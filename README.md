@@ -57,29 +57,56 @@ Frontend (Next.js 14)  -->  Backend (FastAPI)  -->  Cloud SQL PostgreSQL 16
 
 See all ADRs in [decisions/README.md](decisions/README.md).
 
-## Quickstart
+## Quick Start
 
 ### Prerequisites
 
+- Docker and Docker Compose
+- Git
+
+For GCP infrastructure provisioning, you also need:
+
 - Google Cloud SDK (`gcloud`) authenticated
 - Terraform >= 1.7
-- Python >= 3.12
-- Node.js >= 20
 
 ### Deploy
 
 ```bash
-# Install the CLI
-pip install ./cli
+# Clone the repository
+git clone https://github.com/not-that-guy-again/bioAF.git
+cd bioAF
 
-# Deploy infrastructure and application
-bioaf deploy --project my-gcp-project --region us-central1
+# Run the interactive setup (generates config, starts services, creates admin)
+./bioaf setup
 
-# First login: navigate to the URL printed by the CLI
-# The setup wizard walks you through creating the admin account
+# Open http://localhost:8080 and log in with your admin credentials
 ```
 
+The `setup` command prompts for your organization name, admin email, and
+password. It generates all secrets, builds containers, runs database
+migrations, and creates the admin account automatically.
+
+### Management Commands
+
+| Command | Description |
+| ------- | ----------- |
+| `./bioaf setup` | Interactive first-run setup |
+| `./bioaf start` | Start all services |
+| `./bioaf stop` | Stop all services |
+| `./bioaf restart` | Restart all services |
+| `./bioaf status` | Show service status |
+| `./bioaf logs [service]` | Tail logs (all or one service) |
+| `./bioaf migrate` | Run database migrations |
+| `./bioaf backup` | Create a database backup |
+| `./bioaf update` | Pull latest code, rebuild, and migrate |
+| `./bioaf reset-db` | Destroy and recreate the database |
+| `./bioaf help` | Show all commands |
+
 See the full [Deployment Guide](docs/deployment-guide.md) for detailed instructions.
+
+For VM provisioning on GCP, see the
+[bioaf-deploy-demo](https://github.com/not-that-guy-again/bioaf-deploy-demo)
+repository for Terraform modules.
 
 ## Documentation
 
@@ -143,7 +170,7 @@ cd frontend && npm test
 bioAF manages these infrastructure components through its UI:
 
 | Component | Category | Compute Stack | Dependencies |
-|-----------|----------|---------------|-------------|
+| --------- | -------- | ------------- | ----------- |
 | GKE Cluster | Compute | Kubernetes | None |
 | GCS Buckets | Storage | Kubernetes | GKE |
 | SLURM HPC Cluster | Compute | SLURM (coming soon) | None |
