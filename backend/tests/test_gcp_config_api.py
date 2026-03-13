@@ -12,7 +12,7 @@ from sqlalchemy import text
 
 
 async def _seed_gcp_defaults(session):
-    """Insert the default GCP platform_config rows (mirrors migration 022)."""
+    """Insert the default GCP platform_config rows (mirrors migrations 022 + 029)."""
     await session.execute(
         text("""
         INSERT INTO platform_config (key, value) VALUES
@@ -22,7 +22,8 @@ async def _seed_gcp_defaults(session):
             ('org_slug',                   ''),
             ('gcp_credentials_configured', 'false'),
             ('gcp_validation_status',      ''),
-            ('gcp_credential_source',      'vm_default')
+            ('gcp_credential_source',      'vm_default'),
+            ('gcp_service_account_email',  '')
         ON CONFLICT (key) DO NOTHING
         """)
     )
@@ -262,3 +263,58 @@ async def test_post_validate_writes_audit_log(client, admin_token, session):
         )
     ).scalar()
     assert count >= 1
+
+
+# ---------------------------------------------------------------------------
+# Test 18: PUT saves and GET returns service_account_email
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_service_account_email_round_trip(client, admin_token, session):
+    """PUT saves gcp_service_account_email and GET returns it."""
+    await _seed_gcp_defaults(session)
+
+    response = await client.put(
+        "/api/v1/settings/gcp",
+        json={"gcp_service_account_email": "bioaf-sa@my-proj.iam.gserviceaccount.com"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["gcp_service_account_email"] == "bioaf-sa@my-proj.iam.gserviceaccount.com"
+
+    get_resp = await client.get(
+        "/api/v1/settings/gcp",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert get_resp.status_code == 200
+    assert get_resp.json()["gcp_service_account_email"] == "bioaf-sa@my-proj.iam.gserviceaccount.com"
+
+
+# ---------------------------------------------------------------------------
+# Test 19: POST validate passes service_account_email to validator
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_post_validate_passes_sa_email(client, admin_token, session):
+    """POST validate passes the stored service_account_email to the validation function."""
+    await _seed_gcp_defaults(session)
+    await session.execute(text("UPDATE platform_config SET value='my-proj' WHERE key='gcp_project_id'"))
+    await session.execute(
+        text("UPDATE platform_config SET value='sa@proj.iam.gserviceaccount.com' WHERE key='gcp_service_account_email'")
+    )
+    await session.commit()
+
+    with patch("app.api.gcp_config.validate_gcp_credentials") as mock_validate:
+        from app.schemas.gcp_config import GCPValidationCheck, GCPValidationResult
+
+        mock_validate.return_value = GCPValidationResult(
+            passed=True,
+            checks=[GCPValidationCheck(name="credentials_loaded", passed=True, message="OK")],
+        )
+
+        await client.post(
+            "/api/v1/settings/gcp/validate",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        mock_validate.assert_called_once()
+        call_kwargs = mock_validate.call_args
+        assert call_kwargs.kwargs.get("service_account_email") == "sa@proj.iam.gserviceaccount.com"

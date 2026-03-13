@@ -29,6 +29,7 @@ class GCPConfigUpdate(BaseModel):
     org_slug: str | None = None
     gcp_credential_source: Literal["vm_default", "service_account_key"] | None = None
     service_account_key: str | None = None  # write-only; never returned in GET
+    gcp_service_account_email: str | None = None
 
     @field_validator("org_slug")
     @classmethod
@@ -48,6 +49,7 @@ class GCPConfigResponse(BaseModel):
     gcp_credentials_configured: bool
     gcp_validation_status: str | None
     gcp_credential_source: str
+    gcp_service_account_email: str | None
     # service_account_key is intentionally omitted - never returned to clients
 
 

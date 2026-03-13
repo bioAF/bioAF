@@ -87,9 +87,11 @@ class TestGCPConfigResponse:
             gcp_credentials_configured=False,
             gcp_validation_status=None,
             gcp_credential_source="vm_default",
+            gcp_service_account_email=None,
         )
         assert resp.gcp_project_id == "proj-123"
         assert resp.gcp_credentials_configured is False
+        assert resp.gcp_service_account_email is None
 
     def test_response_no_service_account_key_field(self):
         """Response must never expose the raw service account key."""
@@ -101,6 +103,7 @@ class TestGCPConfigResponse:
             gcp_credentials_configured=False,
             gcp_validation_status=None,
             gcp_credential_source="vm_default",
+            gcp_service_account_email=None,
         )
         assert not hasattr(resp, "service_account_key")
         assert not hasattr(resp, "gcp_service_account_key")

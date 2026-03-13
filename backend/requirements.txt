@@ -28,5 +28,6 @@ openpyxl>=3.1
 google-auth>=2.29
 google-cloud-resource-manager>=1.12
 google-cloud-container>=2.47
+google-cloud-service-usage>=1.8
 # Phase 21: Auto-ingest Pub/Sub listener
 google-cloud-pubsub>=2.21
