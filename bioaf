@@ -40,6 +40,18 @@ slugify() {
     echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//'
 }
 
+get_access_url() {
+    # Try to detect the best URL for accessing the web UI.
+    # Prefer the machine's public/private IP; fall back to localhost.
+    local host
+    host=$(hostname -I 2>/dev/null | awk '{print $1}') || true
+    if [ -z "$host" ]; then
+        host=$(ipconfig getifaddr en0 2>/dev/null) || true
+    fi
+    host=${host:-localhost}
+    echo "http://${host}:8080"
+}
+
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
@@ -94,15 +106,29 @@ POSTGRES_DB=bioaf
 DATABASE_URL=postgresql+asyncpg://bioaf:${pg_password}@db:5432/bioaf
 SECRET_KEY=$secret_key
 
-# Frontend
-NEXT_PUBLIC_API_URL=
-
 # Environment
 BIOAF_ENVIRONMENT=production
 ENVEOF
 
     green "Environment file written to docker/.env"
     echo ""
+
+    # Remove stale database volume if it exists. The volume holds the
+    # old password from a previous install, which won't match the newly
+    # generated credentials.
+    local vol_name
+    vol_name=$($DC config --format json 2>/dev/null | python3 -c "
+import sys, json
+cfg = json.load(sys.stdin)
+for v in cfg.get('volumes', {}).values():
+    print(v.get('name', ''))
+    break
+" 2>/dev/null || echo "")
+
+    if [ -n "$vol_name" ] && docker volume inspect "$vol_name" > /dev/null 2>&1; then
+        yellow "Removing existing database volume ($vol_name) to avoid password mismatch..."
+        $DC down -v 2>/dev/null || true
+    fi
 
     # Build and start
     bold "Building and starting containers..."
@@ -127,13 +153,16 @@ ENVEOF
     green "Admin account created."
     echo ""
 
+    local access_url
+    access_url=$(get_access_url)
+
     bold "=== Setup Complete ==="
     echo ""
-    echo "Access bioAF at: http://localhost:8080"
+    echo "Access bioAF at: $access_url"
     echo "Log in with: $admin_email"
     echo ""
     echo "Next steps:"
-    echo "  - Open http://localhost:8080 in your browser"
+    echo "  - Open $access_url in your browser"
     echo "  - Log in with your admin credentials"
     echo "  - Configure SMTP, compute stack, and invite your team from Settings"
     echo ""
@@ -146,27 +175,59 @@ ENVEOF
 
 cmd_start() {
     bold "=== Starting Services ==="
-    $DC up -d
+
+    for svc in db backend frontend nginx; do
+        echo "Starting $svc..."
+        $DC up -d "$svc"
+
+        if [ "$svc" = "db" ]; then
+            wait_for_db
+        fi
+
+        # Give backend time to bind before starting frontend
+        if [ "$svc" = "backend" ]; then
+            echo "Waiting for backend to initialize..."
+            sleep 3
+        fi
+    done
+
+    echo ""
     green "All services started."
     cmd_status
 }
 
 cmd_stop() {
     bold "=== Stopping Services ==="
-    $DC stop
+
+    for svc in nginx frontend backend db; do
+        echo "Stopping $svc..."
+        $DC stop "$svc"
+    done
+
+    echo ""
     green "All services stopped."
 }
 
 cmd_restart() {
-    bold "=== Restarting Services ==="
-    $DC restart
-    green "All services restarted."
+    cmd_stop
+    echo ""
+    cmd_start
 }
 
 cmd_status() {
     bold "=== Service Status ==="
     echo ""
-    $DC ps --format "table {{.Service}}\t{{.Status}}\t{{.Ports}}"
+
+    for svc in db backend frontend nginx; do
+        local state
+        state=$($DC ps --format "{{.State}}" "$svc" 2>/dev/null || echo "not created")
+        case "$state" in
+            running) green "  $svc: running" ;;
+            exited)  red   "  $svc: exited" ;;
+            *)       yellow "  $svc: $state" ;;
+        esac
+    done
+
     echo ""
 }
 
@@ -214,6 +275,106 @@ cmd_update() {
     green "Update complete."
 }
 
+cmd_build() {
+    local service="${1:-}"
+    if [ -n "$service" ]; then
+        bold "=== Building $service ==="
+        $DC build "$service"
+        green "$service built."
+    else
+        bold "=== Building All Services ==="
+        $DC build
+        green "All services built."
+    fi
+}
+
+cmd_shell() {
+    local service="${1:-backend}"
+    bold "Opening shell in $service..."
+    $DC exec "$service" sh
+}
+
+cmd_dbshell() {
+    bold "Opening database shell..."
+    $DC exec db psql -U bioaf bioaf
+}
+
+cmd_seed() {
+    local script="${1:-}"
+    if [ -z "$script" ]; then
+        red "Usage: ./bioaf seed <script.py>"
+        echo ""
+        echo "Available seed scripts:"
+        # List .py files in scripts/ that contain 'seed' or 'generate' in the name
+        find "$SCRIPT_DIR/scripts" -maxdepth 1 -name "*.py" -type f 2>/dev/null | sort | while read -r f; do
+            echo "  $(basename "$f")"
+        done
+        exit 1
+    fi
+
+    # Resolve the script path relative to scripts/ if not absolute
+    local script_path
+    if [ -f "$SCRIPT_DIR/scripts/$script" ]; then
+        script_path="scripts/$script"
+    elif [ -f "$script" ]; then
+        script_path="$script"
+    else
+        red "Script not found: $script"
+        red "Looked in: $SCRIPT_DIR/scripts/$script"
+        exit 1
+    fi
+
+    bold "=== Running seed script: $script_path ==="
+    $DC exec -T backend python "$script_path"
+    green "Seed script complete."
+}
+
+cmd_create_admin() {
+    bold "=== Create Admin Account ==="
+    echo ""
+
+    # Prompt for org name
+    read -rp "Organization name: " org_name
+    if [ -z "$org_name" ]; then
+        red "Organization name cannot be empty."
+        exit 1
+    fi
+
+    org_slug=$(slugify "$org_name")
+    echo "  Org slug: $org_slug"
+    echo ""
+
+    # Prompt for admin email
+    read -rp "Admin email: " admin_email
+    if [ -z "$admin_email" ]; then
+        red "Admin email cannot be empty."
+        exit 1
+    fi
+
+    # Prompt for admin password (hidden)
+    while true; do
+        read -rsp "Admin password: " admin_password
+        echo ""
+        read -rsp "Confirm password: " admin_password_confirm
+        echo ""
+        if [ "$admin_password" = "$admin_password_confirm" ]; then
+            break
+        fi
+        red "Passwords do not match. Try again."
+    done
+    echo ""
+
+    bold "Creating admin account..."
+    $DC exec -T backend python -m app.cli.create_admin \
+        --email "$admin_email" \
+        --password "$admin_password" \
+        --org-name "$org_name" \
+        --org-slug "$org_slug"
+    green "Admin account created."
+    echo ""
+    echo "Log in at $(get_access_url) with: $admin_email"
+}
+
 cmd_reset_db() {
     bold "=== Database Reset ==="
     red "WARNING: This will destroy ALL data in the database."
@@ -248,6 +409,7 @@ cmd_help() {
     echo ""
     bold "First-Run:"
     echo "  setup               Interactive setup wizard (generates .env, starts services, creates admin)"
+    echo "  create-admin        Create an admin user account (services must be running)"
     echo ""
     bold "Service Management:"
     echo "  start               Start all services"
@@ -255,11 +417,17 @@ cmd_help() {
     echo "  restart             Restart all services"
     echo "  status              Show status of all services"
     echo "  logs [service]      Tail logs (all services, or just one)"
+    echo "  build [service]     Build (or rebuild) container images"
     echo ""
     bold "Database:"
     echo "  migrate             Run alembic database migrations"
+    echo "  seed <script.py>    Run a seed/data script in the backend container"
     echo "  backup              Create a database backup"
     echo "  reset-db            Destroy and recreate the database (with confirmation)"
+    echo ""
+    bold "Debugging:"
+    echo "  shell [service]     Open a shell in a container (default: backend)"
+    echo "  dbshell             Open a psql session to the database"
     echo ""
     bold "Maintenance:"
     echo "  update              Pull latest code, rebuild containers, and run migrations"
@@ -267,9 +435,13 @@ cmd_help() {
     echo ""
     bold "Examples:"
     echo "  ./bioaf setup               # First-time setup"
+    echo "  ./bioaf build               # Build all container images"
     echo "  ./bioaf start               # Start services"
     echo "  ./bioaf logs backend        # Tail backend logs"
     echo "  ./bioaf migrate             # Run pending migrations"
+    echo "  ./bioaf seed seed_poc_data.py  # Seed demo data"
+    echo "  ./bioaf shell backend       # Open shell in backend"
+    echo "  ./bioaf dbshell             # Open psql session"
     echo "  ./bioaf backup              # Create database backup"
     echo ""
 }
@@ -281,14 +453,19 @@ command="${1:-help}"
 shift || true
 
 case "$command" in
-    setup)    cmd_setup ;;
-    start)    cmd_start ;;
+    setup)        cmd_setup ;;
+    create-admin) cmd_create_admin ;;
+    start)        cmd_start ;;
     stop)     cmd_stop ;;
     restart)  cmd_restart ;;
     status)   cmd_status ;;
     logs)     cmd_logs "$@" ;;
+    build)    cmd_build "$@" ;;
     migrate)  cmd_migrate ;;
+    seed)     cmd_seed "$@" ;;
     backup)   cmd_backup ;;
+    shell)    cmd_shell "$@" ;;
+    dbshell)  cmd_dbshell ;;
     update)   cmd_update ;;
     reset-db) cmd_reset_db ;;
     help|-h|--help) cmd_help ;;
