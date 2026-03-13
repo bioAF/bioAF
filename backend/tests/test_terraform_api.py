@@ -288,6 +288,84 @@ async def test_terraform_run_detail_endpoint(client, session):
 
 
 @pytest.mark.asyncio
+async def test_terraform_bootstrap_commits_state(client, session):
+    """Bootstrap endpoint commits terraform_initialized to DB so it persists after stream ends."""
+    user, admin_token = await _seed_user_and_token(client, session)
+    await _seed_gcp_config(session, configured=True, initialized=False)
+
+    async def mock_bootstrap_gen(*args, **kwargs):
+        # Simulate the service updating platform_config (as the real service does)
+        await session.execute(
+            text(
+                "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+            ).bindparams(k="terraform_initialized", v="true")
+        )
+        await session.flush()
+        yield TerraformProgressEvent(event_type="progress", message="Starting...")
+        yield TerraformProgressEvent(event_type="apply_complete", message="Done")
+
+    with patch.object(TerraformExecutor, "bootstrap_foundation", new=mock_bootstrap_gen):
+        resp = await client.post(
+            "/api/v1/infrastructure/terraform/bootstrap",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+    assert resp.status_code == 200
+
+    # Verify the state was committed by reading it in a fresh query
+    row = (
+        await session.execute(text("SELECT value FROM platform_config WHERE key = 'terraform_initialized'"))
+    ).scalar()
+    assert row == "true"
+
+
+@pytest.mark.asyncio
+async def test_terraform_apply_commits_state(client, session):
+    """Apply endpoint commits run status to DB after stream completes."""
+    user, admin_token = await _seed_user_and_token(client, session)
+    await _seed_gcp_config(session, configured=True, initialized=True)
+
+    # Create a run in awaiting_confirmation state
+    await session.execute(
+        text("""
+        INSERT INTO terraform_runs (triggered_by_user_id, action, status, module_name, resources_planned)
+        VALUES (:uid, 'plan', 'awaiting_confirmation', 'foundation', 1)
+        """).bindparams(uid=user.id)
+    )
+    await session.commit()
+    run_row = (await session.execute(text("SELECT id FROM terraform_runs LIMIT 1"))).fetchone()
+    run_id = run_row[0]
+
+    async def mock_apply_gen(*args, **kwargs):
+        # Simulate the service updating the run status
+        await session.execute(
+            text("UPDATE terraform_runs SET status = 'completed' WHERE id = :rid").bindparams(rid=run_id)
+        )
+        await session.flush()
+        yield TerraformProgressEvent(
+            event_type="apply_complete",
+            message="Done",
+            resources_completed=1,
+            resources_total=1,
+        )
+
+    with patch.object(TerraformExecutor, "run_apply", new=mock_apply_gen):
+        resp = await client.post(
+            f"/api/v1/infrastructure/terraform/apply/{run_id}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+    assert resp.status_code == 200
+
+    # Verify run status was committed
+    status = (
+        await session.execute(text("SELECT status FROM terraform_runs WHERE id = :rid").bindparams(rid=run_id))
+    ).scalar()
+    assert status == "completed"
+
+
+@pytest.mark.asyncio
 async def test_terraform_bootstrap_409_when_initialized(client, session):
     """Bootstrap returns 409 if already initialized."""
     _, admin_token = await _seed_user_and_token(client, session)

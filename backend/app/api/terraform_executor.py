@@ -116,6 +116,7 @@ async def bootstrap_foundation(
 ) -> StreamingResponse:
     """Bootstrap the GCS Terraform state bucket. Streams SSE progress events."""
     user_id = int(current_user["sub"])
+    org_id = int(current_user["org_id"])
 
     # Eagerly check preconditions before opening the stream so we can return 409
     config_rows = (
@@ -133,10 +134,23 @@ async def bootstrap_foundation(
     if config.get("terraform_initialized", "false") == "true":
         raise HTTPException(status_code=409, detail="Infrastructure is already initialized")
 
-    gen = TerraformExecutor.bootstrap_foundation(session=session, user_id=user_id)
+    gen = TerraformExecutor.bootstrap_foundation(session=session, user_id=user_id, org_id=org_id)
+
+    async def event_generator():
+        try:
+            async for event in gen:
+                yield _sse_event(event)
+        except Exception as exc:
+            error_event = TerraformProgressEvent(
+                event_type="apply_error",
+                message=str(exc),
+            )
+            yield _sse_event(error_event)
+        finally:
+            await session.commit()
 
     return StreamingResponse(
-        _stream_events(gen),
+        event_generator(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -186,8 +200,21 @@ async def apply_plan(
 
     gen = TerraformExecutor.run_apply(session=session, run_id=run_id, user_id=user_id)
 
+    async def event_generator():
+        try:
+            async for event in gen:
+                yield _sse_event(event)
+        except Exception as exc:
+            error_event = TerraformProgressEvent(
+                event_type="apply_error",
+                message=str(exc),
+            )
+            yield _sse_event(error_event)
+        finally:
+            await session.commit()
+
     return StreamingResponse(
-        _stream_events(gen),
+        event_generator(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

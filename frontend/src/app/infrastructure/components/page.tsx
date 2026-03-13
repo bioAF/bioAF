@@ -182,7 +182,6 @@ export default function InfraComponentsPage() {
   }
 
   const isDeployed = stackStatus?.compute_deployed === true;
-  const hasStack = stackStatus?.compute_stack != null;
   const tfInitialized = tfStatus?.terraform_initialized === true;
 
   return (
@@ -202,8 +201,8 @@ export default function InfraComponentsPage() {
             />
           )}
 
-          {/* State 1: No stack selected - show stack selection cards */}
-          {tfInitialized && !hasStack && (
+          {/* State 1: Initialized but not deployed - show stack selection cards */}
+          {tfInitialized && !isDeployed && (
             <div className="space-y-4 mb-8">
               <h2 className="text-lg font-semibold">Select Compute Stack</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

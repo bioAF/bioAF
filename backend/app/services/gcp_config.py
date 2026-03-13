@@ -40,6 +40,7 @@ def _skip_all_after_creds() -> list[GCPValidationCheck]:
         _skipped("project_accessible", _SKIP_CREDS),
         _skipped("storage_api_enabled", _SKIP_CREDS),
         _skipped("gke_api_enabled", _SKIP_CREDS),
+        _skipped("apis_enabled", _SKIP_CREDS),
         _skipped("iam_permissions", _SKIP_CREDS),
         _skipped("storage_access", _SKIP_CREDS),
     ]
@@ -49,6 +50,7 @@ def _skip_all_after_project() -> list[GCPValidationCheck]:
     return [
         _skipped("storage_api_enabled", _SKIP_PROJECT),
         _skipped("gke_api_enabled", _SKIP_PROJECT),
+        _skipped("apis_enabled", _SKIP_PROJECT),
         _skipped("iam_permissions", _SKIP_PROJECT),
         _skipped("storage_access", _SKIP_PROJECT),
     ]
@@ -67,8 +69,9 @@ def validate_gcp_credentials(
     2. project_accessible   - can we fetch the GCP project via Resource Manager?
     3. storage_api_enabled  - is the Cloud Storage API enabled?
     4. gke_api_enabled      - is the Kubernetes Engine API enabled?
-    5. iam_permissions       - does the SA have required IAM roles?
-    6. storage_access        - can we read/write to a GCS bucket?
+    5. apis_enabled         - are all required GCP APIs enabled?
+    6. iam_permissions      - does the SA have required IAM permissions?
+    7. storage_access       - can we read/write to a GCS bucket?
     """
     checks: list[GCPValidationCheck] = []
 
@@ -153,8 +156,8 @@ def validate_gcp_credentials(
         checks.append(GCPValidationCheck(name="gke_api_enabled", passed=False, message=str(exc)))
 
     # ------------------------------------------------------------------
-    # Check 5: IAM permissions -- verify key APIs are enabled via
-    # Service Usage API (lightweight alternative to testIamPermissions)
+    # Check 5: APIs enabled -- verify all required GCP APIs are enabled
+    # via Service Usage API
     # ------------------------------------------------------------------
     required_apis = [
         "cloudresourcemanager.googleapis.com",
@@ -163,6 +166,7 @@ def validate_gcp_credentials(
         "iam.googleapis.com",
         "secretmanager.googleapis.com",
         "compute.googleapis.com",
+        "pubsub.googleapis.com",
     ]
     try:
         su_client = service_usage_v1.ServiceUsageClient(credentials=creds)
@@ -183,7 +187,7 @@ def validate_gcp_credentials(
         if missing:
             checks.append(
                 GCPValidationCheck(
-                    name="iam_permissions",
+                    name="apis_enabled",
                     passed=False,
                     message=f"Required APIs not enabled: {', '.join(missing)}",
                 )
@@ -191,9 +195,51 @@ def validate_gcp_credentials(
         else:
             checks.append(
                 GCPValidationCheck(
-                    name="iam_permissions",
+                    name="apis_enabled",
                     passed=True,
                     message="All required APIs are enabled",
+                )
+            )
+    except Exception as exc:
+        checks.append(GCPValidationCheck(name="apis_enabled", passed=False, message=str(exc)))
+
+    # ------------------------------------------------------------------
+    # Check 6: IAM permissions -- verify the service account has the
+    # required project-level permissions via testIamPermissions
+    # ------------------------------------------------------------------
+    required_permissions = [
+        "storage.buckets.create",
+        "pubsub.topics.create",
+        "pubsub.topics.getIamPolicy",
+        "pubsub.topics.setIamPolicy",
+        "container.clusters.create",
+        "iam.serviceAccounts.actAs",
+        "compute.instances.create",
+        "resourcemanager.projects.getIamPolicy",
+        "resourcemanager.projects.setIamPolicy",
+    ]
+    try:
+        rm_client = resourcemanager_v3.ProjectsClient(credentials=creds)
+        resp = rm_client.test_iam_permissions(
+            resource=f"projects/{project_id}",
+            permissions=required_permissions,
+        )
+        granted = set(resp.permissions)
+        missing_perms = [p for p in required_permissions if p not in granted]
+        if missing_perms:
+            checks.append(
+                GCPValidationCheck(
+                    name="iam_permissions",
+                    passed=False,
+                    message=f"Missing permissions: {', '.join(missing_perms)}",
+                )
+            )
+        else:
+            checks.append(
+                GCPValidationCheck(
+                    name="iam_permissions",
+                    passed=True,
+                    message="All required IAM permissions are granted",
                 )
             )
     except Exception as exc:

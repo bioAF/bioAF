@@ -124,16 +124,30 @@ export function TerraformProgressModal({
               setLogLines((prev) => [...prev, event.log_line!]);
             }
 
-            if (event.event_type === "apply_complete") {
+            if (
+              event.event_type === "apply_complete" ||
+              event.event_type === "stack_complete"
+            ) {
               setStatus("complete");
               return;
-            } else if (event.event_type === "apply_error") {
+            } else if (
+              event.event_type === "apply_error" ||
+              event.event_type === "stack_error"
+            ) {
               setStatus("error");
               setErrorMessage(event.message);
               return;
             }
           }
         }
+        // Stream ended without a terminal event -- treat as error
+        setStatus((prev) => {
+          if (prev === "running" || prev === "connecting") {
+            setErrorMessage("Stream ended unexpectedly");
+            return "error";
+          }
+          return prev;
+        });
       } catch {
         if (!controller.signal.aborted) {
           setStatus("error");
@@ -197,10 +211,18 @@ export function TerraformProgressModal({
         {events.length > 0 && (
           <ul className="space-y-1 mb-4 max-h-40 overflow-y-auto">
             {events
-              .filter((e) => e.event_type === "resource_complete")
+              .filter(
+                (e) =>
+                  e.event_type === "resource_complete" ||
+                  e.event_type === "progress"
+              )
               .map((e, i) => (
                 <li key={i} className="text-sm flex items-center gap-2">
-                  <span className="text-green-500">&#10003;</span>
+                  {e.event_type === "resource_complete" ? (
+                    <span className="text-green-500">&#10003;</span>
+                  ) : (
+                    <span className="text-blue-500">&#9654;</span>
+                  )}
                   <span className="text-gray-700">{e.message}</span>
                 </li>
               ))}

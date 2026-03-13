@@ -6,6 +6,7 @@ Provides cluster status via GKE API.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import AsyncGenerator
 
@@ -13,6 +14,8 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.activity_feed_service import ActivityFeedService
+from app.services.audit_service import log_action
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
 
 logger = logging.getLogger("bioaf.stack_deployment")
@@ -185,7 +188,23 @@ async def _run_module(
 
     This is the real implementation. Tests mock this function.
     """
-    run = await TerraformExecutor.run_plan(session, user_id, module_name=module_name)
+    try:
+        run = await TerraformExecutor.run_plan(session, user_id, module_name=module_name)
+    except asyncio.CancelledError:
+        # Connection dropped during plan -- mark any active run as failed
+        logger.warning("Plan cancelled for module %s (client disconnected)", module_name)
+        await session.execute(
+            text("""
+            UPDATE terraform_runs
+            SET status = 'failed',
+                error_message = 'Operation cancelled (client disconnected)',
+                completed_at = now()
+            WHERE status IN ('planning', 'applying')
+              AND module_name = :mod
+            """).bindparams(mod=module_name)
+        )
+        await session.commit()
+        return
     await session.commit()
 
     if run.status != "awaiting_confirmation":
@@ -216,6 +235,7 @@ async def deploy_stack(
     session: AsyncSession,
     stack_type: str,
     user_id: int,
+    org_id: int | None = None,
 ) -> AsyncGenerator[TerraformProgressEvent, None]:
     """Deploy a full compute stack (storage + compute).
 
@@ -255,6 +275,25 @@ async def deploy_stack(
             elif event.event_type == "apply_complete":
                 # Storage post-apply hook
                 await _set_config(session, "storage_deployed", "true")
+                await log_action(
+                    session,
+                    user_id=user_id,
+                    entity_type="infrastructure",
+                    entity_id=0,
+                    action="deploy_storage",
+                    details={"module": "storage", "status": "completed"},
+                )
+                if org_id is not None:
+                    await ActivityFeedService.add_event(
+                        session,
+                        org_id=org_id,
+                        user_id=user_id,
+                        event_type="infrastructure.storage_deployed",
+                        summary="Storage infrastructure deployed (GCS buckets, Pub/Sub)",
+                        entity_type="infrastructure",
+                        entity_id=0,
+                        metadata={"module": "storage"},
+                    )
                 await session.flush()
 
         if storage_failed:
@@ -294,6 +333,25 @@ async def deploy_stack(
                 WHERE component_key = 'kubernetes_cluster'
                 """)
             )
+            await log_action(
+                session,
+                user_id=user_id,
+                entity_type="infrastructure",
+                entity_id=0,
+                action="deploy_compute",
+                details={"module": "compute", "stack_type": "kubernetes", "status": "completed"},
+            )
+            if org_id is not None:
+                await ActivityFeedService.add_event(
+                    session,
+                    org_id=org_id,
+                    user_id=user_id,
+                    event_type="infrastructure.compute_deployed",
+                    summary="Kubernetes cluster and node pools deployed",
+                    entity_type="infrastructure",
+                    entity_id=0,
+                    metadata={"module": "compute", "stack_type": "kubernetes"},
+                )
             await session.flush()
 
     if compute_failed:

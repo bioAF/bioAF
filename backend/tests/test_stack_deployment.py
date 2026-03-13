@@ -9,12 +9,36 @@
 9. test_deploy_stack_preserves_storage_on_compute_failure
 10. test_teardown_stack_requires_deployed
 11. test_teardown_stack_clears_config
+12. test_deploy_stack_creates_activity_feed_events
 """
 
 from unittest.mock import patch
 
 import pytest
 from sqlalchemy import text
+
+
+async def _seed_org_and_user(session):
+    """Create an org and user for tests that need audit logging, return (org_id, user_id)."""
+    from app.models.organization import Organization
+    from app.models.user import User
+    from app.services.auth_service import AuthService
+
+    org = Organization(name="StackTestOrg", setup_complete=True)
+    session.add(org)
+    await session.flush()
+
+    user = User(
+        email="stack_test@test.com",
+        password_hash=AuthService.hash_password("pw"),
+        role="admin",
+        organization_id=org.id,
+        status="active",
+    )
+    session.add(user)
+    await session.flush()
+    await session.commit()
+    return org.id, user.id
 
 
 async def _set_config(session, key: str, value: str):
@@ -96,6 +120,8 @@ async def test_deploy_stack_deploys_storage_then_compute(session):
     """deploy_stack runs storage module first, then compute module."""
     from app.services.stack_deployment import deploy_stack
 
+    _, user_id = await _seed_org_and_user(session)
+
     await _set_config(session, "gcp_credentials_configured", "true")
     await _set_config(session, "terraform_initialized", "true")
     await _set_config(session, "compute_deployed", "false")
@@ -104,7 +130,7 @@ async def test_deploy_stack_deploys_storage_then_compute(session):
 
     modules_run = []
 
-    async def mock_run_module(sess, user_id, module_name):
+    async def mock_run_module(sess, uid, module_name):
         modules_run.append(module_name)
         yield _make_progress_event(
             "apply_complete",
@@ -122,7 +148,7 @@ async def test_deploy_stack_deploys_storage_then_compute(session):
 
     with patch("app.services.stack_deployment._run_module", side_effect=mock_run_module):
         events = []
-        async for event in deploy_stack(session, "kubernetes", user_id=1):
+        async for event in deploy_stack(session, "kubernetes", user_id=user_id):
             events.append(event)
 
     assert modules_run == ["storage", "compute"]
@@ -134,6 +160,8 @@ async def test_deploy_stack_skips_storage_if_already_deployed(session):
     """deploy_stack only runs compute module when storage is already deployed."""
     from app.services.stack_deployment import deploy_stack
 
+    _, user_id = await _seed_org_and_user(session)
+
     await _set_config(session, "gcp_credentials_configured", "true")
     await _set_config(session, "terraform_initialized", "true")
     await _set_config(session, "compute_deployed", "false")
@@ -142,7 +170,7 @@ async def test_deploy_stack_skips_storage_if_already_deployed(session):
 
     modules_run = []
 
-    async def mock_run_module(sess, user_id, module_name):
+    async def mock_run_module(sess, uid, module_name):
         modules_run.append(module_name)
         yield _make_progress_event(
             "apply_complete",
@@ -158,7 +186,7 @@ async def test_deploy_stack_skips_storage_if_already_deployed(session):
 
     with patch("app.services.stack_deployment._run_module", side_effect=mock_run_module):
         events = []
-        async for event in deploy_stack(session, "kubernetes", user_id=1):
+        async for event in deploy_stack(session, "kubernetes", user_id=user_id):
             events.append(event)
 
     assert modules_run == ["compute"]
@@ -169,13 +197,15 @@ async def test_deploy_stack_stores_cluster_config_on_success(session):
     """deploy_stack stores GKE config in platform_config after success."""
     from app.services.stack_deployment import deploy_stack
 
+    _, user_id = await _seed_org_and_user(session)
+
     await _set_config(session, "gcp_credentials_configured", "true")
     await _set_config(session, "terraform_initialized", "true")
     await _set_config(session, "compute_deployed", "false")
     await _set_config(session, "storage_deployed", "true")
     await session.commit()
 
-    async def mock_run_module(sess, user_id, module_name):
+    async def mock_run_module(sess, uid, module_name):
         yield _make_progress_event(
             "apply_complete",
             "done",
@@ -189,7 +219,7 @@ async def test_deploy_stack_stores_cluster_config_on_success(session):
         )
 
     with patch("app.services.stack_deployment._run_module", side_effect=mock_run_module):
-        async for _ in deploy_stack(session, "kubernetes", user_id=1):
+        async for _ in deploy_stack(session, "kubernetes", user_id=user_id):
             pass
 
     await session.commit()
@@ -206,17 +236,15 @@ async def test_deploy_stack_preserves_storage_on_compute_failure(session):
     """Storage remains deployed even if compute module fails."""
     from app.services.stack_deployment import deploy_stack
 
+    _, user_id = await _seed_org_and_user(session)
+
     await _set_config(session, "gcp_credentials_configured", "true")
     await _set_config(session, "terraform_initialized", "true")
     await _set_config(session, "compute_deployed", "false")
     await _set_config(session, "storage_deployed", "false")
     await session.commit()
 
-    call_count = 0
-
-    async def mock_run_module(sess, user_id, module_name):
-        nonlocal call_count
-        call_count += 1
+    async def mock_run_module(sess, uid, module_name):
         if module_name == "storage":
             yield _make_progress_event("apply_complete", "storage done")
         else:
@@ -224,7 +252,7 @@ async def test_deploy_stack_preserves_storage_on_compute_failure(session):
 
     with patch("app.services.stack_deployment._run_module", side_effect=mock_run_module):
         events = []
-        async for event in deploy_stack(session, "kubernetes", user_id=1):
+        async for event in deploy_stack(session, "kubernetes", user_id=user_id):
             events.append(event)
 
     await session.commit()
@@ -297,3 +325,68 @@ async def test_teardown_stack_clears_config(session):
     assert row is not None
     assert row[0] is False
     assert row[1] == "disabled"
+
+
+# -----------------------------------------------------------------------
+# Activity feed tests
+# -----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_deploy_stack_creates_activity_feed_events(session):
+    """deploy_stack writes activity feed events for storage and compute deploy."""
+    from app.services.stack_deployment import deploy_stack
+
+    org_id, user_id = await _seed_org_and_user(session)
+
+    await _set_config(session, "gcp_credentials_configured", "true")
+    await _set_config(session, "terraform_initialized", "true")
+    await _set_config(session, "compute_deployed", "false")
+    await _set_config(session, "storage_deployed", "false")
+    await session.commit()
+
+    async def mock_run_module(sess, uid, module_name):
+        yield _make_progress_event(
+            "apply_complete",
+            f"{module_name} done",
+            extra={
+                "outputs": {
+                    "cluster_name": {"value": "bioaf-test"},
+                    "cluster_endpoint": {"value": "https://1.2.3.4"},
+                    "cluster_ca_cert": {"value": "Y2VydA=="},
+                }
+            }
+            if module_name == "compute"
+            else {},
+        )
+
+    with patch("app.services.stack_deployment._run_module", side_effect=mock_run_module):
+        async for _ in deploy_stack(session, "kubernetes", user_id=user_id, org_id=org_id):
+            pass
+
+    await session.commit()
+
+    # Check activity feed has storage and compute events
+    rows = (
+        await session.execute(
+            text(
+                "SELECT event_type, summary FROM activity_feed WHERE organization_id = :org_id ORDER BY created_at"
+            ).bindparams(org_id=org_id)
+        )
+    ).fetchall()
+
+    event_types = [r[0] for r in rows]
+    assert "infrastructure.storage_deployed" in event_types
+    assert "infrastructure.compute_deployed" in event_types
+
+    # Check audit log has entries
+    audit_rows = (
+        await session.execute(
+            text("SELECT action FROM audit_log WHERE user_id = :uid AND entity_type = 'infrastructure'").bindparams(
+                uid=user_id
+            )
+        )
+    ).fetchall()
+    actions = [r[0] for r in audit_rows]
+    assert "deploy_storage" in actions
+    assert "deploy_compute" in actions

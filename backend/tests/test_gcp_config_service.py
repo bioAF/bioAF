@@ -34,6 +34,13 @@ def _mock_enabled_services(api_names: list[str]) -> MagicMock:
     return services
 
 
+def _mock_iam_response(permissions: list[str]) -> MagicMock:
+    """Build a mock testIamPermissions response returning the given permissions."""
+    resp = MagicMock()
+    resp.permissions = permissions
+    return resp
+
+
 ALL_REQUIRED_APIS = [
     "cloudresourcemanager.googleapis.com",
     "storage.googleapis.com",
@@ -41,6 +48,19 @@ ALL_REQUIRED_APIS = [
     "iam.googleapis.com",
     "secretmanager.googleapis.com",
     "compute.googleapis.com",
+    "pubsub.googleapis.com",
+]
+
+ALL_REQUIRED_PERMISSIONS = [
+    "storage.buckets.create",
+    "pubsub.topics.create",
+    "pubsub.topics.getIamPolicy",
+    "pubsub.topics.setIamPolicy",
+    "container.clusters.create",
+    "iam.serviceAccounts.actAs",
+    "compute.instances.create",
+    "resourcemanager.projects.getIamPolicy",
+    "resourcemanager.projects.setIamPolicy",
 ]
 
 
@@ -120,6 +140,7 @@ def test_storage_api_disabled_marks_check_failed(mock_sa, mock_rm, mock_storage,
     mock_creds = MagicMock()
     mock_sa.Credentials.from_service_account_info.return_value = mock_creds
     mock_rm.ProjectsClient.return_value.get_project.return_value = MagicMock()
+    mock_rm.ProjectsClient.return_value.test_iam_permissions.return_value = _mock_iam_response(ALL_REQUIRED_PERMISSIONS)
     mock_storage.Client.return_value.list_buckets.side_effect = Exception("Cloud Storage API has not been used")
     mock_gke.ClusterManagerClient.return_value.list_clusters.return_value = MagicMock()
     mock_su.ServiceUsageClient.return_value.list_services.return_value = _mock_enabled_services(ALL_REQUIRED_APIS)
@@ -148,6 +169,7 @@ def test_vm_default_uses_google_auth_default(mock_auth_default, mock_rm, mock_st
     mock_creds = MagicMock()
     mock_auth_default.return_value = (mock_creds, "my-project")
     mock_rm.ProjectsClient.return_value.get_project.return_value = MagicMock()
+    mock_rm.ProjectsClient.return_value.test_iam_permissions.return_value = _mock_iam_response(ALL_REQUIRED_PERMISSIONS)
     mock_storage.Client.return_value.list_buckets.return_value = []
     mock_gke.ClusterManagerClient.return_value.list_clusters.return_value = MagicMock()
     mock_su.ServiceUsageClient.return_value.list_services.return_value = _mock_enabled_services(ALL_REQUIRED_APIS)
@@ -174,6 +196,7 @@ def test_all_checks_pass_with_valid_credentials(mock_sa, mock_rm, mock_storage, 
     mock_creds = MagicMock()
     mock_sa.Credentials.from_service_account_info.return_value = mock_creds
     mock_rm.ProjectsClient.return_value.get_project.return_value = MagicMock()
+    mock_rm.ProjectsClient.return_value.test_iam_permissions.return_value = _mock_iam_response(ALL_REQUIRED_PERMISSIONS)
     mock_storage.Client.return_value.list_buckets.return_value = []
     mock_gke.ClusterManagerClient.return_value.list_clusters.return_value = MagicMock()
     mock_su.ServiceUsageClient.return_value.list_services.return_value = _mock_enabled_services(ALL_REQUIRED_APIS)
@@ -209,6 +232,7 @@ def test_vm_default_with_sa_email_uses_impersonation(
     mock_impersonated.Credentials.return_value = mock_target_creds
 
     mock_rm.ProjectsClient.return_value.get_project.return_value = MagicMock()
+    mock_rm.ProjectsClient.return_value.test_iam_permissions.return_value = _mock_iam_response(ALL_REQUIRED_PERMISSIONS)
     mock_storage.Client.return_value.list_buckets.return_value = []
     mock_gke.ClusterManagerClient.return_value.list_clusters.return_value = MagicMock()
     mock_su.ServiceUsageClient.return_value.list_services.return_value = _mock_enabled_services(ALL_REQUIRED_APIS)
@@ -242,6 +266,7 @@ def test_gke_api_disabled_marks_check_failed(mock_sa, mock_rm, mock_storage, moc
     mock_creds = MagicMock()
     mock_sa.Credentials.from_service_account_info.return_value = mock_creds
     mock_rm.ProjectsClient.return_value.get_project.return_value = MagicMock()
+    mock_rm.ProjectsClient.return_value.test_iam_permissions.return_value = _mock_iam_response(ALL_REQUIRED_PERMISSIONS)
     mock_storage.Client.return_value.list_buckets.return_value = []
     mock_gke.ClusterManagerClient.return_value.list_clusters.side_effect = Exception(
         "Kubernetes Engine API has not been used"
@@ -268,10 +293,11 @@ def test_gke_api_disabled_marks_check_failed(mock_sa, mock_rm, mock_storage, moc
 @patch("app.services.gcp_config.resourcemanager_v3")
 @patch("app.services.gcp_config.service_account")
 def test_missing_required_apis_reported(mock_sa, mock_rm, mock_storage, mock_gke, mock_su):
-    """When required APIs are not enabled, iam_permissions check reports them."""
+    """When required APIs are not enabled, apis_enabled check reports them."""
     mock_creds = MagicMock()
     mock_sa.Credentials.from_service_account_info.return_value = mock_creds
     mock_rm.ProjectsClient.return_value.get_project.return_value = MagicMock()
+    mock_rm.ProjectsClient.return_value.test_iam_permissions.return_value = _mock_iam_response(ALL_REQUIRED_PERMISSIONS)
     mock_storage.Client.return_value.list_buckets.return_value = []
     mock_gke.ClusterManagerClient.return_value.list_clusters.return_value = MagicMock()
 
@@ -290,10 +316,10 @@ def test_missing_required_apis_reported(mock_sa, mock_rm, mock_storage, mock_gke
         service_account_key=VALID_SA_KEY,
     )
 
-    iam_check = next(c for c in result.checks if c.name == "iam_permissions")
-    assert iam_check.passed is False
-    assert "iam.googleapis.com" in iam_check.message
-    assert "secretmanager.googleapis.com" in iam_check.message
+    apis_check = next(c for c in result.checks if c.name == "apis_enabled")
+    assert apis_check.passed is False
+    assert "iam.googleapis.com" in apis_check.message
+    assert "secretmanager.googleapis.com" in apis_check.message
     assert result.passed is False
 
 
@@ -310,6 +336,7 @@ def test_storage_access_skipped_when_storage_api_disabled(mock_sa, mock_rm, mock
     mock_creds = MagicMock()
     mock_sa.Credentials.from_service_account_info.return_value = mock_creds
     mock_rm.ProjectsClient.return_value.get_project.return_value = MagicMock()
+    mock_rm.ProjectsClient.return_value.test_iam_permissions.return_value = _mock_iam_response(ALL_REQUIRED_PERMISSIONS)
     mock_storage.Client.return_value.list_buckets.side_effect = Exception("Storage API disabled")
     mock_gke.ClusterManagerClient.return_value.list_clusters.return_value = MagicMock()
     mock_su.ServiceUsageClient.return_value.list_services.return_value = _mock_enabled_services(ALL_REQUIRED_APIS)
@@ -332,11 +359,12 @@ def test_storage_access_skipped_when_storage_api_disabled(mock_sa, mock_rm, mock
 @patch("app.services.gcp_config.storage")
 @patch("app.services.gcp_config.resourcemanager_v3")
 @patch("app.services.gcp_config.service_account")
-def test_all_six_checks_returned_in_order(mock_sa, mock_rm, mock_storage, mock_gke, mock_su):
-    """Validation returns all six checks in the expected order."""
+def test_all_seven_checks_returned_in_order(mock_sa, mock_rm, mock_storage, mock_gke, mock_su):
+    """Validation returns all seven checks in the expected order."""
     mock_creds = MagicMock()
     mock_sa.Credentials.from_service_account_info.return_value = mock_creds
     mock_rm.ProjectsClient.return_value.get_project.return_value = MagicMock()
+    mock_rm.ProjectsClient.return_value.test_iam_permissions.return_value = _mock_iam_response(ALL_REQUIRED_PERMISSIONS)
     mock_storage.Client.return_value.list_buckets.return_value = []
     mock_gke.ClusterManagerClient.return_value.list_clusters.return_value = MagicMock()
     mock_su.ServiceUsageClient.return_value.list_services.return_value = _mock_enabled_services(ALL_REQUIRED_APIS)
@@ -352,8 +380,107 @@ def test_all_six_checks_returned_in_order(mock_sa, mock_rm, mock_storage, mock_g
         "project_accessible",
         "storage_api_enabled",
         "gke_api_enabled",
+        "apis_enabled",
         "iam_permissions",
         "storage_access",
     ]
     actual_names = [c.name for c in result.checks]
     assert actual_names == expected_names
+
+
+# ---------------------------------------------------------------------------
+# Test 12: Missing pubsub API is detected
+# ---------------------------------------------------------------------------
+@patch("app.services.gcp_config.service_usage_v1")
+@patch("app.services.gcp_config.container_v1")
+@patch("app.services.gcp_config.storage")
+@patch("app.services.gcp_config.resourcemanager_v3")
+@patch("app.services.gcp_config.service_account")
+def test_missing_pubsub_api_reported(mock_sa, mock_rm, mock_storage, mock_gke, mock_su):
+    """When pubsub API is not enabled, apis_enabled check reports it."""
+    mock_creds = MagicMock()
+    mock_sa.Credentials.from_service_account_info.return_value = mock_creds
+    mock_rm.ProjectsClient.return_value.get_project.return_value = MagicMock()
+    mock_rm.ProjectsClient.return_value.test_iam_permissions.return_value = _mock_iam_response(ALL_REQUIRED_PERMISSIONS)
+    mock_storage.Client.return_value.list_buckets.return_value = []
+    mock_gke.ClusterManagerClient.return_value.list_clusters.return_value = MagicMock()
+
+    # All APIs except pubsub
+    apis_without_pubsub = [a for a in ALL_REQUIRED_APIS if a != "pubsub.googleapis.com"]
+    mock_su.ServiceUsageClient.return_value.list_services.return_value = _mock_enabled_services(apis_without_pubsub)
+
+    result = validate_gcp_credentials(
+        project_id="my-project",
+        credential_source="service_account_key",
+        service_account_key=VALID_SA_KEY,
+    )
+
+    apis_check = next(c for c in result.checks if c.name == "apis_enabled")
+    assert apis_check.passed is False
+    assert "pubsub.googleapis.com" in apis_check.message
+    assert result.passed is False
+
+
+# ---------------------------------------------------------------------------
+# Test 13: Missing IAM permissions are reported
+# ---------------------------------------------------------------------------
+@patch("app.services.gcp_config.service_usage_v1")
+@patch("app.services.gcp_config.container_v1")
+@patch("app.services.gcp_config.storage")
+@patch("app.services.gcp_config.resourcemanager_v3")
+@patch("app.services.gcp_config.service_account")
+def test_missing_iam_permissions_reported(mock_sa, mock_rm, mock_storage, mock_gke, mock_su):
+    """When SA lacks required permissions, iam_permissions check reports them."""
+    mock_creds = MagicMock()
+    mock_sa.Credentials.from_service_account_info.return_value = mock_creds
+    mock_rm.ProjectsClient.return_value.get_project.return_value = MagicMock()
+
+    # Return only some permissions (missing pubsub.topics.create and container.clusters.create)
+    mock_rm.ProjectsClient.return_value.test_iam_permissions.return_value = _mock_iam_response(
+        ["storage.buckets.create", "iam.serviceAccounts.actAs", "compute.instances.create"]
+    )
+
+    mock_storage.Client.return_value.list_buckets.return_value = []
+    mock_gke.ClusterManagerClient.return_value.list_clusters.return_value = MagicMock()
+    mock_su.ServiceUsageClient.return_value.list_services.return_value = _mock_enabled_services(ALL_REQUIRED_APIS)
+
+    result = validate_gcp_credentials(
+        project_id="my-project",
+        credential_source="service_account_key",
+        service_account_key=VALID_SA_KEY,
+    )
+
+    iam_check = next(c for c in result.checks if c.name == "iam_permissions")
+    assert iam_check.passed is False
+    assert "pubsub.topics.create" in iam_check.message
+    assert "container.clusters.create" in iam_check.message
+    assert result.passed is False
+
+
+# ---------------------------------------------------------------------------
+# Test 14: IAM permissions check handles API errors gracefully
+# ---------------------------------------------------------------------------
+@patch("app.services.gcp_config.service_usage_v1")
+@patch("app.services.gcp_config.container_v1")
+@patch("app.services.gcp_config.storage")
+@patch("app.services.gcp_config.resourcemanager_v3")
+@patch("app.services.gcp_config.service_account")
+def test_iam_permissions_check_handles_api_error(mock_sa, mock_rm, mock_storage, mock_gke, mock_su):
+    """When testIamPermissions API call fails, the check fails gracefully."""
+    mock_creds = MagicMock()
+    mock_sa.Credentials.from_service_account_info.return_value = mock_creds
+    mock_rm.ProjectsClient.return_value.get_project.return_value = MagicMock()
+    mock_rm.ProjectsClient.return_value.test_iam_permissions.side_effect = Exception("403 Forbidden")
+    mock_storage.Client.return_value.list_buckets.return_value = []
+    mock_gke.ClusterManagerClient.return_value.list_clusters.return_value = MagicMock()
+    mock_su.ServiceUsageClient.return_value.list_services.return_value = _mock_enabled_services(ALL_REQUIRED_APIS)
+
+    result = validate_gcp_credentials(
+        project_id="my-project",
+        credential_source="service_account_key",
+        service_account_key=VALID_SA_KEY,
+    )
+
+    iam_check = next(c for c in result.checks if c.name == "iam_permissions")
+    assert iam_check.passed is False
+    assert result.passed is False

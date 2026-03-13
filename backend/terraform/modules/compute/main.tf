@@ -104,8 +104,12 @@ resource "google_container_node_pool" "interactive" {
 
 # --- IAM binding for GCS access from GKE nodes ---
 
+data "google_project" "current" {
+  project_id = var.project_id
+}
+
 resource "google_project_iam_member" "gke_storage_access" {
   project = var.project_id
   role    = "roles/storage.objectAdmin"
-  member  = "serviceAccount:${google_container_cluster.bioaf.node_config[0].service_account}"
+  member  = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
 }

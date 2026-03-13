@@ -66,7 +66,7 @@ class TestStackDeployEndpoint:
 
         from app.services.terraform_executor import TerraformProgressEvent
 
-        async def mock_deploy(sess, stack_type, user_id):
+        async def mock_deploy(sess, stack_type, user_id, org_id=None):
             yield TerraformProgressEvent(event_type="stack_complete", message="done")
 
         with patch("app.api.stack_deploy.deploy_stack", side_effect=mock_deploy):

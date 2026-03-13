@@ -65,6 +65,7 @@ const REQUIRED_APIS = [
   { name: "secretmanager.googleapis.com", description: "Secret Manager" },
   { name: "servicenetworking.googleapis.com", description: "Service Networking" },
   { name: "serviceusage.googleapis.com", description: "Service Usage" },
+  { name: "pubsub.googleapis.com", description: "Pub/Sub" },
   { name: "storage.googleapis.com", description: "Cloud Storage" },
   { name: "sqladmin.googleapis.com", description: "Cloud SQL Admin" },
   { name: "cloudbilling.googleapis.com", description: "Cloud Billing" },
@@ -76,9 +77,11 @@ const REQUIRED_ROLES = [
   "roles/compute.admin",
   "roles/iam.serviceAccountUser",
   "roles/storage.admin",
+  "roles/pubsub.admin",
   "roles/secretmanager.admin",
   "roles/cloudsql.admin",
   "roles/serviceusage.serviceUsageViewer",
+  "roles/resourcemanager.projectIamAdmin",
 ];
 
 export default function GcpSettingsPage() {

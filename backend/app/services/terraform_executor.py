@@ -24,6 +24,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.component import TerraformRun
+from app.services.activity_feed_service import ActivityFeedService
 from app.services.audit_service import log_action
 from app.services.credential_injector import GCPCredentialInjector
 from app.services.plan_parser import TerraformPlanParser
@@ -140,6 +141,7 @@ class TerraformExecutor:
         if run.status != "awaiting_confirmation":
             raise ValueError(f"Run {run_id} is not awaiting confirmation (status: {run.status})")
 
+        run.action = "apply"
         run.status = "applying"
         await session.flush()
 
@@ -149,22 +151,45 @@ class TerraformExecutor:
         resources_completed = 0
 
         env, cleanup = await GCPCredentialInjector.build_env(config)
+        log_lines: list[str] = []
+        process = None
         try:
             work_dir = await asyncio.to_thread(TerraformExecutor._prepare_work_dir, module_name)
+            TerraformExecutor._write_tfvars(work_dir, module_name, config)
+            await TerraformExecutor._run_init(work_dir, env, config)
 
-            apply_result = await asyncio.to_thread(
-                subprocess.run,
-                ["terraform", "apply", "-auto-approve", "-json", "-no-color", "tfplan"],
+            process = await asyncio.create_subprocess_exec(
+                "terraform",
+                "apply",
+                "-auto-approve",
+                "-json",
+                "-no-color",
                 cwd=str(work_dir),
-                capture_output=True,
-                text=True,
-                timeout=1800,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
                 env={**TerraformExecutor._base_env(), **env},
             )
 
-            log_lines = []
-            for line in (apply_result.stdout or "").splitlines():
+            while True:
+                try:
+                    line_bytes = await asyncio.wait_for(process.stdout.readline(), timeout=15)
+                except asyncio.TimeoutError:
+                    yield TerraformProgressEvent(
+                        event_type="heartbeat",
+                        message="Terraform operation in progress...",
+                        resources_completed=resources_completed,
+                        resources_total=resources_total,
+                    )
+                    continue
+
+                if not line_bytes:
+                    break
+
+                line = line_bytes.decode().rstrip()
+                if not line:
+                    continue
                 log_lines.append(line)
+
                 try:
                     entry = json.loads(line)
                 except json.JSONDecodeError:
@@ -196,9 +221,14 @@ class TerraformExecutor:
                         log_line=line,
                     )
 
+            stderr_output = ""
+            if process.stderr:
+                stderr_output = (await process.stderr.read()).decode()
+            return_code = await process.wait()
+
             run.apply_log = "\n".join(log_lines)
 
-            if apply_result.returncode == 0:
+            if return_code == 0:
                 run.status = "completed"
                 run.completed_at = datetime.now(timezone.utc)
                 yield TerraformProgressEvent(
@@ -209,7 +239,7 @@ class TerraformExecutor:
                 )
             else:
                 run.status = "failed"
-                run.error_message = apply_result.stderr or "Terraform apply failed"
+                run.error_message = stderr_output or "Terraform apply failed"
                 run.completed_at = datetime.now(timezone.utc)
                 yield TerraformProgressEvent(
                     event_type="apply_error",
@@ -218,6 +248,20 @@ class TerraformExecutor:
                     resources_total=resources_total,
                 )
 
+        except asyncio.CancelledError:
+            logger.warning("Terraform apply cancelled for run %s", run_id)
+            if process and process.returncode is None:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=10)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    process.kill()
+            run.status = "failed"
+            run.error_message = "Operation cancelled (client disconnected)"
+            run.completed_at = datetime.now(timezone.utc)
+            run.apply_log = "\n".join(log_lines) if log_lines else None
+            await session.flush()
+            return
         except Exception as exc:
             logger.error("Terraform apply failed: %s", exc)
             run.status = "failed"
@@ -246,6 +290,7 @@ class TerraformExecutor:
     async def bootstrap_foundation(
         session: AsyncSession,
         user_id: int,
+        org_id: int | None = None,
     ) -> AsyncIterator[TerraformProgressEvent]:
         """Bootstrap GCS state bucket via the foundation module.
 
@@ -301,29 +346,41 @@ class TerraformExecutor:
                 resources_total=resources_total,
             )
 
-            apply_result = await asyncio.to_thread(
-                subprocess.run,
-                ["terraform", "apply", "-auto-approve", "-json", "-no-color", "tfplan"],
+            bootstrap_process = await asyncio.create_subprocess_exec(
+                "terraform",
+                "apply",
+                "-auto-approve",
+                "-json",
+                "-no-color",
+                "tfplan",
                 cwd=str(work_dir),
-                capture_output=True,
-                text=True,
-                timeout=1800,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
                 env={**TerraformExecutor._base_env(), **env},
             )
 
-            if apply_result.returncode != 0:
-                run.status = "failed"
-                run.error_message = apply_result.stderr or "Apply failed"
-                run.completed_at = datetime.now(timezone.utc)
-                await session.flush()
-                yield TerraformProgressEvent(
-                    event_type="apply_error",
-                    message=run.error_message,
-                )
-                return
-
             resources_completed = 0
-            for line in (apply_result.stdout or "").splitlines():
+            bootstrap_log_lines: list[str] = []
+            while True:
+                try:
+                    line_bytes = await asyncio.wait_for(bootstrap_process.stdout.readline(), timeout=15)
+                except asyncio.TimeoutError:
+                    yield TerraformProgressEvent(
+                        event_type="heartbeat",
+                        message="Bootstrap in progress...",
+                        resources_completed=resources_completed,
+                        resources_total=resources_total,
+                    )
+                    continue
+
+                if not line_bytes:
+                    break
+
+                line = line_bytes.decode().rstrip()
+                if not line:
+                    continue
+                bootstrap_log_lines.append(line)
+
                 try:
                     entry = json.loads(line)
                     if entry.get("type") == "apply_complete" and "hook" in entry:
@@ -340,6 +397,22 @@ class TerraformExecutor:
                         )
                 except json.JSONDecodeError:
                     pass
+
+            bootstrap_stderr = ""
+            if bootstrap_process.stderr:
+                bootstrap_stderr = (await bootstrap_process.stderr.read()).decode()
+            bootstrap_rc = await bootstrap_process.wait()
+
+            if bootstrap_rc != 0:
+                run.status = "failed"
+                run.error_message = bootstrap_stderr or "Apply failed"
+                run.completed_at = datetime.now(timezone.utc)
+                await session.flush()
+                yield TerraformProgressEvent(
+                    event_type="apply_error",
+                    message=run.error_message,
+                )
+                return
 
             # Get bucket name from terraform output
             output_result = await asyncio.to_thread(
@@ -375,6 +448,29 @@ class TerraformExecutor:
             run.status = "completed"
             run.terraform_state_url = f"gs://{bucket_name}" if bucket_name else ""
             run.completed_at = datetime.now(timezone.utc)
+            await session.flush()
+
+            await log_action(
+                session,
+                user_id=user_id,
+                entity_type="terraform",
+                entity_id=run.id,
+                action="bootstrap",
+                details={"status": "completed", "module_name": "foundation", "state_bucket": bucket_name},
+            )
+
+            if org_id is not None:
+                await ActivityFeedService.add_event(
+                    session,
+                    org_id=org_id,
+                    user_id=user_id,
+                    event_type="infrastructure.bootstrap_completed",
+                    summary=f"Terraform state bucket created: {bucket_name}",
+                    entity_type="terraform",
+                    entity_id=run.id,
+                    metadata={"state_bucket": bucket_name},
+                )
+
             await session.flush()
 
             yield TerraformProgressEvent(
@@ -468,6 +564,10 @@ class TerraformExecutor:
         cmd = ["terraform", "init", "-no-color", "-input=false"]
         if local_backend:
             cmd += ["-backend=false"]
+        else:
+            bucket = config.get("terraform_state_bucket")
+            if bucket:
+                cmd += [f"-backend-config=bucket={bucket}"]
 
         result = await asyncio.to_thread(
             subprocess.run,

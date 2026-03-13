@@ -41,11 +41,11 @@ router = APIRouter(tags=["stack_deploy"])
 
 
 class StackDeployRequest(BaseModel):
-    stack_type: str  # "kubernetes" only for now
+    stack_type: str = "kubernetes"
 
 
 class StackTeardownRequest(BaseModel):
-    confirm: bool
+    confirm: bool = True
 
 
 class ClusterConfigResponse(BaseModel):
@@ -171,16 +171,18 @@ KUBERNETES_COMPONENTS: list[dict] = [
 
 @router.post("/api/v1/infrastructure/stack/deploy")
 async def stack_deploy_endpoint(
-    body: StackDeployRequest,
+    body: StackDeployRequest | None = None,
     current_user: dict = require_role("admin"),
     session: AsyncSession = Depends(get_session),
 ):
     """Deploy the full compute stack via SSE stream."""
     user_id = int(current_user["sub"])
+    org_id = int(current_user["org_id"]) if current_user.get("org_id") else None
+    stack_type = body.stack_type if body else "kubernetes"
 
     async def event_generator():
         try:
-            async for event in deploy_stack(session, body.stack_type, user_id):
+            async for event in deploy_stack(session, stack_type, user_id, org_id=org_id):
                 data = json.dumps(
                     {
                         "event_type": event.event_type,
@@ -197,17 +199,21 @@ async def stack_deploy_endpoint(
         finally:
             await session.commit()
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/api/v1/infrastructure/stack/teardown")
 async def stack_teardown_endpoint(
-    body: StackTeardownRequest,
+    body: StackTeardownRequest | None = None,
     current_user: dict = require_role("admin"),
     session: AsyncSession = Depends(get_session),
 ):
     """Teardown the compute stack via SSE stream."""
-    if not body.confirm:
+    if body and not body.confirm:
         raise HTTPException(status_code=400, detail="Confirmation required. Set confirm=true.")
 
     user_id = int(current_user["sub"])
@@ -228,7 +234,11 @@ async def stack_teardown_endpoint(
         finally:
             await session.commit()
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/api/v1/infrastructure/stack/status")
