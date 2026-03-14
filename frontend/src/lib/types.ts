@@ -963,12 +963,16 @@ export type ReviewVerdict = "approved" | "approved_with_caveats" | "rejected" | 
 
 export interface ControlledVocabularyValue {
   id: number;
-  field_name: string;
-  allowed_value: string;
+  value: string;
   display_label: string | null;
   display_order: number;
   is_default: boolean;
   is_active: boolean;
+}
+
+export interface ControlledVocabularyResponse {
+  field_name: string;
+  values: ControlledVocabularyValue[];
 }
 
 export interface ControlledVocabularyFieldsResponse {

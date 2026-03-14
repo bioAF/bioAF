@@ -37,8 +37,8 @@ export function VocabularySelect({
     >
       {allowEmpty && <option value="">{placeholder || `Select ${fieldName.replace(/_/g, " ")}...`}</option>}
       {values.map((v) => (
-        <option key={v.id} value={v.allowed_value}>
-          {v.display_label || v.allowed_value}
+        <option key={v.id} value={v.value}>
+          {v.display_label || v.value}
         </option>
       ))}
     </select>
