@@ -3,6 +3,9 @@
  * These verify the redirect configuration is correct by importing and checking the config.
  */
 
+import * as fs from "fs";
+import * as path from "path";
+
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const nextConfig = require("../next.config.js");
 
@@ -82,6 +85,23 @@ describe("Route Redirects", () => {
     expect(redirect).toBeDefined();
     expect(redirect!.destination).toBe("/projects/experiments/:id");
     expect(redirect!.permanent).toBe(true);
+  });
+
+  it("routes /experiments/new to /projects/experiments/new via the :id pattern", () => {
+    // The /experiments/:id redirect catches /experiments/new and sends it to
+    // /projects/experiments/new. That page must exist or Next.js falls through
+    // to [id]/page.tsx with id="new", showing "Experiment not found".
+    const idRedirect = redirects.find(
+      (r: Redirect) => r.source === "/experiments/:id",
+    );
+    expect(idRedirect).toBeDefined();
+    expect(idRedirect!.destination).toBe("/projects/experiments/:id");
+
+    const newPagePath = path.resolve(
+      __dirname,
+      "../src/app/projects/experiments/new/page.tsx",
+    );
+    expect(fs.existsSync(newPagePath)).toBe(true);
   });
 
   it("contains all expected redirect sources", () => {
