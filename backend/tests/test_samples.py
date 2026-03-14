@@ -100,6 +100,25 @@ async def test_update_sample(client, admin_token, experiment_id, session):
 
 
 @pytest.mark.asyncio
+async def test_create_sample_with_qc_metrics(client, admin_token, experiment_id, session):
+    response = await client.post(
+        f"/api/experiments/{experiment_id}/samples",
+        json={
+            "sample_id_external": "PBMC_donor1",
+            "organism": "Homo sapiens",
+            "tissue_type": "PBMC",
+            "cell_count": 5000,
+            "viability_pct": 95.0,
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["cell_count"] == 5000
+    assert data["viability_pct"] == 95.0
+
+
+@pytest.mark.asyncio
 async def test_qc_status_update(client, admin_token, experiment_id, session):
     resp = await client.post(
         f"/api/experiments/{experiment_id}/samples",

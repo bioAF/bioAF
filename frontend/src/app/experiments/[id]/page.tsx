@@ -14,6 +14,7 @@ import { api } from "@/lib/api";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
 import type {
   ExperimentDetail,
+  ExperimentUpdateRequest,
   Sample,
   Batch,
   AuditLogResponse,
@@ -53,9 +54,13 @@ export default function ExperimentDetailPage() {
   const [pipelineRuns, setPipelineRuns] = useState<PipelineRun[]>([]);
 
   const [showGeoExport, setShowGeoExport] = useState(false);
+  const [editingOverview, setEditingOverview] = useState(false);
+  const [overviewForm, setOverviewForm] = useState<ExperimentUpdateRequest>({});
+  const [overviewError, setOverviewError] = useState("");
   const [showSampleForm, setShowSampleForm] = useState(false);
   const [showBatchForm, setShowBatchForm] = useState(false);
   const [sampleForm, setSampleForm] = useState<SampleCreateRequest>({});
+  const [sampleFormError, setSampleFormError] = useState("");
   const [batchForm, setBatchForm] = useState<BatchCreateRequest>({ name: "" });
 
   useEffect(() => {
@@ -137,13 +142,16 @@ export default function ExperimentDetailPage() {
   }
 
   async function handleAddSample() {
+    setSampleFormError("");
     try {
       await api.post(`/api/experiments/${id}/samples`, sampleForm);
       setSampleForm({});
       setShowSampleForm(false);
       loadSamples();
       loadExperiment();
-    } catch {}
+    } catch (err) {
+      setSampleFormError(err instanceof Error ? err.message : "Failed to save sample");
+    }
   }
 
   async function handleAddBatch() {
@@ -154,6 +162,30 @@ export default function ExperimentDetailPage() {
       loadBatches();
       loadExperiment();
     } catch {}
+  }
+
+  function startEditOverview() {
+    if (!experiment) return;
+    setOverviewForm({
+      name: experiment.name,
+      hypothesis: experiment.hypothesis,
+      description: experiment.description,
+      start_date: experiment.start_date,
+      expected_sample_count: experiment.expected_sample_count,
+    });
+    setOverviewError("");
+    setEditingOverview(true);
+  }
+
+  async function handleSaveOverview() {
+    setOverviewError("");
+    try {
+      await api.patch(`/api/experiments/${id}`, overviewForm);
+      setEditingOverview(false);
+      loadExperiment();
+    } catch (err) {
+      setOverviewError(err instanceof Error ? err.message : "Failed to save experiment");
+    }
   }
 
   async function handleUpdateQC(sampleId: number, qcStatus: string) {
@@ -259,17 +291,56 @@ export default function ExperimentDetailPage() {
           {activeTab === "overview" && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="bg-white rounded-lg shadow p-6">
-                <h2 className="text-lg font-semibold mb-4">Experiment Details</h2>
-                <dl className="space-y-3">
-                  <div><dt className="text-sm text-gray-500">Project</dt><dd className="text-sm">{experiment.project?.name || "—"}</dd></div>
-                  <div><dt className="text-sm text-gray-500">Owner</dt><dd className="text-sm">{experiment.owner?.name || experiment.owner?.email || "—"}</dd></div>
-                  <div><dt className="text-sm text-gray-500">Hypothesis</dt><dd className="text-sm">{experiment.hypothesis || "—"}</dd></div>
-                  <div><dt className="text-sm text-gray-500">Description</dt><dd className="text-sm">{experiment.description || "—"}</dd></div>
-                  <div><dt className="text-sm text-gray-500">Start Date</dt><dd className="text-sm">{experiment.start_date || "—"}</dd></div>
-                  <div><dt className="text-sm text-gray-500">Expected Samples</dt><dd className="text-sm">{experiment.expected_sample_count ?? "—"}</dd></div>
-                  <div><dt className="text-sm text-gray-500">Actual Samples</dt><dd className="text-sm">{experiment.sample_count}</dd></div>
-                  <div><dt className="text-sm text-gray-500">Created</dt><dd className="text-sm">{new Date(experiment.created_at).toLocaleString()}</dd></div>
-                </dl>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold">Experiment Details</h2>
+                  {!editingOverview && (
+                    <button onClick={startEditOverview} className="text-sm text-bioaf-600 hover:underline">Edit</button>
+                  )}
+                </div>
+
+                {editingOverview ? (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-sm text-gray-500 mb-1">Name</label>
+                      <input value={overviewForm.name ?? ""} onChange={(e) => setOverviewForm({ ...overviewForm, name: e.target.value })} className="w-full border rounded px-3 py-1.5 text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-500 mb-1">Hypothesis</label>
+                      <textarea value={overviewForm.hypothesis ?? ""} onChange={(e) => setOverviewForm({ ...overviewForm, hypothesis: e.target.value || null })} rows={3} className="w-full border rounded px-3 py-1.5 text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-500 mb-1">Description</label>
+                      <textarea value={overviewForm.description ?? ""} onChange={(e) => setOverviewForm({ ...overviewForm, description: e.target.value || null })} rows={3} className="w-full border rounded px-3 py-1.5 text-sm" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm text-gray-500 mb-1">Start Date</label>
+                        <input type="date" value={overviewForm.start_date ?? ""} onChange={(e) => setOverviewForm({ ...overviewForm, start_date: e.target.value || null })} className="w-full border rounded px-3 py-1.5 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-gray-500 mb-1">Expected Samples</label>
+                        <input type="number" min={0} value={overviewForm.expected_sample_count ?? ""} onChange={(e) => setOverviewForm({ ...overviewForm, expected_sample_count: e.target.value ? Number(e.target.value) : null })} className="w-full border rounded px-3 py-1.5 text-sm" />
+                      </div>
+                    </div>
+                    {overviewError && <p className="text-red-600 text-sm">{overviewError}</p>}
+                    <div className="flex gap-2 pt-1">
+                      <button onClick={handleSaveOverview} className="bg-bioaf-600 text-white px-4 py-1.5 rounded text-sm">Save</button>
+                      <button onClick={() => { setEditingOverview(false); setOverviewError(""); }} className="border px-4 py-1.5 rounded text-sm">Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <dl className="space-y-3">
+                    <div><dt className="text-sm text-gray-500">Project</dt><dd className="text-sm">{experiment.project?.name || "—"}</dd></div>
+                    <div><dt className="text-sm text-gray-500">Template</dt><dd className="text-sm">{experiment.template_name || "—"}</dd></div>
+                    <div><dt className="text-sm text-gray-500">Owner</dt><dd className="text-sm">{experiment.owner?.name || experiment.owner?.email || "—"}</dd></div>
+                    <div><dt className="text-sm text-gray-500">Hypothesis</dt><dd className="text-sm">{experiment.hypothesis || "—"}</dd></div>
+                    <div><dt className="text-sm text-gray-500">Description</dt><dd className="text-sm">{experiment.description || "—"}</dd></div>
+                    <div><dt className="text-sm text-gray-500">Start Date</dt><dd className="text-sm">{experiment.start_date || "—"}</dd></div>
+                    <div><dt className="text-sm text-gray-500">Expected Samples</dt><dd className="text-sm">{experiment.expected_sample_count ?? "—"}</dd></div>
+                    <div><dt className="text-sm text-gray-500">Actual Samples</dt><dd className="text-sm">{experiment.sample_count}</dd></div>
+                    <div><dt className="text-sm text-gray-500">Created</dt><dd className="text-sm">{new Date(experiment.created_at).toLocaleString()}</dd></div>
+                  </dl>
+                )}
               </div>
 
               <div className="bg-white rounded-lg shadow p-6">
@@ -293,11 +364,14 @@ export default function ExperimentDetailPage() {
                 {experiment.custom_fields.length > 0 && (
                   <>
                     <h3 className="text-md font-semibold mt-6 mb-3">Custom Fields</h3>
+                    {experiment.template_name && (
+                      <p className="text-xs text-gray-400 mb-3">Controlled by template: {experiment.template_name}</p>
+                    )}
                     <dl className="space-y-2">
                       {experiment.custom_fields.map((cf) => (
                         <div key={cf.id}>
-                          <dt className="text-sm text-gray-500">{cf.field_name}</dt>
-                          <dd className="text-sm">{cf.field_value || "—"}</dd>
+                          <dt className="text-sm text-gray-400">{cf.field_name}</dt>
+                          <dd className="text-sm text-gray-500">{cf.field_value || "—"}</dd>
                         </div>
                       ))}
                     </dl>
@@ -330,19 +404,24 @@ export default function ExperimentDetailPage() {
               {showSampleForm && (
                 <div className="bg-white rounded-lg shadow p-4 mb-4">
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    <input placeholder="External ID" value={sampleForm.sample_id_external ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, sample_id_external: e.target.value })} className="border rounded px-3 py-2 text-sm" />
+                    <input placeholder="External Sample ID" value={sampleForm.sample_id_external ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, sample_id_external: e.target.value })} className="border rounded px-3 py-2 text-sm" />
                     <input placeholder="Organism" value={sampleForm.organism ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, organism: e.target.value })} className="border rounded px-3 py-2 text-sm" />
                     <input placeholder="Tissue Type" value={sampleForm.tissue_type ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, tissue_type: e.target.value })} className="border rounded px-3 py-2 text-sm" />
-                    <input placeholder="Donor/Source" value={sampleForm.donor_source ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, donor_source: e.target.value })} className="border rounded px-3 py-2 text-sm" />
-                    <input placeholder="Treatment" value={sampleForm.treatment_condition ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, treatment_condition: e.target.value })} className="border rounded px-3 py-2 text-sm" />
-                    <input placeholder="Chemistry Version" value={sampleForm.chemistry_version ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, chemistry_version: e.target.value })} className="border rounded px-3 py-2 text-sm" />
+                    <input placeholder="Donor ID" value={sampleForm.donor_source ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, donor_source: e.target.value })} className="border rounded px-3 py-2 text-sm" />
+                    <input placeholder="Treatment Condition" value={sampleForm.treatment_condition ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, treatment_condition: e.target.value })} className="border rounded px-3 py-2 text-sm" />
+                    <input placeholder="Chemistry Version (e.g. NextGEM v3.1)" value={sampleForm.chemistry_version ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, chemistry_version: e.target.value })} className="border rounded px-3 py-2 text-sm" />
+                    <input type="number" placeholder="Cell Count" min={0} value={sampleForm.cell_count ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, cell_count: e.target.value ? Number(e.target.value) : null })} className="border rounded px-3 py-2 text-sm" />
+                    <input type="number" placeholder="Viability %" min={0} max={100} step={0.1} value={sampleForm.viability_pct ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, viability_pct: e.target.value ? Number(e.target.value) : null })} className="border rounded px-3 py-2 text-sm" />
                     <VocabularySelect fieldName="molecule_type" value={sampleForm.molecule_type} onChange={(v) => setSampleForm({ ...sampleForm, molecule_type: v })} placeholder="Molecule Type..." />
-                    <VocabularySelect fieldName="library_prep_method" value={sampleForm.library_prep_method} onChange={(v) => setSampleForm({ ...sampleForm, library_prep_method: v })} placeholder="Library Prep..." />
+                    <VocabularySelect fieldName="library_prep_method" value={sampleForm.library_prep_method} onChange={(v) => setSampleForm({ ...sampleForm, library_prep_method: v })} placeholder="Library Prep Method..." />
                     <VocabularySelect fieldName="library_layout" value={sampleForm.library_layout} onChange={(v) => setSampleForm({ ...sampleForm, library_layout: v })} placeholder="Library Layout..." />
                   </div>
+                  {sampleFormError && (
+                    <p className="text-red-600 text-sm mt-2">{sampleFormError}</p>
+                  )}
                   <div className="flex gap-2 mt-3">
                     <button onClick={handleAddSample} className="bg-bioaf-600 text-white px-4 py-1.5 rounded text-sm">Save</button>
-                    <button onClick={() => setShowSampleForm(false)} className="border px-4 py-1.5 rounded text-sm">Cancel</button>
+                    <button onClick={() => { setShowSampleForm(false); setSampleFormError(""); }} className="border px-4 py-1.5 rounded text-sm">Cancel</button>
                   </div>
                 </div>
               )}

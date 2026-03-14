@@ -69,6 +69,8 @@ class ExperimentResponse(BaseModel):
     id: int
     name: str
     project: ProjectSummary | None = None
+    template_id: int | None = None
+    template_name: str | None = None
     hypothesis: str | None
     description: str | None
     status: str

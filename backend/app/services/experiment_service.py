@@ -157,6 +157,7 @@ class ExperimentService:
                 selectinload(Experiment.custom_fields),
                 selectinload(Experiment.project),
                 selectinload(Experiment.owner),
+                selectinload(Experiment.template),
             )
             .where(
                 Experiment.id == experiment_id,
@@ -201,6 +202,7 @@ class ExperimentService:
                 selectinload(Experiment.owner),
                 selectinload(Experiment.samples),
                 selectinload(Experiment.batches),
+                selectinload(Experiment.template),
             )
             .order_by(Experiment.created_at.desc())
             .offset((page - 1) * page_size)

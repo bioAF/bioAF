@@ -230,6 +230,37 @@ async def test_get_experiment_detail(client, admin_token):
     assert "batches" in data
     assert "custom_fields" in data
     assert "audit_trail_count" in data
+    assert data["template_id"] is None
+    assert data["template_name"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_experiment_detail_includes_template_name(client, admin_token):
+    # Create a template
+    tmpl_resp = await client.post(
+        "/api/templates",
+        json={"name": "PBMC scRNA Template", "required_fields_json": {"sample_fields": ["organism"]}},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    template_id = tmpl_resp.json()["id"]
+
+    # Create experiment using that template
+    resp = await client.post(
+        "/api/experiments",
+        json={"name": "Templated Exp", "template_id": template_id},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    exp_id = resp.json()["id"]
+
+    # Detail endpoint should return template_id and template_name
+    detail = await client.get(
+        f"/api/experiments/{exp_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert detail.status_code == 200
+    data = detail.json()
+    assert data["template_id"] == template_id
+    assert data["template_name"] == "PBMC scRNA Template"
 
 
 @pytest.mark.asyncio

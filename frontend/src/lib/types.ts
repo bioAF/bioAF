@@ -170,6 +170,8 @@ export interface Experiment {
   id: number;
   name: string;
   project: ProjectSummary | null;
+  template_id: number | null;
+  template_name: string | null;
   hypothesis: string | null;
   description: string | null;
   status: ExperimentStatus;
@@ -180,6 +182,14 @@ export interface Experiment {
   batch_count: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface ExperimentUpdateRequest {
+  name?: string | null;
+  hypothesis?: string | null;
+  description?: string | null;
+  start_date?: string | null;
+  expected_sample_count?: number | null;
 }
 
 export interface ExperimentListResponse {
