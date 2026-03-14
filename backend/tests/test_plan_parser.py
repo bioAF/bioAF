@@ -192,3 +192,57 @@ def test_parse_handles_missing_resource_changes_key():
 
     assert result["add_count"] == 0
     assert result["total"] == 0
+
+
+def test_parse_replace_counts_two_operations():
+    """A replace action (create + delete) counts as two operations in total,
+    matching the two apply_complete events Terraform emits."""
+    plan = {
+        "resource_changes": [
+            {
+                "address": "google_storage_bucket.ingest",
+                "type": "google_storage_bucket",
+                "name": "ingest",
+                "change": {"actions": ["delete", "create"]},
+            },
+            {
+                "address": "google_storage_bucket.results",
+                "type": "google_storage_bucket",
+                "name": "results",
+                "change": {"actions": ["create"]},
+            },
+        ],
+    }
+    result = TerraformPlanParser.parse(plan)
+
+    assert result["add_count"] == 2
+    assert result["destroy_count"] == 1
+    assert result["change_count"] == 0
+    # total = add_count + change_count + destroy_count = 3 operations
+    assert result["total"] == 3
+    assert len(result["resources"]) == 2
+
+
+def test_parse_data_source_reads_excluded():
+    """Data source reads (action=['read']) are excluded from counts."""
+    plan = {
+        "resource_changes": [
+            {
+                "address": "data.google_storage_project_service_account.gcs_account",
+                "type": "google_storage_project_service_account",
+                "name": "gcs_account",
+                "change": {"actions": ["read"]},
+            },
+            {
+                "address": "google_storage_bucket.ingest",
+                "type": "google_storage_bucket",
+                "name": "ingest",
+                "change": {"actions": ["create"]},
+            },
+        ],
+    }
+    result = TerraformPlanParser.parse(plan)
+
+    assert result["add_count"] == 1
+    assert result["total"] == 1
+    assert len(result["resources"]) == 1

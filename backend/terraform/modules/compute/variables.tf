@@ -18,6 +18,11 @@ variable "org_slug" {
   description = "Organization slug used in resource naming"
 }
 
+variable "stack_uid" {
+  type        = string
+  description = "Short unique ID appended to resource names to avoid GCP soft-delete conflicts on redeploy"
+}
+
 variable "k8s_pipeline_machine_type" {
   type        = string
   default     = "n2-highmem-8"

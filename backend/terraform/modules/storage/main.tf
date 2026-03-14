@@ -19,7 +19,7 @@ locals {
 }
 
 resource "google_storage_bucket" "ingest" {
-  name          = "${local.bucket_prefix}-ingest-${var.org_slug}"
+  name          = "${local.bucket_prefix}-ingest-${var.org_slug}-${var.stack_uid}"
   project       = var.project_id
   location      = var.region
   storage_class = "STANDARD"
@@ -34,7 +34,7 @@ resource "google_storage_bucket" "ingest" {
 }
 
 resource "google_storage_bucket" "raw" {
-  name          = "${local.bucket_prefix}-raw-${var.org_slug}"
+  name          = "${local.bucket_prefix}-raw-${var.org_slug}-${var.stack_uid}"
   project       = var.project_id
   location      = var.region
   storage_class = "STANDARD"
@@ -59,7 +59,7 @@ resource "google_storage_bucket" "raw" {
 }
 
 resource "google_storage_bucket" "working" {
-  name          = "${local.bucket_prefix}-working-${var.org_slug}"
+  name          = "${local.bucket_prefix}-working-${var.org_slug}-${var.stack_uid}"
   project       = var.project_id
   location      = var.region
   storage_class = "STANDARD"
@@ -74,7 +74,7 @@ resource "google_storage_bucket" "working" {
 }
 
 resource "google_storage_bucket" "results" {
-  name          = "${local.bucket_prefix}-results-${var.org_slug}"
+  name          = "${local.bucket_prefix}-results-${var.org_slug}-${var.stack_uid}"
   project       = var.project_id
   location      = var.region
   storage_class = "STANDARD"
@@ -89,7 +89,7 @@ resource "google_storage_bucket" "results" {
 }
 
 resource "google_storage_bucket" "config_backups" {
-  name          = "${local.bucket_prefix}-config-backups-${var.org_slug}"
+  name          = "${local.bucket_prefix}-config-backups-${var.org_slug}-${var.stack_uid}"
   project       = var.project_id
   location      = var.region
   storage_class = "STANDARD"
@@ -106,7 +106,7 @@ resource "google_storage_bucket" "config_backups" {
 # --- Pub/Sub for ingest bucket notifications ---
 
 resource "google_pubsub_topic" "ingest_events" {
-  name    = "bioaf-ingest-events-${var.org_slug}"
+  name    = "bioaf-ingest-events-${var.org_slug}-${var.stack_uid}"
   project = var.project_id
 
   labels = {
@@ -116,7 +116,7 @@ resource "google_pubsub_topic" "ingest_events" {
 }
 
 resource "google_pubsub_subscription" "ingest_worker" {
-  name    = "bioaf-ingest-worker-${var.org_slug}"
+  name    = "bioaf-ingest-worker-${var.org_slug}-${var.stack_uid}"
   topic   = google_pubsub_topic.ingest_events.id
   project = var.project_id
 
@@ -137,12 +137,12 @@ resource "google_pubsub_subscription" "ingest_worker" {
 }
 
 resource "google_pubsub_topic" "ingest_dead_letter" {
-  name    = "bioaf-ingest-dead-letter-${var.org_slug}"
+  name    = "bioaf-ingest-dead-letter-${var.org_slug}-${var.stack_uid}"
   project = var.project_id
 }
 
 resource "google_pubsub_subscription" "ingest_dead_letter_sub" {
-  name    = "bioaf-ingest-dead-letter-sub-${var.org_slug}"
+  name    = "bioaf-ingest-dead-letter-sub-${var.org_slug}-${var.stack_uid}"
   topic   = google_pubsub_topic.ingest_dead_letter.id
   project = var.project_id
 }

@@ -286,6 +286,8 @@ async def test_teardown_stack_clears_config(session):
     """teardown_stack clears GKE config and sets compute_deployed to false."""
     from app.services.stack_deployment import teardown_stack
 
+    _, user_id = await _seed_org_and_user(session)
+
     await _set_config(session, "compute_deployed", "true")
     await _set_config(session, "compute_stack", "kubernetes")
     await _set_config(session, "gke_cluster_name", "bioaf-myorg")
@@ -301,12 +303,12 @@ async def test_teardown_stack_clears_config(session):
     )
     await session.commit()
 
-    async def mock_run_destroy(sess, user_id, module_name):
+    async def mock_run_destroy(sess, uid, module_name):
         yield _make_progress_event("apply_complete", "destroy done")
 
     with patch("app.services.stack_deployment._run_destroy", side_effect=mock_run_destroy):
         events = []
-        async for event in teardown_stack(session, user_id=1):
+        async for event in teardown_stack(session, user_id=user_id):
             events.append(event)
 
     await session.commit()
@@ -390,3 +392,251 @@ async def test_deploy_stack_creates_activity_feed_events(session):
     actions = [r[0] for r in audit_rows]
     assert "deploy_storage" in actions
     assert "deploy_compute" in actions
+
+
+# -----------------------------------------------------------------------
+# Event remapping: apply_complete -> phase_complete
+# -----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_deploy_stack_remaps_apply_complete_to_phase_complete(session):
+    """Module-level apply_complete events are remapped to phase_complete so
+    the frontend does not prematurely show 'Complete'."""
+    from app.services.stack_deployment import deploy_stack
+
+    _, user_id = await _seed_org_and_user(session)
+
+    await _set_config(session, "gcp_credentials_configured", "true")
+    await _set_config(session, "terraform_initialized", "true")
+    await _set_config(session, "compute_deployed", "false")
+    await _set_config(session, "storage_deployed", "false")
+    await session.commit()
+
+    async def mock_run_module(sess, uid, module_name):
+        yield _make_progress_event(
+            "apply_complete",
+            f"{module_name} done",
+            extra={
+                "outputs": {
+                    "cluster_name": {"value": "bioaf-test"},
+                    "cluster_endpoint": {"value": "https://1.2.3.4"},
+                    "cluster_ca_cert": {"value": "Y2VydA=="},
+                }
+            }
+            if module_name == "compute"
+            else {},
+        )
+
+    with patch("app.services.stack_deployment._run_module", side_effect=mock_run_module):
+        events = []
+        async for event in deploy_stack(session, "kubernetes", user_id=user_id):
+            events.append(event)
+
+    event_types = [e.event_type for e in events]
+    # Raw apply_complete must NOT appear -- it should be remapped
+    assert "apply_complete" not in event_types
+    # phase_complete events for each module
+    assert event_types.count("phase_complete") == 2
+    # Final stack_complete marks the real end
+    assert event_types[-1] == "stack_complete"
+
+
+# -----------------------------------------------------------------------
+# Teardown activity feed
+# -----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_teardown_stack_creates_activity_feed_event(session):
+    """teardown_stack writes an activity feed event for the teardown."""
+    from app.services.stack_deployment import teardown_stack
+
+    org_id, user_id = await _seed_org_and_user(session)
+
+    await _set_config(session, "compute_deployed", "true")
+    await _set_config(session, "compute_stack", "kubernetes")
+    await session.execute(
+        text("""
+        INSERT INTO component_states (component_key, enabled, status, config_json)
+        VALUES ('kubernetes_cluster', true, 'running', '{}')
+        ON CONFLICT (component_key) DO UPDATE SET enabled = true, status = 'running'
+        """)
+    )
+    await session.commit()
+
+    async def mock_run_destroy(sess, uid, module_name):
+        yield _make_progress_event("apply_complete", "destroy done")
+
+    with patch("app.services.stack_deployment._run_destroy", side_effect=mock_run_destroy):
+        async for _ in teardown_stack(session, user_id=user_id, org_id=org_id):
+            pass
+
+    await session.commit()
+
+    rows = (
+        await session.execute(
+            text("SELECT event_type, summary FROM activity_feed WHERE organization_id = :org_id").bindparams(
+                org_id=org_id
+            )
+        )
+    ).fetchall()
+
+    event_types = [r[0] for r in rows]
+    assert "infrastructure.compute_teardown" in event_types
+
+    # Check audit log
+    audit_rows = (
+        await session.execute(
+            text("SELECT action FROM audit_log WHERE user_id = :uid AND entity_type = 'infrastructure'").bindparams(
+                uid=user_id
+            )
+        )
+    ).fetchall()
+    assert "teardown_compute" in [r[0] for r in audit_rows]
+
+
+# -----------------------------------------------------------------------
+# stack_uid generation
+# -----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_deploy_stack_generates_stack_uid(session):
+    """deploy_stack generates and persists a stack_uid on first deploy."""
+    from app.services.stack_deployment import deploy_stack
+
+    _, user_id = await _seed_org_and_user(session)
+
+    await _set_config(session, "gcp_credentials_configured", "true")
+    await _set_config(session, "terraform_initialized", "true")
+    await _set_config(session, "compute_deployed", "false")
+    await _set_config(session, "storage_deployed", "false")
+    await session.commit()
+
+    async def mock_run_module(sess, uid, module_name):
+        yield _make_progress_event(
+            "apply_complete",
+            f"{module_name} done",
+            extra={
+                "outputs": {
+                    "cluster_name": {"value": "bioaf-test"},
+                    "cluster_endpoint": {"value": "https://1.2.3.4"},
+                    "cluster_ca_cert": {"value": "Y2VydA=="},
+                }
+            }
+            if module_name == "compute"
+            else {},
+        )
+
+    with patch("app.services.stack_deployment._run_module", side_effect=mock_run_module):
+        async for _ in deploy_stack(session, "kubernetes", user_id=user_id):
+            pass
+
+    await session.commit()
+
+    uid = await _get_config(session, "stack_uid")
+    assert uid is not None
+    assert len(uid) == 6  # secrets.token_hex(3) -> 6 hex chars
+
+
+@pytest.mark.asyncio
+async def test_deploy_stack_reuses_existing_stack_uid(session):
+    """deploy_stack does not overwrite an existing stack_uid."""
+    from app.services.stack_deployment import deploy_stack
+
+    _, user_id = await _seed_org_and_user(session)
+
+    await _set_config(session, "gcp_credentials_configured", "true")
+    await _set_config(session, "terraform_initialized", "true")
+    await _set_config(session, "compute_deployed", "false")
+    await _set_config(session, "storage_deployed", "true")
+    await _set_config(session, "stack_uid", "abc123")
+    await session.commit()
+
+    async def mock_run_module(sess, uid, module_name):
+        yield _make_progress_event(
+            "apply_complete",
+            f"{module_name} done",
+            extra={
+                "outputs": {
+                    "cluster_name": {"value": "bioaf-test"},
+                    "cluster_endpoint": {"value": "https://1.2.3.4"},
+                    "cluster_ca_cert": {"value": "Y2VydA=="},
+                }
+            },
+        )
+
+    with patch("app.services.stack_deployment._run_module", side_effect=mock_run_module):
+        async for _ in deploy_stack(session, "kubernetes", user_id=user_id):
+            pass
+
+    await session.commit()
+
+    uid = await _get_config(session, "stack_uid")
+    assert uid == "abc123"
+
+
+# -----------------------------------------------------------------------
+# Progress counter accumulation
+# -----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_deploy_stack_accumulates_resource_counts(session):
+    """stack_complete event carries accumulated resource counts from both phases."""
+    from app.services.stack_deployment import deploy_stack
+
+    _, user_id = await _seed_org_and_user(session)
+
+    await _set_config(session, "gcp_credentials_configured", "true")
+    await _set_config(session, "terraform_initialized", "true")
+    await _set_config(session, "compute_deployed", "false")
+    await _set_config(session, "storage_deployed", "false")
+    await session.commit()
+
+    async def mock_run_module(sess, uid, module_name):
+        if module_name == "storage":
+            yield _make_progress_event(
+                "resource_complete",
+                "Applied: bucket",
+                resources_completed=1,
+                resources_total=2,
+            )
+            yield _make_progress_event(
+                "apply_complete",
+                "storage done",
+                resources_completed=2,
+                resources_total=2,
+            )
+        else:
+            yield _make_progress_event(
+                "resource_complete",
+                "Applied: cluster",
+                resources_completed=1,
+                resources_total=3,
+            )
+            yield _make_progress_event(
+                "apply_complete",
+                "compute done",
+                resources_completed=3,
+                resources_total=3,
+                extra={
+                    "outputs": {
+                        "cluster_name": {"value": "bioaf-test"},
+                        "cluster_endpoint": {"value": "https://1.2.3.4"},
+                        "cluster_ca_cert": {"value": "Y2VydA=="},
+                    }
+                },
+            )
+
+    with patch("app.services.stack_deployment._run_module", side_effect=mock_run_module):
+        events = []
+        async for event in deploy_stack(session, "kubernetes", user_id=user_id):
+            events.append(event)
+
+    stack_complete = [e for e in events if e.event_type == "stack_complete"]
+    assert len(stack_complete) == 1
+    # 2 from storage + 3 from compute = 5 total
+    assert stack_complete[0].resources_completed == 5
+    assert stack_complete[0].resources_total == 5

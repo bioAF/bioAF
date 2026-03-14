@@ -658,12 +658,13 @@ def test_write_tfvars_foundation():
 
 
 def test_write_tfvars_storage():
-    """_write_tfvars writes project_id, region, and org_slug for storage."""
+    """_write_tfvars writes project_id, region, org_slug, and stack_uid for storage."""
     tmp = Path(tempfile.mkdtemp(prefix="tf_test_"))
     config = {
         "gcp_project_id": "my-project",
         "gcp_region": "us-west1",
         "org_slug": "my-lab",
+        "stack_uid": "a1b2c3",
     }
     TerraformExecutor._write_tfvars(tmp, "storage", config)
 
@@ -671,17 +672,19 @@ def test_write_tfvars_storage():
     assert tfvars["project_id"] == "my-project"
     assert tfvars["region"] == "us-west1"
     assert tfvars["org_slug"] == "my-lab"
+    assert tfvars["stack_uid"] == "a1b2c3"
     assert "state_bucket_name" not in tfvars
 
 
 def test_write_tfvars_compute():
-    """_write_tfvars writes project_id, region, zone, and org_slug for compute."""
+    """_write_tfvars writes project_id, region, zone, org_slug, and stack_uid for compute."""
     tmp = Path(tempfile.mkdtemp(prefix="tf_test_"))
     config = {
         "gcp_project_id": "my-project",
         "gcp_region": "europe-west1",
         "gcp_zone": "europe-west1-b",
         "org_slug": "acme",
+        "stack_uid": "d4e5f6",
     }
     TerraformExecutor._write_tfvars(tmp, "compute", config)
 
@@ -690,6 +693,7 @@ def test_write_tfvars_compute():
     assert tfvars["region"] == "europe-west1"
     assert tfvars["zone"] == "europe-west1-b"
     assert tfvars["org_slug"] == "acme"
+    assert tfvars["stack_uid"] == "d4e5f6"
 
 
 def test_write_tfvars_defaults():
@@ -802,6 +806,58 @@ async def test_run_init_no_bucket_in_config_skips_backend_config():
 
     assert captured_cmd is not None
     assert not any("backend-config" in c for c in captured_cmd)
+
+
+@pytest.mark.asyncio
+async def test_run_init_passes_prefix_for_module_name():
+    """_run_init passes -backend-config=prefix=<module> to isolate state per module."""
+    config = {"terraform_state_bucket": "my-tf-bucket"}
+    captured_cmd = None
+
+    def _fake_run(cmd, **kwargs):
+        nonlocal captured_cmd
+        captured_cmd = cmd
+        result = MagicMock()
+        result.returncode = 0
+        result.stderr = ""
+        return result
+
+    with patch("app.services.terraform_executor.subprocess.run", side_effect=_fake_run):
+        await TerraformExecutor._run_init(
+            work_dir=Path("/tmp/fake"),
+            env={},
+            config=config,
+            module_name="storage",
+        )
+
+    assert captured_cmd is not None
+    assert "-backend-config=prefix=storage" in captured_cmd
+    assert "-backend-config=bucket=my-tf-bucket" in captured_cmd
+
+
+@pytest.mark.asyncio
+async def test_run_init_no_prefix_without_module_name():
+    """_run_init omits prefix config when module_name is not provided."""
+    config = {"terraform_state_bucket": "my-tf-bucket"}
+    captured_cmd = None
+
+    def _fake_run(cmd, **kwargs):
+        nonlocal captured_cmd
+        captured_cmd = cmd
+        result = MagicMock()
+        result.returncode = 0
+        result.stderr = ""
+        return result
+
+    with patch("app.services.terraform_executor.subprocess.run", side_effect=_fake_run):
+        await TerraformExecutor._run_init(
+            work_dir=Path("/tmp/fake"),
+            env={},
+            config=config,
+        )
+
+    assert captured_cmd is not None
+    assert not any("prefix" in c for c in captured_cmd)
 
 
 # ---------------------------------------------------------------------------

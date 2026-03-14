@@ -217,10 +217,11 @@ async def stack_teardown_endpoint(
         raise HTTPException(status_code=400, detail="Confirmation required. Set confirm=true.")
 
     user_id = int(current_user["sub"])
+    org_id = int(current_user["org_id"]) if current_user.get("org_id") else None
 
     async def event_generator():
         try:
-            async for event in teardown_stack(session, user_id):
+            async for event in teardown_stack(session, user_id, org_id=org_id):
                 data = json.dumps(
                     {
                         "event_type": event.event_type,

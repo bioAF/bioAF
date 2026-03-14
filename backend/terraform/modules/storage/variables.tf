@@ -13,3 +13,8 @@ variable "org_slug" {
   description = "Organization slug used in bucket naming"
   type        = string
 }
+
+variable "stack_uid" {
+  description = "Short unique ID appended to resource names to avoid GCP soft-delete conflicts on redeploy"
+  type        = string
+}

@@ -23,6 +23,77 @@ type ModalStatus = "connecting" | "running" | "complete" | "error";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+// ---------------------------------------------------------------------------
+// Friendly names for Terraform resource types. Biologists don't need to
+// know about google_storage_bucket -- they care about "Data storage".
+// ---------------------------------------------------------------------------
+
+const FRIENDLY_NAMES: Record<string, string> = {
+  // Storage resources
+  "google_storage_bucket.ingest": "Ingest data storage",
+  "google_storage_bucket.raw": "Raw data storage",
+  "google_storage_bucket.working": "Working data storage",
+  "google_storage_bucket.results": "Results storage",
+  "google_storage_bucket.config_backups": "Configuration backups",
+  // Pub/Sub
+  "google_pubsub_topic.ingest_events": "Data ingest notifications",
+  "google_pubsub_subscription.ingest_worker": "Ingest processing queue",
+  "google_pubsub_topic.ingest_dead_letter": "Failed ingest retry queue",
+  "google_pubsub_subscription.ingest_dead_letter_sub":
+    "Failed ingest retry handler",
+  "google_storage_notification.ingest_notification":
+    "Automatic file detection",
+  "google_pubsub_topic_iam_member.gcs_publisher":
+    "Storage notification permissions",
+  // Compute resources
+  "google_container_cluster.bioaf": "Compute cluster",
+  "google_container_node_pool.pipelines": "Pipeline processing nodes",
+  "google_container_node_pool.interactive": "Interactive session nodes",
+  "google_project_iam_member.gke_storage_access":
+    "Cluster storage permissions",
+};
+
+type ResourceStatus = "pending" | "in_progress" | "complete";
+
+interface TrackedResource {
+  address: string;
+  label: string;
+  status: ResourceStatus;
+}
+
+function friendlyLabel(address: string): string {
+  if (FRIENDLY_NAMES[address]) return FRIENDLY_NAMES[address];
+  // Fallback: strip provider prefix and humanize
+  const parts = address.split(".");
+  if (parts.length === 2) {
+    return parts[1].replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+  return address;
+}
+
+function StatusBadge({ status }: { status: ResourceStatus }) {
+  if (status === "complete") {
+    return (
+      <span className="text-xs font-medium text-green-600 uppercase tracking-wide">
+        Done
+      </span>
+    );
+  }
+  if (status === "in_progress") {
+    return (
+      <span className="text-xs font-medium text-blue-600 uppercase tracking-wide flex items-center gap-1.5">
+        <span className="inline-block h-1.5 w-1.5 bg-blue-600 rounded-full animate-pulse" />
+        Setting up
+      </span>
+    );
+  }
+  return (
+    <span className="text-xs text-gray-400 uppercase tracking-wide">
+      Queued
+    </span>
+  );
+}
+
 export function TerraformProgressModal({
   title,
   sseUrl,
@@ -36,7 +107,10 @@ export function TerraformProgressModal({
   const [logLines, setLogLines] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [showLog, setShowLog] = useState(false);
+  const [resources, setResources] = useState<TrackedResource[]>([]);
+  const [phase, setPhase] = useState<"storage" | "compute" | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const listRef = useRef<HTMLUListElement | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -99,7 +173,6 @@ export function TerraformProgressModal({
 
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
-          // Keep the last incomplete line in the buffer
           buffer = lines.pop() ?? "";
 
           for (const line of lines) {
@@ -114,22 +187,82 @@ export function TerraformProgressModal({
 
             setEvents((prev) => [...prev, event]);
 
-            if (event.resources_total) {
+            if (event.resources_total && event.resources_total > 0) {
               setResourcesTotal(event.resources_total);
             }
-            if (event.resources_completed !== undefined) {
+            if (
+              event.resources_completed !== undefined &&
+              event.resources_completed > 0
+            ) {
               setResourcesCompleted(event.resources_completed);
             }
             if (event.log_line) {
               setLogLines((prev) => [...prev, event.log_line!]);
             }
 
+            // Track deployment phase for contextual messaging
             if (
-              event.event_type === "apply_complete" ||
-              event.event_type === "stack_complete"
+              event.message?.toLowerCase().includes("storage") &&
+              event.event_type === "progress"
             ) {
+              setPhase("storage");
+            } else if (
+              event.message?.toLowerCase().includes("compute") &&
+              event.event_type === "progress"
+            ) {
+              setPhase("compute");
+            }
+
+            // Track individual resources by address
+            if (event.resource_address && event.event_type === "resource_complete") {
+              const addr = event.resource_address;
+              setResources((prev) => {
+                const exists = prev.find((r) => r.address === addr);
+                if (exists) {
+                  return prev.map((r) =>
+                    r.address === addr ? { ...r, status: "complete" as const } : r,
+                  );
+                }
+                return [
+                  ...prev,
+                  { address: addr, label: friendlyLabel(addr), status: "complete" },
+                ];
+              });
+            } else if (
+              event.resource_address &&
+              event.event_type === "progress" &&
+              event.resource_address !== ""
+            ) {
+              const addr = event.resource_address;
+              setResources((prev) => {
+                const exists = prev.find((r) => r.address === addr);
+                if (!exists) {
+                  return [
+                    ...prev,
+                    {
+                      address: addr,
+                      label: friendlyLabel(addr),
+                      status: "in_progress",
+                    },
+                  ];
+                }
+                return prev;
+              });
+            }
+
+            if (event.event_type === "stack_complete") {
               setStatus("complete");
               return;
+            } else if (event.event_type === "apply_complete") {
+              setStatus("complete");
+              return;
+            } else if (event.event_type === "phase_complete") {
+              // Mark all tracked resources as complete for this phase
+              setResources((prev) =>
+                prev.map((r) =>
+                  r.status !== "complete" ? { ...r, status: "complete" as const } : r,
+                ),
+              );
             } else if (
               event.event_type === "apply_error" ||
               event.event_type === "stack_error"
@@ -140,7 +273,6 @@ export function TerraformProgressModal({
             }
           }
         }
-        // Stream ended without a terminal event -- treat as error
         setStatus((prev) => {
           if (prev === "running" || prev === "connecting") {
             setErrorMessage("Stream ended unexpectedly");
@@ -163,69 +295,100 @@ export function TerraformProgressModal({
     };
   }, [sseUrl]);
 
+  // Auto-scroll resource list
+  useEffect(() => {
+    if (listRef.current) {
+      listRef.current.scrollTop = listRef.current.scrollHeight;
+    }
+  }, [resources]);
+
   const progressPct =
-    resourcesTotal > 0 ? Math.round((resourcesCompleted / resourcesTotal) * 100) : 0;
+    resourcesTotal > 0
+      ? Math.min(100, Math.round((resourcesCompleted / resourcesTotal) * 100))
+      : 0;
+
+  const phaseLabel =
+    phase === "storage"
+      ? "Setting up data storage"
+      : phase === "compute"
+        ? "Setting up compute cluster"
+        : "Preparing infrastructure";
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 p-6">
-        <h2 className="text-lg font-semibold mb-4">{title}</h2>
+        <h2 className="text-lg font-semibold mb-1">{title}</h2>
 
         <div data-testid="tf-modal-status" className="mb-4">
           {status === "connecting" && (
             <p className="text-sm text-gray-500">Connecting...</p>
           )}
           {status === "running" && (
-            <p className="text-sm text-blue-600 flex items-center gap-2">
-              <span className="inline-block h-3 w-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-              Running...
-            </p>
+            <div>
+              <p className="text-sm text-blue-600 flex items-center gap-2">
+                <span className="inline-block h-3 w-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                {phaseLabel}
+              </p>
+              {phase === "compute" && (
+                <p className="text-xs text-gray-400 mt-1">
+                  Cluster setup typically takes 5 to 15 minutes
+                </p>
+              )}
+            </div>
           )}
           {status === "complete" && (
-            <p className="text-sm text-green-600 font-medium">Complete</p>
+            <p className="text-sm text-green-600 font-medium">
+              All systems ready
+            </p>
           )}
           {status === "error" && (
-            <p data-testid="tf-modal-error" className="text-sm text-red-600 font-medium">
-              Error: {errorMessage}
+            <p
+              data-testid="tf-modal-error"
+              className="text-sm text-red-600 font-medium"
+            >
+              Setup failed: {errorMessage}
             </p>
           )}
         </div>
 
         {resourcesTotal > 0 && (
           <div data-testid="tf-progress-bar" className="mb-4">
-            <div className="flex justify-between text-xs text-gray-500 mb-1">
-              <span>
-                {resourcesCompleted} / {resourcesTotal} resources
-              </span>
-              <span>{progressPct}%</span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
+            <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
               <div
-                className="bg-blue-600 h-2 rounded-full transition-all"
+                className="bg-blue-600 h-2 rounded-full transition-all duration-500"
                 style={{ width: `${progressPct}%` }}
               />
             </div>
+            <p className="text-xs text-gray-400 mt-1 text-right">
+              {resourcesCompleted} of {resourcesTotal} components
+            </p>
           </div>
         )}
 
-        {events.length > 0 && (
-          <ul className="space-y-1 mb-4 max-h-40 overflow-y-auto">
-            {events
-              .filter(
-                (e) =>
-                  e.event_type === "resource_complete" ||
-                  e.event_type === "progress"
-              )
-              .map((e, i) => (
-                <li key={i} className="text-sm flex items-center gap-2">
-                  {e.event_type === "resource_complete" ? (
-                    <span className="text-green-500">&#10003;</span>
-                  ) : (
-                    <span className="text-blue-500">&#9654;</span>
-                  )}
-                  <span className="text-gray-700">{e.message}</span>
-                </li>
-              ))}
+        {resources.length > 0 && (
+          <ul
+            ref={listRef}
+            className="space-y-0.5 mb-4 max-h-52 overflow-y-auto"
+          >
+            {resources.map((r) => (
+              <li
+                key={r.address}
+                className="flex items-center justify-between py-1.5 px-2 rounded text-sm"
+              >
+                <span
+                  className={
+                    r.status === "complete"
+                      ? "text-gray-700"
+                      : r.status === "in_progress"
+                        ? "text-gray-900"
+                        : "text-gray-400"
+                  }
+                >
+                  {r.label}
+                </span>
+                <StatusBadge status={r.status} />
+              </li>
+            ))}
           </ul>
         )}
 
@@ -233,12 +396,12 @@ export function TerraformProgressModal({
           <div className="mb-4">
             <button
               onClick={() => setShowLog((v) => !v)}
-              className="text-xs text-gray-500 underline"
+              className="text-xs text-gray-400 hover:text-gray-600 underline"
             >
-              {showLog ? "Hide" : "Show"} log
+              {showLog ? "Hide" : "Show"} technical log
             </button>
             {showLog && (
-              <pre className="mt-2 text-xs bg-gray-50 rounded p-2 max-h-32 overflow-y-auto">
+              <pre className="mt-2 text-xs bg-gray-50 rounded p-2 max-h-32 overflow-y-auto font-mono text-gray-500">
                 {logLines.join("\n")}
               </pre>
             )}

@@ -127,6 +127,10 @@ class TerraformPlanParser:
             "add_count": add_count,
             "change_count": change_count,
             "destroy_count": destroy_count,
-            "total": len(resources),
+            # Total counts actual Terraform operations, not unique resource
+            # entries.  A "replace" generates both a destroy and a create,
+            # so add_count + change_count + destroy_count is the correct
+            # number of apply_complete events Terraform will emit.
+            "total": add_count + change_count + destroy_count,
             "resources": resources,
         }
