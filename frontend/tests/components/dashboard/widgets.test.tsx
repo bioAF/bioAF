@@ -98,11 +98,25 @@ describe("Dashboard Widgets", () => {
   });
 
   describe("CostBudgetWidget", () => {
+    it("calls the correct endpoint", async () => {
+      mockApiGet.mockResolvedValueOnce({
+        current_month_spend: 500,
+        monthly_budget: 1000,
+        budget_remaining: 500,
+        projected_month_end: 800,
+      });
+      render(<CostBudgetWidget />);
+      await waitFor(() => {
+        expect(mockApiGet).toHaveBeenCalledWith("/api/costs/summary");
+      });
+    });
+
     it("renders with mock data", async () => {
       mockApiGet.mockResolvedValueOnce({
-        current_spend: 500,
+        current_month_spend: 500,
         monthly_budget: 1000,
-        currency: "USD",
+        budget_remaining: 500,
+        projected_month_end: 800,
       });
       render(<CostBudgetWidget />);
       await waitFor(() => {
@@ -113,6 +127,19 @@ describe("Dashboard Widgets", () => {
     });
 
     it("shows empty state when no budget configured", async () => {
+      mockApiGet.mockResolvedValueOnce({
+        current_month_spend: 200,
+        monthly_budget: null,
+        budget_remaining: null,
+        projected_month_end: null,
+      });
+      render(<CostBudgetWidget />);
+      await waitFor(() => {
+        expect(screen.getByTestId("widget-empty")).toBeInTheDocument();
+      });
+    });
+
+    it("handles error state", async () => {
       mockApiGet.mockRejectedValueOnce(new Error("fail"));
       render(<CostBudgetWidget />);
       await waitFor(() => {

@@ -3,10 +3,16 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 
+interface CostSummaryResponse {
+  current_month_spend: number;
+  monthly_budget: number | null;
+  budget_remaining: number | null;
+  projected_month_end: number | null;
+}
+
 interface BudgetData {
   current_spend: number;
   monthly_budget: number;
-  currency: string;
 }
 
 export function CostBudgetWidget() {
@@ -16,8 +22,15 @@ export function CostBudgetWidget() {
 
   useEffect(() => {
     api
-      .get<BudgetData>("/api/cost-center/budget-summary")
-      .then(setData)
+      .get<CostSummaryResponse>("/api/costs/summary")
+      .then((res) => {
+        if (res.monthly_budget != null) {
+          setData({
+            current_spend: res.current_month_spend,
+            monthly_budget: res.monthly_budget,
+          });
+        }
+      })
       .catch(() => setError("Failed to load budget data"))
       .finally(() => setLoading(false));
   }, []);
