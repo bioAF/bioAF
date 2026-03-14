@@ -3,6 +3,7 @@ import logging
 import re
 import uuid
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.file import File
@@ -43,6 +44,15 @@ class UploadService:
         return lower.endswith(".fastq.gz") or lower.endswith(".fq.gz")
 
     @staticmethod
+    async def _get_ingest_bucket(session: AsyncSession) -> str:
+        """Read ingest bucket name from platform_config."""
+        result = await session.execute(text("SELECT value FROM platform_config WHERE key = 'ingest_bucket_name'"))
+        name = result.scalar_one_or_none()
+        if not name or name == "null":
+            raise ValueError("Ingest bucket not configured. Deploy storage infrastructure first.")
+        return name
+
+    @staticmethod
     async def initiate_upload(
         session: AsyncSession,
         org_id: int,
@@ -55,7 +65,7 @@ class UploadService:
     ) -> dict:
         """Initiate an upload, returning upload_id and signed URL."""
         upload_id = str(uuid.uuid4())
-        bucket_name = f"bioaf-{org_id}-data"
+        bucket_name = await UploadService._get_ingest_bucket(session)
         gcs_path = f"uploads/{upload_id}/{filename}"
         gcs_uri = f"gs://{bucket_name}/{gcs_path}"
 
@@ -160,7 +170,7 @@ class UploadService:
     ) -> File:
         """Simple single-request upload for small files."""
         upload_id = str(uuid.uuid4())
-        bucket_name = f"bioaf-{org_id}-data"
+        bucket_name = await UploadService._get_ingest_bucket(session)
         gcs_path = f"uploads/{upload_id}/{filename}"
         gcs_uri = f"gs://{bucket_name}/{gcs_path}"
 

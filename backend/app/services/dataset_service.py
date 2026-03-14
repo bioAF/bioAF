@@ -1,6 +1,6 @@
 import logging
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -9,7 +9,6 @@ from app.models.experiment import Experiment
 from app.models.file import File
 from app.models.pipeline_run import PipelineRun
 from app.models.qc_dashboard import QCDashboard
-from app.models.sample import Sample
 
 logger = logging.getLogger("bioaf.dataset_service")
 
@@ -74,14 +73,11 @@ class DatasetService:
             if chemistry and not any(s.chemistry_version == chemistry for s in samples):
                 continue
 
-            # Get file count and size via sample_files junction table (LEFT JOIN
-            # so that experiments with 0 linked files return 0 instead of crashing)
+            # Get file count and size via File.experiment_id (direct FK)
             file_result = await session.execute(
-                select(func.count(File.id), func.coalesce(func.sum(File.size_bytes), 0))
-                .select_from(Sample)
-                .outerjoin(text("sample_files ON sample_files.sample_id = samples.id"))
-                .outerjoin(File, File.id == text("sample_files.file_id"))
-                .where(Sample.experiment_id == exp.id)
+                select(func.count(File.id), func.coalesce(func.sum(File.size_bytes), 0)).where(
+                    File.experiment_id == exp.id
+                )
             )
             file_row = file_result.first()
             file_count = file_row[0] if file_row else 0

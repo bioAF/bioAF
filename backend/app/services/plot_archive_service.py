@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -141,9 +141,17 @@ class PlotArchiveService:
             orgs_result = await session.execute(select(Organization))
             orgs = list(orgs_result.scalars().all())
 
+            cfg_result = await session.execute(
+                text("SELECT value FROM platform_config WHERE key = 'results_bucket_name'")
+            )
+            results_bucket = cfg_result.scalar_one_or_none()
+            if not results_bucket or results_bucket == "null":
+                logger.warning("results_bucket_name not configured in platform_config, skipping plot scan")
+                return 0
+
             for org in orgs:
                 org_id = org.id
-                bucket_name = f"bioaf-{org_id}-results"
+                bucket_name = results_bucket
                 last = _last_scan.get(org_id)
 
                 try:

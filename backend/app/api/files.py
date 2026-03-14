@@ -42,16 +42,19 @@ async def initiate_upload(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    result = await UploadService.initiate_upload(
-        session,
-        org_id,
-        user_id,
-        filename=body.filename,
-        expected_size=body.expected_size_bytes,
-        expected_md5=body.expected_md5,
-        experiment_id=body.experiment_id,
-        sample_ids=body.sample_ids,
-    )
+    try:
+        result = await UploadService.initiate_upload(
+            session,
+            org_id,
+            user_id,
+            filename=body.filename,
+            expected_size=body.expected_size_bytes,
+            expected_md5=body.expected_md5,
+            experiment_id=body.experiment_id,
+            sample_ids=body.sample_ids,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     return FileUploadInitiateResponse(**result)
 
 

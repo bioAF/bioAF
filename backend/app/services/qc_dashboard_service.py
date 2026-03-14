@@ -2,7 +2,7 @@ import io
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pipeline_run import PipelineRun
@@ -213,9 +213,19 @@ class QCDashboardService:
         return summary
 
     @staticmethod
+    async def _get_results_bucket(session: AsyncSession) -> str | None:
+        """Read results bucket name from platform_config."""
+        result = await session.execute(text("SELECT value FROM platform_config WHERE key = 'results_bucket_name'"))
+        name = result.scalar_one_or_none()
+        if not name or name == "null":
+            return None
+        return name
+
+    @staticmethod
     async def _generate_plots(session: AsyncSession, org_id: int, dashboard_id: int, metrics: dict) -> list[dict]:
         """Generate QC plot images and upload to GCS."""
         plots_meta = []
+        results_bucket = await QCDashboardService._get_results_bucket(session)
 
         try:
             # Lazy import matplotlib
@@ -275,7 +285,9 @@ class QCDashboardService:
                         org_id=org_id,
                         user_id=None,
                         filename=plot_filename,
-                        gcs_uri=f"gs://bioaf-{org_id}-results/qc_plots/{plot_filename}",
+                        gcs_uri=f"gs://{results_bucket}/qc_plots/{plot_filename}"
+                        if results_bucket
+                        else f"gs://unset/{plot_filename}",
                         size_bytes=buf.getbuffer().nbytes,
                         md5_checksum=None,
                         file_type="png",
