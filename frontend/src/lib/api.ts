@@ -87,6 +87,65 @@ async function uploadFile<T>(path: string, file: File): Promise<T> {
   return response.json();
 }
 
+interface SignedUploadOptions {
+  experimentId?: number;
+  onProgress?: (pct: number) => void;
+}
+
+// Upload a file via the initiate → PUT to GCS → complete flow.
+// The file bytes never transit the backend, so there is no size limit
+// beyond what GCS supports. Progress events are available via XHR.
+async function uploadFileSigned<T>(
+  file: File,
+  options: SignedUploadOptions = {},
+): Promise<T> {
+  // Step 1: get a signed URL and upload_id from the backend
+  const initiateBody: Record<string, unknown> = {
+    filename: file.name,
+    expected_size_bytes: file.size,
+  };
+  if (options.experimentId != null) {
+    initiateBody.experiment_id = options.experimentId;
+  }
+  const { upload_id, signed_url } = await fetchApi<{
+    upload_id: string;
+    signed_url: string;
+    gcs_uri: string;
+  }>("/api/files/upload/initiate", {
+    method: "POST",
+    body: JSON.stringify(initiateBody),
+  });
+
+  // Step 2: PUT directly to GCS via XHR so we get upload progress events
+  await new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", signed_url);
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && options.onProgress) {
+        options.onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else {
+        reject(new ApiError(xhr.status, `GCS upload failed: ${xhr.status}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error during upload"));
+    xhr.send(file);
+  });
+
+  // Step 3: confirm with the backend so it creates the DB record
+  return fetchApi<T>("/api/files/upload/complete", {
+    method: "POST",
+    body: JSON.stringify({ upload_id }),
+  });
+}
+
 export const api = {
   get: <T>(path: string) => fetchApi<T>(path),
   post: <T>(path: string, body?: unknown) =>
@@ -107,6 +166,8 @@ export const api = {
   delete: <T>(path: string) =>
     fetchApi<T>(path, { method: "DELETE" }),
   upload: <T>(path: string, file: File) => uploadFile<T>(path, file),
+  uploadSigned: <T>(file: File, options?: SignedUploadOptions) =>
+    uploadFileSigned<T>(file, options),
 };
 
 export { ApiError };

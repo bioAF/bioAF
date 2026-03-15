@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     rate_limit_verify: int = 5
     rate_limit_reset: int = 3
 
+    # Compute
+    compute_mode: str = "kubernetes"
+
     # Bcrypt
     bcrypt_rounds: int = 12
 

@@ -15,7 +15,7 @@ class FileUploadInitiate(BaseModel):
 
 class FileUploadComplete(BaseModel):
     upload_id: str
-    actual_md5: str
+    actual_md5: str = ""
 
 
 class FileResponse(BaseModel):

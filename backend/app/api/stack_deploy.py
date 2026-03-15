@@ -25,7 +25,9 @@ from app.database import get_session
 from app.services.stack_deployment import (
     StackStatus,
     deploy_stack,
+    destroy_storage,
     get_cluster_status,
+    sync_storage_config,
     teardown_stack,
 )
 from app.services.terraform_executor import TerraformExecutor
@@ -46,6 +48,10 @@ class StackDeployRequest(BaseModel):
 
 class StackTeardownRequest(BaseModel):
     confirm: bool = True
+
+
+class StorageDestroyRequest(BaseModel):
+    confirm: bool = False
 
 
 class ClusterConfigResponse(BaseModel):
@@ -240,6 +246,71 @@ async def stack_teardown_endpoint(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/api/v1/infrastructure/stack/destroy-storage")
+async def stack_destroy_storage_endpoint(
+    body: StorageDestroyRequest | None = None,
+    current_user: dict = require_role("admin"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Destroy the storage module (GCS buckets + Pub/Sub) via SSE stream.
+
+    Only allowed when compute stack is torn down. Resets stack_uid so the
+    next deploy creates fresh bucket names (avoids GCS soft-delete conflicts).
+    """
+    # A missing body is treated as confirmed -- the UI enforces the 3-step
+    # confirmation (warning, checkbox, typed phrase) before calling this endpoint.
+    if body is not None and not body.confirm:
+        raise HTTPException(status_code=400, detail="Confirmation required. Set confirm=true.")
+
+    user_id = int(current_user["sub"])
+    org_id = int(current_user["org_id"]) if current_user.get("org_id") else None
+
+    async def event_generator():
+        try:
+            async for event in destroy_storage(session, user_id, org_id=org_id):
+                data = json.dumps(
+                    {
+                        "event_type": event.event_type,
+                        "message": event.message,
+                        "resource_address": event.resource_address,
+                        "resources_completed": event.resources_completed,
+                        "resources_total": event.resources_total,
+                    }
+                )
+                yield f"data: {data}\n\n"
+        except ValueError as exc:
+            error_data = json.dumps({"event_type": "stack_error", "message": str(exc)})
+            yield f"data: {error_data}\n\n"
+        finally:
+            await session.commit()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/api/v1/infrastructure/stack/sync-storage-config")
+async def sync_storage_config_endpoint(
+    current_user: dict = require_role("admin"),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Re-read Terraform storage outputs and write bucket names to platform_config.
+
+    Use this after a deployment where storage was applied before the automatic
+    output-persistence was in place (i.e. bucket names are missing from
+    platform_config but the GCS buckets exist).
+    """
+    try:
+        populated = await sync_storage_config(session)
+        await session.commit()
+        return {"status": "ok", "populated": populated}
+    except Exception as exc:
+        logger.error("Storage config sync failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.get("/api/v1/infrastructure/stack/status")

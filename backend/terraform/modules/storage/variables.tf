@@ -18,3 +18,9 @@ variable "stack_uid" {
   description = "Short unique ID appended to resource names to avoid GCP soft-delete conflicts on redeploy"
   type        = string
 }
+
+variable "backend_service_account_email" {
+  description = "Email of the GCP service account the backend runs as. When provided, objectAdmin is granted on all storage buckets. Defaults to the project's default compute SA."
+  type        = string
+  default     = ""
+}

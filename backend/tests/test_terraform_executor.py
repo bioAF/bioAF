@@ -918,3 +918,113 @@ async def test_run_apply_inits_workdir_and_applies_without_planfile(session):
     assert "apply" in apply_cmd
     # apply must NOT reference a saved plan file
     assert "tfplan" not in apply_cmd
+
+
+# ---------------------------------------------------------------------------
+# read_module_outputs
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_read_module_outputs_returns_parsed_json(session):
+    """read_module_outputs inits then reads terraform output -json and returns parsed dict."""
+    await _seed_gcp_config(session, configured=True, initialized=True)
+
+    storage_outputs = {
+        "ingest_bucket_name": {"value": "bioaf-abc123-ingest"},
+        "raw_bucket_name": {"value": "bioaf-abc123-raw"},
+    }
+
+    init_calls: list = []
+    output_calls: list = []
+
+    def mock_subprocess_run(args, **kwargs):
+        result = MagicMock()
+        result.returncode = 0
+        result.stderr = ""
+        if "init" in args:
+            init_calls.append(args)
+            result.stdout = ""
+        else:
+            output_calls.append(args)
+            result.stdout = json.dumps(storage_outputs)
+        return result
+
+    with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_subprocess_run):
+        with _patch_work_dir():
+            with patch.object(TerraformExecutor, "_write_tfvars"):
+                outputs = await TerraformExecutor.read_module_outputs(session, "storage")
+
+    assert outputs == storage_outputs
+    assert any("output" in " ".join(str(a) for a in cmd) for cmd in output_calls)
+
+
+@pytest.mark.asyncio
+async def test_read_module_outputs_raises_on_failure(session):
+    """read_module_outputs raises RuntimeError when terraform output exits non-zero."""
+    await _seed_gcp_config(session, configured=True, initialized=True)
+
+    def mock_subprocess_run(args, **kwargs):
+        result = MagicMock()
+        result.stderr = "No outputs defined"
+        if "init" in args:
+            result.returncode = 0
+            result.stdout = ""
+        else:
+            result.returncode = 1
+            result.stdout = ""
+        return result
+
+    with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_subprocess_run):
+        with _patch_work_dir():
+            with patch.object(TerraformExecutor, "_write_tfvars"):
+                with pytest.raises(RuntimeError, match="terraform output failed"):
+                    await TerraformExecutor.read_module_outputs(session, "storage")
+
+
+# ---------------------------------------------------------------------------
+# sync_storage_config
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sync_storage_config_writes_bucket_names(session):
+    """sync_storage_config reads storage outputs and populates platform_config."""
+    from app.services.stack_deployment import sync_storage_config
+
+    storage_outputs = {
+        "ingest_bucket_name": {"value": "bioaf-abc123-ingest"},
+        "raw_bucket_name": {"value": "bioaf-abc123-raw"},
+        "working_bucket_name": {"value": "bioaf-abc123-working"},
+        "results_bucket_name": {"value": "bioaf-abc123-results"},
+        "config_backups_bucket_name": {"value": "bioaf-abc123-config-backups"},
+    }
+
+    with patch.object(TerraformExecutor, "read_module_outputs", return_value=storage_outputs):
+        populated = await sync_storage_config(session)
+
+    await session.commit()
+
+    assert populated["ingest_bucket_name"] == "bioaf-abc123-ingest"
+    assert populated["results_bucket_name"] == "bioaf-abc123-results"
+    assert len(populated) == 5
+
+    row = (await session.execute(text("SELECT value FROM platform_config WHERE key = 'ingest_bucket_name'"))).fetchone()
+    assert row is not None
+    assert row[0] == "bioaf-abc123-ingest"
+
+
+@pytest.mark.asyncio
+async def test_sync_storage_config_skips_empty_outputs(session):
+    """sync_storage_config skips keys where the output value is empty."""
+    from app.services.stack_deployment import sync_storage_config
+
+    storage_outputs = {
+        "ingest_bucket_name": {"value": "bioaf-abc123-ingest"},
+        # Other keys absent -- simulates partial output
+    }
+
+    with patch.object(TerraformExecutor, "read_module_outputs", return_value=storage_outputs):
+        populated = await sync_storage_config(session)
+
+    assert list(populated.keys()) == ["ingest_bucket_name"]

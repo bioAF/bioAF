@@ -22,6 +22,7 @@ class FileService:
         md5_checksum: str | None,
         file_type: str,
         tags: list[str] | None = None,
+        experiment_id: int | None = None,
     ) -> File:
         file = File(
             organization_id=org_id,
@@ -32,6 +33,7 @@ class FileService:
             uploader_user_id=user_id,
             file_type=file_type,
             tags_json=tags or [],
+            experiment_id=experiment_id,
         )
         session.add(file)
         await session.flush()

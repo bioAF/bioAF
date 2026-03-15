@@ -106,7 +106,13 @@ async def lifespan(app: FastAPI):
 
 
 async def _job_status_sync_loop():
-    """Sync SLURM job statuses every 60 seconds."""
+    """Sync SLURM job statuses every 60 seconds. No-op on non-SLURM deployments."""
+    from app.config import settings
+
+    if settings.compute_mode != "slurm":
+        logger.debug("Compute mode is %r, SLURM job sync disabled", settings.compute_mode)
+        return
+
     from app.database import async_session_factory
     from app.services.slurm_service import SlurmService
 

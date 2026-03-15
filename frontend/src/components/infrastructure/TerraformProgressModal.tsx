@@ -17,6 +17,7 @@ interface TerraformProgressModalProps {
   sseUrl: string;
   onComplete: () => void;
   onClose: () => void;
+  mode?: "deploy" | "teardown";
 }
 
 type ModalStatus = "connecting" | "running" | "complete" | "error";
@@ -53,6 +54,65 @@ const FRIENDLY_NAMES: Record<string, string> = {
     "Cluster storage permissions",
 };
 
+// Rotating messages shown during long compute provisioning.
+const PATIENCE_MESSAGES = [
+  "Doing the science…",
+  "Arguing with reviewer #2…",
+  "Negotiating with the sequencer…",
+  "Asking the compute cluster nicely…",
+  "Wrangling sample metadata…",
+  "Spinning up nodes (they're shy)…",
+  "Convincing Kubernetes this is a good idea…",
+  "Almost there. Probably.",
+  "Aligning reads...",
+  "Realigning reads...",
+  "Realigning the realignment...",
+  "Counting reads...",
+  "Counting them again to be sure...",
+  "Finding that one weird SNP...",
+  "Ignoring mitochondiral reads...",
+  "Blaming the reference genome...",
+  "Indexing the reference genome...",
+  "Re-indexing the reference genome...",
+  "Scaffolding genomes...",
+  "Looking for structural variants...",
+  "Pretending we understand structural variants...",
+  "Explaining TPM to the system again...",
+  "Explaining FPKM to the system again...",
+  "Pretending TPM vs FPKM matters less than it does...",
+  "Arguing about cluster labels",
+  "Growing cells...",
+  "Waiting for cells to grow...",
+  "Waiting longer for cells to grow...",
+  "Checking the incubator...",
+  "Feeding the cells...",
+  "Sacrificing a pipette tip...",
+  "Running another gel...",
+  "Waiting for the centrifuge...",
+  "Balancing the centrifuge again just in case...",
+  "Submitting job to the queue...",
+  "Waiting in the queue...",
+  "Still waiting in the queue...",
+  "Looking for the missing sample...",
+  "Looking harder for the missling sample...",
+  "Checking the -80...",
+  "Defrosting the -80...",
+  "Questioning the methods section...",
+  "Questioning everything...",
+  "Untangling phylogenetic trees...",
+  "Teaching BLAST new tricks...",
+  "Negotiating with NCBI...",
+  "Bribing the alignment algorithm...",
+  "Searching for conserved domains...",
+  "Looking for signal peptides...",
+  "Convincing proteins to fold correctly...",
+  "Consulting the ribosome...",
+  "SLURM says maybe...",
+  "Explaining TPM to the PI...",
+  "Downloading another 200GB reference genome...",
+  "Recreating the environment (again)...",
+];
+
 type ResourceStatus = "pending" | "in_progress" | "complete";
 
 interface TrackedResource {
@@ -63,7 +123,6 @@ interface TrackedResource {
 
 function friendlyLabel(address: string): string {
   if (FRIENDLY_NAMES[address]) return FRIENDLY_NAMES[address];
-  // Fallback: strip provider prefix and humanize
   const parts = address.split(".");
   if (parts.length === 2) {
     return parts[1].replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -71,7 +130,13 @@ function friendlyLabel(address: string): string {
   return address;
 }
 
-function StatusBadge({ status }: { status: ResourceStatus }) {
+function StatusBadge({
+  status,
+  mode,
+}: {
+  status: ResourceStatus;
+  mode: "deploy" | "teardown";
+}) {
   if (status === "complete") {
     return (
       <span className="text-xs font-medium text-green-600 uppercase tracking-wide">
@@ -80,10 +145,11 @@ function StatusBadge({ status }: { status: ResourceStatus }) {
     );
   }
   if (status === "in_progress") {
+    const label = mode === "teardown" ? "Removing" : "Setting up";
     return (
       <span className="text-xs font-medium text-blue-600 uppercase tracking-wide flex items-center gap-1.5">
         <span className="inline-block h-1.5 w-1.5 bg-blue-600 rounded-full animate-pulse" />
-        Setting up
+        {label}
       </span>
     );
   }
@@ -99,6 +165,7 @@ export function TerraformProgressModal({
   sseUrl,
   onComplete,
   onClose,
+  mode = "deploy",
 }: TerraformProgressModalProps) {
   const [status, setStatus] = useState<ModalStatus>("connecting");
   const [events, setEvents] = useState<TerraformEvent[]>([]);
@@ -109,6 +176,10 @@ export function TerraformProgressModal({
   const [showLog, setShowLog] = useState(false);
   const [resources, setResources] = useState<TrackedResource[]>([]);
   const [phase, setPhase] = useState<"storage" | "compute" | null>(null);
+  // Once compute phase starts, never hide the timing warning even if a
+  // spurious "storage" message arrives later.
+  const [computePhaseStarted, setComputePhaseStarted] = useState(false);
+  const [patienceIndex, setPatienceIndex] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
 
@@ -200,17 +271,20 @@ export function TerraformProgressModal({
               setLogLines((prev) => [...prev, event.log_line!]);
             }
 
-            // Track deployment phase for contextual messaging
+            // Track deployment phase. Phase transitions are forward-only:
+            // null -> storage -> compute. Once compute starts, it never
+            // reverts to storage even if a spurious "storage" message arrives.
             if (
-              event.message?.toLowerCase().includes("storage") &&
-              event.event_type === "progress"
-            ) {
-              setPhase("storage");
-            } else if (
               event.message?.toLowerCase().includes("compute") &&
               event.event_type === "progress"
             ) {
               setPhase("compute");
+              setComputePhaseStarted(true);
+            } else if (
+              event.message?.toLowerCase().includes("storage") &&
+              event.event_type === "progress"
+            ) {
+              setPhase((prev) => (prev === "compute" ? "compute" : "storage"));
             }
 
             // Track individual resources by address
@@ -257,7 +331,6 @@ export function TerraformProgressModal({
               setStatus("complete");
               return;
             } else if (event.event_type === "phase_complete") {
-              // Mark all tracked resources as complete for this phase
               setResources((prev) =>
                 prev.map((r) =>
                   r.status !== "complete" ? { ...r, status: "complete" as const } : r,
@@ -295,6 +368,15 @@ export function TerraformProgressModal({
     };
   }, [sseUrl]);
 
+  // Rotate patience messages every 10 seconds while running.
+  useEffect(() => {
+    if (status !== "running") return;
+    const interval = setInterval(() => {
+      setPatienceIndex((prev) => (prev + 1) % PATIENCE_MESSAGES.length);
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [status]);
+
   // Auto-scroll resource list
   useEffect(() => {
     if (listRef.current) {
@@ -308,11 +390,18 @@ export function TerraformProgressModal({
       : 0;
 
   const phaseLabel =
-    phase === "storage"
-      ? "Setting up data storage"
-      : phase === "compute"
-        ? "Setting up compute cluster"
-        : "Preparing infrastructure";
+    mode === "teardown"
+      ? "Removing compute resources"
+      : phase === "storage"
+        ? "Setting up data storage"
+        : phase === "compute"
+          ? "Setting up compute cluster"
+          : "Preparing infrastructure";
+
+  const completeMessage =
+    mode === "teardown" ? "Teardown complete" : "All systems ready";
+
+  const errorPrefix = mode === "teardown" ? "Teardown failed" : "Setup failed";
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -329,16 +418,21 @@ export function TerraformProgressModal({
                 <span className="inline-block h-3 w-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
                 {phaseLabel}
               </p>
-              {phase === "compute" && (
-                <p className="text-xs text-gray-400 mt-1">
-                  Cluster setup typically takes 5 to 15 minutes
+              <div className="mt-2">
+                {((computePhaseStarted && mode === "deploy") || mode === "teardown") && (
+                  <p className="text-xs text-gray-400">
+                    This may take 5–15 minutes.
+                  </p>
+                )}
+                <p className="text-xs text-gray-300 mt-1">
+                  {PATIENCE_MESSAGES[patienceIndex]}
                 </p>
-              )}
+              </div>
             </div>
           )}
           {status === "complete" && (
             <p className="text-sm text-green-600 font-medium">
-              All systems ready
+              {completeMessage}
             </p>
           )}
           {status === "error" && (
@@ -346,7 +440,7 @@ export function TerraformProgressModal({
               data-testid="tf-modal-error"
               className="text-sm text-red-600 font-medium"
             >
-              Setup failed: {errorMessage}
+              {errorPrefix}: {errorMessage}
             </p>
           )}
         </div>
@@ -386,7 +480,7 @@ export function TerraformProgressModal({
                 >
                   {r.label}
                 </span>
-                <StatusBadge status={r.status} />
+                <StatusBadge status={r.status} mode={mode} />
               </li>
             ))}
           </ul>

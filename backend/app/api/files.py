@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File as FastAPIFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File as FastAPIFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_role
@@ -77,14 +77,27 @@ async def complete_upload(
 @router.post("/upload/simple", response_model=FileResponse)
 async def simple_upload(
     file: UploadFile = FastAPIFile(...),
+    experiment_id: int | None = Query(None),
     current_user: dict = require_role("admin", "comp_bio", "bench"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    content = await file.read()
-    result = await UploadService.simple_upload(session, org_id, user_id, file.filename or "unknown", content)
+    try:
+        result = await UploadService.simple_upload(
+            session,
+            org_id,
+            user_id,
+            file.filename or "unknown",
+            file.file,
+            size_bytes=file.size,
+            experiment_id=experiment_id,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Upload failed: {e}")
     await session.commit()
     result = await FileService.get_file(session, result.id, org_id)
     return _file_response(result)

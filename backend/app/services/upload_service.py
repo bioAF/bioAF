@@ -44,6 +44,43 @@ class UploadService:
         return lower.endswith(".fastq.gz") or lower.endswith(".fq.gz")
 
     @staticmethod
+    async def _get_gcs_credentials(session: AsyncSession):
+        """Return GCS credentials from platform_config, or None to use ADC.
+
+        When gcp_credential_source is 'service_account_key', parses the stored
+        JSON key and returns service_account.Credentials so the GCS client
+        bypasses the VM's OAuth scopes entirely. Returns None otherwise.
+        """
+        import json as _json
+
+        result = await session.execute(
+            text(
+                "SELECT key, value FROM platform_config "
+                "WHERE key IN ('gcp_credential_source', 'gcp_service_account_key')"
+            )
+        )
+        config = {r[0]: r[1] for r in result.fetchall()}
+
+        if config.get("gcp_credential_source") != "service_account_key":
+            return None
+
+        key_json = config.get("gcp_service_account_key")
+        if not key_json or key_json == "null":
+            return None
+
+        try:
+            from google.oauth2 import service_account
+
+            key_data = _json.loads(key_json)
+            return service_account.Credentials.from_service_account_info(
+                key_data,
+                scopes=["https://www.googleapis.com/auth/cloud-platform"],
+            )
+        except Exception as e:
+            logger.warning("Failed to load GCS credentials from platform_config: %s", e)
+            return None
+
+    @staticmethod
     async def _get_ingest_bucket(session: AsyncSession) -> str:
         """Read ingest bucket name from platform_config."""
         result = await session.execute(text("SELECT value FROM platform_config WHERE key = 'ingest_bucket_name'"))
@@ -70,7 +107,8 @@ class UploadService:
         gcs_uri = f"gs://{bucket_name}/{gcs_path}"
 
         # Generate signed URL via GCS client
-        signed_url = await UploadService._generate_signed_upload_url(bucket_name, gcs_path)
+        credentials = await UploadService._get_gcs_credentials(session)
+        signed_url = await UploadService._generate_signed_upload_url(bucket_name, gcs_path, credentials=credentials)
 
         _pending_uploads[upload_id] = {
             "org_id": org_id,
@@ -163,19 +201,21 @@ class UploadService:
         org_id: int,
         user_id: int,
         filename: str,
-        content: bytes,
+        file_obj,
+        size_bytes: int | None = None,
         file_type: str | None = None,
         experiment_id: int | None = None,
         sample_ids: list[int] | None = None,
     ) -> File:
-        """Simple single-request upload for small files."""
+        """Stream a file directly to GCS without buffering the full content in memory."""
         upload_id = str(uuid.uuid4())
         bucket_name = await UploadService._get_ingest_bucket(session)
         gcs_path = f"uploads/{upload_id}/{filename}"
         gcs_uri = f"gs://{bucket_name}/{gcs_path}"
 
-        # Upload to GCS
-        await UploadService._upload_to_gcs(bucket_name, gcs_path, content)
+        # Upload to GCS -- raises on failure so no dangling DB records are created
+        credentials = await UploadService._get_gcs_credentials(session)
+        await UploadService._upload_file_to_gcs(bucket_name, gcs_path, file_obj, credentials=credentials)
 
         if not file_type:
             file_type = UploadService._detect_file_type(filename)
@@ -186,9 +226,10 @@ class UploadService:
             user_id=user_id,
             filename=filename,
             gcs_uri=gcs_uri,
-            size_bytes=len(content),
+            size_bytes=size_bytes,
             md5_checksum=None,
             file_type=file_type,
+            experiment_id=experiment_id,
         )
 
         if sample_ids:
@@ -234,34 +275,37 @@ class UploadService:
         return "other"
 
     @staticmethod
-    async def _generate_signed_upload_url(bucket_name: str, gcs_path: str) -> str:
-        """Generate a signed URL for uploading to GCS."""
-        try:
-            from google.cloud import storage as gcs_storage
+    async def _generate_signed_upload_url(bucket_name: str, gcs_path: str, credentials=None) -> str:
+        """Generate a signed URL for uploading to GCS.
 
-            client = gcs_storage.Client()
-            bucket = client.bucket(bucket_name)
-            blob = bucket.blob(gcs_path)
-            url = blob.generate_signed_url(
-                version="v4",
-                expiration=3600,
-                method="PUT",
-                content_type="application/octet-stream",
-            )
-            return url
-        except Exception as e:
-            logger.warning("GCS signed URL generation failed (using placeholder): %s", e)
-            return f"https://storage.googleapis.com/upload/{bucket_name}/{gcs_path}?signed=placeholder"
+        Requires credentials with signing capability (service_account.Credentials).
+        ADC / VM default service account will not work here -- configure
+        gcp_credential_source=service_account_key in platform_config.
+        """
+        from google.cloud import storage as gcs_storage
+
+        client = gcs_storage.Client(credentials=credentials)
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(gcs_path)
+        return blob.generate_signed_url(
+            version="v4",
+            expiration=3600,
+            method="PUT",
+            content_type="application/octet-stream",
+        )
 
     @staticmethod
-    async def _upload_to_gcs(bucket_name: str, gcs_path: str, content: bytes) -> None:
-        """Upload content to GCS."""
-        try:
-            from google.cloud import storage as gcs_storage
+    async def _upload_file_to_gcs(bucket_name: str, gcs_path: str, file_obj, credentials=None) -> None:
+        """Stream a file-like object to GCS. Raises on failure.
 
-            client = gcs_storage.Client()
+        Uses upload_from_file so the full content is never held in memory at once.
+        """
+        from google.cloud import storage as gcs_storage
+
+        def _do_upload() -> None:
+            client = gcs_storage.Client(credentials=credentials)
             bucket = client.bucket(bucket_name)
             blob = bucket.blob(gcs_path)
-            blob.upload_from_string(content)
-        except Exception as e:
-            logger.warning("GCS upload failed (file record still created): %s", e)
+            blob.upload_from_file(file_obj, rewind=True)
+
+        await asyncio.to_thread(_do_upload)

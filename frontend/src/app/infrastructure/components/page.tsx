@@ -112,8 +112,14 @@ export default function InfraComponentsPage() {
   const [showTeardownModal, setShowTeardownModal] = useState(false);
   const [showTeardownProgress, setShowTeardownProgress] = useState(false);
   const [teardownChecked, setTeardownChecked] = useState(false);
+  const [showDestroyStorageModal, setShowDestroyStorageModal] = useState(false);
+  const [showDestroyStorageProgress, setShowDestroyStorageProgress] = useState(false);
+  const [destroyStorageChecked, setDestroyStorageChecked] = useState(false);
+  const [destroyStoragePhrase, setDestroyStoragePhrase] = useState("");
   const [showConfigPanel, setShowConfigPanel] = useState(false);
   const [componentErrors, setComponentErrors] = useState<Record<string, string>>({});
+
+  const DESTROY_STORAGE_PHRASE = "delete my data";
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -170,6 +176,11 @@ export default function InfraComponentsPage() {
     setRefreshKey((k) => k + 1);
   }
 
+  function handleDestroyStorageComplete() {
+    setShowDestroyStorageProgress(false);
+    setRefreshKey((k) => k + 1);
+  }
+
   async function handleComponentToggle(componentKey: string) {
     setComponentErrors((prev) => ({ ...prev, [componentKey]: "" }));
     try {
@@ -199,6 +210,33 @@ export default function InfraComponentsPage() {
               gcpCredentialsConfigured={tfStatus.gcp_credentials_configured}
               onBootstrapStart={() => setShowBootstrapModal(true)}
             />
+          )}
+
+          {/* Storage destroy section: compute is down but storage is still provisioned */}
+          {tfInitialized && !isDeployed && stackStatus?.storage_deployed && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-amber-900">
+                    Storage infrastructure is provisioned
+                  </h3>
+                  <p className="text-xs text-amber-700 mt-1">
+                    GCS buckets and Pub/Sub topics are still running and accruing costs.
+                    Destroy them before redeploying to get fresh bucket names.
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setDestroyStorageChecked(false);
+                    setDestroyStoragePhrase("");
+                    setShowDestroyStorageModal(true);
+                  }}
+                  className="ml-4 shrink-0 text-sm text-red-600 hover:text-red-800 font-medium"
+                >
+                  Destroy Storage
+                </button>
+              </div>
+            </div>
           )}
 
           {/* State 1: Initialized but not deployed - show stack selection cards */}
@@ -516,8 +554,84 @@ export default function InfraComponentsPage() {
         <TerraformProgressModal
           title="Teardown Compute Stack"
           sseUrl="/api/v1/infrastructure/stack/teardown"
+          mode="teardown"
           onComplete={handleTeardownComplete}
           onClose={() => setShowTeardownProgress(false)}
+        />
+      )}
+
+      {/* Destroy Storage Confirmation Modal */}
+      {showDestroyStorageModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+            <h2 className="text-lg font-semibold mb-3">Destroy Storage Infrastructure</h2>
+
+            <div className="bg-red-50 border border-red-200 rounded p-3 mb-4">
+              <p className="text-sm font-medium text-red-800 mb-1">
+                All data will be permanently deleted
+              </p>
+              <p className="text-xs text-red-700">
+                This will permanently destroy all GCS buckets and their contents,
+                including raw sample data, processed pipeline outputs, and results.
+                This action cannot be undone.
+              </p>
+            </div>
+
+            <label className="flex items-start gap-2 mb-4 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={destroyStorageChecked}
+                onChange={(e) => setDestroyStorageChecked(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span className="text-sm text-gray-700">
+                I understand all files stored in GCS will be permanently lost
+              </span>
+            </label>
+
+            <div className="mb-4">
+              <label className="text-xs text-gray-500 block mb-1">
+                Type <span className="font-mono font-medium text-gray-700">delete my data</span> to confirm
+              </label>
+              <input
+                type="text"
+                value={destroyStoragePhrase}
+                onChange={(e) => setDestroyStoragePhrase(e.target.value)}
+                placeholder="delete my data"
+                className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowDestroyStorageModal(false)}
+                className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={!destroyStorageChecked || destroyStoragePhrase !== DESTROY_STORAGE_PHRASE}
+                onClick={() => {
+                  setShowDestroyStorageModal(false);
+                  setShowDestroyStorageProgress(true);
+                }}
+                className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Destroy Storage
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Destroy Storage Progress Modal */}
+      {showDestroyStorageProgress && (
+        <TerraformProgressModal
+          title="Destroy Storage Infrastructure"
+          sseUrl="/api/v1/infrastructure/stack/destroy-storage"
+          mode="teardown"
+          onComplete={handleDestroyStorageComplete}
+          onClose={() => setShowDestroyStorageProgress(false)}
         />
       )}
     </div>

@@ -6,29 +6,23 @@ import { Header } from "@/components/layout/Header";
 import { api } from "@/lib/api";
 import type { FileResponse } from "@/lib/types";
 
-interface UploadState {
-  files: File[];
-  experimentId: string;
-  uploading: boolean;
-  progress: Record<string, number>;
-  errors: string[];
-  successes: string[];
+type FileStatus = "queued" | "uploading" | "complete" | "error";
+
+interface FileItem {
+  file: File;
+  status: FileStatus;
+  progress: number;
+  error?: string;
 }
 
 export default function DataUploadPage() {
-  const [state, setState] = useState<UploadState>({
-    files: [],
-    experimentId: "",
-    uploading: false,
-    progress: {},
-    errors: [],
-    successes: [],
-  });
+  const [items, setItems] = useState<FileItem[]>([]);
+  const [experimentId, setExperimentId] = useState("");
+  const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    const droppedFiles = Array.from(e.dataTransfer.files).filter(
+  const addFiles = (incoming: File[]) => {
+    const accepted = incoming.filter(
       (f) =>
         f.name.endsWith(".fastq") ||
         f.name.endsWith(".fastq.gz") ||
@@ -36,58 +30,58 @@ export default function DataUploadPage() {
         f.name.endsWith(".fq.gz") ||
         f.name.endsWith(".h5ad") ||
         f.name.endsWith(".csv") ||
-        f.name.endsWith(".tsv")
+        f.name.endsWith(".tsv"),
     );
-    setState((prev) => ({ ...prev, files: [...prev.files, ...droppedFiles] }));
+    setItems((prev) => [
+      ...prev,
+      ...accepted.map((f) => ({ file: f, status: "queued" as FileStatus, progress: 0 })),
+    ]);
+  };
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    addFiles(Array.from(e.dataTransfer.files));
   }, []);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setState((prev) => ({
-        ...prev,
-        files: [...prev.files, ...Array.from(e.target.files!)],
-      }));
-    }
+    if (e.target.files) addFiles(Array.from(e.target.files));
   };
 
-  const removeFile = (index: number) => {
-    setState((prev) => ({
-      ...prev,
-      files: prev.files.filter((_, i) => i !== index),
-    }));
+  const removeItem = (idx: number) => {
+    setItems((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  const uploadFiles = async () => {
-    setState((prev) => ({ ...prev, uploading: true, errors: [], successes: [] }));
+  const setItemState = (idx: number, patch: Partial<FileItem>) => {
+    setItems((prev) => prev.map((item, i) => (i === idx ? { ...item, ...patch } : item)));
+  };
 
-    for (const file of state.files) {
+  const uploadAll = async () => {
+    setUploading(true);
+    const expId = experimentId ? parseInt(experimentId, 10) : undefined;
+
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].status === "complete") continue;
+
+      setItemState(i, { status: "uploading", progress: 0 });
+
       try {
-        setState((prev) => ({
-          ...prev,
-          progress: { ...prev.progress, [file.name]: 0 },
-        }));
-
-        const params = new URLSearchParams();
-        if (state.experimentId) params.set("experiment_id", state.experimentId);
-        const path = `/api/files/upload${params.toString() ? `?${params}` : ""}`;
-
-        await api.upload<FileResponse>(path, file);
-
-        setState((prev) => ({
-          ...prev,
-          progress: { ...prev.progress, [file.name]: 100 },
-          successes: [...prev.successes, file.name],
-        }));
+        await api.uploadSigned<FileResponse>(items[i].file, {
+          experimentId: expId,
+          onProgress: (pct) => setItemState(i, { progress: pct }),
+        });
+        setItemState(i, { status: "complete", progress: 100 });
       } catch (err) {
-        setState((prev) => ({
-          ...prev,
-          errors: [...prev.errors, `${file.name}: ${err instanceof Error ? err.message : "Upload failed"}`],
-        }));
+        setItemState(i, {
+          status: "error",
+          error: err instanceof Error ? err.message : "Upload failed",
+        });
       }
     }
 
-    setState((prev) => ({ ...prev, uploading: false, files: [] }));
+    setUploading(false);
   };
+
+  const pendingCount = items.filter((i) => i.status !== "complete").length;
 
   return (
     <div className="flex h-screen">
@@ -127,81 +121,94 @@ export default function DataUploadPage() {
               <input
                 type="text"
                 placeholder="Experiment ID"
-                value={state.experimentId}
-                onChange={(e) =>
-                  setState((prev) => ({ ...prev, experimentId: e.target.value }))
-                }
+                value={experimentId}
+                onChange={(e) => setExperimentId(e.target.value)}
                 className="w-48 px-3 py-2 border border-gray-300 rounded-md text-sm"
               />
             </div>
 
             {/* File list */}
-            {state.files.length > 0 && (
+            {items.length > 0 && (
               <div className="bg-white rounded-lg shadow p-4">
-                <h3 className="font-medium mb-3">
-                  Selected Files ({state.files.length})
-                </h3>
-                <ul className="space-y-2">
-                  {state.files.map((file, idx) => (
-                    <li
-                      key={`${file.name}-${idx}`}
-                      className="flex items-center justify-between text-sm"
-                    >
-                      <span className="truncate flex-1">{file.name}</span>
-                      <span className="text-gray-400 mx-4">
-                        {(file.size / 1024 / 1024).toFixed(1)} MB
-                      </span>
-                      {state.progress[file.name] !== undefined && (
-                        <div className="w-24 bg-gray-200 rounded-full h-2 mx-2">
-                          <div
-                            className="bg-blue-500 h-2 rounded-full transition-all"
-                            style={{ width: `${state.progress[file.name]}%` }}
-                          />
-                        </div>
-                      )}
-                      {!state.uploading && (
-                        <button
-                          onClick={() => removeFile(idx)}
-                          className="text-red-400 hover:text-red-600 ml-2"
-                        >
-                          Remove
-                        </button>
+                <h3 className="font-medium mb-3">Files ({items.length})</h3>
+                <ul className="space-y-3">
+                  {items.map((item, idx) => (
+                    <li key={`${item.file.name}-${idx}`} className="text-sm">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="truncate flex-1 mr-3">{item.file.name}</span>
+                        <span className="text-gray-400 mr-3 shrink-0">
+                          {(item.file.size / 1024 / 1024).toFixed(1)} MB
+                        </span>
+                        <StatusLabel item={item} />
+                        {!uploading && item.status !== "uploading" && (
+                          <button
+                            onClick={() => removeItem(idx)}
+                            className="text-red-400 hover:text-red-600 ml-3"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                      <ProgressBar item={item} />
+                      {item.status === "error" && item.error && (
+                        <p className="text-xs text-red-600 mt-1">{item.error}</p>
                       )}
                     </li>
                   ))}
                 </ul>
-                <button
-                  onClick={uploadFiles}
-                  disabled={state.uploading}
-                  className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {state.uploading ? "Uploading..." : "Upload All"}
-                </button>
-              </div>
-            )}
 
-            {/* Status messages */}
-            {state.errors.length > 0 && (
-              <div className="bg-red-50 border border-red-200 rounded-md p-3">
-                {state.errors.map((err, i) => (
-                  <p key={i} className="text-sm text-red-700">
-                    {err}
-                  </p>
-                ))}
-              </div>
-            )}
-            {state.successes.length > 0 && (
-              <div className="bg-green-50 border border-green-200 rounded-md p-3">
-                {state.successes.map((s, i) => (
-                  <p key={i} className="text-sm text-green-700">
-                    Uploaded: {s}
-                  </p>
-                ))}
+                {pendingCount > 0 && (
+                  <button
+                    onClick={uploadAll}
+                    disabled={uploading}
+                    className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {uploading ? "Uploading..." : `Upload ${pendingCount} file${pendingCount !== 1 ? "s" : ""}`}
+                  </button>
+                )}
               </div>
             )}
           </div>
         </main>
       </div>
+    </div>
+  );
+}
+
+function StatusLabel({ item }: { item: FileItem }) {
+  if (item.status === "complete") {
+    return <span className="text-xs font-medium text-green-600 shrink-0">Done</span>;
+  }
+  if (item.status === "error") {
+    return <span className="text-xs font-medium text-red-600 shrink-0">Failed</span>;
+  }
+  if (item.status === "uploading") {
+    return (
+      <span className="text-xs font-medium text-blue-600 flex items-center gap-1 shrink-0">
+        <span className="inline-block h-1.5 w-1.5 bg-blue-600 rounded-full animate-pulse" />
+        {item.progress}%
+      </span>
+    );
+  }
+  return <span className="text-xs text-gray-400 shrink-0">Queued</span>;
+}
+
+function ProgressBar({ item }: { item: FileItem }) {
+  if (item.status === "queued") return null;
+
+  const barColor =
+    item.status === "complete"
+      ? "bg-green-500"
+      : item.status === "error"
+        ? "bg-red-400"
+        : "bg-blue-500";
+
+  return (
+    <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+      <div
+        className={`${barColor} h-1.5 rounded-full transition-all duration-300`}
+        style={{ width: `${item.status === "error" ? 100 : item.progress}%` }}
+      />
     </div>
   );
 }
