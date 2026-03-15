@@ -6,10 +6,12 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { VocabularySelect } from "@/components/shared/VocabularySelect";
 import type {
   Experiment,
   ExperimentCreateRequest,
   ExperimentTemplate,
+  FieldDefaultValue,
   ProjectListResponse,
   SampleCreateRequest,
 } from "@/lib/types";
@@ -32,6 +34,35 @@ export default function NewExperimentPage() {
   });
 
   const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [fieldDefaults, setFieldDefaults] = useState<FieldDefaultValue[]>([]);
+  const [showFieldDefaults, setShowFieldDefaults] = useState(false);
+
+  const DEFAULTABLE_FIELDS = [
+    { name: "organism", label: "Organism", type: "text" as const },
+    { name: "tissue_type", label: "Tissue Type", type: "text" as const },
+    { name: "donor_source", label: "Donor ID", type: "text" as const },
+    { name: "treatment_condition", label: "Treatment Condition", type: "text" as const },
+    { name: "chemistry_version", label: "Chemistry Version", type: "text" as const },
+    { name: "molecule_type", label: "Molecule Type", type: "vocabulary" as const },
+    { name: "library_prep_method", label: "Library Prep Method", type: "vocabulary" as const },
+    { name: "library_layout", label: "Library Layout", type: "vocabulary" as const },
+  ];
+
+  function updateFieldDefault(fieldName: string, value: string | null, isRequired: boolean | null) {
+    setFieldDefaults((prev) => {
+      const existing = prev.find((d) => d.field_name === fieldName);
+      if (existing) {
+        if (!value && isRequired === null) {
+          return prev.filter((d) => d.field_name !== fieldName);
+        }
+        return prev.map((d) => d.field_name === fieldName ? { ...d, default_value: value, is_required: isRequired } : d);
+      }
+      if (value || isRequired !== null) {
+        return [...prev, { field_name: fieldName, default_value: value, is_required: isRequired }];
+      }
+      return prev;
+    });
+  }
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -59,7 +90,8 @@ export default function NewExperimentPage() {
     setError("");
 
     try {
-      const experiment = await api.post<Experiment>("/api/experiments", form);
+      const payload = { ...form, field_defaults: fieldDefaults.length > 0 ? fieldDefaults : undefined };
+      const experiment = await api.post<Experiment>("/api/experiments", payload);
 
       if (csvFile) {
         await api.upload(`/api/experiments/${experiment.id}/samples/upload`, csvFile);
@@ -192,6 +224,64 @@ export default function NewExperimentPage() {
                 ))}
               </div>
             )}
+
+            <div className="bg-white rounded-lg shadow p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold">Sample Field Defaults</h2>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Set default values applied to all samples in this experiment. Per-sample values still override these.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowFieldDefaults(!showFieldDefaults)}
+                  className="text-sm text-bioaf-600 hover:underline"
+                >
+                  {showFieldDefaults ? "Hide" : "Configure"}
+                </button>
+              </div>
+
+              {showFieldDefaults && (
+                <div className="space-y-3 pt-2">
+                  {DEFAULTABLE_FIELDS.map((field) => {
+                    const current = fieldDefaults.find((d) => d.field_name === field.name);
+                    return (
+                      <div key={field.name} className="grid grid-cols-3 gap-3 items-center">
+                        <label className="text-sm text-gray-700">{field.label}</label>
+                        <div>
+                          {field.type === "vocabulary" ? (
+                            <VocabularySelect
+                              fieldName={field.name}
+                              value={current?.default_value ?? null}
+                              onChange={(v) => updateFieldDefault(field.name, v, current?.is_required ?? null)}
+                              placeholder={`Default ${field.label}...`}
+                            />
+                          ) : (
+                            <input
+                              type="text"
+                              value={current?.default_value ?? ""}
+                              onChange={(e) => updateFieldDefault(field.name, e.target.value || null, current?.is_required ?? null)}
+                              placeholder={`Default ${field.label}`}
+                              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                            />
+                          )}
+                        </div>
+                        <label className="flex items-center gap-2 text-sm text-gray-600">
+                          <input
+                            type="checkbox"
+                            checked={current?.is_required ?? false}
+                            onChange={(e) => updateFieldDefault(field.name, current?.default_value ?? null, e.target.checked || null)}
+                            className="rounded border-gray-300"
+                          />
+                          Required
+                        </label>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
 
             <div className="bg-white rounded-lg shadow p-6 space-y-4">
               <h2 className="text-lg font-semibold">Initial Samples (optional)</h2>

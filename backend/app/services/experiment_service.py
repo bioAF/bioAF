@@ -9,6 +9,7 @@ from app.models.audit_log import AuditLog
 from app.models.batch import Batch
 from app.models.experiment import Experiment, EXPERIMENT_STATUS_TRANSITIONS
 from app.models.experiment_custom_field import ExperimentCustomField
+from app.models.experiment_field_default import ExperimentFieldDefault
 from app.models.sample import Sample
 from app.schemas.experiment import ExperimentCreate, ExperimentUpdate
 from app.services.audit_service import log_action
@@ -45,6 +46,17 @@ class ExperimentService:
                 session.add(custom_field)
             await session.flush()
 
+        if data.field_defaults:
+            for fd in data.field_defaults:
+                field_default = ExperimentFieldDefault(
+                    experiment_id=experiment.id,
+                    field_name=fd.field_name,
+                    default_value=fd.default_value,
+                    is_required=fd.is_required,
+                )
+                session.add(field_default)
+            await session.flush()
+
         await log_action(
             session,
             user_id=user_id,
@@ -78,6 +90,28 @@ class ExperimentService:
                 previous[field] = str(old_val) if old_val is not None else None
                 setattr(experiment, field, new_val)
                 updates[field] = str(new_val) if new_val is not None else None
+
+        if data.field_defaults is not None:
+            # Delete existing field defaults and replace
+            existing = await session.execute(
+                select(ExperimentFieldDefault).where(ExperimentFieldDefault.experiment_id == experiment_id)
+            )
+            for row in existing.scalars().all():
+                await session.delete(row)
+            await session.flush()
+
+            for fd in data.field_defaults:
+                field_default = ExperimentFieldDefault(
+                    experiment_id=experiment_id,
+                    field_name=fd.field_name,
+                    default_value=fd.default_value,
+                    is_required=fd.is_required,
+                )
+                session.add(field_default)
+            updates["field_defaults"] = [
+                {"field_name": fd.field_name, "default_value": fd.default_value, "is_required": fd.is_required}
+                for fd in data.field_defaults
+            ]
 
         if updates:
             await session.flush()
@@ -155,6 +189,7 @@ class ExperimentService:
                 selectinload(Experiment.samples),
                 selectinload(Experiment.batches),
                 selectinload(Experiment.custom_fields),
+                selectinload(Experiment.field_defaults),
                 selectinload(Experiment.project),
                 selectinload(Experiment.owner),
                 selectinload(Experiment.template),

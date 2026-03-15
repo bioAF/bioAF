@@ -4,6 +4,7 @@ from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
 
 from app.models.experiment import Experiment
+from app.models.experiment_field_default import ExperimentFieldDefault, DEFAULTABLE_SAMPLE_FIELDS
 from app.models.experiment_template import ExperimentTemplate
 from app.models.sample import Sample
 from app.schemas.sample import SampleCreate, SampleUpdate
@@ -22,6 +23,33 @@ SAMPLE_STATUS_TRANSITIONS = {
 
 
 class SampleService:
+    @staticmethod
+    async def _get_field_defaults(session: AsyncSession, experiment_id: int) -> dict[str, str]:
+        """Load experiment-level field defaults as a {field_name: default_value} dict."""
+        result = await session.execute(
+            select(ExperimentFieldDefault).where(
+                ExperimentFieldDefault.experiment_id == experiment_id,
+                ExperimentFieldDefault.default_value.isnot(None),
+            )
+        )
+        return {fd.field_name: fd.default_value for fd in result.scalars().all() if fd.default_value}
+
+    @staticmethod
+    def _apply_defaults(data: SampleCreate, defaults: dict[str, str]) -> SampleCreate:
+        """Return a copy of data with experiment-level defaults filled in for empty fields."""
+        if not defaults:
+            return data
+        overrides = {}
+        for field_name in DEFAULTABLE_SAMPLE_FIELDS:
+            if field_name not in defaults:
+                continue
+            current = getattr(data, field_name, None)
+            if current is None or (isinstance(current, str) and not current.strip()):
+                overrides[field_name] = defaults[field_name]
+        if not overrides:
+            return data
+        return data.model_copy(update=overrides)
+
     @staticmethod
     async def _validate_template_fields(
         session: AsyncSession, experiment_id: int, sample_data: SampleCreate
@@ -48,6 +76,10 @@ class SampleService:
 
     @staticmethod
     async def create_sample(session: AsyncSession, experiment_id: int, user_id: int, data: SampleCreate) -> Sample:
+        # Apply experiment-level defaults for any fields not provided
+        defaults = await SampleService._get_field_defaults(session, experiment_id)
+        data = SampleService._apply_defaults(data, defaults)
+
         errors = await SampleService._validate_template_fields(session, experiment_id, data)
         if errors:
             raise HTTPException(400, detail="; ".join(errors))
@@ -101,6 +133,10 @@ class SampleService:
     async def bulk_create_samples(
         session: AsyncSession, experiment_id: int, user_id: int, samples_data: list[SampleCreate]
     ) -> list[Sample]:
+        # Apply experiment-level defaults
+        defaults = await SampleService._get_field_defaults(session, experiment_id)
+        samples_data = [SampleService._apply_defaults(d, defaults) for d in samples_data]
+
         # Validate all before creating any
         all_errors = []
         for i, data in enumerate(samples_data):

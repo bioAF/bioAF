@@ -10,6 +10,7 @@ from app.models.sample import Sample
 from app.models.batch import Batch
 from app.models.experiment_template import ExperimentTemplate
 from app.models.experiment_custom_field import ExperimentCustomField
+from app.models.experiment_field_default import ExperimentFieldDefault
 from app.models.notebook_session import NotebookSession
 from app.models.slurm_job import SlurmJob
 from app.models.user_quota import UserQuota
@@ -64,6 +65,7 @@ __all__ = [
     "Batch",
     "ExperimentTemplate",
     "ExperimentCustomField",
+    "ExperimentFieldDefault",
     "NotebookSession",
     "SlurmJob",
     "UserQuota",

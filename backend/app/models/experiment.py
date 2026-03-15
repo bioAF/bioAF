@@ -59,3 +59,4 @@ class Experiment(Base):
     samples = relationship("Sample", back_populates="experiment")
     batches = relationship("Batch", back_populates="experiment")
     custom_fields = relationship("ExperimentCustomField", back_populates="experiment")
+    field_defaults = relationship("ExperimentFieldDefault", back_populates="experiment")

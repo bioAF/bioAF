@@ -190,6 +190,7 @@ export interface ExperimentUpdateRequest {
   description?: string | null;
   start_date?: string | null;
   expected_sample_count?: number | null;
+  field_defaults?: FieldDefaultValue[];
 }
 
 export interface ExperimentListResponse {
@@ -234,10 +235,24 @@ export interface BatchBrief {
   created_at: string;
 }
 
+export interface FieldDefaultValue {
+  field_name: string;
+  default_value: string | null;
+  is_required: boolean | null;
+}
+
+export interface FieldDefaultResponse {
+  id: number;
+  field_name: string;
+  default_value: string | null;
+  is_required: boolean | null;
+}
+
 export interface ExperimentDetail extends Experiment {
   samples: SampleBrief[];
   batches: BatchBrief[];
   custom_fields: CustomFieldResponse[];
+  field_defaults: FieldDefaultResponse[];
   audit_trail_count: number;
 }
 
@@ -320,6 +335,7 @@ export interface ExperimentCreateRequest {
   start_date?: string | null;
   expected_sample_count?: number | null;
   custom_fields?: CustomFieldValue[];
+  field_defaults?: FieldDefaultValue[];
 }
 
 export interface SampleCreateRequest {
@@ -338,6 +354,27 @@ export interface SampleCreateRequest {
   library_layout?: string | null;
   qc_status?: string | null;
   qc_notes?: string | null;
+}
+
+export interface SampleUpdateRequest {
+  sample_id_external?: string | null;
+  organism?: string | null;
+  tissue_type?: string | null;
+  donor_source?: string | null;
+  treatment_condition?: string | null;
+  chemistry_version?: string | null;
+  batch_id?: number | null;
+  viability_pct?: number | null;
+  cell_count?: number | null;
+  prep_notes?: string | null;
+  molecule_type?: string | null;
+  library_prep_method?: string | null;
+  library_layout?: string | null;
+}
+
+export interface SampleBulkUpdateRequest {
+  sample_ids: number[];
+  update: SampleUpdateRequest;
 }
 
 export interface BatchCreateRequest {

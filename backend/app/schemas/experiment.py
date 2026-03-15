@@ -19,6 +19,30 @@ class CustomFieldValue(BaseModel):
     field_type: str = "string"
 
 
+class FieldDefaultValue(BaseModel):
+    field_name: str
+    default_value: str | None = None
+    is_required: bool | None = None
+
+    @field_validator("field_name")
+    @classmethod
+    def validate_field_name(cls, v: str) -> str:
+        from app.models.experiment_field_default import DEFAULTABLE_SAMPLE_FIELDS
+
+        if v not in DEFAULTABLE_SAMPLE_FIELDS:
+            raise ValueError(f"Invalid field '{v}'. Must be one of: {', '.join(DEFAULTABLE_SAMPLE_FIELDS)}")
+        return v
+
+
+class FieldDefaultResponse(BaseModel):
+    id: int
+    field_name: str
+    default_value: str | None
+    is_required: bool | None
+
+    model_config = {"from_attributes": True}
+
+
 class CustomFieldResponse(BaseModel):
     id: int
     field_name: str
@@ -37,6 +61,7 @@ class ExperimentCreate(BaseModel):
     start_date: date | None = None
     expected_sample_count: int | None = None
     custom_fields: list[CustomFieldValue] | None = None
+    field_defaults: list[FieldDefaultValue] | None = None
 
 
 class ExperimentUpdate(BaseModel):
@@ -45,6 +70,7 @@ class ExperimentUpdate(BaseModel):
     description: str | None = None
     start_date: date | None = None
     expected_sample_count: int | None = None
+    field_defaults: list[FieldDefaultValue] | None = None
 
 
 class ExperimentStatusUpdate(BaseModel):
@@ -122,4 +148,5 @@ class ExperimentDetailResponse(ExperimentResponse):
     samples: list[SampleResponseBrief] = []
     batches: list[BatchResponseBrief] = []
     custom_fields: list[CustomFieldResponse] = []
+    field_defaults: list[FieldDefaultResponse] = []
     audit_trail_count: int = 0

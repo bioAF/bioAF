@@ -225,3 +225,62 @@ async def test_filter_samples(client, admin_token, experiment_id):
     assert response.status_code == 200
     samples = response.json()
     assert all(s["qc_status"] == "pass" for s in samples)
+
+
+@pytest.mark.asyncio
+async def test_bulk_update_samples(client, admin_token, experiment_id, session):
+    # Create 3 samples
+    ids = []
+    for ext_id in ["BU001", "BU002", "BU003"]:
+        resp = await client.post(
+            f"/api/experiments/{experiment_id}/samples",
+            json={"sample_id_external": ext_id, "organism": "Human"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        ids.append(resp.json()["id"])
+
+    # Bulk update organism on first two
+    response = await client.patch(
+        "/api/samples/bulk/update",
+        json={
+            "sample_ids": ids[:2],
+            "update": {"organism": "Mus musculus", "tissue_type": "liver"},
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["updated"] == 2
+    assert response.json()["errors"] == []
+
+    # Verify updates applied
+    for sid in ids[:2]:
+        s = await client.get(f"/api/samples/{sid}", headers={"Authorization": f"Bearer {admin_token}"})
+        assert s.json()["organism"] == "Mus musculus"
+        assert s.json()["tissue_type"] == "liver"
+
+    # Third sample unchanged
+    s3 = await client.get(f"/api/samples/{ids[2]}", headers={"Authorization": f"Bearer {admin_token}"})
+    assert s3.json()["organism"] == "Human"
+    assert s3.json()["tissue_type"] is None
+
+
+@pytest.mark.asyncio
+async def test_bulk_update_nonexistent_sample(client, admin_token, experiment_id):
+    resp = await client.post(
+        f"/api/experiments/{experiment_id}/samples",
+        json={"sample_id_external": "BU_EXIST", "organism": "Human"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    real_id = resp.json()["id"]
+
+    response = await client.patch(
+        "/api/samples/bulk/update",
+        json={
+            "sample_ids": [real_id, 99999],
+            "update": {"organism": "Mouse"},
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["updated"] == 1
+    assert len(response.json()["errors"]) == 1

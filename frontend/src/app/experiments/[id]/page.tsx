@@ -15,11 +15,14 @@ import SnapshotTimeline from "@/components/SnapshotTimeline";
 import type {
   ExperimentDetail,
   ExperimentUpdateRequest,
+  FieldDefaultValue,
   Sample,
   Batch,
   AuditLogResponse,
   AuditLogEntry,
   SampleCreateRequest,
+  SampleUpdateRequest,
+  SampleBulkUpdateRequest,
   BatchCreateRequest,
   ExperimentStatus,
   QCStatus,
@@ -62,6 +65,27 @@ export default function ExperimentDetailPage() {
   const [sampleForm, setSampleForm] = useState<SampleCreateRequest>({});
   const [sampleFormError, setSampleFormError] = useState("");
   const [batchForm, setBatchForm] = useState<BatchCreateRequest>({ name: "" });
+  const [editFieldDefaults, setEditFieldDefaults] = useState<FieldDefaultValue[]>([]);
+
+  // Sample editing state
+  const [selectedSampleIds, setSelectedSampleIds] = useState<Set<number>>(new Set());
+  const [editingSampleId, setEditingSampleId] = useState<number | null>(null);
+  const [editSampleForm, setEditSampleForm] = useState<SampleUpdateRequest>({});
+  const [editSampleError, setEditSampleError] = useState("");
+  const [showBulkEdit, setShowBulkEdit] = useState(false);
+  const [bulkEditForm, setBulkEditForm] = useState<SampleUpdateRequest>({});
+  const [bulkEditError, setBulkEditError] = useState("");
+
+  const DEFAULTABLE_FIELDS = [
+    { name: "organism", label: "Organism", type: "text" as const },
+    { name: "tissue_type", label: "Tissue Type", type: "text" as const },
+    { name: "donor_source", label: "Donor ID", type: "text" as const },
+    { name: "treatment_condition", label: "Treatment Condition", type: "text" as const },
+    { name: "chemistry_version", label: "Chemistry Version", type: "text" as const },
+    { name: "molecule_type", label: "Molecule Type", type: "vocabulary" as const },
+    { name: "library_prep_method", label: "Library Prep Method", type: "vocabulary" as const },
+    { name: "library_layout", label: "Library Layout", type: "vocabulary" as const },
+  ];
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -173,14 +197,38 @@ export default function ExperimentDetailPage() {
       start_date: experiment.start_date,
       expected_sample_count: experiment.expected_sample_count,
     });
+    setEditFieldDefaults(
+      experiment.field_defaults.map((fd) => ({
+        field_name: fd.field_name,
+        default_value: fd.default_value,
+        is_required: fd.is_required,
+      }))
+    );
     setOverviewError("");
     setEditingOverview(true);
+  }
+
+  function updateEditFieldDefault(fieldName: string, value: string | null, isRequired: boolean | null) {
+    setEditFieldDefaults((prev) => {
+      const existing = prev.find((d) => d.field_name === fieldName);
+      if (existing) {
+        if (!value && isRequired === null) {
+          return prev.filter((d) => d.field_name !== fieldName);
+        }
+        return prev.map((d) => d.field_name === fieldName ? { ...d, default_value: value, is_required: isRequired } : d);
+      }
+      if (value || isRequired !== null) {
+        return [...prev, { field_name: fieldName, default_value: value, is_required: isRequired }];
+      }
+      return prev;
+    });
   }
 
   async function handleSaveOverview() {
     setOverviewError("");
     try {
-      await api.patch(`/api/experiments/${id}`, overviewForm);
+      const payload = { ...overviewForm, field_defaults: editFieldDefaults };
+      await api.patch(`/api/experiments/${id}`, payload);
       setEditingOverview(false);
       loadExperiment();
     } catch (err) {
@@ -201,6 +249,83 @@ export default function ExperimentDetailPage() {
       loadSamples();
       loadExperiment();
     } catch {}
+  }
+
+  function startEditSample(sample: Sample) {
+    setEditingSampleId(sample.id);
+    setEditSampleForm({
+      sample_id_external: sample.sample_id_external,
+      organism: sample.organism,
+      tissue_type: sample.tissue_type,
+      donor_source: sample.donor_source,
+      treatment_condition: sample.treatment_condition,
+      chemistry_version: sample.chemistry_version,
+      viability_pct: sample.viability_pct,
+      cell_count: sample.cell_count,
+      molecule_type: sample.molecule_type,
+      library_prep_method: sample.library_prep_method,
+      library_layout: sample.library_layout,
+    });
+    setEditSampleError("");
+  }
+
+  async function handleSaveSampleEdit() {
+    if (!editingSampleId) return;
+    setEditSampleError("");
+    try {
+      await api.patch(`/api/samples/${editingSampleId}`, editSampleForm);
+      setEditingSampleId(null);
+      setEditSampleForm({});
+      loadSamples();
+    } catch (err) {
+      setEditSampleError(err instanceof Error ? err.message : "Failed to save");
+    }
+  }
+
+  async function handleBulkEdit() {
+    if (selectedSampleIds.size === 0) return;
+    setBulkEditError("");
+    // Only send fields that have a value
+    const update: SampleUpdateRequest = {};
+    for (const [key, val] of Object.entries(bulkEditForm)) {
+      if (val !== undefined && val !== null && val !== "") {
+        (update as Record<string, unknown>)[key] = val;
+      }
+    }
+    if (Object.keys(update).length === 0) {
+      setBulkEditError("Set at least one field to update");
+      return;
+    }
+    try {
+      const payload: SampleBulkUpdateRequest = {
+        sample_ids: Array.from(selectedSampleIds),
+        update,
+      };
+      await api.patch("/api/samples/bulk/update", payload);
+      setShowBulkEdit(false);
+      setBulkEditForm({});
+      setSelectedSampleIds(new Set());
+      loadSamples();
+    } catch (err) {
+      setBulkEditError(err instanceof Error ? err.message : "Failed to save");
+    }
+  }
+
+  function toggleSampleSelection(sampleId: number) {
+    setSelectedSampleIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sampleId)) next.delete(sampleId);
+      else next.add(sampleId);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (selectedSampleIds.size === samples.length) {
+      setSelectedSampleIds(new Set());
+    } else {
+      setSelectedSampleIds(new Set(samples.map((s) => s.id)));
+    }
   }
 
   async function handleStatusUpdate(newStatus: string) {
@@ -322,6 +447,44 @@ export default function ExperimentDetailPage() {
                         <input type="number" min={0} value={overviewForm.expected_sample_count ?? ""} onChange={(e) => setOverviewForm({ ...overviewForm, expected_sample_count: e.target.value ? Number(e.target.value) : null })} className="w-full border rounded px-3 py-1.5 text-sm" />
                       </div>
                     </div>
+                    <div className="border-t pt-3 mt-3">
+                      <h3 className="text-sm font-medium text-gray-700 mb-2">Sample Field Defaults</h3>
+                      <p className="text-xs text-gray-400 mb-2">Default values applied to new samples. Per-sample values override these.</p>
+                      <div className="space-y-2">
+                        {DEFAULTABLE_FIELDS.map((field) => {
+                          const current = editFieldDefaults.find((d) => d.field_name === field.name);
+                          return (
+                            <div key={field.name} className="grid grid-cols-3 gap-2 items-center">
+                              <span className="text-xs text-gray-600">{field.label}</span>
+                              {field.type === "vocabulary" ? (
+                                <VocabularySelect
+                                  fieldName={field.name}
+                                  value={current?.default_value ?? null}
+                                  onChange={(v) => updateEditFieldDefault(field.name, v, current?.is_required ?? null)}
+                                  placeholder={`Default...`}
+                                />
+                              ) : (
+                                <input
+                                  value={current?.default_value ?? ""}
+                                  onChange={(e) => updateEditFieldDefault(field.name, e.target.value || null, current?.is_required ?? null)}
+                                  placeholder="Default..."
+                                  className="border rounded px-2 py-1 text-sm"
+                                />
+                              )}
+                              <label className="flex items-center gap-1 text-xs text-gray-500">
+                                <input
+                                  type="checkbox"
+                                  checked={current?.is_required ?? false}
+                                  onChange={(e) => updateEditFieldDefault(field.name, current?.default_value ?? null, e.target.checked || null)}
+                                  className="rounded border-gray-300"
+                                />
+                                Required
+                              </label>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                     {overviewError && <p className="text-red-600 text-sm">{overviewError}</p>}
                     <div className="flex gap-2 pt-1">
                       <button onClick={handleSaveOverview} className="bg-bioaf-600 text-white px-4 py-1.5 rounded text-sm">Save</button>
@@ -377,6 +540,25 @@ export default function ExperimentDetailPage() {
                     </dl>
                   </>
                 )}
+
+                {experiment.field_defaults.length > 0 && (
+                  <>
+                    <h3 className="text-md font-semibold mt-6 mb-3">Sample Field Defaults</h3>
+                    <p className="text-xs text-gray-400 mb-3">Applied to new samples unless overridden per-sample.</p>
+                    <dl className="space-y-2">
+                      {experiment.field_defaults.map((fd) => {
+                        const label = DEFAULTABLE_FIELDS.find((f) => f.name === fd.field_name)?.label ?? fd.field_name;
+                        return (
+                          <div key={fd.id} className="flex items-center gap-2">
+                            <dt className="text-sm text-gray-400">{label}</dt>
+                            <dd className="text-sm text-gray-600">{fd.default_value || "—"}</dd>
+                            {fd.is_required && <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">required</span>}
+                          </div>
+                        );
+                      })}
+                    </dl>
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -385,7 +567,16 @@ export default function ExperimentDetailPage() {
             <div>
               <div className="flex items-center gap-4 mb-4">
                 <button
-                  onClick={() => setShowSampleForm(!showSampleForm)}
+                  onClick={() => {
+                    if (!showSampleForm && experiment) {
+                      const prefill: Record<string, string> = {};
+                      for (const fd of experiment.field_defaults) {
+                        if (fd.default_value) prefill[fd.field_name] = fd.default_value;
+                      }
+                      setSampleForm(prefill as unknown as SampleCreateRequest);
+                    }
+                    setShowSampleForm(!showSampleForm);
+                  }}
                   className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
                 >
                   Add Sample
@@ -399,6 +590,14 @@ export default function ExperimentDetailPage() {
                     onChange={(e) => { if (e.target.files?.[0]) handleCsvUpload(e.target.files[0]); }}
                   />
                 </label>
+                {selectedSampleIds.size > 0 && (
+                  <button
+                    onClick={() => { setShowBulkEdit(true); setBulkEditForm({}); setBulkEditError(""); }}
+                    className="bg-amber-600 text-white px-4 py-2 rounded-md text-sm hover:bg-amber-700"
+                  >
+                    Edit Selected ({selectedSampleIds.size})
+                  </button>
+                )}
               </div>
 
               {showSampleForm && (
@@ -426,10 +625,42 @@ export default function ExperimentDetailPage() {
                 </div>
               )}
 
+              {showBulkEdit && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg shadow p-4 mb-4">
+                  <h3 className="text-sm font-semibold mb-2">Bulk Edit {selectedSampleIds.size} Sample{selectedSampleIds.size > 1 ? "s" : ""}</h3>
+                  <p className="text-xs text-gray-500 mb-3">Only fields you fill in will be updated. Blank fields are left unchanged.</p>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    <input placeholder="Organism" value={bulkEditForm.organism ?? ""} onChange={(e) => setBulkEditForm({ ...bulkEditForm, organism: e.target.value || undefined })} className="border rounded px-3 py-2 text-sm" />
+                    <input placeholder="Tissue Type" value={bulkEditForm.tissue_type ?? ""} onChange={(e) => setBulkEditForm({ ...bulkEditForm, tissue_type: e.target.value || undefined })} className="border rounded px-3 py-2 text-sm" />
+                    <input placeholder="Donor ID" value={bulkEditForm.donor_source ?? ""} onChange={(e) => setBulkEditForm({ ...bulkEditForm, donor_source: e.target.value || undefined })} className="border rounded px-3 py-2 text-sm" />
+                    <input placeholder="Treatment Condition" value={bulkEditForm.treatment_condition ?? ""} onChange={(e) => setBulkEditForm({ ...bulkEditForm, treatment_condition: e.target.value || undefined })} className="border rounded px-3 py-2 text-sm" />
+                    <input placeholder="Chemistry Version" value={bulkEditForm.chemistry_version ?? ""} onChange={(e) => setBulkEditForm({ ...bulkEditForm, chemistry_version: e.target.value || undefined })} className="border rounded px-3 py-2 text-sm" />
+                    <VocabularySelect fieldName="molecule_type" value={bulkEditForm.molecule_type} onChange={(v) => setBulkEditForm({ ...bulkEditForm, molecule_type: v || undefined })} placeholder="Molecule Type..." />
+                    <VocabularySelect fieldName="library_prep_method" value={bulkEditForm.library_prep_method} onChange={(v) => setBulkEditForm({ ...bulkEditForm, library_prep_method: v || undefined })} placeholder="Library Prep Method..." />
+                    <VocabularySelect fieldName="library_layout" value={bulkEditForm.library_layout} onChange={(v) => setBulkEditForm({ ...bulkEditForm, library_layout: v || undefined })} placeholder="Library Layout..." />
+                  </div>
+                  {bulkEditError && (
+                    <p className="text-red-600 text-sm mt-2">{bulkEditError}</p>
+                  )}
+                  <div className="flex gap-2 mt-3">
+                    <button onClick={handleBulkEdit} className="bg-amber-600 text-white px-4 py-1.5 rounded text-sm">Apply to Selected</button>
+                    <button onClick={() => setShowBulkEdit(false)} className="border px-4 py-1.5 rounded text-sm">Cancel</button>
+                  </div>
+                </div>
+              )}
+
               <div className="bg-white rounded-lg shadow overflow-hidden">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
+                      <th className="px-2 py-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={samples.length > 0 && selectedSampleIds.size === samples.length}
+                          onChange={toggleSelectAll}
+                          className="rounded border-gray-300"
+                        />
+                      </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">External ID</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Organism</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tissue</th>
@@ -440,40 +671,123 @@ export default function ExperimentDetailPage() {
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Batch</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">QC</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                      <th className="px-4 py-3"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
                     {samples.map((s) => (
-                      <tr key={s.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-sm">{s.sample_id_external || "—"}</td>
-                        <td className="px-4 py-3 text-sm">{s.organism || "—"}</td>
-                        <td className="px-4 py-3 text-sm">{s.tissue_type || "—"}</td>
-                        <td className="px-4 py-3 text-sm">{s.molecule_type || "—"}</td>
-                        <td className="px-4 py-3 text-sm">{s.treatment_condition || "—"}</td>
-                        <td className="px-4 py-3 text-sm">{s.library_prep_method || "—"}</td>
-                        <td className="px-4 py-3 text-sm">{s.library_layout || "—"}</td>
-                        <td className="px-4 py-3 text-sm">{s.batch?.name || "—"}</td>
+                      <tr key={s.id} className={`hover:bg-gray-50 ${selectedSampleIds.has(s.id) ? "bg-blue-50/50" : ""}`}>
+                        <td className="px-2 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={selectedSampleIds.has(s.id)}
+                            onChange={() => toggleSampleSelection(s.id)}
+                            className="rounded border-gray-300"
+                          />
+                        </td>
+                        <td className="px-4 py-3 text-sm">{s.sample_id_external || "---"}</td>
+                        <td className="px-4 py-3 text-sm">{s.organism || "---"}</td>
+                        <td className="px-4 py-3 text-sm">{s.tissue_type || "---"}</td>
+                        <td className="px-4 py-3 text-sm">{s.molecule_type || "---"}</td>
+                        <td className="px-4 py-3 text-sm">{s.treatment_condition || "---"}</td>
+                        <td className="px-4 py-3 text-sm">{s.library_prep_method || "---"}</td>
+                        <td className="px-4 py-3 text-sm">{s.library_layout || "---"}</td>
+                        <td className="px-4 py-3 text-sm">{s.batch?.name || "---"}</td>
                         <td className="px-4 py-3">
                           <select
                             value={s.qc_status ?? ""}
                             onChange={(e) => { if (e.target.value) handleUpdateQC(s.id, e.target.value); }}
                             className="text-xs border rounded px-2 py-1"
                           >
-                            <option value="">—</option>
+                            <option value="">---</option>
                             <option value="pass">Pass</option>
                             <option value="warning">Warning</option>
                             <option value="fail">Fail</option>
                           </select>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-500">{s.status.replace(/_/g, " ")}</td>
+                        <td className="px-4 py-3">
+                          <button
+                            onClick={() => startEditSample(s)}
+                            className="text-xs text-bioaf-600 hover:text-bioaf-700 font-medium"
+                          >
+                            Edit
+                          </button>
+                        </td>
                       </tr>
                     ))}
                     {samples.length === 0 && (
-                      <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-400">No samples yet</td></tr>
+                      <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-400">No samples yet</td></tr>
                     )}
                   </tbody>
                 </table>
               </div>
+
+              {/* Edit Sample Modal */}
+              {editingSampleId !== null && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center">
+                  <div className="fixed inset-0 bg-black/40" onClick={() => { setEditingSampleId(null); setEditSampleError(""); }} />
+                  <div className="relative bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 p-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold">Edit Sample</h3>
+                      <button onClick={() => { setEditingSampleId(null); setEditSampleError(""); }} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">External Sample ID</label>
+                        <input value={editSampleForm.sample_id_external ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, sample_id_external: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Organism</label>
+                        <input value={editSampleForm.organism ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, organism: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Tissue Type</label>
+                        <input value={editSampleForm.tissue_type ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, tissue_type: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Donor ID</label>
+                        <input value={editSampleForm.donor_source ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, donor_source: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Treatment Condition</label>
+                        <input value={editSampleForm.treatment_condition ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, treatment_condition: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Chemistry Version</label>
+                        <input value={editSampleForm.chemistry_version ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, chemistry_version: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Cell Count</label>
+                        <input type="number" min={0} value={editSampleForm.cell_count ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, cell_count: e.target.value ? Number(e.target.value) : null })} className="border rounded px-3 py-2 text-sm w-full" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Viability %</label>
+                        <input type="number" min={0} max={100} step={0.1} value={editSampleForm.viability_pct ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, viability_pct: e.target.value ? Number(e.target.value) : null })} className="border rounded px-3 py-2 text-sm w-full" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Molecule Type</label>
+                        <VocabularySelect fieldName="molecule_type" value={editSampleForm.molecule_type} onChange={(v) => setEditSampleForm({ ...editSampleForm, molecule_type: v })} placeholder="Molecule Type..." />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Library Prep Method</label>
+                        <VocabularySelect fieldName="library_prep_method" value={editSampleForm.library_prep_method} onChange={(v) => setEditSampleForm({ ...editSampleForm, library_prep_method: v })} placeholder="Library Prep Method..." />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Library Layout</label>
+                        <VocabularySelect fieldName="library_layout" value={editSampleForm.library_layout} onChange={(v) => setEditSampleForm({ ...editSampleForm, library_layout: v })} placeholder="Library Layout..." />
+                      </div>
+                    </div>
+                    {editSampleError && (
+                      <p className="text-red-600 text-sm mt-3">{editSampleError}</p>
+                    )}
+                    <div className="flex justify-end gap-2 mt-4">
+                      <button onClick={() => { setEditingSampleId(null); setEditSampleError(""); }} className="border px-4 py-2 rounded text-sm">Cancel</button>
+                      <button onClick={handleSaveSampleEdit} className="bg-bioaf-600 text-white px-4 py-2 rounded text-sm hover:bg-bioaf-700">Save Changes</button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

@@ -69,6 +69,11 @@ class SampleBulkCreate(BaseModel):
     samples: list[SampleCreate]
 
 
+class SampleBulkUpdate(BaseModel):
+    sample_ids: list[int]
+    update: SampleUpdate
+
+
 class SampleQCUpdate(BaseModel):
     qc_status: str
     qc_notes: str | None = None

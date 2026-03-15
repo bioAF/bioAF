@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.api.dependencies import require_role
-from app.schemas.sample import SampleQCUpdate, SampleResponse, SampleStatusUpdate, SampleUpdate
+from app.schemas.sample import SampleBulkUpdate, SampleQCUpdate, SampleResponse, SampleStatusUpdate, SampleUpdate
 from app.services.sample_service import SampleService
 
 router = APIRouter(prefix="/api/samples", tags=["samples"])
@@ -31,6 +31,26 @@ def _sample_response(s) -> SampleResponse:
         created_at=s.created_at,
         updated_at=s.updated_at,
     )
+
+
+@router.patch("/bulk/update")
+async def bulk_update_samples(
+    body: SampleBulkUpdate,
+    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    session: AsyncSession = Depends(get_session),
+):
+    user_id = int(current_user["sub"])
+    updated = 0
+    errors = []
+    for sample_id in body.sample_ids:
+        sample = await SampleService.update_sample(session, sample_id, user_id, body.update)
+        if not sample:
+            errors.append(f"Sample {sample_id} not found")
+        else:
+            updated += 1
+    if updated:
+        await session.commit()
+    return {"updated": updated, "errors": errors}
 
 
 @router.get("/{sample_id}", response_model=SampleResponse)

@@ -17,6 +17,7 @@ from app.schemas.experiment import (
     ExperimentResponse,
     ExperimentStatusUpdate,
     ExperimentUpdate,
+    FieldDefaultResponse,
     ProjectSummary,
     SampleResponseBrief,
     BatchResponseBrief,
@@ -173,6 +174,15 @@ async def get_experiment(
                 field_type=cf.field_type,
             )
             for cf in experiment.custom_fields
+        ],
+        field_defaults=[
+            FieldDefaultResponse(
+                id=fd.id,
+                field_name=fd.field_name,
+                default_value=fd.default_value,
+                is_required=fd.is_required,
+            )
+            for fd in experiment.field_defaults
         ],
         audit_trail_count=audit_count,
     )
