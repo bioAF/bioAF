@@ -21,8 +21,8 @@ export default function DataDocumentsPage() {
         );
         setDocuments(data.documents);
       } else {
-        const data = await api.get<DocumentResponse[]>("/api/documents");
-        setDocuments(data);
+        const data = await api.get<DocumentSearchResponse>("/api/documents");
+        setDocuments(data.documents);
       }
     } catch {
       // ignore
