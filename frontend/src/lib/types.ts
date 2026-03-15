@@ -646,6 +646,7 @@ export interface FileResponse {
   file_type: string;
   tags: string[];
   uploader: UserSummary | null;
+  experiment_id: number | null;
   upload_timestamp: string;
   created_at: string;
 }

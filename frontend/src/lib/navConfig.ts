@@ -46,6 +46,7 @@ export const navConfig: NavSection[] = [
     icon: "database",
     children: [
       { label: "Upload", path: "/data/upload" },
+      { label: "Files", path: "/data/files" },
       { label: "Dataset Browser", path: "/data/browser" },
       { label: "Documents", path: "/data/documents" },
       { label: "Reference Data", path: "/data/references" },

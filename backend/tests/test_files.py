@@ -89,6 +89,47 @@ async def test_viewer_cannot_delete_file(client, viewer_token, sample_file):
     assert resp.status_code == 403
 
 
+@pytest.mark.asyncio
+async def test_list_files_includes_experiment_id(client, admin_token, sample_file, sample_experiment, session):
+    sample_file.experiment_id = sample_experiment.id
+    await session.commit()
+
+    resp = await client.get(
+        "/api/files",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    match = next(f for f in resp.json()["files"] if f["id"] == sample_file.id)
+    assert match["experiment_id"] == sample_experiment.id
+
+
+@pytest.mark.asyncio
+async def test_list_files_null_experiment_id(client, admin_token, sample_file):
+    resp = await client.get(
+        "/api/files",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    match = next(f for f in resp.json()["files"] if f["id"] == sample_file.id)
+    assert match["experiment_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_link_file_to_experiment(client, admin_token, sample_file, sample_experiment):
+    resp = await client.post(
+        f"/api/files/{sample_file.id}/link",
+        json={"experiment_id": sample_experiment.id},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+
+    resp = await client.get(
+        f"/api/files/{sample_file.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.json()["experiment_id"] == sample_experiment.id
+
+
 # --- Upload Service Unit Tests ---
 
 

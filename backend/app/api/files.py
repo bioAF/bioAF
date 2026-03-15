@@ -28,6 +28,7 @@ def _file_response(f) -> FileResponse:
         file_type=f.file_type,
         tags=f.tags_json if isinstance(f.tags_json, list) else [],
         uploader=UserSummary(id=f.uploader.id, name=f.uploader.name, email=f.uploader.email) if f.uploader else None,
+        experiment_id=f.experiment_id,
         upload_timestamp=f.upload_timestamp,
         created_at=f.created_at,
     )
@@ -195,6 +196,8 @@ async def link_file(
     if not file:
         raise HTTPException(404, "File not found")
 
+    if body.experiment_id is not None:
+        file.experiment_id = body.experiment_id
     if body.sample_id:
         await FileService.link_file_to_sample(session, file_id, body.sample_id)
     await session.commit()
