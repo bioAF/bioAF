@@ -5,7 +5,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 
 interface IngestStats {
-  files_today: number;
+  totalFiles: number;
   unmatched: number;
   unclaimed: number;
 }
@@ -17,19 +17,15 @@ export function IngestStatusWidget() {
 
   useEffect(() => {
     Promise.all([
-      api.get<{ total: number }>("/api/ingest/events?page_size=1").catch(() => ({ total: 0 })),
-      api.get<{ files: unknown[] }>("/api/ingest/unmatched").catch(() => ({ files: [] })),
-      api.get<{ entities: unknown[] }>("/api/ingest/unclaimed").catch(() => ({ entities: [] })),
+      api.get<{ total: number }>("/api/files?page_size=1").catch(() => ({ total: 0 })),
+      api.get<unknown[]>("/api/ingest/unmatched").catch(() => []),
+      api.get<unknown[]>("/api/ingest/unclaimed").catch(() => []),
     ])
-      .then(([events, unmatched, unclaimed]) => {
+      .then(([filesResp, unmatched, unclaimed]) => {
         setStats({
-          files_today: (events as { total: number }).total,
-          unmatched: Array.isArray((unmatched as { files: unknown[] }).files)
-            ? (unmatched as { files: unknown[] }).files.length
-            : 0,
-          unclaimed: Array.isArray((unclaimed as { entities: unknown[] }).entities)
-            ? (unclaimed as { entities: unknown[] }).entities.length
-            : 0,
+          totalFiles: (filesResp as { total: number }).total ?? 0,
+          unmatched: Array.isArray(unmatched) ? unmatched.length : 0,
+          unclaimed: Array.isArray(unclaimed) ? unclaimed.length : 0,
         });
       })
       .catch(() => setError("Failed to load ingest data"))
@@ -57,7 +53,7 @@ export function IngestStatusWidget() {
         <div className="space-y-2">
           <div className="flex justify-between">
             <span className="text-sm text-gray-600">Files ingested</span>
-            <span className="text-sm font-medium">{stats.files_today}</span>
+            <span className="text-sm font-medium">{stats.totalFiles}</span>
           </div>
           {stats.unmatched > 0 && (
             <div className="flex justify-between">
