@@ -8,6 +8,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapters.registry import get_compute_adapter, get_storage_adapter
 from app.models.budget_config import BudgetConfig
 from app.models.cost_record import CostRecord
 from app.services.event_bus import event_bus
@@ -20,6 +21,20 @@ class CostService:
     @staticmethod
     async def get_cost_summary(session: AsyncSession, org_id: int) -> dict:
         """Get current month cost summary with trends and breakdown."""
+        # Lazy sync: if no records exist for today, sync from adapters first
+        today = date.today()
+        today_check = await session.execute(
+            select(func.count())
+            .select_from(CostRecord)
+            .where(
+                CostRecord.organization_id == org_id,
+                CostRecord.record_date == today,
+            )
+        )
+        if (today_check.scalar() or 0) == 0:
+            await CostService.sync_billing_data(session, org_id)
+            await session.flush()
+
         now = datetime.now(timezone.utc)
         month_start = date(now.year, now.month, 1)
 
@@ -84,6 +99,8 @@ class CostService:
             days_in_month = (next_month - month_start).days
         projected = (current_month_spend / days_elapsed * days_in_month) if days_elapsed > 0 else Decimal("0")
 
+        currency = budget.currency if budget else "USD"
+
         return {
             "current_month_spend": current_month_spend,
             "daily_trend": daily_trend,
@@ -92,6 +109,7 @@ class CostService:
             "monthly_budget": monthly_budget,
             "budget_remaining": budget_remaining,
             "projected_month_end": projected,
+            "currency": currency,
         }
 
     @staticmethod
@@ -120,10 +138,74 @@ class CostService:
 
     @staticmethod
     async def sync_billing_data(session: AsyncSession, org_id: int) -> None:
-        """Fetch billing data from GCP. Uses mock data when GCP is unavailable."""
+        """Sync today's cost data from infrastructure adapters into cost_records.
+
+        Records daily costs for three components:
+        - node: the always-on bioAF platform VM
+        - storage: all GCS buckets
+        - compute: pipeline and interactive compute nodes
+
+        Only writes today's record. Past records accumulate from prior daily
+        syncs so costs reflect what was actually running each day.
+        Idempotent -- re-syncing the same day updates existing records.
+        """
         logger.info("Syncing billing data for org %d", org_id)
-        # In production, this would call the GCP Billing API
-        # For now, we skip if no GCP credentials are available
+        today = date.today()
+        month_start = date(today.year, today.month, 1)
+
+        # -- Node and compute cost from cluster metrics --
+        # Cluster metrics reflect actual billing rates (sustained-use discounts,
+        # committed-use, free-tier credits) rather than GCP list prices.
+        compute_adapter = get_compute_adapter()
+        cluster_metrics = await compute_adapter.get_cluster_metrics()
+        node_cost_daily = Decimal("0")
+        compute_cost_daily = Decimal("0")
+
+        for pool in cluster_metrics.get("node_pools", []):
+            hourly = Decimal(str(pool.get("cost_rate_hourly", 0)))
+            if pool.get("name", "") == "bioaf-platform":
+                node_cost_daily += hourly * 24
+            else:
+                compute_cost_daily += hourly * 24
+
+        # -- Storage cost (prorated daily from monthly) --
+        storage_adapter = get_storage_adapter()
+        storage_metrics = await storage_adapter.get_storage_metrics()
+        storage_cost_monthly = Decimal(str(storage_metrics.get("total_cost_monthly_usd", 0)))
+        if today.month == 12:
+            days_in_month = 31
+        else:
+            next_month = date(today.year, today.month + 1, 1)
+            days_in_month = (next_month - month_start).days
+        storage_cost_daily = storage_cost_monthly / days_in_month if days_in_month > 0 else Decimal("0")
+
+        # -- Upsert today's cost records --
+        components = {
+            "node": node_cost_daily,
+            "storage": storage_cost_daily,
+            "compute": compute_cost_daily,
+        }
+
+        for component, amount in components.items():
+            existing_rec = await session.execute(
+                select(CostRecord).where(
+                    CostRecord.organization_id == org_id,
+                    CostRecord.record_date == today,
+                    CostRecord.component == component,
+                )
+            )
+            record = existing_rec.scalar_one_or_none()
+            if record:
+                record.cost_amount = amount
+            else:
+                session.add(
+                    CostRecord(
+                        organization_id=org_id,
+                        record_date=today,
+                        component=component,
+                        cost_amount=amount,
+                    )
+                )
 
     @staticmethod
     async def get_budget_config(session: AsyncSession, org_id: int) -> BudgetConfig | None:
@@ -149,6 +231,7 @@ class CostService:
             "threshold_80_enabled",
             "threshold_100_enabled",
             "scale_to_zero_on_100",
+            "currency",
         ]:
             if key in data and data[key] is not None:
                 setattr(config, key, data[key])

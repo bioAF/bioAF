@@ -104,6 +104,7 @@ describe("Dashboard Widgets", () => {
         monthly_budget: 1000,
         budget_remaining: 500,
         projected_month_end: 800,
+        breakdown_by_component: [],
       });
       render(<CostBudgetWidget />);
       await waitFor(() => {
@@ -117,25 +118,51 @@ describe("Dashboard Widgets", () => {
         monthly_budget: 1000,
         budget_remaining: 500,
         projected_month_end: 800,
+        breakdown_by_component: [],
       });
       render(<CostBudgetWidget />);
       await waitFor(() => {
-        expect(screen.getByText("$500")).toBeInTheDocument();
-        expect(screen.getByText("$1,000")).toBeInTheDocument();
+        expect(screen.getByText("$500.00")).toBeInTheDocument();
+        expect(screen.getByText("$1000.00")).toBeInTheDocument();
         expect(screen.getByText("50% of monthly budget")).toBeInTheDocument();
       });
     });
 
-    it("shows empty state when no budget configured", async () => {
+    it("renders cost breakdown by component", async () => {
+      mockApiGet.mockResolvedValueOnce({
+        current_month_spend: 52.47,
+        monthly_budget: 200,
+        budget_remaining: 147.53,
+        projected_month_end: 110,
+        breakdown_by_component: [
+          { component: "node", amount: "48.91", percentage: 93.2 },
+          { component: "storage", amount: "3.12", percentage: 5.9 },
+          { component: "compute", amount: "0.44", percentage: 0.9 },
+        ],
+      });
+      render(<CostBudgetWidget />);
+      await waitFor(() => {
+        expect(screen.getByText("bioAF Node")).toBeInTheDocument();
+        expect(screen.getByText("Storage")).toBeInTheDocument();
+        expect(screen.getByText("Compute")).toBeInTheDocument();
+      });
+    });
+
+    it("shows spend with infinity and cost center link when no budget configured", async () => {
       mockApiGet.mockResolvedValueOnce({
         current_month_spend: 200,
         monthly_budget: null,
         budget_remaining: null,
         projected_month_end: null,
+        breakdown_by_component: [],
       });
       render(<CostBudgetWidget />);
       await waitFor(() => {
-        expect(screen.getByTestId("widget-empty")).toBeInTheDocument();
+        expect(screen.getByText("$200.00")).toBeInTheDocument();
+        expect(screen.getByText("\u221E")).toBeInTheDocument();
+        expect(screen.getByTestId("widget-no-budget")).toBeInTheDocument();
+        const link = screen.getByText("Configure in Cost Center");
+        expect(link).toHaveAttribute("href", "/infrastructure/cost-center");
       });
     });
 

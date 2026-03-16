@@ -12,6 +12,7 @@ from app.schemas.cost import (
     BudgetConfigResponse,
     BudgetConfigUpdate,
 )
+from app.models.cost_record import CostRecord
 from app.services.cost_service import CostService
 
 router = APIRouter(prefix="/api/costs", tags=["costs"])
@@ -78,4 +79,27 @@ async def trigger_billing_sync(
 ):
     org_id = current_user["org_id"]
     await CostService.sync_billing_data(session, org_id)
+    await session.commit()
     return {"status": "sync_initiated"}
+
+
+@router.delete("/records")
+async def purge_cost_records(
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    current_user: dict = require_role("admin"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Delete cost records in a date range. Useful for clearing stale data."""
+    from sqlalchemy import delete
+
+    org_id = current_user["org_id"]
+    result = await session.execute(
+        delete(CostRecord).where(
+            CostRecord.organization_id == org_id,
+            CostRecord.record_date >= start_date,
+            CostRecord.record_date <= end_date,
+        )
+    )
+    await session.commit()
+    return {"deleted_count": result.rowcount}

@@ -116,6 +116,13 @@ class GcsStorageProvider(StorageProvider):
         return collected
 
     def _local_storage_metrics(self) -> dict:
+        from app.config import settings
+
+        total_monthly = settings.local_storage_cost_monthly
+        # Distribute proportionally across buckets (raw ~55%, working ~27%, results ~18%)
+        raw_cost = round(total_monthly * 0.545, 4)
+        working_cost = round(total_monthly * 0.273, 4)
+        results_cost = round(total_monthly - raw_cost - working_cost, 4)
         return {
             "buckets": [
                 {
@@ -130,21 +137,21 @@ class GcsStorageProvider(StorageProvider):
                     "size_gb": 2.5,
                     "object_count": 45,
                     "storage_class": "STANDARD",
-                    "cost_monthly_usd": 0.06,
+                    "cost_monthly_usd": raw_cost,
                 },
                 {
                     "name": self.working_bucket,
                     "size_gb": 1.2,
                     "object_count": 120,
                     "storage_class": "STANDARD",
-                    "cost_monthly_usd": 0.03,
+                    "cost_monthly_usd": working_cost,
                 },
                 {
                     "name": self.results_bucket,
                     "size_gb": 0.8,
                     "object_count": 35,
                     "storage_class": "STANDARD",
-                    "cost_monthly_usd": 0.02,
+                    "cost_monthly_usd": results_cost,
                 },
                 {
                     "name": self.config_backups_bucket,
@@ -155,7 +162,7 @@ class GcsStorageProvider(StorageProvider):
                 },
             ],
             "total_size_gb": 4.51,
-            "total_cost_monthly_usd": 0.11,
+            "total_cost_monthly_usd": total_monthly,
         }
 
     # -- GCS stage/collect helpers --

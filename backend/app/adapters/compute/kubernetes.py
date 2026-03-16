@@ -148,16 +148,19 @@ class KubernetesComputeProvider(ComputeProvider):
         }
 
     def _local_cluster_metrics(self) -> dict:
+        from app.config import settings
+
+        node_rate = settings.local_node_cost_hourly
         return {
             "cpu_utilization_pct": 12.5,
             "memory_utilization_pct": 28.3,
-            "cost_burn_rate_hourly": 0.15,
+            "cost_burn_rate_hourly": node_rate,
             "node_pools": [
                 {
                     "name": "bioaf-platform",
                     "cpu_utilization_pct": 25.0,
                     "memory_utilization_pct": 45.0,
-                    "cost_rate_hourly": 0.15,
+                    "cost_rate_hourly": node_rate,
                 },
                 {
                     "name": "bioaf-pipelines",

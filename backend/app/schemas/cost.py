@@ -30,6 +30,7 @@ class CostSummaryResponse(BaseModel):
     monthly_budget: Decimal | None = None
     budget_remaining: Decimal | None = None
     projected_month_end: Decimal | None = None
+    currency: str = "USD"
 
 
 class CostHistoryResponse(BaseModel):
@@ -43,6 +44,7 @@ class BudgetConfigResponse(BaseModel):
     threshold_80_enabled: bool
     threshold_100_enabled: bool
     scale_to_zero_on_100: bool
+    currency: str = "USD"
 
     model_config = {"from_attributes": True}
 
@@ -53,3 +55,4 @@ class BudgetConfigUpdate(BaseModel):
     threshold_80_enabled: bool | None = None
     threshold_100_enabled: bool | None = None
     scale_to_zero_on_100: bool | None = None
+    currency: str | None = None

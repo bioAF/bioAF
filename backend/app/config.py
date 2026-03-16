@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     # Compute
     compute_mode: str = "kubernetes"
 
+    # Local mode cost overrides (used when BIOAF_COMPUTE_MODE=local)
+    local_node_cost_hourly: float = 0.01
+    local_storage_cost_monthly: float = 0.11
+
     # Bcrypt
     bcrypt_rounds: int = 12
 

@@ -25,6 +25,7 @@ interface CostSummary {
   monthly_budget: string | null;
   budget_remaining: string | null;
   projected_month_end: string | null;
+  currency: string;
 }
 
 interface BudgetConfig {
@@ -33,7 +34,21 @@ interface BudgetConfig {
   threshold_80_enabled: boolean;
   threshold_100_enabled: boolean;
   scale_to_zero_on_100: boolean;
+  currency: string;
 }
+
+const SUPPORTED_CURRENCIES = [
+  "AUD", "BRL", "CAD", "CHF", "CLP", "COP", "CZK", "DKK",
+  "EUR", "GBP", "HKD", "IDR", "ILS", "INR", "JPY", "KRW",
+  "MXN", "MYR", "NOK", "NZD", "PEN", "PLN", "SEK", "SGD",
+  "THB", "TRY", "TWD", "USD", "VND",
+] as const;
+
+const COMPONENT_LABELS: Record<string, string> = {
+  node: "bioAF Node",
+  storage: "Storage",
+  compute: "Compute",
+};
 
 export default function InfraCostCenterPage() {
   const router = useRouter();
@@ -41,6 +56,7 @@ export default function InfraCostCenterPage() {
   const [budget, setBudget] = useState<BudgetConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [budgetInput, setBudgetInput] = useState("");
+  const [currencyInput, setCurrencyInput] = useState("USD");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -58,6 +74,7 @@ export default function InfraCostCenterPage() {
         setSummary(s);
         setBudget(b);
         setBudgetInput(b.monthly_budget || "");
+        setCurrencyInput(b.currency || "USD");
       } catch {
         // ignore
       } finally {
@@ -66,6 +83,8 @@ export default function InfraCostCenterPage() {
     };
     load();
   }, [router]);
+
+  const currency = budget?.currency || "USD";
 
   const handleSaveBudget = async () => {
     if (!budget) return;
@@ -78,6 +97,7 @@ export default function InfraCostCenterPage() {
         threshold_80_enabled: budget.threshold_80_enabled,
         threshold_100_enabled: budget.threshold_100_enabled,
         scale_to_zero_on_100: budget.scale_to_zero_on_100,
+        currency: currencyInput,
       });
       setBudget(updated);
       setMessage("Budget configuration saved");
@@ -91,6 +111,8 @@ export default function InfraCostCenterPage() {
   const budgetPct = summary && budget?.monthly_budget
     ? Math.min(100, (parseFloat(summary.current_month_spend) / parseFloat(budget.monthly_budget)) * 100)
     : 0;
+
+  const fmt = (value: string | number) => `${parseFloat(String(value)).toFixed(2)} ${currency}`;
 
   return (
     <div className="flex h-screen">
@@ -111,18 +133,18 @@ export default function InfraCostCenterPage() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 <div className="bg-white rounded-lg border border-gray-200 p-4">
                   <p className="text-sm text-gray-600">Current Month Spend</p>
-                  <p className="text-2xl font-bold text-gray-900">${parseFloat(summary.current_month_spend).toFixed(2)}</p>
+                  <p className="text-2xl font-bold text-gray-900">{fmt(summary.current_month_spend)}</p>
                 </div>
                 <div className="bg-white rounded-lg border border-gray-200 p-4">
                   <p className="text-sm text-gray-600">Budget Remaining</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {summary.budget_remaining ? `$${parseFloat(summary.budget_remaining).toFixed(2)}` : "No budget set"}
+                    {summary.budget_remaining ? fmt(summary.budget_remaining) : "No budget set"}
                   </p>
                 </div>
                 <div className="bg-white rounded-lg border border-gray-200 p-4">
                   <p className="text-sm text-gray-600">Projected Month End</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {summary.projected_month_end ? `$${parseFloat(summary.projected_month_end).toFixed(2)}` : "N/A"}
+                    {summary.projected_month_end ? fmt(summary.projected_month_end) : "N/A"}
                   </p>
                 </div>
               </div>
@@ -154,15 +176,15 @@ export default function InfraCostCenterPage() {
                   <div className="space-y-2">
                     {summary.breakdown_by_component.map((c) => (
                       <div key={c.component} className="flex items-center gap-3">
-                        <span className="text-sm w-32 text-gray-700">{c.component}</span>
+                        <span className="text-sm w-32 text-gray-700">{COMPONENT_LABELS[c.component] || c.component}</span>
                         <div className="flex-1 bg-gray-100 rounded-full h-3">
                           <div
                             className="bg-bioaf-500 h-3 rounded-full"
                             style={{ width: `${c.percentage}%` }}
                           />
                         </div>
-                        <span className="text-sm text-gray-900 w-24 text-right">
-                          ${parseFloat(c.amount).toFixed(2)} ({c.percentage}%)
+                        <span className="text-sm text-gray-900 w-32 text-right">
+                          {fmt(c.amount)} ({c.percentage}%)
                         </span>
                       </div>
                     ))}
@@ -185,7 +207,7 @@ export default function InfraCostCenterPage() {
                         {summary.daily_trend.map((d) => (
                           <tr key={d.date} className="border-b">
                             <td className="px-3 py-2 text-gray-900">{d.date}</td>
-                            <td className="px-3 py-2 text-right text-gray-900">${parseFloat(d.amount).toFixed(2)}</td>
+                            <td className="px-3 py-2 text-right text-gray-900">{fmt(d.amount)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -199,7 +221,20 @@ export default function InfraCostCenterPage() {
                   <h2 className="font-semibold text-gray-900 mb-4">Budget Configuration</h2>
                   <div className="space-y-4 max-w-md">
                     <div>
-                      <label className="block text-sm text-gray-700 mb-1">Monthly Budget ($)</label>
+                      <label className="block text-sm text-gray-700 mb-1">Currency</label>
+                      <select
+                        value={currencyInput}
+                        onChange={(e) => setCurrencyInput(e.target.value)}
+                        className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                        data-testid="currency-select"
+                      >
+                        {SUPPORTED_CURRENCIES.map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-700 mb-1">Monthly Budget ({currencyInput})</label>
                       <input
                         type="number"
                         value={budgetInput}
