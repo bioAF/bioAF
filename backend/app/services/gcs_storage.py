@@ -98,15 +98,54 @@ class GcsStorageService:
         return metrics
 
     @staticmethod
-    async def move_file(source_uri: str, destination_uri: str) -> str:
+    async def get_credentials(session: AsyncSession):
+        """Return GCS credentials from platform_config, or None to use ADC.
+
+        When gcp_credential_source is 'service_account_key', parses the stored
+        JSON key and returns service_account.Credentials with full
+        cloud-platform scope so the GCS client bypasses the VM's OAuth scopes.
+        """
+        import json as _json
+
+        result = await session.execute(
+            text(
+                "SELECT key, value FROM platform_config "
+                "WHERE key IN ('gcp_credential_source', 'gcp_service_account_key')"
+            )
+        )
+        config = {r[0]: r[1] for r in result.fetchall()}
+
+        if config.get("gcp_credential_source") != "service_account_key":
+            return None
+
+        key_json = config.get("gcp_service_account_key")
+        if not key_json or key_json == "null":
+            return None
+
+        try:
+            from google.oauth2 import service_account
+
+            key_data = _json.loads(key_json)
+            return service_account.Credentials.from_service_account_info(
+                key_data,
+                scopes=["https://www.googleapis.com/auth/cloud-platform"],
+            )
+        except Exception as e:
+            logger.warning("Failed to load GCS credentials from platform_config: %s", e)
+            return None
+
+    @staticmethod
+    async def move_file(source_uri: str, destination_uri: str, credentials=None) -> str:
         """Copy an object from source to destination in GCS, then delete source.
 
         Returns the destination URI. If copy fails, source is NOT deleted (fail-safe).
+        Pass credentials from get_credentials() for service account auth;
+        omit to fall back to ADC.
         """
         src_bucket_name, src_blob_path = GcsStorageService._parse_gcs_uri(source_uri)
         dst_bucket_name, dst_blob_path = GcsStorageService._parse_gcs_uri(destination_uri)
 
-        client = storage.Client()
+        client = storage.Client(credentials=credentials)
         src_bucket = client.get_bucket(src_bucket_name)
         dst_bucket = client.get_bucket(dst_bucket_name)
         src_blob = src_bucket.blob(src_blob_path)

@@ -245,15 +245,30 @@ class UploadService:
     async def _auto_update_experiment_status(
         session: AsyncSession, experiment_id: int, org_id: int, user_id: int
     ) -> None:
-        """Auto-transition experiment to fastq_uploaded if appropriate."""
+        """Auto-transition experiment to fastq_uploaded if appropriate.
+
+        Walks through intermediate statuses (registered -> library_prep ->
+        sequencing -> fastq_uploaded) because uploading FASTQs implies the
+        earlier steps already happened externally.
+        """
         from app.services.experiment_service import ExperimentService
 
+        # Statuses that precede fastq_uploaded, in order
+        path_to_fastq = ["library_prep", "sequencing", "fastq_uploaded"]
         exp = await ExperimentService.get_experiment(session, experiment_id, org_id)
-        if exp and exp.status in ("registered", "library_prep", "sequencing"):
-            try:
-                await ExperimentService.update_status(session, experiment_id, org_id, user_id, "fastq_uploaded")
-            except Exception as e:
-                logger.warning("Could not auto-update experiment status: %s", e)
+        if not exp or exp.status not in ("registered", "library_prep", "sequencing"):
+            return
+
+        try:
+            # Find where we are in the path and advance from there
+            current = exp.status
+            for target in path_to_fastq:
+                if current == "fastq_uploaded":
+                    break
+                await ExperimentService.update_status(session, experiment_id, org_id, user_id, target)
+                current = target
+        except Exception as e:
+            logger.warning("Could not auto-update experiment status: %s", e)
 
     @staticmethod
     def _detect_file_type(filename: str) -> str:

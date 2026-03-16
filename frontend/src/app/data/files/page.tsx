@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { api } from "@/lib/api";
+import { getCurrentUser } from "@/lib/auth";
 import type {
   FileResponse,
   FileListResponse,
@@ -17,6 +18,14 @@ function formatBytes(bytes: number | null): string {
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
 
+function countStuckFiles(files: FileResponse[]): number {
+  return files.filter(
+    (f) =>
+      f.experiment_id != null &&
+      f.gcs_uri.includes("/uploads/")
+  ).length;
+}
+
 export default function DataFilesPage() {
   const [files, setFiles] = useState<FileResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,6 +36,15 @@ export default function DataFilesPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [linkingFileIds, setLinkingFileIds] = useState<number[]>([]);
   const [selectedExperimentId, setSelectedExperimentId] = useState<string>("");
+  const [reconciling, setReconciling] = useState(false);
+  const [reconcileResult, setReconcileResult] = useState<{
+    reconciled: number;
+    failed: number;
+  } | null>(null);
+
+  const user = getCurrentUser();
+  const isAdmin = user?.role === "admin";
+  const stuckCount = countStuckFiles(files);
 
   const fetchFiles = useCallback(async () => {
     setLoading(true);
@@ -100,6 +118,27 @@ export default function DataFilesPage() {
     }
   };
 
+  const handleReconcile = async () => {
+    setReconciling(true);
+    setReconcileResult(null);
+    try {
+      const result = await api.post<{
+        reconciled: number;
+        failed: number;
+        skipped: number;
+      }>("/api/files/reconcile");
+      setReconcileResult({
+        reconciled: result.reconciled,
+        failed: result.failed,
+      });
+      fetchFiles();
+    } catch {
+      setReconcileResult({ reconciled: 0, failed: -1 });
+    } finally {
+      setReconciling(false);
+    }
+  };
+
   const experimentName = (expId: number | null) => {
     if (expId == null) return null;
     return experiments.find((e) => e.id === expId)?.name ?? `#${expId}`;
@@ -146,6 +185,45 @@ export default function DataFilesPage() {
                 </div>
               )}
             </div>
+
+            {isAdmin && stuckCount > 0 && !reconcileResult && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-amber-800">
+                    {stuckCount} {stuckCount === 1 ? "file needs" : "files need"} to be synced to storage
+                  </p>
+                  <p className="text-xs text-amber-600 mt-1">
+                    These files are linked to an experiment but haven&apos;t been
+                    moved to long-term storage yet.
+                  </p>
+                </div>
+                <button
+                  onClick={handleReconcile}
+                  disabled={reconciling}
+                  className="px-4 py-2 bg-amber-600 text-white rounded-md text-sm font-medium hover:bg-amber-700 disabled:opacity-50 whitespace-nowrap ml-4"
+                >
+                  {reconciling ? "Syncing..." : "Fix Now"}
+                </button>
+              </div>
+            )}
+
+            {reconcileResult && (
+              <div
+                className={`rounded-lg p-4 text-sm ${
+                  reconcileResult.failed === -1
+                    ? "bg-red-50 border border-red-200 text-red-800"
+                    : reconcileResult.failed > 0
+                      ? "bg-amber-50 border border-amber-200 text-amber-800"
+                      : "bg-green-50 border border-green-200 text-green-800"
+                }`}
+              >
+                {reconcileResult.failed === -1
+                  ? "Something went wrong. Please try again or contact support."
+                  : reconcileResult.failed > 0
+                    ? `Synced ${reconcileResult.reconciled} files, but ${reconcileResult.failed} failed. Try again or contact support.`
+                    : `Done! ${reconcileResult.reconciled} ${reconcileResult.reconciled === 1 ? "file" : "files"} synced to storage.`}
+              </div>
+            )}
 
             {loading ? (
               <p className="text-gray-400 text-sm">Loading...</p>

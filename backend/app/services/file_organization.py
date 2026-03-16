@@ -22,6 +22,15 @@ class FileOrganizationService:
     """Manage file-to-experiment assignments with GCS moves."""
 
     @staticmethod
+    async def _get_raw_bucket(session: AsyncSession) -> str | None:
+        """Read raw_bucket_name from platform_config."""
+        result = await session.execute(text("SELECT value FROM platform_config WHERE key = 'raw_bucket_name'"))
+        val = result.scalar_one_or_none()
+        if val and val != "null":
+            return val
+        return None
+
+    @staticmethod
     async def assign_file_to_experiment(
         session: AsyncSession,
         file_id: int,
@@ -49,14 +58,17 @@ class FileOrganizationService:
             await FileOrganizationService.reassign_file_to_experiment(session, file_id, experiment_id, user_id)
             return
 
-        # Build new URI in the experiment prefix
-        bucket_name, _ = _parse_gcs_uri(old_uri)
+        # Use raw bucket as destination; fall back to source bucket
+        raw_bucket = await FileOrganizationService._get_raw_bucket(session)
+        source_bucket, _ = _parse_gcs_uri(old_uri)
+        dest_bucket = raw_bucket or source_bucket
         new_prefix = GcsStorageService.build_experiment_prefix(experiment_id)
-        new_uri = f"gs://{bucket_name}/{new_prefix}{filename}"
+        new_uri = f"gs://{dest_bucket}/{new_prefix}{filename}"
 
         # Move file in GCS if URIs differ
         if old_uri != new_uri:
-            new_uri = await GcsStorageService.move_file(old_uri, new_uri)
+            credentials = await GcsStorageService.get_credentials(session)
+            new_uri = await GcsStorageService.move_file(old_uri, new_uri, credentials=credentials)
 
         # Update DB
         await session.execute(
@@ -98,14 +110,17 @@ class FileOrganizationService:
 
         old_uri, old_exp_id, filename = row[0], row[1], row[2]
 
-        # Build new URI
-        bucket_name, _ = _parse_gcs_uri(old_uri)
+        # Use raw bucket as destination; fall back to source bucket
+        raw_bucket = await FileOrganizationService._get_raw_bucket(session)
+        source_bucket, _ = _parse_gcs_uri(old_uri)
+        dest_bucket = raw_bucket or source_bucket
         new_prefix = GcsStorageService.build_experiment_prefix(new_experiment_id)
-        new_uri = f"gs://{bucket_name}/{new_prefix}{filename}"
+        new_uri = f"gs://{dest_bucket}/{new_prefix}{filename}"
 
         # Move in GCS
         if old_uri != new_uri:
-            new_uri = await GcsStorageService.move_file(old_uri, new_uri)
+            credentials = await GcsStorageService.get_credentials(session)
+            new_uri = await GcsStorageService.move_file(old_uri, new_uri, credentials=credentials)
 
         # Update DB
         await session.execute(
@@ -147,14 +162,17 @@ class FileOrganizationService:
 
         old_uri, old_exp_id, filename = row[0], row[1], row[2]
 
-        # Build new URI in unlinked prefix
-        bucket_name, _ = _parse_gcs_uri(old_uri)
+        # Use raw bucket as destination; fall back to source bucket
+        raw_bucket = await FileOrganizationService._get_raw_bucket(session)
+        source_bucket, _ = _parse_gcs_uri(old_uri)
+        dest_bucket = raw_bucket or source_bucket
         unlinked_prefix = GcsStorageService.build_unlinked_prefix()
-        new_uri = f"gs://{bucket_name}/{unlinked_prefix}{filename}"
+        new_uri = f"gs://{dest_bucket}/{unlinked_prefix}{filename}"
 
         # Move in GCS
         if old_uri != new_uri:
-            new_uri = await GcsStorageService.move_file(old_uri, new_uri)
+            credentials = await GcsStorageService.get_credentials(session)
+            new_uri = await GcsStorageService.move_file(old_uri, new_uri, credentials=credentials)
 
         # Update DB
         await session.execute(

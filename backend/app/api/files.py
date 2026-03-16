@@ -104,6 +104,92 @@ async def simple_upload(
     return _file_response(result)
 
 
+@router.post("/reconcile")
+async def reconcile_stuck_files(
+    current_user: dict = require_role("admin"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Move files stuck in the ingest bucket to the raw bucket.
+
+    Finds files that have an experiment_id but whose gcs_uri still points
+    to the ingest bucket, then moves each one to the raw bucket under the
+    correct experiment prefix. Also advances experiment status for any
+    experiments that have FASTQ files reconciled.
+    """
+    import logging
+
+    from sqlalchemy import text
+
+    from app.services.file_organization import FileOrganizationService
+
+    logger = logging.getLogger("bioaf.files")
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+
+    # Read bucket names
+    config_rows = (
+        await session.execute(
+            text("SELECT key, value FROM platform_config WHERE key IN ('ingest_bucket_name', 'raw_bucket_name')")
+        )
+    ).fetchall()
+    config = {r[0]: r[1] for r in config_rows}
+    ingest_bucket = config.get("ingest_bucket_name", "")
+    raw_bucket = config.get("raw_bucket_name", "")
+
+    if not ingest_bucket or not raw_bucket:
+        raise HTTPException(400, "Ingest or raw bucket not configured")
+
+    # Find stuck files: have experiment_id, URI still in ingest bucket
+    stuck = (
+        await session.execute(
+            text(
+                "SELECT id, experiment_id, file_type FROM files "
+                "WHERE organization_id = :org_id "
+                "AND experiment_id IS NOT NULL "
+                "AND gcs_uri LIKE :pattern"
+            ).bindparams(org_id=org_id, pattern=f"gs://{ingest_bucket}/%")
+        )
+    ).fetchall()
+
+    reconciled = 0
+    failed = 0
+    experiments_with_fastq: set[int] = set()
+
+    for file_id, experiment_id, file_type in stuck:
+        try:
+            await FileOrganizationService.assign_file_to_experiment(session, file_id, experiment_id, user_id)
+            reconciled += 1
+            if file_type == "fastq":
+                experiments_with_fastq.add(experiment_id)
+        except Exception as e:
+            logger.warning("Failed to reconcile file %d: %s", file_id, e)
+            failed += 1
+
+    # Advance experiment status for any with reconciled FASTQs
+    for exp_id in experiments_with_fastq:
+        await UploadService._auto_update_experiment_status(session, exp_id, org_id, user_id)
+
+    await session.commit()
+
+    # Count files already in raw bucket (skipped)
+    already_ok = (
+        await session.execute(
+            text(
+                "SELECT COUNT(*) FROM files "
+                "WHERE organization_id = :org_id "
+                "AND experiment_id IS NOT NULL "
+                "AND gcs_uri LIKE :pattern"
+            ).bindparams(org_id=org_id, pattern=f"gs://{raw_bucket}/%")
+        )
+    ).scalar_one()
+
+    return {
+        "reconciled": reconciled,
+        "failed": failed,
+        "skipped": already_ok,
+    }
+
+
 @router.get("", response_model=FileListResponse)
 async def list_files(
     request: Request,
@@ -191,13 +277,21 @@ async def link_file(
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
 
     file = await FileService.get_file(session, file_id, org_id)
     if not file:
         raise HTTPException(404, "File not found")
 
     if body.experiment_id is not None:
-        file.experiment_id = body.experiment_id
+        from app.services.file_organization import FileOrganizationService
+
+        await FileOrganizationService.assign_file_to_experiment(session, file_id, body.experiment_id, user_id)
+
+        # Auto-transition experiment status for FASTQ files
+        if file.file_type == "fastq":
+            await UploadService._auto_update_experiment_status(session, body.experiment_id, org_id, user_id)
+
     if body.sample_id:
         await FileService.link_file_to_sample(session, file_id, body.sample_id)
     await session.commit()

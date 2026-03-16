@@ -30,6 +30,7 @@ jest.mock("@/lib/api", () => ({
 jest.mock("@/lib/auth", () => ({
   getToken: () => "fake-token",
   removeToken: jest.fn(),
+  getCurrentUser: () => ({ role: "admin", sub: "1", org_id: "1" }),
 }));
 
 import { api } from "@/lib/api";
@@ -262,6 +263,58 @@ test("bulk-links selected files to experiment", async () => {
     expect(mockPost).toHaveBeenCalledWith("/api/files/3/link", {
       experiment_id: 10,
     });
+  });
+});
+
+test("shows reconcile banner for stuck files and fixes on click", async () => {
+  const stuckFiles = {
+    files: [
+      makeFile({
+        id: 1,
+        filename: "stuck.fastq.gz",
+        gcs_uri: "gs://ingest-bucket/uploads/abc/stuck.fastq.gz",
+        experiment_id: 10,
+      }),
+      makeFile({
+        id: 2,
+        filename: "ok.fastq.gz",
+        gcs_uri: "gs://raw-bucket/experiments/10/ok.fastq.gz",
+        experiment_id: 10,
+      }),
+    ],
+    total: 2,
+    page: 1,
+    page_size: 25,
+  };
+
+  mockGet.mockImplementation((path: string) => {
+    if (path.startsWith("/api/files")) return Promise.resolve(stuckFiles);
+    if (path.startsWith("/api/experiments"))
+      return Promise.resolve(experimentsResponse);
+    return Promise.resolve([]);
+  });
+  mockPost.mockResolvedValue({ reconciled: 1, failed: 0, skipped: 1 });
+
+  render(<DataFilesPage />);
+
+  // Banner should appear for the 1 stuck file
+  await waitFor(() => {
+    expect(
+      screen.getByText("1 file needs to be synced to storage")
+    ).toBeInTheDocument();
+  });
+
+  fireEvent.click(screen.getByText("Fix Now"));
+
+  await waitFor(() => {
+    expect(mockPost).toHaveBeenCalledWith("/api/files/reconcile");
+  });
+
+  // After reconcile, success message should appear
+  await waitFor(() => {
+    expect(
+      screen.getByText("Done! 1 file synced to storage.")
+    ).toBeInTheDocument();
   });
 });
 
