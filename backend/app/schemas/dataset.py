@@ -11,6 +11,9 @@ class DatasetExperimentSummary(BaseModel):
     status: str
     organism: str | None = None
     tissue: str | None = None
+    molecule_type: str | None = None
+    instrument_model: str | None = None
+    review_status: str | None = None
     sample_count: int = 0
     file_count: int = 0
     total_size_bytes: int = 0
@@ -21,6 +24,10 @@ class DatasetExperimentSummary(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class DatasetFilterOptions(BaseModel):
+    organisms: list[str] = []
 
 
 class DatasetSearchResult(BaseModel):

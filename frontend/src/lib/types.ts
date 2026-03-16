@@ -707,6 +707,9 @@ export interface DatasetExperimentSummary {
   status: string;
   organism: string | null;
   tissue: string | null;
+  molecule_type: string | null;
+  instrument_model: string | null;
+  review_status: string | null;
   sample_count: number;
   file_count: number;
   total_size_bytes: number;

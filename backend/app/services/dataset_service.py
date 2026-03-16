@@ -4,10 +4,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.batch import Batch
 from app.models.cellxgene_publication import CellxgenePublication
 from app.models.experiment import Experiment
+from app.models.sample import Sample
 from app.models.file import File
 from app.models.pipeline_run import PipelineRun
+from app.models.pipeline_run_review import PipelineRunReview
 from app.models.qc_dashboard import QCDashboard
 
 logger = logging.getLogger("bioaf.dataset_service")
@@ -23,6 +26,9 @@ class DatasetService:
         tissue: str | None = None,
         chemistry: str | None = None,
         status: str | None = None,
+        molecule_type: str | None = None,
+        instrument_model: str | None = None,
+        review_status: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
         batch_id: int | None = None,
@@ -65,12 +71,40 @@ class DatasetService:
         for exp in experiments:
             samples = exp.samples or []
 
-            # Filter by organism/tissue/chemistry at sample level
+            # Filter by organism/tissue/chemistry/molecule_type at sample level
             if organism and not any(s.organism == organism for s in samples):
                 continue
             if tissue and not any(s.tissue_type == tissue for s in samples):
                 continue
             if chemistry and not any(s.chemistry_version == chemistry for s in samples):
+                continue
+            if molecule_type and not any(s.molecule_type == molecule_type for s in samples):
+                continue
+
+            # Instrument model from batches
+            batch_result = await session.execute(
+                select(Batch.instrument_model).where(Batch.experiment_id == exp.id, Batch.instrument_model.is_not(None))
+            )
+            instrument_models = [row[0] for row in batch_result.all()]
+            top_instrument = max(set(instrument_models), key=instrument_models.count) if instrument_models else None
+
+            if instrument_model and instrument_model not in instrument_models:
+                continue
+
+            # Review status from pipeline run reviews (latest non-superseded)
+            review_result = await session.execute(
+                select(PipelineRunReview.verdict)
+                .join(PipelineRun, PipelineRunReview.pipeline_run_id == PipelineRun.id)
+                .where(
+                    PipelineRun.experiment_id == exp.id,
+                    PipelineRunReview.superseded_by_id.is_(None),
+                )
+                .order_by(PipelineRunReview.reviewed_at.desc())
+                .limit(1)
+            )
+            review_verdict = review_result.scalar_one_or_none()
+
+            if review_status and review_verdict != review_status:
                 continue
 
             # Get file count and size via File.experiment_id (direct FK)
@@ -104,9 +138,10 @@ class DatasetService:
             )
             has_cellxgene = (cx_result.scalar() or 0) > 0
 
-            # Most common organism/tissue
+            # Most common organism/tissue/molecule_type
             organisms = [s.organism for s in samples if s.organism]
             tissues = [s.tissue_type for s in samples if s.tissue_type]
+            mol_types = [s.molecule_type for s in samples if s.molecule_type]
 
             datasets.append(
                 {
@@ -115,6 +150,9 @@ class DatasetService:
                     "status": exp.status,
                     "organism": max(set(organisms), key=organisms.count) if organisms else None,
                     "tissue": max(set(tissues), key=tissues.count) if tissues else None,
+                    "molecule_type": max(set(mol_types), key=mol_types.count) if mol_types else None,
+                    "instrument_model": top_instrument,
+                    "review_status": review_verdict,
                     "sample_count": len(samples),
                     "file_count": file_count,
                     "total_size_bytes": total_size,
@@ -127,6 +165,18 @@ class DatasetService:
             )
 
         return datasets, total
+
+    @staticmethod
+    async def get_filter_options(session: AsyncSession, org_id: int) -> dict:
+        """Return distinct filter values for the org's samples."""
+        result = await session.execute(
+            select(Sample.organism)
+            .join(Experiment, Sample.experiment_id == Experiment.id)
+            .where(Experiment.organization_id == org_id, Sample.organism.is_not(None), Sample.organism != "")
+            .distinct()
+        )
+        organisms = sorted([row[0] for row in result.all()], key=lambda s: (s.lower(), s))
+        return {"organisms": organisms}
 
     @staticmethod
     async def get_dataset_detail(session: AsyncSession, org_id: int, experiment_id: int) -> dict | None:

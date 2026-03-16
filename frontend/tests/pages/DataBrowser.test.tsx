@@ -67,10 +67,15 @@ const mockDatasets = {
 };
 
 describe("DataBrowserPage - file reassignment", () => {
+  const mockFilterOptions = { organisms: ["Human", "Mouse"] };
+
   beforeEach(() => {
     mockApiGet.mockReset();
     mockApiPost.mockReset();
-    mockApiGet.mockResolvedValue(mockDatasets);
+    mockApiGet.mockImplementation((url: string) => {
+      if (url.includes("/filter-options")) return Promise.resolve(mockFilterOptions);
+      return Promise.resolve(mockDatasets);
+    });
   });
 
   it("renders checkbox column for admin users", async () => {
@@ -99,6 +104,7 @@ describe("DataBrowserPage - file reassignment", () => {
 
   it("calls API when adding selected experiments to project", async () => {
     mockApiGet.mockImplementation((url: string) => {
+      if (url.includes("/filter-options")) return Promise.resolve(mockFilterOptions);
       if (url.startsWith("/api/datasets")) return Promise.resolve(mockDatasets);
       if (url.startsWith("/api/projects"))
         return Promise.resolve({

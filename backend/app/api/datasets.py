@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.schemas.dataset import DatasetExperimentSummary, DatasetSearchResult
+from app.schemas.dataset import DatasetExperimentSummary, DatasetFilterOptions, DatasetSearchResult
 from app.schemas.experiment import UserSummary
 from app.services.dataset_service import DatasetService
 
@@ -17,6 +17,9 @@ async def search_datasets(
     tissue: str | None = None,
     chemistry: str | None = None,
     status: str | None = None,
+    molecule_type: str | None = None,
+    instrument_model: str | None = None,
+    review_status: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
     batch_id: int | None = None,
@@ -35,6 +38,9 @@ async def search_datasets(
         tissue=tissue,
         chemistry=chemistry,
         status=status,
+        molecule_type=molecule_type,
+        instrument_model=instrument_model,
+        review_status=review_status,
         date_from=date_from,
         date_to=date_to,
         batch_id=batch_id,
@@ -50,6 +56,9 @@ async def search_datasets(
                 status=d["status"],
                 organism=d.get("organism"),
                 tissue=d.get("tissue"),
+                molecule_type=d.get("molecule_type"),
+                instrument_model=d.get("instrument_model"),
+                review_status=d.get("review_status"),
                 sample_count=d["sample_count"],
                 file_count=d["file_count"],
                 total_size_bytes=d["total_size_bytes"],
@@ -67,6 +76,17 @@ async def search_datasets(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/filter-options", response_model=DatasetFilterOptions)
+async def get_filter_options(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    current_user = request.state.current_user
+    org_id = int(current_user["org_id"])
+    options = await DatasetService.get_filter_options(session, org_id)
+    return DatasetFilterOptions(**options)
 
 
 @router.get("/{experiment_id}")
