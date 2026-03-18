@@ -138,24 +138,108 @@ class CostService:
 
     @staticmethod
     async def sync_billing_data(session: AsyncSession, org_id: int) -> None:
-        """Sync today's cost data from infrastructure adapters into cost_records.
+        """Sync cost data into cost_records.
 
-        Records daily costs for three components:
-        - node: the always-on bioAF platform VM
-        - storage: all GCS buckets
-        - compute: pipeline and interactive compute nodes
-
-        Only writes today's record. Past records accumulate from prior daily
-        syncs so costs reflect what was actually running each day.
-        Idempotent -- re-syncing the same day updates existing records.
+        When BigQuery billing export is configured, queries BQ for historical
+        MTD data (excluding today, which lags up to 24h) and uses adapter
+        estimates for today only. When not configured, uses the adapter path
+        for all data.
         """
         logger.info("Syncing billing data for org %d", org_id)
         today = date.today()
         month_start = date(today.year, today.month, 1)
 
-        # -- Node and compute cost from cluster metrics --
-        # Cluster metrics reflect actual billing rates (sustained-use discounts,
-        # committed-use, free-tier credits) rather than GCP list prices.
+        # Check if BQ billing export is configured
+        from sqlalchemy import text as sa_text
+
+        bq_rows = (
+            await session.execute(
+                sa_text(
+                    "SELECT key, value FROM platform_config "
+                    "WHERE key IN ('billing_export_configured', 'billing_export_dataset', "
+                    "'billing_export_table', 'gcp_project_id', "
+                    "'gcp_credential_source', 'gcp_service_account_key', "
+                    "'gcp_service_account_email')"
+                )
+            )
+        ).fetchall()
+        bq_config = {r[0]: r[1] for r in bq_rows}
+
+        bq_configured = bq_config.get("billing_export_configured", "false") == "true"
+
+        if bq_configured:
+            await CostService._sync_from_bigquery(session, org_id, bq_config, today, month_start)
+        else:
+            await CostService._sync_from_adapters(session, org_id, today, month_start)
+
+    @staticmethod
+    async def _sync_from_bigquery(
+        session: AsyncSession,
+        org_id: int,
+        bq_config: dict,
+        today: date,
+        month_start: date,
+    ) -> None:
+        """Sync historical MTD from BQ, today from adapters (intraday bridge)."""
+        from app.services.billing_export_service import BillingExportService
+
+        project_id = bq_config.get("gcp_project_id", "")
+        dataset_id = bq_config.get("billing_export_dataset", "")
+        table_id = bq_config.get("billing_export_table", "")
+
+        # Historical data from BQ (excludes today due to export lag)
+        if project_id and dataset_id and table_id:
+            try:
+                from app.services.credential_injector import load_gcp_credentials
+
+                try:
+                    creds = load_gcp_credentials(bq_config)
+                except Exception:
+                    logger.warning("Failed to load GCP credentials for BQ sync, using ADC")
+                    creds = None
+                bq_results = await BillingExportService.query_mtd_costs(
+                    project_id, dataset_id, table_id, credentials=creds
+                )
+                # Aggregate by date + component
+                daily_components: dict[tuple[date, str], Decimal] = {}
+                for row in bq_results:
+                    key = (row["usage_date"], row["component"])
+                    daily_components[key] = daily_components.get(key, Decimal("0")) + Decimal(str(row["net_cost"]))
+
+                for (record_date, component), amount in daily_components.items():
+                    existing_rec = await session.execute(
+                        select(CostRecord).where(
+                            CostRecord.organization_id == org_id,
+                            CostRecord.record_date == record_date,
+                            CostRecord.component == component,
+                        )
+                    )
+                    record = existing_rec.scalar_one_or_none()
+                    if record:
+                        record.cost_amount = amount
+                    else:
+                        session.add(
+                            CostRecord(
+                                organization_id=org_id,
+                                record_date=record_date,
+                                component=component,
+                                cost_amount=amount,
+                            )
+                        )
+            except Exception:
+                logger.exception("Failed to query BQ billing export, falling back to adapters")
+
+        # Today's costs from adapters (intraday bridge)
+        await CostService._sync_from_adapters(session, org_id, today, month_start)
+
+    @staticmethod
+    async def _sync_from_adapters(
+        session: AsyncSession,
+        org_id: int,
+        today: date,
+        month_start: date,
+    ) -> None:
+        """Sync today's cost data from infrastructure adapters."""
         compute_adapter = get_compute_adapter()
         cluster_metrics = await compute_adapter.get_cluster_metrics()
         node_cost_daily = Decimal("0")
@@ -168,7 +252,6 @@ class CostService:
             else:
                 compute_cost_daily += hourly * 24
 
-        # -- Storage cost (prorated daily from monthly) --
         storage_adapter = get_storage_adapter()
         storage_metrics = await storage_adapter.get_storage_metrics()
         storage_cost_monthly = Decimal(str(storage_metrics.get("total_cost_monthly_usd", 0)))
@@ -179,7 +262,6 @@ class CostService:
             days_in_month = (next_month - month_start).days
         storage_cost_daily = storage_cost_monthly / days_in_month if days_in_month > 0 else Decimal("0")
 
-        # -- Upsert today's cost records --
         components = {
             "node": node_cost_daily,
             "storage": storage_cost_daily,

@@ -23,9 +23,17 @@ interface ValidationCheck {
   status: string;
 }
 
+interface PermissionDetail {
+  permission: string;
+  granted: boolean;
+  recommended_role: string;
+}
+
 interface ValidationResult {
   passed: boolean;
   checks: ValidationCheck[];
+  recommended_roles: string[];
+  permission_details: PermissionDetail[];
 }
 
 const ORG_SLUG_RE = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/;
@@ -57,6 +65,18 @@ function zonesForRegion(region: string): string[] {
   return GCP_ZONES[region] ?? [`${region}-a`, `${region}-b`, `${region}-c`];
 }
 
+const RECOMMENDED_ROLES = [
+  { role: "roles/storage.admin", description: "Storage Admin" },
+  { role: "roles/pubsub.admin", description: "Pub/Sub Admin" },
+  { role: "roles/container.admin", description: "Kubernetes Engine Admin" },
+  { role: "roles/iam.serviceAccountUser", description: "Service Account User" },
+  { role: "roles/compute.admin", description: "Compute Admin" },
+  { role: "roles/resourcemanager.projectIamAdmin", description: "Project IAM Admin" },
+  { role: "roles/bigquery.dataEditor", description: "BigQuery Data Editor" },
+  { role: "roles/serviceusage.serviceUsageViewer", description: "Service Usage Viewer" },
+  { role: "roles/viewer", description: "Viewer" },
+];
+
 const REQUIRED_APIS = [
   { name: "cloudresourcemanager.googleapis.com", description: "Cloud Resource Manager" },
   { name: "compute.googleapis.com", description: "Compute Engine" },
@@ -70,18 +90,7 @@ const REQUIRED_APIS = [
   { name: "sqladmin.googleapis.com", description: "Cloud SQL Admin" },
   { name: "cloudbilling.googleapis.com", description: "Cloud Billing" },
   { name: "file.googleapis.com", description: "Filestore" },
-];
-
-const REQUIRED_ROLES = [
-  "roles/container.admin",
-  "roles/compute.admin",
-  "roles/iam.serviceAccountUser",
-  "roles/storage.admin",
-  "roles/pubsub.admin",
-  "roles/secretmanager.admin",
-  "roles/cloudsql.admin",
-  "roles/serviceusage.serviceUsageViewer",
-  "roles/resourcemanager.projectIamAdmin",
+  { name: "bigquery.googleapis.com", description: "BigQuery" },
 ];
 
 export default function GcpSettingsPage() {
@@ -99,7 +108,7 @@ export default function GcpSettingsPage() {
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [validating, setValidating] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [showRequirements, setShowRequirements] = useState(false);
+  const [showApis, setShowApis] = useState(false);
 
   useEffect(() => {
     api.get<GCPConfig>("/api/v1/settings/gcp").then((cfg) => {
@@ -111,6 +120,18 @@ export default function GcpSettingsPage() {
       setServiceAccountEmail(cfg.gcp_service_account_email ?? "");
     });
   }, []);
+
+  const runValidation = async () => {
+    setValidating(true);
+    try {
+      const result = await api.post<ValidationResult>("/api/v1/settings/gcp/validate");
+      setValidationResult(result);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Validation failed");
+    } finally {
+      setValidating(false);
+    }
+  };
 
   const handleSave = async () => {
     setError("");
@@ -133,27 +154,27 @@ export default function GcpSettingsPage() {
           : undefined,
         gcp_service_account_email: serviceAccountEmail || undefined,
       });
-      setMessage("GCP configuration saved");
+      setMessage("Configuration saved. Validating...");
       setValidationResult(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save GCP configuration");
-    } finally {
       setSaving(false);
+      return;
     }
+    setSaving(false);
+
+    // Auto-validate after save
+    await runValidation();
+    setMessage("");
   };
 
   const handleValidate = async () => {
     setError("");
-    setValidating(true);
-    try {
-      const result = await api.post<ValidationResult>("/api/v1/settings/gcp/validate");
-      setValidationResult(result);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Validation failed");
-    } finally {
-      setValidating(false);
-    }
+    await runValidation();
   };
+
+  const grantedCount = validationResult?.permission_details?.filter(d => d.granted).length ?? 0;
+  const totalPermissions = validationResult?.permission_details?.length ?? 0;
 
   return (
     <div className="flex h-screen">
@@ -174,6 +195,41 @@ export default function GcpSettingsPage() {
             </div>
           )}
 
+          {/* Recommended Roles (collapsible) */}
+          <details data-testid="recommended-roles" className="bg-white rounded-lg shadow max-w-2xl mb-6">
+            <summary className="px-6 py-4 cursor-pointer text-lg font-semibold select-none">
+              Recommended IAM Roles
+              <span className="ml-2 text-sm font-normal text-gray-400">({RECOMMENDED_ROLES.length} roles)</span>
+            </summary>
+            <div className="px-6 pb-6">
+              <p className="text-sm text-gray-600 mb-3">
+                Assign these roles to your service account. They cover all permissions
+                bioAF needs. How you grant them is up to you, but these roles are the
+                simplest path.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 mb-3">
+                {RECOMMENDED_ROLES.map(({ role, description }) => (
+                  <div key={role} className="flex items-center gap-2 text-xs">
+                    <code className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-800">{role}</code>
+                    <span className="text-gray-400">{description}</span>
+                  </div>
+                ))}
+              </div>
+              <details className="text-xs">
+                <summary className="text-bioaf-600 cursor-pointer font-medium">gcloud command</summary>
+                <pre className="mt-2 bg-gray-50 border rounded p-3 overflow-x-auto">
+{`SA_EMAIL="your-sa@your-project.iam.gserviceaccount.com"
+PROJECT_ID="your-project-id"
+
+${RECOMMENDED_ROLES.map(({ role }) => `gcloud projects add-iam-policy-binding $PROJECT_ID \\
+  --member="serviceAccount:$SA_EMAIL" \\
+  --role="${role}"`).join("\n\n")}`}
+                </pre>
+              </details>
+            </div>
+          </details>
+
+          {/* Configuration form */}
           <div className="bg-white rounded-lg shadow p-6 max-w-2xl space-y-5">
             {/* GCP Project ID */}
             <div>
@@ -312,28 +368,25 @@ export default function GcpSettingsPage() {
               <button
                 data-testid="save-gcp-config-btn"
                 onClick={handleSave}
-                disabled={saving}
+                disabled={saving || validating}
                 className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
               >
-                {saving ? "Saving..." : "Save Configuration"}
+                {saving ? "Saving..." : validating ? "Validating..." : "Save & Validate"}
               </button>
               <button
                 data-testid="validate-gcp-btn"
                 onClick={handleValidate}
-                disabled={validating}
+                disabled={validating || saving}
                 className="px-4 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50 disabled:opacity-50"
               >
-                {validating ? "Validating..." : "Validate Connection"}
+                {validating ? "Validating..." : "Re-validate"}
               </button>
             </div>
           </div>
 
           {/* Validation results */}
           {validationResult && (
-            <div
-              data-testid="validation-results"
-              className="mt-6 bg-white rounded-lg shadow p-6 max-w-2xl"
-            >
+            <div data-testid="validation-results" className="mt-6 bg-white rounded-lg shadow p-6 max-w-2xl">
               <h2 className="text-lg font-semibold mb-4">
                 Validation {validationResult.passed ? (
                   <span className="text-green-600">Passed</span>
@@ -341,7 +394,10 @@ export default function GcpSettingsPage() {
                   <span className="text-red-600">Failed</span>
                 )}
               </h2>
-              <ul className="space-y-2">
+
+              {/* System checks */}
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">System Checks</h3>
+              <ul className="space-y-2 mb-5">
                 {validationResult.checks.map((check) => (
                   <li key={check.name} className="flex items-start gap-2 text-sm">
                     <span className={`mt-0.5 ${check.passed ? "text-green-600" : check.status === "skipped" ? "text-gray-400" : "text-red-600"}`}>
@@ -354,90 +410,68 @@ export default function GcpSettingsPage() {
                   </li>
                 ))}
               </ul>
+
+              {/* Per-permission details */}
+              {validationResult.permission_details && validationResult.permission_details.length > 0 && (
+                <div data-testid="permission-details">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                    Permissions ({grantedCount}/{totalPermissions})
+                  </h3>
+                  <p className="text-xs text-gray-500 mb-2">
+                    These are the specific permissions bioAF needs. The recommended roles above
+                    would grant all of them.
+                  </p>
+                  <ul className="space-y-1">
+                    {validationResult.permission_details.map((detail) => (
+                      <li key={detail.permission} className="flex items-center gap-2 text-xs">
+                        <span className={detail.granted ? "text-green-600" : "text-red-600"}>
+                          {detail.granted ? "\u2713" : "\u2717"}
+                        </span>
+                        <code className={`px-1 py-0.5 rounded ${detail.granted ? "bg-green-50 text-green-800" : "bg-red-50 text-red-800"}`}>
+                          {detail.permission}
+                        </code>
+                        {!detail.granted && (
+                          <span className="text-gray-400">
+                            (needs {detail.recommended_role})
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
 
-          {/* Requirements guidance */}
+          {/* Required APIs (collapsible) */}
           <div className="mt-6 max-w-2xl">
             <button
               data-testid="toggle-requirements-btn"
-              onClick={() => setShowRequirements(!showRequirements)}
+              onClick={() => setShowApis(!showApis)}
               className="text-sm text-bioaf-600 hover:text-bioaf-700 font-medium"
             >
-              {showRequirements ? "Hide" : "Show"} GCP project requirements
+              {showApis ? "Hide" : "Show"} required GCP APIs
             </button>
 
-            {showRequirements && (
-              <div data-testid="requirements-section" className="mt-3 bg-white rounded-lg shadow p-6 space-y-4">
-                <h2 className="text-lg font-semibold">GCP Project Requirements</h2>
-
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-2">Required APIs</h3>
-                  <p className="text-xs text-gray-500 mb-2">
-                    Enable these APIs in the GCP Console under APIs &amp; Services, or run:
-                  </p>
-                  <pre className="bg-gray-50 border rounded p-3 text-xs overflow-x-auto mb-2">
+            {showApis && (
+              <div data-testid="requirements-section" className="mt-3 bg-white rounded-lg shadow p-6">
+                <h2 className="text-lg font-semibold mb-2">Required GCP APIs</h2>
+                <p className="text-xs text-gray-500 mb-2">
+                  Enable these APIs in the GCP Console under APIs &amp; Services, or run:
+                </p>
+                <pre className="bg-gray-50 border rounded p-3 text-xs overflow-x-auto mb-2">
 {`gcloud services enable \\
   ${REQUIRED_APIS.map(a => a.name).join(" \\\n  ")} \\
   --project=YOUR_PROJECT_ID`}
-                  </pre>
-                  <ul className="text-xs text-gray-600 space-y-1">
-                    {REQUIRED_APIS.map((a) => (
-                      <li key={a.name}>
-                        <code className="bg-gray-100 px-1 rounded">{a.name}</code>
-                        <span className="ml-1 text-gray-400">-- {a.description}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-2">Required IAM Roles</h3>
-                  <p className="text-xs text-gray-500 mb-2">
-                    The service account used by bioAF needs the following roles. Grant them with:
-                  </p>
-                  <pre className="bg-gray-50 border rounded p-3 text-xs overflow-x-auto mb-2">
-{`SA_EMAIL="your-sa@your-project.iam.gserviceaccount.com"
-PROJECT_ID="your-project-id"
-
-${REQUIRED_ROLES.map(r => `gcloud projects add-iam-policy-binding $PROJECT_ID \\
-  --member="serviceAccount:$SA_EMAIL" \\
-  --role="${r}"`).join("\n\n")}`}
-                  </pre>
-                  <ul className="text-xs text-gray-600 space-y-1">
-                    {REQUIRED_ROLES.map((r) => (
-                      <li key={r}>
-                        <code className="bg-gray-100 px-1 rounded">{r}</code>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-2">VM Default Credentials with Impersonation</h3>
-                  <p className="text-xs text-gray-500">
-                    If your VM default service account does not have the required scopes or roles,
-                    create a dedicated service account with the roles above, then set its email in
-                    the &quot;Service Account Email&quot; field. The VM default SA will impersonate it.
-                    The VM SA needs the <code className="bg-gray-100 px-1 rounded">roles/iam.serviceAccountTokenCreator</code> role
-                    on the target service account.
-                  </p>
-                  <pre className="bg-gray-50 border rounded p-3 text-xs overflow-x-auto mt-2">
-{`# Create dedicated SA
-gcloud iam service-accounts create bioaf-sa \\
-  --display-name="bioAF Service Account" \\
-  --project=YOUR_PROJECT_ID
-
-# Grant required roles to the new SA
-# (use the IAM role commands above)
-
-# Allow VM default SA to impersonate it
-gcloud iam service-accounts add-iam-policy-binding \\
-  bioaf-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com \\
-  --member="serviceAccount:VM_DEFAULT_SA@YOUR_PROJECT_ID.iam.gserviceaccount.com" \\
-  --role="roles/iam.serviceAccountTokenCreator"`}
-                  </pre>
-                </div>
+                </pre>
+                <ul className="text-xs text-gray-600 space-y-1">
+                  {REQUIRED_APIS.map((a) => (
+                    <li key={a.name}>
+                      <code className="bg-gray-100 px-1 rounded">{a.name}</code>
+                      <span className="ml-1 text-gray-400">-- {a.description}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
           </div>

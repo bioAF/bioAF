@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import * as dagre from "@dagrejs/dagre";
+import dagre from "@dagrejs/dagre";
 import type { ProvenanceDAG as ProvenanceDAGType, ProvenanceNode, ProvenanceEdge } from "@/lib/types";
 
 interface Props {

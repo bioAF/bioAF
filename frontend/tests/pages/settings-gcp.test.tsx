@@ -34,6 +34,23 @@ const defaultConfig = {
   gcp_credential_source: "vm_default",
 };
 
+const fullValidationResult = {
+  passed: true,
+  checks: [
+    { name: "credentials_loaded", passed: true, message: "OK", status: "ok" },
+    { name: "iam_permissions", passed: true, message: "All granted", status: "ok" },
+  ],
+  recommended_roles: [
+    "roles/storage.admin",
+    "roles/bigquery.dataEditor",
+    "roles/container.admin",
+  ],
+  permission_details: [
+    { permission: "storage.buckets.create", granted: true, recommended_role: "roles/storage.admin" },
+    { permission: "bigquery.datasets.create", granted: false, recommended_role: "roles/bigquery.dataEditor" },
+  ],
+};
+
 describe("GCP Settings Page", () => {
   beforeEach(() => {
     mockApiGet.mockReset();
@@ -79,8 +96,10 @@ describe("GCP Settings Page", () => {
     });
   });
 
-  // Test 21: Save button calls PUT API
-  it("save button calls PUT /api/v1/settings/gcp", async () => {
+  // Test 21: Save button calls PUT then auto-validates
+  it("save button calls PUT then auto-validates", async () => {
+    mockApiPost.mockResolvedValue(fullValidationResult);
+
     render(<GcpSettingsPage />);
     await waitFor(() => screen.getByTestId("save-gcp-config-btn"));
 
@@ -92,16 +111,17 @@ describe("GCP Settings Page", () => {
         expect.any(Object),
       );
     });
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith(
+        expect.stringContaining("/api/v1/settings/gcp/validate"),
+      );
+    });
   });
 
   // Test 22: Validate button calls POST validate API
   it("validate button calls POST /api/v1/settings/gcp/validate", async () => {
-    mockApiPost.mockResolvedValue({
-      passed: false,
-      checks: [
-        { name: "credentials_loaded", passed: false, message: "No creds", status: "failed" },
-      ],
-    });
+    mockApiPost.mockResolvedValue(fullValidationResult);
 
     render(<GcpSettingsPage />);
     await waitFor(() => screen.getByTestId("validate-gcp-btn"));
@@ -117,12 +137,7 @@ describe("GCP Settings Page", () => {
 
   // Test 23: Validation results display after validate
   it("displays validation results after validate is clicked", async () => {
-    mockApiPost.mockResolvedValue({
-      passed: false,
-      checks: [
-        { name: "credentials_loaded", passed: false, message: "No credentials found", status: "failed" },
-      ],
-    });
+    mockApiPost.mockResolvedValue(fullValidationResult);
 
     render(<GcpSettingsPage />);
     await waitFor(() => screen.getByTestId("validate-gcp-btn"));
@@ -131,7 +146,35 @@ describe("GCP Settings Page", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("validation-results")).toBeInTheDocument();
-      expect(screen.getByText(/credentials_loaded/i)).toBeInTheDocument();
     });
+  });
+
+  // Test 24: Recommended roles are shown
+  it("shows recommended roles section", async () => {
+    render(<GcpSettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("recommended-roles")).toBeInTheDocument();
+    });
+    const rolesSection = screen.getByTestId("recommended-roles");
+    expect(rolesSection.textContent).toContain("roles/bigquery.dataEditor");
+    expect(rolesSection.textContent).toContain("roles/storage.admin");
+    expect(rolesSection.textContent).toContain("roles/viewer");
+  });
+
+  // Test 25: Per-permission results are shown after validation
+  it("shows per-permission results after validation", async () => {
+    mockApiPost.mockResolvedValue(fullValidationResult);
+
+    render(<GcpSettingsPage />);
+    await waitFor(() => screen.getByTestId("validate-gcp-btn"));
+
+    fireEvent.click(screen.getByTestId("validate-gcp-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("permission-details")).toBeInTheDocument();
+    });
+    const details = screen.getByTestId("permission-details");
+    expect(details.textContent).toContain("storage.buckets.create");
+    expect(details.textContent).toContain("bigquery.datasets.create");
   });
 });

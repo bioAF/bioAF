@@ -23,7 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_role
-from app.database import get_session
+from app.database import async_session_factory, get_session
 from app.services.stack_deployment import (
     StackStatus,
     deploy_stack,
@@ -248,14 +248,15 @@ async def stack_deploy_background_endpoint(
         raise HTTPException(status_code=400, detail="Terraform has not been initialized")
 
     async def _run_deploy():
-        """Drain the deploy_stack generator in the background."""
-        try:
-            async for _event in deploy_stack(session, stack_type, user_id, org_id=org_id):
-                pass  # Events are consumed; terraform runs as a subprocess
-        except Exception:
-            logger.exception("Background deploy failed")
-        finally:
-            await session.commit()
+        """Drain the deploy_stack generator in the background with its own session."""
+        async with async_session_factory() as bg_session:
+            try:
+                async for _event in deploy_stack(bg_session, stack_type, user_id, org_id=org_id):
+                    pass  # Events are consumed; terraform runs as a subprocess
+                await bg_session.commit()
+            except Exception:
+                logger.exception("Background deploy failed")
+                await bg_session.rollback()
 
     asyncio.get_event_loop().create_task(_run_deploy())
 

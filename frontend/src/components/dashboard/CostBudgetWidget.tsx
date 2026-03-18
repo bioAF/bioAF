@@ -30,6 +30,7 @@ const COMPONENT_LABELS: Record<string, string> = {
   node: "bioAF Node",
   storage: "Storage",
   compute: "Compute",
+  other: "Other Services",
 };
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
@@ -110,9 +111,14 @@ export function CostBudgetWidget() {
       {error && (
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
-          <button onClick={() => window.location.reload()} className="ml-2 text-bioaf-600 hover:underline">
-            Retry
-          </button>
+          <div className="mt-2 flex gap-2">
+            <button onClick={() => window.location.reload()} className="text-bioaf-600 hover:underline">
+              Retry
+            </button>
+            <Link href="/infrastructure/cost-center" className="text-bioaf-600 hover:underline">
+              Set up billing
+            </Link>
+          </div>
         </div>
       )}
       {!loading && !error && data && (

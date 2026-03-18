@@ -63,9 +63,16 @@ async def deploy_storage_module(session: AsyncSession, user_id: int) -> dict:
     if run.status != "awaiting_confirmation":
         return {"status": "failed", "message": run.error_message or "Plan failed"}
 
+    # Fully consume the generator to avoid closing it mid-iteration, which
+    # would trigger GeneratorExit while asyncpg still has an operation in
+    # flight (run_apply flushes progress updates internally).
+    error_message: str | None = None
     async for event in TerraformExecutor.run_apply(session, run.id, user_id):
         if event.event_type == "apply_error":
-            return {"status": "failed", "message": event.message}
+            error_message = event.message
+
+    if error_message is not None:
+        return {"status": "failed", "message": error_message}
 
     await session.commit()
     return {"status": "completed"}

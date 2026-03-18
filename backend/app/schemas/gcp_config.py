@@ -66,6 +66,14 @@ class GCPValidationCheck(BaseModel):
         return self
 
 
+class PermissionDetail(BaseModel):
+    permission: str
+    granted: bool
+    recommended_role: str
+
+
 class GCPValidationResult(BaseModel):
     passed: bool
     checks: list[GCPValidationCheck]
+    recommended_roles: list[str] = []
+    permission_details: list[PermissionDetail] = []

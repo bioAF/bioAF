@@ -6,6 +6,14 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { BillingSetupModal } from "@/components/infrastructure/BillingSetupModal";
+
+interface BillingExportStatus {
+  configured: boolean;
+  dataset_id: string;
+  console_url: string;
+  table_id: string;
+}
 
 interface DailyCost {
   date: string;
@@ -48,6 +56,7 @@ const COMPONENT_LABELS: Record<string, string> = {
   node: "bioAF Node",
   storage: "Storage",
   compute: "Compute",
+  other: "Other Services",
 };
 
 export default function InfraCostCenterPage() {
@@ -59,6 +68,8 @@ export default function InfraCostCenterPage() {
   const [currencyInput, setCurrencyInput] = useState("USD");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [billingExport, setBillingExport] = useState<BillingExportStatus | null>(null);
+  const [showBillingSetupModal, setShowBillingSetupModal] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/login"); return; }
@@ -77,9 +88,16 @@ export default function InfraCostCenterPage() {
         setCurrencyInput(b.currency || "USD");
       } catch {
         // ignore
-      } finally {
-        setLoading(false);
       }
+      try {
+        const be = await api.get<BillingExportStatus>(
+          "/api/v1/infrastructure/billing-export/status",
+        );
+        setBillingExport(be);
+      } catch {
+        // ignore -- endpoint may not exist in older versions
+      }
+      setLoading(false);
     };
     load();
   }, [router]);
@@ -121,6 +139,65 @@ export default function InfraCostCenterPage() {
         <Header />
         <main className="flex-1 overflow-y-auto p-6">
           <h1 className="text-2xl font-bold text-gray-900 mb-6">Cost Center</h1>
+
+          {billingExport && !billingExport.configured && !billingExport.dataset_id && (
+            <div className="mb-4 p-4 rounded-lg border border-amber-200 bg-amber-50 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-amber-800">Cost data is estimated</p>
+                <p className="text-xs text-amber-600 mt-0.5">
+                  Set up BigQuery billing export for accurate, invoice-matched costs.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowBillingSetupModal(true)}
+                className="px-3 py-1.5 bg-amber-600 text-white rounded text-sm font-medium hover:bg-amber-700 whitespace-nowrap"
+              >
+                Set Up Billing Export
+              </button>
+            </div>
+          )}
+
+          {billingExport && !billingExport.configured && billingExport.dataset_id && (
+            <div className="mb-4 p-4 rounded-lg border border-blue-200 bg-blue-50 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-blue-800">Waiting for billing export data</p>
+                <p className="text-xs text-blue-600 mt-0.5">
+                  Dataset created. Data typically appears within 24 hours after enabling export in the Google Cloud Console.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowBillingSetupModal(true)}
+                className="px-3 py-1.5 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 whitespace-nowrap"
+              >
+                Check Status
+              </button>
+            </div>
+          )}
+
+          {billingExport?.configured && (
+            <div className="mb-4 flex items-center gap-2 text-xs text-green-700">
+              <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
+              Using BigQuery billing export
+            </div>
+          )}
+
+          {showBillingSetupModal && (
+            <BillingSetupModal
+              datasetExists={!!billingExport?.dataset_id}
+              consoleUrl={billingExport?.console_url}
+              onComplete={() => {
+                setShowBillingSetupModal(false);
+                // Refresh data
+                api.get<BillingExportStatus>("/api/v1/infrastructure/billing-export/status")
+                  .then(setBillingExport)
+                  .catch(() => {});
+                api.get<CostSummary>("/api/costs/summary")
+                  .then(setSummary)
+                  .catch(() => {});
+              }}
+              onClose={() => setShowBillingSetupModal(false)}
+            />
+          )}
 
           {message && (
             <div className="mb-4 p-3 rounded bg-green-50 text-green-700 text-sm">{message}</div>

@@ -19,13 +19,36 @@ from google.cloud import container_v1, resourcemanager_v3, storage
 from google.cloud import service_usage_v1
 from google.oauth2 import service_account
 
-from app.schemas.gcp_config import GCPValidationCheck, GCPValidationResult
+from app.schemas.gcp_config import GCPValidationCheck, GCPValidationResult, PermissionDetail
 
 # Aliases for patching in tests
 google_auth_default = _google_auth.default
 impersonated_credentials = _impersonated_credentials
 
 _GCP_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
+
+# Maps each required IAM permission to the role we recommend for granting it.
+_PERMISSION_ROLE_MAP: dict[str, str] = {
+    "storage.buckets.create": "roles/storage.admin",
+    "pubsub.topics.create": "roles/pubsub.admin",
+    "pubsub.topics.getIamPolicy": "roles/pubsub.admin",
+    "pubsub.topics.setIamPolicy": "roles/pubsub.admin",
+    "container.clusters.create": "roles/container.admin",
+    "iam.serviceAccounts.actAs": "roles/iam.serviceAccountUser",
+    "compute.instances.create": "roles/compute.admin",
+    "resourcemanager.projects.getIamPolicy": "roles/resourcemanager.projectIamAdmin",
+    "resourcemanager.projects.setIamPolicy": "roles/resourcemanager.projectIamAdmin",
+    "bigquery.datasets.create": "roles/bigquery.dataEditor",
+    "bigquery.jobs.create": "roles/bigquery.dataEditor",
+}
+
+# Deduplicated, stable-order list of recommended roles.
+# Start with roles derived from the permission map, then append roles that
+# are needed for validation probes (project access, API listing) but are not
+# tied to a specific testIamPermissions entry.
+RECOMMENDED_ROLES: list[str] = list(
+    dict.fromkeys([*_PERMISSION_ROLE_MAP.values(), "roles/serviceusage.serviceUsageViewer", "roles/viewer"])
+)
 
 _SKIP_CREDS = "Skipped: credentials failed to load"
 _SKIP_PROJECT = "Skipped: project not accessible"
@@ -167,6 +190,7 @@ def validate_gcp_credentials(
         "secretmanager.googleapis.com",
         "compute.googleapis.com",
         "pubsub.googleapis.com",
+        "bigquery.googleapis.com",
     ]
     try:
         su_client = service_usage_v1.ServiceUsageClient(credentials=creds)
@@ -207,17 +231,8 @@ def validate_gcp_credentials(
     # Check 6: IAM permissions -- verify the service account has the
     # required project-level permissions via testIamPermissions
     # ------------------------------------------------------------------
-    required_permissions = [
-        "storage.buckets.create",
-        "pubsub.topics.create",
-        "pubsub.topics.getIamPolicy",
-        "pubsub.topics.setIamPolicy",
-        "container.clusters.create",
-        "iam.serviceAccounts.actAs",
-        "compute.instances.create",
-        "resourcemanager.projects.getIamPolicy",
-        "resourcemanager.projects.setIamPolicy",
-    ]
+    required_permissions = list(_PERMISSION_ROLE_MAP.keys())
+    permission_details: list[PermissionDetail] = []
     try:
         rm_client = resourcemanager_v3.ProjectsClient(credentials=creds)
         resp = rm_client.test_iam_permissions(
@@ -226,6 +241,16 @@ def validate_gcp_credentials(
         )
         granted = set(resp.permissions)
         missing_perms = [p for p in required_permissions if p not in granted]
+
+        for perm in required_permissions:
+            permission_details.append(
+                PermissionDetail(
+                    permission=perm,
+                    granted=perm in granted,
+                    recommended_role=_PERMISSION_ROLE_MAP[perm],
+                )
+            )
+
         if missing_perms:
             checks.append(
                 GCPValidationCheck(
@@ -263,4 +288,9 @@ def validate_gcp_credentials(
         checks.append(_skipped("storage_access", "Skipped: Storage API not enabled"))
 
     all_passed = all(c.passed for c in checks)
-    return GCPValidationResult(passed=all_passed, checks=checks)
+    return GCPValidationResult(
+        passed=all_passed,
+        checks=checks,
+        recommended_roles=RECOMMENDED_ROLES,
+        permission_details=permission_details,
+    )

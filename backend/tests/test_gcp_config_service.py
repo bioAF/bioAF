@@ -49,6 +49,7 @@ ALL_REQUIRED_APIS = [
     "secretmanager.googleapis.com",
     "compute.googleapis.com",
     "pubsub.googleapis.com",
+    "bigquery.googleapis.com",
 ]
 
 ALL_REQUIRED_PERMISSIONS = [
@@ -61,6 +62,8 @@ ALL_REQUIRED_PERMISSIONS = [
     "compute.instances.create",
     "resourcemanager.projects.getIamPolicy",
     "resourcemanager.projects.setIamPolicy",
+    "bigquery.datasets.create",
+    "bigquery.jobs.create",
 ]
 
 
@@ -484,3 +487,102 @@ def test_iam_permissions_check_handles_api_error(mock_sa, mock_rm, mock_storage,
     iam_check = next(c for c in result.checks if c.name == "iam_permissions")
     assert iam_check.passed is False
     assert result.passed is False
+
+
+# ---------------------------------------------------------------------------
+# Test 15: Validation includes per-permission details
+# ---------------------------------------------------------------------------
+@patch("app.services.gcp_config.service_usage_v1")
+@patch("app.services.gcp_config.container_v1")
+@patch("app.services.gcp_config.storage")
+@patch("app.services.gcp_config.resourcemanager_v3")
+@patch("app.services.gcp_config.service_account")
+def test_result_includes_permission_details(mock_sa, mock_rm, mock_storage, mock_gke, mock_su):
+    """Validation result includes per-permission granted status and recommended role."""
+    mock_creds = MagicMock()
+    mock_sa.Credentials.from_service_account_info.return_value = mock_creds
+    mock_rm.ProjectsClient.return_value.get_project.return_value = MagicMock()
+
+    # Grant all except bigquery permissions
+    granted = [p for p in ALL_REQUIRED_PERMISSIONS if not p.startswith("bigquery.")]
+    mock_rm.ProjectsClient.return_value.test_iam_permissions.return_value = _mock_iam_response(granted)
+    mock_storage.Client.return_value.list_buckets.return_value = []
+    mock_gke.ClusterManagerClient.return_value.list_clusters.return_value = MagicMock()
+    mock_su.ServiceUsageClient.return_value.list_services.return_value = _mock_enabled_services(ALL_REQUIRED_APIS)
+
+    result = validate_gcp_credentials(
+        project_id="my-project",
+        credential_source="service_account_key",
+        service_account_key=VALID_SA_KEY,
+    )
+
+    assert len(result.permission_details) == len(ALL_REQUIRED_PERMISSIONS)
+    bq_detail = next(d for d in result.permission_details if d.permission == "bigquery.datasets.create")
+    assert bq_detail.granted is False
+    assert "bigquery" in bq_detail.recommended_role
+
+    storage_detail = next(d for d in result.permission_details if d.permission == "storage.buckets.create")
+    assert storage_detail.granted is True
+
+
+# ---------------------------------------------------------------------------
+# Test 16: Validation includes recommended roles
+# ---------------------------------------------------------------------------
+@patch("app.services.gcp_config.service_usage_v1")
+@patch("app.services.gcp_config.container_v1")
+@patch("app.services.gcp_config.storage")
+@patch("app.services.gcp_config.resourcemanager_v3")
+@patch("app.services.gcp_config.service_account")
+def test_result_includes_recommended_roles(mock_sa, mock_rm, mock_storage, mock_gke, mock_su):
+    """Validation result includes the full list of recommended IAM roles."""
+    mock_creds = MagicMock()
+    mock_sa.Credentials.from_service_account_info.return_value = mock_creds
+    mock_rm.ProjectsClient.return_value.get_project.return_value = MagicMock()
+    mock_rm.ProjectsClient.return_value.test_iam_permissions.return_value = _mock_iam_response(ALL_REQUIRED_PERMISSIONS)
+    mock_storage.Client.return_value.list_buckets.return_value = []
+    mock_gke.ClusterManagerClient.return_value.list_clusters.return_value = MagicMock()
+    mock_su.ServiceUsageClient.return_value.list_services.return_value = _mock_enabled_services(ALL_REQUIRED_APIS)
+
+    result = validate_gcp_credentials(
+        project_id="my-project",
+        credential_source="service_account_key",
+        service_account_key=VALID_SA_KEY,
+    )
+
+    assert len(result.recommended_roles) > 0
+    assert "roles/bigquery.dataEditor" in result.recommended_roles
+    assert "roles/storage.admin" in result.recommended_roles
+    assert "roles/viewer" in result.recommended_roles
+    assert "roles/serviceusage.serviceUsageViewer" in result.recommended_roles
+
+
+# ---------------------------------------------------------------------------
+# Test 17: bigquery.googleapis.com is in required APIs
+# ---------------------------------------------------------------------------
+@patch("app.services.gcp_config.service_usage_v1")
+@patch("app.services.gcp_config.container_v1")
+@patch("app.services.gcp_config.storage")
+@patch("app.services.gcp_config.resourcemanager_v3")
+@patch("app.services.gcp_config.service_account")
+def test_missing_bigquery_api_reported(mock_sa, mock_rm, mock_storage, mock_gke, mock_su):
+    """When bigquery API is not enabled, apis_enabled check reports it."""
+    mock_creds = MagicMock()
+    mock_sa.Credentials.from_service_account_info.return_value = mock_creds
+    mock_rm.ProjectsClient.return_value.get_project.return_value = MagicMock()
+    mock_rm.ProjectsClient.return_value.test_iam_permissions.return_value = _mock_iam_response(ALL_REQUIRED_PERMISSIONS)
+    mock_storage.Client.return_value.list_buckets.return_value = []
+    mock_gke.ClusterManagerClient.return_value.list_clusters.return_value = MagicMock()
+
+    # All APIs except bigquery
+    apis_without_bq = [a for a in ALL_REQUIRED_APIS if a != "bigquery.googleapis.com"]
+    mock_su.ServiceUsageClient.return_value.list_services.return_value = _mock_enabled_services(apis_without_bq)
+
+    result = validate_gcp_credentials(
+        project_id="my-project",
+        credential_source="service_account_key",
+        service_account_key=VALID_SA_KEY,
+    )
+
+    apis_check = next(c for c in result.checks if c.name == "apis_enabled")
+    assert apis_check.passed is False
+    assert "bigquery.googleapis.com" in apis_check.message

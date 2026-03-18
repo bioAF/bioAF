@@ -1117,3 +1117,37 @@ async def test_abandon_run_rejects_nonexistent_run(session):
 
     with pytest.raises(ValueError, match="not found"):
         await TerraformExecutor.abandon_run(session, 99999, user_id)
+
+
+@pytest.mark.asyncio
+async def test_delete_gcs_lock_file_uses_storage_client():
+    """_delete_gcs_lock_file uses google-cloud-storage, not gsutil."""
+    mock_blob = MagicMock()
+    mock_bucket = MagicMock()
+    mock_bucket.blob.return_value = mock_blob
+    mock_client = MagicMock()
+    mock_client.bucket.return_value = mock_bucket
+
+    with patch("app.services.terraform_executor.storage.Client", return_value=mock_client):
+        await TerraformExecutor._delete_gcs_lock_file("my-bucket", "compute/default.tflock")
+
+    mock_client.bucket.assert_called_once_with("my-bucket")
+    mock_bucket.blob.assert_called_once_with("compute/default.tflock")
+    mock_blob.delete.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_gcs_lock_file_logs_not_found():
+    """_delete_gcs_lock_file handles NotFound gracefully."""
+    from google.api_core.exceptions import NotFound
+
+    mock_blob = MagicMock()
+    mock_blob.delete.side_effect = NotFound("not found")
+    mock_bucket = MagicMock()
+    mock_bucket.blob.return_value = mock_blob
+    mock_client = MagicMock()
+    mock_client.bucket.return_value = mock_bucket
+
+    with patch("app.services.terraform_executor.storage.Client", return_value=mock_client):
+        # Should not raise
+        await TerraformExecutor._delete_gcs_lock_file("my-bucket", "compute/default.tflock")

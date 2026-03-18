@@ -1,8 +1,9 @@
-"""GCP credential injection helper for Terraform subprocess calls.
+"""GCP credential helpers.
 
-Reads GCP configuration from a platform_config dict and produces:
-- A dict of environment variables to pass to subprocess calls
-- An async cleanup callable that removes any temporary files
+Provides:
+- ``GCPCredentialInjector``: builds subprocess env vars for Terraform
+- ``load_gcp_credentials``: returns a google-auth Credentials object for
+  use with Python GCP client libraries (BigQuery, Storage, etc.)
 
 Supports two credential sources:
 - vm_default: uses the VM's attached service account via ADC
@@ -12,10 +13,45 @@ Supports two credential sources:
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Callable, Coroutine
+from typing import TYPE_CHECKING, Any, Callable, Coroutine
+
+import google.auth as _google_auth
+from google.auth import impersonated_credentials as _impersonated_credentials
+from google.oauth2 import service_account
+
+if TYPE_CHECKING:
+    from google.auth.credentials import Credentials
+
+_GCP_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
+
+
+def load_gcp_credentials(config: dict[str, Any]) -> "Credentials":
+    """Load GCP credentials from a platform_config dict.
+
+    Returns a Credentials object with full cloud-platform scope, suitable
+    for passing to any GCP Python client (BigQuery, Storage, etc.).
+    """
+    credential_source = config.get("gcp_credential_source", "vm_default")
+    sa_email = config.get("gcp_service_account_email", "")
+
+    if credential_source == "service_account_key":
+        key_json = config.get("gcp_service_account_key", "")
+        key_data = json.loads(key_json)
+        return service_account.Credentials.from_service_account_info(key_data, scopes=_GCP_SCOPES)
+
+    # vm_default: use ADC, optionally impersonating a target SA
+    source_creds, _ = _google_auth.default(scopes=_GCP_SCOPES)
+    if sa_email:
+        return _impersonated_credentials.Credentials(
+            source_credentials=source_creds,
+            target_principal=sa_email,
+            target_scopes=_GCP_SCOPES,
+        )
+    return source_creds
 
 
 class GCPCredentialInjector:
