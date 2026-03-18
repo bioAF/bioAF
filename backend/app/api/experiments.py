@@ -396,6 +396,57 @@ async def create_batch(
     )
 
 
+@router.get("/{experiment_id}/files")
+async def list_experiment_files(
+    experiment_id: int,
+    request: Request,
+    page: int = 1,
+    page_size: int = 25,
+    session: AsyncSession = Depends(get_session),
+):
+    current_user = request.state.current_user
+    org_id = int(current_user["org_id"])
+
+    experiment = await ExperimentService.get_experiment(session, experiment_id, org_id)
+    if not experiment:
+        raise HTTPException(404, "Experiment not found")
+
+    from app.schemas.file import FileListResponse, FileResponse
+    from app.schemas.experiment import UserSummary
+    from app.services.file_service import FileService
+
+    files, total = await FileService.list_files(
+        session,
+        org_id,
+        experiment_id=experiment_id,
+        page=page,
+        page_size=page_size,
+    )
+    return FileListResponse(
+        files=[
+            FileResponse(
+                id=f.id,
+                filename=f.filename,
+                gcs_uri=f.gcs_uri,
+                size_bytes=f.size_bytes,
+                md5_checksum=f.md5_checksum,
+                file_type=f.file_type,
+                tags=f.tags_json if isinstance(f.tags_json, list) else [],
+                uploader=UserSummary(id=f.uploader.id, name=f.uploader.name, email=f.uploader.email)
+                if f.uploader
+                else None,
+                experiment_id=f.experiment_id,
+                upload_timestamp=f.upload_timestamp,
+                created_at=f.created_at,
+            )
+            for f in files
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
 @router.get("/{experiment_id}/audit", response_model=AuditLogResponse)
 async def get_experiment_audit(
     experiment_id: int,

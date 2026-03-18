@@ -71,6 +71,10 @@ class FileService:
             query = query.where(File.file_type == file_type)
             count_query = count_query.where(File.file_type == file_type)
 
+        if experiment_id is not None:
+            query = query.where(File.experiment_id == experiment_id)
+            count_query = count_query.where(File.experiment_id == experiment_id)
+
         total_result = await session.execute(count_query)
         total = total_result.scalar() or 0
 

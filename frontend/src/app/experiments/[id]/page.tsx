@@ -36,9 +36,11 @@ import type {
   CellxgenePublicationResponse,
   PlotArchiveResponse,
   PlotArchiveListResponse,
+  FileResponse,
+  FileListResponse,
 } from "@/lib/types";
 
-type Tab = "overview" | "samples" | "batches" | "analysis" | "pipelines" | "results" | "audit";
+type Tab = "overview" | "samples" | "batches" | "files" | "analysis" | "pipelines" | "results" | "audit";
 
 export default function ExperimentDetailPage() {
   const router = useRouter();
@@ -55,6 +57,8 @@ export default function ExperimentDetailPage() {
 
   const [notebookSessions, setNotebookSessions] = useState<NotebookSession[]>([]);
   const [pipelineRuns, setPipelineRuns] = useState<PipelineRun[]>([]);
+  const [experimentFiles, setExperimentFiles] = useState<FileResponse[]>([]);
+  const [filesTotalCount, setFilesTotalCount] = useState(0);
 
   const [showGeoExport, setShowGeoExport] = useState(false);
   const [editingOverview, setEditingOverview] = useState(false);
@@ -99,6 +103,7 @@ export default function ExperimentDetailPage() {
   useEffect(() => {
     if (activeTab === "samples") loadSamples();
     if (activeTab === "batches") loadBatches();
+    if (activeTab === "files") loadFiles();
     if (activeTab === "analysis") loadNotebookSessions();
     if (activeTab === "pipelines") loadPipelineRuns();
     if (activeTab === "audit") loadAudit();
@@ -127,6 +132,14 @@ export default function ExperimentDetailPage() {
     try {
       const data = await api.get<Batch[]>(`/api/experiments/${id}/batches`);
       setBatches(data);
+    } catch {}
+  }
+
+  async function loadFiles() {
+    try {
+      const data = await api.get<FileListResponse>(`/api/experiments/${id}/files`);
+      setExperimentFiles(data.files);
+      setFilesTotalCount(data.total);
     } catch {}
   }
 
@@ -363,6 +376,7 @@ export default function ExperimentDetailPage() {
     { key: "overview", label: "Overview" },
     { key: "samples", label: `Samples (${experiment.sample_count})` },
     { key: "batches", label: `Batches (${experiment.batch_count})` },
+    { key: "files", label: "Files" },
     { key: "analysis", label: "Analysis" },
     { key: "pipelines", label: "Pipeline Runs" },
     { key: "results", label: "Results" },
@@ -839,6 +853,48 @@ export default function ExperimentDetailPage() {
                   <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">No batches yet</div>
                 )}
               </div>
+            </div>
+          )}
+
+          {activeTab === "files" && (
+            <div>
+              <h2 className="text-lg font-semibold mb-4">Files ({filesTotalCount})</h2>
+              {experimentFiles.length === 0 ? (
+                <p className="text-gray-400 text-sm py-8 text-center">
+                  No files associated with this experiment yet
+                </p>
+              ) : (
+                <div className="bg-white rounded-lg shadow overflow-hidden">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Filename</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Size</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Uploaded</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Uploader</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {experimentFiles.map((f) => (
+                        <tr key={f.id}>
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">{f.filename}</td>
+                          <td className="px-4 py-3 text-sm text-gray-500">{f.file_type}</td>
+                          <td className="px-4 py-3 text-sm text-gray-500">
+                            {f.size_bytes != null ? `${(f.size_bytes / 1024 / 1024).toFixed(1)} MB` : "--"}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-500">
+                            {new Date(f.upload_timestamp).toLocaleDateString()}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-500">
+                            {f.uploader?.name ?? "--"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 

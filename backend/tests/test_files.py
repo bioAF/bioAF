@@ -354,6 +354,78 @@ async def test_reconcile_requires_admin(client, viewer_token):
     assert resp.status_code == 403
 
 
+@pytest.mark.asyncio
+async def test_list_files_filter_by_experiment_id(client, admin_token, sample_file, sample_experiment, session):
+    """GET /api/files?experiment_id=N should return only files for that experiment."""
+    # Link sample_file to the experiment
+    sample_file.experiment_id = sample_experiment.id
+    await session.commit()
+
+    # Create a second file NOT linked to the experiment
+    from app.models.file import File
+
+    unlinked = File(
+        organization_id=sample_file.organization_id,
+        gcs_uri="gs://test-bucket/other.csv",
+        filename="other.csv",
+        size_bytes=500,
+        file_type="csv",
+        uploader_user_id=sample_file.uploader_user_id,
+    )
+    session.add(unlinked)
+    await session.flush()
+    await session.commit()
+
+    resp = await client.get(
+        f"/api/files?experiment_id={sample_experiment.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 1
+    assert data["files"][0]["id"] == sample_file.id
+    assert data["files"][0]["experiment_id"] == sample_experiment.id
+
+
+@pytest.mark.asyncio
+async def test_get_experiment_files(client, admin_token, sample_file, sample_experiment, session):
+    """GET /api/experiments/{id}/files should return files for that experiment."""
+    sample_file.experiment_id = sample_experiment.id
+    await session.commit()
+
+    resp = await client.get(
+        f"/api/experiments/{sample_experiment.id}/files",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 1
+    assert data["files"][0]["id"] == sample_file.id
+
+
+@pytest.mark.asyncio
+async def test_get_experiment_files_empty(client, admin_token, sample_experiment):
+    """GET /api/experiments/{id}/files returns empty list when no files linked."""
+    resp = await client.get(
+        f"/api/experiments/{sample_experiment.id}/files",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 0
+    assert data["files"] == []
+
+
+@pytest.mark.asyncio
+async def test_get_experiment_files_not_found(client, admin_token):
+    """GET /api/experiments/99999/files should return 404."""
+    resp = await client.get(
+        "/api/experiments/99999/files",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 404
+
+
 # --- Upload Service Unit Tests ---
 
 

@@ -1,10 +1,16 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { api } from "@/lib/api";
-import type { FileResponse } from "@/lib/types";
+import type { ExperimentListResponse, FileResponse } from "@/lib/types";
+
+interface ExperimentOption {
+  id: number;
+  name: string;
+  status: string;
+}
 
 type FileStatus = "queued" | "uploading" | "complete" | "error";
 
@@ -18,8 +24,20 @@ interface FileItem {
 export default function DataUploadPage() {
   const [items, setItems] = useState<FileItem[]>([]);
   const [experimentId, setExperimentId] = useState("");
+  const [experiments, setExperiments] = useState<ExperimentOption[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    api
+      .get<ExperimentListResponse>("/api/experiments?page_size=100")
+      .then((data) =>
+        setExperiments(
+          data.experiments.map((e) => ({ id: e.id, name: e.name, status: e.status })),
+        ),
+      )
+      .catch(() => setExperiments([]));
+  }, []);
 
   const addFiles = (incoming: File[]) => {
     const accepted = incoming.filter(
@@ -115,16 +133,22 @@ export default function DataUploadPage() {
 
             {/* Experiment linkage */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="experiment-select" className="block text-sm font-medium text-gray-700 mb-1">
                 Link to Experiment (optional)
               </label>
-              <input
-                type="text"
-                placeholder="Experiment ID"
+              <select
+                id="experiment-select"
                 value={experimentId}
                 onChange={(e) => setExperimentId(e.target.value)}
-                className="w-48 px-3 py-2 border border-gray-300 rounded-md text-sm"
-              />
+                className="w-80 px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+              >
+                <option value="">No experiment selected</option>
+                {experiments.map((exp) => (
+                  <option key={exp.id} value={String(exp.id)}>
+                    {exp.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* File list */}
