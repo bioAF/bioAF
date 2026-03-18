@@ -220,6 +220,28 @@ async def apply_plan(
     )
 
 
+@router.post("/abandon/{run_id}", response_model=TerraformRunDetail)
+async def abandon_run(
+    run_id: int,
+    current_user: dict = require_role("admin"),
+    session: AsyncSession = Depends(get_session),
+) -> TerraformRunDetail:
+    """Abandon a stuck Terraform run and release the GCS state lock."""
+    user_id = int(current_user["sub"])
+
+    try:
+        run = await TerraformExecutor.abandon_run(
+            session=session,
+            run_id=run_id,
+            user_id=user_id,
+        )
+        await session.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    return TerraformRunDetail.model_validate(run)
+
+
 @router.get("/status", response_model=TerraformStatusResponse)
 async def get_terraform_status(
     current_user: dict = require_role("admin"),
@@ -238,8 +260,10 @@ async def get_terraform_status(
     ).fetchall()
     config = {r[0]: r[1] for r in rows}
 
-    # Check for active run
-    active_result = await session.execute(select(TerraformRun).where(TerraformRun.status.in_(["planning", "applying"])))
+    # Check for active run (includes awaiting_confirmation since those hold GCS locks)
+    active_result = await session.execute(
+        select(TerraformRun).where(TerraformRun.status.in_(["planning", "applying", "awaiting_confirmation"]))
+    )
     active_run = active_result.scalar_one_or_none()
 
     return TerraformStatusResponse(

@@ -1,7 +1,8 @@
 {
   "aligner": "star",
   "protocol": "10XV3",
-  "genome": "GRCh38",
+  "fasta": "https://ftp.ensembl.org/pub/release-112/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz",
+  "gtf": "https://ftp.ensembl.org/pub/release-112/gtf/homo_sapiens/Homo_sapiens.GRCh38.112.gtf.gz",
   "max_memory": "128.GB",
   "max_cpus": 16,
   "max_time": "48.h"

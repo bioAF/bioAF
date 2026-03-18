@@ -7,6 +7,7 @@
 - POST /api/v1/infrastructure/stack/components/{key}/toggle - enable/disable component
 - GET  /api/v1/infrastructure/cluster/config     - current cluster config
 - POST /api/v1/infrastructure/cluster/config     - update cluster config (generates plan)
+- POST /api/v1/infrastructure/stack/sync-compute-config - re-read compute TF outputs
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from app.services.stack_deployment import (
     deploy_stack,
     destroy_storage,
     get_cluster_status,
+    sync_compute_config,
     sync_storage_config,
     teardown_stack,
 )
@@ -73,6 +75,7 @@ class ClusterConfigUpdate(BaseModel):
 class ClusterConfigPlanResponse(BaseModel):
     run_id: int
     status: str
+    plan_summary: dict | None = None
 
 
 class ComponentInfo(BaseModel):
@@ -313,6 +316,34 @@ async def sync_storage_config_endpoint(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.post("/api/v1/infrastructure/stack/sync-compute-config")
+async def sync_compute_config_endpoint(
+    current_user: dict = require_role("admin"),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Re-read Terraform compute outputs and write cluster config to platform_config.
+
+    Use this after a deployment where the terraform output capture failed,
+    leaving gke_cluster_endpoint as 'null' in platform_config.
+    """
+    try:
+        populated = await sync_compute_config(session)
+        await session.commit()
+        # Force the compute adapter to reload cluster config from DB
+        try:
+            from app.adapters.registry import get_compute_adapter
+
+            adapter = get_compute_adapter()
+            if hasattr(adapter, "load_cluster_config"):
+                await adapter.load_cluster_config(force=True)
+        except Exception:
+            pass  # Adapter may not be initialized yet
+        return {"status": "ok", "populated": populated}
+    except Exception as exc:
+        logger.error("Compute config sync failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.get("/api/v1/infrastructure/stack/status")
 async def stack_status_endpoint(
     current_user: dict = require_role("admin", "comp_bio"),
@@ -535,7 +566,25 @@ async def update_cluster_config(
     run = await TerraformExecutor.run_plan(session, user_id, module_name="compute")
     await session.commit()
 
+    # Build plan_summary from plan_json (run_plan writes to plan_json, not plan_summary_json)
+    plan_summary = None
+    if run.plan_json:
+        pj = run.plan_json
+        add_list = [r for r in pj.get("resources", []) if r.get("action") == "create"]
+        change_list = [r for r in pj.get("resources", []) if r.get("action") == "update"]
+        destroy_list = [r for r in pj.get("resources", []) if r.get("action") == "delete"]
+        replace_list = [r for r in pj.get("resources", []) if r.get("action") == "replace"]
+        plan_summary = {
+            "add": add_list + replace_list,
+            "change": change_list,
+            "destroy": destroy_list + replace_list,
+            "add_count": pj.get("add_count", 0),
+            "change_count": pj.get("change_count", 0),
+            "destroy_count": pj.get("destroy_count", 0),
+        }
+
     return ClusterConfigPlanResponse(
         run_id=run.id,
         status=run.status,
+        plan_summary=plan_summary,
     )

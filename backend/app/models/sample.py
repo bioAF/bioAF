@@ -1,10 +1,19 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, Numeric, String, Table, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+sample_files = Table(
+    "sample_files",
+    Base.metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("sample_id", Integer, ForeignKey("samples.id"), nullable=False),
+    Column("file_id", Integer, ForeignKey("files.id"), nullable=True),
+    extend_existing=True,
+)
 
 
 SAMPLE_STATUSES = [
@@ -48,3 +57,4 @@ class Sample(Base):
 
     experiment = relationship("Experiment", back_populates="samples")
     batch = relationship("Batch", back_populates="samples")
+    files = relationship("File", secondary=sample_files, lazy="select")

@@ -1028,3 +1028,92 @@ async def test_sync_storage_config_skips_empty_outputs(session):
         populated = await sync_storage_config(session)
 
     assert list(populated.keys()) == ["ingest_bucket_name"]
+
+
+# ---------------------------------------------------------------------------
+# abandon_run tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_abandon_run_marks_run_cancelled(session):
+    """abandon_run() marks a stuck run as cancelled and sets completed_at."""
+    user_id = await _seed_user(session)
+    await _seed_gcp_config(session, configured=True, initialized=True)
+
+    # Insert a stuck run in awaiting_confirmation
+    await session.execute(
+        text("""
+        INSERT INTO terraform_runs
+            (triggered_by_user_id, action, status, module_name)
+        VALUES (:uid, 'plan', 'awaiting_confirmation', 'compute')
+        """).bindparams(uid=user_id)
+    )
+    await session.commit()
+    run_row = (await session.execute(text("SELECT id FROM terraform_runs LIMIT 1"))).fetchone()
+    run_id = run_row[0]
+
+    with patch.object(TerraformExecutor, "_delete_gcs_lock_file", new=AsyncMock()):
+        run = await TerraformExecutor.abandon_run(session, run_id, user_id)
+
+    assert run.status == "cancelled"
+    assert run.completed_at is not None
+    assert "abandoned" in (run.error_message or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_abandon_run_deletes_gcs_lock_file(session):
+    """abandon_run() calls _delete_gcs_lock_file with the correct path."""
+    user_id = await _seed_user(session)
+    await _seed_gcp_config(session, configured=True, initialized=True)
+
+    await session.execute(
+        text("""
+        INSERT INTO terraform_runs
+            (triggered_by_user_id, action, status, module_name)
+        VALUES (:uid, 'plan', 'awaiting_confirmation', 'compute')
+        """).bindparams(uid=user_id)
+    )
+    await session.commit()
+    run_row = (await session.execute(text("SELECT id FROM terraform_runs LIMIT 1"))).fetchone()
+    run_id = run_row[0]
+
+    mock_delete = AsyncMock()
+    with patch.object(TerraformExecutor, "_delete_gcs_lock_file", new=mock_delete):
+        await TerraformExecutor.abandon_run(session, run_id, user_id)
+
+    mock_delete.assert_called_once()
+    call_args = mock_delete.call_args
+    assert "compute" in call_args[0][1]  # lock path contains module name
+    assert "default.tflock" in call_args[0][1]
+
+
+@pytest.mark.asyncio
+async def test_abandon_run_rejects_completed_run(session):
+    """abandon_run() raises ValueError for runs that are already completed."""
+    user_id = await _seed_user(session)
+    await _seed_gcp_config(session, configured=True, initialized=True)
+
+    await session.execute(
+        text("""
+        INSERT INTO terraform_runs
+            (triggered_by_user_id, action, status, module_name, completed_at)
+        VALUES (:uid, 'plan', 'completed', 'compute', now())
+        """).bindparams(uid=user_id)
+    )
+    await session.commit()
+    run_row = (await session.execute(text("SELECT id FROM terraform_runs LIMIT 1"))).fetchone()
+    run_id = run_row[0]
+
+    with pytest.raises(ValueError, match="cannot be abandoned"):
+        await TerraformExecutor.abandon_run(session, run_id, user_id)
+
+
+@pytest.mark.asyncio
+async def test_abandon_run_rejects_nonexistent_run(session):
+    """abandon_run() raises ValueError for a run that does not exist."""
+    user_id = await _seed_user(session)
+    await _seed_gcp_config(session, configured=True, initialized=True)
+
+    with pytest.raises(ValueError, match="not found"):
+        await TerraformExecutor.abandon_run(session, 99999, user_id)

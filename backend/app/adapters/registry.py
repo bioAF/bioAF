@@ -22,7 +22,10 @@ _notebook_adapter: NotebookProvider | None = None
 _initialized: bool = False
 
 
-def _create_adapters(compute_stack: str) -> tuple[ComputeProvider, StorageProvider, NotebookProvider]:
+def _create_adapters(
+    compute_stack: str,
+    session_factory=None,
+) -> tuple[ComputeProvider, StorageProvider, NotebookProvider]:
     """Instantiate adapters based on the compute_stack value."""
     if compute_stack not in VALID_COMPUTE_STACKS:
         raise ValueError(f"Unknown compute_stack '{compute_stack}'. Valid options: {VALID_COMPUTE_STACKS}")
@@ -33,7 +36,7 @@ def _create_adapters(compute_stack: str) -> tuple[ComputeProvider, StorageProvid
         from app.adapters.storage.gcs import GcsStorageProvider
 
         return (
-            KubernetesComputeProvider(),
+            KubernetesComputeProvider(session_factory=session_factory),
             GcsStorageProvider(),
             KubernetesNotebookProvider(),
         )
@@ -49,7 +52,7 @@ def _create_adapters(compute_stack: str) -> tuple[ComputeProvider, StorageProvid
         )
 
 
-async def initialize_adapters(session: AsyncSession) -> None:
+async def initialize_adapters(session: AsyncSession, session_factory=None) -> None:
     """Read compute_stack from platform_config and initialize adapters."""
     global _compute_adapter, _storage_adapter, _notebook_adapter, _initialized
 
@@ -58,7 +61,15 @@ async def initialize_adapters(session: AsyncSession) -> None:
     compute_stack = row[0] if row else "kubernetes"
 
     logger.info("Initializing BAL adapters for compute_stack=%s", compute_stack)
-    _compute_adapter, _storage_adapter, _notebook_adapter = _create_adapters(compute_stack)
+    _compute_adapter, _storage_adapter, _notebook_adapter = _create_adapters(
+        compute_stack, session_factory=session_factory
+    )
+
+    # Eagerly load cluster config so the compute adapter never needs to
+    # run async DB queries from a sync context (which breaks asyncpg).
+    if hasattr(_compute_adapter, "load_cluster_config"):
+        await _compute_adapter.load_cluster_config()
+
     _initialized = True
 
 

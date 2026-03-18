@@ -2,25 +2,73 @@
 
 Supports local/mock mode for development and real K8s API for production.
 Mode is controlled by the BIOAF_COMPUTE_MODE environment variable.
+
+When running outside the cluster (e.g., Docker Compose on a VM), the adapter
+builds a K8s client from platform_config credentials (gke_cluster_endpoint,
+gke_cluster_ca_cert, GCP service account key).
 """
 
+import base64
+import json as _json
 import logging
 import os
+import tempfile
+import time
 import uuid
 from datetime import datetime, timezone
 
+from kubernetes import client, config
 
 from app.adapters.base import ComputeProvider
 
 logger = logging.getLogger("bioaf.adapters.compute.k8s")
 
 
+def _get_gcp_credentials(service_account_key_json: str):
+    """Build GCP credentials from a service account key JSON string."""
+    from google.oauth2 import service_account
+
+    key_data = _json.loads(service_account_key_json)
+    return service_account.Credentials.from_service_account_info(
+        key_data,
+        scopes=["https://www.googleapis.com/auth/cloud-platform"],
+    )
+
+
+def _get_gcp_token(service_account_key_json: str) -> str:
+    """Exchange a GCP service account key for an access token."""
+    import google.auth.transport.requests
+
+    credentials = _get_gcp_credentials(service_account_key_json)
+    credentials.refresh(google.auth.transport.requests.Request())
+    return credentials.token
+
+
+def _sanitize_label_value(value: str) -> str:
+    """Sanitize a string for use as a K8s label value.
+
+    Label values must match: (([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?
+    Replaces invalid characters with '-' and trims to 63 chars.
+    """
+    import re
+
+    sanitized = re.sub(r"[^A-Za-z0-9\-_.]", "-", value)
+    sanitized = sanitized.strip("-_.")
+    return sanitized[:63]
+
+
 class KubernetesComputeProvider(ComputeProvider):
     """Kubernetes compute backend with local mode for development."""
+
+    # GCP access tokens expire after 3600s; rebuild client before that
+    _TOKEN_TTL_SECONDS = 2700  # 45 minutes
 
     def __init__(self, session_factory=None):
         self._mode = os.environ.get("BIOAF_COMPUTE_MODE", "local")
         self._session_factory = session_factory
+        self._api_client: client.ApiClient | None = None
+        self._client_created_at: float = 0.0
+        self._cluster_config: dict | None = None
 
     @property
     def is_local(self) -> bool:
@@ -125,7 +173,7 @@ class KubernetesComputeProvider(ComputeProvider):
                 },
                 {
                     "name": "bioaf-pipelines",
-                    "machine_type": "n2-highmem-8",
+                    "machine_type": "n2-highmem-16",
                     "min_nodes": 0,
                     "max_nodes": 20,
                     "current_nodes": 0,
@@ -179,32 +227,166 @@ class KubernetesComputeProvider(ComputeProvider):
 
     # -- K8s client helpers --
 
+    async def load_cluster_config(self, force: bool = False) -> dict:
+        """Read GKE cluster config from platform_config.
+
+        Must be called during async initialization (e.g., app startup)
+        so the DB query runs on the correct event loop. The result is
+        cached in _cluster_config for later sync access.
+
+        If the cached config has a "null" or missing cluster endpoint,
+        re-reads from the database on each call so newly deployed
+        cluster info is picked up without a restart.
+        """
+        if self._cluster_config is not None and not force:
+            endpoint = self._cluster_config.get("gke_cluster_endpoint", "")
+            if endpoint and endpoint != "null":
+                return self._cluster_config
+
+        from sqlalchemy import text as sa_text
+
+        if not self._session_factory:
+            self._cluster_config = {}
+            return self._cluster_config
+
+        async with self._session_factory() as session:
+            result = await session.execute(
+                sa_text(
+                    "SELECT key, value FROM platform_config "
+                    "WHERE key IN ("
+                    "  'gke_cluster_endpoint', 'gke_cluster_ca_cert',"
+                    "  'gcp_credential_source', 'gcp_service_account_key',"
+                    "  'gke_cluster_name', 'gcp_project_id', 'gcp_zone',"
+                    "  'raw_bucket_name'"
+                    ")"
+                )
+            )
+            self._cluster_config = {r[0]: r[1] for r in result.fetchall()}
+
+        # Invalidate cached API client so it rebuilds with fresh config
+        if force:
+            self._api_client = None
+
+        return self._cluster_config
+
+    def _build_out_of_cluster_client(self) -> client.ApiClient:
+        """Build a K8s ApiClient using platform_config credentials.
+
+        Requires load_cluster_config() to have been called first during
+        async startup so _cluster_config is populated.
+        """
+        cfg = self._cluster_config or {}
+
+        endpoint = cfg.get("gke_cluster_endpoint", "")
+        ca_cert_b64 = cfg.get("gke_cluster_ca_cert", "")
+        sa_key = cfg.get("gcp_service_account_key", "")
+
+        if not endpoint or endpoint == "null":
+            raise RuntimeError("No GKE cluster endpoint in platform_config. Deploy the compute stack first.")
+
+        # Ensure endpoint has https:// scheme
+        if not endpoint.startswith("https://"):
+            endpoint = f"https://{endpoint}"
+
+        # Get a GCP access token for K8s API auth
+        token = _get_gcp_token(sa_key)
+
+        # Write CA cert to a temp file for the K8s client
+        ca_cert_bytes = base64.b64decode(ca_cert_b64)
+        ca_file = tempfile.NamedTemporaryFile(delete=False, suffix=".crt")
+        ca_file.write(ca_cert_bytes)
+        ca_file.close()
+
+        configuration = client.Configuration()
+        configuration.host = endpoint
+        configuration.ssl_ca_cert = ca_file.name
+        configuration.api_key = {"authorization": f"Bearer {token}"}
+
+        self._client_created_at = time.monotonic()
+        return client.ApiClient(configuration)
+
+    def _is_token_expired(self) -> bool:
+        """Check if the cached GCP access token is older than the TTL."""
+        if self._client_created_at == 0.0:
+            return False
+        return (time.monotonic() - self._client_created_at) > self._TOKEN_TTL_SECONDS
+
+    async def _get_api_client_async(self) -> client.ApiClient:
+        """Get or create a K8s ApiClient, trying incluster first.
+
+        If the cached config has a stale endpoint, reloads from platform_config
+        before building the client. This handles the case where compute was
+        deployed after the backend started. Also rebuilds the client when the
+        GCP access token is about to expire.
+        """
+        if self._api_client is not None and not self._is_token_expired():
+            return self._api_client
+
+        if self._is_token_expired():
+            logger.info("GCP access token approaching expiry, refreshing K8s client")
+            self._api_client = None
+
+        try:
+            config.load_incluster_config()
+            self._api_client = client.ApiClient()
+            logger.info("Using incluster K8s config")
+        except Exception:
+            logger.info("Not running in cluster, using platform_config credentials")
+            # Reload config in case it was stale at startup
+            await self.load_cluster_config(force=True)
+            try:
+                self._api_client = self._build_out_of_cluster_client()
+                logger.info(
+                    "K8s client built for endpoint %s", (self._cluster_config or {}).get("gke_cluster_endpoint")
+                )
+            except Exception:
+                logger.exception("Failed to build out-of-cluster K8s client")
+                raise
+
+        return self._api_client
+
+    def _get_api_client(self) -> client.ApiClient:
+        """Get or create a K8s ApiClient, trying incluster first (sync version)."""
+        if self._api_client is not None and not self._is_token_expired():
+            return self._api_client
+
+        if self._is_token_expired():
+            logger.info("GCP access token approaching expiry, refreshing K8s client")
+            self._api_client = None
+
+        try:
+            config.load_incluster_config()
+            self._api_client = client.ApiClient()
+            logger.info("Using incluster K8s config")
+        except Exception:
+            logger.info("Not running in cluster, using platform_config credentials")
+            try:
+                self._api_client = self._build_out_of_cluster_client()
+                logger.info(
+                    "K8s client built for endpoint %s", (self._cluster_config or {}).get("gke_cluster_endpoint")
+                )
+            except Exception:
+                logger.exception("Failed to build out-of-cluster K8s client")
+                raise
+
+        return self._api_client
+
     def _get_k8s_core_client(self):
         """Get a Kubernetes CoreV1Api client. Tests mock this method."""
-        from kubernetes import client, config
-
-        config.load_incluster_config()
-        return client.CoreV1Api()
+        return client.CoreV1Api(api_client=self._get_api_client())
 
     def _get_k8s_batch_client(self):
         """Get a Kubernetes BatchV1Api client. Tests mock this method."""
-        from kubernetes import client, config
-
-        config.load_incluster_config()
-        return client.BatchV1Api()
+        return client.BatchV1Api(api_client=self._get_api_client())
 
     def _get_k8s_rbac_client(self):
         """Get a Kubernetes RbacAuthorizationV1Api client. Tests mock this method."""
-        from kubernetes import client, config
-
-        config.load_incluster_config()
-        return client.RbacAuthorizationV1Api()
+        return client.RbacAuthorizationV1Api(api_client=self._get_api_client())
 
     _namespace_ready = False
 
     async def ensure_pipeline_namespace(self, namespace: str = "bioaf-pipelines") -> None:
         """Ensure the pipeline namespace, service account, and role binding exist."""
-        from kubernetes import client
         from kubernetes.client.rest import ApiException
 
         core_v1 = self._get_k8s_core_client()
@@ -281,10 +463,136 @@ class KubernetesComputeProvider(ComputeProvider):
     }
 
     def _get_gke_client(self):
-        """Get a GKE ClusterManager client. Tests mock this method."""
+        """Get a GKE ClusterManager client using platform_config credentials."""
         from google.cloud import container_v1
 
+        cfg = self._cluster_config or {}
+        sa_key = cfg.get("gcp_service_account_key", "")
+
+        if sa_key:
+            credentials = _get_gcp_credentials(sa_key)
+            return container_v1.ClusterManagerClient(credentials=credentials)
+
         return container_v1.ClusterManagerClient()
+
+    NEXTFLOW_IMAGE = "nextflow/nextflow:25.10.4"
+
+    @staticmethod
+    def _build_nextflow_command(job_spec: dict) -> list[str]:
+        """Build a Nextflow run command from the job spec.
+
+        Translates pipeline_source, pipeline_version, parameters, and
+        sample_sheet into a shell command that nextflow can execute.
+        """
+        pipeline_source = job_spec.get("pipeline_source", "")
+        pipeline_version = job_spec.get("pipeline_version", "")
+        parameters = job_spec.get("parameters", {})
+        sample_sheet = job_spec.get("sample_sheet", "")
+
+        # Log the config file before running so it appears in pod logs
+        parts = ["cat /data/nextflow.config &&", "nextflow", "run", pipeline_source]
+
+        if pipeline_version:
+            parts.extend(["-r", pipeline_version])
+
+        # Use a generated nextflow.config with K8s executor settings.
+        # GKE uses containerd (no Docker daemon), so -profile docker won't work.
+        parts.extend(["-c", "/data/nextflow.config"])
+
+        if sample_sheet:
+            parts.extend(["--input", "/data/samplesheet.csv"])
+
+        # Ensure outdir is always set (nf-core pipelines require it)
+        if "outdir" not in parameters:
+            parameters = {**parameters, "outdir": "/data/results"}
+
+        for key, value in sorted(parameters.items()):
+            parts.extend([f"--{key}", str(value)])
+
+        return ["/bin/sh", "-c", " ".join(parts)]
+
+    @staticmethod
+    def _build_nextflow_k8s_config(
+        namespace: str,
+        has_gcs_secret: bool,
+        gcs_work_dir: str | None = None,
+    ) -> str:
+        """Build a nextflow.config for K8s executor mode.
+
+        Each Nextflow process runs as its own K8s pod. The config ensures
+        pods use the right service account, have GCS credentials when
+        available, and share a GCS-backed work directory so the head pod
+        and process pods can exchange command scripts and data.
+        """
+        lines = [
+            "process.executor = 'k8s'",
+            f"k8s.namespace = '{namespace}'",
+            "k8s.serviceAccount = 'bioaf-pipeline-runner'",
+        ]
+
+        # GCS work directory so head and process pods share files.
+        # Wave + Fusion mount GCS paths as a local filesystem inside
+        # process pods so they can access .command.run scripts.
+        if gcs_work_dir:
+            lines.append(f"workDir = '{gcs_work_dir}'")
+            lines.append("wave.enabled = true")
+            lines.append("fusion.enabled = true")
+            lines.append("fusion.exportStorageCredentials = true")
+
+        # Build k8s.pod directives for secrets/env (Nextflow doesn't
+        # support tolerations in k8s.pod, so node placement is left to
+        # the cluster autoscaler; the head Job already targets the
+        # pipeline pool via nodeSelector + toleration in the Job manifest)
+        pod_directives: list[str] = []
+        if has_gcs_secret:
+            pod_directives.append("[secret: 'bioaf-gcs-sa-key', mountPath: '/secrets/gcp']")
+            pod_directives.append("[env: 'GOOGLE_APPLICATION_CREDENTIALS', value: '/secrets/gcp/key.json']")
+
+        if pod_directives:
+            lines.append("k8s.pod = [" + ", ".join(pod_directives) + "]")
+
+        # Docker is the default container engine for nf-core
+        lines.append("docker.enabled = true")
+
+        return "\n".join(lines)
+
+    def _ensure_gcs_secret(self, namespace: str) -> bool:
+        """Create a K8s Secret with the GCP SA key for GCS access.
+
+        Returns True if the secret exists (created or already present).
+        """
+        import base64
+
+        from kubernetes.client.rest import ApiException
+
+        cfg = self._cluster_config or {}
+        sa_key = cfg.get("gcp_service_account_key", "")
+        if not sa_key:
+            return False
+
+        core_client = self._get_k8s_core_client()
+        secret_name = "bioaf-gcs-sa-key"
+
+        try:
+            core_client.read_namespaced_secret(name=secret_name, namespace=namespace)
+            return True
+        except ApiException as e:
+            if e.status != 404:
+                logger.warning("Error checking GCS secret: %s", e)
+                return False
+
+        core_client.create_namespaced_secret(
+            namespace=namespace,
+            body={
+                "apiVersion": "v1",
+                "kind": "Secret",
+                "metadata": {"name": secret_name, "labels": {"bioaf.io/managed": "true"}},
+                "type": "Opaque",
+                "data": {"key.json": base64.b64encode(sa_key.encode()).decode()},
+            },
+        )
+        logger.info("Created GCS SA key secret in %s", namespace)
+        return True
 
     async def _k8s_submit_job(self, job_spec: dict) -> dict:
         """Submit a real Kubernetes Job to the GKE cluster."""
@@ -294,7 +602,21 @@ class KubernetesComputeProvider(ComputeProvider):
         container_image = job_spec.get("container_image", "alpine:3.19")
         command = job_spec.get("command", [])
         stage_commands = job_spec.get("stage_commands", [])
-        _ = job_spec.get("input_files", [])  # reserved for future use
+        pipeline_source = job_spec.get("pipeline_source", "")
+        sample_sheet = job_spec.get("sample_sheet", "")
+
+        # Ensure namespace, service account, and role binding exist on first use
+        if not self._namespace_ready:
+            await self.ensure_pipeline_namespace(namespace)
+
+        # Ensure GCS credentials secret exists for bucket access
+        has_gcs_secret = self._ensure_gcs_secret(namespace)
+
+        # Auto-build Nextflow command when pipeline_source is set and no
+        # explicit command was provided
+        if pipeline_source and not command:
+            container_image = self.NEXTFLOW_IMAGE
+            command = self._build_nextflow_command(job_spec)
 
         job_name = f"bioaf-pipeline-{run_id}"
 
@@ -311,12 +633,60 @@ class KubernetesComputeProvider(ComputeProvider):
                 }
             )
 
+        # Write sample sheet to the data volume via init container
+        if sample_sheet and pipeline_source and not job_spec.get("command"):
+            # Strip carriage returns that browsers/forms sometimes inject
+            clean_sheet = sample_sheet.replace("\r\n", "\n").replace("\r", "\n")
+            escaped_sheet = clean_sheet.replace("'", "'\\''")
+            init_containers.append(
+                {
+                    "name": "write-samplesheet",
+                    "image": "alpine:3.19",
+                    "command": ["/bin/sh", "-c", f"printf '%s' '{escaped_sheet}' > /data/samplesheet.csv"],
+                    "volumeMounts": [{"name": "data", "mountPath": "/data"}],
+                }
+            )
+
+        # Write nextflow.config with K8s executor settings for Nextflow pipelines
+        if pipeline_source and not job_spec.get("command"):
+            cfg = self._cluster_config or {}
+            raw_bucket = cfg.get("raw_bucket_name", "")
+            gcs_work_dir = f"gs://{raw_bucket}/nextflow-work" if raw_bucket else None
+            nf_config = self._build_nextflow_k8s_config(namespace, has_gcs_secret, gcs_work_dir)
+            # Use heredoc to avoid shell escaping issues with single quotes
+            # in Nextflow config values (e.g., 'k8s', 'bioaf-pipelines')
+            init_containers.append(
+                {
+                    "name": "write-nf-config",
+                    "image": "alpine:3.19",
+                    "command": [
+                        "/bin/sh",
+                        "-c",
+                        f"cat > /data/nextflow.config << 'NFEOF'\n{nf_config}\nNFEOF",
+                    ],
+                    "volumeMounts": [{"name": "data", "mountPath": "/data"}],
+                }
+            )
+
+        # GCS credential mounts for all containers
+        gcs_volume_mount = {"name": "gcp-sa-key", "mountPath": "/secrets/gcp", "readOnly": True}
+        gcs_env = {"name": "GOOGLE_APPLICATION_CREDENTIALS", "value": "/secrets/gcp/key.json"}
+
+        if has_gcs_secret:
+            for ic in init_containers:
+                ic.setdefault("volumeMounts", []).append(gcs_volume_mount)
+                ic.setdefault("env", []).append(gcs_env)
+
         # Build main container
         main_container = {
             "name": "pipeline",
             "image": container_image,
             "volumeMounts": [{"name": "data", "mountPath": "/data"}],
+            "terminationMessagePolicy": "FallbackToLogsOnError",
         }
+        if has_gcs_secret:
+            main_container["volumeMounts"].append(gcs_volume_mount)
+            main_container["env"] = [gcs_env]
         if command:
             main_container["command"] = command
 
@@ -329,12 +699,13 @@ class KubernetesComputeProvider(ComputeProvider):
                 "namespace": namespace,
                 "labels": {
                     "bioaf.io/pipeline-run": str(run_id),
-                    "bioaf.io/pipeline": pipeline_name,
+                    "bioaf.io/pipeline": _sanitize_label_value(pipeline_name),
                     "bioaf.io/pool": "pipelines",
                 },
             },
             "spec": {
                 "backoffLimit": 0,
+                "ttlSecondsAfterFinished": 3600,
                 "template": {
                     "spec": {
                         "nodeSelector": {"bioaf.io/pool": "pipelines"},
@@ -349,7 +720,12 @@ class KubernetesComputeProvider(ComputeProvider):
                         "containers": [main_container],
                         "volumes": [
                             {"name": "data", "emptyDir": {"sizeLimit": "50Gi"}},
-                        ],
+                        ]
+                        + (
+                            [{"name": "gcp-sa-key", "secret": {"secretName": "bioaf-gcs-sa-key"}}]
+                            if has_gcs_secret
+                            else []
+                        ),
                         "restartPolicy": "Never",
                     }
                 },
@@ -446,7 +822,11 @@ class KubernetesComputeProvider(ComputeProvider):
         return jobs
 
     async def _k8s_get_job_logs(self, job_id: str) -> str:
-        """Retrieve logs from the pipeline pod."""
+        """Retrieve logs from the pipeline pod.
+
+        Falls back to pod container status (exit code, reason, message)
+        when the kubelet is unavailable (e.g., node scaled down).
+        """
         core_client = self._get_k8s_core_client()
         namespace = "bioaf-pipelines"
 
@@ -457,22 +837,59 @@ class KubernetesComputeProvider(ComputeProvider):
         if not pod_list.items:
             return f"No pods found for job {job_id}"
 
-        pod_name = pod_list.items[0].metadata.name
-        logs = core_client.read_namespaced_pod_log(
-            name=pod_name,
-            namespace=namespace,
-            container="pipeline",
-        )
-        return logs
+        pod = pod_list.items[0]
+        pod_name = pod.metadata.name
+
+        try:
+            logs = core_client.read_namespaced_pod_log(
+                name=pod_name,
+                namespace=namespace,
+                container="pipeline",
+            )
+            return logs
+        except Exception:
+            logger.warning("Could not read logs from %s (node likely scaled down), using pod status", pod_name)
+
+        # Fallback: extract termination info from pod status
+        return self._extract_pod_termination_info(pod)
+
+    @staticmethod
+    def _extract_pod_termination_info(pod) -> str:
+        """Build a log message from pod container status when logs are unavailable."""
+        lines = [f"Pod {pod.metadata.name} - phase: {pod.status.phase}"]
+
+        for cs in pod.status.container_statuses or []:
+            terminated = getattr(cs.state, "terminated", None)
+            if terminated:
+                lines.append(f"Container '{cs.name}': exit_code={terminated.exit_code}, reason={terminated.reason}")
+                if terminated.message:
+                    lines.append(f"  message: {terminated.message}")
+
+            waiting = getattr(cs.state, "waiting", None)
+            if waiting and waiting.reason:
+                lines.append(f"Container '{cs.name}' waiting: {waiting.reason}")
+                if waiting.message:
+                    lines.append(f"  message: {waiting.message}")
+
+        for cs in pod.status.init_container_statuses or []:
+            terminated = getattr(cs.state, "terminated", None)
+            if terminated and terminated.exit_code != 0:
+                lines.append(
+                    f"Init container '{cs.name}': exit_code={terminated.exit_code}, reason={terminated.reason}"
+                )
+
+        return "\n".join(lines)
 
     async def _k8s_get_cluster_status(self) -> dict:
         """Query GKE API for real cluster status."""
-        cluster_name = os.environ.get("GKE_CLUSTER_NAME", "")
-        project_id = os.environ.get("GCP_PROJECT_ID", "")
-        zone = os.environ.get("GCP_ZONE", "")
+        await self.load_cluster_config()
+        cfg = self._cluster_config or {}
+        cluster_name = cfg.get("gke_cluster_name") or os.environ.get("GKE_CLUSTER_NAME", "")
+        project_id = cfg.get("gcp_project_id") or os.environ.get("GCP_PROJECT_ID", "")
+        zone = cfg.get("gcp_zone") or os.environ.get("GCP_ZONE", "")
 
-        client = self._get_gke_client()
-        cluster = client.get_cluster(name=f"projects/{project_id}/locations/{zone}/clusters/{cluster_name}")
+        gke_client = self._get_gke_client()
+        cluster = gke_client.get_cluster(name=f"projects/{project_id}/locations/{zone}/clusters/{cluster_name}")
 
         node_pools = []
         total_nodes = 0
@@ -504,29 +921,96 @@ class KubernetesComputeProvider(ComputeProvider):
             "health": health,
         }
 
+    # On-demand hourly rates (USD) for common GCE machine types.
+    # Source: us-central1 pricing as of 2024-Q4. Close enough for cost
+    # estimation; exact billing comes from the GCP billing export.
+    _GCE_HOURLY_RATES: dict[str, float] = {
+        "e2-micro": 0.0084,
+        "e2-small": 0.0168,
+        "e2-medium": 0.0336,
+        "e2-standard-2": 0.0671,
+        "e2-standard-4": 0.1342,
+        "e2-standard-8": 0.2684,
+        "n2-standard-2": 0.0971,
+        "n2-standard-4": 0.1942,
+        "n2-standard-8": 0.3884,
+        "n2-highmem-2": 0.1310,
+        "n2-highmem-4": 0.2620,
+        "n2-highmem-8": 0.5241,
+        "n2-highmem-16": 1.0482,
+        "n2-highcpu-4": 0.1416,
+        "n2-highcpu-8": 0.2832,
+    }
+
+    _SPOT_DISCOUNT = 0.35  # spot VMs are ~65% cheaper on average
+
+    @classmethod
+    def _hourly_rate(cls, machine_type: str, spot: bool) -> float:
+        """Look up the hourly rate for a GCE machine type."""
+        rate = cls._GCE_HOURLY_RATES.get(machine_type, 0.10)
+        if spot:
+            rate *= cls._SPOT_DISCOUNT
+        return round(rate, 4)
+
     async def _k8s_get_cluster_metrics(self) -> dict:
-        """Query GKE API for cluster metrics."""
-        cluster_name = os.environ.get("GKE_CLUSTER_NAME", "")
-        project_id = os.environ.get("GCP_PROJECT_ID", "")
-        zone = os.environ.get("GCP_ZONE", "")
+        """Query GKE API for cluster metrics with cost rate estimates.
 
-        client = self._get_gke_client()
-        cluster = client.get_cluster(name=f"projects/{project_id}/locations/{zone}/clusters/{cluster_name}")
+        Reads cluster identity (name, project, zone) from platform_config
+        so no extra environment variables are needed beyond what the deploy
+        script already stores.  Falls back to env vars for compatibility.
+        If the GKE API call fails, returns safe zeros so the cost endpoint
+        does not 500.
+        """
+        await self.load_cluster_config()
+        cfg = self._cluster_config or {}
+        cluster_name = cfg.get("gke_cluster_name") or os.environ.get("GKE_CLUSTER_NAME", "")
+        project_id = cfg.get("gcp_project_id") or os.environ.get("GCP_PROJECT_ID", "")
+        zone = cfg.get("gcp_zone") or os.environ.get("GCP_ZONE", "")
 
+        _fallback = {
+            "cpu_utilization_pct": 0.0,
+            "memory_utilization_pct": 0.0,
+            "cost_burn_rate_hourly": 0.0,
+            "node_pools": [],
+        }
+
+        if not cluster_name or not project_id or not zone:
+            logger.warning(
+                "Missing GKE cluster identity (name=%s, project=%s, zone=%s). "
+                "Store gke_cluster_name, gcp_project_id, gcp_zone in platform_config.",
+                cluster_name,
+                project_id,
+                zone,
+            )
+            return _fallback
+
+        try:
+            gke_client = self._get_gke_client()
+            cluster = gke_client.get_cluster(name=f"projects/{project_id}/locations/{zone}/clusters/{cluster_name}")
+        except Exception:
+            logger.exception("Failed to fetch GKE cluster metrics")
+            return _fallback
+
+        total_cost = 0.0
         node_pools = []
         for pool in cluster.node_pools:
+            node_count = pool.initial_node_count
+            is_spot = pool.config.spot
+            per_node = self._hourly_rate(pool.config.machine_type, is_spot)
+            pool_cost = round(per_node * node_count, 4)
+            total_cost += pool_cost
             node_pools.append(
                 {
                     "name": pool.name,
                     "cpu_utilization_pct": 0.0,
                     "memory_utilization_pct": 0.0,
-                    "cost_rate_hourly": 0.0,
+                    "cost_rate_hourly": pool_cost,
                 }
             )
 
         return {
             "cpu_utilization_pct": 0.0,
             "memory_utilization_pct": 0.0,
-            "cost_burn_rate_hourly": 0.0,
+            "cost_burn_rate_hourly": round(total_cost, 4),
             "node_pools": node_pools,
         }

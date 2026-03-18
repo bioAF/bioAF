@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.experiment import Experiment
+from app.models.file import File
 from app.models.pipeline_run import PipelineRun, PipelineRunSample
 from app.models.sample import Sample
 from app.schemas.pipeline_run import PipelineRunLaunchRequest
@@ -22,6 +23,23 @@ logger = logging.getLogger("bioaf.pipeline_runs")
 
 
 class PipelineRunService:
+    @staticmethod
+    def _attach_experiment_files(samples: list, experiment_files: list) -> None:
+        """Attach experiment-level FASTQ files to samples with no linked files.
+
+        When the sample_files junction table is empty, fall back to
+        experiment-level files so the sample sheet has FASTQ paths.
+        Only attaches files with file_type 'fastq' or .fastq.gz extension.
+        """
+        fastq_files = [
+            f
+            for f in experiment_files
+            if getattr(f, "file_type", "") == "fastq" or (getattr(f, "filename", "") or "").endswith(".fastq.gz")
+        ]
+        for sample in samples:
+            if not sample.files:
+                sample.files = list(fastq_files)
+
     @staticmethod
     async def launch_run(
         session: AsyncSession,
@@ -49,17 +67,29 @@ class PipelineRunService:
         # 3. Resolve sample_ids
         if data.sample_ids:
             sample_result = await session.execute(
-                select(Sample).where(
+                select(Sample)
+                .where(
                     Sample.id.in_(data.sample_ids),
                     Sample.experiment_id == data.experiment_id,
                 )
+                .options(selectinload(Sample.files))
             )
             samples = list(sample_result.scalars().all())
             if len(samples) != len(data.sample_ids):
                 raise ValueError("Some sample IDs do not belong to this experiment")
         else:
-            sample_result = await session.execute(select(Sample).where(Sample.experiment_id == data.experiment_id))
+            sample_result = await session.execute(
+                select(Sample).where(Sample.experiment_id == data.experiment_id).options(selectinload(Sample.files))
+            )
             samples = list(sample_result.scalars().all())
+
+        # 3b. Fall back to experiment-level files when sample_files is empty
+        any_sample_missing_files = any(not s.files for s in samples)
+        if any_sample_missing_files:
+            exp_files_result = await session.execute(select(File).where(File.experiment_id == data.experiment_id))
+            exp_files = list(exp_files_result.scalars().all())
+            if exp_files:
+                PipelineRunService._attach_experiment_files(samples, exp_files)
 
         # 4. Check quota
         allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=2.0)
@@ -119,6 +149,7 @@ class PipelineRunService:
             compute_adapter = get_compute_adapter()
             job_spec = {
                 "run_id": run.id,
+                "pipeline_name": pipeline.pipeline_key,
                 "pipeline_source": pipeline.source_url,
                 "pipeline_version": pipeline.version,
                 "parameters": merged_params,

@@ -286,7 +286,20 @@ class PipelineMonitorService:
 
     @staticmethod
     async def get_run_report(session: AsyncSession, run_id: int) -> str:
-        """Read the Nextflow HTML report."""
+        """Read the pipeline report (K8s container logs or Nextflow HTML report)."""
+        # For K8s runs, return the container logs directly
+        k8s_result = await session.execute(select(PipelineRun.k8s_job_name).where(PipelineRun.id == run_id))
+        k8s_job_name = k8s_result.scalar_one_or_none()
+
+        if k8s_job_name:
+            try:
+                compute_adapter = get_compute_adapter()
+                return await compute_adapter.get_job_logs(k8s_job_name)
+            except Exception as e:
+                logger.warning("Failed to read K8s report for run %d: %s", run_id, e)
+                return ""
+
+        # Nextflow HTML report path (legacy)
         result = await session.execute(select(PipelineRun.work_dir).where(PipelineRun.id == run_id))
         work_dir = result.scalar_one_or_none()
         if not work_dir:

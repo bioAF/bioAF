@@ -98,9 +98,12 @@ export default function PipelineRunDetailPage() {
     } catch {}
   }
 
-  async function loadLogs(processName: string) {
+  async function loadLogs(processName?: string) {
     try {
-      const data = await api.get<{ stdout: string; stderr: string }>(`/api/pipeline-runs/${runId}/logs/${encodeURIComponent(processName)}`);
+      const url = processName
+        ? `/api/pipeline-runs/${runId}/logs/${encodeURIComponent(processName)}`
+        : `/api/pipeline-runs/${runId}/logs`;
+      const data = await api.get<{ stdout: string; stderr: string }>(url);
       setLogs(data);
     } catch {}
   }
@@ -126,9 +129,14 @@ export default function PipelineRunDetailPage() {
   }, [activeTab, runId]);
 
   useEffect(() => {
-    if (selectedProcess && activeTab === "logs") loadLogs(selectedProcess);
+    if (activeTab !== "logs") return;
+    if (run?.k8s_job_name && !run.processes?.length) {
+      loadLogs();
+    } else if (selectedProcess) {
+      loadLogs(selectedProcess);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedProcess, activeTab]);
+  }, [selectedProcess, activeTab, run?.k8s_job_name]);
 
   if (loading) {
     return <div className="flex h-screen items-center justify-center"><LoadingSpinner size="lg" /></div>;
@@ -349,21 +357,25 @@ export default function PipelineRunDetailPage() {
             <div className="bg-white rounded-lg shadow p-6">
               <div className="flex items-center gap-4 mb-4">
                 <h2 className="text-lg font-semibold">Logs</h2>
-                <select value={selectedProcess} onChange={(e) => setSelectedProcess(e.target.value)} className="border rounded px-3 py-1.5 text-sm">
-                  <option value="">Select process...</option>
-                  {run.processes.map((p) => <option key={p.id} value={p.process_name}>{p.process_name}</option>)}
-                </select>
+                {run.processes.length > 0 && (
+                  <select value={selectedProcess} onChange={(e) => setSelectedProcess(e.target.value)} className="border rounded px-3 py-1.5 text-sm">
+                    <option value="">Select process...</option>
+                    {run.processes.map((p) => <option key={p.id} value={p.process_name}>{p.process_name}</option>)}
+                  </select>
+                )}
               </div>
-              {selectedProcess ? (
+              {(selectedProcess || (run.k8s_job_name && !run.processes.length)) ? (
                 <div className="space-y-4">
                   <div>
                     <h3 className="text-sm font-medium mb-1">stdout</h3>
-                    <pre className="text-xs bg-gray-900 text-green-400 p-4 rounded overflow-auto max-h-64">{logs.stdout || "(empty)"}</pre>
+                    <pre className="text-xs bg-gray-900 text-green-400 p-4 rounded overflow-auto max-h-96 whitespace-pre-wrap">{logs.stdout || "(empty)"}</pre>
                   </div>
-                  <div>
-                    <h3 className="text-sm font-medium mb-1">stderr</h3>
-                    <pre className="text-xs bg-gray-900 text-red-400 p-4 rounded overflow-auto max-h-64">{logs.stderr || "(empty)"}</pre>
-                  </div>
+                  {logs.stderr && (
+                    <div>
+                      <h3 className="text-sm font-medium mb-1">stderr</h3>
+                      <pre className="text-xs bg-gray-900 text-red-400 p-4 rounded overflow-auto max-h-64 whitespace-pre-wrap">{logs.stderr || "(empty)"}</pre>
+                    </div>
+                  )}
                 </div>
               ) : <p className="text-gray-400">Select a process to view logs</p>}
             </div>

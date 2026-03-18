@@ -66,7 +66,7 @@ class TestSubmitJobCreatesK8sJob:
         body = call_kwargs["body"]
         # Check labels
         assert body["metadata"]["labels"]["bioaf.io/pipeline-run"] == "42"
-        assert body["metadata"]["labels"]["bioaf.io/pipeline"] == "nf-core/scrnaseq"
+        assert body["metadata"]["labels"]["bioaf.io/pipeline"] == "nf-core-scrnaseq"
         assert body["metadata"]["labels"]["bioaf.io/pool"] == "pipelines"
 
         # Check node selector and tolerations

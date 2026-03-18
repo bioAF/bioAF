@@ -49,7 +49,7 @@ BUILTIN_PIPELINES = [
     },
 ]
 
-DEFAULTS_DIR = Path(__file__).parent.parent.parent.parent / "scripts" / "pipelines" / "defaults"
+DEFAULTS_DIR = Path(__file__).parent.parent / "pipeline_defaults"
 
 
 class PipelineCatalogService:
@@ -64,7 +64,15 @@ class PipelineCatalogService:
                     PipelineCatalogEntry.pipeline_key == pipeline_def["pipeline_key"],
                 )
             )
-            if result.scalar_one_or_none():
+            existing = result.scalar_one_or_none()
+            if existing:
+                # Sync defaults from disk when they differ from what is in the DB
+                defaults_file = DEFAULTS_DIR / pipeline_def["defaults_file"]
+                if defaults_file.exists():
+                    disk_defaults = json.loads(defaults_file.read_text())
+                    if existing.default_params_json != disk_defaults:
+                        existing.default_params_json = disk_defaults
+                        logger.info("Refreshed defaults for %s", pipeline_def["pipeline_key"])
                 continue
 
             default_params = {}

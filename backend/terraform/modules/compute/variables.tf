@@ -25,7 +25,7 @@ variable "stack_uid" {
 
 variable "k8s_pipeline_machine_type" {
   type        = string
-  default     = "n2-highmem-8"
+  default     = "n2-highmem-16"
   description = "Machine type for the pipeline node pool"
 }
 

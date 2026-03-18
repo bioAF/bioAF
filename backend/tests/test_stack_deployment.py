@@ -796,3 +796,135 @@ async def test_destroy_storage_yields_stack_error_on_tf_failure(session):
     # Config must NOT be cleared when destroy fails
     assert await _get_config(session, "storage_deployed") == "true"
     assert await _get_config(session, "stack_uid") == "abc123"
+
+
+# -----------------------------------------------------------------------
+# sync_compute_config tests
+# -----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sync_compute_config_writes_cluster_values(session):
+    """sync_compute_config reads terraform outputs and writes to platform_config."""
+    from unittest.mock import AsyncMock
+
+    from app.services.stack_deployment import sync_compute_config
+
+    mock_outputs = {
+        "cluster_name": {"value": "bioaf-test-abc"},
+        "cluster_endpoint": {"value": "10.0.0.1"},
+        "cluster_ca_cert": {"value": "dGVzdC1jZXJ0"},
+    }
+
+    with patch(
+        "app.services.stack_deployment.TerraformExecutor.read_module_outputs",
+        new=AsyncMock(return_value=mock_outputs),
+    ):
+        populated = await sync_compute_config(session)
+
+    await session.commit()
+
+    assert populated["gke_cluster_name"] == "bioaf-test-abc"
+    assert populated["gke_cluster_endpoint"] == "10.0.0.1"
+    assert populated["gke_cluster_ca_cert"] == "dGVzdC1jZXJ0"
+    assert await _get_config(session, "gke_cluster_endpoint") == "10.0.0.1"
+    assert await _get_config(session, "gke_cluster_ca_cert") == "dGVzdC1jZXJ0"
+
+
+@pytest.mark.asyncio
+async def test_sync_compute_config_skips_empty_outputs(session):
+    """sync_compute_config does not overwrite config with empty values."""
+    from unittest.mock import AsyncMock
+
+    from app.services.stack_deployment import sync_compute_config
+
+    await _set_config(session, "gke_cluster_endpoint", "existing-value")
+    await session.commit()
+
+    # Outputs with empty cluster_endpoint
+    mock_outputs = {
+        "cluster_name": {"value": "bioaf-test"},
+        "cluster_endpoint": {"value": ""},
+        "cluster_ca_cert": {"value": "Y2VydA=="},
+    }
+
+    with patch(
+        "app.services.stack_deployment.TerraformExecutor.read_module_outputs",
+        new=AsyncMock(return_value=mock_outputs),
+    ):
+        populated = await sync_compute_config(session)
+
+    await session.commit()
+
+    assert "gke_cluster_endpoint" not in populated
+    # Original value preserved
+    assert await _get_config(session, "gke_cluster_endpoint") == "existing-value"
+
+
+# -----------------------------------------------------------------------
+# get_cluster_status uses SA credentials
+# -----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_status_uses_sa_credentials(session):
+    """get_cluster_status passes SA credentials to the GKE client."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services.stack_deployment import get_cluster_status
+
+    await _set_config(session, "compute_deployed", "true")
+    await _set_config(session, "compute_stack", "kubernetes")
+    await _set_config(session, "storage_deployed", "true")
+    await _set_config(session, "gke_cluster_name", "bioaf-test")
+    await _set_config(session, "gcp_project_id", "my-project")
+    await _set_config(session, "gcp_zone", "us-central1-a")
+    await _set_config(session, "gcp_credential_source", "service_account_key")
+    await _set_config(session, "gcp_service_account_key", '{"type": "service_account"}')
+    await session.commit()
+
+    mock_creds = MagicMock()
+
+    mock_pool = MagicMock()
+    mock_pool.name = "bioaf-pipelines"
+    mock_pool.config.machine_type = "n2-highmem-16"
+    mock_pool.autoscaling.min_node_count = 0
+    mock_pool.autoscaling.max_node_count = 10
+    mock_pool.initial_node_count = 0
+    mock_pool.config.spot = True
+    mock_pool.status = 2
+
+    mock_pool2 = MagicMock()
+    mock_pool2.name = "bioaf-interactive"
+    mock_pool2.config.machine_type = "n2-standard-4"
+    mock_pool2.autoscaling.min_node_count = 0
+    mock_pool2.autoscaling.max_node_count = 3
+    mock_pool2.initial_node_count = 0
+    mock_pool2.config.spot = False
+    mock_pool2.status = 2
+
+    mock_cluster = MagicMock()
+    mock_cluster.name = "bioaf-test"
+    mock_cluster.status = 2
+    mock_cluster.current_node_count = 0
+    mock_cluster.node_pools = [mock_pool, mock_pool2]
+
+    mock_client = MagicMock()
+    mock_client.get_cluster.return_value = mock_cluster
+
+    with (
+        patch(
+            "app.services.stack_deployment._get_gke_credentials",
+            new=AsyncMock(return_value=mock_creds),
+        ),
+        patch(
+            "app.services.stack_deployment._get_gke_client",
+            return_value=mock_client,
+        ) as mock_get_client,
+    ):
+        result = await get_cluster_status(session)
+
+    mock_get_client.assert_called_once_with(mock_creds)
+    assert result.compute_deployed is True
+    assert result.cluster is not None
+    assert result.cluster.cluster_name == "bioaf-test"

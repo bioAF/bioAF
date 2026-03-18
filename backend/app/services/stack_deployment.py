@@ -63,10 +63,45 @@ class StackStatus(BaseModel):
     cluster: ClusterInfo | None = None
 
 
-def _get_gke_client():
+async def _get_gke_credentials(session: AsyncSession):
+    """Read SA credentials from platform_config for GKE API calls.
+
+    Returns google.oauth2 Credentials or None to fall back to ADC.
+    Same pattern as GcsStorageService.get_credentials().
+    """
+    import json as _json
+
+    result = await session.execute(
+        text("SELECT key, value FROM platform_config WHERE key IN ('gcp_credential_source', 'gcp_service_account_key')")
+    )
+    config = {r[0]: r[1] for r in result.fetchall()}
+
+    if config.get("gcp_credential_source") != "service_account_key":
+        return None
+
+    key_json = config.get("gcp_service_account_key")
+    if not key_json or key_json == "null":
+        return None
+
+    try:
+        from google.oauth2 import service_account
+
+        key_data = _json.loads(key_json)
+        return service_account.Credentials.from_service_account_info(
+            key_data,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+    except Exception as e:
+        logger.warning("Failed to load GKE credentials from platform_config: %s", e)
+        return None
+
+
+def _get_gke_client(credentials=None):
     """Get a GKE ClusterManager client. Tests mock this function."""
     from google.cloud import container_v1
 
+    if credentials:
+        return container_v1.ClusterManagerClient(credentials=credentials)
     return container_v1.ClusterManagerClient()
 
 
@@ -97,7 +132,8 @@ async def get_cluster_status(session: AsyncSession) -> StackStatus:
     zone = await _read_config(session, "gcp_zone")
 
     try:
-        client = _get_gke_client()
+        credentials = await _get_gke_credentials(session)
+        client = _get_gke_client(credentials)
         cluster = client.get_cluster(name=f"projects/{project_id}/locations/{zone}/clusters/{cluster_name}")
 
         pipeline_pool = None
@@ -599,5 +635,30 @@ async def sync_storage_config(session: AsyncSession) -> dict[str, str]:
         if bucket_name:
             await _set_config(session, key, bucket_name)
             populated[key] = bucket_name
+    await session.flush()
+    return populated
+
+
+_COMPUTE_OUTPUT_MAP = {
+    "cluster_name": "gke_cluster_name",
+    "cluster_endpoint": "gke_cluster_endpoint",
+    "cluster_ca_cert": "gke_cluster_ca_cert",
+}
+
+
+async def sync_compute_config(session: AsyncSession) -> dict[str, str]:
+    """Re-read the compute Terraform outputs and write cluster config to platform_config.
+
+    Used to recover deployments where the terraform output capture failed
+    silently, leaving gke_cluster_endpoint as 'null'. Returns a dict of
+    {config_key: value} for all keys that were successfully populated.
+    """
+    outputs = await TerraformExecutor.read_module_outputs(session, "compute")
+    populated: dict[str, str] = {}
+    for tf_key, config_key in _COMPUTE_OUTPUT_MAP.items():
+        value = outputs.get(tf_key, {}).get("value", "")
+        if value:
+            await _set_config(session, config_key, value)
+            populated[config_key] = value
     await session.flush()
     return populated

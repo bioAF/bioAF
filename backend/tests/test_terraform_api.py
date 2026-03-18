@@ -401,3 +401,81 @@ async def test_terraform_plan_409_when_run_in_progress(client, session):
             headers={"Authorization": f"Bearer {admin_token}"},
         )
     assert resp.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# Test: Abandon endpoint
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_abandon_run_returns_cancelled(client, session):
+    """POST /abandon/{run_id} marks the run as cancelled and returns 200."""
+    user, admin_token = await _seed_user_and_token(client, session)
+    await _seed_gcp_config(session, configured=True, initialized=True)
+
+    await session.execute(
+        text("""
+        INSERT INTO terraform_runs
+            (triggered_by_user_id, action, status, module_name)
+        VALUES (:uid, 'plan', 'awaiting_confirmation', 'compute')
+        """).bindparams(uid=user.id)
+    )
+    await session.commit()
+    run_row = (await session.execute(text("SELECT id FROM terraform_runs LIMIT 1"))).fetchone()
+    run_id = run_row[0]
+
+    mock_run = MagicMock()
+    mock_run.id = run_id
+    mock_run.action = "plan"
+    mock_run.module_name = "compute"
+    mock_run.status = "cancelled"
+    mock_run.resources_planned = 1
+    mock_run.resources_completed = 0
+    mock_run.plan_json = None
+    mock_run.triggered_by_user_id = user.id
+    mock_run.started_at = "2026-03-16T00:00:00Z"
+    mock_run.completed_at = "2026-03-16T00:01:00Z"
+    mock_run.error_message = "Abandoned by user"
+    mock_run.terraform_state_url = None
+
+    with patch.object(TerraformExecutor, "abandon_run", new=AsyncMock(return_value=mock_run)):
+        resp = await client.post(
+            f"/api/v1/infrastructure/terraform/abandon/{run_id}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "cancelled"
+    assert body["error_message"] == "Abandoned by user"
+
+
+@pytest.mark.asyncio
+async def test_abandon_run_requires_admin(client, session):
+    """Non-admin users get 403 on the abandon endpoint."""
+    _, viewer_token = await _seed_user_and_token(client, session, role="viewer")
+
+    resp = await client.post(
+        "/api/v1/infrastructure/terraform/abandon/1",
+        headers={"Authorization": f"Bearer {viewer_token}"},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_abandon_run_409_on_completed(client, session):
+    """Abandon returns 409 when the run is already completed."""
+    _, admin_token = await _seed_user_and_token(client, session)
+    await _seed_gcp_config(session, configured=True, initialized=True)
+
+    with patch.object(
+        TerraformExecutor,
+        "abandon_run",
+        new=AsyncMock(side_effect=ValueError("cannot be abandoned")),
+    ):
+        resp = await client.post(
+            "/api/v1/infrastructure/terraform/abandon/1",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    assert resp.status_code == 409

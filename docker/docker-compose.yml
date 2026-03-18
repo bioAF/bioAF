@@ -28,6 +28,8 @@ services:
       BIOAF_DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://bioaf:CHANGE_ME@db:5432/bioaf}
       BIOAF_JWT_SECRET_KEY: ${SECRET_KEY:-CHANGE_ME_TO_RANDOM_STRING}
       BIOAF_ENVIRONMENT: ${BIOAF_ENVIRONMENT:-production}
+      BIOAF_COMPUTE_MODE: ${BIOAF_COMPUTE_MODE:-k8s}
+      BIOAF_GCP_PROJECT_ID: ${GCP_PROJECT_ID:-}
       BIOAF_DEBUG: "false"
       BIOAF_USE_SECRET_MANAGER: "false"
     depends_on:

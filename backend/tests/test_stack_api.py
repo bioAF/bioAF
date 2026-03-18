@@ -257,7 +257,20 @@ class TestClusterConfigEndpoint:
         mock_run = MagicMock()
         mock_run.id = 99
         mock_run.status = "awaiting_confirmation"
-        mock_run.plan_json = {"total": 1, "resources": []}
+        mock_run.plan_json = {
+            "total": 1,
+            "add_count": 0,
+            "change_count": 1,
+            "destroy_count": 0,
+            "resources": [
+                {
+                    "type": "google_container_node_pool",
+                    "name": "pipeline",
+                    "address": "google_container_node_pool.pipeline",
+                    "action": "update",
+                },
+            ],
+        }
         mock_run.resources_planned = 1
 
         with patch("app.api.stack_deploy.TerraformExecutor.run_plan", new_callable=AsyncMock) as mock_plan:
@@ -274,3 +287,47 @@ class TestClusterConfigEndpoint:
         data = response.json()
         assert data["run_id"] == 99
         assert data["status"] == "awaiting_confirmation"
+        assert data["plan_summary"] is not None
+        assert data["plan_summary"]["change_count"] == 1
+
+
+# -----------------------------------------------------------------------
+# Sync compute config
+# -----------------------------------------------------------------------
+
+
+class TestSyncComputeConfigEndpoint:
+    @pytest.mark.asyncio
+    async def test_sync_compute_config_returns_populated(self, client, admin_token, session):
+        """POST /sync-compute-config returns populated keys."""
+        await _set_config(session, "compute_deployed", "true")
+        await session.commit()
+
+        with patch("app.api.stack_deploy.sync_compute_config") as mock_sync:
+            from unittest.mock import AsyncMock
+
+            mock_sync.side_effect = AsyncMock(
+                return_value={
+                    "gke_cluster_endpoint": "10.0.0.1",
+                    "gke_cluster_ca_cert": "Y2VydA==",
+                    "gke_cluster_name": "bioaf-test",
+                }
+            )
+            response = await client.post(
+                "/api/v1/infrastructure/stack/sync-compute-config",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert "gke_cluster_endpoint" in data["populated"]
+
+    @pytest.mark.asyncio
+    async def test_sync_compute_config_requires_admin(self, client, viewer_token, session):
+        """Non-admin users get 403 on sync-compute-config."""
+        response = await client.post(
+            "/api/v1/infrastructure/stack/sync-compute-config",
+            headers={"Authorization": f"Bearer {viewer_token}"},
+        )
+        assert response.status_code == 403

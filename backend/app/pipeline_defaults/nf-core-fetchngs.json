@@ -1,0 +1,7 @@
+{
+  "nf_core_pipeline": "rnaseq",
+  "download_method": "aspera",
+  "max_memory": "16.GB",
+  "max_cpus": 4,
+  "max_time": "24.h"
+}

@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
     from app.adapters.registry import initialize_adapters
 
     async with notif_session_factory() as adapter_session:
-        await initialize_adapters(adapter_session)
+        await initialize_adapters(adapter_session, session_factory=notif_session_factory)
     logger.info("BAL adapters initialized")
 
     logger.info("bioAF backend started successfully")

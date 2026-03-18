@@ -235,6 +235,17 @@ async def get_provenance(
     return provenance
 
 
+@router.get("/{run_id}/logs")
+async def get_run_logs(
+    run_id: int,
+    current_user: dict = require_role("admin", "comp_bio"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Get logs for a K8s pipeline run (no process selection needed)."""
+    logs = await PipelineMonitorService.get_run_logs(session, run_id, "")
+    return logs
+
+
 @router.get("/{run_id}/logs/{process_name}")
 async def get_process_logs(
     run_id: int,

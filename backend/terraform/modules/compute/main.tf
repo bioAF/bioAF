@@ -62,11 +62,11 @@ resource "google_container_node_pool" "pipelines" {
       "bioaf.io/pool" = "pipelines"
     }
 
-    taint {
-      key    = "bioaf.io/pool"
-      value  = "pipelines"
-      effect = "NO_SCHEDULE"
-    }
+    # No taint on pipelines pool: Nextflow K8s executor spawns process
+    # pods that cannot carry custom tolerations, so an untainted pool is
+    # required. The label + nodeSelector on the head Job still directs
+    # orchestrator pods here; other pools' taints prevent Nextflow
+    # process pods from landing elsewhere.
   }
 }
 

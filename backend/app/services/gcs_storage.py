@@ -55,7 +55,8 @@ class GcsStorageService:
         if config.get("storage_deployed", "false") != "true":
             raise ValueError("Storage infrastructure has not been deployed yet")
 
-        client = storage.Client()
+        credentials = await GcsStorageService.get_credentials(session)
+        client = storage.Client(credentials=credentials)
         metrics: list[BucketMetrics] = []
 
         for config_key, purpose in _BUCKET_CONFIG_KEYS.items():
