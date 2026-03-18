@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -213,6 +214,52 @@ async def stack_deploy_endpoint(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/api/v1/infrastructure/stack/deploy-background")
+async def stack_deploy_background_endpoint(
+    body: StackDeployRequest | None = None,
+    current_user: dict = require_role("admin"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Start a stack deploy in the background and return immediately.
+
+    Used by the setup wizard to kick off deployment without maintaining
+    an SSE connection. The DeploymentBanner polls terraform status to
+    track progress.
+    """
+    user_id = int(current_user["sub"])
+    org_id = int(current_user["org_id"]) if current_user.get("org_id") else None
+    stack_type = body.stack_type if body else "kubernetes"
+
+    # Validate preconditions synchronously so we can return a clear error.
+    gcp_configured = await session.execute(
+        text("SELECT value FROM platform_config WHERE key = 'gcp_credentials_configured'")
+    )
+    gcp_val = gcp_configured.scalar_one_or_none()
+    if gcp_val != "true":
+        raise HTTPException(status_code=400, detail="GCP credentials are not configured")
+
+    tf_initialized = await session.execute(
+        text("SELECT value FROM platform_config WHERE key = 'terraform_initialized'")
+    )
+    tf_val = tf_initialized.scalar_one_or_none()
+    if tf_val != "true":
+        raise HTTPException(status_code=400, detail="Terraform has not been initialized")
+
+    async def _run_deploy():
+        """Drain the deploy_stack generator in the background."""
+        try:
+            async for _event in deploy_stack(session, stack_type, user_id, org_id=org_id):
+                pass  # Events are consumed; terraform runs as a subprocess
+        except Exception:
+            logger.exception("Background deploy failed")
+        finally:
+            await session.commit()
+
+    asyncio.get_event_loop().create_task(_run_deploy())
+
+    return {"message": "Deployment started"}
 
 
 @router.post("/api/v1/infrastructure/stack/teardown")

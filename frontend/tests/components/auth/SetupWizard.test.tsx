@@ -2,8 +2,12 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { SetupWizard } from "@/components/auth/SetupWizard";
 
 const mockApiPost = jest.fn();
+const mockApiPut = jest.fn();
 jest.mock("@/lib/api", () => ({
-  api: { post: (...args: unknown[]) => mockApiPost(...args) },
+  api: {
+    post: (...args: unknown[]) => mockApiPost(...args),
+    put: (...args: unknown[]) => mockApiPut(...args),
+  },
 }));
 
 jest.mock("@/lib/auth", () => ({
@@ -12,17 +16,51 @@ jest.mock("@/lib/auth", () => ({
 
 // InviteForm uses api internally; its mock is covered above.
 
+/** Advance the wizard from step 0 to the GCP Configuration step (step 4). */
+async function advanceToGcpStep() {
+  // Step 0 -> 1
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "a@b.com" } });
+  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "pw" } });
+  fireEvent.change(screen.getByLabelText("Confirm Password"), { target: { value: "pw" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create Admin Account" }));
+  await screen.findByRole("heading", { name: "Verify Email" });
+
+  // Step 1 -> 2 (skip)
+  fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+  await screen.findByRole("heading", { name: "Organization Name" });
+
+  // Step 2 -> 3
+  mockApiPost.mockResolvedValueOnce({});
+  fireEvent.change(screen.getByLabelText("Organization Name"), { target: { value: "Acme Bio" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save Organization Name" }));
+  await screen.findByRole("heading", { name: "SMTP Configuration" });
+
+  // Step 3 -> 4 (skip)
+  fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+  await screen.findByRole("heading", { name: "GCP Configuration" });
+}
+
+/** Advance from GCP Configuration step to Compute Stack step (skip). */
+async function advanceToComputeStep() {
+  await advanceToGcpStep();
+  // Step 4 -> 5 (skip)
+  fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+  await screen.findByRole("heading", { name: "Compute Stack" });
+}
+
 describe("SetupWizard", () => {
   beforeEach(() => {
     mockApiPost.mockReset();
+    mockApiPut.mockReset();
     mockApiPost.mockResolvedValue({ access_token: "tok", email_sent: true });
+    mockApiPut.mockResolvedValue({});
   });
 
-  it("renders the 7-step indicator on mount", () => {
+  it("renders the 8-step indicator on mount", () => {
     render(<SetupWizard onComplete={jest.fn()} />);
-    // 7 step circles labeled 1–7
+    // 8 step circles labeled 1-8
     expect(screen.getByText("1")).toBeInTheDocument();
-    expect(screen.getByText("7")).toBeInTheDocument();
+    expect(screen.getByText("8")).toBeInTheDocument();
   });
 
   it("step 0: shows Create Admin Account form", () => {
@@ -58,30 +96,38 @@ describe("SetupWizard", () => {
     });
   });
 
-  it("step 4: renders Kubernetes + GCS (recommended) and SLURM + NFS (coming soon) cards", async () => {
-    // Navigate to step 4 by mocking each intermediate API call
+  it("step 4: GCP Configuration appears after SMTP", async () => {
     render(<SetupWizard onComplete={jest.fn()} />);
+    await advanceToGcpStep();
 
-    // Step 0 → 1
-    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "a@b.com" } });
-    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "pw" } });
-    fireEvent.change(screen.getByLabelText("Confirm Password"), { target: { value: "pw" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create Admin Account" }));
-    await screen.findByRole("heading", { name: "Verify Email" });
+    expect(screen.getByRole("heading", { name: "GCP Configuration" })).toBeInTheDocument();
+    expect(screen.getByLabelText("GCP Project ID")).toBeInTheDocument();
+    expect(screen.getByLabelText("Region")).toBeInTheDocument();
+    expect(screen.getByLabelText("GCP Project ID")).toBeInTheDocument();
+    expect(screen.getByText("Organization Slug")).toBeInTheDocument();
+  });
 
-    // Step 1 → 2 (skip)
-    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
-    await screen.findByRole("heading", { name: "Organization Name" });
+  it("step 4: Save & Validate saves GCP config then validates", async () => {
+    render(<SetupWizard onComplete={jest.fn()} />);
+    await advanceToGcpStep();
 
-    // Step 2 → 3
-    mockApiPost.mockResolvedValueOnce({});
-    fireEvent.change(screen.getByLabelText("Organization Name"), { target: { value: "Acme Bio" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save Organization Name" }));
-    await screen.findByRole("heading", { name: "SMTP Configuration" });
+    mockApiPut.mockResolvedValueOnce({});
+    mockApiPost.mockResolvedValueOnce({ passed: true, checks: [] });
 
-    // Step 3 → 4 (skip)
-    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+    fireEvent.change(screen.getByLabelText("GCP Project ID"), { target: { value: "my-project" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save & Validate" }));
+
     await screen.findByRole("heading", { name: "Compute Stack" });
+
+    expect(mockApiPut).toHaveBeenCalledWith("/api/v1/settings/gcp", expect.objectContaining({
+      gcp_project_id: "my-project",
+    }));
+    expect(mockApiPost).toHaveBeenCalledWith("/api/v1/settings/gcp/validate");
+  });
+
+  it("step 5: renders Kubernetes + GCS (recommended) and SLURM + NFS (coming soon) cards", async () => {
+    render(<SetupWizard onComplete={jest.fn()} />);
+    await advanceToComputeStep();
 
     // Kubernetes card is present and labeled Recommended
     expect(screen.getByTestId("compute-stack-kubernetes")).toBeInTheDocument();
@@ -94,45 +140,17 @@ describe("SetupWizard", () => {
     expect(screen.getByText("Coming Soon")).toBeInTheDocument();
   });
 
-  it("step 4: Kubernetes is selected by default and continues with K8s label", async () => {
+  it("step 5: Kubernetes is selected by default and continues with K8s label", async () => {
     render(<SetupWizard onComplete={jest.fn()} />);
-
-    // Navigate to compute stack step
-    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "a@b.com" } });
-    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "pw" } });
-    fireEvent.change(screen.getByLabelText("Confirm Password"), { target: { value: "pw" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create Admin Account" }));
-    await screen.findByRole("heading", { name: "Verify Email" });
-    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
-    await screen.findByRole("heading", { name: "Organization Name" });
-    mockApiPost.mockResolvedValueOnce({});
-    fireEvent.change(screen.getByLabelText("Organization Name"), { target: { value: "Org" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save Organization Name" }));
-    await screen.findByRole("heading", { name: "SMTP Configuration" });
-    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
-    await screen.findByRole("heading", { name: "Compute Stack" });
+    await advanceToComputeStep();
 
     // Continue button shows Kubernetes label
     expect(screen.getByRole("button", { name: "Continue with Kubernetes + GCS" })).toBeInTheDocument();
   });
 
-  it("step 4: clicking Kubernetes card keeps it selected", async () => {
+  it("step 5: clicking Kubernetes card keeps it selected", async () => {
     render(<SetupWizard onComplete={jest.fn()} />);
-
-    // Fast-navigate to compute stack
-    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "a@b.com" } });
-    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "pw" } });
-    fireEvent.change(screen.getByLabelText("Confirm Password"), { target: { value: "pw" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create Admin Account" }));
-    await screen.findByRole("heading", { name: "Verify Email" });
-    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
-    await screen.findByRole("heading", { name: "Organization Name" });
-    mockApiPost.mockResolvedValueOnce({});
-    fireEvent.change(screen.getByLabelText("Organization Name"), { target: { value: "Org" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save Organization Name" }));
-    await screen.findByRole("heading", { name: "SMTP Configuration" });
-    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
-    await screen.findByRole("heading", { name: "Compute Stack" });
+    await advanceToComputeStep();
 
     fireEvent.click(screen.getByTestId("compute-stack-kubernetes"));
     expect(screen.getByRole("button", { name: "Continue with Kubernetes + GCS" })).toBeInTheDocument();

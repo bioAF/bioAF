@@ -10,10 +10,28 @@ const STEPS = [
   "Verify Email",
   "Organization Name",
   "SMTP Configuration",
+  "GCP Configuration",
   "Compute Stack",
   "Invite Team",
   "Confirmation",
 ];
+
+const GCP_REGIONS = [
+  "us-central1", "us-east1", "us-east4", "us-west1", "us-west2", "us-west3", "us-west4",
+  "europe-west1", "europe-west2", "europe-west3", "europe-west4", "europe-west6",
+  "asia-east1", "asia-east2", "asia-northeast1", "asia-south1", "asia-southeast1",
+];
+
+const GCP_ZONES: Record<string, string[]> = {
+  "us-central1": ["us-central1-a", "us-central1-b", "us-central1-c", "us-central1-f"],
+  "us-east1": ["us-east1-b", "us-east1-c", "us-east1-d"],
+  "us-east4": ["us-east4-a", "us-east4-b", "us-east4-c"],
+  "us-west1": ["us-west1-a", "us-west1-b", "us-west1-c"],
+};
+
+function zonesForRegion(region: string): string[] {
+  return GCP_ZONES[region] ?? [`${region}-a`, `${region}-b`, `${region}-c`];
+}
 
 interface SetupWizardProps {
   onComplete: () => void;
@@ -34,6 +52,17 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [smtpUsername, setSmtpUsername] = useState("");
   const [smtpPassword, setSmtpPassword] = useState("");
   const [smtpFrom, setSmtpFrom] = useState("");
+
+  // GCP configuration state
+  const [gcpProjectId, setGcpProjectId] = useState("");
+  const [gcpRegion, setGcpRegion] = useState("us-central1");
+  const [gcpZone, setGcpZone] = useState("us-central1-a");
+  const [gcpOrgSlug, setGcpOrgSlug] = useState("");
+  const [gcpCredentialSource, setGcpCredentialSource] = useState<"vm_default" | "service_account_key">("vm_default");
+  const [gcpServiceAccountKey, setGcpServiceAccountKey] = useState("");
+  const [gcpServiceAccountEmail, setGcpServiceAccountEmail] = useState("");
+  const [gcpSaving, setGcpSaving] = useState(false);
+
   const [computeStack, setComputeStack] = useState("kubernetes");
 
   const handleCreateAdmin = async () => {
@@ -94,17 +123,60 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     }
   };
 
+  const handleSaveGcp = async () => {
+    setError("");
+    setGcpSaving(true);
+    try {
+      await api.put("/api/v1/settings/gcp", {
+        gcp_project_id: gcpProjectId || undefined,
+        gcp_region: gcpRegion,
+        gcp_zone: gcpZone,
+        org_slug: gcpOrgSlug || undefined,
+        gcp_credential_source: gcpCredentialSource,
+        service_account_key:
+          gcpCredentialSource === "service_account_key" && gcpServiceAccountKey
+            ? gcpServiceAccountKey
+            : undefined,
+        gcp_service_account_email: gcpServiceAccountEmail || undefined,
+      });
+
+      // Validate after saving
+      await api.post("/api/v1/settings/gcp/validate");
+      setStep(5);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save GCP configuration");
+    } finally {
+      setGcpSaving(false);
+    }
+  };
+
   const handleSelectComputeStack = async () => {
     setError("");
     try {
-      await api.post("/api/bootstrap/configure-compute-stack", {
-        compute_stack: computeStack,
-      });
-      setStep(5);
+      // Save the stack selection (non-critical if endpoint doesn't exist)
+      try {
+        await api.post("/api/bootstrap/configure-compute-stack", {
+          compute_stack: computeStack,
+        });
+      } catch {
+        // Non-critical
+      }
+
+      // Start deployment in the background -- the DeploymentBanner will
+      // track progress and show a toast when complete.
+      try {
+        await api.post("/api/v1/infrastructure/stack/deploy-background", {
+          stack_type: computeStack,
+        });
+      } catch {
+        // Deployment may fail if bootstrap hasn't run yet or preconditions
+        // aren't met. The user can trigger deployment later from the
+        // Infrastructure page.
+      }
+
+      setStep(6);
     } catch (e) {
-      // Non-critical: the endpoint may not exist yet during bootstrap
-      // Default to kubernetes and continue
-      setStep(5);
+      setStep(6);
     }
   };
 
@@ -255,8 +327,145 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         </div>
       )}
 
-      {/* Step 5: Compute Stack */}
+      {/* Step 5: GCP Configuration */}
       {step === 4 && (
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600 mb-2">
+            Configure your Google Cloud Platform project. Credentials are required before
+            deploying a compute stack.
+          </p>
+
+          <div>
+            <label htmlFor="gcp-project-id" className="block text-sm font-medium text-gray-700 mb-1">GCP Project ID</label>
+            <input
+              id="gcp-project-id"
+              type="text"
+              value={gcpProjectId}
+              onChange={(e) => setGcpProjectId(e.target.value)}
+              placeholder="my-gcp-project"
+              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="gcp-region" className="block text-sm font-medium text-gray-700 mb-1">Region</label>
+              <select
+                id="gcp-region"
+                value={gcpRegion}
+                onChange={(e) => {
+                  setGcpRegion(e.target.value);
+                  setGcpZone(zonesForRegion(e.target.value)[0]);
+                }}
+                className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500"
+              >
+                {GCP_REGIONS.map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="gcp-zone" className="block text-sm font-medium text-gray-700 mb-1">Zone</label>
+              <select
+                id="gcp-zone"
+                value={gcpZone}
+                onChange={(e) => setGcpZone(e.target.value)}
+                className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500"
+              >
+                {zonesForRegion(gcpRegion).map((z) => (
+                  <option key={z} value={z}>{z}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="gcp-org-slug" className="block text-sm font-medium text-gray-700 mb-1">
+              Organization Slug
+              <span className="ml-1 text-gray-400 font-normal text-xs">(3-30 chars, lowercase, hyphens allowed)</span>
+            </label>
+            <input
+              id="gcp-org-slug"
+              type="text"
+              value={gcpOrgSlug}
+              onChange={(e) => setGcpOrgSlug(e.target.value)}
+              placeholder="my-bioaf-org"
+              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Authentication</label>
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="gcp_credential_source"
+                  value="vm_default"
+                  checked={gcpCredentialSource === "vm_default"}
+                  onChange={() => setGcpCredentialSource("vm_default")}
+                />
+                <span className="text-sm">VM default credentials</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="gcp_credential_source"
+                  value="service_account_key"
+                  checked={gcpCredentialSource === "service_account_key"}
+                  onChange={() => setGcpCredentialSource("service_account_key")}
+                />
+                <span className="text-sm">Service account key (JSON)</span>
+              </label>
+            </div>
+
+            {gcpCredentialSource === "service_account_key" && (
+              <div className="mt-3">
+                <label htmlFor="gcp-sa-key" className="block text-sm font-medium text-gray-700 mb-1">Service Account Key (JSON)</label>
+                <textarea
+                  id="gcp-sa-key"
+                  value={gcpServiceAccountKey}
+                  onChange={(e) => setGcpServiceAccountKey(e.target.value)}
+                  rows={4}
+                  className="w-full px-3 py-2 border rounded font-mono text-xs focus:ring-2 focus:ring-bioaf-500"
+                  placeholder='{"type": "service_account", ...}'
+                />
+              </div>
+            )}
+
+            {gcpCredentialSource === "vm_default" && (
+              <div className="mt-3">
+                <label htmlFor="gcp-sa-email" className="block text-sm font-medium text-gray-700 mb-1">
+                  Service Account Email
+                  <span className="ml-1 text-gray-400 font-normal text-xs">(optional)</span>
+                </label>
+                <input
+                  id="gcp-sa-email"
+                  type="email"
+                  value={gcpServiceAccountEmail}
+                  onChange={(e) => setGcpServiceAccountEmail(e.target.value)}
+                  className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500"
+                  placeholder="bioaf-sa@my-project.iam.gserviceaccount.com"
+                />
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={handleSaveGcp}
+            disabled={gcpSaving}
+            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
+          >
+            {gcpSaving ? "Saving..." : "Save & Validate"}
+          </button>
+          <button onClick={() => setStep(5)} className="w-full text-gray-500 text-sm hover:text-gray-700">
+            Skip for now
+          </button>
+        </div>
+      )}
+
+      {/* Step 6: Compute Stack */}
+      {step === 5 && (
         <div className="space-y-4">
           <p className="text-sm text-gray-600 mb-4">
             Choose the compute infrastructure for running pipelines and notebooks.
@@ -319,27 +528,28 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         </div>
       )}
 
-      {/* Step 6: Invite Team */}
-      {step === 5 && (
+      {/* Step 7: Invite Team */}
+      {step === 6 && (
         <div className="space-y-4">
           <InviteForm />
-          <button onClick={() => setStep(6)} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
+          <button onClick={() => setStep(7)} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
             Continue
           </button>
-          <button onClick={() => setStep(6)} className="w-full text-gray-500 text-sm hover:text-gray-700">
+          <button onClick={() => setStep(7)} className="w-full text-gray-500 text-sm hover:text-gray-700">
             Skip for now
           </button>
         </div>
       )}
 
-      {/* Step 7: Confirmation */}
-      {step === 6 && (
+      {/* Step 8: Confirmation */}
+      {step === 7 && (
         <div className="space-y-4">
           <div className="p-4 bg-green-50 border border-green-200 rounded">
             <h3 className="font-semibold text-green-800">Setup Summary</h3>
             <ul className="mt-2 text-sm text-green-700 space-y-1">
               <li>Admin account created</li>
               {orgName && <li>Organization: {orgName}</li>}
+              {gcpProjectId && <li>GCP Project: {gcpProjectId}</li>}
               <li>Compute stack: {computeStack === "kubernetes" ? "Kubernetes + GCS" : "SLURM + NFS"}</li>
               <li>Platform ready to use</li>
             </ul>

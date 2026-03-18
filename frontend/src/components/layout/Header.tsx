@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { getCurrentUser, removeToken } from "@/lib/auth";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
+import { DeploymentBanner } from "@/components/infrastructure/DeploymentBanner";
 
 export function Header() {
   const router = useRouter();
@@ -14,6 +15,8 @@ export function Header() {
   };
 
   return (
+    <>
+    <DeploymentBanner />
     <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6">
       <div />
       <div className="flex items-center gap-4">
@@ -36,5 +39,6 @@ export function Header() {
         )}
       </div>
     </header>
+    </>
   );
 }
