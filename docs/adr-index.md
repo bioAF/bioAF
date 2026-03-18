@@ -20,3 +20,14 @@
 | [ADR-016](../decisions/ADR-016-snapshot-comparison-ui.md) | Snapshot Comparison UI | Visual diff tool for comparing analysis snapshots |
 | [ADR-017](../decisions/ADR-017-reference-data-management.md) | Reference Data Management | Centralized management of reference genomes and annotations |
 | [ADR-018](../decisions/ADR-018-cross-experiment-projects.md) | Cross-Experiment Projects | Group related experiments into projects for organization |
+| [ADR-019](../decisions/ADR-019-pipeline-review-handoff.md) | Pipeline Review Handoff | Review gate between pipeline completion and data handoff |
+| [ADR-020](../decisions/ADR-020-bioaf-adapter-layer.md) | BioAF Adapter Layer (BAL) | Abstract compute, storage, and notebook providers behind clean interfaces |
+| [ADR-021](../decisions/ADR-021-kubernetes-compute-backend.md) | Kubernetes Compute Backend | GKE Autopilot as the recommended compute backend |
+| [ADR-022](../decisions/ADR-022-gcs-storage-backend.md) | GCS Storage Backend | GCS as the recommended storage backend, replacing Filestore |
+| [ADR-023](../decisions/ADR-023-cro-naming-profiles.md) | CRO Naming Profiles | Configurable naming profiles for CRO file conventions |
+| [ADR-024](../decisions/ADR-024-gcs-auto-ingest.md) | GCS Auto-Ingest | Event-driven file cataloging from GCS ingest bucket via Pub/Sub |
+| [ADR-025](../decisions/ADR-025-automated-pipeline-triggering.md) | Automated Pipeline Triggering | Auto-trigger pipelines when ingest conditions are met |
+| [ADR-026](../decisions/ADR-026-ssh-access.md) | SSH Access | One-click kubectl exec into running containers |
+| [ADR-027](../decisions/ADR-027-navigation-restructure.md) | Navigation Restructure | Reorganize sidebar navigation for clarity |
+| [ADR-028](../decisions/ADR-028-bigquery-billing-export.md) | BigQuery Billing Export | Use GCP BigQuery billing export for accurate cost data |
+| [ADR-029](../decisions/ADR-029-signed-url-direct-upload.md) | Signed URL Direct Upload | Browser uploads directly to GCS via signed URLs, bypassing backend |

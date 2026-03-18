@@ -29,6 +29,8 @@
 | [ADR-025](ADR-025-automated-pipeline-triggering.md) | Automated Pipeline Triggering | Accepted | 2026-03-10 |
 | [ADR-026](ADR-026-ssh-access.md) | SSH Access to Running Containers | Accepted | 2026-03-10 |
 | [ADR-027](ADR-027-navigation-restructure.md) | Navigation Restructure | Accepted | 2026-03-10 |
+| [ADR-028](ADR-028-bigquery-billing-export.md) | BigQuery Billing Export for Accurate Cost Data | Accepted | 2026-03-17 |
+| [ADR-029](ADR-029-signed-url-direct-upload.md) | Signed URL Direct Upload for File Ingestion | Accepted | 2026-03-15 |
 
 ## How to Use This Directory
 

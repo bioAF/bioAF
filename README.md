@@ -17,7 +17,7 @@ A turnkey computational biology platform for small biotech companies (5-50 resea
 - **SSH Access** - One-click kubectl exec into running pipeline jobs and notebook sessions
 - **Notifications** - Event-driven alerts via in-app, email (SMTP), and Slack webhooks
 - **Cost Center** - GCP billing integration, budget alerts, component cost breakdown, projections
-- **Backup & Recovery** - Tiered backups (Cloud SQL PITR, Filestore snapshots, config exports), one-click restore
+- **Backup & Recovery** - Tiered backups (Cloud SQL PITR, GCS versioning, config exports), one-click restore
 - **Role-Based Access** - Four roles (admin, comp_bio, bench, viewer) with granular permissions
 - **Upgrade System** - GitHub-based version checking, managed upgrade flow with rollback
 - **Activity Feed & Access Logs** - Full audit trail and team activity tracking
