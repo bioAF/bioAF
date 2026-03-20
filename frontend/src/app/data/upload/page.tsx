@@ -125,7 +125,7 @@ export default function DataUploadPage() {
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept=".fastq,.fastq.gz,.fq,.fq.gz,.h5ad,.csv,.tsv"
+                accept=".fastq,.fastq.gz,.fq,.fq.gz,.gz,.h5ad,.csv,.tsv"
                 onChange={handleFileSelect}
                 className="hidden"
               />

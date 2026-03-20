@@ -92,7 +92,13 @@ async def test_simple_upload_links_experiment_id(client, admin_token, configured
     await session.flush()
     await session.commit()
 
-    with patch("app.services.upload_service.UploadService._upload_file_to_gcs", new_callable=AsyncMock):
+    async def fake_move(source_uri, dest_uri, credentials=None):
+        return dest_uri
+
+    with (
+        patch("app.services.upload_service.UploadService._upload_file_to_gcs", new_callable=AsyncMock),
+        patch("app.services.gcs_storage.GcsStorageService.move_file", side_effect=fake_move),
+    ):
         resp = await client.post(
             f"/api/files/upload/simple?experiment_id={exp.id}",
             files={"file": ("sample.fastq.gz", io.BytesIO(b"data"), "application/gzip")},
@@ -267,6 +273,171 @@ async def test_simple_upload_streams_file_without_buffering(client, admin_token,
 # ---------------------------------------------------------------------------
 # complete_upload: optional md5
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_signed_upload_links_experiment_id(client, admin_token, configured_ingest_bucket, session):
+    """Signed upload flow (initiate -> complete) must persist experiment_id on the file record."""
+    from app.models.experiment import Experiment
+    from app.models.file import File
+    from app.models.user import User
+    from sqlalchemy import select
+
+    user = (await session.execute(select(User).limit(1))).scalar_one()
+    exp = Experiment(
+        organization_id=user.organization_id,
+        name="Signed Upload Link Test",
+        owner_user_id=user.id,
+        status="registered",
+    )
+    session.add(exp)
+    await session.flush()
+    await session.commit()
+
+    from app.services.upload_service import UploadService
+
+    async def fake_move(source_uri, dest_uri, credentials=None):
+        return dest_uri
+
+    with (
+        patch.object(
+            UploadService,
+            "_generate_signed_upload_url",
+            new=AsyncMock(return_value="https://storage.googleapis.com/fake-signed-url"),
+        ),
+        patch("app.services.gcs_storage.GcsStorageService.move_file", side_effect=fake_move),
+    ):
+        initiate_resp = await client.post(
+            "/api/files/upload/initiate",
+            json={
+                "filename": "linked.fastq.gz",
+                "expected_size_bytes": 5000,
+                "experiment_id": exp.id,
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert initiate_resp.status_code == 200
+        upload_id = initiate_resp.json()["upload_id"]
+
+        complete_resp = await client.post(
+            "/api/files/upload/complete",
+            json={"upload_id": upload_id},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    assert complete_resp.status_code == 200
+    assert complete_resp.json()["experiment_id"] == exp.id
+
+    file_row = (await session.execute(select(File).where(File.filename == "linked.fastq.gz"))).scalar_one_or_none()
+    assert file_row is not None
+    assert file_row.experiment_id == exp.id
+
+
+@pytest.mark.asyncio
+async def test_signed_upload_moves_file_to_raw_bucket(client, admin_token, configured_ingest_bucket, session):
+    """Signed upload with experiment_id must move the file from ingest to raw bucket."""
+    from app.models.component import PlatformConfig
+    from app.models.experiment import Experiment
+    from app.models.file import File
+    from app.models.user import User
+    from sqlalchemy import select
+
+    session.add(PlatformConfig(key="raw_bucket_name", value="bioaf-raw-test-abc123"))
+    session.add(PlatformConfig(key="gcp_credential_source", value="vm_default"))
+    await session.flush()
+    await session.commit()
+
+    user = (await session.execute(select(User).limit(1))).scalar_one()
+    exp = Experiment(
+        organization_id=user.organization_id,
+        name="Move Test",
+        owner_user_id=user.id,
+        status="registered",
+    )
+    session.add(exp)
+    await session.flush()
+    await session.commit()
+
+    from app.services.upload_service import UploadService
+
+    move_calls = []
+
+    async def fake_move(source_uri, dest_uri, credentials=None):
+        move_calls.append((source_uri, dest_uri))
+        return dest_uri
+
+    with (
+        patch.object(
+            UploadService,
+            "_generate_signed_upload_url",
+            new=AsyncMock(return_value="https://storage.googleapis.com/fake-signed-url"),
+        ),
+        patch("app.services.gcs_storage.GcsStorageService.move_file", side_effect=fake_move),
+    ):
+        initiate_resp = await client.post(
+            "/api/files/upload/initiate",
+            json={
+                "filename": "moved.fastq.gz",
+                "expected_size_bytes": 5000,
+                "experiment_id": exp.id,
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert initiate_resp.status_code == 200
+        upload_id = initiate_resp.json()["upload_id"]
+
+        complete_resp = await client.post(
+            "/api/files/upload/complete",
+            json={"upload_id": upload_id},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+    assert complete_resp.status_code == 200
+
+    # File should have been moved from ingest to raw bucket
+    assert len(move_calls) == 1
+    src, dest = move_calls[0]
+    assert "uploads/" in src
+    assert f"experiments/{exp.id}/" in dest
+    assert "bioaf-raw-test-abc123" in dest
+
+    # DB record should have the new URI
+    file_row = (await session.execute(select(File).where(File.filename == "moved.fastq.gz"))).scalar_one_or_none()
+    assert file_row is not None
+    assert f"experiments/{exp.id}/" in file_row.gcs_uri
+    assert "uploads/" not in file_row.gcs_uri
+
+
+@pytest.mark.asyncio
+async def test_signed_upload_without_experiment_id(client, admin_token, configured_ingest_bucket, session):
+    """Signed upload flow without experiment_id must leave experiment_id as None."""
+    from app.models.file import File
+    from sqlalchemy import select
+    from app.services.upload_service import UploadService
+
+    with patch.object(
+        UploadService,
+        "_generate_signed_upload_url",
+        new=AsyncMock(return_value="https://storage.googleapis.com/fake-signed-url"),
+    ):
+        initiate_resp = await client.post(
+            "/api/files/upload/initiate",
+            json={"filename": "nolink.fastq.gz", "expected_size_bytes": 5000},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    assert initiate_resp.status_code == 200
+    upload_id = initiate_resp.json()["upload_id"]
+
+    complete_resp = await client.post(
+        "/api/files/upload/complete",
+        json={"upload_id": upload_id},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert complete_resp.status_code == 200
+    assert complete_resp.json()["experiment_id"] is None
+
+    file_row = (await session.execute(select(File).where(File.filename == "nolink.fastq.gz"))).scalar_one_or_none()
+    assert file_row is not None
+    assert file_row.experiment_id is None
 
 
 @pytest.mark.asyncio
