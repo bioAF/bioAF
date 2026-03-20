@@ -621,6 +621,7 @@ class QCDashboardService:
                     md5_checksum=None,
                     file_type="png",
                     tags=["qc_plot", plot_type],
+                    experiment_id=run.experiment_id,
                 )
                 plots_meta.append({"plot_type": plot_type, "title": title, "file_id": file.id})
 

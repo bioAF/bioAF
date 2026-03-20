@@ -81,6 +81,46 @@ async def test_delete_file(client, admin_token, sample_file):
 
 
 @pytest.mark.asyncio
+async def test_delete_file_with_plot_archive(client, admin_token, session, admin_user):
+    """Deleting a file referenced by plot_archive should succeed by cascading."""
+    from app.models.file import File
+    from app.models.plot_archive_entry import PlotArchiveEntry
+
+    f = File(
+        organization_id=admin_user.organization_id,
+        gcs_uri="gs://test-bucket/qc-plot.png",
+        filename="qc-plot.png",
+        size_bytes=2048,
+        file_type="png",
+        uploader_user_id=admin_user.id,
+    )
+    session.add(f)
+    await session.flush()
+
+    entry = PlotArchiveEntry(
+        organization_id=admin_user.organization_id,
+        file_id=f.id,
+        title="QC Plot",
+    )
+    session.add(entry)
+    await session.flush()
+    await session.commit()
+
+    resp = await client.delete(
+        f"/api/files/{f.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+
+    from sqlalchemy import text
+
+    row = (
+        await session.execute(text("SELECT count(*) FROM plot_archive WHERE file_id = :fid").bindparams(fid=f.id))
+    ).scalar()
+    assert row == 0
+
+
+@pytest.mark.asyncio
 async def test_viewer_cannot_delete_file(client, viewer_token, sample_file):
     resp = await client.delete(
         f"/api/files/{sample_file.id}",

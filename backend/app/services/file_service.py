@@ -1,10 +1,11 @@
 import logging
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.file import File
+from app.models.plot_archive_entry import PlotArchiveEntry
 from app.services.audit_service import log_action
 
 logger = logging.getLogger("bioaf.file_service")
@@ -122,6 +123,42 @@ class FileService:
             action="delete",
             details={"filename": file.filename},
         )
+
+        # Remove dependent rows from tables with FK references to files.id
+        await session.execute(delete(PlotArchiveEntry).where(PlotArchiveEntry.file_id == file_id))
+
+        from app.models.cellxgene_publication import CellxgenePublication
+        from app.models.document import Document
+        from app.models.file_parse_result import FileParseResult
+        from app.models.ingest_event import IngestEvent
+        from app.models.sample import sample_files
+
+        await session.execute(sample_files.delete().where(sample_files.c.file_id == file_id))
+        await session.execute(delete(FileParseResult).where(FileParseResult.file_id == file_id))
+        await session.execute(delete(IngestEvent).where(IngestEvent.file_id == file_id))
+        await session.execute(delete(CellxgenePublication).where(CellxgenePublication.file_id == file_id))
+        await session.execute(delete(Document).where(Document.file_id == file_id))
+
+        await session.execute(
+            text("UPDATE analysis_snapshots SET figure_file_id = NULL WHERE figure_file_id = :fid").bindparams(
+                fid=file_id
+            )
+        )
+        await session.execute(
+            text("UPDATE analysis_snapshots SET checkpoint_file_id = NULL WHERE checkpoint_file_id = :fid").bindparams(
+                fid=file_id
+            )
+        )
+
+        # notebook_session_files is created by migration, not ORM metadata;
+        # check existence at runtime before attempting cleanup
+        table_check = await session.execute(
+            text("SELECT 1 FROM information_schema.tables WHERE table_name = 'notebook_session_files' LIMIT 1")
+        )
+        if table_check.scalar_one_or_none():
+            await session.execute(
+                text("DELETE FROM notebook_session_files WHERE file_id = :fid").bindparams(fid=file_id)
+            )
 
         await session.delete(file)
         await session.flush()

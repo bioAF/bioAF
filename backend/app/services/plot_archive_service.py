@@ -190,6 +190,7 @@ class PlotArchiveService:
                             size_bytes=blob.size,
                             md5_checksum=None,
                             file_type=file_type,
+                            experiment_id=experiment_id,
                         )
 
                         # Create archive entry
