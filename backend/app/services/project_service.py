@@ -95,15 +95,15 @@ class ProjectService:
         owner_user_id: int | None = None,
         search: str | None = None,
     ) -> list[dict]:
-        # Base query for projects
+        # Count experiments and samples via the experiments table (project_id FK)
         stmt = (
             select(
                 Project,
-                func.count(func.distinct(ProjectSample.id)).label("sample_count"),
-                func.count(func.distinct(Sample.experiment_id)).label("experiment_count"),
+                func.count(func.distinct(Experiment.id)).label("experiment_count"),
+                func.count(func.distinct(Sample.id)).label("sample_count"),
             )
-            .outerjoin(ProjectSample, ProjectSample.project_id == Project.id)
-            .outerjoin(Sample, Sample.id == ProjectSample.sample_id)
+            .outerjoin(Experiment, Experiment.project_id == Project.id)
+            .outerjoin(Sample, Sample.experiment_id == Experiment.id)
             .options(selectinload(Project.owner))
             .where(Project.organization_id == org_id)
             .group_by(Project.id)
@@ -140,7 +140,7 @@ class ProjectService:
             snap_counts = dict(snap_result.all())
 
         projects = []
-        for project, sample_count, experiment_count in rows:
+        for project, experiment_count, sample_count in rows:
             projects.append(
                 {
                     "id": project.id,
@@ -174,29 +174,66 @@ class ProjectService:
         if not project:
             return None
 
-        # Get samples grouped by experiment (single JOIN query)
-        sample_stmt = (
+        # Get experiments and their samples via project_id FK
+        exp_stmt = (
+            select(Experiment, Sample)
+            .outerjoin(Sample, Sample.experiment_id == Experiment.id)
+            .where(Experiment.project_id == project_id)
+            .order_by(Experiment.name, Sample.sample_id_external)
+        )
+        exp_result = await session.execute(exp_stmt)
+        exp_rows = exp_result.all()
+
+        # Also get samples added via project_samples junction table
+        ps_stmt = (
             select(ProjectSample, Sample, Experiment)
             .join(Sample, Sample.id == ProjectSample.sample_id)
             .join(Experiment, Experiment.id == Sample.experiment_id)
             .where(ProjectSample.project_id == project_id)
             .order_by(Experiment.name, Sample.sample_id_external)
         )
-        sample_result = await session.execute(sample_stmt)
-        sample_rows = sample_result.all()
+        ps_result = await session.execute(ps_stmt)
+        ps_rows = ps_result.all()
 
-        # Load added_by user names
-        user_ids = {ps.added_by_user_id for ps, _, _ in sample_rows}
-        user_names = {}
+        # Load added_by user names for project_sample entries
+        user_ids = {ps.added_by_user_id for ps, _, _ in ps_rows}
+        user_names: dict[int, str] = {}
         if user_ids:
             from app.models.user import User
 
             user_result = await session.execute(select(User.id, User.name).where(User.id.in_(user_ids)))
             user_names = dict(user_result.all())
 
-        # Group by experiment
+        # Build groups from experiments linked via project_id
         groups: dict[int, dict] = {}
-        for ps, sample, experiment in sample_rows:
+        all_sample_ids: set[int] = set()
+        for experiment, sample in exp_rows:
+            if experiment.id not in groups:
+                groups[experiment.id] = {
+                    "experiment_id": experiment.id,
+                    "experiment_name": experiment.name,
+                    "samples": [],
+                }
+            if sample is not None:
+                all_sample_ids.add(sample.id)
+                groups[experiment.id]["samples"].append(
+                    {
+                        "sample_id": sample.id,
+                        "sample_id_external": sample.sample_id_external,
+                        "organism": sample.organism,
+                        "tissue_type": sample.tissue_type,
+                        "qc_status": sample.qc_status,
+                        "added_by": None,
+                        "added_at": None,
+                        "notes": None,
+                    }
+                )
+
+        # Merge in project_sample entries (for samples not already included)
+        for ps, sample, experiment in ps_rows:
+            if sample.id in all_sample_ids:
+                continue
+            all_sample_ids.add(sample.id)
             if experiment.id not in groups:
                 groups[experiment.id] = {
                     "experiment_id": experiment.id,
@@ -216,6 +253,21 @@ class ProjectService:
                 }
             )
 
+        # Build experiment summaries
+        exp_map: dict[int, dict] = {}
+        for experiment, sample in exp_rows:
+            if experiment.id not in exp_map:
+                exp_map[experiment.id] = {
+                    "id": experiment.id,
+                    "name": experiment.name,
+                    "status": experiment.status,
+                    "sample_count": 0,
+                    "created_at": experiment.created_at,
+                }
+            if sample is not None:
+                exp_map[experiment.id]["sample_count"] += 1
+        experiment_summaries = sorted(exp_map.values(), key=lambda e: e["name"])
+
         # Get pipeline runs
         run_result = await session.execute(
             select(PipelineRun).where(PipelineRun.project_id == project_id).order_by(PipelineRun.created_at.desc())
@@ -223,7 +275,7 @@ class ProjectService:
         runs = run_result.scalars().all()
 
         # Counts
-        sample_count = len(sample_rows)
+        sample_count = len(all_sample_ids)
         experiment_count = len(groups)
         snap_result = await session.execute(
             select(func.count(AnalysisSnapshot.id)).where(AnalysisSnapshot.project_id == project_id)
@@ -244,6 +296,7 @@ class ProjectService:
             "snapshot_count": snapshot_count,
             "created_at": project.created_at,
             "samples": list(groups.values()),
+            "experiments": experiment_summaries,
             "pipeline_runs": [
                 {
                     "id": r.id,

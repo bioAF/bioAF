@@ -9,6 +9,7 @@ import { SampleQCBadge } from "@/components/experiments/SampleQCBadge";
 import { GeoExportModal } from "@/components/experiments/GeoExportModal";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { PlotModal } from "@/components/shared/PlotModal";
+import { DetailModal } from "@/components/shared/DetailModal";
 import { ExportPdfButton } from "@/components/shared/ExportPdfButton";
 import { VocabularySelect } from "@/components/shared/VocabularySelect";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
@@ -73,7 +74,8 @@ export default function ExperimentDetailPage() {
   const [batchForm, setBatchForm] = useState<BatchCreateRequest>({ name: "" });
   const [editFieldDefaults, setEditFieldDefaults] = useState<FieldDefaultValue[]>([]);
 
-  // Sample editing state
+  // Sample viewing/editing state
+  const [viewingSample, setViewingSample] = useState<Sample | null>(null);
   const [selectedSampleIds, setSelectedSampleIds] = useState<Set<number>>(new Set());
   const [editingSampleId, setEditingSampleId] = useState<number | null>(null);
   const [editSampleForm, setEditSampleForm] = useState<SampleUpdateRequest>({});
@@ -692,8 +694,8 @@ export default function ExperimentDetailPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-200">
                     {samples.map((s) => (
-                      <tr key={s.id} className={`hover:bg-gray-50 ${selectedSampleIds.has(s.id) ? "bg-blue-50/50" : ""}`}>
-                        <td className="px-2 py-3 text-center">
+                      <tr key={s.id} className={`hover:bg-gray-50 cursor-pointer ${selectedSampleIds.has(s.id) ? "bg-blue-50/50" : ""}`} onClick={() => setViewingSample(s)}>
+                        <td className="px-2 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             checked={selectedSampleIds.has(s.id)}
@@ -709,7 +711,7 @@ export default function ExperimentDetailPage() {
                         <td className="px-4 py-3 text-sm">{s.library_prep_method || "---"}</td>
                         <td className="px-4 py-3 text-sm">{s.library_layout || "---"}</td>
                         <td className="px-4 py-3 text-sm">{s.batch?.name || "---"}</td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                           <select
                             value={s.qc_status ?? ""}
                             onChange={(e) => { if (e.target.value) handleUpdateQC(s.id, e.target.value); }}
@@ -722,10 +724,10 @@ export default function ExperimentDetailPage() {
                           </select>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-500">{s.status.replace(/_/g, " ")}</td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                           <button
                             onClick={() => startEditSample(s)}
-                            className="text-xs text-bioaf-600 hover:text-bioaf-700 font-medium"
+                            className="text-xs px-2 py-1 border border-bioaf-600 text-bioaf-600 rounded hover:bg-bioaf-50"
                           >
                             Edit
                           </button>
@@ -738,6 +740,42 @@ export default function ExperimentDetailPage() {
                   </tbody>
                 </table>
               </div>
+
+              {/* View Sample Modal */}
+              {viewingSample && (
+                <DetailModal
+                  title={viewingSample.sample_id_external || `Sample #${viewingSample.id}`}
+                  onClose={() => setViewingSample(null)}
+                  fields={[
+                    { label: "External ID", value: viewingSample.sample_id_external },
+                    { label: "Status", value: viewingSample.status.replace(/_/g, " ") },
+                    { label: "Organism", value: viewingSample.organism },
+                    { label: "Tissue Type", value: viewingSample.tissue_type },
+                    { label: "Molecule Type", value: viewingSample.molecule_type },
+                    { label: "Treatment", value: viewingSample.treatment_condition },
+                    { label: "Library Prep", value: viewingSample.library_prep_method },
+                    { label: "Library Layout", value: viewingSample.library_layout },
+                    { label: "Donor ID", value: viewingSample.donor_source },
+                    { label: "Chemistry Version", value: viewingSample.chemistry_version },
+                    { label: "Cell Count", value: viewingSample.cell_count?.toLocaleString() },
+                    { label: "Viability %", value: viewingSample.viability_pct != null ? `${viewingSample.viability_pct}%` : null },
+                    { label: "Batch", value: viewingSample.batch?.name },
+                    { label: "QC Status", value: viewingSample.qc_status },
+                    { label: "QC Notes", value: viewingSample.qc_notes },
+                    { label: "Prep Notes", value: viewingSample.prep_notes },
+                    { label: "Created", value: new Date(viewingSample.created_at).toLocaleString() },
+                    { label: "Updated", value: new Date(viewingSample.updated_at).toLocaleString() },
+                  ]}
+                  actions={
+                    <button
+                      onClick={() => { setViewingSample(null); startEditSample(viewingSample); }}
+                      className="px-3 py-1.5 border border-bioaf-600 text-bioaf-600 rounded text-sm hover:bg-bioaf-50"
+                    >
+                      Edit
+                    </button>
+                  }
+                />
+              )}
 
               {/* Edit Sample Modal */}
               {editingSampleId !== null && (

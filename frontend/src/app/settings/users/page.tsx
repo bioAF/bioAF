@@ -10,10 +10,12 @@ import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api, ApiError } from "@/lib/api";
 import type { User } from "@/lib/types";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { DetailModal } from "@/components/shared/DetailModal";
 
 export default function SettingsUsersPage() {
   const router = useRouter();
   const [users, setUsers] = useState<User[]>([]);
+  const [viewingUser, setViewingUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [showInvite, setShowInvite] = useState(false);
   const [error, setError] = useState("");
@@ -87,10 +89,10 @@ export default function SettingsUsersPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {users.map((user) => (
-                    <tr key={user.id} className="hover:bg-gray-50">
+                    <tr key={user.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setViewingUser(user)}>
                       <td className="px-6 py-4 text-sm">{user.email}</td>
                       <td className="px-6 py-4 text-sm text-gray-500">{user.name || "—"}</td>
-                      <td className="px-6 py-4">
+                      <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
                         <select
                           value={user.role}
                           onChange={(e) => handleRoleChange(user.id, e.target.value)}
@@ -103,9 +105,9 @@ export default function SettingsUsersPage() {
                         </select>
                       </td>
                       <td className="px-6 py-4"><StatusBadge status={user.status} /></td>
-                      <td className="px-6 py-4">
+                      <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
                         {user.status === "active" && (
-                          <button onClick={() => handleDeactivate(user.id)} className="text-sm text-red-600 hover:text-red-800">
+                          <button onClick={() => handleDeactivate(user.id)} className="text-xs px-2 py-1 border border-red-600 text-red-600 rounded hover:bg-red-50">
                             Deactivate
                           </button>
                         )}
@@ -115,6 +117,31 @@ export default function SettingsUsersPage() {
                 </tbody>
               </table>
             </div>
+          )}
+
+          {viewingUser && (
+            <DetailModal
+              title={viewingUser.name || viewingUser.email}
+              onClose={() => setViewingUser(null)}
+              fields={[
+                { label: "Email", value: viewingUser.email },
+                { label: "Name", value: viewingUser.name },
+                { label: "Role", value: viewingUser.role },
+                { label: "Status", value: viewingUser.status },
+                { label: "Created", value: new Date(viewingUser.created_at).toLocaleString() },
+                { label: "Updated", value: new Date(viewingUser.updated_at).toLocaleString() },
+              ]}
+              actions={
+                viewingUser.status === "active" ? (
+                  <button
+                    onClick={() => { handleDeactivate(viewingUser.id); setViewingUser(null); }}
+                    className="px-3 py-1.5 border border-red-600 text-red-600 rounded text-sm hover:bg-red-50"
+                  >
+                    Deactivate
+                  </button>
+                ) : undefined
+              }
+            />
           )}
         </main>
       </div>

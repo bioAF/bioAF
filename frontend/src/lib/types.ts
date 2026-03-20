@@ -138,8 +138,17 @@ export interface PipelineRunSummary {
   created_at: string | null;
 }
 
+export interface ExperimentSummary {
+  id: number;
+  name: string;
+  status: string;
+  sample_count: number;
+  created_at: string | null;
+}
+
 export interface ProjectDetailResponse extends Project {
   samples: ProjectSampleGroup[];
+  experiments: ExperimentSummary[];
   pipeline_runs: PipelineRunSummary[];
 }
 

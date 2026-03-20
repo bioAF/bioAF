@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { getCurrentUser } from "@/lib/auth";
-import { navConfig, NavSection, NavChild } from "@/lib/navConfig";
+import { navConfig, NavSection, NavChild, isChildActive } from "@/lib/navConfig";
 
 function ChevronIcon({ expanded }: { expanded: boolean }) {
   return (
@@ -53,9 +53,7 @@ function SidebarSection({
 }) {
   const isExpandable = !!section.children;
   const isSectionActive = isExpandable
-    ? section.children!.some(
-        (c) => pathname === c.path || pathname.startsWith(c.path + "/"),
-      )
+    ? section.children!.some((c) => isChildActive(pathname, c, section.children!))
     : pathname === section.path ||
       (section.path === "/dashboard" && pathname === "/");
 
@@ -93,10 +91,7 @@ function SidebarSection({
             <SidebarChildItem
               key={child.path}
               child={child}
-              isActive={
-                pathname === child.path ||
-                pathname.startsWith(child.path + "/")
-              }
+              isActive={isChildActive(pathname, child, section.children!)}
             />
           ))}
         </div>
@@ -115,8 +110,8 @@ export function Sidebar() {
     const initial = new Set<string>();
     for (const section of navConfig) {
       if (section.children) {
-        const hasActiveChild = section.children.some(
-          (c) => pathname === c.path || pathname.startsWith(c.path + "/"),
+        const hasActiveChild = section.children.some((c) =>
+          isChildActive(pathname, c, section.children!),
         );
         if (hasActiveChild) {
           initial.add(section.label);
@@ -130,8 +125,8 @@ export function Sidebar() {
   useEffect(() => {
     for (const section of navConfig) {
       if (section.children) {
-        const hasActiveChild = section.children.some(
-          (c) => pathname === c.path || pathname.startsWith(c.path + "/"),
+        const hasActiveChild = section.children.some((c) =>
+          isChildActive(pathname, c, section.children!),
         );
         if (hasActiveChild && !expandedSections.has(section.label)) {
           setExpandedSections((prev) => new Set(prev).add(section.label));
@@ -162,7 +157,7 @@ export function Sidebar() {
         <Link href="/dashboard" className="text-xl font-bold text-bioaf-400">
           bioAF
         </Link>
-        <p className="text-xs text-gray-400 mt-1">Computational Biology Platform</p>
+        <p className="text-xs text-gray-400 mt-1">Comp Bio Automation Framework</p>
       </div>
 
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto" data-testid="sidebar-nav">

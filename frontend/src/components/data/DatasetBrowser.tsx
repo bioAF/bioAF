@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth";
+import { DetailModal } from "@/components/shared/DetailModal";
 import type {
   DatasetExperimentSummary,
   DatasetSearchResult,
@@ -12,6 +13,7 @@ import type {
 
 export function DatasetBrowser() {
   const [datasets, setDatasets] = useState<DatasetExperimentSummary[]>([]);
+  const [viewingDataset, setViewingDataset] = useState<DatasetExperimentSummary | null>(null);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -247,9 +249,9 @@ export function DatasetBrowser() {
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {datasets.map((ds) => (
-                  <tr key={ds.experiment_id} className={`hover:bg-gray-50 ${selectedExperiments.has(ds.experiment_id) ? "bg-bioaf-50" : ""}`}>
+                  <tr key={ds.experiment_id} className={`hover:bg-gray-50 cursor-pointer ${selectedExperiments.has(ds.experiment_id) ? "bg-bioaf-50" : ""}`} onClick={() => setViewingDataset(ds)}>
                     {canModify && (
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={selectedExperiments.has(ds.experiment_id)}
@@ -307,6 +309,29 @@ export function DatasetBrowser() {
             </div>
           </div>
         </>
+      )}
+
+      {viewingDataset && (
+        <DetailModal
+          title={viewingDataset.experiment_name}
+          onClose={() => setViewingDataset(null)}
+          fields={[
+            { label: "Status", value: viewingDataset.status },
+            { label: "Organism", value: viewingDataset.organism },
+            { label: "Tissue", value: viewingDataset.tissue },
+            { label: "Molecule Type", value: viewingDataset.molecule_type },
+            { label: "Instrument", value: viewingDataset.instrument_model },
+            { label: "Review Status", value: viewingDataset.review_status },
+            { label: "Samples", value: viewingDataset.sample_count },
+            { label: "Files", value: viewingDataset.file_count },
+            { label: "Total Size", value: `${(viewingDataset.total_size_bytes / (1024 ** 3)).toFixed(2)} GB` },
+            { label: "Pipeline Runs", value: viewingDataset.pipeline_run_count },
+            { label: "QC Dashboard", value: viewingDataset.has_qc_dashboard ? "Yes" : "No" },
+            { label: "CELLxGENE", value: viewingDataset.has_cellxgene ? "Yes" : "No" },
+            { label: "Owner", value: viewingDataset.owner?.name || viewingDataset.owner?.email },
+            { label: "Created", value: new Date(viewingDataset.created_at).toLocaleDateString() },
+          ]}
+        />
       )}
 
       {/* Add to Project Modal */}

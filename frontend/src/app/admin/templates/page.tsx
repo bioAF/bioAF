@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { DetailModal } from "@/components/shared/DetailModal";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { ExperimentTemplate, TemplateCreateRequest } from "@/lib/types";
@@ -23,6 +24,7 @@ export default function TemplatesPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [viewingTemplate, setViewingTemplate] = useState<ExperimentTemplate | null>(null);
 
   const [form, setForm] = useState<TemplateCreateRequest>({
     name: "",
@@ -224,7 +226,7 @@ export default function TemplatesPage() {
           ) : (
             <div className="grid gap-4">
               {templates.map((t) => (
-                <div key={t.id} className="bg-white rounded-lg shadow p-4">
+                <div key={t.id} className="bg-white rounded-lg shadow p-4 hover:bg-gray-50 cursor-pointer" onClick={() => setViewingTemplate(t)}>
                   <div className="flex items-center justify-between">
                     <div>
                       <h3 className="font-semibold">{t.name}</h3>
@@ -234,8 +236,8 @@ export default function TemplatesPage() {
                       </p>
                     </div>
                     <button
-                      onClick={() => handleEdit(t)}
-                      className="text-sm text-bioaf-600 hover:text-bioaf-700"
+                      onClick={(e) => { e.stopPropagation(); handleEdit(t); }}
+                      className="text-xs px-2 py-1 border border-bioaf-600 text-bioaf-600 rounded hover:bg-bioaf-50"
                     >
                       Edit
                     </button>
@@ -243,6 +245,40 @@ export default function TemplatesPage() {
                 </div>
               ))}
             </div>
+          )}
+          {viewingTemplate && (
+            <DetailModal
+              title={viewingTemplate.name}
+              onClose={() => setViewingTemplate(null)}
+              fields={[
+                { label: "Description", value: viewingTemplate.description },
+                { label: "Created By", value: viewingTemplate.created_by?.name || viewingTemplate.created_by?.email },
+                { label: "Created", value: new Date(viewingTemplate.created_at).toLocaleDateString() },
+                {
+                  label: "Required Sample Fields",
+                  value: (() => {
+                    const fields = (viewingTemplate.required_fields_json as Record<string, string[]>)?.sample_fields;
+                    return fields?.length ? fields.join(", ") : "None";
+                  })(),
+                },
+                {
+                  label: "Custom Fields",
+                  value: (() => {
+                    const schema = viewingTemplate.custom_fields_schema_json as { fields?: Array<{ name: string; type: string }> } | null;
+                    const fields = schema?.fields;
+                    return fields?.length ? fields.map((f) => `${f.name} (${f.type})`).join(", ") : "None";
+                  })(),
+                },
+              ]}
+              actions={
+                <button
+                  onClick={() => { setViewingTemplate(null); handleEdit(viewingTemplate); }}
+                  className="px-3 py-1.5 border border-bioaf-600 text-bioaf-600 rounded text-sm hover:bg-bioaf-50"
+                >
+                  Edit
+                </button>
+              }
+            />
           )}
         </main>
       </div>

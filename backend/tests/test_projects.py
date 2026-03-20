@@ -417,3 +417,86 @@ async def test_viewer_cannot_create_project(client, viewer_token):
         headers={"Authorization": f"Bearer {viewer_token}"},
     )
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_list_projects_counts_experiments_via_project_id(client, admin_token, session, admin_user):
+    """Experiment/sample counts should reflect experiments linked via project_id,
+    not just samples manually added through the project_samples table."""
+    # Create a project
+    resp = await client.post(
+        "/api/projects",
+        json={"name": "Counts Test Project"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    project_id = resp.json()["id"]
+
+    # Create experiments linked to the project via project_id
+    exp1 = Experiment(
+        organization_id=admin_user.organization_id,
+        project_id=project_id,
+        name="Linked Exp 1",
+        status="registered",
+    )
+    exp2 = Experiment(
+        organization_id=admin_user.organization_id,
+        project_id=project_id,
+        name="Linked Exp 2",
+        status="registered",
+    )
+    session.add_all([exp1, exp2])
+    await session.flush()
+
+    # Add samples to one of the experiments
+    s1 = Sample(experiment_id=exp1.id, sample_id_external="CNT-1", organism="Homo sapiens", status="registered")
+    s2 = Sample(experiment_id=exp1.id, sample_id_external="CNT-2", organism="Homo sapiens", status="registered")
+    s3 = Sample(experiment_id=exp2.id, sample_id_external="CNT-3", organism="Homo sapiens", status="registered")
+    session.add_all([s1, s2, s3])
+    await session.commit()
+
+    # List projects and verify counts
+    response = await client.get(
+        "/api/projects",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    projects = response.json()["projects"]
+    project = next(p for p in projects if p["id"] == project_id)
+
+    assert project["experiment_count"] == 2, f"Expected 2 experiments, got {project['experiment_count']}"
+    assert project["sample_count"] == 3, f"Expected 3 samples, got {project['sample_count']}"
+
+
+@pytest.mark.asyncio
+async def test_project_detail_counts_experiments_via_project_id(client, admin_token, session, admin_user):
+    """Project detail should include experiments linked via project_id."""
+    resp = await client.post(
+        "/api/projects",
+        json={"name": "Detail Counts Project"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    project_id = resp.json()["id"]
+
+    exp = Experiment(
+        organization_id=admin_user.organization_id,
+        project_id=project_id,
+        name="Detail Linked Exp",
+        status="registered",
+    )
+    session.add(exp)
+    await session.flush()
+
+    s1 = Sample(experiment_id=exp.id, sample_id_external="DET-1", organism="Homo sapiens", status="registered")
+    session.add(s1)
+    await session.commit()
+
+    response = await client.get(
+        f"/api/projects/{project_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["experiment_count"] >= 1, f"Expected >= 1 experiment, got {data['experiment_count']}"
+    assert data["sample_count"] >= 1, f"Expected >= 1 sample, got {data['sample_count']}"

@@ -81,6 +81,30 @@ export const navConfig: NavSection[] = [
 ];
 
 /**
+ * Check if a child nav item should be active for the given pathname.
+ * Uses startsWith matching but excludes paths that match a more specific sibling.
+ */
+export function isChildActive(
+  pathname: string,
+  child: NavChild,
+  siblings: NavChild[],
+): boolean {
+  if (pathname === child.path) return true;
+  if (!pathname.startsWith(child.path + "/")) return false;
+  // Ensure no sibling is a more specific match
+  for (const sibling of siblings) {
+    if (sibling.path === child.path) continue;
+    if (
+      sibling.path.startsWith(child.path + "/") &&
+      (pathname === sibling.path || pathname.startsWith(sibling.path + "/"))
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Find the nav section and child for a given pathname.
  * Returns { section, child } or { section } for top-level pages.
  */

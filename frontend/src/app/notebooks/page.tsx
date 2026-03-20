@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { DetailModal } from "@/components/shared/DetailModal";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type {
@@ -32,6 +33,7 @@ const SESSION_STATUS_COLORS: Record<string, string> = {
 export default function NotebooksPage() {
   const router = useRouter();
   const [sessions, setSessions] = useState<NotebookSession[]>([]);
+  const [viewingSession, setViewingSession] = useState<NotebookSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [launching, setLaunching] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<ResourceProfile>("small");
@@ -194,7 +196,7 @@ export default function NotebooksPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {sessions.map((s) => (
-                    <tr key={s.id} className={s.status === "idle" ? "bg-yellow-50" : "hover:bg-gray-50"}>
+                    <tr key={s.id} className={`cursor-pointer ${s.status === "idle" ? "bg-yellow-50 hover:bg-yellow-100" : "hover:bg-gray-50"}`} onClick={() => setViewingSession(s)}>
                       <td className="px-4 py-3 text-sm capitalize font-medium">{s.session_type}</td>
                       <td className="px-4 py-3 text-sm">{s.user?.name || s.user?.email || "\u2014"}</td>
                       <td className="px-4 py-3 text-sm capitalize">
@@ -222,21 +224,21 @@ export default function NotebooksPage() {
                           </span>
                         ) : "\u2014"}
                       </td>
-                      <td className="px-4 py-3 text-sm">
+                      <td className="px-4 py-3 text-sm" onClick={(e) => e.stopPropagation()}>
                         {s.experiment ? (
                           <Link href={`/experiments/${s.experiment.id}`} className="text-bioaf-600 hover:underline">
                             {s.experiment.name}
                           </Link>
                         ) : "\u2014"}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex gap-2">
                           {s.proxy_url && s.status === "running" && (
                             <a
                               href={s.proxy_url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-xs text-bioaf-600 hover:text-bioaf-800"
+                              className="text-xs px-2 py-1 border border-bioaf-600 text-bioaf-600 rounded hover:bg-bioaf-50"
                             >
                               Open
                             </a>
@@ -244,7 +246,7 @@ export default function NotebooksPage() {
                           {s.status === "running" && (
                             <button
                               onClick={() => handleSync(s.id)}
-                              className="text-xs text-green-600 hover:text-green-800"
+                              className="text-xs px-2 py-1 border border-green-600 text-green-600 rounded hover:bg-green-50"
                             >
                               Sync
                             </button>
@@ -252,7 +254,7 @@ export default function NotebooksPage() {
                           {["pending", "starting", "running", "idle"].includes(s.status) && (
                             <button
                               onClick={() => handleStop(s.id)}
-                              className="text-xs text-red-600 hover:text-red-800"
+                              className="text-xs px-2 py-1 border border-red-600 text-red-600 rounded hover:bg-red-50"
                             >
                               Stop
                             </button>
@@ -268,6 +270,46 @@ export default function NotebooksPage() {
               </table>
             )}
           </div>
+
+          {viewingSession && (
+            <DetailModal
+              title={`${viewingSession.session_type.charAt(0).toUpperCase() + viewingSession.session_type.slice(1)} Session`}
+              onClose={() => setViewingSession(null)}
+              fields={[
+                { label: "Type", value: viewingSession.session_type },
+                { label: "Status", value: viewingSession.status },
+                { label: "User", value: viewingSession.user?.name || viewingSession.user?.email },
+                { label: "Resource Profile", value: viewingSession.resource_profile },
+                { label: "CPU Cores", value: viewingSession.cpu_cores },
+                { label: "Memory (GB)", value: viewingSession.memory_gb },
+                { label: "Experiment", value: viewingSession.experiment?.name },
+                { label: "Started", value: viewingSession.started_at ? new Date(viewingSession.started_at).toLocaleString() : null },
+                { label: "Idle Since", value: viewingSession.idle_since ? new Date(viewingSession.idle_since).toLocaleString() : null },
+              ]}
+              actions={
+                <>
+                  {viewingSession.proxy_url && viewingSession.status === "running" && (
+                    <a
+                      href={viewingSession.proxy_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 border border-bioaf-600 text-bioaf-600 rounded text-sm hover:bg-bioaf-50"
+                    >
+                      Open
+                    </a>
+                  )}
+                  {["pending", "starting", "running", "idle"].includes(viewingSession.status) && (
+                    <button
+                      onClick={() => { handleStop(viewingSession.id); setViewingSession(null); }}
+                      className="px-3 py-1.5 border border-red-600 text-red-600 rounded text-sm hover:bg-red-50"
+                    >
+                      Stop
+                    </button>
+                  )}
+                </>
+              }
+            />
+          )}
         </main>
       </div>
     </div>
