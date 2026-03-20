@@ -17,7 +17,7 @@ provider "google" {
 resource "google_bigquery_dataset" "billing_export" {
   dataset_id  = "billing_export"
   project     = var.project_id
-  location    = var.region
+  location    = "US"
   description = "BigQuery billing export dataset managed by bioAF"
 
   labels = {

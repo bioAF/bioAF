@@ -235,6 +235,24 @@ async def test_query_mtd_costs_returns_mapped_data():
 
 
 @pytest.mark.asyncio
+async def test_verify_dataset_finds_resource_prefix_table():
+    """verify_dataset should match detailed usage cost tables (resource_v1_ prefix)."""
+    from app.services.billing_export_service import BillingExportService
+
+    resource_table = MagicMock()
+    resource_table.table_id = "gcp_billing_export_resource_v1_DEADBEEF"
+
+    mock_bq_client = MagicMock()
+    mock_bq_client.list_tables.return_value = [resource_table]
+
+    with patch("app.services.billing_export_service.bigquery.Client", return_value=mock_bq_client):
+        result = await BillingExportService.verify_dataset("proj", "ds")
+
+    assert result["found"] is True
+    assert result["table_id"] == "gcp_billing_export_resource_v1_DEADBEEF"
+
+
+@pytest.mark.asyncio
 async def test_verify_dataset_passes_credentials_to_bq_client():
     """verify_dataset must pass explicit credentials to the BQ client."""
     from app.services.billing_export_service import BillingExportService

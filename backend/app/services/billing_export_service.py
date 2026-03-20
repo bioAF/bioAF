@@ -47,7 +47,7 @@ class BillingExportService:
             client = bigquery.Client(project=project_id, credentials=credentials)
             tables = list(client.list_tables(f"{project_id}.{dataset_id}"))
             for table in tables:
-                if table.table_id.startswith("gcp_billing_export_v1_"):
+                if table.table_id.startswith(("gcp_billing_export_v1_", "gcp_billing_export_resource_v1_")):
                     return {"found": True, "table_id": table.table_id}
             return {"found": False}
 
