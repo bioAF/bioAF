@@ -121,6 +121,17 @@ class KubernetesComputeProvider(ComputeProvider):
             "basis": "input file count heuristic",
         }
 
+    async def get_job_report(self, job_id: str) -> str:
+        """Read the Nextflow HTML report from GCS."""
+        if self.is_local:
+            return ""
+        return await self._read_gcs_report(job_id)
+
+    async def get_job_progress(self, job_id: str) -> dict:
+        if self.is_local:
+            return await self._local_get_job_progress(job_id)
+        return await self._k8s_get_job_progress(job_id)
+
     async def get_connection_command(self, job_id: str) -> str:
         namespace = "bioaf-pipelines"
         return f"kubectl exec -it -n {namespace} job/{job_id} -- /bin/bash"
@@ -154,6 +165,20 @@ class KubernetesComputeProvider(ComputeProvider):
             "started_at": datetime.now(timezone.utc).isoformat(),
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "exit_code": 0,
+        }
+
+    async def _local_get_job_progress(self, job_id: str) -> dict:
+        return {
+            "percent_complete": 100.0,
+            "processes": [
+                {
+                    "name": "LOCAL_PROCESS",
+                    "status": "completed",
+                    "cpu": 0.0,
+                    "memory_gb": 0.0,
+                    "duration_s": 0,
+                }
+            ],
         }
 
     async def _local_list_jobs(self, filters: dict | None = None) -> list[dict]:
@@ -478,7 +503,7 @@ class KubernetesComputeProvider(ComputeProvider):
     NEXTFLOW_IMAGE = "nextflow/nextflow:25.10.4"
 
     @staticmethod
-    def _build_nextflow_command(job_spec: dict) -> list[str]:
+    def _build_nextflow_command(job_spec: dict, report_gcs_path: str = "") -> list[str]:
         """Build a Nextflow run command from the job spec.
 
         Translates pipeline_source, pipeline_version, parameters, and
@@ -501,6 +526,10 @@ class KubernetesComputeProvider(ComputeProvider):
 
         if sample_sheet:
             parts.extend(["--input", "/data/samplesheet.csv"])
+
+        # Write Nextflow HTML report to GCS so it persists after pod cleanup
+        if report_gcs_path:
+            parts.extend(["-with-report", report_gcs_path])
 
         # Ensure outdir is always set (nf-core pipelines require it)
         if "outdir" not in parameters:
@@ -612,13 +641,33 @@ class KubernetesComputeProvider(ComputeProvider):
         # Ensure GCS credentials secret exists for bucket access
         has_gcs_secret = self._ensure_gcs_secret(namespace)
 
+        job_name = f"bioaf-pipeline-{run_id}"
+
         # Auto-build Nextflow command when pipeline_source is set and no
         # explicit command was provided
         if pipeline_source and not command:
             container_image = self.NEXTFLOW_IMAGE
-            command = self._build_nextflow_command(job_spec)
 
-        job_name = f"bioaf-pipeline-{run_id}"
+            nf_cfg = self._cluster_config or {}
+            raw_bucket = nf_cfg.get("raw_bucket_name", "")
+
+            # Write the Nextflow HTML report directly to GCS so it persists
+            # after the head pod is cleaned up.
+            report_gcs_path = f"gs://{raw_bucket}/nextflow-reports/{job_name}/report.html" if raw_bucket else ""
+
+            # Set --outdir to a GCS path so pipeline outputs persist after
+            # pod cleanup.  The path mirrors the prefix that
+            # _gcs_collect_outputs and _extract_metrics use to find outputs.
+            experiment_id = job_spec.get("experiment_id", "unknown")
+            # Derive results bucket from raw_bucket_name (bioaf-raw-X -> bioaf-results-X)
+            results_bucket = (
+                raw_bucket.replace("bioaf-raw-", "bioaf-results-", 1) if raw_bucket.startswith("bioaf-raw-") else ""
+            )
+            if results_bucket and "outdir" not in job_spec.get("parameters", {}):
+                gcs_outdir = f"gs://{results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}"
+                job_spec = {**job_spec, "parameters": {**job_spec.get("parameters", {}), "outdir": gcs_outdir}}
+
+            command = self._build_nextflow_command(job_spec, report_gcs_path=report_gcs_path)
 
         # Build init containers for GCS input staging
         init_containers = []
@@ -649,8 +698,8 @@ class KubernetesComputeProvider(ComputeProvider):
 
         # Write nextflow.config with K8s executor settings for Nextflow pipelines
         if pipeline_source and not job_spec.get("command"):
-            cfg = self._cluster_config or {}
-            raw_bucket = cfg.get("raw_bucket_name", "")
+            nf_cfg = self._cluster_config or {}
+            raw_bucket = nf_cfg.get("raw_bucket_name", "")
             gcs_work_dir = f"gs://{raw_bucket}/nextflow-work" if raw_bucket else None
             nf_config = self._build_nextflow_k8s_config(namespace, has_gcs_secret, gcs_work_dir)
             # Use heredoc to avoid shell escaping issues with single quotes
@@ -822,10 +871,10 @@ class KubernetesComputeProvider(ComputeProvider):
         return jobs
 
     async def _k8s_get_job_logs(self, job_id: str) -> str:
-        """Retrieve logs from the pipeline pod.
+        """Retrieve logs from the pipeline pod, falling back to GCS.
 
-        Falls back to pod container status (exit code, reason, message)
-        when the kubelet is unavailable (e.g., node scaled down).
+        Tries the live pod first, then the persisted log in GCS (uploaded
+        at pipeline exit), then pod termination status as a last resort.
         """
         core_client = self._get_k8s_core_client()
         namespace = "bioaf-pipelines"
@@ -834,24 +883,267 @@ class KubernetesComputeProvider(ComputeProvider):
             namespace=namespace,
             label_selector=f"job-name={job_id}",
         )
-        if not pod_list.items:
-            return f"No pods found for job {job_id}"
 
-        pod = pod_list.items[0]
-        pod_name = pod.metadata.name
+        # Try live pod logs first
+        if pod_list.items:
+            pod = pod_list.items[0]
+            pod_name = pod.metadata.name
+            try:
+                logs = core_client.read_namespaced_pod_log(
+                    name=pod_name,
+                    namespace=namespace,
+                    container="pipeline",
+                )
+                return logs
+            except Exception:
+                logger.warning("Could not read logs from %s, trying GCS fallback", pod_name)
+
+        # Fall back to Cloud Logging (GKE ships all pod stdout/stderr here)
+        cloud_logs = self._read_cloud_logging(job_id)
+        if cloud_logs:
+            return cloud_logs
+
+        # Fall back to persisted log in GCS
+        gcs_logs = await self._read_gcs_log(job_id)
+        if gcs_logs:
+            return gcs_logs
+
+        # Last resort: pod termination info
+        if pod_list.items:
+            return self._extract_pod_termination_info(pod_list.items[0])
+
+        return f"No logs available for job {job_id} (pod cleaned up, no Cloud Logging or GCS log found)"
+
+    async def _read_gcs_log(self, job_id: str) -> str | None:
+        """Read persisted pipeline.log from GCS. Returns None if unavailable."""
+        cfg = self._cluster_config or {}
+        raw_bucket = cfg.get("raw_bucket_name", "")
+        if not raw_bucket:
+            return None
+
+        sa_key = cfg.get("gcp_service_account_key", "")
+        log_path = f"nextflow-traces/{job_id}/pipeline.log"
 
         try:
-            logs = core_client.read_namespaced_pod_log(
-                name=pod_name,
-                namespace=namespace,
-                container="pipeline",
-            )
-            return logs
-        except Exception:
-            logger.warning("Could not read logs from %s (node likely scaled down), using pod status", pod_name)
+            from google.cloud import storage as gcs_storage
 
-        # Fallback: extract termination info from pod status
-        return self._extract_pod_termination_info(pod)
+            if sa_key:
+                credentials = _get_gcp_credentials(sa_key)
+                storage_client = gcs_storage.Client(credentials=credentials)
+            else:
+                storage_client = gcs_storage.Client()
+
+            bucket = storage_client.bucket(raw_bucket)
+            blob = bucket.blob(log_path)
+
+            if not blob.exists():
+                return None
+
+            return blob.download_as_text()
+        except Exception:
+            logger.warning("Could not read log file gs://%s/%s", raw_bucket, log_path)
+            return None
+
+    async def _read_gcs_report(self, job_id: str) -> str:
+        """Read the Nextflow HTML report from GCS. Returns empty string if unavailable."""
+        cfg = self._cluster_config or {}
+        raw_bucket = cfg.get("raw_bucket_name", "")
+        if not raw_bucket:
+            return ""
+
+        sa_key = cfg.get("gcp_service_account_key", "")
+        report_path = f"nextflow-reports/{job_id}/report.html"
+
+        try:
+            from google.cloud import storage as gcs_storage
+
+            if sa_key:
+                credentials = _get_gcp_credentials(sa_key)
+                storage_client = gcs_storage.Client(credentials=credentials)
+            else:
+                storage_client = gcs_storage.Client()
+
+            bucket = storage_client.bucket(raw_bucket)
+            blob = bucket.blob(report_path)
+
+            if not blob.exists():
+                return ""
+
+            return blob.download_as_text()
+        except Exception:
+            logger.warning("Could not read report gs://%s/%s", raw_bucket, report_path)
+            return ""
+
+    def _read_cloud_logging(self, job_id: str) -> str | None:
+        """Read pipeline logs from GKE Cloud Logging.
+
+        GKE automatically ships all container stdout/stderr to Cloud Logging.
+        Logs persist for 30 days even after pods are cleaned up.
+        Returns None if unavailable or no entries found.
+        """
+        cfg = self._cluster_config or {}
+        project_id = cfg.get("gcp_project_id", "")
+        if not project_id:
+            return None
+
+        sa_key = cfg.get("gcp_service_account_key", "")
+
+        try:
+            import google.cloud.logging
+
+            if sa_key:
+                credentials = _get_gcp_credentials(sa_key)
+                log_client = google.cloud.logging.Client(project=project_id, credentials=credentials)
+            else:
+                log_client = google.cloud.logging.Client(project=project_id)
+
+            log_filter = (
+                'resource.type="k8s_container" '
+                f'resource.labels.container_name="pipeline" '
+                f'resource.labels.pod_name:("{job_id}")'
+            )
+
+            entries = list(log_client.list_entries(filter_=log_filter, order_by="timestamp asc"))
+
+            if not entries:
+                return None
+
+            lines = []
+            for entry in entries:
+                payload = entry.payload
+                if isinstance(payload, str) and payload.strip():
+                    lines.append(payload)
+                elif isinstance(payload, dict):
+                    lines.append(str(payload.get("message", payload)))
+            return "\n".join(lines) if lines else None
+
+        except Exception:
+            logger.warning("Could not read Cloud Logging for job %s", job_id)
+            return None
+
+    async def _k8s_get_job_progress(self, job_id: str) -> dict:
+        """Read Nextflow trace.tsv from GCS and return normalized progress.
+
+        The trace file is uploaded to GCS as a one-shot copy when the pipeline
+        container exits, so this only returns data after completion/failure.
+        """
+        cfg = self._cluster_config or {}
+        raw_bucket = cfg.get("raw_bucket_name", "")
+        if not raw_bucket:
+            return {"percent_complete": 0.0, "processes": []}
+
+        sa_key = cfg.get("gcp_service_account_key", "")
+        trace_path = f"nextflow-traces/{job_id}/trace.tsv"
+
+        try:
+            from google.cloud import storage as gcs_storage
+
+            if sa_key:
+                credentials = _get_gcp_credentials(sa_key)
+                storage_client = gcs_storage.Client(credentials=credentials)
+            else:
+                storage_client = gcs_storage.Client()
+
+            bucket = storage_client.bucket(raw_bucket)
+            blob = bucket.blob(trace_path)
+
+            if not blob.exists():
+                return {"percent_complete": 0.0, "processes": []}
+
+            content = blob.download_as_text()
+        except Exception:
+            logger.warning("Could not read trace file gs://%s/%s", raw_bucket, trace_path)
+            return {"percent_complete": 0.0, "processes": []}
+
+        return self._parse_trace_to_progress(content)
+
+    @staticmethod
+    def _parse_trace_to_progress(content: str) -> dict:
+        """Parse Nextflow trace TSV content into normalized progress structure."""
+        import csv
+        import io
+
+        reader = csv.DictReader(io.StringIO(content), delimiter="\t")
+        rows = list(reader)
+
+        if not rows:
+            return {"percent_complete": 0.0, "processes": []}
+
+        status_map = {
+            "COMPLETED": "completed",
+            "RUNNING": "running",
+            "FAILED": "failed",
+            "CACHED": "cached",
+            "SUBMITTED": "pending",
+            "PENDING": "pending",
+            "ABORTED": "failed",
+        }
+
+        processes = []
+        completed_count = 0
+        for row in rows:
+            nf_status = row.get("status", "").upper()
+            mapped_status = status_map.get(nf_status, nf_status.lower())
+            if mapped_status in ("completed", "cached"):
+                completed_count += 1
+
+            cpu_raw = row.get("%cpu", "0")
+            try:
+                cpu = float(str(cpu_raw).replace("%", "")) if cpu_raw and cpu_raw != "-" else 0.0
+            except (ValueError, TypeError):
+                cpu = 0.0
+
+            mem_raw = row.get("peak_rss", "")
+            memory_gb = 0.0
+            if mem_raw and mem_raw != "-":
+                try:
+                    val = str(mem_raw).strip()
+                    if "GB" in val.upper():
+                        memory_gb = float(val.upper().replace("GB", "").strip())
+                    elif "MB" in val.upper():
+                        memory_gb = round(float(val.upper().replace("MB", "").strip()) / 1024, 2)
+                except (ValueError, TypeError):
+                    pass
+
+            dur_raw = row.get("realtime", "")
+            duration_s = 0
+            if dur_raw and dur_raw != "-":
+                try:
+                    dur_str = str(dur_raw).strip()
+                    if dur_str.endswith("ms"):
+                        duration_s = int(float(dur_str[:-2]) / 1000)
+                    elif dur_str.endswith("s") and "m" not in dur_str and "h" not in dur_str:
+                        duration_s = int(float(dur_str[:-1]))
+                    else:
+                        secs = 0
+                        if "h" in dur_str:
+                            parts = dur_str.split("h")
+                            secs += int(parts[0].strip()) * 3600
+                            dur_str = parts[1].strip()
+                        if "m" in dur_str:
+                            parts = dur_str.split("m")
+                            secs += int(parts[0].strip()) * 60
+                            dur_str = parts[1].strip()
+                        if dur_str.endswith("s"):
+                            secs += int(float(dur_str[:-1]))
+                        duration_s = secs
+                except (ValueError, TypeError):
+                    pass
+
+            processes.append(
+                {
+                    "name": row.get("process", ""),
+                    "status": mapped_status,
+                    "cpu": cpu,
+                    "memory_gb": memory_gb,
+                    "duration_s": duration_s,
+                }
+            )
+
+        total = len(processes)
+        pct = round(completed_count / total * 100, 1) if total > 0 else 0.0
+
+        return {"percent_complete": pct, "processes": processes}
 
     @staticmethod
     def _extract_pod_termination_info(pod) -> str:

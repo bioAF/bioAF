@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 
 interface ActivityEvent {
   id: number;
@@ -19,11 +20,13 @@ export function ActivityFeedWidget() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const timeout = setTimeout(() => setLoading(false), 30000);
     api
-      .get<{ events: ActivityEvent[] }>("/api/activity-feed?page_size=10")
+      .getWithRetry<{ events: ActivityEvent[] }>("/api/activity-feed?page_size=10")
       .then((data) => setEvents(data.events))
       .catch(() => setError("Failed to load activity feed"))
-      .finally(() => setLoading(false));
+      .finally(() => { clearTimeout(timeout); setLoading(false); });
+    return () => clearTimeout(timeout);
   }, []);
 
   const severityColor: Record<string, string> = {
@@ -47,13 +50,11 @@ export function ActivityFeedWidget() {
         </Link>
       </div>
       {loading && (
-        <div className="animate-pulse space-y-2" data-testid="widget-loading">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="h-6 bg-gray-100 rounded" />
-          ))}
+        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+          <LoadingSpinner size="sm" /><span className="text-sm">Loading activity...</span>
         </div>
       )}
-      {error && (
+      {error && !loading && (
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
           <button onClick={() => window.location.reload()} className="ml-2 text-bioaf-600 hover:underline">

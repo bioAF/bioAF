@@ -178,20 +178,7 @@ class PlotArchiveService:
                         file_type = ext if ext in ("png", "svg", "pdf") else "other"
 
                         # Extract context from path
-                        parts = blob.name.split("/")
-                        experiment_id = None
-                        pipeline_run_id = None
-                        for i, part in enumerate(parts):
-                            if part == "experiments" and i + 1 < len(parts):
-                                try:
-                                    experiment_id = int(parts[i + 1])
-                                except ValueError:
-                                    pass
-                            if part == "runs" and i + 1 < len(parts):
-                                try:
-                                    pipeline_run_id = int(parts[i + 1])
-                                except ValueError:
-                                    pass
+                        experiment_id, pipeline_run_id = PlotArchiveService._parse_ids_from_path(gcs_uri)
 
                         # Create file record
                         file = await FileService.create_file_record(
@@ -231,3 +218,53 @@ class PlotArchiveService:
             logger.error("Plot archive scan failed: %s", e)
 
         return indexed
+
+    @staticmethod
+    def _parse_ids_from_path(gcs_uri: str) -> tuple[int | None, int | None]:
+        """Extract experiment_id and pipeline_run_id from a GCS URI path."""
+        parts = gcs_uri.replace("gs://", "").split("/")
+        experiment_id = None
+        pipeline_run_id = None
+        for i, part in enumerate(parts):
+            if part == "experiments" and i + 1 < len(parts):
+                try:
+                    experiment_id = int(parts[i + 1])
+                except ValueError:
+                    pass
+            if part in ("runs", "pipeline-runs") and i + 1 < len(parts):
+                try:
+                    pipeline_run_id = int(parts[i + 1])
+                except ValueError:
+                    pass
+        return experiment_id, pipeline_run_id
+
+    @staticmethod
+    async def backfill_metadata(session: AsyncSession) -> int:
+        """Re-parse GCS URIs to correct experiment_id and pipeline_run_id on all entries."""
+        from app.models.experiment import Experiment
+        from app.models.pipeline_run import PipelineRun
+
+        result = await session.execute(select(PlotArchiveEntry).options(selectinload(PlotArchiveEntry.file)))
+        entries = list(result.scalars().all())
+        updated = 0
+        for entry in entries:
+            if not entry.file or not entry.file.gcs_uri:
+                continue
+            exp_id, run_id = PlotArchiveService._parse_ids_from_path(entry.file.gcs_uri)
+            changed = False
+            if exp_id is not None and entry.experiment_id != exp_id:
+                exists = await session.execute(select(Experiment.id).where(Experiment.id == exp_id))
+                if exists.scalar_one_or_none() is not None:
+                    entry.experiment_id = exp_id
+                    changed = True
+            if run_id is not None and entry.pipeline_run_id != run_id:
+                exists = await session.execute(select(PipelineRun.id).where(PipelineRun.id == run_id))
+                if exists.scalar_one_or_none() is not None:
+                    entry.pipeline_run_id = run_id
+                    changed = True
+            if changed:
+                updated += 1
+        if updated > 0:
+            await session.commit()
+            logger.info("Backfilled metadata for %d plot archive entries", updated)
+        return updated

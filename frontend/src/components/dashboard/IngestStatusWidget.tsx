@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 
 interface IngestStats {
   totalFiles: number;
@@ -16,10 +17,11 @@ export function IngestStatusWidget() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const timeout = setTimeout(() => setLoading(false), 30000);
     Promise.all([
-      api.get<{ total: number }>("/api/files?page_size=1").catch(() => ({ total: 0 })),
-      api.get<unknown[]>("/api/ingest/unmatched").catch(() => []),
-      api.get<unknown[]>("/api/ingest/unclaimed").catch(() => []),
+      api.getWithRetry<{ total: number }>("/api/files?page_size=1").catch(() => ({ total: 0 })),
+      api.getWithRetry<unknown[]>("/api/ingest/unmatched").catch(() => []),
+      api.getWithRetry<unknown[]>("/api/ingest/unclaimed").catch(() => []),
     ])
       .then(([filesResp, unmatched, unclaimed]) => {
         setStats({
@@ -29,7 +31,8 @@ export function IngestStatusWidget() {
         });
       })
       .catch(() => setError("Failed to load ingest data"))
-      .finally(() => setLoading(false));
+      .finally(() => { clearTimeout(timeout); setLoading(false); });
+    return () => clearTimeout(timeout);
   }, []);
 
   return (
@@ -38,12 +41,11 @@ export function IngestStatusWidget() {
         Ingest Status
       </h3>
       {loading && (
-        <div className="animate-pulse space-y-2" data-testid="widget-loading">
-          <div className="h-6 bg-gray-100 rounded w-1/2" />
-          <div className="h-4 bg-gray-100 rounded w-3/4" />
+        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+          <LoadingSpinner size="sm" /><span className="text-sm">Loading ingest data...</span>
         </div>
       )}
-      {error && (
+      {error && !loading && (
         <div className="text-sm text-red-600" data-testid="widget-error">{error}</div>
       )}
       {!loading && !error && !stats && (

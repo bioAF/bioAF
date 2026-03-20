@@ -787,6 +787,11 @@ export interface QCMetrics {
   mito_pct_median: number | null;
   doublet_score_median: number | null;
   saturation: number | null;
+  total_sequences: number | null;
+  percent_duplicates: number | null;
+  percent_gc: number | null;
+  avg_sequence_length: number | null;
+  total_samples: number | null;
   quality_rating: string;
 }
 

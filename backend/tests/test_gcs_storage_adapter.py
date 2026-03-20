@@ -40,7 +40,7 @@ class TestGcsResolveOutputPath:
     @pytest.mark.asyncio
     async def test_returns_local_results_path(self, adapter):
         path = await adapter.resolve_output_path({"id": 42, "experiment_id": 7}, "counts.h5ad")
-        assert "experiments/7/runs/42/counts.h5ad" in path
+        assert "experiments/7/pipeline-runs/42/counts.h5ad" in path
 
 
 class TestGcsStageInputs:

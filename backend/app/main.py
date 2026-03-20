@@ -180,10 +180,14 @@ async def _plot_archive_watcher_loop():
     from app.database import async_session_factory
     from app.services.plot_archive_service import PlotArchiveService
 
+    backfilled = False
     while True:
         try:
             await asyncio.sleep(60)
             async with async_session_factory() as session:
+                if not backfilled:
+                    await PlotArchiveService.backfill_metadata(session)
+                    backfilled = True
                 await PlotArchiveService.scan_and_index(session)
         except asyncio.CancelledError:
             break

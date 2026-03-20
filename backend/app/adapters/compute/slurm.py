@@ -24,6 +24,9 @@ class SlurmComputeProvider(ComputeProvider):
     async def get_job_logs(self, job_id: str) -> str:
         raise NotImplementedError("SLURM compute backend coming soon. Select Kubernetes during setup.")
 
+    async def get_job_progress(self, job_id: str) -> dict:
+        raise NotImplementedError("SLURM compute backend coming soon. Select Kubernetes during setup.")
+
     async def get_cluster_status(self) -> dict:
         raise NotImplementedError("SLURM compute backend coming soon. Select Kubernetes during setup.")
 

@@ -55,6 +55,13 @@ export default function PipelineRunsPage() {
     return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
   }
 
+  function formatDateTime(dateStr: string | null): string {
+    if (!dateStr) return "—";
+    const d = new Date(dateStr);
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " " +
+      d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  }
+
   function toggleSort(field: "id" | "status" | "pipeline_name") {
     if (sortField === field) {
       setSortDir(sortDir === "asc" ? "desc" : "asc");
@@ -107,6 +114,7 @@ export default function PipelineRunsPage() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Review</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Progress</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Submitter</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Started</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cost</th>
                 </tr>
@@ -134,12 +142,13 @@ export default function PipelineRunsPage() {
                       ) : <span className="text-xs text-gray-400">—</span>}
                     </td>
                     <td className="px-4 py-3 text-sm">{r.submitted_by?.name || r.submitted_by?.email || "—"}</td>
+                    <td className="px-4 py-3 text-sm text-gray-500">{formatDateTime(r.started_at)}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">{formatDuration(r.started_at, r.completed_at)}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">{r.cost_estimate ? `$${r.cost_estimate.toFixed(2)}` : "—"}</td>
                   </tr>
                 ))}
                 {runs.length === 0 && (
-                  <tr><td colSpan={9} className="px-4 py-12 text-center text-gray-400">No pipeline runs</td></tr>
+                  <tr><td colSpan={10} className="px-4 py-12 text-center text-gray-400">No pipeline runs</td></tr>
                 )}
               </tbody>
             </table>

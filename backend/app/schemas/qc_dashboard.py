@@ -11,6 +11,12 @@ class QCMetrics(BaseModel):
     mito_pct_median: float | None = None
     doublet_score_median: float | None = None
     saturation: float | None = None
+    # Bulk/FastQC metrics
+    total_sequences: int | None = None
+    percent_duplicates: float | None = None
+    percent_gc: float | None = None
+    avg_sequence_length: float | None = None
+    total_samples: int | None = None
     quality_rating: str = "concerning"
 
 

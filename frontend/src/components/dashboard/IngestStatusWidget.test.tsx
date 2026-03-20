@@ -14,10 +14,15 @@ jest.mock("next/link", () => {
   };
 });
 
+jest.mock("@/components/shared/LoadingSpinner", () => ({
+  LoadingSpinner: () => <div data-testid="spinner" />,
+}));
+
 // Mock the api module
 jest.mock("@/lib/api", () => ({
   api: {
     get: jest.fn(),
+    getWithRetry: jest.fn(),
   },
 }));
 
@@ -29,7 +34,7 @@ jest.mock("@/lib/auth", () => ({
 
 import { api } from "@/lib/api";
 
-const mockGet = api.get as jest.Mock;
+const mockGet = api.getWithRetry as jest.Mock;
 
 beforeEach(() => {
   mockGet.mockReset();

@@ -243,14 +243,17 @@ async def download_file(
     try:
         from google.cloud import storage as gcs_storage
 
-        client = gcs_storage.Client()
+        from app.services.gcs_storage import GcsStorageService
+
+        credentials = await GcsStorageService.get_credentials(session)
+        client = gcs_storage.Client(credentials=credentials)
         parts = file.gcs_uri.replace("gs://", "").split("/", 1)
         bucket = client.bucket(parts[0])
         blob = bucket.blob(parts[1])
         url = blob.generate_signed_url(version="v4", expiration=3600, method="GET")
         return {"download_url": url}
     except Exception:
-        return {"download_url": file.gcs_uri}
+        raise HTTPException(502, "Could not generate download URL")
 
 
 @router.delete("/{file_id}")

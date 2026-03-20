@@ -43,6 +43,15 @@ class ComputeProvider(ABC):
         """Estimate cost for a job spec with confidence interval."""
 
     @abstractmethod
+    async def get_job_progress(self, job_id: str) -> dict:
+        """Get normalized progress for a running job.
+
+        Returns dict with percent_complete (float) and processes (list of dicts
+        with name, status, cpu, memory_gb, duration_s). Each adapter handles
+        engine-specific parsing internally.
+        """
+
+    @abstractmethod
     async def get_connection_command(self, job_id: str) -> str:
         """Get kubectl exec/SSH command for direct access to a running job."""
 

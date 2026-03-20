@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 
 interface ComponentHealth {
   name: string;
@@ -15,11 +16,13 @@ export function InfrastructureHealthWidget() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const timeout = setTimeout(() => setLoading(false), 30000);
     api
-      .get<{ components: ComponentHealth[] }>("/api/components")
+      .getWithRetry<{ components: ComponentHealth[] }>("/api/components")
       .then((data) => setComponents(data.components.filter((c) => c.enabled)))
       .catch(() => setError("Failed to load component health"))
-      .finally(() => setLoading(false));
+      .finally(() => { clearTimeout(timeout); setLoading(false); });
+    return () => clearTimeout(timeout);
   }, []);
 
   const statusColor: Record<string, string> = {
@@ -35,13 +38,11 @@ export function InfrastructureHealthWidget() {
         Infrastructure Health
       </h3>
       {loading && (
-        <div className="animate-pulse space-y-2" data-testid="widget-loading">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-8 bg-gray-100 rounded" />
-          ))}
+        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+          <LoadingSpinner size="sm" /><span className="text-sm">Loading health...</span>
         </div>
       )}
-      {error && (
+      {error && !loading && (
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
           <button

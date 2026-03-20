@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 
 interface ComponentCost {
   component: string;
@@ -76,8 +77,9 @@ export function CostBudgetWidget() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const timeout = setTimeout(() => setLoading(false), 30000);
     api
-      .get<CostSummaryResponse>("/api/costs/summary")
+      .getWithRetry<CostSummaryResponse>("/api/costs/summary")
       .then((res) => {
         setData({
           current_spend: res.current_month_spend,
@@ -87,7 +89,8 @@ export function CostBudgetWidget() {
         });
       })
       .catch(() => setError("Failed to load budget data"))
-      .finally(() => setLoading(false));
+      .finally(() => { clearTimeout(timeout); setLoading(false); });
+    return () => clearTimeout(timeout);
   }, []);
 
   const hasBudget = data?.monthly_budget != null;
@@ -103,12 +106,11 @@ export function CostBudgetWidget() {
         Cost vs. Budget
       </h3>
       {loading && (
-        <div className="animate-pulse space-y-2" data-testid="widget-loading">
-          <div className="h-4 bg-gray-100 rounded w-1/2" />
-          <div className="h-3 bg-gray-100 rounded" />
+        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+          <LoadingSpinner size="sm" /><span className="text-sm">Loading costs...</span>
         </div>
       )}
-      {error && (
+      {error && !loading && (
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
           <div className="mt-2 flex gap-2">

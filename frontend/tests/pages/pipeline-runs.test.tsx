@@ -174,8 +174,8 @@ describe("Pipeline Logs Display (Test 29)", () => {
       expect(screen.getByText(/bioAF System Test/)).toBeInTheDocument();
     });
 
-    // Click on Logs tab
-    fireEvent.click(screen.getByText("Logs"));
+    // Logs tab is now the default active tab, so logs content is already visible.
+    // No need to click the tab.
 
     // Select a process to load logs
     await waitFor(() => {

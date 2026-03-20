@@ -3,17 +3,114 @@
 import { useState, useEffect, useCallback } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
+import { PlotModal } from "@/components/shared/PlotModal";
 import { api } from "@/lib/api";
-import type { PlotArchiveResponse, PlotArchiveListResponse } from "@/lib/types";
+import type {
+  PlotArchiveResponse,
+  PlotArchiveListResponse,
+  ExperimentListResponse,
+  PipelineRunListResponse,
+} from "@/lib/types";
+
+function PlotThumbnail({
+  fileId,
+  title,
+  onClick,
+}: {
+  fileId: number;
+  title: string;
+  onClick: (signedUrl: string) => void;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await api.get<{ download_url: string }>(
+          `/api/files/${fileId}/download`
+        );
+        if (!cancelled) setUrl(data.download_url);
+      } catch {
+        if (!cancelled) setError(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [fileId]);
+
+  if (error) {
+    return <span className="text-gray-400 text-xs">Failed to load</span>;
+  }
+  if (!url) {
+    return <span className="text-gray-400 text-xs">Loading...</span>;
+  }
+  return (
+    <img
+      src={url}
+      alt={title}
+      className="w-full h-full object-cover cursor-pointer"
+      onClick={() => onClick(url)}
+      onError={() => setError(true)}
+    />
+  );
+}
 
 export default function PlotArchivePage() {
   const [plots, setPlots] = useState<PlotArchiveResponse[]>([]);
   const [query, setQuery] = useState("");
+  const [experimentId, setExperimentId] = useState("");
+  const [pipelineRunId, setPipelineRunId] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [preview, setPreview] = useState<PlotArchiveResponse | null>(null);
+  const [expandedUrl, setExpandedUrl] = useState<string | null>(null);
+  const [expandedTitle, setExpandedTitle] = useState("");
   const pageSize = 24;
+
+  const [experiments, setExperiments] = useState<
+    { id: number; name: string }[]
+  >([]);
+  const [pipelineRuns, setPipelineRuns] = useState<
+    { id: number; label: string }[]
+  >([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await api.get<ExperimentListResponse>(
+          "/api/experiments?page_size=200"
+        );
+        setExperiments(
+          data.experiments.map((e) => ({
+            id: e.id,
+            name: e.name ?? `Experiment #${e.id}`,
+          }))
+        );
+      } catch {
+        // ignore
+      }
+    })();
+    (async () => {
+      try {
+        const data = await api.get<PipelineRunListResponse>(
+          "/api/pipeline-runs?page_size=200"
+        );
+        setPipelineRuns(
+          data.runs.map((r) => ({
+            id: r.id,
+            label: `${r.pipeline_name || r.pipeline_key || "Run"} #${r.id}`,
+          }))
+        );
+      } catch {
+        // ignore
+      }
+    })();
+  }, []);
 
   const fetchPlots = useCallback(async () => {
     setLoading(true);
@@ -23,7 +120,13 @@ export default function PlotArchivePage() {
         page_size: String(pageSize),
       });
       if (query) params.set("query", query);
-      const data = await api.get<PlotArchiveListResponse>(`/api/plots?${params}`);
+      if (experimentId) params.set("experiment_id", experimentId);
+      if (pipelineRunId) params.set("pipeline_run_id", pipelineRunId);
+      if (dateFrom) params.set("date_from", dateFrom);
+      if (dateTo) params.set("date_to", dateTo);
+      const data = await api.get<PlotArchiveListResponse>(
+        `/api/plots?${params}`
+      );
       setPlots(data.plots);
       setTotal(data.total);
     } catch {
@@ -31,11 +134,18 @@ export default function PlotArchivePage() {
     } finally {
       setLoading(false);
     }
-  }, [page, query]);
+  }, [page, query, experimentId, pipelineRunId, dateFrom, dateTo]);
 
   useEffect(() => {
     fetchPlots();
   }, [fetchPlots]);
+
+  const resetPage = () => setPage(1);
+
+  const handleExpand = (plot: PlotArchiveResponse, signedUrl: string) => {
+    setExpandedUrl(signedUrl);
+    setExpandedTitle(plot.title ?? "Plot");
+  };
 
   return (
     <div className="flex h-screen">
@@ -46,16 +156,92 @@ export default function PlotArchivePage() {
           <h1 className="text-2xl font-bold mb-6">Plot Archive</h1>
 
           <div className="space-y-4">
-            <input
-              type="text"
-              placeholder="Search plots..."
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setPage(1);
-              }}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
-            />
+            {/* Filters */}
+            <div className="flex flex-wrap gap-3 items-end">
+              <div className="flex-1 min-w-[200px]">
+                <label className="block text-xs text-gray-500 mb-1">
+                  Search
+                </label>
+                <input
+                  type="text"
+                  placeholder="Search plots..."
+                  value={query}
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    resetPage();
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                />
+              </div>
+              <div className="min-w-[180px]">
+                <label className="block text-xs text-gray-500 mb-1">
+                  Experiment
+                </label>
+                <select
+                  value={experimentId}
+                  onChange={(e) => {
+                    setExperimentId(e.target.value);
+                    resetPage();
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                >
+                  <option value="">All experiments</option>
+                  {experiments.map((exp) => (
+                    <option key={exp.id} value={exp.id}>
+                      {exp.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="min-w-[180px]">
+                <label className="block text-xs text-gray-500 mb-1">
+                  Pipeline Run
+                </label>
+                <select
+                  value={pipelineRunId}
+                  onChange={(e) => {
+                    setPipelineRunId(e.target.value);
+                    resetPage();
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                >
+                  <option value="">All runs</option>
+                  {pipelineRuns.map((run) => (
+                    <option key={run.id} value={run.id}>
+                      {run.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">
+                  Date from
+                </label>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => {
+                    setDateFrom(e.target.value);
+                    resetPage();
+                  }}
+                  className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">
+                  Date to
+                </label>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => {
+                    setDateTo(e.target.value);
+                    resetPage();
+                  }}
+                  className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+                />
+              </div>
+            </div>
 
             {loading ? (
               <p className="text-gray-400 text-sm">Loading...</p>
@@ -67,22 +253,25 @@ export default function PlotArchivePage() {
                   {plots.map((plot) => (
                     <div
                       key={plot.id}
-                      onClick={() => setPreview(plot)}
-                      className="bg-white rounded-lg shadow overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
+                      className="bg-white rounded-lg shadow overflow-hidden hover:shadow-md transition-shadow"
                     >
                       <div className="aspect-square bg-gray-100 flex items-center justify-center">
-                        {plot.thumbnail_url ? (
-                          <img
-                            src={plot.thumbnail_url ?? undefined}
-                            alt={plot.title ?? undefined}
-                            className="w-full h-full object-cover"
+                        {plot.file ? (
+                          <PlotThumbnail
+                            fileId={plot.file.id}
+                            title={plot.title ?? "Plot"}
+                            onClick={(url) => handleExpand(plot, url)}
                           />
                         ) : (
-                          <span className="text-gray-400 text-xs">No preview</span>
+                          <span className="text-gray-400 text-xs">
+                            No preview
+                          </span>
                         )}
                       </div>
                       <div className="p-2">
-                        <p className="text-xs font-medium truncate">{plot.title}</p>
+                        <p className="text-xs font-medium truncate">
+                          {plot.title}
+                        </p>
                         {plot.tags.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-1">
                             {plot.tags.slice(0, 3).map((tag) => (
@@ -101,7 +290,9 @@ export default function PlotArchivePage() {
                 </div>
 
                 <div className="flex justify-between items-center text-sm text-gray-500">
-                  <span>{total} plot{total !== 1 ? "s" : ""}</span>
+                  <span>
+                    {total} plot{total !== 1 ? "s" : ""}
+                  </span>
                   <div className="space-x-2">
                     <button
                       onClick={() => setPage((p) => Math.max(1, p - 1))}
@@ -122,58 +313,12 @@ export default function PlotArchivePage() {
               </>
             )}
 
-            {preview && (
-              <div
-                className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-                onClick={() => setPreview(null)}
-              >
-                <div
-                  className="bg-white rounded-lg shadow-xl max-w-3xl w-full mx-4 p-6"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <h3 className="text-lg font-bold">{preview.title}</h3>
-                      {preview.tags.length > 0 && (
-                        <div className="flex gap-1 mt-1">
-                          {preview.tags.map((tag) => (
-                            <span
-                              key={tag}
-                              className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"
-                            >
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => setPreview(null)}
-                      className="text-gray-400 hover:text-gray-600 text-xl"
-                    >
-                      &times;
-                    </button>
-                  </div>
-                  <div className="bg-gray-100 rounded-lg flex items-center justify-center min-h-[400px]">
-                    {preview.file ? (
-                      <img
-                        src={preview.file.gcs_uri}
-                        alt={preview.title ?? undefined}
-                        className="max-w-full max-h-[600px] object-contain"
-                      />
-                    ) : (
-                      <span className="text-gray-400">No image available</span>
-                    )}
-                  </div>
-                  <div className="mt-3 text-xs text-gray-400">
-                    {preview.experiment_id && <span>Experiment #{preview.experiment_id}</span>}
-                    {preview.pipeline_run_id && <span> | Run #{preview.pipeline_run_id}</span>}
-                    {preview.indexed_at && (
-                      <span> | Indexed {new Date(preview.indexed_at).toLocaleDateString()}</span>
-                    )}
-                  </div>
-                </div>
-              </div>
+            {expandedUrl && (
+              <PlotModal
+                url={expandedUrl}
+                title={expandedTitle}
+                onClose={() => setExpandedUrl(null)}
+              />
             )}
           </div>
         </main>

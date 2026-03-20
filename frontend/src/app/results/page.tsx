@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
+import { PlotModal } from "@/components/shared/PlotModal";
 import { api } from "@/lib/api";
 import type {
   QCDashboardSummary,
@@ -384,13 +385,54 @@ function CellxgeneTab() {
 
 /* ─── Plot Archive Tab ─── */
 
+function PlotThumbnail({
+  fileId,
+  title,
+  onClick,
+}: {
+  fileId: number;
+  title: string;
+  onClick: (signedUrl: string) => void;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await api.get<{ download_url: string }>(
+          `/api/files/${fileId}/download`
+        );
+        if (!cancelled) setUrl(data.download_url);
+      } catch {
+        if (!cancelled) setError(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [fileId]);
+
+  if (error) return <span className="text-gray-400 text-xs">Failed to load</span>;
+  if (!url) return <span className="text-gray-400 text-xs">Loading...</span>;
+  return (
+    <img
+      src={url}
+      alt={title}
+      className="w-full h-full object-cover cursor-pointer"
+      onClick={() => onClick(url)}
+      onError={() => setError(true)}
+    />
+  );
+}
+
 function PlotArchiveTab() {
   const [plots, setPlots] = useState<PlotArchiveResponse[]>([]);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [preview, setPreview] = useState<PlotArchiveResponse | null>(null);
+  const [expandedUrl, setExpandedUrl] = useState<string | null>(null);
+  const [expandedTitle, setExpandedTitle] = useState("");
   const pageSize = 24;
 
   const fetchPlots = useCallback(async () => {
@@ -440,15 +482,17 @@ function PlotArchiveTab() {
             {plots.map((plot) => (
               <div
                 key={plot.id}
-                onClick={() => setPreview(plot)}
-                className="bg-white rounded-lg shadow overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
+                className="bg-white rounded-lg shadow overflow-hidden hover:shadow-md transition-shadow"
               >
                 <div className="aspect-square bg-gray-100 flex items-center justify-center">
-                  {plot.thumbnail_url ? (
-                    <img
-                      src={plot.thumbnail_url ?? undefined}
-                      alt={plot.title ?? undefined}
-                      className="w-full h-full object-cover"
+                  {plot.file ? (
+                    <PlotThumbnail
+                      fileId={plot.file.id}
+                      title={plot.title ?? "Plot"}
+                      onClick={(url) => {
+                        setExpandedUrl(url);
+                        setExpandedTitle(plot.title ?? "Plot");
+                      }}
                     />
                   ) : (
                     <span className="text-gray-400 text-xs">No preview</span>
@@ -497,59 +541,12 @@ function PlotArchiveTab() {
         </>
       )}
 
-      {/* Preview modal */}
-      {preview && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-          onClick={() => setPreview(null)}
-        >
-          <div
-            className="bg-white rounded-lg shadow-xl max-w-3xl w-full mx-4 p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex justify-between items-start mb-4">
-              <div>
-                <h3 className="text-lg font-bold">{preview.title}</h3>
-                {preview.tags.length > 0 && (
-                  <div className="flex gap-1 mt-1">
-                    {preview.tags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <button
-                onClick={() => setPreview(null)}
-                className="text-gray-400 hover:text-gray-600 text-xl"
-              >
-                &times;
-              </button>
-            </div>
-            <div className="bg-gray-100 rounded-lg flex items-center justify-center min-h-[400px]">
-              {preview.file ? (
-                <img
-                  src={preview.file.gcs_uri}
-                  alt={preview.title ?? undefined}
-                  className="max-w-full max-h-[600px] object-contain"
-                />
-              ) : (
-                <span className="text-gray-400">No image available</span>
-              )}
-            </div>
-            <div className="mt-3 text-xs text-gray-400">
-              {preview.experiment_id && <span>Experiment #{preview.experiment_id}</span>}
-              {preview.pipeline_run_id && <span> | Run #{preview.pipeline_run_id}</span>}
-              {preview.indexed_at && (
-                <span> | Indexed {new Date(preview.indexed_at).toLocaleDateString()}</span>
-              )}
-            </div>
-          </div>
-        </div>
+      {expandedUrl && (
+        <PlotModal
+          url={expandedUrl}
+          title={expandedTitle}
+          onClose={() => setExpandedUrl(null)}
+        />
       )}
     </div>
   );

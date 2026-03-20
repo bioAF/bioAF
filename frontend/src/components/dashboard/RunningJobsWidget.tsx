@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 
 interface RunStats {
   running: number;
@@ -17,9 +18,10 @@ export function RunningJobsWidget() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const timeout = setTimeout(() => setLoading(false), 30000);
     Promise.all([
-      api.get<{ total: number }>("/api/pipeline-runs?status=running&page_size=1").catch(() => ({ total: 0 })),
-      api.get<{ total: number }>("/api/pipeline-runs?status=pending&page_size=1").catch(() => ({ total: 0 })),
+      api.getWithRetry<{ total: number }>("/api/pipeline-runs?status=running&page_size=1").catch(() => ({ total: 0 })),
+      api.getWithRetry<{ total: number }>("/api/pipeline-runs?status=pending&page_size=1").catch(() => ({ total: 0 })),
     ])
       .then(([running, pending]) => {
         setStats({
@@ -30,7 +32,8 @@ export function RunningJobsWidget() {
         });
       })
       .catch(() => setError("Failed to load job stats"))
-      .finally(() => setLoading(false));
+      .finally(() => { clearTimeout(timeout); setLoading(false); });
+    return () => clearTimeout(timeout);
   }, []);
 
   return (
@@ -39,12 +42,11 @@ export function RunningJobsWidget() {
         Running Jobs
       </h3>
       {loading && (
-        <div className="animate-pulse space-y-2" data-testid="widget-loading">
-          <div className="h-10 bg-gray-100 rounded" />
-          <div className="h-6 bg-gray-100 rounded w-3/4" />
+        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+          <LoadingSpinner size="sm" /><span className="text-sm">Loading jobs...</span>
         </div>
       )}
-      {error && (
+      {error && !loading && (
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
           <button onClick={() => window.location.reload()} className="ml-2 text-bioaf-600 hover:underline">

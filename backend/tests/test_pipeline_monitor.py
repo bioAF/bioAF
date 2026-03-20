@@ -122,8 +122,83 @@ async def k8s_running_run(session, admin_user):
 
 
 @pytest.mark.asyncio
+async def test_k8s_monitor_uses_adapter_progress_on_completion(session, k8s_running_run):
+    """Monitor fetches adapter.get_job_progress() at completion, not while running."""
+    mock_compute = AsyncMock()
+    mock_compute.get_job_status.return_value = {
+        "status": "completed",
+        "pod_name": "bioaf-pipeline-99-xyz",
+    }
+    mock_compute.get_job_progress.return_value = {
+        "percent_complete": 100.0,
+        "processes": [
+            {"name": "STARSOLO", "status": "completed", "cpu": 85.0, "memory_gb": 4.5, "duration_s": 1800},
+            {"name": "SAMTOOLS_SORT", "status": "completed", "cpu": 50.0, "memory_gb": 2.1, "duration_s": 300},
+            {"name": "FASTQC", "status": "completed", "cpu": 20.0, "memory_gb": 0.5, "duration_s": 270},
+        ],
+    }
+
+    mock_storage = AsyncMock()
+    mock_storage.collect_outputs.return_value = []
+
+    with (
+        patch("app.services.pipeline_monitor_service.get_compute_adapter", return_value=mock_compute),
+        patch("app.services.pipeline_monitor_service.get_storage_adapter", return_value=mock_storage),
+        patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
+    ):
+        await PipelineMonitorService.sync_run_statuses(session)
+
+    mock_compute.get_job_progress.assert_called_once_with(k8s_running_run.k8s_job_name)
+
+    from sqlalchemy import select
+
+    result = await session.execute(select(PipelineRun).where(PipelineRun.id == k8s_running_run.id))
+    run = result.scalar_one()
+    assert run.progress_json is not None
+    assert run.progress_json["percent_complete"] == 100.0
+    assert run.progress_json["total_processes"] == 3
+    assert run.progress_json["completed"] == 3
+
+
+@pytest.mark.asyncio
+async def test_k8s_monitor_creates_process_records_on_completion(session, k8s_running_run):
+    """Monitor creates PipelineProcess records from adapter progress at completion."""
+    mock_compute = AsyncMock()
+    mock_compute.get_job_status.return_value = {
+        "status": "completed",
+        "pod_name": "bioaf-pipeline-99-xyz",
+    }
+    mock_compute.get_job_progress.return_value = {
+        "percent_complete": 100.0,
+        "processes": [
+            {"name": "STARSOLO", "status": "completed", "cpu": 85.0, "memory_gb": 4.5, "duration_s": 1800},
+            {"name": "SAMTOOLS_SORT", "status": "completed", "cpu": 50.0, "memory_gb": 2.1, "duration_s": 300},
+        ],
+    }
+
+    mock_storage = AsyncMock()
+    mock_storage.collect_outputs.return_value = []
+
+    with (
+        patch("app.services.pipeline_monitor_service.get_compute_adapter", return_value=mock_compute),
+        patch("app.services.pipeline_monitor_service.get_storage_adapter", return_value=mock_storage),
+        patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
+    ):
+        await PipelineMonitorService.sync_run_statuses(session)
+
+    from sqlalchemy import select
+    from app.models.pipeline_process import PipelineProcess
+
+    result = await session.execute(select(PipelineProcess).where(PipelineProcess.pipeline_run_id == k8s_running_run.id))
+    processes = list(result.scalars().all())
+    assert len(processes) == 2
+    names = {p.process_name for p in processes}
+    assert names == {"STARSOLO", "SAMTOOLS_SORT"}
+
+
+@pytest.mark.asyncio
 async def test_k8s_monitor_keeps_running(session, k8s_running_run):
-    """Test 20: monitor keeps running status when K8s reports running."""
+    """Monitor keeps running status when K8s reports running, does not fetch progress."""
     mock_compute = AsyncMock()
     mock_compute.get_job_status.return_value = {
         "status": "running",
@@ -135,6 +210,9 @@ async def test_k8s_monitor_keeps_running(session, k8s_running_run):
         return_value=mock_compute,
     ):
         await PipelineMonitorService.sync_run_statuses(session)
+
+    # Progress is only fetched at completion, not while running
+    mock_compute.get_job_progress.assert_not_called()
 
     from sqlalchemy import select
 
@@ -151,6 +229,10 @@ async def test_k8s_monitor_detects_completion(session, k8s_running_run):
     mock_compute.get_job_status.return_value = {
         "status": "completed",
         "pod_name": "bioaf-pipeline-99-xyz",
+    }
+    mock_compute.get_job_progress.return_value = {
+        "percent_complete": 100.0,
+        "processes": [],
     }
 
     mock_storage = AsyncMock()
@@ -179,6 +261,10 @@ async def test_k8s_monitor_detects_failure(session, k8s_running_run):
         "status": "failed",
         "pod_name": "bioaf-pipeline-99-xyz",
     }
+    mock_compute.get_job_progress.return_value = {
+        "percent_complete": 0.0,
+        "processes": [],
+    }
     mock_compute.get_job_logs.return_value = "Error: container exited with code 1"
 
     with (
@@ -202,6 +288,10 @@ async def test_k8s_monitor_sends_completion_audit(session, k8s_running_run):
     mock_compute.get_job_status.return_value = {
         "status": "completed",
         "pod_name": "bioaf-pipeline-99-xyz",
+    }
+    mock_compute.get_job_progress.return_value = {
+        "percent_complete": 100.0,
+        "processes": [],
     }
 
     mock_storage = AsyncMock()

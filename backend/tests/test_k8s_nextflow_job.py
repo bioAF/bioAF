@@ -137,6 +137,32 @@ class TestNextflowCommandBuilt:
         assert "--outdir /data/results" in command_str
 
     @pytest.mark.asyncio
+    async def test_gcs_outdir_when_raw_bucket_configured(self, adapter):
+        """When raw_bucket_name is configured, outdir should point to GCS results bucket."""
+        adapter._cluster_config = {"raw_bucket_name": "bioaf-raw-demo"}
+        mock_batch = _mock_batch_client()
+        job_spec = {
+            "run_id": 7,
+            "pipeline_name": "nf-core/scrnaseq",
+            "pipeline_source": "https://github.com/nf-core/scrnaseq",
+            "pipeline_version": "2.7.1",
+            "parameters": {},
+            "sample_sheet": "sample,fastq_1\nS1,s1.fq.gz\n",
+            "namespace": "bioaf-pipelines",
+            "experiment_id": 3,
+            "input_files": [],
+        }
+
+        with patch.object(adapter, "_get_k8s_batch_client", return_value=mock_batch):
+            await adapter._k8s_submit_job(job_spec)
+
+        body = mock_batch.create_namespaced_job.call_args[1]["body"]
+        main_container = body["spec"]["template"]["spec"]["containers"][0]
+        command_str = " ".join(main_container["command"])
+
+        assert "--outdir gs://bioaf-results-demo/experiments/3/pipeline-runs/7" in command_str
+
+    @pytest.mark.asyncio
     async def test_explicit_command_overrides_nextflow_build(self, adapter):
         """If command is explicitly set, do not auto-build a Nextflow command."""
         mock_batch = _mock_batch_client()

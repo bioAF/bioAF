@@ -118,6 +118,21 @@ export default function DataFilesPage() {
     }
   };
 
+  const handleDeleteSelected = async () => {
+    if (selectedIds.size === 0) return;
+    const count = selectedIds.size;
+    if (!confirm(`Delete ${count} ${count === 1 ? "file" : "files"}? This cannot be undone.`)) return;
+    try {
+      await Promise.all(
+        Array.from(selectedIds).map((id) => api.delete(`/api/files/${id}`))
+      );
+      setSelectedIds(new Set());
+      fetchFiles();
+    } catch {
+      // ignore
+    }
+  };
+
   const handleReconcile = async () => {
     setReconciling(true);
     setReconcileResult(null);
@@ -181,6 +196,12 @@ export default function DataFilesPage() {
                     className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
                   >
                     Link to Experiment
+                  </button>
+                  <button
+                    onClick={handleDeleteSelected}
+                    className="px-3 py-1.5 bg-red-600 text-white rounded-md text-sm hover:bg-red-700"
+                  >
+                    Delete
                   </button>
                 </div>
               )}

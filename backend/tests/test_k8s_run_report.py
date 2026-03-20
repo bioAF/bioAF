@@ -1,8 +1,7 @@
-"""Tests that pipeline report and logs use the real k8s_job_name.
+"""Tests that pipeline report reads the Nextflow HTML report from GCS.
 
-The report endpoint was looking for a job called "report-{run_id}" which
-does not exist. For K8s runs, both the report and logs tab should read
-from the actual k8s_job_name stored on the pipeline_run record.
+The report endpoint uses get_job_report (which reads from GCS) rather than
+get_job_logs (which reads container stdout/stderr).
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -20,47 +19,14 @@ def mock_session():
 
 class TestRunReport:
     @pytest.mark.asyncio
-    async def test_report_uses_k8s_job_name_not_report_prefix(self, mock_session):
-        """get_run_report should use k8s_job_name, not 'report-{run_id}'."""
-        # Mock the DB query to return k8s_job_name
+    async def test_report_uses_get_job_report(self, mock_session):
+        """get_run_report should call get_job_report, not get_job_logs."""
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = "bioaf-pipeline-11"
-
-        # get_run_report does two queries: first work_dir, then we need k8s_job_name
-        # Let's check what it actually queries
         mock_session.execute.return_value = mock_result
 
         mock_adapter = MagicMock()
-        mock_adapter.get_job_logs = AsyncMock(return_value="Container 'pipeline': exit_code=1")
-
-        with patch(
-            "app.services.pipeline_monitor_service.get_compute_adapter",
-            return_value=mock_adapter,
-        ):
-            await PipelineMonitorService.get_run_report(mock_session, 11)
-
-        # Should NOT have called get_job_logs with "report-11"
-        if mock_adapter.get_job_logs.called:
-            call_arg = mock_adapter.get_job_logs.call_args[0][0]
-            assert call_arg != "report-11", f"Report should use k8s_job_name, not 'report-11'. Got: {call_arg}"
-
-    @pytest.mark.asyncio
-    async def test_report_returns_logs_for_k8s_run(self, mock_session):
-        """For a K8s run, the report should return the job's container logs."""
-        # First query: work_dir (not used for K8s, but checked for existence)
-        # Second query: k8s_job_name
-        mock_result_1 = MagicMock()
-        mock_result_1.scalar_one_or_none.return_value = "/data/work"
-
-        mock_result_2 = MagicMock()
-        mock_result_2.scalar_one_or_none.return_value = "bioaf-pipeline-11"
-
-        mock_session.execute.side_effect = [mock_result_1, mock_result_2]
-
-        mock_adapter = MagicMock()
-        mock_adapter.get_job_logs = AsyncMock(
-            return_value="Pod bioaf-pipeline-11-abc - phase: Failed\nContainer 'pipeline': exit_code=1, reason=Error"
-        )
+        mock_adapter.get_job_report = AsyncMock(return_value="<html>report</html>")
 
         with patch(
             "app.services.pipeline_monitor_service.get_compute_adapter",
@@ -68,4 +34,15 @@ class TestRunReport:
         ):
             report = await PipelineMonitorService.get_run_report(mock_session, 11)
 
-        assert "exit_code=1" in report
+        mock_adapter.get_job_report.assert_called_once_with("bioaf-pipeline-11")
+        assert report == "<html>report</html>"
+
+    @pytest.mark.asyncio
+    async def test_report_returns_empty_when_no_k8s_job(self, mock_session):
+        """get_run_report returns empty string when no k8s_job_name."""
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_session.execute.return_value = mock_result
+
+        report = await PipelineMonitorService.get_run_report(mock_session, 99)
+        assert report == ""

@@ -21,7 +21,7 @@ const STATUS_COLORS: Record<PipelineRunStatus | PipelineProcessStatus, string> =
   cached: "bg-purple-100 text-purple-700",
 };
 
-type Tab = "progress" | "parameters" | "provenance" | "report" | "logs" | "review";
+type Tab = "logs" | "report" | "parameters" | "provenance" | "review";
 
 function getUserRole(): string {
   try {
@@ -41,9 +41,11 @@ export default function PipelineRunDetailPage() {
 
   const [run, setRun] = useState<PipelineRunDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<Tab>("progress");
+  const [activeTab, setActiveTab] = useState<Tab>("logs");
   const [report, setReport] = useState<string>("");
+  const [reportLoading, setReportLoading] = useState(false);
   const [logs, setLogs] = useState<{ stdout: string; stderr: string }>({ stdout: "", stderr: "" });
+  const [logsLoading, setLogsLoading] = useState(false);
   const [selectedProcess, setSelectedProcess] = useState<string>("");
   const [provenance, setProvenance] = useState<Record<string, unknown> | null>(null);
   const [references, setReferences] = useState<ReferenceDataset[]>([]);
@@ -90,22 +92,24 @@ export default function PipelineRunDetailPage() {
   }
 
   async function loadReport() {
+    setReportLoading(true);
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/pipeline-runs/${runId}/report`, {
         headers: { Authorization: `Bearer ${localStorage.getItem("bioaf_token")}` },
       });
       setReport(await res.text());
-    } catch {}
+    } catch {} finally { setReportLoading(false); }
   }
 
   async function loadLogs(processName?: string) {
+    setLogsLoading(true);
     try {
       const url = processName
         ? `/api/pipeline-runs/${runId}/logs/${encodeURIComponent(processName)}`
         : `/api/pipeline-runs/${runId}/logs`;
       const data = await api.get<{ stdout: string; stderr: string }>(url);
       setLogs(data);
-    } catch {}
+    } catch {} finally { setLogsLoading(false); }
   }
 
   async function loadProvenance() {
@@ -123,10 +127,10 @@ export default function PipelineRunDetailPage() {
   }
 
   useEffect(() => {
-    if (activeTab === "report") loadReport();
+    if (activeTab === "report" && !["running", "pending"].includes(run?.status ?? "")) loadReport();
     if (activeTab === "provenance") loadProvenance();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, runId]);
+  }, [activeTab, runId, run?.status]);
 
   useEffect(() => {
     if (activeTab !== "logs") return;
@@ -154,13 +158,29 @@ export default function PipelineRunDetailPage() {
     );
   }
 
+  function formatDateTime(dateStr: string | null | undefined): string {
+    if (!dateStr) return "—";
+    const d = new Date(dateStr);
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) + " " +
+      d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" });
+  }
+
+  function formatDuration(startedAt: string | null | undefined, completedAt: string | null | undefined): string {
+    if (!startedAt) return "—";
+    const start = new Date(startedAt).getTime();
+    const end = completedAt ? new Date(completedAt).getTime() : Date.now();
+    const seconds = Math.floor((end - start) / 1000);
+    if (seconds < 60) return `${seconds}s`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+  }
+
   const isActive = ["running", "pending"].includes(run.status);
   const tabs: { key: Tab; label: string }[] = [
-    { key: "progress", label: "Progress" },
+    { key: "logs", label: "Logs" },
+    { key: "report", label: "Report" },
     { key: "parameters", label: "Parameters" },
     { key: "provenance", label: "Provenance" },
-    { key: "report", label: "Report" },
-    { key: "logs", label: "Logs" },
     { key: "review", label: "Review" },
   ];
 
@@ -180,6 +200,15 @@ export default function PipelineRunDetailPage() {
             {!isActive && (
               <button onClick={handleReproduce} className="ml-auto bg-bioaf-600 text-white px-4 py-1.5 rounded text-sm hover:bg-bioaf-700">Reproduce</button>
             )}
+          </div>
+
+          {/* Timing metadata */}
+          <div className="bg-white rounded-lg shadow p-4 mb-6 flex gap-6">
+            <div><span className="text-xs text-gray-500">Started</span><p className="text-sm font-medium">{formatDateTime(run.started_at)}</p></div>
+            {run.completed_at && (
+              <div><span className="text-xs text-gray-500">Completed</span><p className="text-sm font-medium">{formatDateTime(run.completed_at)}</p></div>
+            )}
+            <div><span className="text-xs text-gray-500">Duration</span><p className="text-sm font-medium">{formatDuration(run.started_at, run.completed_at)}</p></div>
           </div>
 
           {/* Overall progress */}
@@ -235,39 +264,6 @@ export default function PipelineRunDetailPage() {
               ))}
             </nav>
           </div>
-
-          {/* Progress tab */}
-          {activeTab === "progress" && (
-            <div className="bg-white rounded-lg shadow overflow-hidden">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Process</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">CPU</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Memory</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Exit</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {run.processes.map((p) => (
-                    <tr key={p.id}>
-                      <td className="px-4 py-3 text-sm font-mono">{p.process_name}</td>
-                      <td className="px-4 py-3"><span className={`px-2 py-0.5 text-xs rounded-full ${STATUS_COLORS[p.status]}`}>{p.status}</span></td>
-                      <td className="px-4 py-3 text-sm">{p.cpu_usage != null ? `${p.cpu_usage.toFixed(1)}%` : "—"}</td>
-                      <td className="px-4 py-3 text-sm">{p.memory_peak_gb != null ? `${p.memory_peak_gb.toFixed(2)} GB` : "—"}</td>
-                      <td className="px-4 py-3 text-sm">{p.duration_seconds != null ? `${Math.floor(p.duration_seconds / 60)}m ${p.duration_seconds % 60}s` : "—"}</td>
-                      <td className="px-4 py-3 text-sm">{p.exit_code ?? "—"}</td>
-                    </tr>
-                  ))}
-                  {run.processes.length === 0 && (
-                    <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No processes yet</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
 
           {/* Parameters tab */}
           {activeTab === "parameters" && (
@@ -348,7 +344,13 @@ export default function PipelineRunDetailPage() {
               <h2 className="text-lg font-semibold mb-4">Nextflow Report</h2>
               {report ? (
                 <iframe srcDoc={report} className="w-full h-[600px] border rounded" title="Nextflow Report" />
-              ) : <p className="text-gray-400">No report available yet</p>}
+              ) : isActive ? (
+                <p className="text-gray-400">Reports are available after the pipeline run completes.</p>
+              ) : reportLoading ? (
+                <div className="flex items-center gap-2 text-gray-400"><LoadingSpinner size="sm" /><span>Loading report...</span></div>
+              ) : (
+                <p className="text-gray-400">No report available.</p>
+              )}
             </div>
           )}
 
@@ -365,18 +367,22 @@ export default function PipelineRunDetailPage() {
                 )}
               </div>
               {(selectedProcess || (run.k8s_job_name && !run.processes.length)) ? (
-                <div className="space-y-4">
-                  <div>
-                    <h3 className="text-sm font-medium mb-1">stdout</h3>
-                    <pre className="text-xs bg-gray-900 text-green-400 p-4 rounded overflow-auto max-h-96 whitespace-pre-wrap">{logs.stdout || "(empty)"}</pre>
-                  </div>
-                  {logs.stderr && (
+                logsLoading ? (
+                  <div className="flex items-center gap-2 text-gray-400"><LoadingSpinner size="sm" /><span>Loading logs...</span></div>
+                ) : (
+                  <div className="space-y-4">
                     <div>
-                      <h3 className="text-sm font-medium mb-1">stderr</h3>
-                      <pre className="text-xs bg-gray-900 text-red-400 p-4 rounded overflow-auto max-h-64 whitespace-pre-wrap">{logs.stderr || "(empty)"}</pre>
+                      <h3 className="text-sm font-medium mb-1">stdout</h3>
+                      <pre className="text-xs bg-gray-900 text-green-400 p-4 rounded overflow-auto max-h-96 whitespace-pre-wrap">{logs.stdout || "(empty)"}</pre>
                     </div>
-                  )}
-                </div>
+                    {logs.stderr && (
+                      <div>
+                        <h3 className="text-sm font-medium mb-1">stderr</h3>
+                        <pre className="text-xs bg-gray-900 text-red-400 p-4 rounded overflow-auto max-h-64 whitespace-pre-wrap">{logs.stderr || "(empty)"}</pre>
+                      </div>
+                    )}
+                  </div>
+                )
               ) : <p className="text-gray-400">Select a process to view logs</p>}
             </div>
           )}

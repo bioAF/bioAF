@@ -56,8 +56,8 @@ class GcsStorageProvider(StorageProvider):
         run_id = pipeline_run.get("id", "unknown")
         experiment_id = pipeline_run.get("experiment_id", "unknown")
         if self.is_local:
-            return f"{LOCAL_DATA_ROOT}/results/experiments/{experiment_id}/runs/{run_id}/{filename}"
-        return f"gs://{self.results_bucket}/experiments/{experiment_id}/runs/{run_id}/{filename}"
+            return f"{LOCAL_DATA_ROOT}/results/experiments/{experiment_id}/pipeline-runs/{run_id}/{filename}"
+        return f"gs://{self.results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}/{filename}"
 
     async def stage_inputs(self, file_records: list[dict], working_dir: str) -> list[str]:
         if self.is_local:
@@ -95,7 +95,7 @@ class GcsStorageProvider(StorageProvider):
     async def _local_collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[dict]:
         run_id = pipeline_run.get("id", "unknown")
         experiment_id = pipeline_run.get("experiment_id", "unknown")
-        results_dir = f"{LOCAL_DATA_ROOT}/results/experiments/{experiment_id}/runs/{run_id}"
+        results_dir = f"{LOCAL_DATA_ROOT}/results/experiments/{experiment_id}/pipeline-runs/{run_id}"
         os.makedirs(results_dir, exist_ok=True)
 
         collected = []
@@ -109,7 +109,7 @@ class GcsStorageProvider(StorageProvider):
                         {
                             "filename": fname,
                             "local_path": dest,
-                            "gcs_uri": f"gs://{self.results_bucket}/experiments/{experiment_id}/runs/{run_id}/{fname}",
+                            "gcs_uri": f"gs://{self.results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}/{fname}",
                             "size_bytes": os.path.getsize(dest),
                         }
                     )

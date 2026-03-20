@@ -110,6 +110,15 @@ async def get_thumbnail(
     return {"thumbnail_url": None}
 
 
+@router.post("/backfill")
+async def backfill_plot_metadata(
+    current_user: dict = require_role("admin"),
+    session: AsyncSession = Depends(get_session),
+):
+    updated = await PlotArchiveService.backfill_metadata(session)
+    return {"updated": updated}
+
+
 @router.patch("/{plot_id}", response_model=PlotArchiveResponse)
 async def update_plot(
     plot_id: int,

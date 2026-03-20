@@ -8,6 +8,8 @@ import { ExperimentStatusBadge } from "@/components/experiments/ExperimentStatus
 import { SampleQCBadge } from "@/components/experiments/SampleQCBadge";
 import { GeoExportModal } from "@/components/experiments/GeoExportModal";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { PlotModal } from "@/components/shared/PlotModal";
+import { ExportPdfButton } from "@/components/shared/ExportPdfButton";
 import { VocabularySelect } from "@/components/shared/VocabularySelect";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -1095,12 +1097,95 @@ export default function ExperimentDetailPage() {
 
 /* ─── Experiment Results Tab ─── */
 
+function ResultsPlotImage({ fileId, title, onExpand }: { fileId: number; title: string; onExpand: (url: string) => void }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await api.get<{ download_url: string }>(`/api/files/${fileId}/download`);
+        if (!cancelled) setUrl(data.download_url);
+      } catch {
+        if (!cancelled) setError(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [fileId]);
+
+  return (
+    <div className="relative bg-gray-100 rounded min-h-[10rem] flex items-center justify-center group">
+      {error ? (
+        <span className="text-gray-400 text-sm">Failed to load plot</span>
+      ) : url ? (
+        <>
+          <img src={url} alt={title} className="w-full rounded" onError={() => setError(true)} />
+          <button
+            onClick={() => onExpand(url)}
+            className="absolute top-2 right-2 p-1.5 bg-white/80 rounded shadow opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white"
+            title="Expand plot"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5" />
+            </svg>
+          </button>
+        </>
+      ) : (
+        <span className="text-gray-400 text-sm">Loading plot...</span>
+      )}
+    </div>
+  );
+}
+
+function ExperimentPlotThumbnail({
+  fileId,
+  title,
+  onExpand,
+}: {
+  fileId: number;
+  title: string;
+  onExpand: (url: string) => void;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await api.get<{ download_url: string }>(
+          `/api/files/${fileId}/download`
+        );
+        if (!cancelled) setUrl(data.download_url);
+      } catch {
+        if (!cancelled) setError(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [fileId]);
+
+  if (error) return <span className="text-gray-400 text-xs">Failed to load</span>;
+  if (!url) return <span className="text-gray-400 text-xs">Loading...</span>;
+  return (
+    <img
+      src={url}
+      alt={title}
+      className="w-full h-full object-cover cursor-pointer"
+      onClick={() => onExpand(url)}
+      onError={() => setError(true)}
+    />
+  );
+}
+
 function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
   const [qcDashboards, setQcDashboards] = useState<QCDashboardSummary[]>([]);
   const [selectedQc, setSelectedQc] = useState<QCDashboardResponse | null>(null);
+  const [regenerating, setRegenerating] = useState(false);
   const [cellxgenePubs, setCellxgenePubs] = useState<CellxgenePublicationResponse[]>([]);
   const [plots, setPlots] = useState<PlotArchiveResponse[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandedPlot, setExpandedPlot] = useState<{ url: string; title: string } | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -1130,11 +1215,27 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
     }
   };
 
+  const regenerateQc = async (runId: number) => {
+    setRegenerating(true);
+    try {
+      const data = await api.post<QCDashboardResponse>(`/api/qc-dashboards/regenerate/${runId}`, {});
+      setSelectedQc(data);
+      // Refresh the list
+      const updated = await api.get<QCDashboardSummary[]>(`/api/qc-dashboards?experiment_id=${experimentId}`);
+      setQcDashboards(updated);
+    } catch {
+      // ignore
+    } finally {
+      setRegenerating(false);
+    }
+  };
+
   const qualityColor = (rating: string) => {
     switch (rating) {
       case "excellent": return "bg-green-100 text-green-700";
       case "good": return "bg-blue-100 text-blue-700";
       case "acceptable": return "bg-yellow-100 text-yellow-700";
+      case "pending_review": return "bg-gray-100 text-gray-700";
       default: return "bg-red-100 text-red-700";
     }
   };
@@ -1147,29 +1248,84 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
       <section>
         <h2 className="text-lg font-semibold mb-3">QC Dashboards</h2>
         {selectedQc ? (
-          <div className="bg-white rounded-lg shadow p-6">
-            <button onClick={() => setSelectedQc(null)} className="text-blue-600 text-sm hover:underline mb-3">
-              Back to list
-            </button>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold">Run #{selectedQc.pipeline_run_id}</h3>
-              <span className={`px-3 py-1 rounded-full text-sm font-medium ${qualityColor(selectedQc.metrics.quality_rating)}`}>
-                {selectedQc.metrics.quality_rating}
-              </span>
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <button onClick={() => setSelectedQc(null)} className="text-blue-600 text-sm hover:underline">
+                Back to list
+              </button>
+              <ExportPdfButton
+                targetId="experiment-qc-content"
+                filename={`qc-dashboard-run-${selectedQc.pipeline_run_id}.pdf`}
+              />
             </div>
-            {selectedQc.summary_text && <p className="text-sm text-gray-600 mb-4">{selectedQc.summary_text}</p>}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {selectedQc.metrics.cell_count != null && (
-                <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Cell Count</p><p className="font-semibold">{selectedQc.metrics.cell_count.toLocaleString()}</p></div>
-              )}
-              {selectedQc.metrics.median_genes_per_cell != null && (
-                <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Median Genes/Cell</p><p className="font-semibold">{selectedQc.metrics.median_genes_per_cell.toLocaleString()}</p></div>
-              )}
-              {selectedQc.metrics.mito_pct_median != null && (
-                <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Mito %</p><p className="font-semibold">{selectedQc.metrics.mito_pct_median.toFixed(1)}%</p></div>
-              )}
-              {selectedQc.metrics.saturation != null && (
-                <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Saturation</p><p className="font-semibold">{(selectedQc.metrics.saturation * 100).toFixed(1)}%</p></div>
+            <div id="experiment-qc-content" className="bg-white rounded-lg shadow p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-bold">Run #{selectedQc.pipeline_run_id}</h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => regenerateQc(selectedQc.pipeline_run_id)}
+                    disabled={regenerating}
+                    className="px-3 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200 disabled:opacity-50"
+                  >
+                    {regenerating ? "Regenerating..." : "Regenerate"}
+                  </button>
+                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${qualityColor(selectedQc.metrics.quality_rating)}`}>
+                    {selectedQc.metrics.quality_rating}
+                  </span>
+                </div>
+              </div>
+              {selectedQc.summary_text && <p className="text-sm text-gray-600 mb-4" dangerouslySetInnerHTML={{ __html: selectedQc.summary_text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>") }} />}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+                {selectedQc.metrics.cell_count != null && (
+                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Cell Count</p><p className="font-semibold">{selectedQc.metrics.cell_count.toLocaleString()}</p></div>
+                )}
+                {selectedQc.metrics.median_genes_per_cell != null && (
+                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Median Genes/Cell</p><p className="font-semibold">{selectedQc.metrics.median_genes_per_cell.toLocaleString()}</p></div>
+                )}
+                {selectedQc.metrics.median_umi_per_cell != null && (
+                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Median UMI/Cell</p><p className="font-semibold">{selectedQc.metrics.median_umi_per_cell.toLocaleString()}</p></div>
+                )}
+                {selectedQc.metrics.mito_pct_median != null && (
+                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Mito %</p><p className="font-semibold">{selectedQc.metrics.mito_pct_median.toFixed(1)}%</p></div>
+                )}
+                {selectedQc.metrics.median_reads_per_cell != null && (
+                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Median Reads/Cell</p><p className="font-semibold">{selectedQc.metrics.median_reads_per_cell.toLocaleString()}</p></div>
+                )}
+                {selectedQc.metrics.saturation != null && (
+                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Saturation</p><p className="font-semibold">{(selectedQc.metrics.saturation * 100).toFixed(1)}%</p></div>
+                )}
+                {selectedQc.metrics.total_sequences != null && (
+                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Total Sequences</p><p className="font-semibold">{selectedQc.metrics.total_sequences.toLocaleString()}</p></div>
+                )}
+                {selectedQc.metrics.total_samples != null && (
+                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Samples</p><p className="font-semibold">{selectedQc.metrics.total_samples}</p></div>
+                )}
+                {selectedQc.metrics.percent_duplicates != null && (
+                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Duplication</p><p className="font-semibold">{selectedQc.metrics.percent_duplicates.toFixed(1)}%</p></div>
+                )}
+                {selectedQc.metrics.percent_gc != null && (
+                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">GC Content</p><p className="font-semibold">{selectedQc.metrics.percent_gc.toFixed(0)}%</p></div>
+                )}
+                {selectedQc.metrics.avg_sequence_length != null && (
+                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Avg Read Length</p><p className="font-semibold">{selectedQc.metrics.avg_sequence_length.toFixed(0)} bp</p></div>
+                )}
+              </div>
+              {selectedQc.plots.length > 0 && (
+                <div>
+                  <h4 className="font-medium mb-3">Plots</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    {selectedQc.plots.map((plot, i) => (
+                      <div key={i} className="border rounded-lg p-3">
+                        <p className="text-sm font-medium mb-2">{plot.title}</p>
+                        <ResultsPlotImage
+                          fileId={plot.file_id}
+                          title={plot.title}
+                          onExpand={(url) => setExpandedPlot({ url, title: plot.title })}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           </div>
@@ -1222,8 +1378,12 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
             {plots.map((plot) => (
               <div key={plot.id} className="bg-white rounded-lg shadow overflow-hidden">
                 <div className="aspect-square bg-gray-100 flex items-center justify-center">
-                  {plot.thumbnail_url ? (
-                    <img src={plot.thumbnail_url ?? undefined} alt={plot.title ?? undefined} className="w-full h-full object-cover" />
+                  {plot.file ? (
+                    <ExperimentPlotThumbnail
+                      fileId={plot.file.id}
+                      title={plot.title ?? "Plot"}
+                      onExpand={(url) => setExpandedPlot({ url, title: plot.title ?? "Plot" })}
+                    />
                   ) : (
                     <span className="text-gray-400 text-xs">No preview</span>
                   )}
@@ -1236,6 +1396,14 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
           </div>
         )}
       </section>
+
+      {expandedPlot && (
+        <PlotModal
+          url={expandedPlot.url}
+          title={expandedPlot.title}
+          onClose={() => setExpandedPlot(null)}
+        />
+      )}
     </div>
   );
 }

@@ -146,8 +146,31 @@ async function uploadFileSigned<T>(
   });
 }
 
+async function fetchWithRetry<T>(
+  path: string,
+  options: RequestInit = {},
+  retries = 3,
+  delayMs = 2000,
+): Promise<T> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fetchApi<T>(path, options);
+    } catch (err) {
+      const isLastAttempt = attempt === retries;
+      const isRetryable =
+        !(err instanceof ApiError) ||
+        err.status >= 500;
+      if (isLastAttempt || !isRetryable) throw err;
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw new Error("Unreachable");
+}
+
 export const api = {
   get: <T>(path: string) => fetchApi<T>(path),
+  getWithRetry: <T>(path: string, retries?: number) =>
+    fetchWithRetry<T>(path, {}, retries),
   post: <T>(path: string, body?: unknown) =>
     fetchApi<T>(path, {
       method: "POST",

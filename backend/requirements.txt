@@ -33,3 +33,5 @@ google-cloud-service-usage>=1.8
 google-cloud-pubsub>=2.21
 # BigQuery billing export
 google-cloud-bigquery>=3.20
+# Cloud Logging fallback for pipeline log persistence
+google-cloud-logging>=3.10

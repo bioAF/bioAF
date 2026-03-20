@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import csv
 import io
 import logging
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +14,9 @@ from app.models.pipeline_process import PipelineProcess
 from app.models.pipeline_run import PipelineRun
 from app.services.audit_service import log_action
 from app.adapters.registry import get_compute_adapter, get_storage_adapter
+
+if TYPE_CHECKING:
+    from app.adapters.base import ComputeProvider
 
 logger = logging.getLogger("bioaf.pipeline_monitor")
 
@@ -118,7 +124,12 @@ class PipelineMonitorService:
 
     @staticmethod
     async def _sync_k8s_run(session: AsyncSession, run: PipelineRun, job_id: str) -> None:
-        """Sync a K8s Job run by querying the compute adapter for job status."""
+        """Sync a K8s Job run by querying the compute adapter for job status.
+
+        Progress data (trace file) is only available after the pipeline
+        container exits, so we fetch it on completion/failure transitions
+        rather than on every sync cycle.
+        """
         try:
             compute_adapter = get_compute_adapter()
             status_result = await compute_adapter.get_job_status(job_id)
@@ -136,25 +147,31 @@ class PipelineMonitorService:
         if k8s_status == "completed" and run.status != "completed":
             run.status = "completed"
             run.completed_at = datetime.now(timezone.utc)
-            run.progress_json = {
-                "total_processes": 1,
-                "completed": 1,
-                "running": 0,
-                "failed": 0,
-                "cached": 0,
-                "percent_complete": 100.0,
-            }
+
+            # Fetch final progress from the adapter (trace uploaded at exit)
+            await PipelineMonitorService._populate_progress(session, run, compute_adapter, job_id)
+            if not run.progress_json:
+                run.progress_json = {
+                    "total_processes": 1,
+                    "completed": 1,
+                    "running": 0,
+                    "failed": 0,
+                    "cached": 0,
+                    "percent_complete": 100.0,
+                }
             await PipelineMonitorService._handle_completion(session, run)
 
         elif k8s_status == "failed" and run.status != "failed":
             run.status = "failed"
             run.completed_at = datetime.now(timezone.utc)
 
+            # Fetch final progress (trace may or may not exist for failures)
+            await PipelineMonitorService._populate_progress(session, run, compute_adapter, job_id)
+
             # Try to get error info from logs
             try:
                 log_content = await compute_adapter.get_job_logs(job_id)
                 if log_content:
-                    # Take last 500 chars of logs as error message
                     run.error_message = log_content[-500:] if len(log_content) > 500 else log_content
                 else:
                     run.error_message = "Job failed (no logs available)"
@@ -162,6 +179,73 @@ class PipelineMonitorService:
                 run.error_message = "Job failed (could not retrieve logs)"
 
             await PipelineMonitorService._handle_completion(session, run)
+
+    @staticmethod
+    async def _populate_progress(
+        session: AsyncSession,
+        run: PipelineRun,
+        compute_adapter: ComputeProvider,
+        job_id: str,
+    ) -> None:
+        """Fetch progress from the adapter and update run + PipelineProcess records."""
+        try:
+            progress = await compute_adapter.get_job_progress(job_id)
+        except Exception as e:
+            logger.warning("Failed to get job progress for run %d: %s", run.id, e)
+            return
+
+        adapter_processes = progress.get("processes", [])
+        if not adapter_processes:
+            return
+
+        existing_by_name = {p.process_name: p for p in run.processes}
+
+        completed = 0
+        running = 0
+        failed = 0
+        cached = 0
+        for proc_data in adapter_processes:
+            name = proc_data.get("name", "")
+            status = proc_data.get("status", "")
+
+            if status == "completed":
+                completed += 1
+            elif status == "running":
+                running += 1
+            elif status == "failed":
+                failed += 1
+            elif status == "cached":
+                cached += 1
+
+            if name in existing_by_name:
+                proc = existing_by_name[name]
+            else:
+                proc = PipelineProcess(
+                    pipeline_run_id=run.id,
+                    process_name=name,
+                )
+                session.add(proc)
+
+            proc.status = status
+            cpu_val = proc_data.get("cpu")
+            if cpu_val is not None:
+                proc.cpu_usage = cpu_val
+            mem_val = proc_data.get("memory_gb")
+            if mem_val is not None:
+                proc.memory_peak_gb = mem_val
+            dur_val = proc_data.get("duration_s")
+            if dur_val is not None:
+                proc.duration_seconds = dur_val
+
+        total = len(adapter_processes)
+        run.progress_json = {
+            "total_processes": total,
+            "completed": completed,
+            "running": running,
+            "failed": failed,
+            "cached": cached,
+            "percent_complete": progress.get("percent_complete", 0.0),
+        }
 
     @staticmethod
     async def _handle_completion(session: AsyncSession, run: PipelineRun) -> None:
@@ -194,7 +278,7 @@ class PipelineMonitorService:
         # Collect output files via storage adapter
         try:
             storage_adapter = get_storage_adapter()
-            outdir = f"/data/results/experiments/{run.experiment_id}/runs/{run.id}"
+            outdir = f"/data/results/experiments/{run.experiment_id}/pipeline-runs/{run.id}"
             collected = await storage_adapter.collect_outputs(
                 outdir,
                 {"id": run.id, "experiment_id": run.experiment_id},
@@ -286,29 +370,18 @@ class PipelineMonitorService:
 
     @staticmethod
     async def get_run_report(session: AsyncSession, run_id: int) -> str:
-        """Read the pipeline report (K8s container logs or Nextflow HTML report)."""
-        # For K8s runs, return the container logs directly
+        """Read the Nextflow HTML report from GCS."""
         k8s_result = await session.execute(select(PipelineRun.k8s_job_name).where(PipelineRun.id == run_id))
         k8s_job_name = k8s_result.scalar_one_or_none()
 
-        if k8s_job_name:
-            try:
-                compute_adapter = get_compute_adapter()
-                return await compute_adapter.get_job_logs(k8s_job_name)
-            except Exception as e:
-                logger.warning("Failed to read K8s report for run %d: %s", run_id, e)
-                return ""
-
-        # Nextflow HTML report path (legacy)
-        result = await session.execute(select(PipelineRun.work_dir).where(PipelineRun.id == run_id))
-        work_dir = result.scalar_one_or_none()
-        if not work_dir:
+        if not k8s_job_name:
             return ""
 
         try:
             compute_adapter = get_compute_adapter()
-            return await compute_adapter.get_job_logs(f"report-{run_id}")
-        except Exception:
+            return await compute_adapter.get_job_report(k8s_job_name)
+        except Exception as e:
+            logger.warning("Failed to read report for run %d: %s", run_id, e)
             return ""
 
 

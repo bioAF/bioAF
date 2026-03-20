@@ -24,6 +24,7 @@ jest.mock("@/lib/api", () => ({
   api: {
     get: jest.fn(),
     post: jest.fn(),
+    delete: jest.fn(),
   },
 }));
 
@@ -37,10 +38,12 @@ import { api } from "@/lib/api";
 
 const mockGet = api.get as jest.Mock;
 const mockPost = api.post as jest.Mock;
+const mockDelete = api.delete as jest.Mock;
 
 beforeEach(() => {
   mockGet.mockReset();
   mockPost.mockReset();
+  mockDelete.mockReset();
 });
 
 const makeFile = (overrides: Record<string, unknown> = {}) => ({
@@ -342,4 +345,57 @@ test("select-all checkbox toggles all rows", async () => {
   // Uncheck all
   fireEvent.click(selectAll);
   expect(screen.queryByText("2 selected")).not.toBeInTheDocument();
+});
+
+test("delete button removes selected files after confirmation", async () => {
+  mockGet.mockImplementation((path: string) => {
+    if (path.startsWith("/api/files")) return Promise.resolve(filesResponse);
+    if (path.startsWith("/api/experiments"))
+      return Promise.resolve(experimentsResponse);
+    return Promise.resolve([]);
+  });
+  mockDelete.mockResolvedValue({});
+
+  render(<DataFilesPage />);
+
+  await waitFor(() => {
+    expect(screen.getByText("sample_R1.fastq.gz")).toBeInTheDocument();
+  });
+
+  // Select the first file
+  const checkboxes = screen.getAllByRole("checkbox");
+  fireEvent.click(checkboxes[1]);
+
+  expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+  // Confirm the deletion
+  window.confirm = jest.fn(() => true);
+  fireEvent.click(screen.getByText("Delete"));
+
+  await waitFor(() => {
+    expect(mockDelete).toHaveBeenCalledWith("/api/files/1");
+  });
+});
+
+test("delete button does nothing when user cancels confirmation", async () => {
+  mockGet.mockImplementation((path: string) => {
+    if (path.startsWith("/api/files")) return Promise.resolve(filesResponse);
+    if (path.startsWith("/api/experiments"))
+      return Promise.resolve(experimentsResponse);
+    return Promise.resolve([]);
+  });
+
+  render(<DataFilesPage />);
+
+  await waitFor(() => {
+    expect(screen.getByText("sample_R1.fastq.gz")).toBeInTheDocument();
+  });
+
+  const checkboxes = screen.getAllByRole("checkbox");
+  fireEvent.click(checkboxes[1]);
+
+  window.confirm = jest.fn(() => false);
+  fireEvent.click(screen.getByText("Delete"));
+
+  expect(mockDelete).not.toHaveBeenCalled();
 });
