@@ -8,6 +8,7 @@ import { StorageSection } from "@/components/components/StorageSection";
 import { BootstrapCard } from "@/components/infrastructure/BootstrapCard";
 import { TerraformProgressModal } from "@/components/infrastructure/TerraformProgressModal";
 import { TerraformRunHistory } from "@/components/infrastructure/TerraformRunHistory";
+import { OrphanedResourcesCard } from "@/components/infrastructure/OrphanedResourcesCard";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 
@@ -694,6 +695,11 @@ export default function InfraComponentsPage() {
               </div>
             </>
           )}
+
+          {/* Orphaned Resources */}
+          <div className="mt-10">
+            <OrphanedResourcesCard />
+          </div>
 
           {/* Run History */}
           <div className="mt-10">

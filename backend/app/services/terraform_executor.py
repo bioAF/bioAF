@@ -338,6 +338,8 @@ class TerraformExecutor:
             )
         finally:
             await cleanup()
+            if run.status == "failed":
+                await TerraformExecutor._auto_cleanup_lock(session, module_name)
             await session.flush()
 
         await log_action(
@@ -713,6 +715,8 @@ class TerraformExecutor:
             )
         finally:
             await cleanup()
+            if run.status == "failed":
+                await TerraformExecutor._auto_cleanup_lock(session, module_name)
             await session.flush()
 
         await log_action(
@@ -938,19 +942,48 @@ class TerraformExecutor:
         return {r[0]: r[1] for r in rows}
 
     @staticmethod
+    async def _auto_cleanup_lock(session: AsyncSession, module_name: str) -> None:
+        """Delete the GCS lock file for a module after a failed run."""
+        config = await TerraformExecutor._read_gcp_config(session)
+        state_bucket = config.get("terraform_state_bucket", "")
+        if state_bucket:
+            lock_path = f"{module_name}/default.tflock"
+            await TerraformExecutor._delete_gcs_lock_file(state_bucket, lock_path)
+
+    @staticmethod
     async def _recover_stale_runs(session: AsyncSession) -> None:
         """Mark runs stuck in planning/applying/awaiting_confirmation for >30 min as failed."""
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=STALE_RUN_THRESHOLD_MINUTES)
-        await session.execute(
+
+        # Find stale runs first so we can clean up their lock files
+        stale_result = await session.execute(
             text("""
-            UPDATE terraform_runs
-            SET status = 'failed',
-                error_message = 'Run timed out and was recovered',
-                completed_at = now()
+            SELECT id, module_name FROM terraform_runs
             WHERE status IN ('planning', 'applying', 'awaiting_confirmation')
               AND started_at < :cutoff
             """).bindparams(cutoff=cutoff)
         )
+        stale_runs = stale_result.fetchall()
+
+        if stale_runs:
+            config = await TerraformExecutor._read_gcp_config(session)
+            state_bucket = config.get("terraform_state_bucket", "")
+            if state_bucket:
+                for _run_id, module_name in stale_runs:
+                    if module_name:
+                        lock_path = f"{module_name}/default.tflock"
+                        await TerraformExecutor._delete_gcs_lock_file(state_bucket, lock_path)
+
+            await session.execute(
+                text("""
+                UPDATE terraform_runs
+                SET status = 'failed',
+                    error_message = 'Run timed out and was recovered',
+                    completed_at = now()
+                WHERE status IN ('planning', 'applying', 'awaiting_confirmation')
+                  AND started_at < :cutoff
+                """).bindparams(cutoff=cutoff)
+            )
         await session.flush()
 
     @staticmethod

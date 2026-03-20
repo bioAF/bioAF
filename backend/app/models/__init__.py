@@ -48,6 +48,7 @@ from app.models.ingest_event import IngestEvent
 from app.models.pipeline_trigger import PipelineTrigger
 from app.models.trigger_evaluation import TriggerEvaluation
 from app.models.pipeline_cost_history import PipelineCostHistory
+from app.models.orphaned_resource import OrphanedResource
 
 __all__ = [
     "User",
@@ -105,4 +106,5 @@ __all__ = [
     "PipelineTrigger",
     "TriggerEvaluation",
     "PipelineCostHistory",
+    "OrphanedResource",
 ]

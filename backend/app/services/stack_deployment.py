@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.activity_feed_service import ActivityFeedService
 from app.services.audit_service import log_action
+from app.services.orphaned_resource_service import OrphanedResourceService
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
 
 logger = logging.getLogger("bioaf.stack_deployment")
@@ -307,6 +308,15 @@ async def deploy_stack(
         new_uid = secrets.token_hex(3)  # 6 hex chars, e.g. "a1b2c3"
         await _set_config(session, "stack_uid", new_uid)
         await session.flush()
+    elif await OrphanedResourceService.has_orphaned_for_uid(session, existing_uid):
+        new_uid = secrets.token_hex(3)
+        await _set_config(session, "stack_uid", new_uid)
+        await session.flush()
+        logger.info(
+            "Re-seeded stack_uid from %s to %s (orphaned resources detected)",
+            existing_uid,
+            new_uid,
+        )
 
     # Step 1: Deploy storage if needed
     if storage_deployed != "true":
@@ -448,6 +458,23 @@ async def deploy_stack(
             )
 
     if compute_failed:
+        # Log the expected cluster as an orphaned resource
+        project_id = await _read_config(session, "gcp_project_id")
+        zone = await _read_config(session, "gcp_zone")
+        org_slug = await _read_config(session, "org_slug")
+        stack_uid = await _read_config(session, "stack_uid")
+        if stack_uid and stack_uid != "null" and org_slug and org_slug != "null":
+            cluster_name = f"bioaf-{org_slug}-{stack_uid}"
+            await OrphanedResourceService.log_resource(
+                session,
+                resource_type="gke_cluster",
+                resource_name=cluster_name,
+                gcp_project_id=project_id if project_id != "null" else "",
+                gcp_zone=zone if zone != "null" else None,
+                stack_uid=stack_uid,
+            )
+            await session.flush()
+
         yield TerraformProgressEvent(
             event_type="stack_error",
             message="Stack deployment failed during compute module. Storage buckets preserved.",
@@ -487,6 +514,22 @@ async def teardown_stack(
             teardown_failed = True
 
     if teardown_failed:
+        # Log the cluster as orphaned for later cleanup
+        project_id = await _read_config(session, "gcp_project_id")
+        zone = await _read_config(session, "gcp_zone")
+        cluster_name = await _read_config(session, "gke_cluster_name")
+        stack_uid = await _read_config(session, "stack_uid")
+        if cluster_name and cluster_name != "null" and stack_uid and stack_uid != "null":
+            await OrphanedResourceService.log_resource(
+                session,
+                resource_type="gke_cluster",
+                resource_name=cluster_name,
+                gcp_project_id=project_id if project_id != "null" else "",
+                gcp_zone=zone if zone != "null" else None,
+                stack_uid=stack_uid,
+            )
+            await session.flush()
+
         yield TerraformProgressEvent(
             event_type="stack_error",
             message="Teardown failed",

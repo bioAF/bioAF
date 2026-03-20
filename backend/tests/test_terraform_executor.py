@@ -1151,3 +1151,92 @@ async def test_delete_gcs_lock_file_logs_not_found():
     with patch("app.services.terraform_executor.storage.Client", return_value=mock_client):
         # Should not raise
         await TerraformExecutor._delete_gcs_lock_file("my-bucket", "compute/default.tflock")
+
+
+# ---------------------------------------------------------------------------
+# Auto lock cleanup on failure
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_apply_failure_deletes_lock(session):
+    """When terraform apply fails (non-zero exit), the lock file is auto-deleted."""
+    user_id = await _seed_user(session)
+    await _seed_gcp_config(session, configured=True, initialized=True)
+
+    apply_output = json.dumps({"type": "diagnostic", "diagnostic": {"summary": "Error applying"}})
+    mock_process = _mock_async_process(apply_output, returncode=1, stderr="apply failed")
+
+    with (
+        _patch_work_dir(),
+        patch("asyncio.create_subprocess_exec", return_value=mock_process),
+        patch.object(TerraformExecutor, "_run_init", new=AsyncMock()),
+        patch.object(TerraformExecutor, "_auto_cleanup_lock", new=AsyncMock()) as mock_cleanup,
+    ):
+        # Insert a run in applying state
+        await session.execute(
+            text("""
+            INSERT INTO terraform_runs
+                (triggered_by_user_id, action, status, module_name, resources_planned)
+            VALUES (:uid, 'apply', 'applying', 'compute', 1)
+            """).bindparams(uid=user_id)
+        )
+        await session.commit()
+        run_row = (await session.execute(text("SELECT id FROM terraform_runs ORDER BY id DESC LIMIT 1"))).fetchone()
+
+        events = []
+        async for event in TerraformExecutor.run_apply(session, run_row[0], user_id):
+            events.append(event)
+
+    mock_cleanup.assert_called_once_with(session, "compute")
+
+
+@pytest.mark.asyncio
+async def test_run_destroy_failure_deletes_lock(session):
+    """When terraform destroy fails (non-zero exit), the lock file is auto-deleted."""
+    user_id = await _seed_user(session)
+    await _seed_gcp_config(session, configured=True, initialized=True)
+
+    mock_process = _mock_async_process("", returncode=1, stderr="destroy failed")
+
+    with (
+        _patch_work_dir(),
+        patch("asyncio.create_subprocess_exec", return_value=mock_process),
+        patch.object(TerraformExecutor, "_run_init", new=AsyncMock()),
+        patch.object(TerraformExecutor, "_auto_cleanup_lock", new=AsyncMock()) as mock_cleanup,
+    ):
+        events = []
+        async for event in TerraformExecutor.run_destroy(session, user_id, "compute"):
+            events.append(event)
+
+    mock_cleanup.assert_called_once_with(session, "compute")
+
+
+@pytest.mark.asyncio
+async def test_recover_stale_runs_deletes_locks(session):
+    """_recover_stale_runs deletes lock files for recovered runs."""
+    user_id = await _seed_user(session)
+    await _seed_gcp_config(session, configured=True, initialized=True)
+
+    # Insert a stale run (started 60 minutes ago)
+    await session.execute(
+        text("""
+        INSERT INTO terraform_runs
+            (triggered_by_user_id, action, status, module_name, started_at)
+        VALUES (:uid, 'apply', 'applying', 'compute', now() - interval '60 minutes')
+        """).bindparams(uid=user_id)
+    )
+    await session.commit()
+
+    mock_delete = AsyncMock()
+    with patch.object(TerraformExecutor, "_delete_gcs_lock_file", new=mock_delete):
+        await TerraformExecutor._recover_stale_runs(session)
+
+    mock_delete.assert_called_once()
+    call_args = mock_delete.call_args
+    assert call_args[0][0] == "bioaf-tfstate-test"
+    assert "compute/default.tflock" in call_args[0][1]
+
+    # Verify the run was marked failed
+    row = (await session.execute(text("SELECT status FROM terraform_runs LIMIT 1"))).fetchone()
+    assert row[0] == "failed"

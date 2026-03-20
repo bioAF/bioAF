@@ -928,3 +928,122 @@ async def test_get_cluster_status_uses_sa_credentials(session):
     assert result.compute_deployed is True
     assert result.cluster is not None
     assert result.cluster.cluster_name == "bioaf-test"
+
+
+# -----------------------------------------------------------------------
+# Orphaned resource logging tests
+# -----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_deploy_stack_logs_orphan_on_compute_failure(session):
+    """When compute fails, the expected cluster is logged as an orphaned resource."""
+    from app.services.stack_deployment import deploy_stack
+
+    _, user_id = await _seed_org_and_user(session)
+
+    await _set_config(session, "gcp_credentials_configured", "true")
+    await _set_config(session, "terraform_initialized", "true")
+    await _set_config(session, "compute_deployed", "false")
+    await _set_config(session, "storage_deployed", "true")
+    await _set_config(session, "org_slug", "demo")
+    await _set_config(session, "stack_uid", "abc123")
+    await _set_config(session, "gcp_project_id", "test-project")
+    await _set_config(session, "gcp_zone", "us-central1-a")
+    await session.commit()
+
+    async def mock_run_module(sess, uid, module_name):
+        yield _make_progress_event("apply_error", "compute failed")
+
+    with patch("app.services.stack_deployment._run_module", side_effect=mock_run_module):
+        events = []
+        async for event in deploy_stack(session, "kubernetes", user_id=user_id):
+            events.append(event)
+
+    assert any(e.event_type == "stack_error" for e in events)
+
+    # Verify orphaned resource was logged
+    row = (
+        await session.execute(text("SELECT resource_type, resource_name, stack_uid FROM orphaned_resources LIMIT 1"))
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "gke_cluster"
+    assert row[1] == "bioaf-demo-abc123"
+    assert row[2] == "abc123"
+
+
+@pytest.mark.asyncio
+async def test_deploy_stack_reseeds_uid_when_orphans_exist(session):
+    """If the current stack_uid has orphaned resources, deploy_stack generates a new one."""
+    from app.services.stack_deployment import deploy_stack
+
+    _, user_id = await _seed_org_and_user(session)
+
+    await _set_config(session, "gcp_credentials_configured", "true")
+    await _set_config(session, "terraform_initialized", "true")
+    await _set_config(session, "compute_deployed", "false")
+    await _set_config(session, "storage_deployed", "true")
+    await _set_config(session, "org_slug", "demo")
+    await _set_config(session, "stack_uid", "old123")
+    await _set_config(session, "gcp_project_id", "test-project")
+    await _set_config(session, "gcp_zone", "us-central1-a")
+    await session.commit()
+
+    # Seed an orphaned resource for old UID
+    from app.services.orphaned_resource_service import OrphanedResourceService
+
+    await OrphanedResourceService.log_resource(
+        session,
+        resource_type="gke_cluster",
+        resource_name="bioaf-demo-old123",
+        gcp_project_id="test-project",
+        stack_uid="old123",
+    )
+    await session.flush()
+    await session.commit()
+
+    async def mock_run_module(sess, uid, module_name):
+        yield _make_progress_event("apply_complete", "done")
+
+    with patch("app.services.stack_deployment._run_module", side_effect=mock_run_module):
+        events = []
+        async for event in deploy_stack(session, "kubernetes", user_id=user_id):
+            events.append(event)
+
+    new_uid = await _get_config(session, "stack_uid")
+    assert new_uid != "old123"
+    assert len(new_uid) == 6  # secrets.token_hex(3) produces 6 hex chars
+
+
+@pytest.mark.asyncio
+async def test_teardown_stack_logs_orphan_on_failure(session):
+    """When teardown fails, the cluster is logged as orphaned."""
+    from app.services.stack_deployment import teardown_stack
+
+    _, user_id = await _seed_org_and_user(session)
+
+    await _set_config(session, "compute_deployed", "true")
+    await _set_config(session, "compute_stack", "kubernetes")
+    await _set_config(session, "gke_cluster_name", "bioaf-demo-abc123")
+    await _set_config(session, "org_slug", "demo")
+    await _set_config(session, "stack_uid", "abc123")
+    await _set_config(session, "gcp_project_id", "test-project")
+    await _set_config(session, "gcp_zone", "us-central1-a")
+    await session.commit()
+
+    async def mock_destroy(sess, uid, module_name):
+        yield _make_progress_event("apply_error", "destroy failed")
+
+    with patch("app.services.stack_deployment._run_destroy", side_effect=mock_destroy):
+        events = []
+        async for event in teardown_stack(session, user_id=user_id):
+            events.append(event)
+
+    assert any(e.event_type == "stack_error" for e in events)
+
+    row = (
+        await session.execute(text("SELECT resource_type, resource_name FROM orphaned_resources LIMIT 1"))
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "gke_cluster"
+    assert row[1] == "bioaf-demo-abc123"
