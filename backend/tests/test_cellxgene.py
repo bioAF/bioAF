@@ -89,3 +89,56 @@ async def test_viewer_cannot_unpublish(client, viewer_token, cellxgene_publicati
         headers={"Authorization": f"Bearer {viewer_token}"},
     )
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_publishable_files_excludes_already_published(client, admin_token, h5ad_file, cellxgene_publication):
+    """h5ad files with active publications should not appear in publishable list."""
+    resp = await client.get(
+        "/api/cellxgene/publishable-files",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    file_ids = [f["id"] for f in data]
+    assert h5ad_file.id not in file_ids
+
+
+@pytest.mark.asyncio
+async def test_publishable_files_includes_unpublished(client, admin_token, session, h5ad_file):
+    """h5ad files with no active publication should appear in publishable list."""
+    resp = await client.get(
+        "/api/cellxgene/publishable-files",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    file_ids = [f["id"] for f in data]
+    assert h5ad_file.id in file_ids
+
+
+@pytest.mark.asyncio
+async def test_publishable_files_only_h5ad(client, admin_token, session, admin_user):
+    """Only h5ad files should appear in publishable list."""
+    from app.models.file import File
+
+    csv_file = File(
+        organization_id=admin_user.organization_id,
+        gcs_uri="gs://test-bucket/data.csv",
+        filename="data.csv",
+        size_bytes=5000,
+        file_type="csv",
+        uploader_user_id=admin_user.id,
+    )
+    session.add(csv_file)
+    await session.flush()
+    await session.commit()
+
+    resp = await client.get(
+        "/api/cellxgene/publishable-files",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    file_types = [f["file_type"] for f in data]
+    assert all(ft == "h5ad" for ft in file_types)

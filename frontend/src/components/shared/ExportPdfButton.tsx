@@ -20,13 +20,19 @@ export function ExportPdfButton({ targetId, filename = "report.pdf" }: ExportPdf
       const { jsPDF } = await import("jspdf");
 
       const canvas = await html2canvas(el, {
-        scale: 2,
+        scale: 1.5,
         useCORS: true,
+        allowTaint: true,
         logging: false,
         backgroundColor: "#ffffff",
+        // Replace cross-origin images with placeholders instead of failing
+        onclone: (_doc: Document, cloned: HTMLElement) => {
+          cloned.querySelectorAll("img").forEach((img) => {
+            img.crossOrigin = "anonymous";
+          });
+        },
       });
 
-      const imgData = canvas.toDataURL("image/png");
       const imgWidth = canvas.width;
       const imgHeight = canvas.height;
 
@@ -35,41 +41,36 @@ export function ExportPdfButton({ targetId, filename = "report.pdf" }: ExportPdf
       const pageHeight = 841.89;
       const margin = 28;
       const contentWidth = pageWidth - margin * 2;
-      const scaledHeight = (imgHeight * contentWidth) / imgWidth;
 
       const pdf = new jsPDF({
-        orientation: scaledHeight > pageHeight ? "portrait" : "portrait",
+        orientation: "portrait",
         unit: "pt",
         format: "a4",
       });
 
-      // If content fits one page, center it; otherwise paginate
-      if (scaledHeight <= pageHeight - margin * 2) {
-        pdf.addImage(imgData, "PNG", margin, margin, contentWidth, scaledHeight);
-      } else {
-        let yOffset = 0;
-        const availableHeight = pageHeight - margin * 2;
-        // How many pixels of the source image fit per page
-        const srcPixelsPerPage = (availableHeight / contentWidth) * imgWidth;
+      const availableHeight = pageHeight - margin * 2;
+      const srcPixelsPerPage = (availableHeight / contentWidth) * imgWidth;
 
-        while (yOffset < imgHeight) {
-          if (yOffset > 0) pdf.addPage();
+      let yOffset = 0;
+      let pageIndex = 0;
 
-          // Create a slice of the canvas for this page
-          const sliceHeight = Math.min(srcPixelsPerPage, imgHeight - yOffset);
-          const pageCanvas = document.createElement("canvas");
-          pageCanvas.width = imgWidth;
-          pageCanvas.height = sliceHeight;
-          const ctx = pageCanvas.getContext("2d");
-          if (ctx) {
-            ctx.drawImage(canvas, 0, -yOffset);
-            const pageData = pageCanvas.toDataURL("image/png");
-            const renderedHeight = (sliceHeight * contentWidth) / imgWidth;
-            pdf.addImage(pageData, "PNG", margin, margin, contentWidth, renderedHeight);
-          }
+      while (yOffset < imgHeight) {
+        if (pageIndex > 0) pdf.addPage();
 
-          yOffset += srcPixelsPerPage;
+        const sliceHeight = Math.min(srcPixelsPerPage, imgHeight - yOffset);
+        const pageCanvas = document.createElement("canvas");
+        pageCanvas.width = imgWidth;
+        pageCanvas.height = sliceHeight;
+        const ctx = pageCanvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(canvas, 0, -yOffset);
+          const pageData = pageCanvas.toDataURL("image/jpeg", 0.85);
+          const renderedHeight = (sliceHeight * contentWidth) / imgWidth;
+          pdf.addImage(pageData, "JPEG", margin, margin, contentWidth, renderedHeight);
         }
+
+        yOffset += srcPixelsPerPage;
+        pageIndex++;
       }
 
       pdf.save(filename);

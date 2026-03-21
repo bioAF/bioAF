@@ -101,6 +101,33 @@ async def list_publications(
     return [_pub_response(p) for p in pubs]
 
 
+@router.get("/publishable-files")
+async def list_publishable_files(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    current_user = request.state.current_user
+    org_id = int(current_user["org_id"])
+
+    files = await CellxgeneService.list_publishable_files(session, org_id)
+    return [
+        FileResponse(
+            id=f.id,
+            filename=f.filename,
+            gcs_uri=f.gcs_uri,
+            size_bytes=f.size_bytes,
+            md5_checksum=f.md5_checksum,
+            file_type=f.file_type,
+            tags=f.tags_json if isinstance(f.tags_json, list) else [],
+            uploader=None,
+            experiment_id=f.experiment_id,
+            upload_timestamp=f.upload_timestamp,
+            created_at=f.created_at,
+        )
+        for f in files
+    ]
+
+
 @router.get("/{publication_id}", response_model=CellxgenePublicationResponse)
 async def get_publication(
     publication_id: int,

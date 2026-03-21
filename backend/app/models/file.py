@@ -25,6 +25,8 @@ class File(Base):
     version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     ingest_source: Mapped[str | None] = mapped_column(String(20), server_default="manual", nullable=True)
     experiment_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("experiments.id"), nullable=True, index=True)
+    source_type: Mapped[str] = mapped_column(String(30), server_default="upload", nullable=False)
+    source_pipeline_run_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("pipeline_runs.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("idx_files_experiment_id", "experiment_id"),)
@@ -33,3 +35,4 @@ class File(Base):
     uploader = relationship("User")
     project = relationship("Project")
     experiment = relationship("Experiment")
+    source_pipeline_run = relationship("PipelineRun", foreign_keys=[source_pipeline_run_id])

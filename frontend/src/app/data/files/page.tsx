@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { api } from "@/lib/api";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, getToken } from "@/lib/auth";
 import type {
   FileResponse,
   FileListResponse,
@@ -12,7 +12,8 @@ import type {
 } from "@/lib/types";
 
 function formatBytes(bytes: number | null): string {
-  if (bytes == null || bytes === 0) return "0 B";
+  if (bytes == null) return "-";
+  if (bytes === 0) return "0 B";
   const units = ["B", "KB", "MB", "GB", "TB"];
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
@@ -41,6 +42,10 @@ export default function DataFilesPage() {
     reconciled: number;
     failed: number;
   } | null>(null);
+  const [viewingFile, setViewingFile] = useState<FileResponse | null>(null);
+  const [page, setPage] = useState(1);
+  const [totalFiles, setTotalFiles] = useState(0);
+  const pageSize = 25;
 
   const user = getCurrentUser();
   const isAdmin = user?.role === "admin";
@@ -49,16 +54,21 @@ export default function DataFilesPage() {
   const fetchFiles = useCallback(async () => {
     setLoading(true);
     try {
-      const params = filterType ? `?file_type=${filterType}` : "";
-      const data = await api.get<FileListResponse>(`/api/files${params}`);
+      const params = new URLSearchParams();
+      if (filterType) params.set("file_type", filterType);
+      params.set("page", String(page));
+      params.set("page_size", String(pageSize));
+      const qs = params.toString();
+      const data = await api.get<FileListResponse>(`/api/files?${qs}`);
       setFiles(data.files);
+      setTotalFiles(data.total);
       setSelectedIds(new Set());
     } catch {
       // ignore
     } finally {
       setLoading(false);
     }
-  }, [filterType]);
+  }, [filterType, page]);
 
   const fetchExperiments = useCallback(async () => {
     try {
@@ -161,6 +171,24 @@ export default function DataFilesPage() {
 
   const fileTypes = Array.from(new Set(files.map((f) => f.file_type))).sort();
 
+  const sourceLabel = (file: FileResponse): string => {
+    switch (file.source_type) {
+      case "upload": return file.uploader ? `Uploaded by ${file.uploader.name ?? file.uploader.email}` : "Uploaded";
+      case "qc_dashboard": return `QC Dashboard${file.source_pipeline_run_id ? ` (run #${file.source_pipeline_run_id})` : ""}`;
+      case "plot_archive": return `Plot Archive${file.source_pipeline_run_id ? ` (run #${file.source_pipeline_run_id})` : ""}`;
+      default: return file.source_type;
+    }
+  };
+
+  const isImageFile = (ft: string) => ["png", "jpg", "jpeg", "svg"].includes(ft.toLowerCase());
+
+  const fileContentUrl = (fileId: number): string => {
+    const token = getToken();
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+    const base = `${apiUrl}/api/files/${fileId}/content`;
+    return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+  };
+
   return (
     <div className="flex h-screen">
       <Sidebar />
@@ -173,7 +201,7 @@ export default function DataFilesPage() {
             <div className="flex gap-4 items-center">
               <select
                 value={filterType}
-                onChange={(e) => setFilterType(e.target.value)}
+                onChange={(e) => { setFilterType(e.target.value); setPage(1); }}
                 className="px-3 py-2 border border-gray-300 rounded-md text-sm"
               >
                 <option value="">All types</option>
@@ -251,7 +279,7 @@ export default function DataFilesPage() {
             ) : files.length === 0 ? (
               <p className="text-gray-400 text-sm">No files found.</p>
             ) : (
-              <div className="bg-white rounded-lg shadow overflow-hidden">
+              <div className="bg-white rounded-lg shadow overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
@@ -281,21 +309,28 @@ export default function DataFilesPage() {
                         Uploader
                       </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                        Source
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                         Experiment
                       </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
                     {files.map((file) => (
-                      <tr key={file.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3">
+                      <tr
+                        key={file.id}
+                        className="hover:bg-gray-50 cursor-pointer"
+                        onClick={() => setViewingFile(file)}
+                      >
+                        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             checked={selectedIds.has(file.id)}
                             onChange={() => toggleSelect(file.id)}
                           />
                         </td>
-                        <td className="px-4 py-3 text-sm font-medium">
+                        <td className="px-4 py-3 text-sm font-medium text-blue-600">
                           {file.filename}
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-500">
@@ -305,14 +340,21 @@ export default function DataFilesPage() {
                           {formatBytes(file.size_bytes)}
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-500">
-                          {new Date(
-                            file.upload_timestamp
-                          ).toLocaleDateString()}
+                          {new Date(file.upload_timestamp).toLocaleString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })}
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-500">
                           {file.uploader?.name ?? file.uploader?.email ?? "-"}
                         </td>
-                        <td className="px-4 py-3 text-sm">
+                        <td className="px-4 py-3 text-sm text-gray-500">
+                          {file.source_type === "upload" ? "Upload" : file.source_type === "qc_dashboard" ? "QC Dashboard" : file.source_type === "plot_archive" ? "Plot Archive" : file.source_type}
+                        </td>
+                        <td className="px-4 py-3 text-sm" onClick={(e) => e.stopPropagation()}>
                           {file.experiment_id ? (
                             <span className="text-gray-700">
                               {experimentName(file.experiment_id)}
@@ -335,9 +377,151 @@ export default function DataFilesPage() {
                     ))}
                   </tbody>
                 </table>
+
+                {/* Pagination */}
+                {totalFiles > pageSize && (
+                  <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-gray-50">
+                    <p className="text-sm text-gray-600">
+                      Showing {(page - 1) * pageSize + 1}--{Math.min(page * pageSize, totalFiles)} of {totalFiles}
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setPage((p) => Math.max(1, p - 1))}
+                        disabled={page <= 1}
+                        className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Previous
+                      </button>
+                      <span className="px-3 py-1 text-sm text-gray-600">
+                        Page {page} of {Math.ceil(totalFiles / pageSize)}
+                      </span>
+                      <button
+                        onClick={() => setPage((p) => p + 1)}
+                        disabled={page * pageSize >= totalFiles}
+                        className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
+
+          {viewingFile && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+              onClick={() => setViewingFile(null)}
+            >
+              <div
+                className="relative bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 max-h-[80vh] overflow-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="sticky top-0 flex items-center justify-between p-4 border-b bg-white rounded-t-lg">
+                  <h3 className="text-lg font-semibold truncate pr-4">{viewingFile.filename}</h3>
+                  <button
+                    onClick={() => setViewingFile(null)}
+                    className="text-gray-400 hover:text-gray-600 text-xl leading-none px-2"
+                  >
+                    &times;
+                  </button>
+                </div>
+
+                {isImageFile(viewingFile.file_type) ? (
+                  <div className="p-4 flex justify-center bg-gray-50">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={fileContentUrl(viewingFile.id)}
+                      alt={viewingFile.filename}
+                      className="max-h-64 object-contain rounded"
+                    />
+                  </div>
+                ) : (
+                  <div className="p-4 flex justify-center bg-gray-50">
+                    <div className="flex flex-col items-center gap-2 py-6">
+                      <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center text-gray-500 text-xs font-bold uppercase">
+                        {viewingFile.file_type}
+                      </div>
+                      <span className="text-xs text-gray-400">No preview available</span>
+                    </div>
+                  </div>
+                )}
+
+                <dl className="p-4 grid grid-cols-2 gap-x-4 gap-y-3">
+                  <div>
+                    <dt className="text-xs font-medium text-gray-500 uppercase">File Type</dt>
+                    <dd className="mt-0.5 text-sm text-gray-900">{viewingFile.file_type}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-medium text-gray-500 uppercase">Size</dt>
+                    <dd className="mt-0.5 text-sm text-gray-900">{formatBytes(viewingFile.size_bytes)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-medium text-gray-500 uppercase">Uploaded</dt>
+                    <dd className="mt-0.5 text-sm text-gray-900">
+                      {new Date(viewingFile.upload_timestamp).toLocaleString(undefined, {
+                        month: "short", day: "numeric", year: "numeric",
+                        hour: "numeric", minute: "2-digit",
+                      })}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-medium text-gray-500 uppercase">Created</dt>
+                    <dd className="mt-0.5 text-sm text-gray-900">
+                      {new Date(viewingFile.created_at).toLocaleString(undefined, {
+                        month: "short", day: "numeric", year: "numeric",
+                        hour: "numeric", minute: "2-digit",
+                      })}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-medium text-gray-500 uppercase">Source</dt>
+                    <dd className="mt-0.5 text-sm text-gray-900">{sourceLabel(viewingFile)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-medium text-gray-500 uppercase">Uploader</dt>
+                    <dd className="mt-0.5 text-sm text-gray-900">
+                      {viewingFile.uploader?.name ?? viewingFile.uploader?.email ?? "---"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-medium text-gray-500 uppercase">Experiment</dt>
+                    <dd className="mt-0.5 text-sm text-gray-900">
+                      {viewingFile.experiment_id ? experimentName(viewingFile.experiment_id) : "---"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-medium text-gray-500 uppercase">MD5</dt>
+                    <dd className="mt-0.5 text-sm text-gray-900 font-mono text-xs break-all">
+                      {viewingFile.md5_checksum ?? "---"}
+                    </dd>
+                  </div>
+                  {viewingFile.tags.length > 0 && (
+                    <div className="col-span-2">
+                      <dt className="text-xs font-medium text-gray-500 uppercase">Tags</dt>
+                      <dd className="mt-0.5 flex flex-wrap gap-1">
+                        {viewingFile.tags.map((tag) => (
+                          <span
+                            key={tag}
+                            className="px-2 py-0.5 bg-gray-100 text-gray-700 text-xs rounded"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </dd>
+                    </div>
+                  )}
+                  <div className="col-span-2">
+                    <dt className="text-xs font-medium text-gray-500 uppercase">GCS URI</dt>
+                    <dd className="mt-0.5 text-xs text-gray-600 font-mono break-all">
+                      {viewingFile.gcs_uri}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            </div>
+          )}
 
           {linkingFileIds.length > 0 && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">

@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_role
 from app.database import get_session
+from app.models.file import File
 from app.schemas.qc_dashboard import (
     QCDashboardResponse,
     QCDashboardSummary,
@@ -36,6 +38,19 @@ def _dashboard_response(d) -> QCDashboardResponse:
             avg_sequence_length=metrics.get("avg_sequence_length"),
             total_samples=metrics.get("total_samples"),
             quality_rating=metrics.get("quality_rating", "concerning"),
+            number_of_reads=metrics.get("number_of_reads"),
+            valid_barcodes=metrics.get("valid_barcodes"),
+            q30_bases_barcode=metrics.get("q30_bases_barcode"),
+            q30_bases_rna_read=metrics.get("q30_bases_rna_read"),
+            reads_mapped_genome=metrics.get("reads_mapped_genome"),
+            reads_mapped_genome_unique=metrics.get("reads_mapped_genome_unique"),
+            mean_reads_per_cell=metrics.get("mean_reads_per_cell"),
+            mean_umi_per_cell=metrics.get("mean_umi_per_cell"),
+            mean_genes_per_cell=metrics.get("mean_genes_per_cell"),
+            total_genes_detected=metrics.get("total_genes_detected"),
+            umis_in_cells=metrics.get("umis_in_cells"),
+            barcode_rank_data=metrics.get("barcode_rank_data"),
+            chart_data=metrics.get("chart_data"),
         ),
         summary_text=d.summary_text or "",
         plots=[
@@ -143,9 +158,15 @@ async def regenerate_dashboard(
     if not await ComponentService.is_enabled(session, "qc_dashboard"):
         raise HTTPException(400, "QC Dashboard component is not enabled")
 
-    # Delete existing dashboard if present
+    # Delete existing dashboard and its plot file records
     existing = await QCDashboardService.get_dashboard_by_run(session, org_id, pipeline_run_id)
     if existing:
+        # Clean up file records created by _collect_plots
+        old_plots = existing.plots_json if isinstance(existing.plots_json, list) else []
+        for plot in old_plots:
+            file_id = plot.get("file_id")
+            if file_id:
+                await session.execute(sa_delete(File).where(File.id == file_id, File.organization_id == org_id))
         await session.delete(existing)
         await session.flush()
 

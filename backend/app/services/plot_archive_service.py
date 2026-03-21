@@ -191,6 +191,8 @@ class PlotArchiveService:
                             md5_checksum=None,
                             file_type=file_type,
                             experiment_id=experiment_id,
+                            source_type="plot_archive",
+                            source_pipeline_run_id=pipeline_run_id,
                         )
 
                         # Create archive entry

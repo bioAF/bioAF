@@ -24,6 +24,8 @@ class FileService:
         file_type: str,
         tags: list[str] | None = None,
         experiment_id: int | None = None,
+        source_type: str = "upload",
+        source_pipeline_run_id: int | None = None,
     ) -> File:
         file = File(
             organization_id=org_id,
@@ -35,6 +37,8 @@ class FileService:
             file_type=file_type,
             tags_json=tags or [],
             experiment_id=experiment_id,
+            source_type=source_type,
+            source_pipeline_run_id=source_pipeline_run_id,
         )
         session.add(file)
         await session.flush()

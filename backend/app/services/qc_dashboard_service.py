@@ -140,6 +140,17 @@ class QCDashboardService:
             "percent_gc": None,
             "avg_sequence_length": None,
             "total_samples": None,
+            "number_of_reads": None,
+            "valid_barcodes": None,
+            "q30_bases_barcode": None,
+            "q30_bases_rna_read": None,
+            "reads_mapped_genome": None,
+            "reads_mapped_genome_unique": None,
+            "mean_reads_per_cell": None,
+            "mean_umi_per_cell": None,
+            "mean_genes_per_cell": None,
+            "total_genes_detected": None,
+            "umis_in_cells": None,
         }
 
         results_bucket = await QCDashboardService._get_results_bucket(session)
@@ -221,12 +232,52 @@ class QCDashboardService:
                     if v is not None and metrics.get(k) is None:
                         metrics[k] = v
 
-            has_any = any(v is not None for v in metrics.values())
+                # Extract structured chart data for interactive rendering
+                chart_data = QCDashboardService._read_multiqc_chart_data(multiqc_text)
+                if chart_data:
+                    metrics["chart_data"] = chart_data
+
+            # 5. Try STARsolo UMIperCellSorted.txt for barcode rank (knee) plot
+            umi_sorted_blob = None
+            for blob in bucket.list_blobs(prefix=f"{prefix}star/"):
+                if blob.name.endswith("Solo.out/Gene/UMIperCellSorted.txt"):
+                    umi_sorted_blob = blob
+                    break
+
+            if umi_sorted_blob:
+                logger.info("Found UMIperCellSorted.txt for barcode rank plot, run %d", run.id)
+                try:
+                    barcode_rank = QCDashboardService._read_umi_per_cell_sorted(umi_sorted_blob.download_as_text())
+                    if barcode_rank:
+                        metrics["barcode_rank_data"] = barcode_rank
+                except Exception as e:
+                    logger.warning("Barcode rank extraction failed for run %d: %s", run.id, e)
+            else:
+                # Fallback: try raw matrix.mtx
+                raw_matrix_blob = None
+                for blob in bucket.list_blobs(prefix=f"{prefix}star/"):
+                    if blob.name.endswith("Solo.out/Gene/raw/UniqueAndMult-EM.mtx") or blob.name.endswith(
+                        "Solo.out/Gene/raw/matrix.mtx"
+                    ):
+                        raw_matrix_blob = blob
+                        break
+                if raw_matrix_blob:
+                    logger.info("Found raw matrix for barcode rank plot, run %d", run.id)
+                    try:
+                        barcode_rank = QCDashboardService._extract_barcode_rank_from_mtx(
+                            raw_matrix_blob.download_as_text()
+                        )
+                        if barcode_rank:
+                            metrics["barcode_rank_data"] = barcode_rank
+                    except Exception as e:
+                        logger.warning("Barcode rank extraction failed for run %d: %s", run.id, e)
+
+            has_any = any(v is not None for k, v in metrics.items() if k not in ("chart_data", "barcode_rank_data"))
             if not has_any:
                 logger.info("No metrics found for run %d from any source", run.id)
                 return empty_metrics
 
-            # 5. Upload metrics cache to GCS
+            # 6. Upload metrics cache to GCS
             cache_upload_blob = bucket.blob(f"{prefix}qc_metrics.json")
             cache_upload_blob.upload_from_string(
                 json.dumps(metrics, indent=2),
@@ -303,6 +354,17 @@ class QCDashboardService:
             "median_genes_per_cell": None,
             "median_umi_per_cell": None,
             "saturation": None,
+            "number_of_reads": None,
+            "valid_barcodes": None,
+            "q30_bases_barcode": None,
+            "q30_bases_rna_read": None,
+            "reads_mapped_genome": None,
+            "reads_mapped_genome_unique": None,
+            "mean_reads_per_cell": None,
+            "mean_umi_per_cell": None,
+            "mean_genes_per_cell": None,
+            "total_genes_detected": None,
+            "umis_in_cells": None,
         }
         try:
             kv = {}
@@ -311,6 +373,7 @@ class QCDashboardService:
                     key, val = line.split(",", 1)
                     kv[key.strip()] = val.strip()
 
+            # Original fields
             if "Estimated Number of Cells" in kv:
                 metrics["cell_count"] = int(kv["Estimated Number of Cells"])
             if "Median Reads per Cell" in kv:
@@ -321,6 +384,34 @@ class QCDashboardService:
                 metrics["median_umi_per_cell"] = float(kv["Median UMI per Cell"])
             if "Sequencing Saturation" in kv:
                 metrics["saturation"] = float(kv["Sequencing Saturation"])
+
+            # Sequencing metrics
+            if "Number of Reads" in kv:
+                metrics["number_of_reads"] = int(kv["Number of Reads"])
+            if "Reads With Valid Barcodes" in kv:
+                metrics["valid_barcodes"] = float(kv["Reads With Valid Barcodes"])
+            if "Q30 Bases in CB+UMI" in kv:
+                metrics["q30_bases_barcode"] = float(kv["Q30 Bases in CB+UMI"])
+            if "Q30 Bases in RNA read" in kv:
+                metrics["q30_bases_rna_read"] = float(kv["Q30 Bases in RNA read"])
+
+            # Mapping metrics
+            if "Reads Mapped to Genome: Unique+Multiple" in kv:
+                metrics["reads_mapped_genome"] = float(kv["Reads Mapped to Genome: Unique+Multiple"])
+            if "Reads Mapped to Genome: Unique" in kv:
+                metrics["reads_mapped_genome_unique"] = float(kv["Reads Mapped to Genome: Unique"])
+
+            # Mean values and totals
+            if "Mean Reads per Cell" in kv:
+                metrics["mean_reads_per_cell"] = float(kv["Mean Reads per Cell"])
+            if "Mean UMI per Cell" in kv:
+                metrics["mean_umi_per_cell"] = float(kv["Mean UMI per Cell"])
+            if "Mean Gene per Cell" in kv:
+                metrics["mean_genes_per_cell"] = float(kv["Mean Gene per Cell"])
+            if "Total Gene Detected" in kv:
+                metrics["total_genes_detected"] = int(kv["Total Gene Detected"])
+            if "UMIs in Cells" in kv:
+                metrics["umis_in_cells"] = int(kv["UMIs in Cells"])
 
             logger.info("STARsolo metrics: %s", metrics)
         except Exception as e:
@@ -435,28 +526,216 @@ class QCDashboardService:
         return metrics
 
     @staticmethod
+    def _build_barcode_rank_data(umi_counts: list[int], max_points: int = 500) -> list[list[int]]:
+        """Build a barcode rank plot curve from sorted UMI counts.
+
+        Returns a list of [rank, umi_count] pairs, downsampled via log-spaced
+        indices when the input exceeds max_points.
+        """
+        if not umi_counts:
+            return []
+
+        n = len(umi_counts)
+        if n <= max_points:
+            return [[i + 1, c] for i, c in enumerate(umi_counts)]
+
+        # Log-spaced indices to preserve detail in the knee region
+        import math
+
+        indices = sorted(
+            set(
+                [0]
+                + [int(round(math.exp(i * math.log(n - 1) / (max_points - 2)))) for i in range(1, max_points - 1)]
+                + [n - 1]
+            )
+        )
+        return [[idx + 1, umi_counts[idx]] for idx in indices]
+
+    @staticmethod
+    def _extract_barcode_rank_from_mtx(mtx_text: str) -> list[list[int]]:
+        """Parse a Market Exchange format sparse matrix and build barcode rank data.
+
+        Sums values per column (barcode), sorts descending, then downsamples.
+        """
+        from collections import defaultdict
+
+        col_sums: dict[int, int] = defaultdict(int)
+        for line in mtx_text.strip().splitlines():
+            if line.startswith("%"):
+                continue
+            parts = line.split()
+            if len(parts) == 3:
+                try:
+                    col = int(parts[1])
+                    val = int(float(parts[2]))
+                    col_sums[col] += val
+                except (ValueError, IndexError):
+                    continue
+
+        if not col_sums:
+            return []
+
+        sorted_counts = sorted(col_sums.values(), reverse=True)
+        return QCDashboardService._build_barcode_rank_data(sorted_counts)
+
+    @staticmethod
+    def _read_umi_per_cell_sorted(text: str) -> list[list[int]]:
+        """Parse UMIperCellSorted.txt (one UMI count per line, descending) into barcode rank data."""
+        counts = []
+        for line in text.strip().splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    counts.append(int(line))
+                except ValueError:
+                    continue
+        return QCDashboardService._build_barcode_rank_data(counts)
+
+    @staticmethod
+    def _read_multiqc_chart_data(multiqc_json_text: str) -> dict:
+        """Extract structured chart data from multiqc_data.json for interactive rendering.
+
+        Supports MultiQC v2 format where:
+        - Bar charts use datasets[].cats[] with name/data_pct arrays
+        - Line charts use datasets[].lines[] with name/pairs arrays
+
+        Extracts:
+        - star_alignment: STAR alignment categories (bar chart)
+        - base_quality: per-base sequence quality (line chart, averaged across samples)
+        - gc_content: GC content distribution (line chart, averaged across samples)
+        - duplication: sequence duplication levels (line chart, averaged across samples)
+        """
+        chart_data: dict = {}
+        try:
+            data = json.loads(multiqc_json_text)
+            plot_data = data.get("report_plot_data", {})
+
+            # STAR alignment (bar chart with cats)
+            star_plot = plot_data.get("star_alignment_plot")
+            if star_plot:
+                datasets = star_plot.get("datasets", [])
+                if datasets:
+                    ds = datasets[0]
+                    # v2 format: cats[] with name and data_pct
+                    cats = ds.get("cats", [])
+                    if cats:
+                        star_items = []
+                        for cat in cats:
+                            name = cat.get("name", "")
+                            pct = cat.get("data_pct", [])
+                            if pct:
+                                star_items.append({"name": name, "value": round(pct[0], 2)})
+                        if star_items:
+                            chart_data["star_alignment"] = star_items
+                    else:
+                        # Fallback: older format with data[].name/data
+                        entries = ds.get("data", [])
+                        star_items = []
+                        for entry in entries:
+                            name = entry.get("name", "")
+                            points = entry.get("data", [])
+                            if points:
+                                val = points[0].get("y", 0) if isinstance(points[0], dict) else points[0][1]
+                                star_items.append({"name": name, "value": val})
+                        if star_items:
+                            chart_data["star_alignment"] = star_items
+
+            # Helper: extract averaged line data from v2 lines[] format
+            def _avg_lines(plot_key: str) -> list[list[float]] | None:
+                plot = plot_data.get(plot_key)
+                if not plot:
+                    return None
+                datasets_list = plot.get("datasets", [])
+                if not datasets_list:
+                    return None
+                ds = datasets_list[0]
+                lines = ds.get("lines", [])
+                if lines:
+                    # Average across all sample lines
+                    all_x: dict[float, list[float]] = {}
+                    for line in lines:
+                        for x, y in line.get("pairs", []):
+                            try:
+                                xf = float(x)
+                            except (ValueError, TypeError):
+                                continue
+                            try:
+                                yf = float(y)
+                            except (ValueError, TypeError):
+                                continue
+                            all_x.setdefault(xf, []).append(yf)
+                    if all_x:
+                        return [[x, round(sum(ys) / len(ys), 4)] for x, ys in sorted(all_x.items())]
+                # Fallback: older format
+                entries = ds.get("data", [])
+                if entries:
+                    points = entries[0].get("data", [])
+                    if points:
+                        return points
+                return None
+
+            # Per-base sequence quality
+            bq_data = _avg_lines("fastqc_per_base_sequence_quality_plot")
+            if bq_data:
+                chart_data["base_quality"] = bq_data
+
+            # GC content distribution (average samples, no theoretical in v2)
+            gc_data = _avg_lines("fastqc_per_sequence_gc_content_plot")
+            if gc_data:
+                chart_data["gc_content"] = {"sample": gc_data}
+
+            # Duplication levels
+            dup_data = _avg_lines("fastqc_sequence_duplication_levels_plot")
+            if dup_data:
+                chart_data["duplication"] = dup_data
+
+        except Exception as e:
+            logger.warning("MultiQC chart data extraction failed: %s", e)
+
+        return chart_data
+
+    @staticmethod
     def _compute_quality_rating(metrics: dict) -> str:
         """Compute quality rating based on metrics thresholds."""
         mito = metrics.get("mito_pct_median")
         genes = metrics.get("median_genes_per_cell")
         reads = metrics.get("median_reads_per_cell")
         sat = metrics.get("saturation")
+        mapping = metrics.get("reads_mapped_genome")
+        q30_rna = metrics.get("q30_bases_rna_read")
+        valid_bc = metrics.get("valid_barcodes")
 
         # Single-cell metrics -- rate based on what's available
         has_sc_metrics = genes is not None or mito is not None
         if has_sc_metrics:
+            # Check for hard failures first
+            if mito is not None and mito > 20:
+                return "concerning"
+            if mapping is not None and mapping < 0.5:
+                return "concerning"
+
             # Full metrics available (after scanpy QC)
             if mito is not None and genes is not None:
                 if mito < 5 and genes > 1000 and (reads is None or reads > 2000):
-                    return "excellent" if sat is not None and sat > 0.7 else "good"
+                    if sat is not None and sat > 0.7:
+                        return "excellent"
+                    return "good"
                 if mito < 10 and genes > 500:
                     return "acceptable"
-                if mito > 20:
-                    return "concerning"
                 return "acceptable"
 
             # STARsolo-level metrics (genes but no mito)
             if genes is not None and genes > 1000:
+                excellent_signals = [
+                    reads is not None and reads > 10000,
+                    sat is not None and sat > 0.7,
+                    mapping is not None and mapping > 0.9,
+                    q30_rna is not None and q30_rna > 0.9,
+                    valid_bc is not None and valid_bc > 0.95,
+                ]
+                good_count = sum(1 for s in excellent_signals if s)
+                if good_count >= 4:
+                    return "excellent"
                 if reads is not None and reads > 10000 and sat is not None and sat > 0.5:
                     return "good"
                 return "acceptable"
@@ -517,9 +796,24 @@ class QCDashboardService:
 
         summary = " ".join(parts) + "." if parts else "No metrics available."
 
+        num_reads = metrics.get("number_of_reads")
+        if num_reads is not None:
+            summary += f" **{num_reads:,} total reads**."
+
         reads = metrics.get("median_reads_per_cell")
         if reads is not None:
             summary += f" Median **{reads:,.0f} reads per cell**."
+
+        # Mapping quality
+        mapping = metrics.get("reads_mapped_genome")
+        if mapping is not None:
+            summary += f" **{mapping * 100:.1f}%** of reads mapped to genome."
+
+        # Q30 quality
+        q30_rna = metrics.get("q30_bases_rna_read")
+        if q30_rna is not None:
+            health = "good" if q30_rna >= 0.9 else "below 90% threshold"
+            summary += f" Q30 bases in RNA read: **{q30_rna * 100:.1f}%** ({health})."
 
         # Note when mito % is missing (common before scanpy QC)
         mito_available = metrics.get("mito_pct_median") is not None
@@ -543,8 +837,9 @@ class QCDashboardService:
 
         sat = metrics.get("saturation")
         if sat is not None:
-            summary += f" Sequencing saturation is **{sat:.0f}%**"
-            if sat < 80:
+            sat_pct = sat * 100
+            summary += f" Sequencing saturation is **{sat_pct:.0f}%**"
+            if sat < 0.8:
                 summary += ", suggesting additional sequencing depth may improve gene detection."
             else:
                 summary += "."
@@ -594,22 +889,21 @@ class QCDashboardService:
             bucket = client.bucket(results_bucket)
             prefix = f"experiments/{run.experiment_id}/pipeline-runs/{run.id}/"
 
-            # Build an index of available PNG filenames in multiqc/multiqc_plots/png/
+            # Build an index of available PNG blobs in multiqc/multiqc_plots/png/
+            # list_blobs returns blobs with metadata (including size) already populated
             plot_prefix = f"{prefix}multiqc/multiqc_plots/png/"
-            available: dict[str, str] = {}  # filename -> full blob name
+            available: dict[str, "storage.Blob"] = {}  # filename -> blob with metadata
             for blob in bucket.list_blobs(prefix=plot_prefix):
                 if blob.name.endswith(".png"):
                     filename = blob.name.rsplit("/", 1)[-1]
-                    available[filename] = blob.name
+                    available[filename] = blob
 
             for png_name, title, plot_type in QCDashboardService._MULTIQC_PLOTS:
-                blob_name = available.get(png_name)
-                if not blob_name:
+                blob_obj = available.get(png_name)
+                if not blob_obj:
                     continue
 
-                gcs_uri = f"gs://{results_bucket}/{blob_name}"
-                blob_obj = bucket.blob(blob_name)
-                size = blob_obj.size
+                gcs_uri = f"gs://{results_bucket}/{blob_obj.name}"
 
                 file = await FileService.create_file_record(
                     session,
@@ -617,11 +911,13 @@ class QCDashboardService:
                     user_id=None,
                     filename=png_name,
                     gcs_uri=gcs_uri,
-                    size_bytes=size,
+                    size_bytes=blob_obj.size,
                     md5_checksum=None,
                     file_type="png",
                     tags=["qc_plot", plot_type],
                     experiment_id=run.experiment_id,
+                    source_type="qc_dashboard",
+                    source_pipeline_run_id=run.id,
                 )
                 plots_meta.append({"plot_type": plot_type, "title": title, "file_id": file.id})
 

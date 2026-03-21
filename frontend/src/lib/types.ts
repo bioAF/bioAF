@@ -693,6 +693,8 @@ export interface FileResponse {
   tags: string[];
   uploader: UserSummary | null;
   experiment_id: number | null;
+  source_type: string;
+  source_pipeline_run_id: number | null;
   upload_timestamp: string;
   created_at: string;
 }
@@ -796,12 +798,35 @@ export interface QCMetrics {
   mito_pct_median: number | null;
   doublet_score_median: number | null;
   saturation: number | null;
+  // Sequencing metrics
+  number_of_reads: number | null;
+  valid_barcodes: number | null;
+  q30_bases_barcode: number | null;
+  q30_bases_rna_read: number | null;
+  // Mapping metrics
+  reads_mapped_genome: number | null;
+  reads_mapped_genome_unique: number | null;
+  // Mean values and totals
+  mean_reads_per_cell: number | null;
+  mean_umi_per_cell: number | null;
+  mean_genes_per_cell: number | null;
+  total_genes_detected: number | null;
+  umis_in_cells: number | null;
+  // Bulk/FastQC metrics
   total_sequences: number | null;
   percent_duplicates: number | null;
   percent_gc: number | null;
   avg_sequence_length: number | null;
   total_samples: number | null;
   quality_rating: string;
+  // Chart data for interactive rendering
+  barcode_rank_data: [number, number][] | null;
+  chart_data: {
+    star_alignment?: { name: string; value: number }[];
+    base_quality?: [number, number][];
+    gc_content?: { sample: [number, number][]; theoretical?: [number, number][] };
+    duplication?: [number, number][];
+  } | null;
 }
 
 export interface QCPlot {

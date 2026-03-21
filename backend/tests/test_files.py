@@ -63,6 +63,67 @@ async def test_get_file(client, admin_token, sample_file):
 
 
 @pytest.mark.asyncio
+async def test_file_source_metadata_upload(client, admin_token, sample_file):
+    """Uploaded files should expose source_type='upload' in API response."""
+    resp = await client.get(
+        f"/api/files/{sample_file.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["source_type"] == "upload"
+    assert data["source_pipeline_run_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_file_source_metadata_qc_dashboard(client, admin_token, session, admin_user):
+    """Files created by QC dashboard should have source_type='qc_dashboard' and a pipeline run link."""
+    from app.models.experiment import Experiment
+    from app.models.file import File
+    from app.models.pipeline_run import PipelineRun
+
+    exp = Experiment(
+        organization_id=admin_user.organization_id,
+        name="QC Source Exp",
+        owner_user_id=admin_user.id,
+        status="registered",
+    )
+    session.add(exp)
+    await session.flush()
+
+    run = PipelineRun(
+        organization_id=admin_user.organization_id,
+        experiment_id=exp.id,
+        pipeline_name="multiqc",
+        status="complete",
+    )
+    session.add(run)
+    await session.flush()
+
+    f = File(
+        organization_id=admin_user.organization_id,
+        gcs_uri="gs://test-bucket/qc-plot.png",
+        filename="qc-plot.png",
+        size_bytes=4096,
+        file_type="png",
+        source_type="qc_dashboard",
+        source_pipeline_run_id=run.id,
+    )
+    session.add(f)
+    await session.flush()
+    await session.commit()
+
+    resp = await client.get(
+        f"/api/files/{f.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["source_type"] == "qc_dashboard"
+    assert data["source_pipeline_run_id"] == run.id
+
+
+@pytest.mark.asyncio
 async def test_get_file_not_found(client, admin_token):
     resp = await client.get(
         "/api/files/99999",

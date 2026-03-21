@@ -130,6 +130,31 @@ class CellxgeneService:
         return result.scalar_one_or_none()
 
     @staticmethod
+    async def list_publishable_files(session: AsyncSession, org_id: int) -> list[File]:
+        """Return h5ad files that have no active cellxgene publication."""
+        # Subquery: file IDs with active publications
+        active_pub_file_ids = (
+            select(CellxgenePublication.file_id)
+            .where(
+                CellxgenePublication.organization_id == org_id,
+                CellxgenePublication.status.in_(["publishing", "published", "running"]),
+            )
+            .correlate(None)
+            .scalar_subquery()
+        )
+
+        result = await session.execute(
+            select(File)
+            .where(
+                File.organization_id == org_id,
+                File.file_type == "h5ad",
+                File.id.notin_(active_pub_file_ids),
+            )
+            .order_by(File.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
     async def _deploy_cellxgene_pod(publication_id: int, gcs_uri: str, dataset_name: str) -> None:
         """Deploy a cellxgene pod via Kubernetes API."""
         try:

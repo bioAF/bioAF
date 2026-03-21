@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File as FastAPIFile
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_role
@@ -29,6 +30,8 @@ def _file_response(f) -> FileResponse:
         tags=f.tags_json if isinstance(f.tags_json, list) else [],
         uploader=UserSummary(id=f.uploader.id, name=f.uploader.name, email=f.uploader.email) if f.uploader else None,
         experiment_id=f.experiment_id,
+        source_type=f.source_type,
+        source_pipeline_run_id=f.source_pipeline_run_id,
         upload_timestamp=f.upload_timestamp,
         created_at=f.created_at,
     )
@@ -254,6 +257,47 @@ async def download_file(
         return {"download_url": url}
     except Exception:
         raise HTTPException(502, "Could not generate download URL")
+
+
+@router.get("/{file_id}/content")
+async def file_content(
+    file_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Serve file bytes directly (same-origin proxy for cross-origin GCS content)."""
+    current_user = request.state.current_user
+    org_id = int(current_user["org_id"])
+
+    file = await FileService.get_file(session, file_id, org_id)
+    if not file:
+        raise HTTPException(404, "File not found")
+
+    try:
+        from google.cloud import storage as gcs_storage
+
+        from app.services.gcs_storage import GcsStorageService
+
+        credentials = await GcsStorageService.get_credentials(session)
+        client = gcs_storage.Client(credentials=credentials)
+        parts = file.gcs_uri.replace("gs://", "").split("/", 1)
+        bucket = client.bucket(parts[0])
+        blob = bucket.blob(parts[1])
+        data = blob.download_as_bytes()
+
+        content_type = "application/octet-stream"
+        if file.filename.endswith(".png"):
+            content_type = "image/png"
+        elif file.filename.endswith(".jpg") or file.filename.endswith(".jpeg"):
+            content_type = "image/jpeg"
+
+        return Response(
+            content=data,
+            media_type=content_type,
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
+    except Exception:
+        raise HTTPException(502, "Could not fetch file content")
 
 
 @router.delete("/{file_id}")

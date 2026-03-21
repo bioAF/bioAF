@@ -29,12 +29,16 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if path in PUBLIC_PATHS or path.startswith("/api/health"):
             return await call_next(request)
 
-        # Extract token from Authorization header
+        # Extract token from Authorization header or query parameter
         auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            return JSONResponse(status_code=401, content={"detail": "Missing or invalid authorization header"})
+        token: str | None = None
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1]
+        elif request.query_params.get("token"):
+            token = request.query_params["token"]
 
-        token = auth_header.split(" ", 1)[1]
+        if not token:
+            return JSONResponse(status_code=401, content={"detail": "Missing or invalid authorization header"})
         try:
             payload = AuthService.validate_token(token)
             request.state.current_user = payload

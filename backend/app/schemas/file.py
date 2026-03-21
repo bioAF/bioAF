@@ -28,6 +28,8 @@ class FileResponse(BaseModel):
     tags: list[str] = []
     uploader: UserSummary | None = None
     experiment_id: int | None = None
+    source_type: str = "upload"
+    source_pipeline_run_id: int | None = None
     upload_timestamp: datetime
     created_at: datetime
 

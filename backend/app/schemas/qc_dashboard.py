@@ -11,6 +11,20 @@ class QCMetrics(BaseModel):
     mito_pct_median: float | None = None
     doublet_score_median: float | None = None
     saturation: float | None = None
+    # Sequencing metrics
+    number_of_reads: int | None = None
+    valid_barcodes: float | None = None
+    q30_bases_barcode: float | None = None
+    q30_bases_rna_read: float | None = None
+    # Mapping metrics
+    reads_mapped_genome: float | None = None
+    reads_mapped_genome_unique: float | None = None
+    # Mean values and totals
+    mean_reads_per_cell: float | None = None
+    mean_umi_per_cell: float | None = None
+    mean_genes_per_cell: float | None = None
+    total_genes_detected: int | None = None
+    umis_in_cells: int | None = None
     # Bulk/FastQC metrics
     total_sequences: int | None = None
     percent_duplicates: float | None = None
@@ -18,6 +32,9 @@ class QCMetrics(BaseModel):
     avg_sequence_length: float | None = None
     total_samples: int | None = None
     quality_rating: str = "concerning"
+    # Chart data for interactive rendering
+    barcode_rank_data: list[list[int]] | None = None
+    chart_data: dict | None = None
 
 
 class QCPlot(BaseModel):
