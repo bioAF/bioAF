@@ -59,7 +59,7 @@ def upgrade() -> None:
                 source_pipeline_run_id = (
                     SELECT pr.id FROM pipeline_runs pr
                     WHERE pr.id = (
-                        regexp_match(files.gcs_uri, 'pipeline-runs/(\d+)/')
+                        regexp_match(files.gcs_uri, 'pipeline-runs/(\\d+)/')
                     )[1]::int
                     LIMIT 1
                 )

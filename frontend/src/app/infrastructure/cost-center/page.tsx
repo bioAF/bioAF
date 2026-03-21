@@ -7,6 +7,7 @@ import { Header } from "@/components/layout/Header";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { BillingSetupModal } from "@/components/infrastructure/BillingSetupModal";
+import { TerraformProgressModal } from "@/components/infrastructure/TerraformProgressModal";
 
 interface BillingExportStatus {
   configured: boolean;
@@ -70,6 +71,8 @@ export default function InfraCostCenterPage() {
   const [message, setMessage] = useState("");
   const [billingExport, setBillingExport] = useState<BillingExportStatus | null>(null);
   const [showBillingSetupModal, setShowBillingSetupModal] = useState(false);
+  const [showTeardownModal, setShowTeardownModal] = useState(false);
+  const [showTeardownConfirm, setShowTeardownConfirm] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/login"); return; }
@@ -175,9 +178,28 @@ export default function InfraCostCenterPage() {
           )}
 
           {billingExport?.configured && (
-            <div className="mb-4 flex items-center gap-2 text-xs text-green-700">
-              <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
-              Using BigQuery billing export
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs text-green-700">
+                <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
+                Using BigQuery billing export
+              </div>
+              <button
+                onClick={() => setShowTeardownConfirm(true)}
+                className="px-3 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded text-xs font-medium hover:bg-red-100"
+              >
+                Teardown Billing Export
+              </button>
+            </div>
+          )}
+
+          {billingExport && !billingExport.configured && billingExport.dataset_id && (
+            <div className="mb-1 flex justify-end">
+              <button
+                onClick={() => setShowTeardownConfirm(true)}
+                className="px-3 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded text-xs font-medium hover:bg-red-100"
+              >
+                Teardown Billing Export
+              </button>
             </div>
           )}
 
@@ -196,6 +218,57 @@ export default function InfraCostCenterPage() {
                   .catch(() => {});
               }}
               onClose={() => setShowBillingSetupModal(false)}
+            />
+          )}
+
+          {showTeardownConfirm && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6">
+                <h2 className="text-lg font-semibold text-gray-900 mb-3">Teardown Billing Export</h2>
+                <p className="text-sm text-gray-600 mb-2">
+                  This will destroy the BigQuery billing export dataset and all associated IAM bindings via Terraform.
+                </p>
+                <p className="text-sm text-gray-600 mb-4">
+                  You can re-create it afterward using the setup flow. Any billing export configuration in the Google Cloud Console will need to be re-pointed to the new dataset.
+                </p>
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => setShowTeardownConfirm(false)}
+                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowTeardownConfirm(false);
+                      setShowTeardownModal(true);
+                    }}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700"
+                  >
+                    Confirm Teardown
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showTeardownModal && (
+            <TerraformProgressModal
+              title="Teardown Billing Export"
+              sseUrl="/api/v1/infrastructure/billing-export/teardown"
+              mode="teardown"
+              onComplete={() => {
+                setShowTeardownModal(false);
+                setBillingExport(null);
+                // Refresh status
+                api.get<BillingExportStatus>("/api/v1/infrastructure/billing-export/status")
+                  .then(setBillingExport)
+                  .catch(() => {});
+                api.get<CostSummary>("/api/costs/summary")
+                  .then(setSummary)
+                  .catch(() => {});
+              }}
+              onClose={() => setShowTeardownModal(false)}
             />
           )}
 

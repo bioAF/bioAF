@@ -1,15 +1,18 @@
 """BigQuery billing export setup endpoints (ADR-028).
 
-- GET  /api/v1/infrastructure/billing-export/status  - check configuration state
-- POST /api/v1/infrastructure/billing-export/enable   - create BQ dataset via Terraform
-- POST /api/v1/infrastructure/billing-export/verify   - verify export data is flowing
+- GET  /api/v1/infrastructure/billing-export/status    - check configuration state
+- POST /api/v1/infrastructure/billing-export/enable    - create BQ dataset via Terraform
+- POST /api/v1/infrastructure/billing-export/verify    - verify export data is flowing
+- POST /api/v1/infrastructure/billing-export/teardown  - destroy BQ dataset via Terraform (SSE)
 """
 
 from __future__ import annotations
 
+import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +21,7 @@ from app.api.dependencies import require_role
 from app.database import get_session
 from app.services.billing_export_service import BillingExportService
 from app.services.credential_injector import load_gcp_credentials
+from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
 
 logger = logging.getLogger("bioaf.billing_export_api")
 
@@ -80,8 +84,6 @@ async def deploy_billing_export_module(session: AsyncSession, user_id: int) -> d
 
     On success, stores the dataset ID in platform_config.
     """
-    from app.services.terraform_executor import TerraformExecutor
-
     run = await TerraformExecutor.run_plan(session, user_id, module_name="billing_export")
     await session.commit()
 
@@ -215,4 +217,73 @@ async def billing_export_verify(
         configured=True,
         table_id=table_id,
         message="Billing export verified and configured.",
+    )
+
+
+def _sse_event(event: TerraformProgressEvent) -> str:
+    """Format a TerraformProgressEvent as an SSE data line."""
+    payload = {
+        "event_type": event.event_type,
+        "message": event.message,
+        "resource_address": event.resource_address,
+        "resources_completed": event.resources_completed,
+        "resources_total": event.resources_total,
+        "log_line": event.log_line,
+    }
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+@router.post("/api/v1/infrastructure/billing-export/teardown")
+async def billing_export_teardown(
+    current_user: dict = require_role("admin"),
+    session: AsyncSession = Depends(get_session),
+) -> StreamingResponse:
+    """Destroy the BigQuery billing export dataset via Terraform.
+
+    Streams SSE progress events. On success, clears billing export
+    entries from platform_config so the setup flow can be re-run.
+    """
+    config = await _read_billing_config(session)
+
+    if config.get("terraform_initialized", "false") != "true":
+        raise HTTPException(
+            status_code=400,
+            detail="Terraform has not been initialized.",
+        )
+
+    user_id = int(current_user["sub"])
+
+    gen = TerraformExecutor.run_destroy(
+        session=session,
+        user_id=user_id,
+        module_name="billing_export",
+    )
+
+    async def event_generator():
+        completed = False
+        try:
+            async for event in gen:
+                if event.event_type == "apply_complete":
+                    completed = True
+                yield _sse_event(event)
+        except Exception as exc:
+            error_event = TerraformProgressEvent(
+                event_type="apply_error",
+                message=str(exc),
+            )
+            yield _sse_event(error_event)
+        finally:
+            if completed:
+                for key in (
+                    "billing_export_configured",
+                    "billing_export_dataset",
+                    "billing_export_table",
+                ):
+                    await session.execute(text("DELETE FROM platform_config WHERE key = :k").bindparams(k=key))
+            await session.commit()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
