@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import text as sa_text
 
 from app.adapters import registry as adapter_registry
 from app.services.auth_service import AuthService
@@ -17,6 +18,13 @@ TEST_DATABASE_URL = os.environ.get(
 )
 
 
+def _worker_schema(worker_id: str) -> str:
+    """Return a per-worker schema name for pytest-xdist isolation."""
+    if worker_id == "master":
+        return "public"
+    return f"test_{worker_id}"
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def _init_adapter_registry():
     """Initialize the BAL adapter registry for all tests (local/mock mode)."""
@@ -26,18 +34,44 @@ async def _init_adapter_registry():
 
 
 @pytest_asyncio.fixture
-async def db_engine():
-    """Create engine, set up tables, yield, tear down."""
-    import app.models  # noqa: F401 — register all models with Base.metadata
+async def db_engine(worker_id):
+    """Create engine, set up tables in a per-worker schema, yield, tear down."""
+    import app.models  # noqa: F401 -- register all models with Base.metadata
     from app.database import Base
 
+    schema = _worker_schema(worker_id)
+
     engine = create_async_engine(TEST_DATABASE_URL, echo=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
+
+    if schema != "public":
+        async with engine.begin() as conn:
+            await conn.execute(sa_text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
+            await conn.execute(sa_text(f"SET search_path TO {schema}"))
+            await conn.run_sync(Base.metadata.create_all)
+    else:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+            await conn.run_sync(Base.metadata.create_all)
+
+    # Set search_path for all connections from this engine
+    if schema != "public":
+        from sqlalchemy import event
+
+        @event.listens_for(engine.sync_engine, "connect")
+        def set_search_path(dbapi_conn, connection_record):
+            cursor = dbapi_conn.cursor()
+            cursor.execute(f"SET search_path TO {schema}")
+            cursor.close()
+
     yield engine
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+
+    if schema != "public":
+        async with engine.begin() as conn:
+            await conn.execute(sa_text(f"DROP SCHEMA {schema} CASCADE"))
+    else:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+
     await engine.dispose()
 
 
