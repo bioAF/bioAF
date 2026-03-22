@@ -18,7 +18,7 @@ export function RunningJobsWidget() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 30000);
+    const timeout = setTimeout(() => setLoading(false), 60000);
     Promise.all([
       api.getWithRetry<{ total: number }>("/api/pipeline-runs?status=running&page_size=1").catch(() => ({ total: 0 })),
       api.getWithRetry<{ total: number }>("/api/pipeline-runs?status=pending&page_size=1").catch(() => ({ total: 0 })),

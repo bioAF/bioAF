@@ -183,14 +183,17 @@ describe("Dashboard Widgets", () => {
   });
 
   describe("IngestStatusWidget", () => {
-    it("renders with mock data", async () => {
-      mockApiGet
-        .mockResolvedValueOnce({ total: 42 })
-        .mockResolvedValueOnce({ files: [1, 2] })
-        .mockResolvedValueOnce({ entities: [1] });
+    it("renders file breakdown by source and type", async () => {
+      mockApiGet.mockResolvedValueOnce({
+        artifacts: { total: 42, by_type: { pdf: 10, png: 20, h5ad: 12 } },
+        uploaded: { total: 9, by_type: { fastq: 6, csv: 3 } },
+      });
       render(<IngestStatusWidget />);
       await waitFor(() => {
+        expect(screen.getByText("Artifacts")).toBeInTheDocument();
         expect(screen.getByText("42")).toBeInTheDocument();
+        expect(screen.getByText("Uploaded")).toBeInTheDocument();
+        expect(screen.getByText("9")).toBeInTheDocument();
       });
     });
 

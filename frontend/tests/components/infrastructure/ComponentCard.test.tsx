@@ -56,11 +56,6 @@ describe("ComponentCard", () => {
     expect(screen.getByText("Node pool for pipeline jobs")).toBeInTheDocument();
   });
 
-  it("renders estimated monthly cost", () => {
-    render(<ComponentCard component={enabledComponent} onAction={jest.fn()} />);
-    expect(screen.getByText("$50-200/month")).toBeInTheDocument();
-  });
-
   it("shows Disable button for enabled component", () => {
     render(<ComponentCard component={enabledComponent} onAction={jest.fn()} />);
     expect(screen.getByRole("button", { name: "Disable" })).toBeInTheDocument();
@@ -77,11 +72,11 @@ describe("ComponentCard", () => {
     expect(link).toHaveAttribute("href", "/components/k8s_pipeline_pool");
   });
 
-  it("clicking Enable opens confirmation dialog with cost in message", () => {
+  it("clicking Enable opens confirmation dialog", () => {
     render(<ComponentCard component={disabledComponent} onAction={jest.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Enable" }));
     expect(screen.getByText(/Enable Cellxgene/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/\$50-200\/month/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/provision Cellxgene infrastructure/i)).toBeInTheDocument();
   });
 
   it("clicking Disable opens confirmation dialog with danger message", () => {

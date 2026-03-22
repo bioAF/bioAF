@@ -38,7 +38,7 @@ def _create_adapters(
         return (
             KubernetesComputeProvider(session_factory=session_factory),
             GcsStorageProvider(),
-            KubernetesNotebookProvider(),
+            KubernetesNotebookProvider(session_factory=session_factory),
         )
     else:
         from app.adapters.compute.slurm import SlurmComputeProvider
@@ -65,10 +65,12 @@ async def initialize_adapters(session: AsyncSession, session_factory=None) -> No
         compute_stack, session_factory=session_factory
     )
 
-    # Eagerly load cluster config so the compute adapter never needs to
-    # run async DB queries from a sync context (which breaks asyncpg).
+    # Eagerly load cluster config so adapters never need to run async DB
+    # queries from a sync context (which breaks asyncpg).
     if hasattr(_compute_adapter, "load_cluster_config"):
         await _compute_adapter.load_cluster_config()
+    if hasattr(_notebook_adapter, "load_cluster_config"):
+        await _notebook_adapter.load_cluster_config()
 
     _initialized = True
 

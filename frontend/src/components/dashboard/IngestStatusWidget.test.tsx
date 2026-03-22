@@ -1,7 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { IngestStatusWidget } from "./IngestStatusWidget";
 
-// Mock next/link
 jest.mock("next/link", () => {
   return function MockLink({
     children,
@@ -18,7 +17,6 @@ jest.mock("@/components/shared/LoadingSpinner", () => ({
   LoadingSpinner: () => <div data-testid="spinner" />,
 }));
 
-// Mock the api module
 jest.mock("@/lib/api", () => ({
   api: {
     get: jest.fn(),
@@ -26,7 +24,6 @@ jest.mock("@/lib/api", () => ({
   },
 }));
 
-// Mock auth so the token is always set
 jest.mock("@/lib/auth", () => ({
   getToken: () => "fake-token",
   removeToken: jest.fn(),
@@ -40,135 +37,78 @@ beforeEach(() => {
   mockGet.mockReset();
 });
 
-test("renders file count from /api/files endpoint", async () => {
-  mockGet.mockImplementation((path: string) => {
-    if (path.startsWith("/api/files")) {
-      return Promise.resolve({ files: [], total: 14, page: 1, page_size: 1 });
-    }
-    // ingest endpoints return arrays
-    return Promise.resolve([]);
+test("renders file breakdown by source and type", async () => {
+  mockGet.mockResolvedValueOnce({
+    artifacts: { total: 42, by_type: { pdf: 12, png: 18, h5ad: 12 } },
+    uploaded: { total: 8, by_type: { fastq: 8 } },
   });
 
   render(<IngestStatusWidget />);
 
   await waitFor(() => {
-    expect(screen.getByText("14")).toBeInTheDocument();
+    expect(screen.getByText("Artifacts")).toBeInTheDocument();
+    expect(screen.getByText("42")).toBeInTheDocument();
+    expect(screen.getByText("Uploaded")).toBeInTheDocument();
   });
-
-  expect(screen.getByText("Files ingested")).toBeInTheDocument();
+  expect(screen.getByText("pdf")).toBeInTheDocument();
+  expect(screen.getByText("png")).toBeInTheDocument();
+  expect(screen.getByText("fastq")).toBeInTheDocument();
 });
 
-test("renders zero file count explicitly", async () => {
-  mockGet.mockImplementation((path: string) => {
-    if (path.startsWith("/api/files")) {
-      return Promise.resolve({ files: [], total: 0, page: 1, page_size: 1 });
-    }
-    return Promise.resolve([]);
+test("shows empty state when no files exist", async () => {
+  mockGet.mockResolvedValueOnce({
+    artifacts: { total: 0, by_type: {} },
+    uploaded: { total: 0, by_type: {} },
   });
 
   render(<IngestStatusWidget />);
 
   await waitFor(() => {
-    expect(screen.getByText("0")).toBeInTheDocument();
+    expect(screen.getByTestId("widget-empty")).toBeInTheDocument();
   });
-});
-
-test("renders unmatched count from array response", async () => {
-  const unmatchedEvents = [
-    { id: 1, ingest_status: "unmatched", source_path: "a.fastq" },
-    { id: 2, ingest_status: "unmatched", source_path: "b.fastq" },
-  ];
-
-  mockGet.mockImplementation((path: string) => {
-    if (path.startsWith("/api/files")) {
-      return Promise.resolve({ files: [], total: 5, page: 1, page_size: 1 });
-    }
-    if (path === "/api/ingest/unmatched") {
-      return Promise.resolve(unmatchedEvents);
-    }
-    return Promise.resolve([]);
-  });
-
-  render(<IngestStatusWidget />);
-
-  await waitFor(() => {
-    expect(screen.getByText("Unmatched")).toBeInTheDocument();
-    expect(screen.getByText("2")).toBeInTheDocument();
-  });
-});
-
-test("renders unclaimed count from array response", async () => {
-  const unclaimedEntities = [
-    { entity_type: "project", entity_id: 1, name: "P1", created_at: "" },
-  ];
-
-  mockGet.mockImplementation((path: string) => {
-    if (path.startsWith("/api/files")) {
-      return Promise.resolve({ files: [], total: 3, page: 1, page_size: 1 });
-    }
-    if (path === "/api/ingest/unclaimed") {
-      return Promise.resolve(unclaimedEntities);
-    }
-    return Promise.resolve([]);
-  });
-
-  render(<IngestStatusWidget />);
-
-  await waitFor(() => {
-    expect(screen.getByText("Unclaimed")).toBeInTheDocument();
-    expect(screen.getByText("1")).toBeInTheDocument();
-  });
+  expect(screen.getByText("No files yet.")).toBeInTheDocument();
 });
 
 test("shows loading state initially", () => {
-  mockGet.mockImplementation(() => new Promise(() => {})); // never resolves
+  mockGet.mockImplementation(() => new Promise(() => {}));
   render(<IngestStatusWidget />);
   expect(screen.getByTestId("widget-loading")).toBeInTheDocument();
 });
 
-test("degrades gracefully when all fetches fail", async () => {
-  mockGet.mockRejectedValue(new Error("network error"));
+test("shows error when fetch fails", async () => {
+  mockGet.mockRejectedValueOnce(new Error("network error"));
 
   render(<IngestStatusWidget />);
 
-  // Individual catch handlers return fallback values, so widget shows zeros
   await waitFor(() => {
-    expect(screen.getByText("0")).toBeInTheDocument();
+    expect(screen.getByTestId("widget-error")).toBeInTheDocument();
   });
-
-  expect(screen.queryByTestId("widget-error")).not.toBeInTheDocument();
 });
 
-test("hides unmatched and unclaimed when both are zero", async () => {
-  mockGet.mockImplementation((path: string) => {
-    if (path.startsWith("/api/files")) {
-      return Promise.resolve({ files: [], total: 7, page: 1, page_size: 1 });
-    }
-    return Promise.resolve([]);
+test("hides section when its total is zero", async () => {
+  mockGet.mockResolvedValueOnce({
+    artifacts: { total: 5, by_type: { png: 5 } },
+    uploaded: { total: 0, by_type: {} },
   });
 
   render(<IngestStatusWidget />);
 
   await waitFor(() => {
-    expect(screen.getByText("7")).toBeInTheDocument();
+    expect(screen.getByText("Artifacts")).toBeInTheDocument();
   });
-
-  expect(screen.queryByText("Unmatched")).not.toBeInTheDocument();
-  expect(screen.queryByText("Unclaimed")).not.toBeInTheDocument();
+  expect(screen.queryByText("Uploaded")).not.toBeInTheDocument();
 });
 
-test("links to ingest activity page", async () => {
-  mockGet.mockImplementation((path: string) => {
-    if (path.startsWith("/api/files")) {
-      return Promise.resolve({ files: [], total: 0, page: 1, page_size: 1 });
-    }
-    return Promise.resolve([]);
+test("links to files page", async () => {
+  mockGet.mockResolvedValueOnce({
+    artifacts: { total: 1, by_type: { pdf: 1 } },
+    uploaded: { total: 0, by_type: {} },
   });
 
   render(<IngestStatusWidget />);
 
   await waitFor(() => {
-    const link = screen.getByText("View ingest activity");
-    expect(link).toHaveAttribute("href", "/data/upload");
+    const link = screen.getByText("View all files");
+    expect(link).toHaveAttribute("href", "/data/files");
   });
 });

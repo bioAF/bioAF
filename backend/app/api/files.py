@@ -193,6 +193,54 @@ async def reconcile_stuck_files(
     }
 
 
+@router.get("/stats")
+async def file_stats(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Return file counts grouped by source (artifacts vs uploaded) and file type."""
+    from sqlalchemy import case, func, select
+
+    from app.models.file import File
+
+    current_user = request.state.current_user
+    org_id = int(current_user["org_id"])
+
+    is_artifact = case(
+        (File.source_type != "upload", "artifacts"),
+        else_="uploaded",
+    )
+
+    rows = (
+        await session.execute(
+            select(
+                is_artifact.label("source"),
+                func.coalesce(File.file_type, "unknown").label("ftype"),
+                func.count().label("cnt"),
+            )
+            .where(File.organization_id == org_id)
+            .group_by("source", "ftype")
+        )
+    ).all()
+
+    artifacts: dict[str, int] = {}
+    uploaded: dict[str, int] = {}
+    for source, ftype, cnt in rows:
+        bucket = artifacts if source == "artifacts" else uploaded
+        bucket[ftype] = cnt
+
+    return {
+        "artifacts": {
+            "total": sum(artifacts.values()),
+            "by_type": dict(sorted(artifacts.items(), key=lambda x: -x[1])),
+        },
+        "uploaded": {
+            "total": sum(uploaded.values()),
+            "by_type": dict(sorted(uploaded.items(), key=lambda x: -x[1])),
+        },
+    }
+
+
 @router.get("", response_model=FileListResponse)
 async def list_files(
     request: Request,

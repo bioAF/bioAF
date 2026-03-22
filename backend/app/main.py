@@ -91,6 +91,7 @@ async def lifespan(app: FastAPI):
     background_tasks.append(asyncio.create_task(_budget_queue_processing_loop()))
     background_tasks.append(asyncio.create_task(_pubsub_listener_loop()))
     background_tasks.append(asyncio.create_task(_session_monitor_loop()))
+    background_tasks.append(asyncio.create_task(_notebook_image_build_loop()))
     logger.info("Background tasks started")
 
     yield
@@ -413,6 +414,26 @@ async def _session_monitor_loop():
             break
         except Exception as e:
             logger.error("Session monitor error: %s", e)
+
+
+async def _notebook_image_build_loop():
+    """Poll active notebook image builds every 30 seconds."""
+    from app.database import async_session_factory
+    from app.services.notebook_image_service import poll_image_build
+
+    while True:
+        try:
+            await asyncio.sleep(30)
+            async with async_session_factory() as session:
+                status = await poll_image_build(session)
+                if status and status not in ("SUCCESS", "FAILURE", "CANCELLED", "TIMEOUT"):
+                    await session.commit()
+                elif status:
+                    await session.commit()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error("Notebook image build monitor error: %s", e)
 
 
 app = FastAPI(

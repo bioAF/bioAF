@@ -12,6 +12,15 @@ import type { User } from "@/lib/types";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { DetailModal } from "@/components/shared/DetailModal";
 
+interface NeverLoggedInUser {
+  id: number;
+  email: string;
+  name: string | null;
+  role: string;
+  status: string;
+  created_at: string | null;
+}
+
 export default function SettingsUsersPage() {
   const router = useRouter();
   const [users, setUsers] = useState<User[]>([]);
@@ -19,12 +28,16 @@ export default function SettingsUsersPage() {
   const [loading, setLoading] = useState(true);
   const [showInvite, setShowInvite] = useState(false);
   const [error, setError] = useState("");
+  const [neverLoggedIn, setNeverLoggedIn] = useState<NeverLoggedInUser[]>([]);
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/login"); return; }
     const user = getCurrentUser();
     if (user?.role !== "admin") { router.push("/"); return; }
     fetchUsers();
+    api.get<{ users: NeverLoggedInUser[] }>("/api/access-logs/never-logged-in")
+      .then((data) => setNeverLoggedIn(data.users))
+      .catch(() => {});
   }, [router]);
 
   const fetchUsers = async () => {
@@ -67,6 +80,27 @@ export default function SettingsUsersPage() {
           </div>
 
           {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded text-sm">{error}</div>}
+
+          {neverLoggedIn.length > 0 && (
+            <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+              <h3 className="text-sm font-semibold text-amber-800 mb-2">
+                Users who have never logged in ({neverLoggedIn.length})
+              </h3>
+              <ul className="text-sm text-amber-700 space-y-1">
+                {neverLoggedIn.map((u) => (
+                  <li key={u.id}>
+                    {u.email}
+                    {u.role !== "viewer" && <span className="ml-2 text-amber-500">({u.role})</span>}
+                    {u.created_at && (
+                      <span className="ml-2 text-amber-400 text-xs">
+                        invited {new Date(u.created_at).toLocaleDateString()}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {showInvite && (
             <div className="bg-white rounded-lg shadow p-6 mb-6">

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
+import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
 import { getCurrentUser, getToken } from "@/lib/auth";
 import type {
@@ -275,7 +276,7 @@ export default function DataFilesPage() {
             )}
 
             {loading ? (
-              <p className="text-gray-400 text-sm">Loading...</p>
+              <ContentLoading />
             ) : files.length === 0 ? (
               <p className="text-gray-400 text-sm">No files found.</p>
             ) : (

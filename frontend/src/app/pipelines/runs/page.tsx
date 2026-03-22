@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
-import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ContentLoading } from "@/components/shared/ContentLoading";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { ReviewBadge } from "@/components/experiments/ReviewBadge";
@@ -81,16 +81,16 @@ export default function PipelineRunsPage() {
 
   const sortIcon = (field: string) => sortField === field ? (sortDir === "desc" ? " ↓" : " ↑") : "";
 
-  if (loading) {
-    return <div className="flex h-screen items-center justify-center"><LoadingSpinner size="lg" /></div>;
-  }
-
   return (
     <div className="flex h-screen">
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header />
         <main className="flex-1 overflow-y-auto p-6">
+          {loading ? (
+            <ContentLoading />
+          ) : (
+          <>
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl font-bold">Pipeline Runs</h1>
             <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} className="border rounded-md px-3 py-1.5 text-sm">
@@ -160,6 +160,8 @@ export default function PipelineRunsPage() {
               <span className="text-sm text-gray-500 py-1">Page {page} of {Math.ceil(total / 25)}</span>
               <button onClick={() => setPage(page + 1)} disabled={page >= Math.ceil(total / 25)} className="border px-3 py-1 rounded text-sm disabled:opacity-50">Next</button>
             </div>
+          )}
+          </>
           )}
         </main>
       </div>

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { PlotModal } from "@/components/shared/PlotModal";
+import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
 import type {
   PlotArchiveResponse,
@@ -244,7 +245,7 @@ export default function PlotArchivePage() {
             </div>
 
             {loading ? (
-              <p className="text-gray-400 text-sm">Loading...</p>
+              <ContentLoading />
             ) : plots.length === 0 ? (
               <p className="text-gray-400 text-sm">No plots found.</p>
             ) : (

@@ -33,6 +33,37 @@ function zonesForRegion(region: string): string[] {
   return GCP_ZONES[region] ?? [`${region}-a`, `${region}-b`, `${region}-c`];
 }
 
+const SETUP_RECOMMENDED_ROLES = [
+  { role: "roles/storage.admin", description: "Storage Admin" },
+  { role: "roles/pubsub.admin", description: "Pub/Sub Admin" },
+  { role: "roles/container.admin", description: "Kubernetes Engine Admin" },
+  { role: "roles/iam.serviceAccountUser", description: "Service Account User" },
+  { role: "roles/compute.admin", description: "Compute Admin" },
+  { role: "roles/resourcemanager.projectIamAdmin", description: "Project IAM Admin" },
+  { role: "roles/bigquery.dataEditor", description: "BigQuery Data Editor" },
+  { role: "roles/artifactregistry.admin", description: "Artifact Registry Admin" },
+  { role: "roles/cloudbuild.builds.editor", description: "Cloud Build Editor" },
+  { role: "roles/serviceusage.serviceUsageViewer", description: "Service Usage Viewer" },
+  { role: "roles/viewer", description: "Viewer" },
+];
+
+const SETUP_REQUIRED_APIS = [
+  "cloudresourcemanager.googleapis.com",
+  "compute.googleapis.com",
+  "container.googleapis.com",
+  "iam.googleapis.com",
+  "secretmanager.googleapis.com",
+  "servicenetworking.googleapis.com",
+  "serviceusage.googleapis.com",
+  "pubsub.googleapis.com",
+  "storage.googleapis.com",
+  "sqladmin.googleapis.com",
+  "cloudbilling.googleapis.com",
+  "bigquery.googleapis.com",
+  "artifactregistry.googleapis.com",
+  "cloudbuild.googleapis.com",
+];
+
 interface SetupWizardProps {
   onComplete: () => void;
 }
@@ -334,6 +365,37 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             Configure your Google Cloud Platform project. Credentials are required before
             deploying a compute stack.
           </p>
+
+          {/* Prerequisites */}
+          <details data-testid="gcp-prerequisites" className="bg-gray-50 border rounded p-4">
+            <summary className="cursor-pointer text-sm font-semibold text-gray-700 select-none">
+              Prerequisites: IAM Roles &amp; APIs
+              <span className="ml-1 text-xs font-normal text-gray-400">
+                ({SETUP_RECOMMENDED_ROLES.length} roles, {SETUP_REQUIRED_APIS.length} APIs)
+              </span>
+            </summary>
+            <div className="mt-3 space-y-3">
+              <div>
+                <p className="text-xs font-medium text-gray-600 mb-1">Required IAM roles for your service account:</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                  {SETUP_RECOMMENDED_ROLES.map(({ role, description }) => (
+                    <div key={role} className="flex items-center gap-1.5 text-xs">
+                      <code className="bg-white px-1 py-0.5 rounded text-gray-800 border">{role}</code>
+                      <span className="text-gray-400">{description}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-600 mb-1">Required GCP APIs to enable:</p>
+                <pre className="bg-white border rounded p-2 text-xs overflow-x-auto">
+{`gcloud services enable \\
+  ${SETUP_REQUIRED_APIS.join(" \\\n  ")} \\
+  --project=YOUR_PROJECT_ID`}
+                </pre>
+              </div>
+            </div>
+          </details>
 
           <div>
             <label htmlFor="gcp-project-id" className="block text-sm font-medium text-gray-700 mb-1">GCP Project ID</label>

@@ -38,6 +38,7 @@ class NotebookService:
         resource_profile: str,
         experiment_id: int | None = None,
         project_id: int | None = None,
+        image: str | None = None,
     ) -> NotebookSession:
         # Check quota
         allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=1.0)
@@ -56,6 +57,7 @@ class NotebookService:
             cpu_cores=cpu_cores,
             memory_gb=memory_gb,
             status="pending",
+            started_at=datetime.now(timezone.utc),
         )
         session.add(notebook_session)
         await session.flush()
@@ -63,22 +65,34 @@ class NotebookService:
         # Launch via the notebook adapter (BAL)
         try:
             notebook_adapter = get_notebook_adapter()
-            result = await notebook_adapter.launch_session(
-                {
-                    "session_type": session_type,
-                    "resource_profile": resource_profile,
-                    "cpu_cores": cpu_cores,
-                    "memory_gb": memory_gb,
-                    "experiment_id": experiment_id,
-                    "project_id": project_id,
-                    "user_id": user_id,
-                    "session_id": notebook_session.id,
-                }
-            )
+            spec: dict = {
+                "session_type": session_type,
+                "resource_profile": resource_profile,
+                "cpu_cores": cpu_cores,
+                "memory_gb": memory_gb,
+                "experiment_id": experiment_id,
+                "project_id": project_id,
+                "user_id": user_id,
+                "session_id": notebook_session.id,
+            }
+            if image:
+                spec["image"] = image
 
-            notebook_session.slurm_job_id = result.get("session_id", "")
+            result = await notebook_adapter.launch_session(spec)
+
+            notebook_session.slurm_job_id = str(result.get("session_id", ""))
             notebook_session.proxy_url = result.get("url")
-            notebook_session.status = "starting"
+            notebook_session.k8s_pod_name = result.get("pod_name")
+            notebook_session.k8s_namespace = result.get("namespace")
+            notebook_session.access_url = result.get("access_url")
+            notebook_session.gcs_home_prefix = result.get("gcs_home_prefix")
+            adapter_status = result.get("status", "starting")
+            if adapter_status == "error":
+                notebook_session.status = "failed"
+            elif adapter_status == "running":
+                notebook_session.status = "running"
+            else:
+                notebook_session.status = "starting"
         except Exception as e:
             notebook_session.status = "failed"
             logger.error("Failed to launch notebook session %d: %s", notebook_session.id, e)
@@ -110,10 +124,15 @@ class NotebookService:
         old_status = notebook_session.status
 
         # Terminate via the notebook adapter
-        if notebook_session.slurm_job_id:
+        if notebook_session.slurm_job_id or notebook_session.k8s_pod_name:
             try:
                 notebook_adapter = get_notebook_adapter()
-                await notebook_adapter.terminate_session(notebook_session.slurm_job_id)
+                await notebook_adapter.terminate_session(
+                    notebook_session.slurm_job_id or "",
+                    pod_name=notebook_session.k8s_pod_name or "",
+                    namespace=notebook_session.k8s_namespace or "bioaf-notebooks",
+                    gcs_home_prefix=notebook_session.gcs_home_prefix or "",
+                )
             except Exception as e:
                 logger.warning("Failed to terminate session %s: %s", notebook_session.slurm_job_id, e)
 
@@ -210,10 +229,15 @@ class NotebookService:
                         )
                         ns.status = "stopped"
                         ns.stopped_at = now
-                        if ns.slurm_job_id:
+                        if ns.slurm_job_id or ns.k8s_pod_name:
                             try:
                                 notebook_adapter = get_notebook_adapter()
-                                await notebook_adapter.terminate_session(ns.slurm_job_id)
+                                await notebook_adapter.terminate_session(
+                                    ns.slurm_job_id or "",
+                                    pod_name=ns.k8s_pod_name or "",
+                                    namespace=ns.k8s_namespace or "bioaf-notebooks",
+                                    gcs_home_prefix=ns.gcs_home_prefix or "",
+                                )
                             except Exception as e:
                                 logger.warning("Failed to terminate idle session: %s", e)
 

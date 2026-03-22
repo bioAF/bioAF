@@ -7,6 +7,7 @@ from app.database import get_session
 from app.api.dependencies import require_role
 from app.schemas.activity_feed import ActivityFeedItem, ActivityFeedListResponse
 from app.services.activity_feed_service import ActivityFeedService
+from app.services.event_types import EVENT_SEVERITY
 
 router = APIRouter(prefix="/api/activity-feed", tags=["activity-feed"])
 
@@ -36,7 +37,21 @@ async def list_activity_feed(
         end_date=end_date,
     )
     return ActivityFeedListResponse(
-        events=[ActivityFeedItem.model_validate(e) for e in events],
+        events=[
+            ActivityFeedItem(
+                id=e.id,
+                user_id=e.user_id,
+                user_email=e.user.email if e.user else None,
+                event_type=e.event_type,
+                entity_type=e.entity_type,
+                entity_id=e.entity_id,
+                summary=e.summary,
+                severity=EVENT_SEVERITY.get(e.event_type, "info"),
+                metadata_json=e.metadata_json,
+                created_at=e.created_at,
+            )
+            for e in events
+        ],
         total=total,
         page=page,
         page_size=page_size,

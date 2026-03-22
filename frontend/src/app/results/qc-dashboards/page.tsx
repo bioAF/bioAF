@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { PlotModal } from "@/components/shared/PlotModal";
 import { ExportPdfButton } from "@/components/shared/ExportPdfButton";
+import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import type { QCDashboardSummary, QCDashboardResponse, QCMetrics } from "@/lib/types";
@@ -453,7 +454,7 @@ export default function QCDashboardsPage() {
               onExpandPlot={handleExpandPlot}
             />
           ) : loading ? (
-            <p className="text-gray-400 text-sm">Loading...</p>
+            <ContentLoading />
           ) : dashboards.length === 0 ? (
             <p className="text-gray-400 text-sm">
               No QC dashboards yet. They are generated automatically when pipeline runs complete.

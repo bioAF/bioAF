@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
+import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
 import type {
   CellxgenePublicationResponse,
@@ -327,7 +328,7 @@ export default function CellxgenePage() {
           )}
 
           {loading ? (
-            <p className="text-gray-400 text-sm">Loading...</p>
+            <ContentLoading />
           ) : publications.length === 0 ? (
             <p className="text-gray-400 text-sm">
               {filterExperimentId

@@ -12,17 +12,23 @@ interface ActivityEvent {
   created_at: string;
   user_email?: string;
   severity?: string;
+  entity_type?: string;
+  entity_id?: number;
 }
 
-export function ActivityFeedWidget() {
+interface ActivityFeedWidgetProps {
+  className?: string;
+}
+
+export function ActivityFeedWidget({ className }: ActivityFeedWidgetProps) {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 30000);
+    const timeout = setTimeout(() => setLoading(false), 60000);
     api
-      .getWithRetry<{ events: ActivityEvent[] }>("/api/activity-feed?page_size=10")
+      .getWithRetry<{ events: ActivityEvent[] }>("/api/activity-feed?page_size=15")
       .then((data) => setEvents(data.events))
       .catch(() => setError("Failed to load activity feed"))
       .finally(() => { clearTimeout(timeout); setLoading(false); });
@@ -35,9 +41,32 @@ export function ActivityFeedWidget() {
     critical: "bg-red-400",
   };
 
+  function humanize(text: string): string {
+    return text.replace(/[a-z0-9]+(_[a-z0-9]+)+/g, (match) =>
+      match.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")
+    );
+  }
+
+  function formatTimeAgo(dateStr: string): string {
+    const now = new Date();
+    const date = new Date(dateStr);
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return "just now";
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+  }
+
   return (
-    <div className="bg-white rounded-lg shadow p-5" data-testid="widget-activity-feed">
-      <div className="flex items-center justify-between mb-3">
+    <div
+      className={`bg-white rounded-lg shadow p-5 flex flex-col ${className || ""}`}
+      data-testid="widget-activity-feed"
+    >
+      <div className="flex items-center justify-between mb-3 shrink-0">
         <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
           Recent Activity
         </h3>
@@ -68,7 +97,7 @@ export function ActivityFeedWidget() {
         </p>
       )}
       {!loading && !error && events.length > 0 && (
-        <div className="space-y-2">
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-2">
           {events.map((e) => (
             <div key={e.id} className="flex items-start gap-2">
               <span
@@ -77,9 +106,12 @@ export function ActivityFeedWidget() {
                 }`}
               />
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-gray-700 truncate">{e.summary}</p>
+                <p className="text-sm text-gray-700 truncate">{humanize(e.summary)}</p>
                 <p className="text-xs text-gray-400">
-                  {new Date(e.created_at).toLocaleString()}
+                  {e.user_email && (
+                    <span className="text-gray-500">executed by {e.user_email} &middot; </span>
+                  )}
+                  {formatTimeAgo(e.created_at)}
                 </p>
               </div>
             </div>

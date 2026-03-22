@@ -159,6 +159,8 @@ describe("GCP Settings Page", () => {
     expect(rolesSection.textContent).toContain("roles/bigquery.dataEditor");
     expect(rolesSection.textContent).toContain("roles/storage.admin");
     expect(rolesSection.textContent).toContain("roles/viewer");
+    expect(rolesSection.textContent).toContain("roles/artifactregistry.admin");
+    expect(rolesSection.textContent).toContain("roles/cloudbuild.builds.editor");
   });
 
   // Test 25: Per-permission results are shown after validation

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
-import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ContentLoading } from "@/components/shared/ContentLoading";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type {
@@ -95,11 +95,7 @@ export default function PipelineLauncherPage() {
     );
   }
 
-  if (loading) {
-    return <div className="flex h-screen items-center justify-center"><LoadingSpinner size="lg" /></div>;
-  }
-
-  if (!pipeline) {
+  if (!loading && !pipeline) {
     return (
       <div className="flex h-screen">
         <Sidebar />
@@ -119,6 +115,10 @@ export default function PipelineLauncherPage() {
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header />
         <main className="flex-1 overflow-y-auto p-6">
+          {loading ? (
+            <ContentLoading />
+          ) : pipeline && (
+          <>
           <div className="flex items-center gap-4 mb-6">
             <button onClick={() => router.push("/pipelines")} className="text-gray-500 hover:text-gray-700">← Back</button>
             <h1 className="text-2xl font-bold">Launch {pipeline.name}</h1>
@@ -266,6 +266,8 @@ export default function PipelineLauncherPage() {
                 </button>
               </div>
             </div>
+          )}
+          </>
           )}
         </main>
       </div>

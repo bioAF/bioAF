@@ -132,6 +132,12 @@ export default function InfraComponentsPage() {
   const [configApplying, setConfigApplying] = useState(false);
   const [configError, setConfigError] = useState("");
   const [componentErrors, setComponentErrors] = useState<Record<string, string>>({});
+  const [togglingComponent, setTogglingComponent] = useState<string | null>(null);
+  const [buildStatus, setBuildStatus] = useState<{
+    build_id: string | null;
+    build_status: string | null;
+    image_uri: string | null;
+  } | null>(null);
   const [showAbandonModal, setShowAbandonModal] = useState(false);
   const [abandonLoading, setAbandonLoading] = useState(false);
 
@@ -177,6 +183,49 @@ export default function InfraComponentsPage() {
     }
   }
 
+  // Fetch build status when any component is provisioning or build_failed
+  const hasBuildRelated = componentsData?.components.some(
+    (c) => c.status === "provisioning" || c.status === "build_failed",
+  );
+  useEffect(() => {
+    if (!hasBuildRelated) {
+      setBuildStatus(null);
+      return;
+    }
+    let cancelled = false;
+    async function pollBuild() {
+      try {
+        const status = await api.get<{
+          build_id: string | null;
+          build_status: string | null;
+          image_uri: string | null;
+        }>("/api/v1/infrastructure/notebook-image/build-status");
+        if (!cancelled) {
+          setBuildStatus(status);
+          // Build finished -- refresh component list
+          if (status.build_status && !["WORKING", "QUEUED"].includes(status.build_status)) {
+            setRefreshKey((k) => k + 1);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    pollBuild();
+    // Only poll repeatedly if actively building
+    const isActive = componentsData?.components.some((c) => c.status === "provisioning");
+    if (isActive) {
+      const interval = setInterval(pollBuild, 15000);
+      return () => {
+        cancelled = true;
+        clearInterval(interval);
+      };
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [hasBuildRelated, componentsData]);
+
   function handleDeployComplete() {
     setShowDeployModal(false);
     setRefreshKey((k) => k + 1);
@@ -214,12 +263,45 @@ export default function InfraComponentsPage() {
 
   async function handleComponentToggle(componentKey: string) {
     setComponentErrors((prev) => ({ ...prev, [componentKey]: "" }));
+    setTogglingComponent(componentKey);
     try {
       await api.post(`/api/v1/infrastructure/stack/components/${componentKey}/toggle`);
       setRefreshKey((k) => k + 1);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Toggle failed";
       setComponentErrors((prev) => ({ ...prev, [componentKey]: message }));
+    } finally {
+      setTogglingComponent(null);
+    }
+  }
+
+  const [cancellingBuild, setCancellingBuild] = useState(false);
+
+  async function handleCancelBuild() {
+    setCancellingBuild(true);
+    try {
+      await api.post("/api/v1/infrastructure/notebook-image/cancel");
+      setRefreshKey((k) => k + 1);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Cancel failed";
+      alert(message);
+    } finally {
+      setCancellingBuild(false);
+    }
+  }
+
+  async function handleRetryBuild(componentKey: string) {
+    setTogglingComponent(componentKey);
+    try {
+      // Disable then re-enable to trigger a fresh build
+      await api.post(`/api/v1/infrastructure/stack/components/${componentKey}/toggle`);
+      await api.post(`/api/v1/infrastructure/stack/components/${componentKey}/toggle`);
+      setRefreshKey((k) => k + 1);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Retry failed";
+      setComponentErrors((prev) => ({ ...prev, [componentKey]: message }));
+    } finally {
+      setTogglingComponent(null);
     }
   }
 
@@ -642,15 +724,31 @@ export default function InfraComponentsPage() {
                             >
                               <div className="flex items-start justify-between mb-2">
                                 <h3 className="font-semibold text-sm">{comp.name}</h3>
-                                <span
-                                  className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                                    comp.status === "enabled"
-                                      ? "bg-green-100 text-green-700"
-                                      : "bg-gray-100 text-gray-500"
-                                  }`}
-                                >
-                                  {comp.status === "enabled" ? "Enabled" : "Disabled"}
-                                </span>
+                                {(() => {
+                                  const buildFailed = comp.status === "build_failed" ||
+                                    (comp.status === "provisioning" && buildStatus && ["FAILURE", "CANCELLED", "TIMEOUT"].includes(buildStatus.build_status ?? ""));
+                                  return (
+                                    <span
+                                      className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                        comp.status === "enabled"
+                                          ? "bg-green-100 text-green-700"
+                                          : buildFailed
+                                            ? "bg-red-100 text-red-700"
+                                            : comp.status === "provisioning"
+                                              ? "bg-amber-100 text-amber-700"
+                                              : "bg-gray-100 text-gray-500"
+                                      }`}
+                                    >
+                                      {comp.status === "enabled"
+                                        ? "Enabled"
+                                        : buildFailed
+                                          ? "Build Failed"
+                                          : comp.status === "provisioning"
+                                            ? "Building Image..."
+                                            : "Disabled"}
+                                    </span>
+                                  );
+                                })()}
                               </div>
                               <p className="text-xs text-gray-600 mb-3">{comp.description}</p>
                               {comp.dependencies.length > 0 && (
@@ -658,17 +756,77 @@ export default function InfraComponentsPage() {
                                   Requires: {comp.dependencies.join(", ")}
                                 </p>
                               )}
-                              <div className="flex items-center justify-between mt-3">
-                                <span className="text-xs text-gray-500">{comp.cost_estimate}</span>
+                              {/* Show building panel only when actually building (not when build already failed) */}
+                              {comp.status === "provisioning" && buildStatus && !["FAILURE", "CANCELLED", "TIMEOUT"].includes(buildStatus.build_status ?? "") && (
+                                <div className="bg-amber-50 border border-amber-200 rounded p-2 mb-2">
+                                  <p className="text-xs font-medium text-amber-800">
+                                    Building notebook image...
+                                  </p>
+                                  <p className="text-xs text-amber-600 mt-0.5">
+                                    Status: {buildStatus.build_status ?? "Starting"}
+                                    {buildStatus.build_id && (
+                                      <span className="text-amber-400 ml-1">
+                                        ({buildStatus.build_id.slice(0, 8)})
+                                      </span>
+                                    )}
+                                  </p>
+                                  <p className="text-xs text-amber-500 mt-0.5">
+                                    This one-time setup can take up to an hour. You can leave this page.
+                                  </p>
+                                  <button
+                                    onClick={handleCancelBuild}
+                                    disabled={cancellingBuild}
+                                    className="mt-1 text-xs text-red-600 hover:text-red-800 font-medium"
+                                  >
+                                    {cancellingBuild ? "Cancelling..." : "Cancel Build"}
+                                  </button>
+                                </div>
+                              )}
+                              {/* Show failure panel for build_failed OR provisioning-but-actually-failed */}
+                              {(comp.status === "build_failed" || (comp.status === "provisioning" && buildStatus && ["FAILURE", "CANCELLED", "TIMEOUT"].includes(buildStatus.build_status ?? ""))) && (
+                                <div className="bg-red-50 border border-red-200 rounded p-2 mb-2">
+                                  <p className="text-xs font-medium text-red-800">
+                                    Notebook image build failed
+                                  </p>
+                                  {buildStatus?.build_id && (
+                                    <p className="text-xs text-red-600 mt-0.5">
+                                      Build: {buildStatus.build_id.slice(0, 8)} -- {buildStatus.build_status}
+                                    </p>
+                                  )}
+                                  <button
+                                    onClick={() => handleRetryBuild(comp.key)}
+                                    disabled={togglingComponent === comp.key}
+                                    className="mt-1 text-xs text-blue-600 hover:text-blue-800 font-medium"
+                                  >
+                                    {togglingComponent === comp.key ? "Retrying..." : "Retry Build"}
+                                  </button>
+                                </div>
+                              )}
+                              <div className="flex items-center justify-end mt-3">
                                 <button
                                   onClick={() => handleComponentToggle(comp.key)}
+                                  disabled={comp.status === "provisioning" || comp.status === "build_failed" || togglingComponent === comp.key}
                                   className={`px-3 py-1 text-xs rounded font-medium ${
-                                    comp.status === "enabled"
-                                      ? "bg-red-50 text-red-700 hover:bg-red-100"
-                                      : "bg-blue-600 text-white hover:bg-blue-700"
+                                    togglingComponent === comp.key
+                                      ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                                      : comp.status === "enabled"
+                                        ? "bg-red-50 text-red-700 hover:bg-red-100"
+                                        : comp.status === "provisioning"
+                                          ? "bg-amber-100 text-amber-700 cursor-not-allowed"
+                                          : comp.status === "build_failed"
+                                            ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                                            : "bg-blue-600 text-white hover:bg-blue-700"
                                   }`}
                                 >
-                                  {comp.status === "enabled" ? "Disable" : "Enable"}
+                                  {togglingComponent === comp.key
+                                    ? "Updating..."
+                                    : comp.status === "enabled"
+                                      ? "Disable"
+                                      : comp.status === "provisioning"
+                                        ? "Building..."
+                                        : comp.status === "build_failed"
+                                          ? "Failed"
+                                          : "Enable"}
                                 </button>
                               </div>
                               {componentErrors[comp.key] && (

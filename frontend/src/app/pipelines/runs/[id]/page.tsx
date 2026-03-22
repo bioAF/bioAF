@@ -5,6 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ContentLoading } from "@/components/shared/ContentLoading";
 import { ReviewPanel } from "@/components/experiments/ReviewPanel";
 import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBadge";
 import { isAuthenticated } from "@/lib/auth";
@@ -142,11 +143,7 @@ export default function PipelineRunDetailPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProcess, activeTab, run?.k8s_job_name]);
 
-  if (loading) {
-    return <div className="flex h-screen items-center justify-center"><LoadingSpinner size="lg" /></div>;
-  }
-
-  if (!run) {
+  if (!loading && !run) {
     return (
       <div className="flex h-screen">
         <Sidebar />
@@ -175,7 +172,7 @@ export default function PipelineRunDetailPage() {
     return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
   }
 
-  const isActive = ["running", "pending"].includes(run.status);
+  const isActive = ["running", "pending"].includes(run?.status ?? "");
   const tabs: { key: Tab; label: string }[] = [
     { key: "logs", label: "Logs" },
     { key: "report", label: "Report" },
@@ -190,6 +187,10 @@ export default function PipelineRunDetailPage() {
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header />
         <main className="flex-1 overflow-y-auto p-6">
+          {loading ? (
+            <ContentLoading />
+          ) : run && (
+          <>
           <div className="flex items-center gap-4 mb-6">
             <button onClick={() => router.push("/pipelines/runs")} className="text-gray-500 hover:text-gray-700">← Back</button>
             <h1 className="text-2xl font-bold">Run #{run.id} — {run.pipeline_name}</h1>
@@ -429,6 +430,8 @@ export default function PipelineRunDetailPage() {
                 </tbody>
               </table>
             </div>
+          )}
+          </>
           )}
         </main>
       </div>

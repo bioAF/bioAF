@@ -40,6 +40,8 @@ _PERMISSION_ROLE_MAP: dict[str, str] = {
     "resourcemanager.projects.setIamPolicy": "roles/resourcemanager.projectIamAdmin",
     "bigquery.datasets.create": "roles/bigquery.dataEditor",
     "bigquery.jobs.create": "roles/bigquery.dataEditor",
+    "artifactregistry.repositories.create": "roles/artifactregistry.admin",
+    "cloudbuild.builds.create": "roles/cloudbuild.builds.editor",
 }
 
 # Deduplicated, stable-order list of recommended roles.
@@ -191,6 +193,8 @@ def validate_gcp_credentials(
         "compute.googleapis.com",
         "pubsub.googleapis.com",
         "bigquery.googleapis.com",
+        "artifactregistry.googleapis.com",
+        "cloudbuild.googleapis.com",
     ]
     try:
         su_client = service_usage_v1.ServiceUsageClient(credentials=creds)

@@ -34,7 +34,7 @@ const nextConfig = {
       { source: "/admin/backup", destination: "/infrastructure/backup", permanent: true },
       { source: "/admin/backups", destination: "/infrastructure/backup", permanent: true },
       { source: "/admin/users", destination: "/settings/users", permanent: true },
-      { source: "/admin/access-logs", destination: "/settings/access-logs", permanent: true },
+      { source: "/admin/access-logs", destination: "/settings/audit-log", permanent: true },
       { source: "/admin/settings", destination: "/settings/info", permanent: true },
       { source: "/admin/naming-profiles", destination: "/settings/naming-profiles", permanent: true },
       { source: "/admin/templates", destination: "/projects/experiment-templates", permanent: true },

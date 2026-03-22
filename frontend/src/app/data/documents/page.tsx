@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
+import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
 import type { DocumentResponse, DocumentSearchResponse } from "@/lib/types";
 
@@ -88,7 +89,7 @@ export default function DataDocumentsPage() {
             </div>
 
             {loading ? (
-              <p className="text-gray-400 text-sm">Loading...</p>
+              <ContentLoading />
             ) : documents.length === 0 ? (
               <p className="text-gray-400 text-sm">No documents found.</p>
             ) : (

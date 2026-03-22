@@ -5,6 +5,7 @@ from datetime import date
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.activity_feed import ActivityFeedEntry
 
@@ -71,7 +72,10 @@ class ActivityFeedService:
         total = count_result.scalar() or 0
 
         result = await session.execute(
-            base.order_by(ActivityFeedEntry.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+            base.options(selectinload(ActivityFeedEntry.user))
+            .order_by(ActivityFeedEntry.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
         )
         events = list(result.scalars().all())
         return events, total

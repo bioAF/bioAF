@@ -73,6 +73,8 @@ const RECOMMENDED_ROLES = [
   { role: "roles/compute.admin", description: "Compute Admin" },
   { role: "roles/resourcemanager.projectIamAdmin", description: "Project IAM Admin" },
   { role: "roles/bigquery.dataEditor", description: "BigQuery Data Editor" },
+  { role: "roles/artifactregistry.admin", description: "Artifact Registry Admin" },
+  { role: "roles/cloudbuild.builds.editor", description: "Cloud Build Editor" },
   { role: "roles/serviceusage.serviceUsageViewer", description: "Service Usage Viewer" },
   { role: "roles/viewer", description: "Viewer" },
 ];
@@ -91,6 +93,8 @@ const REQUIRED_APIS = [
   { name: "cloudbilling.googleapis.com", description: "Cloud Billing" },
   { name: "file.googleapis.com", description: "Filestore" },
   { name: "bigquery.googleapis.com", description: "BigQuery" },
+  { name: "artifactregistry.googleapis.com", description: "Artifact Registry" },
+  { name: "cloudbuild.googleapis.com", description: "Cloud Build" },
 ];
 
 export default function GcpSettingsPage() {

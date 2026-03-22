@@ -2,13 +2,23 @@
 
 Supports local/mock mode for development and real K8s API for production.
 Mode is controlled by the BIOAF_COMPUTE_MODE environment variable.
+
+When running outside the cluster (e.g., Docker Compose on a VM), the adapter
+builds a K8s client from platform_config credentials (gke_cluster_endpoint,
+gke_cluster_ca_cert, GCP service account key).
 """
 
 import asyncio
+import base64
+import json as _json
 import logging
 import os
+import tempfile
+import time
 import uuid
 from datetime import datetime, timezone
+
+from kubernetes import client, config
 
 from app.adapters.base import NotebookProvider
 from app.services.session_persistence import (
@@ -17,6 +27,27 @@ from app.services.session_persistence import (
 )
 
 logger = logging.getLogger("bioaf.adapters.notebooks.k8s")
+
+
+def _get_gcp_credentials(service_account_key_json: str):
+    """Build GCP credentials from a service account key JSON string."""
+    from google.oauth2 import service_account
+
+    key_data = _json.loads(service_account_key_json)
+    return service_account.Credentials.from_service_account_info(
+        key_data,
+        scopes=["https://www.googleapis.com/auth/cloud-platform"],
+    )
+
+
+def _get_gcp_token(service_account_key_json: str) -> str:
+    """Exchange a GCP service account key for an access token."""
+    import google.auth.transport.requests
+
+    credentials = _get_gcp_credentials(service_account_key_json)
+    credentials.refresh(google.auth.transport.requests.Request())
+    return credentials.token
+
 
 # In-memory session store for local mode
 _local_sessions: dict[str, dict] = {}
@@ -28,8 +59,15 @@ HOME_DIR = "/home/jovyan"
 class KubernetesNotebookProvider(NotebookProvider):
     """Kubernetes notebook backend with local mode for development."""
 
-    def __init__(self):
+    # GCP access tokens expire after 3600s; rebuild client before that
+    _TOKEN_TTL_SECONDS = 2700  # 45 minutes
+
+    def __init__(self, session_factory=None):
         self._mode = os.environ.get("BIOAF_COMPUTE_MODE", "local")
+        self._session_factory = session_factory
+        self._api_client: client.ApiClient | None = None
+        self._client_created_at: float = 0.0
+        self._cluster_config: dict | None = None
         self._namespace_ready = False
 
     @property
@@ -62,25 +100,152 @@ class KubernetesNotebookProvider(NotebookProvider):
 
     # -- K8s client helpers --
 
+    async def load_cluster_config(self, force: bool = False) -> dict:
+        """Read GKE cluster config from platform_config.
+
+        Caches the result. Re-reads when forced or when the cached endpoint
+        is missing/null so newly deployed clusters are picked up.
+        """
+        if self._cluster_config is not None and not force:
+            endpoint = self._cluster_config.get("gke_cluster_endpoint", "")
+            if endpoint and endpoint != "null":
+                return self._cluster_config
+
+        from sqlalchemy import text as sa_text
+
+        if not self._session_factory:
+            self._cluster_config = {}
+            return self._cluster_config
+
+        async with self._session_factory() as session:
+            result = await session.execute(
+                sa_text(
+                    "SELECT key, value FROM platform_config "
+                    "WHERE key IN ("
+                    "  'gke_cluster_endpoint', 'gke_cluster_ca_cert',"
+                    "  'gcp_credential_source', 'gcp_service_account_key',"
+                    "  'gke_cluster_name', 'gcp_project_id', 'gcp_zone'"
+                    ")"
+                )
+            )
+            self._cluster_config = {r[0]: r[1] for r in result.fetchall()}
+
+        if force:
+            self._api_client = None
+
+        return self._cluster_config
+
+    def _build_out_of_cluster_client(self) -> client.ApiClient:
+        """Build a K8s ApiClient using platform_config credentials.
+
+        Requires load_cluster_config() to have been called first.
+        """
+        cfg = self._cluster_config or {}
+
+        endpoint = cfg.get("gke_cluster_endpoint", "")
+        ca_cert_b64 = cfg.get("gke_cluster_ca_cert", "")
+        sa_key = cfg.get("gcp_service_account_key", "")
+
+        if not endpoint or endpoint == "null":
+            raise RuntimeError("No GKE cluster endpoint in platform_config. Deploy the compute stack first.")
+
+        if not endpoint.startswith("https://"):
+            endpoint = f"https://{endpoint}"
+
+        token = _get_gcp_token(sa_key)
+
+        ca_cert_bytes = base64.b64decode(ca_cert_b64)
+        ca_file = tempfile.NamedTemporaryFile(delete=False, suffix=".crt")
+        ca_file.write(ca_cert_bytes)
+        ca_file.close()
+
+        configuration = client.Configuration()
+        configuration.host = endpoint
+        configuration.ssl_ca_cert = ca_file.name
+        configuration.api_key = {"authorization": f"Bearer {token}"}
+
+        self._client_created_at = time.monotonic()
+        return client.ApiClient(configuration)
+
+    def _is_token_expired(self) -> bool:
+        """Check if the cached GCP access token is older than the TTL."""
+        if self._client_created_at == 0.0:
+            return False
+        return (time.monotonic() - self._client_created_at) > self._TOKEN_TTL_SECONDS
+
+    async def _get_api_client_async(self) -> client.ApiClient:
+        """Get or create a K8s ApiClient, trying incluster first.
+
+        Falls back to platform_config credentials when not running in a pod.
+        """
+        if self._api_client is not None and not self._is_token_expired():
+            return self._api_client
+
+        if self._is_token_expired():
+            logger.info("GCP access token approaching expiry, refreshing K8s client")
+            self._api_client = None
+
+        try:
+            config.load_incluster_config()
+            self._api_client = client.ApiClient()
+            logger.info("Using incluster K8s config")
+        except Exception:
+            logger.info("Not running in cluster, using platform_config credentials")
+            await self.load_cluster_config(force=True)
+            try:
+                self._api_client = self._build_out_of_cluster_client()
+                logger.info(
+                    "K8s client built for endpoint %s",
+                    (self._cluster_config or {}).get("gke_cluster_endpoint"),
+                )
+            except Exception:
+                logger.exception("Failed to build out-of-cluster K8s client")
+                raise
+
+        return self._api_client
+
+    def _get_api_client(self) -> client.ApiClient:
+        """Get or create a K8s ApiClient (sync version).
+
+        Uses cached client if available; does not reload from DB.
+        """
+        if self._api_client is not None and not self._is_token_expired():
+            return self._api_client
+
+        if self._is_token_expired():
+            logger.info("GCP access token approaching expiry, refreshing K8s client")
+            self._api_client = None
+
+        try:
+            config.load_incluster_config()
+            self._api_client = client.ApiClient()
+            logger.info("Using incluster K8s config")
+        except Exception:
+            logger.info("Not running in cluster, using platform_config credentials")
+            try:
+                self._api_client = self._build_out_of_cluster_client()
+                logger.info(
+                    "K8s client built for endpoint %s",
+                    (self._cluster_config or {}).get("gke_cluster_endpoint"),
+                )
+            except Exception:
+                logger.exception("Failed to build out-of-cluster K8s client")
+                raise
+
+        return self._api_client
+
     def _get_k8s_core_client(self):
         """Get a Kubernetes CoreV1Api client. Tests mock this method."""
-        from kubernetes import client, config
-
-        config.load_incluster_config()
-        return client.CoreV1Api()
+        return client.CoreV1Api(api_client=self._get_api_client())
 
     def _get_k8s_rbac_client(self):
         """Get a Kubernetes RbacAuthorizationV1Api client. Tests mock this method."""
-        from kubernetes import client, config
-
-        config.load_incluster_config()
-        return client.RbacAuthorizationV1Api()
+        return client.RbacAuthorizationV1Api(api_client=self._get_api_client())
 
     # -- Namespace setup --
 
     async def ensure_notebook_namespace(self, namespace: str = DEFAULT_NOTEBOOK_NAMESPACE) -> None:
         """Ensure the notebook namespace and service account exist."""
-        from kubernetes import client
         from kubernetes.client.rest import ApiException
 
         if self._namespace_ready:
@@ -147,6 +312,9 @@ class KubernetesNotebookProvider(NotebookProvider):
 
     async def _k8s_launch_session(self, session_spec: dict) -> dict:
         """Launch a notebook pod on the GKE interactive node pool."""
+        # Ensure API client is initialized (handles incluster vs out-of-cluster)
+        await self._get_api_client_async()
+
         session_id = session_spec.get("session_id", 0)
         session_type = session_spec.get("session_type", "jupyter")
         user_id = session_spec.get("user_id", 0)
@@ -173,10 +341,12 @@ class KubernetesNotebookProvider(NotebookProvider):
         else:
             container_port = 8787
             container_command = [
-                "rserver",
+                "/usr/lib/rstudio-server/bin/rserver",
                 "--www-address=0.0.0.0",
                 f"--www-port={container_port}",
                 "--auth-none=1",
+                "--auth-minimum-user-id=0",
+                "--server-daemonize=0",
             ]
 
         # Build GCS sync init container
@@ -190,7 +360,7 @@ class KubernetesNotebookProvider(NotebookProvider):
 
         # Build notebook container
         image = session_spec.get("image", "bioaf-scrna:latest")
-        notebook_container = {
+        notebook_container: dict = {
             "name": "notebook",
             "image": image,
             "command": container_command,
@@ -207,6 +377,18 @@ class KubernetesNotebookProvider(NotebookProvider):
                 },
             },
         }
+
+        # RStudio Server requires root to manage sessions and write pid files.
+        # RSTUDIO_SECURE_COOKIE_KEY provides the cookie signing key via env var,
+        # avoiding the file-based approach that fails with UUID-format strings.
+        if session_type == "rstudio":
+            notebook_container["securityContext"] = {"runAsUser": 0}
+            notebook_container["env"] = [
+                {
+                    "name": "RSTUDIO_SECURE_COOKIE_KEY",
+                    "value": uuid.uuid4().hex,
+                },
+            ]
 
         # Pod manifest
         pod_manifest = {
@@ -265,42 +447,134 @@ class KubernetesNotebookProvider(NotebookProvider):
                         "protocol": "TCP",
                     }
                 ],
-                "type": "ClusterIP",
+                "type": "LoadBalancer",
             },
         }
         core_client.create_namespaced_service(namespace=namespace, body=service_manifest)
         logger.info("Created service %s in %s", service_name, namespace)
 
-        # Wait for pod readiness (poll up to 5 minutes)
-        for _ in range(60):
-            pod = core_client.read_namespaced_pod(name=pod_name, namespace=namespace)
-            if pod.status.phase == "Running":
-                conditions = pod.status.conditions or []
-                ready = any(c.type == "Ready" and c.status == "True" for c in conditions)
-                if ready:
-                    break
-            if pod.status.phase in ("Failed", "Unknown"):
-                logger.error("Pod %s entered %s phase", pod_name, pod.status.phase)
-                return {
-                    "session_id": session_id,
-                    "pod_name": pod_name,
-                    "namespace": namespace,
-                    "status": "error",
-                    "access_url": None,
-                    "gcs_home_prefix": gcs_home_prefix,
-                }
-            await asyncio.sleep(5)
-
-        access_url = f"http://{service_name}.{namespace}.svc.cluster.local:{container_port}"
+        # Launch background task to poll for pod readiness and LB IP,
+        # then update the DB session record once both are available.
+        asyncio.create_task(self._poll_session_ready(session_id, pod_name, service_name, namespace, container_port))
 
         return {
             "session_id": session_id,
             "pod_name": pod_name,
             "namespace": namespace,
-            "status": "running",
-            "access_url": access_url,
+            "status": "starting",
+            "access_url": None,
             "gcs_home_prefix": gcs_home_prefix,
         }
+
+    async def _poll_session_ready(
+        self,
+        session_id: int,
+        pod_name: str,
+        service_name: str,
+        namespace: str,
+        container_port: int,
+    ) -> None:
+        """Background: poll for pod readiness and LB IP, then update the DB."""
+        try:
+            core_client = self._get_k8s_core_client()
+
+            # Wait for pod readiness (up to 5 minutes)
+            pod_ready = False
+            for _ in range(60):
+                try:
+                    pod = core_client.read_namespaced_pod(name=pod_name, namespace=namespace)
+                    if pod.status.phase == "Running":
+                        conditions = pod.status.conditions or []
+                        if any(c.type == "Ready" and c.status == "True" for c in conditions):
+                            pod_ready = True
+                            break
+                    if pod.status.phase in ("Failed", "Unknown"):
+                        logger.error("Pod %s entered %s phase", pod_name, pod.status.phase)
+                        await self._update_session_in_db(session_id, status="failed", access_url=None)
+                        return
+                except Exception:
+                    pass
+                await asyncio.sleep(5)
+
+            if not pod_ready:
+                logger.error("Pod %s not ready after 5 min", pod_name)
+                await self._update_session_in_db(session_id, status="failed", access_url=None)
+                return
+
+            # Wait for LoadBalancer external IP (up to 3 minutes)
+            # Use raw httpx instead of python client (client returns stale
+            # ingress: None even when kubectl shows the IP).
+            import httpx
+
+            api_client = self._get_api_client()
+            config = api_client.configuration
+            svc_url = f"{config.host}/api/v1/namespaces/{namespace}/services/{service_name}"
+            headers = {"Authorization": list(config.api_key.values())[0]}
+
+            access_url = None
+            for attempt in range(36):
+                try:
+                    resp = httpx.get(
+                        svc_url,
+                        headers=headers,
+                        verify=config.ssl_ca_cert or False,
+                        timeout=10,
+                    )
+                    if resp.status_code == 200:
+                        ingress_list = resp.json().get("status", {}).get("loadBalancer", {}).get("ingress") or []
+                        if ingress_list:
+                            ext_ip = ingress_list[0].get("ip") or ingress_list[0].get("hostname")
+                            access_url = f"http://{ext_ip}:{container_port}"
+                            logger.info(
+                                "External URL for session %s: %s",
+                                session_id,
+                                access_url,
+                            )
+                            break
+                except Exception:
+                    pass
+                await asyncio.sleep(5)
+
+            if not access_url:
+                logger.warning(
+                    "LoadBalancer IP not ready for %s after 3 min",
+                    service_name,
+                )
+
+            await self._update_session_in_db(session_id, status="running", access_url=access_url)
+
+        except Exception:
+            logger.exception("Background poll failed for session %s", session_id)
+            await self._update_session_in_db(session_id, status="failed", access_url=None)
+
+    async def _update_session_in_db(
+        self,
+        session_id: int,
+        status: str,
+        access_url: str | None,
+    ) -> None:
+        """Update a notebook session's status and access_url in the DB."""
+        if not self._session_factory:
+            logger.warning("No session_factory, cannot update session %s in DB", session_id)
+            return
+
+        try:
+            async with self._session_factory() as db:
+                from sqlalchemy import text
+
+                await db.execute(
+                    text("UPDATE notebook_sessions SET status = :status, access_url = :url WHERE id = :id"),
+                    {"status": status, "url": access_url, "id": session_id},
+                )
+                await db.commit()
+                logger.info(
+                    "Updated session %s: status=%s access_url=%s",
+                    session_id,
+                    status,
+                    access_url,
+                )
+        except Exception:
+            logger.exception("Failed to update session %s in DB", session_id)
 
     async def _k8s_terminate_session(
         self,

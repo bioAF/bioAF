@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
-import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ContentLoading } from "@/components/shared/ContentLoading";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type {
@@ -112,16 +112,16 @@ export default function EnvironmentsPage() {
     archived: "bg-gray-500",
   };
 
-  if (loading) {
-    return <div className="flex h-screen items-center justify-center"><LoadingSpinner size="lg" /></div>;
-  }
-
   return (
     <div className="flex h-screen">
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header />
         <main className="flex-1 overflow-y-auto p-6">
+          {loading ? (
+            <ContentLoading />
+          ) : (
+          <>
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl font-bold">Environments</h1>
             {canMutate && (
@@ -352,6 +352,8 @@ export default function EnvironmentsPage() {
                 </div>
               </div>
             </div>
+          )}
+          </>
           )}
         </main>
       </div>

@@ -24,6 +24,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_role
 from app.database import async_session_factory, get_session
+from app.services.audit_service import log_action
+from app.services.notebook_image_service import build_notebook_image, cancel_build
 from app.services.stack_deployment import (
     StackStatus,
     deploy_stack,
@@ -34,6 +36,9 @@ from app.services.stack_deployment import (
     teardown_stack,
 )
 from app.services.terraform_executor import TerraformExecutor
+
+# Components that require the bioaf-scrna notebook image
+_NOTEBOOK_COMPONENTS = {"rstudio", "jupyterhub"}
 
 logger = logging.getLogger("bioaf.stack_deploy_api")
 
@@ -101,6 +106,12 @@ class ComponentToggleResponse(BaseModel):
     component_key: str
     enabled: bool
     status: str
+
+
+class NotebookImageBuildStatus(BaseModel):
+    build_id: str | None
+    build_status: str | None
+    image_uri: str | None
 
 
 # -----------------------------------------------------------------------
@@ -444,7 +455,11 @@ async def stack_components_list(
     for comp_def in KUBERNETES_COMPONENTS:
         state = state_map.get(comp_def["key"], {"enabled": False, "status": "disabled"})
         if state["enabled"]:
-            status = "enabled"
+            # Preserve provisioning/build_failed status from component_states
+            if state["status"] in ("provisioning", "build_failed"):
+                status = state["status"]
+            else:
+                status = "enabled"
         else:
             status = "disabled"
 
@@ -523,14 +538,37 @@ async def stack_component_toggle(
                 )
 
         # Enable
-        await session.execute(
-            text("""
-            UPDATE component_states SET enabled = true, status = 'enabled'
-            WHERE component_key = :key
-            """).bindparams(key=component_key)
-        )
         new_enabled = True
         new_status = "enabled"
+
+        # Notebook components need the bioaf-scrna image
+        if component_key in _NOTEBOOK_COMPONENTS:
+            scrna_image = (
+                await session.execute(text("SELECT value FROM platform_config WHERE key = 'bioaf_scrna_image'"))
+            ).scalar_one_or_none()
+            build_status = (
+                await session.execute(
+                    text("SELECT value FROM platform_config WHERE key = 'notebook_image_build_status'")
+                )
+            ).scalar_one_or_none()
+
+            # Trigger a build if: no image URI, or image URI is set but the
+            # build never succeeded (stale URI from a pre-fix attempt).
+            needs_build = not scrna_image or scrna_image == "null" or build_status not in ("SUCCESS",)
+            if needs_build:
+                try:
+                    await build_notebook_image(session)
+                    new_status = "provisioning"
+                except Exception as exc:
+                    logger.warning("Failed to start notebook image build: %s", exc)
+                    new_status = "build_failed"
+
+        await session.execute(
+            text("""
+            UPDATE component_states SET enabled = true, status = :status
+            WHERE component_key = :key
+            """).bindparams(key=component_key, status=new_status)
+        )
     else:
         # Disable
         await session.execute(
@@ -542,6 +580,20 @@ async def stack_component_toggle(
         new_enabled = False
         new_status = "disabled"
 
+    user_id = int(current_user["sub"])
+    await log_action(
+        session,
+        user_id=user_id,
+        entity_type="component",
+        entity_id=0,
+        action="enable" if new_enabled else "disable",
+        details={
+            "component_key": component_key,
+            "component_name": comp_def["name"],
+            "status": new_status,
+        },
+    )
+
     await session.commit()
 
     return ComponentToggleResponse(
@@ -549,6 +601,51 @@ async def stack_component_toggle(
         enabled=new_enabled,
         status=new_status,
     )
+
+
+# -----------------------------------------------------------------------
+# Notebook image build status
+# -----------------------------------------------------------------------
+
+
+@router.get("/api/v1/infrastructure/notebook-image/build-status")
+async def notebook_image_build_status(
+    current_user: dict = require_role("admin", "comp_bio"),
+    session: AsyncSession = Depends(get_session),
+) -> NotebookImageBuildStatus:
+    """Return current notebook image build status."""
+    rows = (
+        await session.execute(
+            text(
+                "SELECT key, value FROM platform_config "
+                "WHERE key IN ('notebook_image_build_id', 'notebook_image_build_status', 'bioaf_scrna_image')"
+            )
+        )
+    ).fetchall()
+    config = {r[0]: r[1] for r in rows}
+
+    def _non_null(val: str | None) -> str | None:
+        return val if val and val != "null" else None
+
+    return NotebookImageBuildStatus(
+        build_id=_non_null(config.get("notebook_image_build_id")),
+        build_status=_non_null(config.get("notebook_image_build_status")),
+        image_uri=_non_null(config.get("bioaf_scrna_image")),
+    )
+
+
+@router.post("/api/v1/infrastructure/notebook-image/cancel")
+async def notebook_image_cancel(
+    current_user: dict = require_role("admin"),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Cancel the active notebook image build."""
+    try:
+        build_id = await cancel_build(session)
+        await session.commit()
+        return {"cancelled": True, "build_id": build_id}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 # -----------------------------------------------------------------------

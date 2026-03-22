@@ -16,7 +16,7 @@ export function InfrastructureHealthWidget() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 30000);
+    const timeout = setTimeout(() => setLoading(false), 60000);
     api
       .getWithRetry<{ components: ComponentHealth[] }>("/api/components")
       .then((data) => setComponents(data.components.filter((c) => c.enabled)))

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { api } from "@/lib/api";
+import { ContentLoading } from "@/components/shared/ContentLoading";
 import type {
   FileResponse,
   DocumentResponse,
@@ -330,7 +331,7 @@ function DocumentsTab() {
       </div>
 
       {loading ? (
-        <p className="text-gray-400 text-sm">Loading...</p>
+        <ContentLoading />
       ) : documents.length === 0 ? (
         <p className="text-gray-400 text-sm">No documents found.</p>
       ) : (
@@ -388,7 +389,7 @@ function StorageTab() {
     })();
   }, []);
 
-  if (loading) return <p className="text-gray-400 text-sm">Loading storage stats...</p>;
+  if (loading) return <ContentLoading />;
   if (!dashboard) return <p className="text-gray-400 text-sm">Could not load storage data.</p>;
 
   return (

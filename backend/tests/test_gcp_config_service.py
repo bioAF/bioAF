@@ -50,6 +50,8 @@ ALL_REQUIRED_APIS = [
     "compute.googleapis.com",
     "pubsub.googleapis.com",
     "bigquery.googleapis.com",
+    "artifactregistry.googleapis.com",
+    "cloudbuild.googleapis.com",
 ]
 
 ALL_REQUIRED_PERMISSIONS = [
@@ -64,6 +66,8 @@ ALL_REQUIRED_PERMISSIONS = [
     "resourcemanager.projects.setIamPolicy",
     "bigquery.datasets.create",
     "bigquery.jobs.create",
+    "artifactregistry.repositories.create",
+    "cloudbuild.builds.create",
 ]
 
 
@@ -586,3 +590,106 @@ def test_missing_bigquery_api_reported(mock_sa, mock_rm, mock_storage, mock_gke,
     apis_check = next(c for c in result.checks if c.name == "apis_enabled")
     assert apis_check.passed is False
     assert "bigquery.googleapis.com" in apis_check.message
+
+
+# ---------------------------------------------------------------------------
+# Test 18: Missing Artifact Registry API is detected
+# ---------------------------------------------------------------------------
+@patch("app.services.gcp_config.service_usage_v1")
+@patch("app.services.gcp_config.container_v1")
+@patch("app.services.gcp_config.storage")
+@patch("app.services.gcp_config.resourcemanager_v3")
+@patch("app.services.gcp_config.service_account")
+def test_missing_artifact_registry_api_reported(mock_sa, mock_rm, mock_storage, mock_gke, mock_su):
+    """When Artifact Registry API is not enabled, apis_enabled check reports it."""
+    mock_creds = MagicMock()
+    mock_sa.Credentials.from_service_account_info.return_value = mock_creds
+    mock_rm.ProjectsClient.return_value.get_project.return_value = MagicMock()
+    mock_rm.ProjectsClient.return_value.test_iam_permissions.return_value = _mock_iam_response(ALL_REQUIRED_PERMISSIONS)
+    mock_storage.Client.return_value.list_buckets.return_value = []
+    mock_gke.ClusterManagerClient.return_value.list_clusters.return_value = MagicMock()
+
+    apis_without_ar = [a for a in ALL_REQUIRED_APIS if a != "artifactregistry.googleapis.com"]
+    mock_su.ServiceUsageClient.return_value.list_services.return_value = _mock_enabled_services(apis_without_ar)
+
+    result = validate_gcp_credentials(
+        project_id="my-project",
+        credential_source="service_account_key",
+        service_account_key=VALID_SA_KEY,
+    )
+
+    apis_check = next(c for c in result.checks if c.name == "apis_enabled")
+    assert apis_check.passed is False
+    assert "artifactregistry.googleapis.com" in apis_check.message
+
+
+# ---------------------------------------------------------------------------
+# Test 19: Missing Cloud Build API is detected
+# ---------------------------------------------------------------------------
+@patch("app.services.gcp_config.service_usage_v1")
+@patch("app.services.gcp_config.container_v1")
+@patch("app.services.gcp_config.storage")
+@patch("app.services.gcp_config.resourcemanager_v3")
+@patch("app.services.gcp_config.service_account")
+def test_missing_cloud_build_api_reported(mock_sa, mock_rm, mock_storage, mock_gke, mock_su):
+    """When Cloud Build API is not enabled, apis_enabled check reports it."""
+    mock_creds = MagicMock()
+    mock_sa.Credentials.from_service_account_info.return_value = mock_creds
+    mock_rm.ProjectsClient.return_value.get_project.return_value = MagicMock()
+    mock_rm.ProjectsClient.return_value.test_iam_permissions.return_value = _mock_iam_response(ALL_REQUIRED_PERMISSIONS)
+    mock_storage.Client.return_value.list_buckets.return_value = []
+    mock_gke.ClusterManagerClient.return_value.list_clusters.return_value = MagicMock()
+
+    apis_without_cb = [a for a in ALL_REQUIRED_APIS if a != "cloudbuild.googleapis.com"]
+    mock_su.ServiceUsageClient.return_value.list_services.return_value = _mock_enabled_services(apis_without_cb)
+
+    result = validate_gcp_credentials(
+        project_id="my-project",
+        credential_source="service_account_key",
+        service_account_key=VALID_SA_KEY,
+    )
+
+    apis_check = next(c for c in result.checks if c.name == "apis_enabled")
+    assert apis_check.passed is False
+    assert "cloudbuild.googleapis.com" in apis_check.message
+
+
+# ---------------------------------------------------------------------------
+# Test 20: AR and Cloud Build permissions are validated
+# ---------------------------------------------------------------------------
+@patch("app.services.gcp_config.service_usage_v1")
+@patch("app.services.gcp_config.container_v1")
+@patch("app.services.gcp_config.storage")
+@patch("app.services.gcp_config.resourcemanager_v3")
+@patch("app.services.gcp_config.service_account")
+def test_missing_artifact_registry_permission_reported(mock_sa, mock_rm, mock_storage, mock_gke, mock_su):
+    """Missing artifactregistry.repositories.create is reported with recommended role."""
+    mock_creds = MagicMock()
+    mock_sa.Credentials.from_service_account_info.return_value = mock_creds
+    mock_rm.ProjectsClient.return_value.get_project.return_value = MagicMock()
+
+    # Grant all except AR and Cloud Build permissions
+    granted = [p for p in ALL_REQUIRED_PERMISSIONS if not p.startswith(("artifactregistry.", "cloudbuild."))]
+    mock_rm.ProjectsClient.return_value.test_iam_permissions.return_value = _mock_iam_response(granted)
+    mock_storage.Client.return_value.list_buckets.return_value = []
+    mock_gke.ClusterManagerClient.return_value.list_clusters.return_value = MagicMock()
+    mock_su.ServiceUsageClient.return_value.list_services.return_value = _mock_enabled_services(ALL_REQUIRED_APIS)
+
+    result = validate_gcp_credentials(
+        project_id="my-project",
+        credential_source="service_account_key",
+        service_account_key=VALID_SA_KEY,
+    )
+
+    iam_check = next(c for c in result.checks if c.name == "iam_permissions")
+    assert iam_check.passed is False
+    assert "artifactregistry.repositories.create" in iam_check.message
+    assert "cloudbuild.builds.create" in iam_check.message
+
+    ar_detail = next(d for d in result.permission_details if d.permission == "artifactregistry.repositories.create")
+    assert ar_detail.granted is False
+    assert ar_detail.recommended_role == "roles/artifactregistry.admin"
+
+    cb_detail = next(d for d in result.permission_details if d.permission == "cloudbuild.builds.create")
+    assert cb_detail.granted is False
+    assert cb_detail.recommended_role == "roles/cloudbuild.builds.editor"

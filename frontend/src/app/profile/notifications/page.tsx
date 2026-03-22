@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { isAuthenticated } from "@/lib/auth";
+import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
 
 interface Preference {
@@ -120,7 +121,7 @@ export default function NotificationPreferencesPage() {
           )}
 
           {loading ? (
-            <div className="text-gray-500">Loading...</div>
+            <ContentLoading />
           ) : (
             <>
               <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">

@@ -39,6 +39,12 @@ export default function NotebooksPage() {
   const [selectedProfile, setSelectedProfile] = useState<ResourceProfile>("small");
   const [selectedExperiment, setSelectedExperiment] = useState<number | null>(null);
   const [experiments, setExperiments] = useState<Experiment[]>([]);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+  const [imageBuildStatus, setImageBuildStatus] = useState<{
+    build_id: string | null;
+    build_status: string | null;
+    image_uri: string | null;
+  } | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -47,11 +53,37 @@ export default function NotebooksPage() {
     }
     loadSessions();
     loadExperiments();
+    loadBuildStatus();
   }, [router]);
+
+  // Auto-refresh while any session is starting (waiting for pod + LB IP)
+  useEffect(() => {
+    const hasStarting = sessions.some((s) => s.status === "starting");
+    if (!hasStarting) return;
+    const interval = setInterval(() => loadSessions(), 10000);
+    return () => clearInterval(interval);
+  }, [sessions]);
+
+  async function loadBuildStatus() {
+    try {
+      const status = await api.get<{
+        build_id: string | null;
+        build_status: string | null;
+        image_uri: string | null;
+      }>("/api/v1/infrastructure/notebook-image/build-status");
+      setImageBuildStatus(status);
+      // Poll while build is active
+      if (status.build_status && ["WORKING", "QUEUED"].includes(status.build_status)) {
+        setTimeout(loadBuildStatus, 15000);
+      }
+    } catch {
+      // ignore -- user may not have access
+    }
+  }
 
   async function loadSessions() {
     try {
-      const data = await api.get<SessionListResponse>("/api/notebooks/sessions");
+      const data = await api.get<SessionListResponse>("/api/v1/notebooks/sessions");
       setSessions(data.sessions);
     } catch {
     } finally {
@@ -68,6 +100,7 @@ export default function NotebooksPage() {
 
   async function handleLaunch(sessionType: SessionType) {
     setLaunching(true);
+    setLaunchError(null);
     try {
       const req: SessionLaunchRequest = {
         session_type: sessionType,
@@ -77,7 +110,7 @@ export default function NotebooksPage() {
       await api.post("/api/v1/notebooks/sessions", req);
       loadSessions();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to launch session");
+      setLaunchError(err instanceof Error ? err.message : "Failed to launch session");
     } finally {
       setLaunching(false);
     }
@@ -107,6 +140,40 @@ export default function NotebooksPage() {
           <div className="flex items-center gap-4 mb-6">
             <h1 className="text-2xl font-bold">Notebook Sessions</h1>
           </div>
+
+          {/* Build Status Banner */}
+          {imageBuildStatus?.build_status && ["WORKING", "QUEUED"].includes(imageBuildStatus.build_status) && (
+            <div className="bg-amber-50 border border-amber-300 rounded-lg p-4 mb-6">
+              <div className="flex items-center gap-3">
+                <div className="animate-spin h-5 w-5 border-2 border-amber-500 border-t-transparent rounded-full" />
+                <div>
+                  <p className="text-sm font-medium text-amber-800">
+                    Notebook image is building
+                  </p>
+                  <p className="text-xs text-amber-600 mt-0.5">
+                    Status: {imageBuildStatus.build_status}
+                    {imageBuildStatus.build_id && (
+                      <span className="ml-1 text-amber-400">
+                        (build {imageBuildStatus.build_id.slice(0, 8)})
+                      </span>
+                    )}
+                    {" -- "}this one-time setup can take up to an hour. Sessions launched now may fail until it completes.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {imageBuildStatus?.build_status === "FAILURE" && (
+            <div className="bg-red-50 border border-red-300 rounded-lg p-4 mb-6">
+              <p className="text-sm font-medium text-red-800">
+                Notebook image build failed
+              </p>
+              <p className="text-xs text-red-600 mt-0.5">
+                The last image build did not succeed. Re-enable the component in Infrastructure &gt; Components to retry.
+              </p>
+            </div>
+          )}
 
           {/* Launch Section */}
           <div className="bg-white rounded-lg shadow p-6 mb-6">
@@ -169,6 +236,20 @@ export default function NotebooksPage() {
                   {launching ? "Launching..." : "Launch RStudio"}
                 </button>
               </div>
+
+              {launchError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 mt-3">
+                  <div className="flex items-start justify-between">
+                    <p className="text-sm text-red-800">{launchError}</p>
+                    <button
+                      onClick={() => setLaunchError(null)}
+                      className="text-red-400 hover:text-red-600 ml-2 text-xs"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -189,7 +270,7 @@ export default function NotebooksPage() {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Profile</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start Time</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Idle</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Access URL</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Experiment</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                   </tr>
@@ -217,11 +298,16 @@ export default function NotebooksPage() {
                       <td className="px-4 py-3 text-sm">
                         {s.started_at ? new Date(s.started_at).toLocaleString() : "\u2014"}
                       </td>
-                      <td className="px-4 py-3 text-sm">
-                        {s.idle_since ? (
-                          <span className="text-yellow-700">
-                            Since {new Date(s.idle_since).toLocaleTimeString()}
-                          </span>
+                      <td className="px-4 py-3 text-sm font-mono" onClick={(e) => e.stopPropagation()}>
+                        {s.proxy_url && s.status === "running" ? (
+                          <a
+                            href={s.proxy_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-bioaf-600 hover:underline"
+                          >
+                            {s.proxy_url.replace("http://", "")}
+                          </a>
                         ) : "\u2014"}
                       </td>
                       <td className="px-4 py-3 text-sm" onClick={(e) => e.stopPropagation()}>
@@ -284,6 +370,7 @@ export default function NotebooksPage() {
                 { label: "Memory (GB)", value: viewingSession.memory_gb },
                 { label: "Experiment", value: viewingSession.experiment?.name },
                 { label: "Started", value: viewingSession.started_at ? new Date(viewingSession.started_at).toLocaleString() : null },
+                { label: "Access URL", value: viewingSession.proxy_url || null },
                 { label: "Idle Since", value: viewingSession.idle_since ? new Date(viewingSession.idle_since).toLocaleString() : null },
               ]}
               actions={
@@ -297,6 +384,14 @@ export default function NotebooksPage() {
                     >
                       Open
                     </a>
+                  )}
+                  {viewingSession.status === "running" && (
+                    <button
+                      onClick={() => { handleSync(viewingSession.id); }}
+                      className="px-3 py-1.5 border border-green-600 text-green-600 rounded text-sm hover:bg-green-50"
+                    >
+                      Sync
+                    </button>
                   )}
                   {["pending", "starting", "running", "idle"].includes(viewingSession.status) && (
                     <button

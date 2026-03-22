@@ -96,6 +96,73 @@ async def test_audit_log_immutability(session: AsyncSession, admin_user):
 
 
 @pytest.mark.asyncio
+async def test_audit_api_date_filter(client, admin_token, admin_user, session):
+    """Test that audit log API supports date range filtering."""
+    await log_action(
+        session,
+        user_id=admin_user.id,
+        entity_type="experiment",
+        entity_id=1,
+        action="create",
+        details={"name": "EXP-1"},
+    )
+    await session.commit()
+
+    response = await client.get(
+        "/api/audit?start_date=2020-01-01&end_date=2099-12-31",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_audit_api_user_id_filter(client, admin_token, admin_user, session):
+    """Test that audit log API supports user_id filtering."""
+    await log_action(
+        session,
+        user_id=admin_user.id,
+        entity_type="sample",
+        entity_id=1,
+        action="create",
+    )
+    await session.commit()
+
+    response = await client.get(
+        f"/api/audit?user_id={admin_user.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] >= 1
+    for entry in data["entries"]:
+        assert entry["user"] is not None
+        assert entry["user"]["email"] == admin_user.email
+
+
+@pytest.mark.asyncio
+async def test_audit_api_export_csv(client, admin_token, admin_user, session):
+    """Test CSV export of audit log."""
+    await log_action(
+        session,
+        user_id=admin_user.id,
+        entity_type="experiment",
+        entity_id=1,
+        action="create",
+    )
+    await session.commit()
+
+    response = await client.get(
+        "/api/audit/export?format=csv",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    assert "text/csv" in response.headers.get("content-type", "")
+    assert "timestamp" in response.text
+
+
+@pytest.mark.asyncio
 async def test_login_creates_audit_entry(client, admin_user, session):
     """Test that login creates an audit log entry."""
     response = await client.post(

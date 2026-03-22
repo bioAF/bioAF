@@ -44,19 +44,19 @@ describe("GCP Configuration nav item", () => {
     expect(screen.queryByText("GCP Configuration")).not.toBeInTheDocument();
   });
 
-  it("is positioned between Access Logs and Naming Profiles", () => {
+  it("is positioned between Audit Log and Naming Profiles", () => {
     mockGetCurrentUser.mockReturnValue({ email: "admin@bioaf.org", role: "admin", sub: "1" });
     render(<Sidebar />);
 
     fireEvent.click(screen.getByText("Settings"));
 
     const items = screen.getAllByRole("link").map((el) => el.textContent);
-    const accessLogsIdx = items.findIndex((t) => t === "Access Logs");
+    const auditLogIdx = items.findIndex((t) => t === "Audit Log");
     const gcpIdx = items.findIndex((t) => t === "GCP Configuration");
     const namingIdx = items.findIndex((t) => t === "Naming Profiles");
 
-    expect(accessLogsIdx).toBeGreaterThanOrEqual(0);
-    expect(gcpIdx).toBeGreaterThan(accessLogsIdx);
+    expect(auditLogIdx).toBeGreaterThanOrEqual(0);
+    expect(gcpIdx).toBeGreaterThan(auditLogIdx);
     expect(namingIdx).toBeGreaterThan(gcpIdx);
   });
 });

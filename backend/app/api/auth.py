@@ -13,6 +13,7 @@ from app.schemas.auth import (
     UserProfile,
     VerifyEmailRequest,
 )
+from app.services.access_log_service import AccessLogService
 from app.services.audit_service import log_action
 from app.services.auth_service import AuthService
 from app.services.email_service import EmailService
@@ -36,6 +37,15 @@ async def login(body: LoginRequest, session: AsyncSession = Depends(get_session)
     token = AuthService.create_token(user.id, user.email, user.role, user.organization_id)
 
     await log_action(session, user_id=user.id, entity_type="auth", entity_id=user.id, action="login")
+    await AccessLogService.log_access(
+        session,
+        user.organization_id,
+        user.id,
+        "auth",
+        str(user.id),
+        "login",
+        {"email": user.email},
+    )
     await session.commit()
 
     return LoginResponse(access_token=token)

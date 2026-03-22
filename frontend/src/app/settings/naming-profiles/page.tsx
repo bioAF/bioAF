@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { ContentLoading } from "@/components/shared/ContentLoading";
 import type { NamingProfile, NamingProfileTestResult, SegmentDefinition } from "@/lib/types";
 
 const FIELD_OPTIONS = [
@@ -323,7 +324,7 @@ export default function SettingsNamingProfilesPage() {
             )}
 
             {loading ? (
-              <div className="text-center py-12 text-gray-500">Loading...</div>
+              <ContentLoading />
             ) : profiles.length === 0 ? (
               <div className="text-center py-12 text-gray-500">
                 No naming profiles configured. Create one to enable auto-ingest file parsing.

@@ -7,6 +7,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { isAuthenticated } from "@/lib/auth";
+import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
 
 interface ActivityEvent {
@@ -188,9 +189,7 @@ export default function ActivityFeedPage() {
           {/* Events List */}
           <div className="bg-white rounded-lg border border-gray-200">
             {loading ? (
-              <div className="p-8 text-center text-gray-500" data-testid="activity-loading">
-                Loading...
-              </div>
+              <ContentLoading />
             ) : events.length === 0 ? (
               <div className="p-8 text-center text-gray-500" data-testid="activity-empty">
                 No activity matches your filters.

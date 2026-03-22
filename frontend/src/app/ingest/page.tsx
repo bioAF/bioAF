@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { ContentLoading } from "@/components/shared/ContentLoading";
 import type { IngestEvent, UnclaimedEntity } from "@/lib/types";
 
 export default function IngestDashboardPage() {
@@ -127,7 +128,7 @@ export default function IngestDashboardPage() {
             </div>
 
             {loading ? (
-              <div className="text-center py-12 text-gray-500">Loading...</div>
+              <ContentLoading />
             ) : tab === "events" ? (
               <div className="bg-white border rounded-lg overflow-hidden">
                 <table className="min-w-full">

@@ -95,6 +95,16 @@ describe("GCP Configuration step fields", () => {
     expect(screen.getByText("Service account key (JSON)")).toBeInTheDocument();
   });
 
+  test("shows prerequisites section with IAM roles and APIs", async () => {
+    await advanceToGcpStep();
+    const prereqs = screen.getByTestId("gcp-prerequisites");
+    expect(prereqs).toBeInTheDocument();
+    expect(prereqs.textContent).toContain("roles/artifactregistry.admin");
+    expect(prereqs.textContent).toContain("roles/cloudbuild.builds.editor");
+    expect(prereqs.textContent).toContain("artifactregistry.googleapis.com");
+    expect(prereqs.textContent).toContain("cloudbuild.googleapis.com");
+  });
+
   test("Save & Validate calls PUT then POST validate, advances to Compute Stack", async () => {
     await advanceToGcpStep();
 

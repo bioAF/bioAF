@@ -1,5 +1,33 @@
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import text
+
+
+@pytest.mark.asyncio
+async def test_login_creates_access_log_entry(client: AsyncClient, admin_user, session):
+    """Logging in should create an access_log entry with resource_type='auth'."""
+    response = await client.post(
+        "/api/auth/login",
+        json={"email": admin_user.email, "password": "testpassword123"},
+    )
+    assert response.status_code == 200
+
+    result = await session.execute(text("SELECT * FROM access_log WHERE resource_type = 'auth' AND action = 'login'"))
+    rows = result.fetchall()
+    assert len(rows) >= 1
+    assert rows[0].user_id == admin_user.id
+
+
+@pytest.mark.asyncio
+async def test_never_logged_in_users(client: AsyncClient, admin_token: str, admin_user, session):
+    """Should list users who have never logged in."""
+    response = await client.get(
+        "/api/access-logs/never-logged-in",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data["users"], list)
 
 
 @pytest.mark.asyncio

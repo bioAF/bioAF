@@ -65,8 +65,7 @@ export function ComponentCard({ component, onAction, comingSoon, comingSoonMessa
           </p>
         )}
 
-        <div className="flex items-center justify-between mt-4">
-          <span className="text-xs text-gray-500">{component.estimated_monthly_cost}</span>
+        <div className="flex items-center justify-end mt-4">
           <div className="flex gap-2">
             <Link
               href={`/components/${component.key}`}
@@ -100,7 +99,7 @@ export function ComponentCard({ component, onAction, comingSoon, comingSoonMessa
         title={`${action === "enable" ? "Enable" : "Disable"} ${component.name}?`}
         message={
           action === "enable"
-            ? `This will provision ${component.name} infrastructure. Estimated cost: ${component.estimated_monthly_cost}/month.`
+            ? `This will provision ${component.name} infrastructure.`
             : `This will destroy ${component.name} infrastructure. This action cannot be undone.`
         }
         confirmLabel={action === "enable" ? "Enable" : "Disable"}

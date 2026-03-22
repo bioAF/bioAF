@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { PlotModal } from "@/components/shared/PlotModal";
 import { api } from "@/lib/api";
+import { ContentLoading } from "@/components/shared/ContentLoading";
 import type {
   QCDashboardSummary,
   QCDashboardResponse,
@@ -175,7 +176,7 @@ function QCDashboardsTab() {
     );
   }
 
-  if (loading) return <p className="text-gray-400 text-sm">Loading...</p>;
+  if (loading) return <ContentLoading />;
 
   return (
     <div className="space-y-4">
@@ -273,7 +274,7 @@ function CellxgeneTab() {
     }
   };
 
-  if (loading) return <p className="text-gray-400 text-sm">Loading...</p>;
+  if (loading) return <ContentLoading />;
 
   return (
     <div className="space-y-4">
@@ -473,7 +474,7 @@ function PlotArchiveTab() {
       />
 
       {loading ? (
-        <p className="text-gray-400 text-sm">Loading...</p>
+        <ContentLoading />
       ) : plots.length === 0 ? (
         <p className="text-gray-400 text-sm">No plots found.</p>
       ) : (

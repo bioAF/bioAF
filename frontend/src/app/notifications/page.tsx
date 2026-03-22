@@ -7,6 +7,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { NotificationItem } from "@/components/notifications/NotificationItem";
 import { isAuthenticated } from "@/lib/auth";
+import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
 
 interface Notification {
@@ -118,7 +119,7 @@ export default function NotificationsPage() {
 
           <div className="bg-white rounded-lg border border-gray-200">
             {loading ? (
-              <div className="p-8 text-center text-gray-500">Loading...</div>
+              <ContentLoading />
             ) : notifications.length === 0 ? (
               <div className="p-8 text-center text-gray-500">No notifications</div>
             ) : (
