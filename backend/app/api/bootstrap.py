@@ -25,7 +25,10 @@ async def _get_org(session: AsyncSession) -> Organization | None:
 @router.get("/status", response_model=BootstrapStatus)
 async def get_bootstrap_status(session: AsyncSession = Depends(get_session)):
     org = await _get_org(session)
-    return BootstrapStatus(setup_complete=org.setup_complete if org else False)
+    return BootstrapStatus(
+        setup_complete=org.setup_complete if org else False,
+        smtp_configured=org.smtp_configured if org else False,
+    )
 
 
 @router.post("/create-admin")

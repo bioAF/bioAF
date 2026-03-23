@@ -175,6 +175,18 @@ async def test_launch_session_succeeds_with_config(
     client, session, comp_bio_token, comp_bio_user, seed_platform_config
 ):
     """Launch succeeds when preconditions met, returns session with proxy_url."""
+    # RStudio requires session credentials
+    from app.services.session_credential_service import SessionCredentialService
+
+    await SessionCredentialService.create_or_update(
+        session,
+        user_id=comp_bio_user.id,
+        org_id=comp_bio_user.organization_id,
+        email=comp_bio_user.email,
+        password="testpass",
+    )
+    await session.commit()
+
     response = await client.post(
         "/api/v1/notebooks/sessions",
         json={"session_type": "rstudio", "resource_profile": "small"},

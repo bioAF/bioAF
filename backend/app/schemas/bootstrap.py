@@ -3,6 +3,7 @@ from pydantic import BaseModel, EmailStr
 
 class BootstrapStatus(BaseModel):
     setup_complete: bool
+    smtp_configured: bool = False
 
 
 class CreateAdminRequest(BaseModel):

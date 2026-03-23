@@ -96,8 +96,11 @@ export default function AuditLogPage() {
 
   function formatDetails(entry: AuditEntry): string {
     if (!entry.details) return "";
+    // Prefer human-readable description if available
+    if (entry.details.description) return String(entry.details.description);
     const parts: string[] = [];
     for (const [k, v] of Object.entries(entry.details)) {
+      if (k === "description" || k === "target_email") continue;
       if (v !== null && v !== undefined) {
         parts.push(`${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`);
       }
@@ -108,13 +111,14 @@ export default function AuditLogPage() {
   const entityTypes = [
     "experiment", "sample", "user", "auth", "pipeline_run",
     "pipeline_catalog", "project", "file", "batch", "system",
-    "notebook", "reference",
+    "notebook", "reference", "session_credential",
   ];
 
   const actions = [
     "create", "update", "delete", "login", "logout", "status_change",
     "launch", "invite", "deactivate", "verify_email",
     "download", "read", "view", "session",
+    "change_password", "admin_reset_password", "resend_invite", "lock",
   ];
 
   return (

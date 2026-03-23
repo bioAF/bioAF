@@ -95,7 +95,9 @@ class TestLaunchSession:
         adapter._get_k8s_rbac_client = MagicMock(return_value=mock_rbac)
         adapter._poll_session_ready = AsyncMock()
 
-        await adapter._k8s_launch_session(_session_spec("rstudio"))
+        spec = _session_spec("rstudio")
+        spec["session_credentials"] = {"username": "testuser", "password": "testpass"}
+        await adapter._k8s_launch_session(spec)
 
         pod_body = mock_core.create_namespaced_pod.call_args[1]["body"]
         containers = pod_body["spec"]["containers"]

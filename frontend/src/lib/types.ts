@@ -5,6 +5,8 @@ export interface User {
   role: "admin" | "comp_bio" | "bench" | "viewer";
   status: "active" | "invited" | "deactivated";
   organization_id: number;
+  last_login: string | null;
+  session_credentials_configured: boolean;
   created_at: string;
   updated_at: string;
 }

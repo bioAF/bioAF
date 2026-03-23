@@ -339,15 +339,31 @@ class KubernetesNotebookProvider(NotebookProvider):
                 "--NotebookApp.password=''",
             ]
         else:
+            # RStudio uses PAM auth -- session credentials are required.
+            # User creation must happen inside the main container (not an
+            # init container) because /etc/passwd and /etc/shadow are part
+            # of each container's own root filesystem and are not shared.
+            session_creds = session_spec.get("session_credentials")
+            if not session_creds:
+                raise ValueError("Session credentials are required for RStudio sessions")
+
             container_port = 8787
-            container_command = [
-                "/usr/lib/rstudio-server/bin/rserver",
-                "--www-address=0.0.0.0",
-                f"--www-port={container_port}",
-                "--auth-none=1",
-                "--auth-minimum-user-id=0",
-                "--server-daemonize=0",
-            ]
+            cred_username = session_creds["username"]
+            cred_password = session_creds.get("password_hash") or session_creds.get("password", "")
+
+            if cred_password.startswith("$2"):
+                chpasswd_cmd = f"echo '{cred_username}:{cred_password}' | chpasswd -e"
+            else:
+                chpasswd_cmd = f"echo '{cred_username}:{cred_password}' | chpasswd"
+
+            startup_script = (
+                f"useradd -m -d {HOME_DIR} -s /bin/bash {cred_username} || true && "
+                f"{chpasswd_cmd} && "
+                f"chown -R {cred_username}:{cred_username} {HOME_DIR} && "
+                f"exec /usr/lib/rstudio-server/bin/rserver "
+                f"--www-address=0.0.0.0 --www-port={container_port} --server-daemonize=0"
+            )
+            container_command = ["/bin/sh", "-c", startup_script]
 
         # Build GCS sync init container
         sync_in_cmd = generate_sync_in_command(gcs_home_prefix, HOME_DIR)
@@ -357,6 +373,8 @@ class KubernetesNotebookProvider(NotebookProvider):
             "command": sync_in_cmd,
             "volumeMounts": [{"name": "home", "mountPath": HOME_DIR}],
         }
+
+        init_containers = [init_container]
 
         # Build notebook container
         image = session_spec.get("image", "bioaf-scrna:latest")
@@ -379,16 +397,8 @@ class KubernetesNotebookProvider(NotebookProvider):
         }
 
         # RStudio Server requires root to manage sessions and write pid files.
-        # RSTUDIO_SECURE_COOKIE_KEY provides the cookie signing key via env var,
-        # avoiding the file-based approach that fails with UUID-format strings.
         if session_type == "rstudio":
             notebook_container["securityContext"] = {"runAsUser": 0}
-            notebook_container["env"] = [
-                {
-                    "name": "RSTUDIO_SECURE_COOKIE_KEY",
-                    "value": uuid.uuid4().hex,
-                },
-            ]
 
         # Pod manifest
         pod_manifest = {
@@ -414,7 +424,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                     }
                 ],
                 "serviceAccountName": "bioaf-notebook-runner",
-                "initContainers": [init_container],
+                "initContainers": init_containers,
                 "containers": [notebook_container],
                 "volumes": [
                     {"name": "home", "emptyDir": {"sizeLimit": "10Gi"}},

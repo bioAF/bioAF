@@ -109,7 +109,12 @@ class UserService:
             entity_type="user",
             entity_id=user.id,
             action="update",
-            details={"field": "role", "new_value": new_role},
+            details={
+                "field": "role",
+                "new_value": new_role,
+                "target_email": user.email,
+                "description": f"Changed {user.email} role from {old_role} to {new_role}",
+            },
             previous_value={"field": "role", "old_value": old_role},
         )
         return user
@@ -130,7 +135,11 @@ class UserService:
             entity_type="user",
             entity_id=user.id,
             action="deactivate",
-            details={"status": "deactivated"},
+            details={
+                "status": "deactivated",
+                "target_email": user.email,
+                "description": f"Deactivated {user.email}",
+            },
             previous_value={"status": old_status},
         )
         return user

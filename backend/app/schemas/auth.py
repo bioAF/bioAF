@@ -30,6 +30,16 @@ class PasswordResetConfirm(BaseModel):
     new_password: str
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class AdminResetPasswordRequest(BaseModel):
+    mode: str  # "email" or "temporary"
+    temporary_password: str | None = None
+
+
 class UserProfile(BaseModel):
     id: int
     email: str

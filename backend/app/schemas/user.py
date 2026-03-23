@@ -31,6 +31,8 @@ class UserResponse(BaseModel):
     role: str
     status: str
     organization_id: int
+    last_login: datetime | None = None
+    session_credentials_configured: bool = False
     created_at: datetime
     updated_at: datetime
 

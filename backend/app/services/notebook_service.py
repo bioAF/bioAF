@@ -78,6 +78,21 @@ class NotebookService:
             if image:
                 spec["image"] = image
 
+            # RStudio requires session credentials for PAM auth
+            if session_type == "rstudio":
+                from app.services.session_credential_service import SessionCredentialService
+
+                cred = await SessionCredentialService.get_by_user_id(session, user_id)
+                if not cred:
+                    raise ValueError(
+                        "Session credentials are required for RStudio sessions. "
+                        "Please set up your session credentials in your profile settings."
+                    )
+                spec["session_credentials"] = {
+                    "username": cred.username,
+                    "password_hash": cred.password_hash,
+                }
+
             result = await notebook_adapter.launch_session(spec)
 
             notebook_session.slurm_job_id = str(result.get("session_id", ""))
