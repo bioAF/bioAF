@@ -4,7 +4,7 @@ Welcome to the bioAF documentation. bioAF is a turnkey computational biology pla
 
 ## Quick Links
 
-- [Quickstart Guide](../README.md#quickstart) - Deploy in 30 minutes
+- [Quick Start Guide](../README.md#quick-start) - Deploy in 30 minutes
 - [Deployment Guide](deployment-guide.md) - Full deployment walkthrough
 - [Life After bioAF](life-after-bioaf.md) - Data portability and asset access
 
