@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.schemas.batch import BatchAssignSamples, BatchResponse, BatchUpdate
 from app.schemas.experiment import UserSummary
 from app.services.batch_service import BatchService
@@ -45,7 +45,7 @@ async def get_batch(
 async def update_batch(
     batch_id: int,
     body: BatchUpdate,
-    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    current_user: dict = require_permission("experiments", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
@@ -74,7 +74,7 @@ async def update_batch(
 async def assign_samples(
     batch_id: int,
     body: BatchAssignSamples,
-    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    current_user: dict = require_permission("experiments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])

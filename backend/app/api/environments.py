@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.schemas.environment import (
     EnvironmentChangeResponse,
     EnvironmentCreateRequest,
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/api/environments", tags=["environments"])
 
 @router.get("", response_model=EnvironmentListResponse)
 async def list_environments(
-    current_user: dict = require_role("admin", "comp_bio", "bench", "viewer"),
+    current_user: dict = require_permission("environments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -41,7 +41,7 @@ async def list_environments(
 @router.get("/{name}", response_model=EnvironmentDetailResponse)
 async def get_environment(
     name: str,
-    current_user: dict = require_role("admin", "comp_bio", "bench", "viewer"),
+    current_user: dict = require_permission("environments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -84,7 +84,7 @@ async def get_environment(
 @router.post("", response_model=EnvironmentResponse)
 async def create_environment(
     data: EnvironmentCreateRequest,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("environments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -122,7 +122,7 @@ async def create_environment(
 async def clone_environment(
     name: str,
     data: EnvironmentCreateRequest,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("environments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -159,7 +159,7 @@ async def clone_environment(
 @router.delete("/{name}", status_code=204)
 async def archive_environment(
     name: str,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("environments", "delete"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -175,7 +175,7 @@ async def archive_environment(
 @router.get("/{name}/packages")
 async def list_environment_packages(
     name: str,
-    current_user: dict = require_role("admin", "comp_bio", "bench", "viewer"),
+    current_user: dict = require_permission("environments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -201,7 +201,7 @@ async def get_environment_history(
     name: str,
     page: int = 1,
     page_size: int = 20,
-    current_user: dict = require_role("admin", "comp_bio", "bench", "viewer"),
+    current_user: dict = require_permission("environments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -245,7 +245,7 @@ async def get_environment_history(
 async def get_change_detail(
     name: str,
     change_id: int,
-    current_user: dict = require_role("admin", "comp_bio", "bench", "viewer"),
+    current_user: dict = require_permission("environments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -273,7 +273,7 @@ async def get_change_detail(
 async def rollback_environment(
     name: str,
     data: EnvironmentRollbackRequest,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("environments", "build"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -316,7 +316,7 @@ async def compare_environments(
     name: str,
     sha1: str,
     sha2: str,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("environments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])

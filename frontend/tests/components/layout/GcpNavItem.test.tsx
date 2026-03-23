@@ -15,13 +15,27 @@ jest.mock("@/lib/auth", () => ({
   getCurrentUser: () => mockGetCurrentUser(),
 }));
 
+const mockCanAccess = jest.fn().mockReturnValue(true);
+const mockRoleName = jest.fn().mockReturnValue("admin");
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({
+    canAccess: (...args: unknown[]) => mockCanAccess(...args),
+    roleName: mockRoleName(),
+    loading: false,
+    permissions: new Set(),
+  }),
+  clearPermissionsCache: jest.fn(),
+}));
+
 describe("GCP Configuration nav item", () => {
   beforeEach(() => {
     mockPathname.mockReturnValue("/dashboard");
+    mockCanAccess.mockReturnValue(true);
+    mockRoleName.mockReturnValue("admin");
   });
 
   it("appears in Settings section for admin users", () => {
-    mockGetCurrentUser.mockReturnValue({ email: "admin@bioaf.org", role: "admin", sub: "1" });
+    mockGetCurrentUser.mockReturnValue({ email: "admin@bioaf.org", role_name: "admin", sub: "1" });
     render(<Sidebar />);
 
     // Expand Settings section
@@ -30,7 +44,7 @@ describe("GCP Configuration nav item", () => {
   });
 
   it("links to /settings/gcp", () => {
-    mockGetCurrentUser.mockReturnValue({ email: "admin@bioaf.org", role: "admin", sub: "1" });
+    mockGetCurrentUser.mockReturnValue({ email: "admin@bioaf.org", role_name: "admin", sub: "1" });
     render(<Sidebar />);
 
     fireEvent.click(screen.getByText("Settings"));
@@ -39,13 +53,15 @@ describe("GCP Configuration nav item", () => {
   });
 
   it("does not appear for non-admin users (Settings section hidden)", () => {
-    mockGetCurrentUser.mockReturnValue({ email: "bench@bioaf.org", role: "bench", sub: "2" });
+    mockGetCurrentUser.mockReturnValue({ email: "bench@bioaf.org", role_name: "bench", sub: "2" });
+    mockRoleName.mockReturnValue("bench");
+    mockCanAccess.mockReturnValue(false);
     render(<Sidebar />);
     expect(screen.queryByText("GCP Configuration")).not.toBeInTheDocument();
   });
 
   it("is positioned between Audit Log and Naming Profiles", () => {
-    mockGetCurrentUser.mockReturnValue({ email: "admin@bioaf.org", role: "admin", sub: "1" });
+    mockGetCurrentUser.mockReturnValue({ email: "admin@bioaf.org", role_name: "admin", sub: "1" });
     render(<Sidebar />);
 
     fireEvent.click(screen.getByText("Settings"));

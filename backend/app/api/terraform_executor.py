@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.models.component import TerraformRun
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
@@ -111,7 +111,7 @@ async def _stream_events(
 
 @router.post("/bootstrap")
 async def bootstrap_foundation(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "create"),
     session: AsyncSession = Depends(get_session),
 ) -> StreamingResponse:
     """Bootstrap the GCS Terraform state bucket. Streams SSE progress events."""
@@ -159,7 +159,7 @@ async def bootstrap_foundation(
 @router.post("/plan", response_model=TerraformRunDetail)
 async def run_plan(
     body: TerraformPlanRequest,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "create"),
     session: AsyncSession = Depends(get_session),
 ) -> TerraformRunDetail:
     """Run terraform plan and return the plan summary."""
@@ -181,7 +181,7 @@ async def run_plan(
 @router.post("/apply/{run_id}")
 async def apply_plan(
     run_id: int,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "create"),
     session: AsyncSession = Depends(get_session),
 ) -> StreamingResponse:
     """Apply an approved plan. Streams SSE progress events."""
@@ -223,7 +223,7 @@ async def apply_plan(
 @router.post("/abandon/{run_id}", response_model=TerraformRunDetail)
 async def abandon_run(
     run_id: int,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "create"),
     session: AsyncSession = Depends(get_session),
 ) -> TerraformRunDetail:
     """Abandon a stuck Terraform run and release the GCS state lock."""
@@ -244,7 +244,7 @@ async def abandon_run(
 
 @router.get("/status", response_model=TerraformStatusResponse)
 async def get_terraform_status(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "change_status"),
     session: AsyncSession = Depends(get_session),
 ) -> TerraformStatusResponse:
     """Return current terraform initialization state and active run (if any)."""
@@ -277,7 +277,7 @@ async def get_terraform_status(
 
 @router.get("/runs", response_model=TerraformRunListResponse)
 async def list_runs(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ) -> TerraformRunListResponse:
     """Return the last 10 Terraform runs."""
@@ -292,7 +292,7 @@ async def list_runs(
 @router.get("/runs/{run_id}", response_model=TerraformRunDetail)
 async def get_run(
     run_id: int,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ) -> TerraformRunDetail:
     """Return a single Terraform run by ID."""

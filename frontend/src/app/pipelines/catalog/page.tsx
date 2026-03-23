@@ -12,7 +12,7 @@ import type { PipelineCatalog, PipelineCatalogListResponse, PipelineAddRequest }
 export default function PipelineCatalogPage() {
   const router = useRouter();
   const user = getCurrentUser();
-  const isAdmin = user?.role === "admin";
+  const isAdmin = user?.role_name === "admin";
 
   const [pipelines, setPipelines] = useState<PipelineCatalog[]>([]);
   const [loading, setLoading] = useState(true);

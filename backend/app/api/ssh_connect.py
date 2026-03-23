@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.registry import get_compute_adapter, get_notebook_adapter
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.models.notebook_session import NotebookSession
 from app.models.pipeline_run import PipelineRun
@@ -39,7 +39,7 @@ WARNING_TEXT = (
 async def connect_pipeline_run(
     run_id: int,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("notebooks", "launch"),
 ):
     """Generate connection command for a running pipeline job."""
     result = await session.execute(
@@ -93,7 +93,7 @@ async def connect_pipeline_run(
 async def connect_notebook_session(
     session_id: int,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("notebooks", "launch"),
 ):
     """Generate connection command for an active notebook session."""
     result = await session.execute(
@@ -143,7 +143,7 @@ async def connect_notebook_session(
 @router.get("/api/infrastructure/compute/pods")
 async def list_running_pods(
     session: AsyncSession = Depends(get_session),
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "configure"),
 ):
     """List all running pods with connect capability (admin only)."""
     compute_adapter = get_compute_adapter()

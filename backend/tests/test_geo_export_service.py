@@ -16,7 +16,7 @@ async def comp_bio_user(session, admin_user):
     user = User(
         email="compbio@test.com",
         password_hash=password_hash,
-        role="comp_bio",
+        role_id=admin_user._test_role_map["comp_bio"],
         organization_id=admin_user.organization_id,
         status="active",
     )

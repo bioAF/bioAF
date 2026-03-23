@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.schemas.audit import AuditLogEntry, AuditLogResponse
@@ -55,7 +55,7 @@ async def export_audit_log(
     user_id: int | None = Query(None),
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("audit_log", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     query = _build_query(entity_type, action, user_id, start_date, end_date)
@@ -102,7 +102,7 @@ async def list_audit_log(
     user_id: int | None = Query(None),
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("audit_log", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     query = _build_query(entity_type, action, user_id, start_date, end_date)

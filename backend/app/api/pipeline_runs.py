@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.models.pipeline_run_review import PipelineRunReview
 from app.schemas.pipeline_run import (
     ExperimentSummary,
@@ -20,6 +20,7 @@ from app.schemas.pipeline_run import (
     SampleSummary,
     UserSummary,
 )
+from app.services import role_service
 from app.services.pipeline_monitor_service import PipelineMonitorService
 from app.services.pipeline_run_service import PipelineRunService
 
@@ -98,7 +99,7 @@ async def list_runs(
     pipeline_key: str | None = None,
     status: str | None = None,
     submitted_by_user_id: int | None = None,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -142,7 +143,7 @@ async def list_runs(
 @router.post("", response_model=PipelineRunResponse)
 async def launch_run(
     data: PipelineRunLaunchRequest,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "launch"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -162,7 +163,7 @@ async def launch_run(
 @router.get("/{run_id}", response_model=PipelineRunDetailResponse)
 async def get_run(
     run_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -175,19 +176,17 @@ async def get_run(
 @router.post("/{run_id}/cancel", response_model=PipelineRunResponse)
 async def cancel_run(
     run_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "cancel"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
     org_id = int(current_user["org_id"])
-    role = current_user["role"]
-
     run = await PipelineRunService.get_run(session, run_id, org_id)
     if not run:
         raise HTTPException(404, "Run not found")
 
-    # comp_bio can only cancel own runs
-    if role == "comp_bio" and run.submitted_by_user_id != user_id:
+    can_manage_all = await role_service.has_permission(session, int(current_user["role_id"]), "users", "deactivate")
+    if not can_manage_all and run.submitted_by_user_id != user_id:
         raise HTTPException(403, "Can only cancel your own runs")
 
     run = await PipelineRunService.cancel_run(session, run_id, user_id)
@@ -200,7 +199,7 @@ async def cancel_run(
 @router.post("/{run_id}/reproduce", response_model=PipelineRunResponse)
 async def reproduce_run(
     run_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "launch"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
@@ -219,7 +218,7 @@ async def reproduce_run(
 async def get_provenance(
     run_id: int,
     format: str = "json",
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     try:
@@ -238,7 +237,7 @@ async def get_provenance(
 @router.get("/{run_id}/logs")
 async def get_run_logs(
     run_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     """Get logs for a K8s pipeline run (no process selection needed)."""
@@ -250,7 +249,7 @@ async def get_run_logs(
 async def get_process_logs(
     run_id: int,
     process_name: str,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     logs = await PipelineMonitorService.get_run_logs(session, run_id, process_name)
@@ -260,7 +259,7 @@ async def get_process_logs(
 @router.get("/{run_id}/report")
 async def get_run_report(
     run_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     report = await PipelineMonitorService.get_run_report(session, run_id)
@@ -270,7 +269,7 @@ async def get_run_report(
 @router.post("/compare", response_model=PipelineRunCompareResponse)
 async def compare_runs(
     data: PipelineRunCompareRequest,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     result = await PipelineRunService.compare_runs(session, data.run_ids)
@@ -283,7 +282,7 @@ async def compare_runs(
 @router.get("/{run_id}/references")
 async def get_run_references(
     run_id: int,
-    current_user: dict = require_role("admin", "comp_bio", "bench", "viewer"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     """Get reference datasets used by a pipeline run."""

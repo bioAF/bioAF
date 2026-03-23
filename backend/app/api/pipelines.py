@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.schemas.pipeline import (
     PipelineAddRequest,
     PipelineCatalogListResponse,
@@ -32,7 +32,7 @@ def _catalog_response(entry) -> PipelineCatalogResponse:
 
 @router.get("", response_model=PipelineCatalogListResponse)
 async def list_pipelines(
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -51,7 +51,7 @@ async def list_pipelines(
 @router.get("/{key:path}", response_model=PipelineCatalogResponse)
 async def get_pipeline(
     key: str,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -64,7 +64,7 @@ async def get_pipeline(
 @router.post("/custom", response_model=PipelineCatalogResponse)
 async def add_custom_pipeline(
     data: PipelineAddRequest,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -87,7 +87,7 @@ async def add_custom_pipeline(
 async def update_pipeline_version(
     key: str,
     data: PipelineVersionUpdateRequest,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("pipelines", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])

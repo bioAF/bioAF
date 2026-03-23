@@ -48,7 +48,7 @@ export function SuperSeriesExportModal({
   const [error, setError] = useState<string | null>(null);
 
   const user = getCurrentUser();
-  const canAccess = user?.role === "admin" || user?.role === "comp_bio";
+  const canAccess = user?.role_name === "admin" || user?.role_name === "comp_bio";
 
   // Initialize included IDs when modal opens
   useEffect(() => {

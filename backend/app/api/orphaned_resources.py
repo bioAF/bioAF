@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.schemas.orphaned_resource import (
     OrphanedResourceListResponse,
@@ -20,7 +20,7 @@ router = APIRouter(tags=["orphaned_resources"])
 )
 async def list_orphaned_resources(
     status: str | None = None,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ) -> OrphanedResourceListResponse:
     """List orphaned GCP resources, optionally filtered by status."""
@@ -37,7 +37,7 @@ async def list_orphaned_resources(
 )
 async def cleanup_orphaned_resource(
     resource_id: int,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ) -> OrphanedResourceResponse:
     """Trigger cleanup of an orphaned resource (deletes from GCP)."""
@@ -56,7 +56,7 @@ async def cleanup_orphaned_resource(
 )
 async def dismiss_orphaned_resource(
     resource_id: int,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ) -> OrphanedResourceResponse:
     """Mark an orphaned resource as manually resolved."""

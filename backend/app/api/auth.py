@@ -17,6 +17,7 @@ from app.schemas.auth import (
 from app.schemas.session_credential import SessionCredentialRequest, SessionCredentialResponse
 from app.services.access_log_service import AccessLogService
 from app.services.audit_service import log_action
+from app.services import role_service
 from app.services.auth_service import AuthService
 from app.services.email_service import EmailService
 from app.services.session_credential_service import SessionCredentialService
@@ -38,7 +39,9 @@ async def login(body: LoginRequest, session: AsyncSession = Depends(get_session)
         raise HTTPException(status_code=403, detail="Please accept your invitation first")
 
     user.last_login = datetime.now(timezone.utc)
-    token = AuthService.create_token(user.id, user.email, user.role, user.organization_id)
+    role = await role_service.get_role_by_id(session, user.role_id)
+    role_name = role.name if role else ""
+    token = AuthService.create_token(user.id, user.email, user.role_id, user.organization_id, role_name=role_name)
 
     await log_action(session, user_id=user.id, entity_type="auth", entity_id=user.id, action="login")
     await AccessLogService.log_access(
@@ -63,7 +66,9 @@ async def refresh_token(request: Request, session: AsyncSession = Depends(get_se
     if not user or user.status != "active":
         raise HTTPException(status_code=401, detail="User not found or inactive")
 
-    token = AuthService.create_token(user.id, user.email, user.role, user.organization_id)
+    role = await role_service.get_role_by_id(session, user.role_id)
+    role_name = role.name if role else ""
+    token = AuthService.create_token(user.id, user.email, user.role_id, user.organization_id, role_name=role_name)
     return LoginResponse(access_token=token)
 
 
@@ -162,7 +167,14 @@ async def get_current_user(request: Request, session: AsyncSession = Depends(get
     user = await UserService.get_by_id(session, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return user
+    profile = UserProfile.model_validate(user)
+    role = await role_service.get_role_by_id(session, user.role_id)
+    profile.role_name = role.name if role else ""
+    from app.schemas.auth import PermissionEntry
+
+    perms = await role_service.get_role_permissions(session, user.role_id)
+    profile.permissions = [PermissionEntry(**p) for p in perms]
+    return profile
 
 
 @router.post("/me/change-password")

@@ -3,11 +3,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.schemas.compute import ClusterStatusResponse, PartitionStatus, BudgetResponse
 from app.schemas.slurm_job import JobResponse, JobListResponse
 from app.schemas.notebook_session import UserSummary, ExperimentSummary
 from app.adapters.registry import get_compute_adapter
+from app.services import role_service
 from app.services.slurm_service import SlurmService
 from app.services.compute_cost_service import ComputeCostService
 
@@ -49,7 +50,7 @@ def _job_response(job) -> JobResponse:
 
 @router.get("/cluster", response_model=ClusterStatusResponse)
 async def get_cluster_status(
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "change_status"),
 ):
     # Use the BAL compute adapter for cluster status
     try:
@@ -101,7 +102,7 @@ async def list_jobs(
     status: str | None = None,
     partition: str | None = None,
     experiment_id: int | None = None,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -126,7 +127,7 @@ async def list_jobs(
 @router.get("/jobs/{job_id}", response_model=JobResponse)
 async def get_job(
     job_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     job = await SlurmService.get_job(session, job_id)
@@ -138,18 +139,16 @@ async def get_job(
 @router.post("/jobs/{job_id}/cancel", response_model=JobResponse)
 async def cancel_job(
     job_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
-    role = current_user["role"]
-
     job = await SlurmService.get_job(session, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
 
-    # comp_bio can only cancel own jobs
-    if role == "comp_bio" and job.user_id != user_id:
+    can_manage_all = await role_service.has_permission(session, int(current_user["role_id"]), "users", "deactivate")
+    if not can_manage_all and job.user_id != user_id:
         raise HTTPException(403, "Can only cancel your own jobs")
 
     job = await SlurmService.cancel_job(session, job_id, user_id)
@@ -160,7 +159,7 @@ async def cancel_job(
 @router.post("/jobs/{job_id}/resubmit", response_model=JobResponse)
 async def resubmit_job(
     job_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
@@ -173,7 +172,7 @@ async def resubmit_job(
 
 @router.get("/budget", response_model=BudgetResponse)
 async def get_budget(
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "view"),
 ):
     # Use the BAL compute adapter for metrics
     try:

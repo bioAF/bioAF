@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.schemas.experiment import UserSummary
 from app.schemas.template import TemplateCreate, TemplateResponse, TemplateUpdate
 from app.services.template_service import TemplateService
@@ -38,7 +38,7 @@ async def list_templates(
 @router.post("", response_model=TemplateResponse)
 async def create_template(
     body: TemplateCreate,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("experiments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -70,7 +70,7 @@ async def get_template(
 async def update_template(
     template_id: int,
     body: TemplateUpdate,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("experiments", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])

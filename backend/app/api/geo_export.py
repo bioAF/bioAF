@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.services.audit_service import log_action
 from app.services.geo.geo_export_service import GeoExportService
@@ -19,7 +19,7 @@ async def export_geo(
     pipeline_run_id: int | None = None,
     qc_status_filter: str = "exclude_failed",
     validate_only: bool = False,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("files", "download"),
     session: AsyncSession = Depends(get_session),
 ):
     """Export experiment data as a GEO submission package.
@@ -85,7 +85,7 @@ async def export_project_geo(
     qc_status_filter: str = "exclude_failed",
     exclude_unclaimed: bool = True,
     validate_only: bool = False,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("files", "download"),
     session: AsyncSession = Depends(get_session),
 ):
     """Export project data as a GEO SuperSeries package.

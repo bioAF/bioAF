@@ -28,7 +28,7 @@ jest.mock("@/lib/api", () => ({
 jest.mock("@/lib/auth", () => ({
   getToken: () => "fake-token",
   removeToken: jest.fn(),
-  getCurrentUser: () => ({ role: "admin", email: "admin@test.com" }),
+  getCurrentUser: () => ({ role_name: "admin", email: "admin@test.com" }),
   isAuthenticated: () => true,
 }));
 

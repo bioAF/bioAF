@@ -21,7 +21,7 @@ function formatBytes(bytes: number | null): string {
 export default function ReferencesPage() {
   const router = useRouter();
   const user = getCurrentUser();
-  const canAdd = user?.role === "admin" || user?.role === "comp_bio";
+  const canAdd = user?.role_name === "admin" || user?.role_name === "comp_bio";
 
   const [references, setReferences] = useState<ReferenceDataset[]>([]);
   const [total, setTotal] = useState(0);

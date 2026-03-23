@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
-import { isAuthenticated, getCurrentUser } from "@/lib/auth";
+import { isAuthenticated } from "@/lib/auth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 
@@ -28,6 +29,7 @@ interface AuditEntry {
 
 export default function AuditLogPage() {
   const router = useRouter();
+  const { canAccess, loading: permLoading } = usePermissions();
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -41,9 +43,9 @@ export default function AuditLogPage() {
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/login"); return; }
-    const user = getCurrentUser();
-    if (user?.role !== "admin") { router.push("/"); return; }
-  }, [router]);
+    if (permLoading) return;
+    if (!canAccess("audit_log", "view")) { router.push("/dashboard"); return; }
+  }, [router, permLoading, canAccess]);
 
   const load = useCallback(async () => {
     setLoading(true);

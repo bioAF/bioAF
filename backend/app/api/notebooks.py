@@ -3,7 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
+from app.services import role_service
 from app.schemas.notebook_session import (
     SessionLaunchRequest,
     SessionResponse,
@@ -50,15 +51,13 @@ def _session_response(ns) -> SessionResponse:
 async def list_sessions(
     session_type: str | None = None,
     status: str | None = None,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("notebooks", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
-    role = current_user["role"]
-
-    # Admin sees all, comp_bio sees own only
-    filter_user_id = None if role == "admin" else user_id
+    can_view_all = await role_service.has_permission(session, int(current_user["role_id"]), "users", "deactivate")
+    filter_user_id = None if can_view_all else user_id
 
     sessions, total = await NotebookService.list_sessions(
         session,
@@ -76,7 +75,7 @@ async def list_sessions(
 @router.post("/sessions", response_model=SessionResponse)
 async def launch_session(
     body: SessionLaunchRequest,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("notebooks", "launch"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
@@ -104,7 +103,7 @@ async def launch_session(
 @router.get("/sessions/{session_id}", response_model=SessionResponse)
 async def get_session_detail(
     session_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("notebooks", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     notebook_session = await NotebookService.get_session(session, session_id)
@@ -116,18 +115,16 @@ async def get_session_detail(
 @router.post("/sessions/{session_id}/stop", response_model=SessionResponse)
 async def stop_session(
     session_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("notebooks", "stop"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
-    role = current_user["role"]
-
     notebook_session = await NotebookService.get_session(session, session_id)
     if not notebook_session:
         raise HTTPException(404, "Session not found")
 
-    # comp_bio can only stop own sessions
-    if role == "comp_bio" and notebook_session.user_id != user_id:
+    can_manage_all = await role_service.has_permission(session, int(current_user["role_id"]), "users", "deactivate")
+    if not can_manage_all and notebook_session.user_id != user_id:
         raise HTTPException(403, "Can only stop your own sessions")
 
     try:

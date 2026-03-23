@@ -1,6 +1,12 @@
+export interface PermissionRef {
+  resource: string;
+  action: string;
+}
+
 export interface NavChild {
   label: string;
   path: string;
+  permission?: PermissionRef;
 }
 
 export interface NavSection {
@@ -9,6 +15,7 @@ export interface NavSection {
   icon: string;
   children?: NavChild[];
   adminOnly?: boolean;
+  permission?: PermissionRef;
 }
 
 export const navConfig: NavSection[] = [
@@ -17,51 +24,51 @@ export const navConfig: NavSection[] = [
     label: "Results",
     icon: "chart",
     children: [
-      { label: "QC Dashboards", path: "/results/qc-dashboards" },
-      { label: "Cellxgene", path: "/results/cellxgene" },
-      { label: "Plot Archive", path: "/results/plot-archive" },
+      { label: "QC Dashboards", path: "/results/qc-dashboards", permission: { resource: "experiments", action: "view" } },
+      { label: "Cellxgene", path: "/results/cellxgene", permission: { resource: "experiments", action: "view" } },
+      { label: "Plot Archive", path: "/results/plot-archive", permission: { resource: "experiments", action: "view" } },
     ],
   },
   {
     label: "Pipelines",
     icon: "play",
     children: [
-      { label: "Pipeline Catalog", path: "/pipelines/catalog" },
-      { label: "Pipeline Runs", path: "/pipelines/runs" },
-      { label: "Pipeline Scheduling", path: "/pipelines/scheduling" },
+      { label: "Pipeline Catalog", path: "/pipelines/catalog", permission: { resource: "pipelines", action: "view" } },
+      { label: "Pipeline Runs", path: "/pipelines/runs", permission: { resource: "pipelines", action: "view" } },
+      { label: "Pipeline Scheduling", path: "/pipelines/scheduling", permission: { resource: "pipelines", action: "view" } },
     ],
   },
   {
     label: "Projects",
     icon: "folder",
     children: [
-      { label: "Project List", path: "/projects" },
-      { label: "Experiment Templates", path: "/projects/experiment-templates" },
-      { label: "Experiment List", path: "/projects/experiments" },
+      { label: "Project List", path: "/projects", permission: { resource: "projects", action: "view" } },
+      { label: "Experiment Templates", path: "/projects/experiment-templates", permission: { resource: "experiments", action: "view" } },
+      { label: "Experiment List", path: "/projects/experiments", permission: { resource: "experiments", action: "view" } },
     ],
   },
-  { label: "Notebooks", path: "/notebooks", icon: "notebook" },
+  { label: "Notebooks", path: "/notebooks", icon: "notebook", permission: { resource: "notebooks", action: "view" } },
   {
     label: "Data & Files",
     icon: "database",
     children: [
-      { label: "Upload", path: "/data/upload" },
-      { label: "Files", path: "/data/files" },
-      { label: "Dataset Browser", path: "/data/browser" },
-      { label: "Documents", path: "/data/documents" },
-      { label: "Reference Data", path: "/data/references" },
+      { label: "Upload", path: "/data/upload", permission: { resource: "files", action: "upload" } },
+      { label: "Files", path: "/data/files", permission: { resource: "files", action: "view" } },
+      { label: "Dataset Browser", path: "/data/browser", permission: { resource: "files", action: "view" } },
+      { label: "Documents", path: "/data/documents", permission: { resource: "files", action: "view" } },
+      { label: "Reference Data", path: "/data/references", permission: { resource: "files", action: "view" } },
     ],
   },
   {
     label: "Infrastructure",
     icon: "server",
     children: [
-      { label: "Components", path: "/infrastructure/components" },
-      { label: "Compute", path: "/infrastructure/compute" },
-      { label: "Environments", path: "/infrastructure/environments" },
-      { label: "Packages", path: "/infrastructure/packages" },
-      { label: "Cost Center", path: "/infrastructure/cost-center" },
-      { label: "Backup & Recovery", path: "/infrastructure/backup" },
+      { label: "Components", path: "/infrastructure/components", permission: { resource: "infrastructure", action: "view" } },
+      { label: "Compute", path: "/infrastructure/compute", permission: { resource: "infrastructure", action: "view" } },
+      { label: "Environments", path: "/infrastructure/environments", permission: { resource: "environments", action: "view" } },
+      { label: "Packages", path: "/infrastructure/packages", permission: { resource: "infrastructure", action: "view" } },
+      { label: "Cost Center", path: "/infrastructure/cost-center", permission: { resource: "cost_center", action: "view" } },
+      { label: "Backup & Recovery", path: "/infrastructure/backup", permission: { resource: "backups", action: "view" } },
     ],
   },
   {
@@ -69,7 +76,7 @@ export const navConfig: NavSection[] = [
     icon: "user",
     children: [
       { label: "Account & Credentials", path: "/profile" },
-      { label: "Notifications", path: "/profile/notifications" },
+      { label: "Notifications", path: "/profile/notifications", permission: { resource: "notifications", action: "view" } },
     ],
   },
   {
@@ -77,13 +84,14 @@ export const navConfig: NavSection[] = [
     icon: "settings",
     adminOnly: true,
     children: [
-      { label: "Users & Roles", path: "/settings/users" },
-      { label: "Audit Log", path: "/settings/audit-log" },
-      { label: "GCP Configuration", path: "/settings/gcp" },
-      { label: "Naming Profiles", path: "/settings/naming-profiles" },
-      { label: "SMTP Configuration", path: "/settings/smtp" },
-      { label: "Slack Integration", path: "/settings/slack" },
-      { label: "Information", path: "/settings/info" },
+      { label: "Users", path: "/settings/users", permission: { resource: "users", action: "view" } },
+      { label: "Roles & Permissions", path: "/settings/roles", permission: { resource: "roles", action: "view" } },
+      { label: "Audit Log", path: "/settings/audit-log", permission: { resource: "audit_log", action: "view" } },
+      { label: "GCP Configuration", path: "/settings/gcp", permission: { resource: "infrastructure", action: "configure" } },
+      { label: "Naming Profiles", path: "/settings/naming-profiles", permission: { resource: "infrastructure", action: "configure" } },
+      { label: "SMTP Configuration", path: "/settings/smtp", permission: { resource: "notifications", action: "configure" } },
+      { label: "Slack Integration", path: "/settings/slack", permission: { resource: "notifications", action: "configure" } },
+      { label: "Information", path: "/settings/info", permission: { resource: "infrastructure", action: "view" } },
     ],
   },
 ];

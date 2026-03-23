@@ -18,7 +18,7 @@ async def comp_bio_user(session, admin_user):
     user = User(
         email="compbio@test.com",
         password_hash=password_hash,
-        role="comp_bio",
+        role_id=admin_user._test_role_map["comp_bio"],
         organization_id=admin_user.organization_id,
         status="active",
     )
@@ -33,8 +33,9 @@ async def comp_bio_token(comp_bio_user) -> str:
     return AuthService.create_token(
         comp_bio_user.id,
         comp_bio_user.email,
-        comp_bio_user.role,
+        comp_bio_user.role_id,
         comp_bio_user.organization_id,
+        role_name="comp_bio",
     )
 
 
@@ -46,7 +47,7 @@ async def bench_user(session, admin_user):
     user = User(
         email="bench@test.com",
         password_hash=password_hash,
-        role="bench",
+        role_id=admin_user._test_role_map["bench"],
         organization_id=admin_user.organization_id,
         status="active",
     )
@@ -61,8 +62,9 @@ async def bench_token(bench_user) -> str:
     return AuthService.create_token(
         bench_user.id,
         bench_user.email,
-        bench_user.role,
+        bench_user.role_id,
         bench_user.organization_id,
+        role_name="bench",
     )
 
 

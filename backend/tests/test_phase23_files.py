@@ -5,6 +5,7 @@ import stat
 
 import pytest
 import yaml
+from app.services.bootstrap_roles import seed_builtin_roles
 
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -127,10 +128,12 @@ async def test_bootstrap_status_returns_complete_when_admin_exists(client, sessi
     session.add(org)
     await session.flush()
 
+    role_map = await seed_builtin_roles(session, org.id)
+
     user = User(
         email="cli-admin@example.com",
         password_hash=AuthService.hash_password("pass123"),
-        role="admin",
+        role_id=role_map["admin"],
         organization_id=org.id,
         status="active",
     )
@@ -163,10 +166,12 @@ async def test_create_admin_blocked_after_cli_setup(client, session):
     session.add(org)
     await session.flush()
 
+    role_map = await seed_builtin_roles(session, org.id)
+
     user = User(
         email="cli-admin@example.com",
         password_hash=AuthService.hash_password("pass123"),
-        role="admin",
+        role_id=role_map["admin"],
         organization_id=org.id,
         status="active",
     )

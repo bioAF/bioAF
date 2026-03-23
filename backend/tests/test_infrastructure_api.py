@@ -24,7 +24,7 @@ async def bench_user(session, admin_user):
     user = User(
         email="bench@test.com",
         password_hash=AuthService.hash_password("benchpass123"),
-        role="bench",
+        role_id=admin_user._test_role_map["bench"],
         organization_id=admin_user.organization_id,
         status="active",
     )
@@ -38,7 +38,9 @@ async def bench_user(session, admin_user):
 async def bench_token(bench_user):
     from app.services.auth_service import AuthService
 
-    return AuthService.create_token(bench_user.id, bench_user.email, bench_user.role, bench_user.organization_id)
+    return AuthService.create_token(
+        bench_user.id, bench_user.email, bench_user.role_id, bench_user.organization_id, role_name="bench"
+    )
 
 
 class TestComputeStatusEndpoint:

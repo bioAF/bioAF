@@ -4,7 +4,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.adapters.registry import get_compute_adapter, get_storage_adapter
 from app.schemas.infrastructure import (
     InfraComputeStatusResponse,
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/v1/infrastructure", tags=["infrastructure"])
 
 @router.get("/compute/status", response_model=InfraComputeStatusResponse)
 async def get_compute_status(
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "change_status"),
 ):
     """Returns cluster status from the active compute adapter."""
     compute_adapter = get_compute_adapter()
@@ -55,7 +55,7 @@ async def get_compute_status(
 
 @router.get("/compute/metrics", response_model=InfraComputeMetricsResponse)
 async def get_compute_metrics(
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "view"),
 ):
     """Returns cluster metrics from the active compute adapter."""
     compute_adapter = get_compute_adapter()
@@ -82,7 +82,7 @@ async def get_compute_metrics(
 
 @router.get("/storage/metrics", response_model=InfraStorageMetricsResponse)
 async def get_storage_metrics(
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "view"),
 ):
     """Returns storage metrics from the active storage adapter."""
     storage_adapter = get_storage_adapter()
@@ -109,7 +109,7 @@ async def get_storage_metrics(
 
 @router.get("/compute/stack", response_model=ComputeStackResponse)
 async def get_compute_stack(
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     """Returns the current compute stack selection."""
@@ -120,7 +120,7 @@ async def get_compute_stack(
 
 @router.get("/components", response_model=ComponentsListResponse)
 async def get_components(
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     """Returns component catalog filtered by active compute stack."""

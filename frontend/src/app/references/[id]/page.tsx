@@ -30,8 +30,8 @@ export default function ReferenceDetailPage() {
   const params = useParams();
   const id = params.id as string;
   const user = getCurrentUser();
-  const isAdmin = user?.role === "admin";
-  const isCompBio = user?.role === "comp_bio";
+  const isAdmin = user?.role_name === "admin";
+  const isCompBio = user?.role_name === "comp_bio";
   const canDeprecate = isAdmin || isCompBio;
 
   const [reference, setReference] = useState<ReferenceDatasetDetail | null>(null);

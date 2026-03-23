@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.schemas.access_log import AccessLogEntry, AccessLogListResponse
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/access-logs", tags=["access-logs"])
 
 @router.get("/never-logged-in")
 async def never_logged_in_users(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("audit_log", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     """List users in the org who have never logged in."""
@@ -33,7 +33,7 @@ async def never_logged_in_users(
     )
 
     result = await session.execute(
-        select(User.id, User.email, User.name, User.role, User.status, User.created_at)
+        select(User.id, User.email, User.name, User.role_id, User.status, User.created_at)
         .where(User.organization_id == org_id)
         .where(User.id.notin_(select(logged_in_subq.c.user_id)))
         .order_by(User.created_at.asc())
@@ -46,7 +46,7 @@ async def never_logged_in_users(
                 "id": r.id,
                 "email": r.email,
                 "name": r.name,
-                "role": r.role,
+                "role_id": r.role_id,
                 "status": r.status,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
             }
@@ -64,7 +64,7 @@ async def list_access_logs(
     action: str | None = Query(None),
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("audit_log", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = current_user["org_id"]

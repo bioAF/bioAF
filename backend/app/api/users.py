@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
+from app.models.role import Role
 from app.models.session_credential import SessionCredential
 from app.models.user import User
 from app.schemas.auth import AdminResetPasswordRequest
@@ -10,16 +11,34 @@ from app.schemas.user import AcceptInviteRequest, BulkInvite, UserInvite, UserLi
 from app.services.audit_service import log_action
 from app.services.auth_service import AuthService
 from app.services.email_service import EmailService
+from app.services import role_service
 from app.services.user_service import UserService
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
 
-def _require_admin(request: Request) -> dict:
+async def _require_user_manage(request: Request, session: AsyncSession) -> dict:
     current_user = request.state.current_user
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required")
+    if not await role_service.has_permission(session, int(current_user["role_id"]), "users", "view"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
     return current_user
+
+
+async def _require_user_edit_role(request: Request, session: AsyncSession) -> dict:
+    current_user = request.state.current_user
+    if not await role_service.has_permission(session, int(current_user["role_id"]), "users", "edit_role"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    return current_user
+
+
+async def _get_role_name(session: AsyncSession, role_id: int) -> str:
+    role = await role_service.get_role_by_id(session, role_id)
+    return role.name if role else ""
+
+
+async def _is_admin_role(session: AsyncSession, role_id: int) -> bool:
+    role = await role_service.get_role_by_id(session, role_id)
+    return role is not None and role.name == "admin" and role.is_system
 
 
 async def _count_active_admins(session: AsyncSession, org_id: int) -> int:
@@ -28,30 +47,42 @@ async def _count_active_admins(session: AsyncSession, org_id: int) -> int:
     result = await session.execute(
         select(func.count())
         .select_from(User)
+        .join(Role, User.role_id == Role.id)
         .where(
             User.organization_id == org_id,
-            User.role == "admin",
+            Role.name == "admin",
+            Role.is_system == True,  # noqa: E712
             User.status == "active",
         )
     )
     return result.scalar_one()
 
 
+async def _user_response_with_role_name(session: AsyncSession, user: User) -> UserResponse:
+    resp = UserResponse.model_validate(user)
+    resp.role_name = await _get_role_name(session, user.role_id)
+    return resp
+
+
 @router.get("", response_model=UserListResponse)
 async def list_users(request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = _require_admin(request)
+    current_user = await _require_user_manage(request, session)
     org_id = int(current_user["org_id"])
     users = await UserService.list_users(session, org_id)
 
-    # Batch-fetch which users have session credentials configured
     cred_result = await session.execute(
         select(SessionCredential.user_id).where(SessionCredential.organization_id == org_id)
     )
     configured_user_ids = {row[0] for row in cred_result.all()}
 
+    # Build role name lookup for the org
+    roles_result = await session.execute(select(Role).where(Role.organization_id == org_id))
+    role_name_map = {r.id: r.name for r in roles_result.scalars().all()}
+
     user_responses = []
     for u in users:
         resp = UserResponse.model_validate(u)
+        resp.role_name = role_name_map.get(u.role_id, "")
         resp.session_credentials_configured = u.id in configured_user_ids
         user_responses.append(resp)
 
@@ -60,20 +91,23 @@ async def list_users(request: Request, session: AsyncSession = Depends(get_sessi
 
 @router.post("", response_model=UserResponse)
 async def invite_user(body: UserInvite, request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = _require_admin(request)
+    current_user = await _require_user_edit_role(request, session)
     org_id = int(current_user["org_id"])
     actor_id = int(current_user["sub"])
 
-    # Check if user already exists
     existing = await UserService.get_by_email(session, body.email)
     if existing:
         raise HTTPException(status_code=409, detail="User with this email already exists")
 
     user, invite_token = await UserService.invite_user(
-        session, email=body.email, role=body.role, organization_id=org_id, actor_user_id=actor_id, name=body.name
+        session,
+        email=body.email,
+        role_id=body.role_id,
+        organization_id=org_id,
+        actor_user_id=actor_id,
+        name=body.name,
     )
 
-    # Send invitation email
     invite_link = f"/api/users/accept-invite?token={invite_token}"
     from app.models.organization import Organization
 
@@ -82,12 +116,12 @@ async def invite_user(body: UserInvite, request: Request, session: AsyncSession 
     EmailService.send_invitation(body.email, invite_link, org.name)
 
     await session.commit()
-    return UserResponse.model_validate(user)
+    return await _user_response_with_role_name(session, user)
 
 
 @router.post("/bulk-invite")
 async def bulk_invite(body: BulkInvite, request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = _require_admin(request)
+    current_user = await _require_user_edit_role(request, session)
     org_id = int(current_user["org_id"])
     actor_id = int(current_user["sub"])
 
@@ -101,7 +135,7 @@ async def bulk_invite(body: BulkInvite, request: Request, session: AsyncSession 
         user, invite_token = await UserService.invite_user(
             session,
             email=invite.email,
-            role=invite.role,
+            role_id=invite.role_id,
             organization_id=org_id,
             actor_user_id=actor_id,
             name=invite.name,
@@ -114,32 +148,31 @@ async def bulk_invite(body: BulkInvite, request: Request, session: AsyncSession 
 
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(user_id: int, request: Request, session: AsyncSession = Depends(get_session)):
-    _require_admin(request)
+    await _require_user_manage(request, session)
     user = await UserService.get_by_id(session, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return UserResponse.model_validate(user)
+    return await _user_response_with_role_name(session, user)
 
 
 @router.patch("/{user_id}", response_model=UserResponse)
 async def update_user(user_id: int, body: UserUpdate, request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = _require_admin(request)
+    current_user = await _require_user_edit_role(request, session)
     actor_id = int(current_user["sub"])
 
     user = await UserService.get_by_id(session, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if body.role and body.role != user.role:
-        # Guard: cannot demote the last active admin
-        if user.role == "admin" and body.role != "admin":
+    if body.role_id and body.role_id != user.role_id:
+        if await _is_admin_role(session, user.role_id) and not await _is_admin_role(session, body.role_id):
             admin_count = await _count_active_admins(session, user.organization_id)
             if admin_count <= 1:
                 raise HTTPException(
                     status_code=400,
                     detail="Cannot change role of the last active admin",
                 )
-        user = await UserService.update_role(session, user, body.role, actor_id)
+        user = await UserService.update_role(session, user, body.role_id, actor_id)
     if body.name is not None and body.name != (user.name or ""):
         old_name = user.name
         user.name = body.name
@@ -156,12 +189,14 @@ async def update_user(user_id: int, body: UserUpdate, request: Request, session:
 
     await session.commit()
     await session.refresh(user)
-    return UserResponse.model_validate(user)
+    return await _user_response_with_role_name(session, user)
 
 
 @router.post("/{user_id}/deactivate", response_model=UserResponse)
 async def deactivate_user(user_id: int, request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = _require_admin(request)
+    current_user = request.state.current_user
+    if not await role_service.has_permission(session, int(current_user["role_id"]), "users", "deactivate"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
     actor_id = int(current_user["sub"])
 
     user = await UserService.get_by_id(session, user_id)
@@ -171,7 +206,7 @@ async def deactivate_user(user_id: int, request: Request, session: AsyncSession 
     if user.id == actor_id:
         raise HTTPException(status_code=400, detail="Cannot deactivate yourself")
 
-    if user.role == "admin":
+    if await _is_admin_role(session, user.role_id):
         admin_count = await _count_active_admins(session, user.organization_id)
         if admin_count <= 1:
             raise HTTPException(status_code=400, detail="Cannot deactivate the last active admin")
@@ -179,12 +214,14 @@ async def deactivate_user(user_id: int, request: Request, session: AsyncSession 
     user = await UserService.deactivate(session, user, actor_id)
     await session.commit()
     await session.refresh(user)
-    return UserResponse.model_validate(user)
+    return await _user_response_with_role_name(session, user)
 
 
 @router.post("/{user_id}/lock")
 async def lock_user(user_id: int, request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = _require_admin(request)
+    current_user = request.state.current_user
+    if not await role_service.has_permission(session, int(current_user["role_id"]), "users", "deactivate"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
     actor_id = int(current_user["sub"])
 
     user = await UserService.get_by_id(session, user_id)
@@ -194,7 +231,7 @@ async def lock_user(user_id: int, request: Request, session: AsyncSession = Depe
     if user.id == actor_id:
         raise HTTPException(status_code=400, detail="Cannot lock yourself")
 
-    if user.role == "admin":
+    if await _is_admin_role(session, user.role_id):
         admin_count = await _count_active_admins(session, user.organization_id)
         if admin_count <= 1:
             raise HTTPException(status_code=400, detail="Cannot lock the last active admin")
@@ -216,12 +253,14 @@ async def lock_user(user_id: int, request: Request, session: AsyncSession = Depe
     )
     await session.commit()
     await session.refresh(user)
-    return UserResponse.model_validate(user)
+    return await _user_response_with_role_name(session, user)
 
 
 @router.post("/{user_id}/resend-invite")
 async def resend_invite(user_id: int, request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = _require_admin(request)
+    current_user = request.state.current_user
+    if not await role_service.has_permission(session, int(current_user["role_id"]), "users", "invite"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
     org_id = int(current_user["org_id"])
     actor_id = int(current_user["sub"])
 
@@ -261,7 +300,9 @@ async def admin_reset_password(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = _require_admin(request)
+    current_user = request.state.current_user
+    if not await role_service.has_permission(session, int(current_user["role_id"]), "users", "edit_role"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
     actor_id = int(current_user["sub"])
 
     user = await UserService.get_by_id(session, user_id)
@@ -354,5 +395,7 @@ async def accept_invite(body: AcceptInviteRequest, session: AsyncSession = Depen
     )
     await session.commit()
 
-    token = AuthService.create_token(user.id, user.email, user.role, user.organization_id)
+    role = await role_service.get_role_by_id(session, user.role_id)
+    role_name = role.name if role else ""
+    token = AuthService.create_token(user.id, user.email, user.role_id, user.organization_id, role_name=role_name)
     return {"access_token": token, "token_type": "bearer"}

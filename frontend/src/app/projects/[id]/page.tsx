@@ -44,7 +44,7 @@ export default function ProjectDetailPage() {
   const [adding, setAdding] = useState(false);
 
   const user = getCurrentUser();
-  const canModify = user?.role === "admin" || user?.role === "comp_bio";
+  const canModify = user?.role_name === "admin" || user?.role_name === "comp_bio";
 
   useEffect(() => {
     if (!isAuthenticated()) {

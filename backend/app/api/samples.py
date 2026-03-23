@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.schemas.sample import SampleBulkUpdate, SampleQCUpdate, SampleResponse, SampleStatusUpdate, SampleUpdate
 from app.services.sample_service import SampleService
 
@@ -36,7 +36,7 @@ def _sample_response(s) -> SampleResponse:
 @router.patch("/bulk/update")
 async def bulk_update_samples(
     body: SampleBulkUpdate,
-    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    current_user: dict = require_permission("samples", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
@@ -69,7 +69,7 @@ async def get_sample(
 async def update_sample(
     sample_id: int,
     body: SampleUpdate,
-    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    current_user: dict = require_permission("samples", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
@@ -85,7 +85,7 @@ async def update_sample(
 async def update_sample_qc(
     sample_id: int,
     body: SampleQCUpdate,
-    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    current_user: dict = require_permission("samples", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
@@ -101,7 +101,7 @@ async def update_sample_qc(
 async def update_sample_status(
     sample_id: int,
     body: SampleStatusUpdate,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("samples", "change_status"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])

@@ -3,18 +3,17 @@ from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_resend_invite(client: AsyncClient, admin_token: str):
+async def test_resend_invite(client: AsyncClient, admin_token: str, admin_user):
     """Admin can resend invitation to a user who has never logged in."""
-    # Invite a user
+    role_map = admin_user._test_role_map
     resp = await client.post(
         "/api/users",
-        json={"email": "pending@test.com", "role": "bench"},
+        json={"email": "pending@test.com", "role_id": role_map["bench"]},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert resp.status_code == 200
     user_id = resp.json()["id"]
 
-    # Resend invite
     resp = await client.post(
         f"/api/users/{user_id}/resend-invite",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -56,7 +55,6 @@ async def test_admin_reset_password_set_temp(client: AsyncClient, admin_token: s
     )
     assert resp.status_code == 200
 
-    # User should be able to log in with temp password
     resp = await client.post(
         "/api/auth/login",
         json={"email": "viewer@test.com", "password": "tempPass123!"},
@@ -78,7 +76,6 @@ async def test_admin_reset_password_temp_requires_password(client: AsyncClient, 
 @pytest.mark.asyncio
 async def test_last_admin_guard_deactivate(client: AsyncClient, admin_token: str, admin_user):
     """Cannot deactivate the last active admin."""
-    # admin_user is the only admin -- deactivating should fail
     resp = await client.post(
         f"/api/users/{admin_user.id}/deactivate",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -89,9 +86,10 @@ async def test_last_admin_guard_deactivate(client: AsyncClient, admin_token: str
 @pytest.mark.asyncio
 async def test_last_admin_guard_role_change(client: AsyncClient, admin_token: str, admin_user):
     """Cannot change role of the last active admin to non-admin."""
+    role_map = admin_user._test_role_map
     resp = await client.patch(
         f"/api/users/{admin_user.id}",
-        json={"role": "viewer"},
+        json={"role_id": role_map["viewer"]},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert resp.status_code == 400
@@ -108,14 +106,12 @@ async def test_change_own_password(client: AsyncClient, admin_token: str, admin_
     )
     assert resp.status_code == 200
 
-    # Old password should no longer work
     resp = await client.post(
         "/api/auth/login",
         json={"email": "admin@test.com", "password": "testpassword123"},
     )
     assert resp.status_code == 401
 
-    # New password should work
     resp = await client.post(
         "/api/auth/login",
         json={"email": "admin@test.com", "password": "newpass456"},

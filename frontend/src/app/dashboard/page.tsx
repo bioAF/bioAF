@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { isAuthenticated } from "@/lib/auth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { InfrastructureHealthWidget } from "@/components/dashboard/InfrastructureHealthWidget";
 import { RunningJobsWidget } from "@/components/dashboard/RunningJobsWidget";
 import { QueueDepthWidget } from "@/components/dashboard/QueueDepthWidget";
@@ -20,6 +21,7 @@ interface GCPConfig {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { canAccess, roleName } = usePermissions();
   const [gcpConfigured, setGcpConfigured] = useState<boolean | null>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
@@ -33,7 +35,7 @@ export default function DashboardPage() {
       .catch(() => setGcpConfigured(true)); // don't block dashboard on API error
   }, [router]);
 
-  const showGcpBanner = gcpConfigured === false && !bannerDismissed;
+  const showGcpBanner = gcpConfigured === false && !bannerDismissed && roleName === "admin";
 
   return (
     <div className="flex h-screen">
@@ -67,15 +69,17 @@ export default function DashboardPage() {
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4 shrink-0">
-            <InfrastructureHealthWidget />
-            <RunningJobsWidget />
-            <QueueDepthWidget />
-            <CostBudgetWidget />
-            <IngestStatusWidget />
+            {canAccess("infrastructure", "view") && <InfrastructureHealthWidget />}
+            {canAccess("pipelines", "view") && <RunningJobsWidget />}
+            {canAccess("pipelines", "view") && <QueueDepthWidget />}
+            {canAccess("cost_center", "view") && <CostBudgetWidget />}
+            {canAccess("files", "view") && <IngestStatusWidget />}
           </div>
 
           <div className="flex-1 min-h-0">
-            <ActivityFeedWidget className="h-full" />
+            {canAccess("audit_log", "view") && (
+              <ActivityFeedWidget className="h-full" />
+            )}
           </div>
         </main>
       </div>

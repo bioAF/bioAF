@@ -95,8 +95,12 @@ class NotificationRouter:
                 for rule in rules:
                     if rule.channel == "in_app":
                         continue
-                    if rule.role_filter and recipient_user.role != rule.role_filter:
-                        continue
+                    if rule.role_filter:
+                        from app.services import role_service
+
+                        user_role = await role_service.get_role_by_id(session, recipient_user.role_id)
+                        if not user_role or user_role.name != rule.role_filter:
+                            continue
 
                     # Check user preference (unless mandatory)
                     if not rule.mandatory:
@@ -155,7 +159,9 @@ class NotificationRouter:
             User.status == "active",
         )
         if role_filters:
-            query = query.where(User.role.in_(role_filters))
+            from app.models.role import Role
+
+            query = query.join(Role, User.role_id == Role.id).where(Role.name.in_(role_filters))
 
         result = await session.execute(query)
         recipients = list(result.scalars().all())

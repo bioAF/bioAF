@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.schemas.audit import AuditLogEntry, AuditLogExportRequest, AuditLogResponse
 from app.schemas.experiment import (
     CustomFieldResponse,
@@ -95,7 +95,7 @@ async def list_experiments(
 @router.post("", response_model=ExperimentResponse)
 async def create_experiment(
     body: ExperimentCreate,
-    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    current_user: dict = require_permission("experiments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -192,7 +192,7 @@ async def get_experiment(
 async def update_experiment(
     experiment_id: int,
     body: ExperimentUpdate,
-    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    current_user: dict = require_permission("experiments", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -211,7 +211,7 @@ async def update_experiment(
 async def update_experiment_status(
     experiment_id: int,
     body: ExperimentStatusUpdate,
-    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    current_user: dict = require_permission("experiments", "change_status"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -265,7 +265,7 @@ async def list_experiment_samples(
 async def create_sample(
     experiment_id: int,
     body: SampleCreate,
-    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    current_user: dict = require_permission("experiments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
@@ -300,7 +300,7 @@ async def create_sample(
 async def bulk_create_samples(
     experiment_id: int,
     body: SampleBulkCreate,
-    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    current_user: dict = require_permission("experiments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
@@ -313,7 +313,7 @@ async def bulk_create_samples(
 async def upload_samples_csv(
     experiment_id: int,
     file: UploadFile = File(...),
-    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    current_user: dict = require_permission("experiments", "upload"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
@@ -372,7 +372,7 @@ async def list_experiment_batches(
 async def create_batch(
     experiment_id: int,
     body: BatchCreate,
-    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    current_user: dict = require_permission("experiments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
@@ -486,7 +486,7 @@ async def get_experiment_audit(
 async def export_experiment_audit(
     experiment_id: int,
     body: AuditLogExportRequest,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("experiments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])

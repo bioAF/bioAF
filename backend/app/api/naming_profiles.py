@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.schemas.naming_profile import (
     NamingProfileCreate,
@@ -38,7 +38,7 @@ def _profile_response(p, match_count: int | None = None) -> NamingProfileRespons
 @router.get("", response_model=list[NamingProfileResponse])
 async def list_profiles(
     status: str | None = None,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("experiments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -53,7 +53,7 @@ async def list_profiles(
 @router.post("", response_model=NamingProfileResponse)
 async def create_profile(
     body: NamingProfileCreate,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("experiments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -67,7 +67,7 @@ async def create_profile(
 @router.get("/{profile_id}", response_model=NamingProfileResponse)
 async def get_profile(
     profile_id: int,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("experiments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     profile = await NamingProfileService.get_profile(session, profile_id)
@@ -81,7 +81,7 @@ async def get_profile(
 async def update_profile(
     profile_id: int,
     body: NamingProfileUpdate,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("experiments", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
@@ -96,7 +96,7 @@ async def update_profile(
 @router.delete("/{profile_id}", response_model=NamingProfileResponse)
 async def deactivate_profile(
     profile_id: int,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("experiments", "delete"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
@@ -111,7 +111,7 @@ async def deactivate_profile(
 @router.post("/test", response_model=list[NamingProfileTestResult])
 async def test_profiles(
     body: NamingProfileTestRequest,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("experiments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])

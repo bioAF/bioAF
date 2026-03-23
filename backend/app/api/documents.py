@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.schemas.document import (
     DocumentLinkRequest,
@@ -48,7 +48,7 @@ async def upload_document(
     title: str | None = None,
     experiment_id: int | None = None,
     sample_id: int | None = None,
-    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    current_user: dict = require_permission("files", "upload"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -138,7 +138,7 @@ async def download_document(
 async def update_document(
     document_id: int,
     body: DocumentUpdate,
-    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    current_user: dict = require_permission("files", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -155,7 +155,7 @@ async def update_document(
 @router.delete("/{document_id}")
 async def delete_document(
     document_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("files", "delete"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -172,7 +172,7 @@ async def delete_document(
 async def link_document(
     document_id: int,
     body: DocumentLinkRequest,
-    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    current_user: dict = require_permission("files", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])

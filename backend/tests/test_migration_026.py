@@ -7,6 +7,7 @@ Tests that:
 
 import pytest
 from sqlalchemy import text
+from app.services.bootstrap_roles import seed_builtin_roles
 
 
 @pytest.mark.asyncio
@@ -20,10 +21,12 @@ async def test_migration_adds_k8s_columns_to_pipeline_runs(session):
     session.add(org)
     await session.flush()
 
+    role_map = await seed_builtin_roles(session, org.id)
+
     user = User(
         email="mig026@test.com",
         password_hash=AuthService.hash_password("testpass"),
-        role="admin",
+        role_id=role_map["admin"],
         organization_id=org.id,
         status="active",
     )

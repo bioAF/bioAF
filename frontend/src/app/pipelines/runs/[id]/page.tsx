@@ -29,7 +29,7 @@ function getUserRole(): string {
     const token = getToken();
     if (!token) return "viewer";
     const payload = JSON.parse(atob(token.split(".")[1]));
-    return payload.role || "viewer";
+    return payload.role_name || "viewer";
   } catch {
     return "viewer";
   }

@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
-import { isAuthenticated, getCurrentUser } from "@/lib/auth";
+import { isAuthenticated } from "@/lib/auth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { BillingSetupModal } from "@/components/infrastructure/BillingSetupModal";
 import { TerraformProgressModal } from "@/components/infrastructure/TerraformProgressModal";
@@ -62,6 +63,7 @@ const COMPONENT_LABELS: Record<string, string> = {
 
 export default function InfraCostCenterPage() {
   const router = useRouter();
+  const { canAccess, loading: permLoading } = usePermissions();
   const [summary, setSummary] = useState<CostSummary | null>(null);
   const [budget, setBudget] = useState<BudgetConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -76,8 +78,8 @@ export default function InfraCostCenterPage() {
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/login"); return; }
-    const user = getCurrentUser();
-    if (user?.role !== "admin") { router.push("/"); return; }
+    if (permLoading) return;
+    if (!canAccess("cost_center", "view")) { router.push("/dashboard"); return; }
 
     const load = async () => {
       try {
@@ -103,7 +105,7 @@ export default function InfraCostCenterPage() {
       setLoading(false);
     };
     load();
-  }, [router]);
+  }, [router, permLoading, canAccess]);
 
   const currency = budget?.currency || "USD";
 

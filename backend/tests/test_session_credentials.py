@@ -113,7 +113,7 @@ async def test_username_collision_appends_suffix(client: AsyncClient, admin_toke
     user2 = User(
         email="admin@other.com",
         password_hash=AuthService.hash_password("pass"),
-        role="comp_bio",
+        role_id=admin_user._test_role_map["comp_bio"],
         organization_id=admin_user.organization_id,
         status="active",
     )

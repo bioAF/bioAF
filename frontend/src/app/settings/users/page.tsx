@@ -7,9 +7,10 @@ import { Header } from "@/components/layout/Header";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { InviteForm } from "@/components/auth/InviteForm";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { isAuthenticated, getCurrentUser } from "@/lib/auth";
+import { isAuthenticated } from "@/lib/auth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { api, ApiError } from "@/lib/api";
-import type { User } from "@/lib/types";
+import type { User, Role, RoleListResponse } from "@/lib/types";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { DetailModal } from "@/components/shared/DetailModal";
 
@@ -17,7 +18,7 @@ interface NeverLoggedInUser {
   id: number;
   email: string;
   name: string | null;
-  role: string;
+  role_name: string;
   status: string;
   created_at: string | null;
 }
@@ -31,6 +32,7 @@ type PendingAction =
 
 export default function SettingsUsersPage() {
   const router = useRouter();
+  const { canAccess, loading: permLoading } = usePermissions();
   const [users, setUsers] = useState<User[]>([]);
   const [viewingUser, setViewingUser] = useState<User | null>(null);
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -46,19 +48,23 @@ export default function SettingsUsersPage() {
   const [showTempPasswordForm, setShowTempPasswordForm] = useState(false);
   const [tempPasswordUser, setTempPasswordUser] = useState<User | null>(null);
   const [smtpConfigured, setSmtpConfigured] = useState(false);
+  const [roles, setRoles] = useState<Role[]>([]);
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/login"); return; }
-    const user = getCurrentUser();
-    if (user?.role !== "admin") { router.push("/"); return; }
+    if (permLoading) return;
+    if (!canAccess("users", "view")) { router.push("/dashboard"); return; }
     fetchUsers();
+    api.get<RoleListResponse>("/api/roles")
+      .then((data) => setRoles(data.roles))
+      .catch(() => {});
     api.get<{ users: NeverLoggedInUser[] }>("/api/access-logs/never-logged-in")
       .then((data) => setNeverLoggedIn(data.users))
       .catch(() => {});
     api.get<{ setup_complete: boolean; smtp_configured: boolean }>("/api/bootstrap/status")
       .then((data) => setSmtpConfigured(data.smtp_configured))
       .catch(() => {});
-  }, [router]);
+  }, [router, permLoading, canAccess]);
 
   const fetchUsers = async () => {
     try {
@@ -85,9 +91,12 @@ export default function SettingsUsersPage() {
           await api.post(`/api/users/${pendingAction.user.id}/lock`);
           setSuccess(`${pendingAction.user.email} locked`);
           break;
-        case "role_change":
-          await api.patch(`/api/users/${pendingAction.user.id}`, { role: pendingAction.newRole });
+        case "role_change": {
+          const targetRole = roles.find((r) => r.name === pendingAction.newRole);
+          if (!targetRole) { setError("Role not found"); break; }
+          await api.patch(`/api/users/${pendingAction.user.id}`, { role_id: targetRole.id });
           setSuccess(`${pendingAction.user.email} role changed to ${pendingAction.newRole}`);
+        }
           break;
         case "resend_invite":
           await api.post(`/api/users/${pendingAction.user.id}/resend-invite`);
@@ -127,17 +136,17 @@ export default function SettingsUsersPage() {
     if (!editingUser) return;
     clearMessages();
 
-    const updates: Record<string, string> = {};
+    const updates: Record<string, unknown> = {};
     if (editName !== (editingUser.name || "")) updates.name = editName;
-    if (editRole !== editingUser.role) updates.role = editRole;
+    const roleChanged = editRole !== editingUser.role_name;
 
-    if (Object.keys(updates).length === 0) {
+    if (!roleChanged && Object.keys(updates).length === 0) {
       setEditingUser(null);
       return;
     }
 
     // If role is changing, require confirmation
-    if (updates.role) {
+    if (roleChanged) {
       setPendingAction({ type: "role_change", user: editingUser, newRole: editRole });
       setEditingUser(null);
       return;
@@ -171,7 +180,7 @@ export default function SettingsUsersPage() {
       case "role_change":
         return {
           title: "Change User Role",
-          message: `Change ${pendingAction.user.email} from ${pendingAction.user.role} to ${pendingAction.newRole}?`,
+          message: `Change ${pendingAction.user.email} from ${pendingAction.user.role_name} to ${pendingAction.newRole}?`,
           variant: "default",
         };
       case "resend_invite":
@@ -212,7 +221,7 @@ export default function SettingsUsersPage() {
           onClick={() => {
             setEditingUser(user);
             setEditName(user.name || "");
-            setEditRole(user.role);
+            setEditRole(user.role_name);
             setViewingUser(null);
           }}
           className="px-3 py-1.5 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
@@ -317,7 +326,7 @@ export default function SettingsUsersPage() {
                 {neverLoggedIn.map((u) => (
                   <li key={u.id}>
                     {u.email}
-                    {u.role !== "viewer" && <span className="ml-2 text-amber-500">({u.role})</span>}
+                    {u.role_name !== "viewer" && <span className="ml-2 text-amber-500">({u.role_name})</span>}
                     {u.created_at && (
                       <span className="ml-2 text-amber-400 text-xs">
                         invited {new Date(u.created_at).toLocaleDateString()}
@@ -332,7 +341,7 @@ export default function SettingsUsersPage() {
           {showInvite && (
             <div className="bg-white rounded-lg shadow p-6 mb-6">
               <h2 className="text-lg font-semibold mb-4">Invite Users</h2>
-              <InviteForm />
+              <InviteForm roles={roles} />
             </div>
           )}
 
@@ -376,7 +385,7 @@ export default function SettingsUsersPage() {
                       </td>
                       <td className="px-4 py-3 text-sm">
                         <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">
-                          {user.role}
+                          {user.role_name}
                         </span>
                       </td>
                       <td className="px-4 py-3">
@@ -487,10 +496,9 @@ export default function SettingsUsersPage() {
                       onChange={(e) => setEditRole(e.target.value)}
                       className="w-full px-3 py-2 border rounded-md text-sm"
                     >
-                      <option value="admin">Admin</option>
-                      <option value="comp_bio">Comp Bio</option>
-                      <option value="bench">Bench</option>
-                      <option value="viewer">Viewer</option>
+                      {roles.map((r) => (
+                        <option key={r.id} value={r.name}>{r.name}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -520,7 +528,7 @@ export default function SettingsUsersPage() {
               fields={[
                 { label: "Email", value: viewingUser.email },
                 { label: "Name", value: viewingUser.name },
-                { label: "Role", value: viewingUser.role },
+                { label: "Role", value: viewingUser.role_name },
                 { label: "Status", value: viewingUser.status },
                 {
                   label: "Last Login",

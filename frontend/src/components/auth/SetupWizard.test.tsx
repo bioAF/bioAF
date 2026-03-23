@@ -13,7 +13,7 @@ jest.mock("@/lib/auth", () => ({
   getToken: () => "fake-token",
   setToken: jest.fn(),
   removeToken: jest.fn(),
-  getCurrentUser: () => ({ role: "admin", email: "admin@test.com" }),
+  getCurrentUser: () => ({ role_name: "admin", email: "admin@test.com" }),
 }));
 
 import { api } from "@/lib/api";

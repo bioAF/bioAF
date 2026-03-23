@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import async_session_factory, get_session
 from app.services.audit_service import log_action
 from app.services.notebook_image_service import build_notebook_image, cancel_build
@@ -193,7 +193,7 @@ KUBERNETES_COMPONENTS: list[dict] = [
 @router.post("/api/v1/infrastructure/stack/deploy")
 async def stack_deploy_endpoint(
     body: StackDeployRequest | None = None,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "deploy"),
     session: AsyncSession = Depends(get_session),
 ):
     """Deploy the full compute stack via SSE stream."""
@@ -230,7 +230,7 @@ async def stack_deploy_endpoint(
 @router.post("/api/v1/infrastructure/stack/deploy-background")
 async def stack_deploy_background_endpoint(
     body: StackDeployRequest | None = None,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "deploy"),
     session: AsyncSession = Depends(get_session),
 ):
     """Start a stack deploy in the background and return immediately.
@@ -277,7 +277,7 @@ async def stack_deploy_background_endpoint(
 @router.post("/api/v1/infrastructure/stack/teardown")
 async def stack_teardown_endpoint(
     body: StackTeardownRequest | None = None,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ):
     """Teardown the compute stack via SSE stream."""
@@ -313,7 +313,7 @@ async def stack_teardown_endpoint(
 @router.post("/api/v1/infrastructure/stack/destroy-storage")
 async def stack_destroy_storage_endpoint(
     body: StorageDestroyRequest | None = None,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ):
     """Destroy the storage module (GCS buckets + Pub/Sub) via SSE stream.
@@ -357,7 +357,7 @@ async def stack_destroy_storage_endpoint(
 
 @router.post("/api/v1/infrastructure/stack/sync-storage-config")
 async def sync_storage_config_endpoint(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Re-read Terraform storage outputs and write bucket names to platform_config.
@@ -377,7 +377,7 @@ async def sync_storage_config_endpoint(
 
 @router.post("/api/v1/infrastructure/stack/sync-compute-config")
 async def sync_compute_config_endpoint(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Re-read Terraform compute outputs and write cluster config to platform_config.
@@ -405,7 +405,7 @@ async def sync_compute_config_endpoint(
 
 @router.get("/api/v1/infrastructure/stack/status")
 async def stack_status_endpoint(
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ) -> StackStatus:
     """Return current stack and cluster status."""
@@ -419,7 +419,7 @@ async def stack_status_endpoint(
 
 @router.get("/api/v1/infrastructure/stack/components")
 async def stack_components_list(
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ) -> ComponentListResponse:
     """Return component list based on active compute stack."""
@@ -487,7 +487,7 @@ async def stack_components_list(
 @router.post("/api/v1/infrastructure/stack/components/{component_key}/toggle")
 async def stack_component_toggle(
     component_key: str,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ) -> ComponentToggleResponse:
     """Toggle a component's enabled state with dependency enforcement."""
@@ -610,7 +610,7 @@ async def stack_component_toggle(
 
 @router.get("/api/v1/infrastructure/notebook-image/build-status")
 async def notebook_image_build_status(
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ) -> NotebookImageBuildStatus:
     """Return current notebook image build status."""
@@ -636,7 +636,7 @@ async def notebook_image_build_status(
 
 @router.post("/api/v1/infrastructure/notebook-image/cancel")
 async def notebook_image_cancel(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Cancel the active notebook image build."""
@@ -655,7 +655,7 @@ async def notebook_image_cancel(
 
 @router.get("/api/v1/infrastructure/cluster/config")
 async def get_cluster_config(
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ) -> ClusterConfigResponse:
     """Return current cluster configuration from platform_config."""
@@ -685,7 +685,7 @@ async def get_cluster_config(
 @router.post("/api/v1/infrastructure/cluster/config")
 async def update_cluster_config(
     body: ClusterConfigUpdate,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ) -> ClusterConfigPlanResponse:
     """Update cluster config by generating a Terraform plan."""

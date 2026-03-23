@@ -6,30 +6,37 @@ jest.mock("@/lib/api", () => ({
   api: { post: (...args: unknown[]) => mockApiPost(...args) },
 }));
 
+const mockRoles = [
+  { id: 1, name: "admin", description: null, organization_id: 1, is_system: true, permissions: [], created_at: "" },
+  { id: 2, name: "comp_bio", description: null, organization_id: 1, is_system: true, permissions: [], created_at: "" },
+  { id: 3, name: "bench", description: null, organization_id: 1, is_system: true, permissions: [], created_at: "" },
+  { id: 4, name: "viewer", description: null, organization_id: 1, is_system: true, permissions: [], created_at: "" },
+];
+
 describe("InviteForm", () => {
   beforeEach(() => {
     mockApiPost.mockReset();
   });
 
   it("renders email input, role selector, and invite button", () => {
-    render(<InviteForm />);
+    render(<InviteForm roles={mockRoles} />);
     expect(screen.getByPlaceholderText("Email address")).toBeInTheDocument();
     expect(screen.getByRole("combobox")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Invite" })).toBeInTheDocument();
   });
 
   it("renders all four role options", () => {
-    render(<InviteForm />);
+    render(<InviteForm roles={mockRoles} />);
     const select = screen.getByRole("combobox");
-    expect(select).toContainHTML("Admin");
-    expect(select).toContainHTML("Comp Bio");
-    expect(select).toContainHTML("Bench");
-    expect(select).toContainHTML("Viewer");
+    expect(select).toContainHTML("admin");
+    expect(select).toContainHTML("comp_bio");
+    expect(select).toContainHTML("bench");
+    expect(select).toContainHTML("viewer");
   });
 
-  it("calls POST /api/users with email and selected role on invite", async () => {
+  it("calls POST /api/users with email and selected role_id on invite", async () => {
     mockApiPost.mockResolvedValue({});
-    render(<InviteForm />);
+    render(<InviteForm roles={mockRoles} />);
 
     fireEvent.change(screen.getByPlaceholderText("Email address"), {
       target: { value: "alice@bioaf.org" },
@@ -42,14 +49,14 @@ describe("InviteForm", () => {
     await waitFor(() => {
       expect(mockApiPost).toHaveBeenCalledWith("/api/users", {
         email: "alice@bioaf.org",
-        role: "bench",
+        role_id: 3,
       });
     });
   });
 
   it("shows invited email in results list after successful invite", async () => {
     mockApiPost.mockResolvedValue({});
-    render(<InviteForm />);
+    render(<InviteForm roles={mockRoles} />);
 
     fireEvent.change(screen.getByPlaceholderText("Email address"), {
       target: { value: "alice@bioaf.org" },
@@ -64,7 +71,7 @@ describe("InviteForm", () => {
 
   it("shows error message on invite failure", async () => {
     mockApiPost.mockRejectedValue(new Error("User already exists"));
-    render(<InviteForm />);
+    render(<InviteForm roles={mockRoles} />);
 
     fireEvent.change(screen.getByPlaceholderText("Email address"), {
       target: { value: "exists@bioaf.org" },
@@ -78,7 +85,7 @@ describe("InviteForm", () => {
 
   it("calls bulk invite endpoint with parsed emails", async () => {
     mockApiPost.mockResolvedValue({ results: [{ email: "a@b.com", status: "invited" }] });
-    render(<InviteForm />);
+    render(<InviteForm roles={mockRoles} />);
 
     fireEvent.change(screen.getByLabelText(/Bulk invite/i), {
       target: { value: "a@b.com\nb@c.com" },
@@ -90,8 +97,8 @@ describe("InviteForm", () => {
         "/api/users/bulk-invite",
         expect.objectContaining({
           invites: expect.arrayContaining([
-            { email: "a@b.com", role: "comp_bio" },
-            { email: "b@c.com", role: "comp_bio" },
+            { email: "a@b.com", role_id: 2 },
+            { email: "b@c.com", role_id: 2 },
           ]),
         })
       );

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.schemas.cellxgene import CellxgenePublicationResponse, CellxgenePublishRequest
 from app.schemas.experiment import UserSummary
@@ -44,7 +44,7 @@ def _pub_response(pub) -> CellxgenePublicationResponse:
 @router.post("/publish", response_model=CellxgenePublicationResponse)
 async def publish_dataset(
     body: CellxgenePublishRequest,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("experiments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -75,7 +75,7 @@ async def publish_dataset(
 @router.delete("/{publication_id}")
 async def unpublish_dataset(
     publication_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("experiments", "delete"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])

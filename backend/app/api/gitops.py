@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.schemas.gitops import (
     GitCommitDetail,
     GitCommitListResponse,
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/gitops", tags=["gitops"])
 
 @router.get("/status", response_model=GitOpsRepoStatus)
 async def get_gitops_status(
-    current_user: dict = require_role("admin", "comp_bio", "bench", "viewer"),
+    current_user: dict = require_permission("experiments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -27,7 +27,7 @@ async def get_gitops_status(
 @router.post("/initialize", response_model=GitOpsRepoStatus)
 async def initialize_gitops(
     data: GitOpsInitializeRequest,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -65,7 +65,7 @@ async def list_commits(
     path: str | None = None,
     page: int = 1,
     page_size: int = 20,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -91,7 +91,7 @@ async def list_commits(
 @router.get("/commits/{sha}", response_model=GitCommitDetail)
 async def get_commit(
     sha: str,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -110,7 +110,7 @@ async def get_commit(
 async def get_file(
     path: str,
     ref: str | None = None,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])

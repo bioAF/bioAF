@@ -1,4 +1,5 @@
 import { getToken, removeToken } from "./auth";
+import { clearPermissionsCache } from "@/hooks/usePermissions";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -33,6 +34,7 @@ async function fetchApi<T>(
 
   if (response.status === 401) {
     removeToken();
+    clearPermissionsCache();
     if (typeof window !== "undefined") {
       window.location.href = "/login";
     }
@@ -73,6 +75,7 @@ async function uploadFile<T>(path: string, file: File): Promise<T> {
 
   if (response.status === 401) {
     removeToken();
+    clearPermissionsCache();
     if (typeof window !== "undefined") {
       window.location.href = "/login";
     }

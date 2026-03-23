@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
-import { isAuthenticated, getCurrentUser } from "@/lib/auth";
+import { isAuthenticated } from "@/lib/auth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import type { NamingProfile, NamingProfileTestResult, SegmentDefinition } from "@/lib/types";
@@ -17,6 +18,7 @@ const FIELD_OPTIONS = [
 
 export default function SettingsNamingProfilesPage() {
   const router = useRouter();
+  const { canAccess, loading: permLoading } = usePermissions();
   const [profiles, setProfiles] = useState<NamingProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -41,10 +43,10 @@ export default function SettingsNamingProfilesPage() {
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/login"); return; }
-    const user = getCurrentUser();
-    if (user?.role !== "admin") { router.push("/"); return; }
+    if (permLoading) return;
+    if (!canAccess("infrastructure", "configure")) { router.push("/dashboard"); return; }
     loadProfiles();
-  }, [router]);
+  }, [router, permLoading, canAccess]);
 
   const loadProfiles = async () => {
     try {

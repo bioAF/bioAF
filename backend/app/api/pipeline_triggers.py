@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.models.pipeline_run import PipelineRun
 from app.schemas.pipeline_trigger import (
@@ -38,7 +38,7 @@ def _trigger_response(t, stats: dict | None = None) -> PipelineTriggerResponse:
 
 @router.get("", response_model=list[PipelineTriggerResponse])
 async def list_triggers(
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -53,7 +53,7 @@ async def list_triggers(
 @router.post("", response_model=PipelineTriggerResponse)
 async def create_trigger(
     body: PipelineTriggerCreate,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -66,7 +66,7 @@ async def create_trigger(
 
 @router.get("/queue")
 async def list_queue(
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     result = await session.execute(
@@ -87,7 +87,7 @@ async def list_queue(
 
 @router.get("/cost-estimates")
 async def get_cost_estimates(
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     """Per-pipeline estimation accuracy."""
@@ -107,7 +107,7 @@ async def get_cost_estimates(
 @router.get("/{trigger_id}", response_model=PipelineTriggerResponse)
 async def get_trigger(
     trigger_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     trigger = await TriggerService.get_trigger(session, trigger_id)
@@ -121,7 +121,7 @@ async def get_trigger(
 async def update_trigger(
     trigger_id: int,
     body: PipelineTriggerUpdate,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
@@ -136,7 +136,7 @@ async def update_trigger(
 @router.delete("/{trigger_id}", response_model=PipelineTriggerResponse)
 async def disable_trigger(
     trigger_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "delete"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
@@ -151,7 +151,7 @@ async def disable_trigger(
 @router.post("/{trigger_id}/test")
 async def test_trigger(
     trigger_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     """Dry-run trigger against recent ingest events."""
@@ -180,7 +180,7 @@ async def test_trigger(
 @router.post("/queue/{run_id}/approve")
 async def approve_queued_run(
     run_id: int,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("pipelines", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
@@ -194,7 +194,7 @@ async def approve_queued_run(
 @router.post("/queue/approve-bulk")
 async def approve_bulk(
     body: dict,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("pipelines", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
@@ -211,7 +211,7 @@ budget_router = APIRouter(tags=["budget"])
 @budget_router.post("/api/pipeline-runs/estimate-cost", response_model=CostEstimateResponse)
 async def estimate_cost(
     body: dict,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     pipeline_name = body.get("pipeline_name", "unknown")
@@ -234,7 +234,7 @@ async def estimate_cost(
 
 @budget_router.get("/api/budget/status")
 async def budget_status(
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "change_status"),
     session: AsyncSession = Depends(get_session),
 ):
     current_spend = await BudgetService.get_current_spend(session)

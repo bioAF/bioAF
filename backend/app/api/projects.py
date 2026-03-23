@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.schemas.project import (
     ProjectCreate,
@@ -39,7 +39,7 @@ async def list_projects(
 @router.post("", response_model=ProjectResponse)
 async def create_project(
     body: ProjectCreate,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("projects", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -86,7 +86,7 @@ async def get_project(
 async def update_project(
     project_id: int,
     body: ProjectUpdate,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("projects", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -120,7 +120,7 @@ async def update_project(
 async def add_samples(
     project_id: int,
     body: ProjectSamplesAdd,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("projects", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -141,7 +141,7 @@ async def add_samples(
 async def remove_sample(
     project_id: int,
     sample_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("projects", "delete"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])

@@ -25,19 +25,22 @@ from app.services.terraform_executor import TerraformExecutor, TerraformProgress
 # ---------------------------------------------------------------------------
 
 
-async def _seed_user_and_token(client, session, role="admin"):
+async def _seed_user_and_token(client, session, role_name="admin"):
     from app.models.organization import Organization
     from app.models.user import User
     from app.services.auth_service import AuthService
+    from app.services.bootstrap_roles import seed_builtin_roles
 
     org = Organization(name="ApiTestOrg", setup_complete=True)
     session.add(org)
     await session.flush()
 
+    role_map = await seed_builtin_roles(session, org.id)
+
     user = User(
-        email=f"{role}_api@test.com",
+        email=f"{role_name}_api@test.com",
         password_hash=AuthService.hash_password("pw"),
-        role=role,
+        role_id=role_map[role_name],
         organization_id=org.id,
         status="active",
     )
@@ -45,7 +48,7 @@ async def _seed_user_and_token(client, session, role="admin"):
     await session.flush()
     await session.commit()
 
-    token = AuthService.create_token(user.id, user.email, user.role, user.organization_id)
+    token = AuthService.create_token(user.id, user.email, user.role_id, user.organization_id, role_name=role_name)
     return user, token
 
 
@@ -77,7 +80,7 @@ async def _seed_gcp_config(session, configured=True, initialized=False):
 @pytest.mark.asyncio
 async def test_terraform_status_requires_admin(client, session):
     """Non-admin user gets 403 on terraform status endpoint."""
-    _, viewer_token = await _seed_user_and_token(client, session, role="viewer")
+    _, viewer_token = await _seed_user_and_token(client, session, role_name="viewer")
     await _seed_gcp_config(session)
 
     resp = await client.get(
@@ -90,7 +93,7 @@ async def test_terraform_status_requires_admin(client, session):
 @pytest.mark.asyncio
 async def test_terraform_plan_requires_admin(client, session):
     """Non-admin user gets 403 on terraform plan endpoint."""
-    _, viewer_token = await _seed_user_and_token(client, session, role="viewer")
+    _, viewer_token = await _seed_user_and_token(client, session, role_name="viewer")
 
     resp = await client.post(
         "/api/v1/infrastructure/terraform/plan",
@@ -454,7 +457,7 @@ async def test_abandon_run_returns_cancelled(client, session):
 @pytest.mark.asyncio
 async def test_abandon_run_requires_admin(client, session):
     """Non-admin users get 403 on the abandon endpoint."""
-    _, viewer_token = await _seed_user_and_token(client, session, role="viewer")
+    _, viewer_token = await _seed_user_and_token(client, session, role_name="viewer")
 
     resp = await client.post(
         "/api/v1/infrastructure/terraform/abandon/1",

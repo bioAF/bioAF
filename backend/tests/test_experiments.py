@@ -13,7 +13,7 @@ async def bench_user(session, admin_user):
     user = User(
         email="bench@test.com",
         password_hash=password_hash,
-        role="bench",
+        role_id=admin_user._test_role_map["bench"],
         organization_id=admin_user.organization_id,
         status="active",
     )
@@ -25,22 +25,27 @@ async def bench_user(session, admin_user):
 
 @pytest_asyncio.fixture
 async def bench_token(bench_user) -> str:
-    return AuthService.create_token(bench_user.id, bench_user.email, bench_user.role, bench_user.organization_id)
+    return AuthService.create_token(
+        bench_user.id, bench_user.email, bench_user.role_id, bench_user.organization_id, role_name="bench"
+    )
 
 
 @pytest_asyncio.fixture
 async def other_org_user(session):
     from app.models.organization import Organization
     from app.models.user import User
+    from app.services.bootstrap_roles import seed_builtin_roles
 
     org = Organization(name="Other Org", setup_complete=True)
     session.add(org)
     await session.flush()
 
+    role_map = await seed_builtin_roles(session, org.id)
+
     user = User(
         email="other@other.com",
         password_hash=AuthService.hash_password("otherpass"),
-        role="admin",
+        role_id=role_map["admin"],
         organization_id=org.id,
         status="active",
     )
@@ -53,7 +58,11 @@ async def other_org_user(session):
 @pytest_asyncio.fixture
 async def other_org_token(other_org_user) -> str:
     return AuthService.create_token(
-        other_org_user.id, other_org_user.email, other_org_user.role, other_org_user.organization_id
+        other_org_user.id,
+        other_org_user.email,
+        other_org_user.role_id,
+        other_org_user.organization_id,
+        role_name="admin",
     )
 
 

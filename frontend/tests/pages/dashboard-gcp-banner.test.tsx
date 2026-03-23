@@ -13,7 +13,17 @@ jest.mock("next/navigation", () => ({
 
 jest.mock("@/lib/auth", () => ({
   isAuthenticated: () => true,
-  getCurrentUser: () => ({ email: "admin@bioaf.org", role: "admin", sub: "1" }),
+  getCurrentUser: () => ({ email: "admin@bioaf.org", role_name: "admin", sub: "1" }),
+}));
+
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({
+    canAccess: () => true,
+    roleName: "admin",
+    loading: false,
+    permissions: new Set(),
+  }),
+  clearPermissionsCache: jest.fn(),
 }));
 
 const mockApiGet = jest.fn();

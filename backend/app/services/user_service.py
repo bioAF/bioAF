@@ -29,7 +29,7 @@ class UserService:
         session: AsyncSession,
         email: str,
         password: str,
-        role: str,
+        role_id: int,
         organization_id: int,
         name: str | None = None,
         status: str = "active",
@@ -39,7 +39,7 @@ class UserService:
         user = User(
             email=email,
             password_hash=password_hash,
-            role=role,
+            role_id=role_id,
             organization_id=organization_id,
             name=name,
             status=status,
@@ -53,7 +53,7 @@ class UserService:
             entity_type="user",
             entity_id=user.id,
             action="create",
-            details={"email": email, "role": role, "status": status},
+            details={"email": email, "role_id": role_id, "status": status},
         )
         return user
 
@@ -61,18 +61,17 @@ class UserService:
     async def invite_user(
         session: AsyncSession,
         email: str,
-        role: str,
+        role_id: int,
         organization_id: int,
         actor_user_id: int,
         name: str | None = None,
     ) -> tuple[User, str]:
         """Invite a user. Returns (user, invite_token)."""
-        # Create user with placeholder password and "invited" status
         placeholder_hash = AuthService.hash_password("placeholder-not-usable")
         user = User(
             email=email,
             password_hash=placeholder_hash,
-            role=role,
+            role_id=role_id,
             organization_id=organization_id,
             name=name,
             status="invited",
@@ -88,7 +87,7 @@ class UserService:
             entity_type="user",
             entity_id=user.id,
             action="invite",
-            details={"email": email, "role": role},
+            details={"email": email, "role_id": role_id},
         )
         return user, invite_token
 
@@ -96,11 +95,11 @@ class UserService:
     async def update_role(
         session: AsyncSession,
         user: User,
-        new_role: str,
+        new_role_id: int,
         actor_user_id: int,
     ) -> User:
-        old_role = user.role
-        user.role = new_role
+        old_role_id = user.role_id
+        user.role_id = new_role_id
         await session.flush()
 
         await log_action(
@@ -110,12 +109,11 @@ class UserService:
             entity_id=user.id,
             action="update",
             details={
-                "field": "role",
-                "new_value": new_role,
+                "field": "role_id",
+                "new_value": new_role_id,
                 "target_email": user.email,
-                "description": f"Changed {user.email} role from {old_role} to {new_role}",
             },
-            previous_value={"field": "role", "old_value": old_role},
+            previous_value={"field": "role_id", "old_value": old_role_id},
         )
         return user
 

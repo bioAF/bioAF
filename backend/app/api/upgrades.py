@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.schemas.upgrade import (
     VersionInfo,
     UpdateCheckResponse,
@@ -20,14 +20,14 @@ router = APIRouter(prefix="/api/upgrades", tags=["upgrades"])
 
 @router.get("/current", response_model=VersionInfo)
 async def get_current_version(
-    current_user: dict = require_role("admin", "comp_bio", "bench", "viewer"),
+    current_user: dict = require_permission("experiments", "view"),
 ):
     return await UpgradeService.get_version_info()
 
 
 @router.get("/check", response_model=UpdateCheckResponse)
 async def check_for_updates(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "view"),
 ):
     org_id = current_user["org_id"]
     return await UpgradeService.check_for_updates(org_id)
@@ -37,7 +37,7 @@ async def check_for_updates(
 async def get_upgrade_history(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = current_user["org_id"]
@@ -51,7 +51,7 @@ async def get_upgrade_history(
 @router.post("/start", response_model=StartUpgradeResponse)
 async def start_upgrade(
     body: StartUpgradeRequest,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "deploy"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = current_user["org_id"]
@@ -70,7 +70,7 @@ async def start_upgrade(
 @router.post("/{upgrade_id}/confirm", response_model=ConfirmUpgradeResponse)
 async def confirm_upgrade(
     upgrade_id: int,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = current_user["org_id"]
@@ -89,7 +89,7 @@ async def confirm_upgrade(
 @router.post("/{upgrade_id}/rollback", response_model=RollbackResponse)
 async def rollback_upgrade(
     upgrade_id: int,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "build"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = current_user["org_id"]

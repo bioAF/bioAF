@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
-import { isAuthenticated, getCurrentUser } from "@/lib/auth";
+import { isAuthenticated } from "@/lib/auth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 
 interface AccessLogEntry {
@@ -19,6 +20,7 @@ interface AccessLogEntry {
 
 export default function AccessLogsPage() {
   const router = useRouter();
+  const { canAccess, loading: permLoading } = usePermissions();
   const [logs, setLogs] = useState<AccessLogEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -28,9 +30,9 @@ export default function AccessLogsPage() {
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/login"); return; }
-    const user = getCurrentUser();
-    if (user?.role !== "admin") { router.push("/"); return; }
-  }, [router]);
+    if (permLoading) return;
+    if (!canAccess("audit_log", "view")) { router.push("/dashboard"); return; }
+  }, [router, permLoading, canAccess]);
 
   useEffect(() => {
     const load = async () => {

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.schemas.template_notebook import (
     TemplateCloneRequest,
     TemplateNotebookListResponse,
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/template-notebooks", tags=["template-notebooks"]
 
 @router.get("", response_model=TemplateNotebookListResponse)
 async def list_templates(
-    current_user: dict = require_role("admin", "comp_bio", "bench", "viewer"),
+    current_user: dict = require_permission("experiments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -46,7 +46,7 @@ async def list_templates(
 @router.get("/{template_id}", response_model=TemplateNotebookResponse)
 async def get_template(
     template_id: int,
-    current_user: dict = require_role("admin", "comp_bio", "bench", "viewer"),
+    current_user: dict = require_permission("experiments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -69,7 +69,7 @@ async def get_template(
 @router.get("/{template_id}/content")
 async def get_template_content(
     template_id: int,
-    current_user: dict = require_role("admin", "comp_bio", "bench", "viewer"),
+    current_user: dict = require_permission("experiments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -89,7 +89,7 @@ async def get_template_content(
 async def clone_template(
     template_id: int,
     data: TemplateCloneRequest,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("notebooks", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])

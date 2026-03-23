@@ -20,7 +20,7 @@ type Tab = "packages" | "history" | "compare";
 export default function InfraEnvironmentsPage() {
   const router = useRouter();
   const user = getCurrentUser();
-  const canMutate = user?.role === "admin" || user?.role === "comp_bio";
+  const canMutate = user?.role_name === "admin" || user?.role_name === "comp_bio";
 
   const [environments, setEnvironments] = useState<EnvironmentResponse[]>([]);
   const [loading, setLoading] = useState(true);

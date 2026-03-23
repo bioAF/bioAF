@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
-import { isAuthenticated, getCurrentUser } from "@/lib/auth";
+import { isAuthenticated } from "@/lib/auth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 
 interface BackupTier {
@@ -42,6 +43,7 @@ function formatBytes(bytes: number | null): string {
 
 export default function BackupsPage() {
   const router = useRouter();
+  const { canAccess, loading: permLoading } = usePermissions();
   const [tiers, setTiers] = useState<BackupTier[]>([]);
   const [overallStatus, setOverallStatus] = useState("");
   const [snapshots, setSnapshots] = useState<ConfigSnapshot[]>([]);
@@ -50,8 +52,8 @@ export default function BackupsPage() {
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/login"); return; }
-    const user = getCurrentUser();
-    if (user?.role !== "admin") { router.push("/"); return; }
+    if (permLoading) return;
+    if (!canAccess("backups", "view")) { router.push("/dashboard"); return; }
 
     const load = async () => {
       try {
@@ -69,7 +71,7 @@ export default function BackupsPage() {
       }
     };
     load();
-  }, [router]);
+  }, [router, permLoading, canAccess]);
 
   const handleRestore = async (type: string) => {
     if (!confirm(`Are you sure you want to initiate a ${type} restore?`)) return;

@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { getCurrentUser } from "@/lib/auth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { navConfig, NavSection, NavChild, isChildActive } from "@/lib/navConfig";
 
 function ChevronIcon({ expanded }: { expanded: boolean }) {
@@ -103,7 +104,32 @@ function SidebarSection({
 export function Sidebar() {
   const pathname = usePathname();
   const user = getCurrentUser();
-  const isAdmin = user?.role === "admin";
+  const { canAccess, roleName, loading } = usePermissions();
+
+  // Filter sections and children based on permissions
+  const visibleSections = useMemo(() => {
+    if (loading) return [];
+    return navConfig
+      .filter((section) => {
+        if (section.adminOnly && roleName !== "admin") return false;
+        if (section.permission && !canAccess(section.permission.resource, section.permission.action)) {
+          return false;
+        }
+        if (section.children) {
+          return section.children.some(
+            (child) => !child.permission || canAccess(child.permission.resource, child.permission.action),
+          );
+        }
+        return true;
+      })
+      .map((section) => {
+        if (!section.children) return section;
+        const filteredChildren = section.children.filter(
+          (child) => !child.permission || canAccess(child.permission.resource, child.permission.action),
+        );
+        return { ...section, children: filteredChildren };
+      });
+  }, [loading, roleName, canAccess]);
 
   // Initialize expanded state: auto-expand section containing active path
   const [expandedSections, setExpandedSections] = useState<Set<string>>(() => {
@@ -123,7 +149,7 @@ export function Sidebar() {
 
   // Auto-expand when navigating to a new section
   useEffect(() => {
-    for (const section of navConfig) {
+    for (const section of visibleSections) {
       if (section.children) {
         const hasActiveChild = section.children.some((c) =>
           isChildActive(pathname, c, section.children!),
@@ -133,7 +159,7 @@ export function Sidebar() {
         }
       }
     }
-  }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pathname, visibleSections]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSection = (label: string) => {
     setExpandedSections((prev) => {
@@ -146,10 +172,6 @@ export function Sidebar() {
       return next;
     });
   };
-
-  const visibleSections = navConfig.filter(
-    (section) => !section.adminOnly || isAdmin,
-  );
 
   return (
     <aside className="w-64 bg-gray-900 text-white min-h-screen flex flex-col" data-testid="sidebar">
@@ -176,7 +198,7 @@ export function Sidebar() {
         {user && (
           <div className="text-xs text-gray-400">
             <div className="truncate">{user.email as string}</div>
-            <div className="text-gray-500 mt-0.5">{user.role as string}</div>
+            <div className="text-gray-500 mt-0.5">{user.role_name as string}</div>
           </div>
         )}
         <div className="text-xs text-gray-600 mt-2">v0.1.0</div>

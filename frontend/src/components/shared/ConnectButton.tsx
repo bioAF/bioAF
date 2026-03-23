@@ -21,7 +21,7 @@ interface ConnectionResponse {
 
 export function ConnectButton({ targetType, targetId, disabled = false }: ConnectButtonProps) {
   const user = getCurrentUser();
-  const role = user?.role as string;
+  const role = user?.role_name as string;
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [connection, setConnection] = useState<ConnectionResponse | null>(null);

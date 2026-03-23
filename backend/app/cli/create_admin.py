@@ -61,12 +61,17 @@ async def create_admin_user(
     session.add(org)
     await session.flush()
 
+    # Seed built-in roles
+    from app.services.bootstrap_roles import seed_builtin_roles
+
+    role_map = await seed_builtin_roles(session, org.id)
+
     # Create admin user with bcrypt-hashed password
     password_hash = AuthService.hash_password(password)
     user = User(
         email=email,
         password_hash=password_hash,
-        role="admin",
+        role_id=role_map["admin"],
         organization_id=org.id,
         status="active",
     )

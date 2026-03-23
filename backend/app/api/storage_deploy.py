@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.services.file_organization import FileOrganizationService
 from app.services.gcs_storage import BucketMetrics, GcsStorageService
@@ -83,7 +83,7 @@ async def deploy_storage_module(session: AsyncSession, user_id: int) -> dict:
     response_model=StorageDeployResponse,
 )
 async def deploy_storage(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ) -> StorageDeployResponse:
     """Deploy GCS storage buckets via Terraform."""
@@ -122,7 +122,7 @@ async def deploy_storage(
     response_model=BucketMetricsResponse,
 )
 async def get_storage_buckets(
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ) -> BucketMetricsResponse:
     """Return live bucket metrics from the GCS API."""
@@ -148,7 +148,7 @@ async def get_storage_buckets(
 async def assign_file(
     file_id: int,
     body: FileAssignRequest,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Assign or reassign a file to an experiment."""
@@ -165,7 +165,7 @@ async def assign_file(
 @router.post("/api/v1/files/{file_id}/unlink")
 async def unlink_file(
     file_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Unlink a file from its experiment."""

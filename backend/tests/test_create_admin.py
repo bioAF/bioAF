@@ -37,7 +37,13 @@ async def test_create_admin_creates_user(session):
         org_slug="acme-biotech",
     )
 
-    result = await session.execute(text("SELECT email, role, status FROM users WHERE email = 'admin@example.com'"))
+    result = await session.execute(
+        text(
+            "SELECT u.email, r.name, u.status FROM users u "
+            "JOIN roles r ON u.role_id = r.id "
+            "WHERE u.email = 'admin@example.com'"
+        )
+    )
     row = result.fetchone()
     assert row is not None
     assert row[0] == "admin@example.com"

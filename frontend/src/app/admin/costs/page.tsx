@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
-import { isAuthenticated, getCurrentUser } from "@/lib/auth";
+import { isAuthenticated } from "@/lib/auth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 
 interface DailyCost {
@@ -37,6 +38,7 @@ interface BudgetConfig {
 
 export default function CostsPage() {
   const router = useRouter();
+  const { canAccess, loading: permLoading } = usePermissions();
   const [summary, setSummary] = useState<CostSummary | null>(null);
   const [budget, setBudget] = useState<BudgetConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -46,8 +48,8 @@ export default function CostsPage() {
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/login"); return; }
-    const user = getCurrentUser();
-    if (user?.role !== "admin") { router.push("/"); return; }
+    if (permLoading) return;
+    if (!canAccess("cost_center", "view")) { router.push("/dashboard"); return; }
 
     const load = async () => {
       try {
@@ -65,7 +67,7 @@ export default function CostsPage() {
       }
     };
     load();
-  }, [router]);
+  }, [router, permLoading, canAccess]);
 
   const handleSaveBudget = async () => {
     if (!budget) return;

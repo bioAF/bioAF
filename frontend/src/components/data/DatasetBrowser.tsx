@@ -35,7 +35,7 @@ export function DatasetBrowser() {
   const [addingToProject, setAddingToProject] = useState(false);
 
   const user = getCurrentUser();
-  const canModify = user?.role === "admin" || user?.role === "comp_bio";
+  const canModify = user?.role_name === "admin" || user?.role_name === "comp_bio";
 
   const fetchDatasets = useCallback(async () => {
     setLoading(true);

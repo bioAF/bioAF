@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.schemas.analysis_snapshot import (
     SnapshotComparison,
@@ -62,7 +62,7 @@ def _snapshot_to_detail(snap) -> dict:
 @router.post("", response_model=SnapshotResponse)
 async def create_snapshot(
     body: SnapshotCreate,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("experiments", "change_status"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -142,7 +142,7 @@ async def get_snapshot(
 @router.post("/{snapshot_id}/star", response_model=SnapshotResponse)
 async def toggle_star(
     snapshot_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("experiments", "change_status"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])

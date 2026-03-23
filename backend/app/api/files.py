@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.schemas.experiment import UserSummary
 from app.schemas.file import (
@@ -40,7 +40,7 @@ def _file_response(f) -> FileResponse:
 @router.post("/upload/initiate", response_model=FileUploadInitiateResponse)
 async def initiate_upload(
     body: FileUploadInitiate,
-    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    current_user: dict = require_permission("files", "upload"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -65,7 +65,7 @@ async def initiate_upload(
 @router.post("/upload/complete", response_model=FileResponse)
 async def complete_upload(
     body: FileUploadComplete,
-    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    current_user: dict = require_permission("files", "upload"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -82,7 +82,7 @@ async def complete_upload(
 async def simple_upload(
     file: UploadFile = FastAPIFile(...),
     experiment_id: int | None = Query(None),
-    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    current_user: dict = require_permission("files", "upload"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -109,7 +109,7 @@ async def simple_upload(
 
 @router.post("/reconcile")
 async def reconcile_stuck_files(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("files", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
     """Move files stuck in the ingest bucket to the raw bucket.
@@ -351,7 +351,7 @@ async def file_content(
 @router.delete("/{file_id}")
 async def delete_file(
     file_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("files", "delete"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -368,7 +368,7 @@ async def delete_file(
 async def link_file(
     file_id: int,
     body: FileLinkRequest,
-    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    current_user: dict = require_permission("files", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])

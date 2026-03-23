@@ -19,7 +19,7 @@ A turnkey computational biology platform for small biotech companies (5-50 resea
 - **Cost Center** - GCP billing integration, budget alerts, component cost breakdown, projections
 - **Backup & Recovery** - Tiered backups (Cloud SQL PITR, GCS versioning, config exports), one-click restore
 - **Session Credentials** - Per-user RStudio credentials with PAM authentication, auto-generated usernames
-- **Role-Based Access** - Four roles (admin, comp_bio, bench, viewer) with granular permissions
+- **Role-Based Access** - Permission-based RBAC with four built-in roles, custom role creation, and per-resource/action grants
 - **Upgrade System** - GitHub-based version checking, managed upgrade flow with rollback
 - **Audit Log** - Immutable audit trail with filtering, pagination, and human-readable descriptions
 - **GitOps** - Version-controlled platform configuration with diff and rollback

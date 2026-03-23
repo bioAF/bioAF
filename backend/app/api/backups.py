@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.schemas.backup import (
     BackupStatusResponse,
     BackupTierStatus,
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/backups", tags=["backups"])
 
 @router.get("/status", response_model=BackupStatusResponse)
 async def get_backup_status(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("backups", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     status = await BackupService.get_backup_status(current_user["org_id"])
@@ -34,7 +34,7 @@ async def get_backup_status(
 async def list_config_snapshots(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("backups", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     snapshots, total = await BackupService.get_config_snapshots(
@@ -53,7 +53,7 @@ async def list_config_snapshots(
 @router.get("/config-snapshots/{date}/diff", response_model=ConfigSnapshotDiff)
 async def get_config_snapshot_diff(
     date: str,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("backups", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     diff = await BackupService.get_config_snapshot_diff(current_user["org_id"], date)
@@ -63,7 +63,7 @@ async def get_config_snapshot_diff(
 @router.post("/restore/config", response_model=RestoreResponse)
 async def restore_config(
     body: RestoreRequest,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("backups", "restore"),
     session: AsyncSession = Depends(get_session),
 ):
     result = await BackupService.restore_config(
@@ -76,7 +76,7 @@ async def restore_config(
 @router.post("/restore/cloudsql", response_model=RestoreResponse)
 async def restore_cloudsql(
     body: RestoreRequest,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("backups", "restore"),
     session: AsyncSession = Depends(get_session),
 ):
     return RestoreResponse(
@@ -88,7 +88,7 @@ async def restore_cloudsql(
 @router.post("/restore/filestore", response_model=RestoreResponse)
 async def restore_filestore(
     body: RestoreRequest,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("backups", "restore"),
     session: AsyncSession = Depends(get_session),
 ):
     return RestoreResponse(
@@ -100,7 +100,7 @@ async def restore_filestore(
 @router.put("/settings")
 async def update_backup_settings(
     body: BackupSettingsUpdate,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("backups", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     # Enforce minimums

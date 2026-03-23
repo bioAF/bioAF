@@ -21,6 +21,7 @@ import pytest
 from sqlalchemy import text
 
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
+from app.services.bootstrap_roles import seed_builtin_roles
 
 
 @contextmanager
@@ -167,10 +168,12 @@ async def _seed_user(session):
     session.add(org)
     await session.flush()
 
+    role_map = await seed_builtin_roles(session, org.id)
+
     user = User(
         email="exec_test@test.com",
         password_hash=AuthService.hash_password("pw"),
-        role="admin",
+        role_id=role_map["admin"],
         organization_id=org.id,
         status="active",
     )
@@ -553,10 +556,12 @@ async def test_bootstrap_creates_activity_feed_entry(session):
     session.add(org)
     await session.flush()
 
+    role_map = await seed_builtin_roles(session, org.id)
+
     user = User(
         email="activity_test@test.com",
         password_hash=AuthService.hash_password("pw"),
-        role="admin",
+        role_id=role_map["admin"],
         organization_id=org.id,
         status="active",
     )

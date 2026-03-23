@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.models.file import File
 from app.schemas.qc_dashboard import (
@@ -125,7 +125,7 @@ async def get_dashboard_by_run(
 @router.post("/generate/{pipeline_run_id}", response_model=QCDashboardResponse)
 async def generate_dashboard(
     pipeline_run_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("experiments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -147,7 +147,7 @@ async def generate_dashboard(
 @router.post("/regenerate/{pipeline_run_id}", response_model=QCDashboardResponse)
 async def regenerate_dashboard(
     pipeline_run_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("experiments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     """Delete existing QC dashboard for a run and regenerate from current GCS data."""

@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.services.billing_export_service import BillingExportService
 from app.services.credential_injector import load_gcp_credentials
@@ -124,7 +124,7 @@ async def deploy_billing_export_module(session: AsyncSession, user_id: int) -> d
     response_model=BillingExportStatusResponse,
 )
 async def billing_export_status(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("cost_center", "view"),
     session: AsyncSession = Depends(get_session),
 ) -> BillingExportStatusResponse:
     """Check whether BigQuery billing export is configured."""
@@ -149,7 +149,7 @@ async def billing_export_status(
     response_model=BillingExportEnableResponse,
 )
 async def billing_export_enable(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("cost_center", "view"),
     session: AsyncSession = Depends(get_session),
 ) -> BillingExportEnableResponse:
     """Create the BigQuery dataset and IAM bindings via Terraform."""
@@ -171,7 +171,7 @@ async def billing_export_enable(
     response_model=BillingExportVerifyResponse,
 )
 async def billing_export_verify(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("cost_center", "view"),
     session: AsyncSession = Depends(get_session),
 ) -> BillingExportVerifyResponse:
     """Verify that the billing export table exists and data is flowing."""
@@ -235,7 +235,7 @@ def _sse_event(event: TerraformProgressEvent) -> str:
 
 @router.post("/api/v1/infrastructure/billing-export/teardown")
 async def billing_export_teardown(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("cost_center", "view"),
     session: AsyncSession = Depends(get_session),
 ) -> StreamingResponse:
     """Destroy the BigQuery billing export dataset via Terraform.

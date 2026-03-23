@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.schemas.experiment import UserSummary
 from app.schemas.file import FileResponse
@@ -112,7 +112,7 @@ async def get_thumbnail(
 
 @router.post("/backfill")
 async def backfill_plot_metadata(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("experiments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     updated = await PlotArchiveService.backfill_metadata(session)
@@ -123,7 +123,7 @@ async def backfill_plot_metadata(
 async def update_plot(
     plot_id: int,
     body: PlotUpdateRequest,
-    current_user: dict = require_role("admin", "comp_bio", "bench"),
+    current_user: dict = require_permission("experiments", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])

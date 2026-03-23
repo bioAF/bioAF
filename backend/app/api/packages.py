@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.schemas.package import (
     DependencyTree,
     PackageInstallRequest,
@@ -39,7 +39,7 @@ async def search_packages(
     query: str,
     sources: str | None = None,
     limit: int = 20,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("environments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     source_list = sources.split(",") if sources else None
@@ -52,7 +52,7 @@ async def get_dependencies(
     package_name: str,
     source: str,
     environment: str,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("environments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     result = await PackageSearchService.get_dependency_tree(package_name, source, environment)
@@ -62,7 +62,7 @@ async def get_dependencies(
 @router.post("/install", response_model=EnvironmentChangeResponse)
 async def install_package(
     data: PackageInstallRequest,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("environments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -89,7 +89,7 @@ async def install_package(
 @router.post("/remove", response_model=EnvironmentChangeResponse)
 async def remove_package(
     data: PackageRemoveRequest,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("environments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -114,7 +114,7 @@ async def remove_package(
 @router.post("/update", response_model=EnvironmentChangeResponse)
 async def update_package(
     data: PackageUpdateRequest,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("environments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -142,7 +142,7 @@ async def pin_package(
     name: str,
     environment: str,
     version: str,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("environments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -168,7 +168,7 @@ async def pin_package(
 async def unpin_package(
     name: str,
     environment: str,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("environments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])

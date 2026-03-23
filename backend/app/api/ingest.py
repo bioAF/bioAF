@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.models.experiment import Experiment
 from app.models.file import File
@@ -47,7 +47,7 @@ def _event_response(e) -> IngestEventResponse:
 async def list_ingest_events(
     status: str | None = None,
     limit: int = Query(default=50, le=200),
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     query = select(IngestEvent).order_by(IngestEvent.created_at.desc()).limit(limit)
@@ -60,7 +60,7 @@ async def list_ingest_events(
 @router.get("/events/{event_id}", response_model=IngestEventResponse)
 async def get_ingest_event(
     event_id: int,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     result = await session.execute(select(IngestEvent).where(IngestEvent.id == event_id))
@@ -73,7 +73,7 @@ async def get_ingest_event(
 @router.post("/simulate", response_model=IngestEventResponse)
 async def simulate_ingest(
     body: IngestSimulateRequest,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     """Simulate a file arrival for local/POC testing."""
@@ -99,7 +99,7 @@ async def simulate_ingest(
 @router.post("/reassign", response_model=BulkReassignResponse)
 async def bulk_reassign(
     body: BulkReassignRequest,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     """Bulk reassign files to a different project, experiment, or sample."""
@@ -137,7 +137,7 @@ async def bulk_reassign(
 
 @router.get("/unmatched", response_model=list[IngestEventResponse])
 async def list_unmatched(
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     result = await session.execute(
@@ -148,7 +148,7 @@ async def list_unmatched(
 
 @router.get("/unclaimed", response_model=list[UnclaimedEntityResponse])
 async def list_unclaimed(
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -165,7 +165,7 @@ claim_router = APIRouter(tags=["ingest"])
 async def claim_project(
     project_id: int,
     body: ClaimRequest,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("projects", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
@@ -193,7 +193,7 @@ async def claim_project(
 async def claim_experiment(
     experiment_id: int,
     body: ClaimRequest,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("experiments", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
@@ -221,7 +221,7 @@ async def claim_experiment(
 async def claim_sample(
     sample_id: int,
     body: ClaimRequest,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("samples", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])

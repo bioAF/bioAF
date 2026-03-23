@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.models.controlled_vocabulary import ControlledVocabulary
 from app.schemas.controlled_vocabulary import (
     ControlledVocabularyCreate,
@@ -65,7 +65,7 @@ async def list_vocabulary_fields(
 @router.post("", response_model=ControlledVocabularyDetailResponse, status_code=201)
 async def create_vocabulary_value(
     body: ControlledVocabularyCreate,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("experiments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     """Add a new value to a controlled vocabulary. Admin only."""
@@ -121,7 +121,7 @@ async def create_vocabulary_value(
 async def update_vocabulary_value(
     vocab_id: int,
     body: ControlledVocabularyUpdate,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("experiments", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
     """Update a controlled vocabulary value. Admin only."""

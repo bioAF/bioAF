@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.models.ingest_event import IngestEvent
 from app.services.audit_service import log_action
@@ -42,7 +42,7 @@ class AutoIngestStatus(BaseModel):
 @router.post("/api/v1/settings/auto-ingest")
 async def configure_auto_ingest(
     body: AutoIngestConfig,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("pipelines", "configure"),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Enable or disable auto-ingest with optional cleanup policy."""
@@ -96,7 +96,7 @@ async def configure_auto_ingest(
 
 @router.get("/api/v1/settings/auto-ingest", response_model=AutoIngestStatus)
 async def get_auto_ingest_status(
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ) -> AutoIngestStatus:
     """Return current auto-ingest status including message counts."""

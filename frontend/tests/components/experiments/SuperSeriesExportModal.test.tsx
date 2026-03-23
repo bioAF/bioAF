@@ -16,7 +16,7 @@ jest.mock("@/lib/api", () => ({
 }));
 
 jest.mock("@/lib/auth", () => ({
-  getCurrentUser: () => ({ email: "test@bioaf.org", role: "comp_bio", sub: "1" }),
+  getCurrentUser: () => ({ email: "test@bioaf.org", role_name: "comp_bio", sub: "1" }),
   getToken: () => "mock-token",
 }));
 

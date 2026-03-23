@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.schemas.reference_dataset import (
     ImpactSummary,
@@ -43,7 +43,7 @@ async def list_references(
     scope: str | None = None,
     status: str | None = None,
     name_search: str | None = None,
-    current_user: dict = require_role("admin", "comp_bio", "bench", "viewer"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     """List reference datasets with optional filters."""
@@ -60,7 +60,7 @@ async def list_references(
 @router.get("/{reference_id}", response_model=ReferenceDatasetDetailResponse)
 async def get_reference(
     reference_id: int,
-    current_user: dict = require_role("admin", "comp_bio", "bench", "viewer"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     """Get reference dataset detail with file manifest."""
@@ -74,7 +74,7 @@ async def get_reference(
 @router.post("", response_model=ReferenceDatasetDetailResponse, status_code=201)
 async def create_reference(
     data: ReferenceDatasetCreate,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     """Create a new reference dataset with file manifest."""
@@ -100,7 +100,7 @@ async def create_reference(
 async def deprecate_reference(
     reference_id: int,
     data: ReferenceDeprecateRequest,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     """Deprecate a reference dataset. Public scope enters pending_approval."""
@@ -119,7 +119,7 @@ async def deprecate_reference(
 @router.post("/{reference_id}/approve-deprecation", response_model=ReferenceDatasetResponse)
 async def approve_deprecation(
     reference_id: int,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ):
     """Admin approves a pending public deprecation."""
@@ -138,7 +138,7 @@ async def approve_deprecation(
 @router.get("/{reference_id}/impact", response_model=ImpactSummary)
 async def get_impact(
     reference_id: int,
-    current_user: dict = require_role("admin", "comp_bio", "bench", "viewer"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     """Get impact assessment: which pipeline runs and experiments used this reference."""

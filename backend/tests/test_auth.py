@@ -52,7 +52,7 @@ async def test_get_current_user(client: AsyncClient, admin_token: str):
     assert response.status_code == 200
     data = response.json()
     assert data["email"] == "admin@test.com"
-    assert data["role"] == "admin"
+    assert data["role_name"] == "admin"
 
 
 @pytest.mark.asyncio

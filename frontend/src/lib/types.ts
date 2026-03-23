@@ -2,13 +2,34 @@ export interface User {
   id: number;
   email: string;
   name: string | null;
-  role: "admin" | "comp_bio" | "bench" | "viewer";
+  role_id: number;
+  role_name: string;
   status: "active" | "invited" | "deactivated";
   organization_id: number;
   last_login: string | null;
   session_credentials_configured: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface PermissionEntry {
+  resource: string;
+  action: string;
+}
+
+export interface Role {
+  id: number;
+  name: string;
+  description: string | null;
+  organization_id: number;
+  is_system: boolean;
+  permissions: PermissionEntry[];
+  created_at: string;
+}
+
+export interface RoleListResponse {
+  roles: Role[];
+  total: number;
 }
 
 export interface LoginResponse {

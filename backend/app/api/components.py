@@ -4,14 +4,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
 from app.schemas.component import ComponentConfigUpdate, ComponentListResponse, ComponentStateResponse
 from app.services.component_service import COMPONENT_CATALOG, ComponentService
+from app.services import role_service
 from app.services.terraform_service import TerraformService
 
 router = APIRouter(prefix="/api/components", tags=["components"])
 
 
-def _require_admin(request: Request) -> dict:
+async def _require_admin(request: Request, session: AsyncSession) -> dict:
     current_user = request.state.current_user
-    if current_user["role"] != "admin":
+    if not await role_service.has_permission(session, int(current_user["role_id"]), "infrastructure", "configure"):
         raise HTTPException(status_code=403, detail="Admin access required")
     return current_user
 
@@ -55,7 +56,7 @@ async def get_component(key: str, session: AsyncSession = Depends(get_session)):
 
 @router.post("/{key}/enable")
 async def enable_component(key: str, request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = _require_admin(request)
+    current_user = await _require_admin(request, session)
     user_id = int(current_user["sub"])
 
     if key not in COMPONENT_CATALOG:
@@ -92,7 +93,7 @@ async def enable_component(key: str, request: Request, session: AsyncSession = D
 
 @router.post("/{key}/disable")
 async def disable_component(key: str, request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = _require_admin(request)
+    current_user = await _require_admin(request, session)
     user_id = int(current_user["sub"])
 
     if key not in COMPONENT_CATALOG:
@@ -140,7 +141,7 @@ async def disable_component(key: str, request: Request, session: AsyncSession = 
 async def configure_component(
     key: str, body: ComponentConfigUpdate, request: Request, session: AsyncSession = Depends(get_session)
 ):
-    current_user = _require_admin(request)
+    current_user = await _require_admin(request, session)
     user_id = int(current_user["sub"])
 
     if key not in COMPONENT_CATALOG:

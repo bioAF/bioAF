@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.services.storage_service import StorageService
 
@@ -20,7 +20,7 @@ async def get_storage_stats(
 
 @router.post("/refresh")
 async def refresh_storage_stats(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])

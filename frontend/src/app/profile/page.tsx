@@ -19,7 +19,7 @@ export default function ProfilePage() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<{
     email: string;
-    role: string;
+    role_name: string;
     name?: string;
   } | null>(null);
 
@@ -51,7 +51,7 @@ export default function ProfilePage() {
     if (user) {
       setCurrentUser({
         email: String(user.email || ""),
-        role: String(user.role || ""),
+        role_name: String(user.role_name || ""),
         name: user.name ? String(user.name) : undefined,
       });
     }
@@ -169,7 +169,7 @@ export default function ProfilePage() {
                   </div>
                   <div>
                     <dt className="text-xs font-medium text-gray-500 uppercase">Role</dt>
-                    <dd className="mt-0.5 text-gray-900">{currentUser.role}</dd>
+                    <dd className="mt-0.5 text-gray-900">{currentUser.role_name}</dd>
                   </div>
                   {currentUser.name && (
                     <div>

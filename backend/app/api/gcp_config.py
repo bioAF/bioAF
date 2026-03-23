@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.schemas.gcp_config import GCPConfigResponse, GCPConfigUpdate, GCPValidationResult
 from app.services import audit_service
@@ -73,7 +73,7 @@ def _to_response(config: dict[str, str]) -> GCPConfigResponse:
 
 @router.get("", response_model=GCPConfigResponse)
 async def get_gcp_config(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ) -> GCPConfigResponse:
     """Return current GCP configuration.  Service account key is never returned."""
@@ -84,7 +84,7 @@ async def get_gcp_config(
 @router.put("", response_model=GCPConfigResponse)
 async def update_gcp_config(
     body: GCPConfigUpdate,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "edit"),
     session: AsyncSession = Depends(get_session),
 ) -> GCPConfigResponse:
     """Save GCP configuration fields and reset validation state."""
@@ -127,7 +127,7 @@ async def update_gcp_config(
 
 @router.post("/validate", response_model=GCPValidationResult)
 async def validate_gcp_config(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ) -> GCPValidationResult:
     """Run GCP credential validation checks against live GCP APIs."""

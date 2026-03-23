@@ -6,26 +6,32 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { InviteForm } from "@/components/auth/InviteForm";
-import { isAuthenticated, getCurrentUser } from "@/lib/auth";
+import { isAuthenticated } from "@/lib/auth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { api, ApiError } from "@/lib/api";
-import type { User } from "@/lib/types";
+import type { User, Role, RoleListResponse } from "@/lib/types";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { DetailModal } from "@/components/shared/DetailModal";
 
 export default function UsersPage() {
   const router = useRouter();
+  const { canAccess, loading: permLoading } = usePermissions();
   const [users, setUsers] = useState<User[]>([]);
   const [viewingUser, setViewingUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [showInvite, setShowInvite] = useState(false);
   const [error, setError] = useState("");
+  const [roles, setRoles] = useState<Role[]>([]);
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/login"); return; }
-    const user = getCurrentUser();
-    if (user?.role !== "admin") { router.push("/"); return; }
+    if (permLoading) return;
+    if (!canAccess("users", "view")) { router.push("/dashboard"); return; }
     fetchUsers();
-  }, [router]);
+    api.get<RoleListResponse>("/api/roles")
+      .then((data) => setRoles(data.roles))
+      .catch(() => {});
+  }, [router, permLoading, canAccess]);
 
   const fetchUsers = async () => {
     try {
@@ -46,9 +52,11 @@ export default function UsersPage() {
     }
   };
 
-  const handleRoleChange = async (userId: number, role: string) => {
+  const handleRoleChange = async (userId: number, roleName: string) => {
+    const targetRole = roles.find((r) => r.name === roleName);
+    if (!targetRole) return;
     try {
-      await api.patch(`/api/users/${userId}`, { role });
+      await api.patch(`/api/users/${userId}`, { role_id: targetRole.id });
       fetchUsers();
     } catch { /* handled */ }
   };
@@ -71,7 +79,7 @@ export default function UsersPage() {
           {showInvite && (
             <div className="bg-white rounded-lg shadow p-6 mb-6">
               <h2 className="text-lg font-semibold mb-4">Invite Users</h2>
-              <InviteForm />
+              <InviteForm roles={roles} />
             </div>
           )}
 
@@ -94,14 +102,13 @@ export default function UsersPage() {
                       <td className="px-6 py-4 text-sm text-gray-500">{user.name || "—"}</td>
                       <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
                         <select
-                          value={user.role}
+                          value={user.role_name}
                           onChange={(e) => handleRoleChange(user.id, e.target.value)}
                           className="text-sm border rounded px-2 py-1"
                         >
-                          <option value="admin">Admin</option>
-                          <option value="comp_bio">Comp Bio</option>
-                          <option value="bench">Bench</option>
-                          <option value="viewer">Viewer</option>
+                          {roles.map((r) => (
+                            <option key={r.id} value={r.name}>{r.name}</option>
+                          ))}
                         </select>
                       </td>
                       <td className="px-6 py-4"><StatusBadge status={user.status} /></td>
@@ -126,7 +133,7 @@ export default function UsersPage() {
               fields={[
                 { label: "Email", value: viewingUser.email },
                 { label: "Name", value: viewingUser.name },
-                { label: "Role", value: viewingUser.role },
+                { label: "Role", value: viewingUser.role_name },
                 { label: "Status", value: viewingUser.status },
                 { label: "Created", value: new Date(viewingUser.created_at).toLocaleString() },
                 { label: "Updated", value: new Date(viewingUser.updated_at).toLocaleString() },

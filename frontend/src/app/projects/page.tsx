@@ -22,7 +22,7 @@ export default function ProjectsPage() {
   const [creating, setCreating] = useState(false);
 
   const user = getCurrentUser();
-  const canCreate = user?.role === "admin" || user?.role === "comp_bio";
+  const canCreate = user?.role_name === "admin" || user?.role_name === "comp_bio";
 
   useEffect(() => {
     if (!isAuthenticated()) {

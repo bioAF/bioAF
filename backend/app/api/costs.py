@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.schemas.cost import (
     CostSummaryResponse,
     CostHistoryResponse,
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/costs", tags=["costs"])
 
 @router.get("/summary", response_model=CostSummaryResponse)
 async def get_cost_summary(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("cost_center", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = current_user["org_id"]
@@ -32,7 +32,7 @@ async def get_cost_summary(
 async def get_cost_history(
     start_date: date = Query(...),
     end_date: date = Query(...),
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("cost_center", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = current_user["org_id"]
@@ -45,7 +45,7 @@ async def get_cost_history(
 
 @router.get("/budget", response_model=BudgetConfigResponse)
 async def get_budget_config(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("cost_center", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = current_user["org_id"]
@@ -63,7 +63,7 @@ async def get_budget_config(
 @router.put("/budget", response_model=BudgetConfigResponse)
 async def update_budget_config(
     body: BudgetConfigUpdate,
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("cost_center", "configure_budgets"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = current_user["org_id"]
@@ -74,7 +74,7 @@ async def update_budget_config(
 
 @router.post("/sync")
 async def trigger_billing_sync(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("cost_center", "configure_budgets"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = current_user["org_id"]
@@ -87,7 +87,7 @@ async def trigger_billing_sync(
 async def purge_cost_records(
     start_date: date = Query(...),
     end_date: date = Query(...),
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("cost_center", "configure_budgets"),
     session: AsyncSession = Depends(get_session),
 ):
     """Delete cost records in a date range. Useful for clearing stale data."""

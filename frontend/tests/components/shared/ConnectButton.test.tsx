@@ -22,7 +22,7 @@ const mockConnection = {
 
 describe("ConnectButton", () => {
   beforeEach(() => {
-    mockGetCurrentUser.mockReturnValue({ email: "test@bioaf.org", role: "comp_bio", sub: "1" });
+    mockGetCurrentUser.mockReturnValue({ email: "test@bioaf.org", role_name: "comp_bio", sub: "1" });
     mockApiPost.mockReset();
     mockApiPost.mockResolvedValue(mockConnection);
   });
@@ -33,7 +33,7 @@ describe("ConnectButton", () => {
   });
 
   it("is hidden when user has bench role", () => {
-    mockGetCurrentUser.mockReturnValue({ email: "bench@bioaf.org", role: "bench", sub: "2" });
+    mockGetCurrentUser.mockReturnValue({ email: "bench@bioaf.org", role_name: "bench", sub: "2" });
     render(<ConnectButton targetType="pipeline_run" targetId={1} />);
     expect(screen.queryByTestId("connect-button")).not.toBeInTheDocument();
   });

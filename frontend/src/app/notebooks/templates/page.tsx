@@ -12,7 +12,7 @@ import type { TemplateNotebookResponse, TemplateNotebookListResponse } from "@/l
 export default function TemplateNotebooksPage() {
   const router = useRouter();
   const user = getCurrentUser();
-  const canClone = user?.role === "admin" || user?.role === "comp_bio";
+  const canClone = user?.role_name === "admin" || user?.role_name === "comp_bio";
 
   const [templates, setTemplates] = useState<TemplateNotebookResponse[]>([]);
   const [loading, setLoading] = useState(true);

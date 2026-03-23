@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.schemas.pipeline_run_review import (
     PipelineRunReviewCreate,
     PipelineRunReviewListResponse,
@@ -40,7 +40,7 @@ def _review_response(review) -> PipelineRunReviewResponse:
 async def create_review(
     run_id: int,
     body: PipelineRunReviewCreate,
-    current_user: dict = require_role("admin", "comp_bio"),
+    current_user: dict = require_permission("pipelines", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     """Submit a review for a pipeline run."""
@@ -73,7 +73,7 @@ async def create_review(
 @router.get("/{run_id}/reviews", response_model=PipelineRunReviewListResponse)
 async def list_reviews(
     run_id: int,
-    current_user: dict = require_role("admin", "comp_bio", "bench", "viewer"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     """List all reviews for a pipeline run, newest first."""
@@ -84,7 +84,7 @@ async def list_reviews(
 @router.get("/{run_id}/review", response_model=PipelineRunReviewResponse)
 async def get_active_review(
     run_id: int,
-    current_user: dict = require_role("admin", "comp_bio", "bench", "viewer"),
+    current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     """Get the active (non-superseded) review for a pipeline run."""

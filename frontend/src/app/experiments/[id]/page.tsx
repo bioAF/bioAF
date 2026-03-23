@@ -401,7 +401,7 @@ export default function ExperimentDetailPage() {
             <ExperimentStatusBadge status={experiment.status} />
             {(() => {
               const user = getCurrentUser();
-              const role = (user?.role as string) || "viewer";
+              const role = (user?.role_name as string) || "viewer";
               return ["admin", "comp_bio"].includes(role) ? (
                 <button
                   onClick={() => setShowGeoExport(true)}
@@ -1124,7 +1124,7 @@ export default function ExperimentDetailPage() {
             onClose={() => setShowGeoExport(false)}
             userRole={(() => {
               const user = getCurrentUser();
-              return (user?.role as string) || "viewer";
+              return (user?.role_name as string) || "viewer";
             })()}
           />
         </main>

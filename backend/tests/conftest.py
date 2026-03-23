@@ -84,7 +84,7 @@ async def session(db_engine):
 
 @asynccontextmanager
 async def _test_lifespan(app):
-    """No-op lifespan for tests — skips DB verification and background tasks."""
+    """No-op lifespan for tests -- skips DB verification and background tasks."""
     yield
 
 
@@ -115,48 +115,65 @@ async def client(db_engine):
 async def admin_user(session):
     from app.models.organization import Organization
     from app.models.user import User
+    from app.services.bootstrap_roles import seed_builtin_roles
+    from app.services import role_service
+
+    # Clear the permission cache so tests start fresh
+    role_service.invalidate_cache()
 
     org = Organization(name="Test Org", setup_complete=True)
     session.add(org)
     await session.flush()
 
+    # Seed built-in roles for the test organization
+    role_map = await seed_builtin_roles(session, org.id)
+
     password_hash = AuthService.hash_password("testpassword123")
     user = User(
         email="admin@test.com",
         password_hash=password_hash,
-        role="admin",
+        role_id=role_map["admin"],
         organization_id=org.id,
         status="active",
     )
     session.add(user)
     await session.flush()
     await session.commit()
+
+    # Stash role_map on the user object for other fixtures to use
+    user._test_role_map = role_map  # type: ignore[attr-defined]
     return user
 
 
 @pytest_asyncio.fixture
 async def admin_token(admin_user) -> str:
-    return AuthService.create_token(admin_user.id, admin_user.email, admin_user.role, admin_user.organization_id)
+    return AuthService.create_token(
+        admin_user.id, admin_user.email, admin_user.role_id, admin_user.organization_id, role_name="admin"
+    )
 
 
 @pytest_asyncio.fixture
 async def viewer_user(session, admin_user):
     from app.models.user import User
 
+    role_map = admin_user._test_role_map  # type: ignore[attr-defined]
     password_hash = AuthService.hash_password("viewerpass123")
     user = User(
         email="viewer@test.com",
         password_hash=password_hash,
-        role="viewer",
+        role_id=role_map["viewer"],
         organization_id=admin_user.organization_id,
         status="active",
     )
     session.add(user)
     await session.flush()
     await session.commit()
+    user._test_role_map = role_map  # type: ignore[attr-defined]
     return user
 
 
 @pytest_asyncio.fixture
 async def viewer_token(viewer_user) -> str:
-    return AuthService.create_token(viewer_user.id, viewer_user.email, viewer_user.role, viewer_user.organization_id)
+    return AuthService.create_token(
+        viewer_user.id, viewer_user.email, viewer_user.role_id, viewer_user.organization_id, role_name="viewer"
+    )

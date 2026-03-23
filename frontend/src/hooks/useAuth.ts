@@ -16,7 +16,7 @@ export function useAuth(requiredRole?: string) {
     }
 
     const currentUser = getCurrentUser();
-    if (requiredRole && currentUser?.role !== requiredRole) {
+    if (requiredRole && currentUser?.role_name !== requiredRole) {
       router.push("/");
       return;
     }

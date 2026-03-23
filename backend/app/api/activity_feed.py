@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.schemas.activity_feed import ActivityFeedItem, ActivityFeedListResponse
 from app.services.activity_feed_service import ActivityFeedService
 from app.services.event_types import EVENT_SEVERITY
@@ -21,7 +21,7 @@ async def list_activity_feed(
     user_id: int | None = Query(None),
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
-    current_user: dict = require_role("admin", "comp_bio", "bench", "viewer"),
+    current_user: dict = require_permission("experiments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = current_user["org_id"]

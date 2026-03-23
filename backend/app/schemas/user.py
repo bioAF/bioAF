@@ -5,7 +5,7 @@ from pydantic import BaseModel, EmailStr
 
 class UserInvite(BaseModel):
     email: EmailStr
-    role: str = "viewer"
+    role_id: int
     name: str | None = None
 
 
@@ -14,7 +14,7 @@ class BulkInvite(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    role: str | None = None
+    role_id: int | None = None
     name: str | None = None
 
 
@@ -28,7 +28,8 @@ class UserResponse(BaseModel):
     id: int
     email: str
     name: str | None
-    role: str
+    role_id: int
+    role_name: str = ""
     status: str
     organization_id: int
     last_login: datetime | None = None

@@ -49,7 +49,7 @@ export default function DataFilesPage() {
   const pageSize = 25;
 
   const user = getCurrentUser();
-  const isAdmin = user?.role === "admin";
+  const isAdmin = user?.role_name === "admin";
   const stuckCount = countStuckFiles(files);
 
   const fetchFiles = useCallback(async () => {

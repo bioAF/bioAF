@@ -22,7 +22,7 @@ jest.mock("@/lib/auth", () => ({
   getCurrentUser: () => ({
     id: 1,
     email: "admin@test.com",
-    role: "admin",
+    role_name: "admin",
     organization_id: 1,
   }),
 }));

@@ -11,6 +11,7 @@ from app.models.organization import Organization
 from app.models.user import User
 from app.services.auth_service import AuthService
 from app.services.pipeline_catalog_service import PipelineCatalogService
+from app.services.bootstrap_roles import seed_builtin_roles
 
 
 @pytest_asyncio.fixture
@@ -19,10 +20,12 @@ async def test_org(session):
     session.add(org)
     await session.flush()
 
+    role_map = await seed_builtin_roles(session, org.id)
+
     user = User(
         email="systest@test.com",
         password_hash=AuthService.hash_password("testpass"),
-        role="admin",
+        role_id=role_map["admin"],
         organization_id=org.id,
         status="active",
     )

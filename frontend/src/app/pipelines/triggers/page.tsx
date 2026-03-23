@@ -36,7 +36,7 @@ export default function PipelineTriggersPage() {
   const [formCronExpr, setFormCronExpr] = useState("0 6 * * 1");
 
   const user = getCurrentUser();
-  const isAdmin = user?.role === "admin";
+  const isAdmin = user?.role_name === "admin";
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/login"); return; }

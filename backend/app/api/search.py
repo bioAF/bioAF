@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_role
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.schemas.search import SearchHit, SearchResult
 from app.services.search_service import SearchService
@@ -40,7 +40,7 @@ async def unified_search(
 
 @router.post("/reindex")
 async def reindex(
-    current_user: dict = require_role("admin"),
+    current_user: dict = require_permission("experiments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])

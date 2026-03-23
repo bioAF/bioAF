@@ -12,6 +12,7 @@ from app.services.audit_service import log_action
 from app.services.auth_service import AuthService
 from app.services.component_service import ComponentService
 from app.services.email_service import EmailService
+from app.services import role_service
 from app.services.user_service import UserService
 
 router = APIRouter(prefix="/api/bootstrap", tags=["bootstrap"])
@@ -43,12 +44,17 @@ async def create_admin(body: CreateAdminRequest, session: AsyncSession = Depends
     session.add(org)
     await session.flush()
 
+    # Seed built-in roles for this organization
+    from app.services.bootstrap_roles import seed_builtin_roles
+
+    role_map = await seed_builtin_roles(session, org.id)
+
     # Create admin user
     user = await UserService.create_user(
         session,
         email=body.email,
         password=body.password,
-        role="admin",
+        role_id=role_map["admin"],
         organization_id=org.id,
         name=body.name,
         status="active",
@@ -74,7 +80,7 @@ async def create_admin(body: CreateAdminRequest, session: AsyncSession = Depends
     await session.commit()
 
     # Issue JWT token
-    token = AuthService.create_token(user.id, user.email, user.role, org.id)
+    token = AuthService.create_token(user.id, user.email, user.role_id, org.id, role_name="admin")
 
     response = {
         "message": "Admin account created",
@@ -91,7 +97,7 @@ async def create_admin(body: CreateAdminRequest, session: AsyncSession = Depends
 @router.post("/configure-org")
 async def configure_org(body: ConfigureOrgRequest, request: Request, session: AsyncSession = Depends(get_session)):
     current_user = request.state.current_user
-    if current_user["role"] != "admin":
+    if not await role_service.has_permission(session, int(current_user["role_id"]), "infrastructure", "configure"):
         raise HTTPException(status_code=403, detail="Admin only")
 
     org = await _get_org(session)
@@ -119,7 +125,7 @@ async def configure_org(body: ConfigureOrgRequest, request: Request, session: As
 @router.post("/configure-smtp")
 async def configure_smtp(body: ConfigureSmtpRequest, request: Request, session: AsyncSession = Depends(get_session)):
     current_user = request.state.current_user
-    if current_user["role"] != "admin":
+    if not await role_service.has_permission(session, int(current_user["role_id"]), "infrastructure", "configure"):
         raise HTTPException(status_code=403, detail="Admin only")
 
     org = await _get_org(session)
@@ -155,7 +161,7 @@ async def configure_smtp(body: ConfigureSmtpRequest, request: Request, session: 
 @router.post("/complete")
 async def complete_setup(request: Request, session: AsyncSession = Depends(get_session)):
     current_user = request.state.current_user
-    if current_user["role"] != "admin":
+    if not await role_service.has_permission(session, int(current_user["role_id"]), "infrastructure", "configure"):
         raise HTTPException(status_code=403, detail="Admin only")
 
     org = await _get_org(session)
