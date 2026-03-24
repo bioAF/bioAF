@@ -28,10 +28,17 @@ class EmailService:
 
         for attempt in range(2):
             try:
-                with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as server:
-                    server.starttls()
-                    server.login(settings.smtp_username, settings.smtp_password)
-                    server.send_message(msg)
+                encryption = getattr(settings, "smtp_encryption", "starttls")
+                if encryption == "ssl":
+                    with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=10) as server:
+                        server.login(settings.smtp_username, settings.smtp_password)
+                        server.send_message(msg)
+                else:
+                    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as server:
+                        if encryption == "starttls":
+                            server.starttls()
+                        server.login(settings.smtp_username, settings.smtp_password)
+                        server.send_message(msg)
                 logger.info("Email sent to %s: %s", to, subject)
                 return True
             except Exception as e:

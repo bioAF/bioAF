@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     smtp_username: str = ""
     smtp_password: str = ""
     smtp_from_address: str = ""
+    smtp_encryption: str = "starttls"
     smtp_configured: bool = False
 
     # Rate limiting

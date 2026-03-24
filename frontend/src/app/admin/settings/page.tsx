@@ -41,7 +41,10 @@ export default function SettingsPage() {
   const [smtpPort, setSmtpPort] = useState("587");
   const [smtpUsername, setSmtpUsername] = useState("");
   const [smtpPassword, setSmtpPassword] = useState("");
+  const [hasExistingPassword, setHasExistingPassword] = useState(false);
   const [smtpFrom, setSmtpFrom] = useState("");
+  const [smtpEncryption, setSmtpEncryption] = useState("starttls");
+  const [testEmailTo, setTestEmailTo] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -63,14 +66,25 @@ export default function SettingsPage() {
 
     const load = async () => {
       try {
-        const [wh, version, history] = await Promise.all([
+        const [wh, version, history, smtp] = await Promise.all([
           api.get<SlackWebhook[]>("/api/notifications/slack-webhooks"),
           api.get<UpdateCheck>("/api/upgrades/check"),
           api.get<{ upgrades: UpgradeHistoryItem[] }>("/api/upgrades/history"),
+          api.get<{ host: string; port: number; username: string; password?: string; from_address: string; encryption: string }>("/api/bootstrap/smtp-settings"),
         ]);
         setWebhooks(wh);
         setUpdateCheck(version);
         setUpgradeHistory(history.upgrades);
+        if (smtp.host) {
+          setSmtpHost(smtp.host);
+          setSmtpPort(String(smtp.port));
+          setSmtpUsername(smtp.username);
+          setSmtpFrom(smtp.from_address);
+          setSmtpEncryption(smtp.encryption);
+        }
+        if (smtp.password) {
+          setHasExistingPassword(true);
+        }
       } catch {
         // ignore
       }
@@ -88,6 +102,7 @@ export default function SettingsPage() {
         username: smtpUsername,
         password: smtpPassword,
         from_address: smtpFrom,
+        encryption: smtpEncryption,
       });
       setMessage("SMTP configuration saved");
     } catch (e) {
@@ -172,16 +187,52 @@ export default function SettingsPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                <input type="password" value={smtpPassword} onChange={(e) => setSmtpPassword(e.target.value)} className="w-full px-3 py-2 border rounded" />
+                <input type="password" value={smtpPassword} onChange={(e) => setSmtpPassword(e.target.value)} className="w-full px-3 py-2 border rounded" placeholder={hasExistingPassword ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 (saved)" : "Enter password"} />
               </div>
-              <div className="col-span-2">
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">From Address</label>
                 <input type="email" value={smtpFrom} onChange={(e) => setSmtpFrom(e.target.value)} className="w-full px-3 py-2 border rounded" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Encryption</label>
+                <select value={smtpEncryption} onChange={(e) => setSmtpEncryption(e.target.value)} className="w-full px-3 py-2 border rounded">
+                  <option value="starttls">STARTTLS (port 587)</option>
+                  <option value="ssl">SSL/TLS (port 465)</option>
+                  <option value="none">None (port 25)</option>
+                </select>
               </div>
             </div>
             <button onClick={handleSaveSmtp} className="mt-4 px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700">
               Save SMTP Settings
             </button>
+            <div className="mt-4 pt-4 border-t border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">Send Test Email</h3>
+              <div className="flex gap-3">
+                <input
+                  type="email"
+                  value={testEmailTo}
+                  onChange={(e) => setTestEmailTo(e.target.value)}
+                  className="flex-1 px-3 py-2 border rounded text-sm"
+                  placeholder="recipient@example.com"
+                />
+                <button
+                  onClick={async () => {
+                    setError(""); setMessage("");
+                    if (!testEmailTo) { setError("Enter a destination email address for the test"); return; }
+                    try {
+                      const result = await api.post<{ status: string; to: string; detail: string | null }>(
+                        "/api/bootstrap/test-smtp", { to: testEmailTo }
+                      );
+                      if (result.status === "sent") { setMessage(`Test email sent to ${result.to}`); }
+                      else { setError(result.detail || "Failed to send test email"); }
+                    } catch { setError("Failed to send test email"); }
+                  }}
+                  className="px-4 py-2 border border-gray-300 rounded text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  Send Test
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Slack Webhook Management */}

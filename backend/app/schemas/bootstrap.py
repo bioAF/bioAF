@@ -22,3 +22,24 @@ class ConfigureSmtpRequest(BaseModel):
     username: str
     password: str
     from_address: str
+    encryption: str = "starttls"
+
+
+class SmtpSettingsResponse(BaseModel):
+    host: str
+    port: int
+    username: str
+    password: str
+    from_address: str
+    encryption: str
+    configured: bool
+
+
+class TestSmtpRequest(BaseModel):
+    to: EmailStr
+
+
+class TestSmtpResponse(BaseModel):
+    status: str
+    to: str
+    detail: str | None = None

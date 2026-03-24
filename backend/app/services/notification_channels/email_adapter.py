@@ -74,7 +74,14 @@ class EmailChannel:
 
 
 def _send_smtp(msg: MIMEMultipart) -> None:
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as server:
-        server.starttls()
-        server.login(settings.smtp_username, settings.smtp_password)
-        server.send_message(msg)
+    encryption = getattr(settings, "smtp_encryption", "starttls")
+    if encryption == "ssl":
+        with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=10) as server:
+            server.login(settings.smtp_username, settings.smtp_password)
+            server.send_message(msg)
+    else:
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as server:
+            if encryption == "starttls":
+                server.starttls()
+            server.login(settings.smtp_username, settings.smtp_password)
+            server.send_message(msg)
