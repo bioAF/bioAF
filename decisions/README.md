@@ -37,6 +37,8 @@
 | [ADR-033](ADR-033-versioned-compute-environments.md) | Versioned Compute Environments | Accepted | 2026-03-22 |
 | [ADR-034](ADR-034-custom-work-nodes.md) | Custom Ephemeral Work Nodes | Accepted | 2026-03-22 |
 | [ADR-035](ADR-035-bioaf-cli.md) | bioaf CLI for In-Session Provenance and Heartbeat | Accepted | 2026-03-22 |
+| [ADR-036](ADR-036-data-export-download.md) | Data Export and Download System | Accepted | 2026-03-24 |
+| [ADR-037](ADR-037-provenance-reporting.md) | Provenance Reporting System | Accepted | 2026-03-24 |
 
 ## How to Use This Directory
 
