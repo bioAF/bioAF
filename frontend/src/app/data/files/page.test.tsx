@@ -34,6 +34,15 @@ jest.mock("@/lib/auth", () => ({
   getCurrentUser: () => ({ role_name: "admin", sub: "1", org_id: "1" }),
 }));
 
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({
+    canAccess: () => true,
+    roleName: "admin",
+    loading: false,
+    permissions: new Set(["files:download", "files:delete", "files:upload"]),
+  }),
+}));
+
 import { api } from "@/lib/api";
 
 const mockGet = api.get as jest.Mock;

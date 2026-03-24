@@ -50,7 +50,7 @@ async def db_engine(worker_id):
             await conn.run_sync(Base.metadata.create_all)
     else:
         async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.drop_all)
+            await conn.run_sync(Base.metadata.drop_all, checkfirst=True)
             await conn.run_sync(Base.metadata.create_all)
 
     # Set search_path for all connections from this engine
@@ -70,7 +70,7 @@ async def db_engine(worker_id):
             await conn.execute(sa_text(f"DROP SCHEMA {schema} CASCADE"))
     else:
         async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.drop_all)
+            await conn.run_sync(Base.metadata.drop_all, checkfirst=True)
 
     await engine.dispose()
 

@@ -280,11 +280,11 @@ async def get_file(
 @router.get("/{file_id}/download")
 async def download_file(
     file_id: int,
-    request: Request,
+    current_user: dict = require_permission("files", "download"),
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
 
     file = await FileService.get_file(session, file_id, org_id)
     if not file:
@@ -302,9 +302,27 @@ async def download_file(
         bucket = client.bucket(parts[0])
         blob = bucket.blob(parts[1])
         url = blob.generate_signed_url(version="v4", expiration=3600, method="GET")
-        return {"download_url": url}
     except Exception:
         raise HTTPException(502, "Could not generate download URL")
+
+    # Audit log the download
+    from app.services.audit_service import log_action
+
+    await log_action(
+        session,
+        user_id=user_id,
+        entity_type="file",
+        entity_id=file.id,
+        action="downloaded",
+        details={
+            "filename": file.filename,
+            "file_type": file.file_type,
+            "size_bytes": file.size_bytes,
+        },
+    )
+    await session.commit()
+
+    return {"download_url": url}
 
 
 @router.get("/{file_id}/content")

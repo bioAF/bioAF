@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { ContentLoading } from "@/components/shared/ContentLoading";
+import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { getCurrentUser, getToken } from "@/lib/auth";
 import type {
@@ -46,10 +47,15 @@ export default function DataFilesPage() {
   const [viewingFile, setViewingFile] = useState<FileResponse | null>(null);
   const [page, setPage] = useState(1);
   const [totalFiles, setTotalFiles] = useState(0);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState("");
+  const [downloadError, setDownloadError] = useState("");
   const pageSize = 25;
 
   const user = getCurrentUser();
   const isAdmin = user?.role_name === "admin";
+  const { canAccess } = usePermissions();
+  const canDownload = canAccess("files", "download");
   const stuckCount = countStuckFiles(files);
 
   const fetchFiles = useCallback(async () => {
@@ -165,6 +171,51 @@ export default function DataFilesPage() {
     }
   };
 
+  const triggerDownload = async (fileId: number) => {
+    try {
+      const { download_url } = await api.get<{ download_url: string }>(
+        `/api/files/${fileId}/download`
+      );
+      const a = document.createElement("a");
+      a.href = download_url;
+      a.download = "";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleDownloadSelected = async () => {
+    if (selectedIds.size === 0) return;
+    setDownloading(true);
+    setDownloadError("");
+    const ids = Array.from(selectedIds);
+    let completed = 0;
+    const failed: string[] = [];
+
+    for (const id of ids) {
+      setDownloadProgress(`Downloading ${completed + 1} of ${ids.length} files...`);
+      const ok = await triggerDownload(id);
+      if (ok) {
+        completed++;
+      } else {
+        const file = files.find((f) => f.id === id);
+        failed.push(file?.filename ?? `File ${id}`);
+      }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
+    setDownloading(false);
+    setDownloadProgress("");
+    if (failed.length > 0) {
+      setDownloadError(`Failed to download: ${failed.join(", ")}`);
+    }
+    setSelectedIds(new Set());
+  };
+
   const experimentName = (expId: number | null) => {
     if (expId == null) return null;
     return experiments.find((e) => e.id === expId)?.name ?? `#${expId}`;
@@ -218,6 +269,15 @@ export default function DataFilesPage() {
                   <span className="text-sm text-gray-600">
                     {selectedIds.size} selected
                   </span>
+                  {canDownload && (
+                    <button
+                      onClick={handleDownloadSelected}
+                      disabled={downloading}
+                      className="px-3 py-1.5 bg-green-600 text-white rounded-md text-sm hover:bg-green-700 disabled:opacity-50"
+                    >
+                      {downloading ? downloadProgress || "Downloading..." : "Download Selected"}
+                    </button>
+                  )}
                   <button
                     onClick={() =>
                       openLinkModal(Array.from(selectedIds))
@@ -275,6 +335,13 @@ export default function DataFilesPage() {
               </div>
             )}
 
+            {downloadError && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-800 flex items-center justify-between">
+                <span>{downloadError}</span>
+                <button onClick={() => setDownloadError("")} className="text-red-600 hover:text-red-800 ml-4">&times;</button>
+              </div>
+            )}
+
             {loading ? (
               <ContentLoading />
             ) : files.length === 0 ? (
@@ -315,6 +382,11 @@ export default function DataFilesPage() {
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                         Experiment
                       </th>
+                      {canDownload && (
+                        <th className="px-4 py-3 w-10">
+                          <span className="sr-only">Actions</span>
+                        </th>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
@@ -374,6 +446,19 @@ export default function DataFilesPage() {
                             </span>
                           )}
                         </td>
+                        {canDownload && (
+                          <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => triggerDownload(file.id)}
+                              title="Download"
+                              className="text-gray-400 hover:text-blue-600"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
+                              </svg>
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -520,6 +605,20 @@ export default function DataFilesPage() {
                     </dd>
                   </div>
                 </dl>
+
+                {canDownload && (
+                  <div className="px-4 pb-4">
+                    <button
+                      onClick={() => triggerDownload(viewingFile.id)}
+                      className="w-full px-4 py-2 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700 flex items-center justify-center gap-2"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
+                      </svg>
+                      Download
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
