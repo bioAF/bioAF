@@ -1393,3 +1393,51 @@ export interface CostEstimate {
   historical_run_count: number;
   budget_check: Record<string, unknown>;
 }
+
+// Work Nodes (ADR-034)
+
+export interface WorkNode {
+  id: number;
+  session_type: string;
+  user: UserSummary | null;
+  project_id: number | null;
+  environment_version_id: number | null;
+  machine_type: string | null;
+  data_mount_paths: string[] | null;
+  resource_profile: string;
+  cpu_cores: number;
+  memory_gb: number;
+  status: string;
+  access_url: string | null;
+  heartbeat_at: string | null;
+  started_at: string | null;
+  stopped_at: string | null;
+  created_at: string;
+}
+
+export interface WorkNodeListResponse {
+  sessions: WorkNode[];
+  total: number;
+}
+
+export interface WorkNodeLaunchRequest {
+  project_id: number;
+  environment_version_id: number;
+  machine_type: string;
+  data_mount_paths?: string[];
+}
+
+export interface MachineType {
+  name: string;
+  category: string;
+  cpu: number;
+  memory_gb: number;
+  gpu: string | null;
+  description: string;
+}
+
+export interface DataMount {
+  path: string;
+  label: string;
+  description: string;
+}

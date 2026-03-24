@@ -7,7 +7,7 @@ ALL_RESOURCES_ACTIONS: dict[str, list[str]] = {
     "samples": ["view", "create", "edit", "delete", "change_status"],
     "pipelines": ["view", "create", "edit", "delete", "launch", "cancel", "configure", "change_status"],
     "notebooks": ["view", "create", "edit", "launch", "stop"],
-    "work_nodes": ["view", "launch", "stop"],
+    "work_nodes": ["view", "launch", "stop", "configure"],
     "environments": ["view", "create", "build", "delete"],
     "files": ["view", "upload", "download", "edit", "delete"],
     "projects": ["view", "create", "edit", "delete"],

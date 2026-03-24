@@ -34,6 +34,11 @@ QUOTA_WARNING = "quota.warning"
 # Session events
 SESSION_IDLE = "session.idle"
 
+# Work node events
+WORK_NODE_LAUNCHED = "work_node.launched"
+WORK_NODE_STOPPED = "work_node.stopped"
+WORK_NODE_HEARTBEAT_TIMEOUT = "work_node.heartbeat_timeout"
+
 # Results events
 RESULTS_PUBLISHED = "results.published"
 
@@ -107,6 +112,9 @@ ALL_EVENT_TYPES = [
     BUDGET_MID_QUEUE,
     EVALUATION_FAILED,
     BATCH_WINDOW_CLOSED,
+    WORK_NODE_LAUNCHED,
+    WORK_NODE_STOPPED,
+    WORK_NODE_HEARTBEAT_TIMEOUT,
 ]
 
 # Severity mapping for event types
@@ -146,4 +154,7 @@ EVENT_SEVERITY = {
     BUDGET_MID_QUEUE: "warning",
     EVALUATION_FAILED: "critical",
     BATCH_WINDOW_CLOSED: "info",
+    WORK_NODE_LAUNCHED: "info",
+    WORK_NODE_STOPPED: "info",
+    WORK_NODE_HEARTBEAT_TIMEOUT: "warning",
 }

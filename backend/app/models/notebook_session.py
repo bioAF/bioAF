@@ -1,13 +1,13 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
 
-class NotebookSession(Base):
-    __tablename__ = "notebook_sessions"
+class ComputeSession(Base):
+    __tablename__ = "compute_sessions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
@@ -31,7 +31,21 @@ class NotebookSession(Base):
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    # New columns for work node support (ADR-034)
+    environment_version_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("environment_versions.id"), nullable=True
+    )
+    machine_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    data_mount_paths: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     user = relationship("User")
     organization = relationship("Organization")
     experiment = relationship("Experiment")
     project = relationship("Project")
+    environment_version = relationship("EnvironmentVersion")
+
+
+# Backwards-compatible alias for existing imports
+NotebookSession = ComputeSession

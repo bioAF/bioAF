@@ -338,6 +338,33 @@ class KubernetesNotebookProvider(NotebookProvider):
                 "--NotebookApp.token=''",
                 "--NotebookApp.password=''",
             ]
+        elif session_type == "ssh":
+            # SSH work node (ADR-034): sshd as main process with PAM auth
+            session_creds = session_spec.get("session_credentials")
+            if not session_creds:
+                raise ValueError("Session credentials are required for SSH work nodes")
+
+            container_port = 22
+            cred_username = session_creds["username"]
+            cred_password = session_creds.get("password_hash") or session_creds.get("password", "")
+            home_dir = f"/home/{cred_username}"
+
+            if cred_password.startswith("$2"):
+                chpasswd_cmd = f"echo '{cred_username}:{cred_password}' | chpasswd -e"
+            else:
+                chpasswd_cmd = f"echo '{cred_username}:{cred_password}' | chpasswd"
+
+            # Write heartbeat token to /etc/bioaf/token for the bioaf CLI
+            heartbeat_token = session_spec.get("heartbeat_token", "")
+            startup_script = (
+                f"useradd -m -d {home_dir} -s /bin/bash {cred_username} || true && "
+                f"{chpasswd_cmd} && "
+                f"chown -R {cred_username}:{cred_username} {home_dir} && "
+                f"mkdir -p /etc/bioaf && echo '{heartbeat_token}' > /etc/bioaf/token && "
+                "mkdir -p /run/sshd && "
+                "exec /usr/sbin/sshd -D"
+            )
+            container_command = ["/bin/sh", "-c", startup_script]
         else:
             # RStudio uses PAM auth -- session credentials are required.
             # User creation must happen inside the main container (not an
@@ -365,25 +392,68 @@ class KubernetesNotebookProvider(NotebookProvider):
             )
             container_command = ["/bin/sh", "-c", startup_script]
 
+        # Determine home directory and GCS prefix based on session type
+        if session_type == "ssh":
+            session_creds = session_spec.get("session_credentials", {})
+            cred_username = session_creds.get("username", "bioaf")
+            home_dir = f"/home/{cred_username}"
+            gcs_home_prefix = f"gs://bioaf-working/home/{user_id}/"
+        else:
+            home_dir = HOME_DIR
+
         # Build GCS sync init container
-        sync_in_cmd = generate_sync_in_command(gcs_home_prefix, HOME_DIR)
+        sync_in_cmd = generate_sync_in_command(gcs_home_prefix, home_dir)
         init_container = {
             "name": "gcs-sync-in",
             "image": "google/cloud-sdk:slim",
             "command": sync_in_cmd,
-            "volumeMounts": [{"name": "home", "mountPath": HOME_DIR}],
+            "volumeMounts": [{"name": "home", "mountPath": home_dir}],
         }
 
         init_containers = [init_container]
 
-        # Build notebook container
+        # Build main container
         image = session_spec.get("image", "bioaf-scrna:latest")
+        volume_mounts = [{"name": "home", "mountPath": home_dir}]
+        volumes = [{"name": "home", "emptyDir": {"sizeLimit": "10Gi"}}]
+
+        # SSH work nodes get additional volumes: scratch and data mounts
+        if session_type == "ssh":
+            volume_mounts.append({"name": "scratch", "mountPath": "/scratch"})
+            volumes.append({"name": "scratch", "emptyDir": {"sizeLimit": "100Gi"}})
+
+            # GCS FUSE data mounts (read-only)
+            data_mount_paths = session_spec.get("data_mount_paths", [])
+            for i, mount_path in enumerate(data_mount_paths):
+                vol_name = f"data-{i}"
+                volume_mounts.append(
+                    {
+                        "name": vol_name,
+                        "mountPath": f"/data/{mount_path.lstrip('/')}",
+                        "readOnly": True,
+                    }
+                )
+                volumes.append(
+                    {
+                        "name": vol_name,
+                        "csi": {
+                            "driver": "gcsfuse.csi.storage.gke.io",
+                            "readOnly": True,
+                            "volumeAttributes": {
+                                "bucketName": "bioaf-data",
+                                "mountOptions": "implicit-dirs,file-cache:max-size-mb:-1",
+                                "gcsfuseLoggingSeverity": "warning",
+                            },
+                        },
+                    }
+                )
+
         notebook_container: dict = {
             "name": "notebook",
             "image": image,
             "command": container_command,
             "ports": [{"containerPort": container_port}],
-            "volumeMounts": [{"name": "home", "mountPath": HOME_DIR}],
+            "volumeMounts": volume_mounts,
             "resources": {
                 "requests": {
                     "cpu": str(session_spec.get("cpu_cores", 2)),
@@ -396,9 +466,17 @@ class KubernetesNotebookProvider(NotebookProvider):
             },
         }
 
-        # RStudio Server requires root to manage sessions and write pid files.
-        if session_type == "rstudio":
+        # RStudio and SSH require root for user management
+        if session_type in ("rstudio", "ssh"):
             notebook_container["securityContext"] = {"runAsUser": 0}
+
+        # GPU support for SSH work nodes
+        gpu = session_spec.get("gpu")
+        if gpu and session_type == "ssh":
+            notebook_container["resources"]["limits"]["nvidia.com/gpu"] = "1"
+
+        # Determine node pool based on session type
+        node_pool = session_spec.get("node_pool", "interactive")
 
         # Pod manifest
         pod_manifest = {
@@ -411,24 +489,22 @@ class KubernetesNotebookProvider(NotebookProvider):
                     "bioaf.io/session": str(session_id),
                     "bioaf.io/user": str(user_id),
                     "bioaf.io/type": session_type,
-                    "bioaf.io/pool": "interactive",
+                    "bioaf.io/pool": node_pool,
                 },
             },
             "spec": {
-                "nodeSelector": {"bioaf.io/pool": "interactive"},
+                "nodeSelector": {"bioaf.io/pool": node_pool},
                 "tolerations": [
                     {
                         "key": "bioaf.io/pool",
-                        "value": "interactive",
+                        "value": node_pool,
                         "effect": "NoSchedule",
                     }
                 ],
                 "serviceAccountName": "bioaf-notebook-runner",
                 "initContainers": init_containers,
                 "containers": [notebook_container],
-                "volumes": [
-                    {"name": "home", "emptyDir": {"sizeLimit": "10Gi"}},
-                ],
+                "volumes": volumes,
                 "restartPolicy": "Never",
             },
         }
@@ -573,7 +649,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                 from sqlalchemy import text
 
                 await db.execute(
-                    text("UPDATE notebook_sessions SET status = :status, access_url = :url WHERE id = :id"),
+                    text("UPDATE compute_sessions SET status = :status, access_url = :url WHERE id = :id"),
                     {"status": status, "url": access_url, "id": session_id},
                 )
                 await db.commit()
@@ -715,17 +791,24 @@ class KubernetesNotebookProvider(NotebookProvider):
     def _local_launch_session(self, session_spec: dict) -> dict:
         session_id = f"local-{uuid.uuid4().hex[:12]}"
         session_type = session_spec.get("session_type", "jupyter")
-        port = 8888 if session_type == "jupyter" else 8787
+        if session_type == "ssh":
+            port = 22
+        elif session_type == "jupyter":
+            port = 8888
+        else:
+            port = 8787
 
         session_data = {
             "session_id": session_id,
             "status": "running",
-            "url": f"http://localhost:{port}",
+            "url": f"http://localhost:{port}" if session_type != "ssh" else None,
+            "access_url": f"ssh://localhost:{port}" if session_type == "ssh" else None,
             "session_type": session_type,
             "resource_profile": session_spec.get("resource_profile", "small"),
             "namespace": "bioaf-interactive",
-            "node_pool": "bioaf-interactive",
+            "node_pool": session_spec.get("node_pool", "bioaf-interactive"),
             "created_at": datetime.now(timezone.utc).isoformat(),
+            "gcs_home_prefix": f"gs://bioaf-working/home/{session_spec.get('user_id', 0)}/",
         }
         _local_sessions[session_id] = session_data
         logger.info("Local mode: launched session %s (%s)", session_id, session_type)

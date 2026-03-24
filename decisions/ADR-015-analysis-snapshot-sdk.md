@@ -114,7 +114,7 @@ analysis_snapshots (
     id SERIAL PRIMARY KEY,
     organization_id INTEGER NOT NULL REFERENCES organizations(id),
     experiment_id INTEGER REFERENCES experiments(id),
-    notebook_session_id INTEGER REFERENCES notebook_sessions(id),
+    compute_session_id INTEGER REFERENCES compute_sessions(id),
     user_id INTEGER NOT NULL REFERENCES users(id),
     label VARCHAR(255) NOT NULL,
     notes TEXT,

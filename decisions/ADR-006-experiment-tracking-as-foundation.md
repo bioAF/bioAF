@@ -19,7 +19,7 @@ The experiment tracker is part of the mandatory foundation (deployed with `bioaf
 ### Data Model Implications
 
 - `experiments` and `samples` are core tables in the PostgreSQL database
-- `pipeline_runs`, `notebook_sessions`, and `published_visualizations` all have foreign keys to `experiments`
+- `pipeline_runs`, `compute_sessions`, and `published_visualizations` all have foreign keys to `experiments`
 - `sample_files` links samples to their data files (FASTQs, BAMs, h5ad)
 - `audit_log` records every action on every entity with immutable append-only semantics
 

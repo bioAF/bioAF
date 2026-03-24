@@ -57,8 +57,8 @@ The parent experiments are always derivable from the selected samples (`samples.
 -- Pipeline runs can now belong to a project instead of (or in addition to) an experiment
 ALTER TABLE pipeline_runs ADD COLUMN project_id INTEGER REFERENCES projects(id);
 
--- Notebook sessions can now belong to a project
-ALTER TABLE notebook_sessions ADD COLUMN project_id INTEGER REFERENCES projects(id);
+-- Compute sessions can now belong to a project
+ALTER TABLE compute_sessions ADD COLUMN project_id INTEGER REFERENCES projects(id);
 
 -- Analysis snapshots (ADR-015) can now belong to a project
 ALTER TABLE analysis_snapshots ADD COLUMN project_id INTEGER REFERENCES projects(id);
@@ -155,7 +155,7 @@ This mirrors how computational biology actually works: upstream processing is pe
 
 - The `projects` table is upgraded with new columns (non-breaking migration — all new columns are nullable).
 - The `project_samples` linkage table is added.
-- `pipeline_runs`, `notebook_sessions`, `analysis_snapshots`, and `files` gain an optional `project_id` column.
+- `pipeline_runs`, `compute_sessions`, `analysis_snapshots`, and `files` gain an optional `project_id` column.
 - The provenance view (F-072) must be updated to render DAGs. This is the most significant UI change. Libraries like `dagre` or `d3-dag` can handle the layout.
 - The dataset browser (F-011) gains a "Add to project" action on selected samples.
 - The pipeline launcher (F-030) and notebook launcher (F-040, F-041) gain a project context option alongside the existing experiment context.

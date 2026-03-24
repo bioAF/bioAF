@@ -215,7 +215,7 @@ async def test_launch_stores_k8s_fields(client, session, comp_bio_token, comp_bi
     session_id = response.json()["id"]
 
     result = await session.execute(
-        text("SELECT k8s_pod_name, k8s_namespace, access_url, gcs_home_prefix FROM notebook_sessions WHERE id = :id"),
+        text("SELECT k8s_pod_name, k8s_namespace, access_url, gcs_home_prefix FROM compute_sessions WHERE id = :id"),
         {"id": session_id},
     )
     row = result.first()

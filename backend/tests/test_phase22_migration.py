@@ -11,7 +11,7 @@ async def test_notebook_sessions_has_k8s_columns(session):
         text("""
             SELECT column_name, data_type
             FROM information_schema.columns
-            WHERE table_name = 'notebook_sessions'
+            WHERE table_name = 'compute_sessions'
             AND column_name IN (
                 'k8s_pod_name', 'k8s_namespace', 'access_url',
                 'gcs_home_prefix', 'last_activity_at'
