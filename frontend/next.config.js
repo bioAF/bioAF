@@ -24,10 +24,8 @@ const nextConfig = {
       { source: "/environment/components", destination: "/infrastructure/components", permanent: true },
       { source: "/components", destination: "/infrastructure/components", permanent: true },
       { source: "/components/:id", destination: "/infrastructure/components/:id", permanent: true },
-      { source: "/environment/history", destination: "/infrastructure/environments", permanent: true },
-      { source: "/environments", destination: "/infrastructure/environments", permanent: true },
-      { source: "/environment/packages", destination: "/infrastructure/packages", permanent: true },
-      { source: "/packages", destination: "/infrastructure/packages", permanent: true },
+      { source: "/environment/history", destination: "/environments", permanent: true },
+      { source: "/environment/packages", destination: "/environments", permanent: true },
       // Admin -> Settings and Infrastructure
       { source: "/admin/cost-center", destination: "/infrastructure/cost-center", permanent: true },
       { source: "/admin/costs", destination: "/infrastructure/cost-center", permanent: true },

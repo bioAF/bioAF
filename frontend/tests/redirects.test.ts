@@ -112,8 +112,6 @@ describe("Route Redirects", () => {
     expect(sources).toContain("/admin/backups");
     expect(sources).toContain("/admin/access-logs");
     expect(sources).toContain("/references");
-    expect(sources).toContain("/environments");
-    expect(sources).toContain("/packages");
     expect(sources).toContain("/experiments");
     expect(sources).toContain("/experiments/templates");
     expect(sources).toContain("/experiments/:id");

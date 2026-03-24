@@ -38,19 +38,19 @@ describe("Sidebar", () => {
     mockRoleName.mockReturnValue("admin");
   });
 
-  it("renders all 8 top-level items for admin user", () => {
+  it("renders all 9 top-level items for admin user", () => {
     render(<Sidebar />);
     const nav = screen.getByTestId("sidebar-nav");
-    // 8 top-level sections: Dashboard, Results, Pipelines, Projects,
-    // Notebooks, Data & Files, Infrastructure, Settings
-    // (Experiments is now nested under Projects, not a top-level section)
+    // 9 top-level sections: Dashboard, Results, Pipelines, Projects,
+    // Workbench, Data & Files, Infrastructure, Profile, Settings
     expect(nav).toHaveTextContent("Dashboard");
     expect(nav).toHaveTextContent("Results");
     expect(nav).toHaveTextContent("Pipelines");
     expect(nav).toHaveTextContent("Projects");
-    expect(nav).toHaveTextContent("Notebooks");
+    expect(nav).toHaveTextContent("Workbench");
     expect(nav).toHaveTextContent("Data & Files");
     expect(nav).toHaveTextContent("Infrastructure");
+    expect(nav).toHaveTextContent("Profile");
     expect(nav).toHaveTextContent("Settings");
   });
 
@@ -135,8 +135,6 @@ describe("Sidebar", () => {
     render(<Sidebar />);
     const dashboardLink = screen.getByText("Dashboard").closest("a");
     expect(dashboardLink).toHaveAttribute("href", "/dashboard");
-    const notebooksLink = screen.getByText("Notebooks").closest("a");
-    expect(notebooksLink).toHaveAttribute("href", "/notebooks");
   });
 
   it("toggles children visibility when clicking expandable section", () => {
@@ -178,9 +176,15 @@ describe("Sidebar", () => {
     fireEvent.click(screen.getByText("Infrastructure"));
     expect(screen.getByText("Components")).toBeInTheDocument();
     expect(screen.getByText("Compute")).toBeInTheDocument();
-    expect(screen.getByText("Environments")).toBeInTheDocument();
-    expect(screen.getByText("Packages")).toBeInTheDocument();
     expect(screen.getByText("Cost Center")).toBeInTheDocument();
     expect(screen.getByText("Backup & Recovery")).toBeInTheDocument();
+  });
+
+  it("shows Workbench children: Notebooks, Work Nodes, Environments", () => {
+    render(<Sidebar />);
+    fireEvent.click(screen.getByText("Workbench"));
+    expect(screen.getByText("Notebooks")).toBeInTheDocument();
+    expect(screen.getByText("Work Nodes")).toBeInTheDocument();
+    expect(screen.getByText("Environments")).toBeInTheDocument();
   });
 });

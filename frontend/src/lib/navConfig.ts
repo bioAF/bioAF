@@ -47,7 +47,15 @@ export const navConfig: NavSection[] = [
       { label: "Experiment List", path: "/projects/experiments", permission: { resource: "experiments", action: "view" } },
     ],
   },
-  { label: "Notebooks", path: "/notebooks", icon: "notebook", permission: { resource: "notebooks", action: "view" } },
+  {
+    label: "Workbench",
+    icon: "notebook",
+    children: [
+      { label: "Notebooks", path: "/notebooks", permission: { resource: "notebooks", action: "view" } },
+      { label: "Work Nodes", path: "/workbench/work-nodes", permission: { resource: "notebooks", action: "view" } },
+      { label: "Environments", path: "/environments", permission: { resource: "environments", action: "view" } },
+    ],
+  },
   {
     label: "Data & Files",
     icon: "database",
@@ -65,8 +73,6 @@ export const navConfig: NavSection[] = [
     children: [
       { label: "Components", path: "/infrastructure/components", permission: { resource: "infrastructure", action: "view" } },
       { label: "Compute", path: "/infrastructure/compute", permission: { resource: "infrastructure", action: "view" } },
-      { label: "Environments", path: "/infrastructure/environments", permission: { resource: "environments", action: "view" } },
-      { label: "Packages", path: "/infrastructure/packages", permission: { resource: "infrastructure", action: "view" } },
       { label: "Cost Center", path: "/infrastructure/cost-center", permission: { resource: "cost_center", action: "view" } },
       { label: "Backup & Recovery", path: "/infrastructure/backup", permission: { resource: "backups", action: "view" } },
     ],

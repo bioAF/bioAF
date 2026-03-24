@@ -24,8 +24,8 @@ from app.models.qc_dashboard import QCDashboard
 from app.models.plot_archive_entry import PlotArchiveEntry
 from app.models.storage_stats import StorageStatsCache
 from app.models.gitops_repo import GitOpsRepo
-from app.models.environment import Environment, EnvironmentPackage
-from app.models.environment_change import EnvironmentChange
+from app.models.environment import Environment
+from app.models.environment_version import EnvironmentVersion
 from app.models.template_notebook import TemplateNotebook
 from app.models.notification import (
     Notification,
@@ -84,8 +84,7 @@ __all__ = [
     "StorageStatsCache",
     "GitOpsRepo",
     "Environment",
-    "EnvironmentPackage",
-    "EnvironmentChange",
+    "EnvironmentVersion",
     "TemplateNotebook",
     "Notification",
     "NotificationRule",

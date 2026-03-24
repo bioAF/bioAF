@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getCurrentUser, removeToken } from "@/lib/auth";
 import { clearPermissionsCache } from "@/hooks/usePermissions";
@@ -8,7 +9,11 @@ import { DeploymentBanner } from "@/components/infrastructure/DeploymentBanner";
 
 export function Header() {
   const router = useRouter();
-  const user = getCurrentUser();
+  const [user, setUser] = useState<Record<string, unknown> | null>(null);
+
+  useEffect(() => {
+    setUser(getCurrentUser());
+  }, []);
 
   const handleLogout = () => {
     removeToken();

@@ -92,6 +92,7 @@ async def lifespan(app: FastAPI):
     background_tasks.append(asyncio.create_task(_pubsub_listener_loop()))
     background_tasks.append(asyncio.create_task(_session_monitor_loop()))
     background_tasks.append(asyncio.create_task(_notebook_image_build_loop()))
+    background_tasks.append(asyncio.create_task(_environment_build_poll_loop()))
     logger.info("Background tasks started")
 
     yield
@@ -434,6 +435,24 @@ async def _notebook_image_build_loop():
             break
         except Exception as e:
             logger.error("Notebook image build monitor error: %s", e)
+
+
+async def _environment_build_poll_loop():
+    """Poll in-progress environment version builds every 30 seconds."""
+    from app.database import async_session_factory
+    from app.services.environment_build_service import EnvironmentBuildService
+
+    while True:
+        try:
+            await asyncio.sleep(30)
+            async with async_session_factory() as session:
+                changed = await EnvironmentBuildService.poll_in_progress_builds(session)
+                if changed:
+                    await session.commit()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error("Environment build poll error: %s", e)
 
 
 app = FastAPI(

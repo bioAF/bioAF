@@ -8,7 +8,7 @@ After receiving your invitation email, click the link to set your password and l
 
 ## Registering an Experiment
 
-1. Navigate to **Experiments** in the sidebar
+1. Navigate to **Projects > Experiment List** in the sidebar
 2. Click **New Experiment**
 3. Fill in experiment details:
    - Name (e.g., "PBMC scRNA-seq Batch 3")
@@ -32,8 +32,8 @@ From your experiment detail page:
 
 ## Uploading Data
 
-1. Navigate to **Data** in the sidebar
-2. Click **Upload** and select your FASTQ or other data files
+1. Navigate to **Data & Files > Upload** in the sidebar
+2. Select your FASTQ or other data files
 3. Files are automatically associated with your experiment
 4. Upload progress is shown in real-time
 
@@ -58,6 +58,5 @@ Click the bell icon in the header to see recent notifications. Configure your no
 
 ## Quick Tips
 
-- Use the **Activity Feed** (sidebar) to see recent events across the platform
-- The **Home** dashboard shows your experiments at a glance
+- The **Dashboard** shows your experiments at a glance
 - Contact your admin if you need access to additional components

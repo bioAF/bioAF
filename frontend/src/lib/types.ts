@@ -550,6 +550,7 @@ export interface SessionLaunchRequest {
   session_type: SessionType;
   resource_profile: ResourceProfile;
   experiment_id?: number | null;
+  image_uri?: string | null;
 }
 
 export interface UserQuota {
@@ -995,6 +996,7 @@ export interface DependencyTree {
   estimated_disk_bytes: number | null;
 }
 
+/** @deprecated Legacy type from pre-ADR-033 package tracking */
 export interface InstalledPackage {
   name: string;
   version: string | null;
@@ -1003,18 +1005,27 @@ export interface InstalledPackage {
   installed_at: string;
 }
 
+// --- Versioned Environments (ADR-033) ---
+
+export interface EnvironmentVersionSummary {
+  id: number;
+  version_number: number;
+  status: "draft" | "building" | "ready" | "failed";
+  definition_format: "dockerfile" | "conda";
+  image_uri: string | null;
+  created_at: string;
+}
+
 export interface EnvironmentResponse {
   id: number;
   name: string;
-  env_type: string;
   description: string | null;
-  is_default: boolean;
-  package_count: number;
-  jupyter_kernel_name: string | null;
-  status: string;
-  last_synced_at: string | null;
+  visibility: "team" | "organization";
+  version_count: number;
+  latest_version: EnvironmentVersionSummary | null;
   created_by: UserSummary | null;
   created_at: string;
+  updated_at: string;
 }
 
 export interface EnvironmentListResponse {
@@ -1022,36 +1033,45 @@ export interface EnvironmentListResponse {
   total: number;
 }
 
-export interface EnvironmentDetailResponse extends Omit<EnvironmentResponse, "package_count"> {
-  packages: InstalledPackage[];
+export interface EnvironmentDetailResponse {
+  id: number;
+  name: string;
+  description: string | null;
+  visibility: "team" | "organization";
+  versions: EnvironmentVersionSummary[];
+  created_by: UserSummary | null;
+  created_at: string;
+  updated_at: string;
 }
 
-export interface EnvironmentChangeResponse {
+export interface EnvironmentVersionResponse {
   id: number;
-  change_type: string;
-  package_name: string | null;
-  old_version: string | null;
-  new_version: string | null;
-  git_commit_sha: string | null;
-  commit_message: string | null;
-  reconciled: boolean;
-  reconciled_at: string | null;
-  error_message: string | null;
-  user: UserSummary | null;
+  environment_id: number;
+  version_number: number;
+  status: "draft" | "building" | "ready" | "failed";
+  definition_format: "dockerfile" | "conda";
+  definition_content: string;
+  build_id: string | null;
+  image_uri: string | null;
+  created_by: UserSummary | null;
   created_at: string;
 }
 
-export interface EnvironmentHistoryResponse {
-  changes: EnvironmentChangeResponse[];
-  total: number;
-  page: number;
-  page_size: number;
+export interface BuildLogsResponse {
+  build_id: string | null;
+  status: string;
+  logs_url: string | null;
 }
 
-export interface EnvironmentDiff {
-  added: string[];
-  removed: string[];
-  changed: Array<{ name: string; old_version: string | null; new_version: string | null }>;
+export interface EnvironmentCreateRequest {
+  name: string;
+  description?: string;
+  visibility?: "team" | "organization";
+}
+
+export interface VersionCreateRequest {
+  definition_format: "dockerfile" | "conda";
+  definition_content: string;
 }
 
 export interface TemplateNotebookResponse {

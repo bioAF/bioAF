@@ -1,8 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_session
+from datetime import datetime
+
+from pydantic import BaseModel
+
 from app.api.dependencies import require_permission
+from app.database import get_session
 from app.schemas.package import (
     DependencyTree,
     PackageInstallRequest,
@@ -10,9 +14,26 @@ from app.schemas.package import (
     PackageSearchResponse,
     PackageUpdateRequest,
 )
-from app.schemas.environment import EnvironmentChangeResponse
 from app.services.package_search_service import PackageSearchService
 from app.services.package_service import PackageService
+
+
+class EnvironmentChangeResponse(BaseModel):
+    """Legacy schema for package change tracking (pre-ADR-033)."""
+
+    id: int
+    change_type: str
+    package_name: str | None = None
+    old_version: str | None = None
+    new_version: str | None = None
+    git_commit_sha: str | None = None
+    commit_message: str | None = None
+    reconciled: bool
+    reconciled_at: datetime | None = None
+    error_message: str | None = None
+    user: dict | None = None
+    created_at: datetime
+
 
 router = APIRouter(prefix="/api/packages", tags=["packages"])
 

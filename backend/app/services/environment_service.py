@@ -1,263 +1,68 @@
 import logging
-from datetime import datetime, timezone
-from pathlib import Path
 
-import yaml
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.environment import Environment, EnvironmentPackage
-from app.models.environment_change import EnvironmentChange
+from app.models.environment import Environment
+from app.models.environment_version import EnvironmentVersion
 from app.services.audit_service import log_action
-from app.services.gitops_service import GitOpsService
 
 logger = logging.getLogger("bioaf.environment")
 
-SCRIPTS_DIR = Path(__file__).parent.parent.parent.parent / "scripts"
+VALID_VISIBILITIES = ("team", "organization")
+VALID_DEFINITION_FORMATS = ("dockerfile", "conda")
 
 
 class EnvironmentService:
     @staticmethod
-    async def initialize_default_environments(session: AsyncSession, org_id: int) -> list[Environment]:
-        """Create DB records for built-in environments if they don't exist."""
-        created = []
-
-        defaults = [
-            {
-                "name": "bioaf-scrna",
-                "env_type": "conda",
-                "yaml_path": "environments/bioaf-scrna.yml",
-                "description": "Default scRNA-seq analysis environment (Python/scanpy)",
-                "jupyter_kernel_name": "bioaf-scrna",
-                "yaml_file": SCRIPTS_DIR / "environments" / "bioaf-scrna.yml",
-            },
-            {
-                "name": "bioaf-rstudio",
-                "env_type": "r",
-                "yaml_path": "environments/bioaf-rstudio.yml",
-                "description": "Default R/Bioconductor analysis environment (Seurat, DESeq2)",
-                "jupyter_kernel_name": "bioaf-rstudio",
-                "yaml_file": SCRIPTS_DIR / "environments" / "r-bioaf.R",
-            },
-        ]
-
-        for env_def in defaults:
-            result = await session.execute(
-                select(Environment).where(
-                    Environment.organization_id == org_id,
-                    Environment.name == env_def["name"],
-                )
-            )
-            if result.scalar_one_or_none():
-                continue
-
-            env = Environment(
-                organization_id=org_id,
-                name=env_def["name"],
-                env_type=env_def["env_type"],
-                yaml_path=env_def["yaml_path"],
-                is_default=True,
-                description=env_def["description"],
-                jupyter_kernel_name=env_def["jupyter_kernel_name"],
-                status="active",
-                last_synced_at=datetime.now(timezone.utc),
-            )
-            session.add(env)
-            await session.flush()
-
-            # Parse packages from YAML
-            yaml_file = env_def["yaml_file"]
-            if yaml_file.exists():
-                content = yaml_file.read_text()
-                if env_def["env_type"] == "conda":
-                    packages = EnvironmentService._parse_conda_yaml(content)
-                else:
-                    packages = EnvironmentService._parse_r_script(content)
-
-                for pkg in packages:
-                    ep = EnvironmentPackage(
-                        environment_id=env.id,
-                        package_name=pkg["name"],
-                        version=pkg.get("version"),
-                        source=pkg["source"],
-                    )
-                    session.add(ep)
-
-            created.append(env)
-
-        if created:
-            await session.flush()
-            logger.info("Initialized %d default environments for org %d", len(created), org_id)
-
-        return created
-
-    @staticmethod
-    def _parse_conda_yaml(content: str) -> list[dict]:
-        """Parse conda YAML to extract package list."""
-        data = yaml.safe_load(content)
-        if not data or "dependencies" not in data:
-            return []
-
-        packages = []
-        for dep in data["dependencies"]:
-            if isinstance(dep, str):
-                name, version = EnvironmentService._parse_conda_dep(dep)
-                packages.append({"name": name, "version": version, "source": "conda"})
-            elif isinstance(dep, dict) and "pip" in dep:
-                for pip_dep in dep["pip"]:
-                    name, version = EnvironmentService._parse_conda_dep(pip_dep)
-                    packages.append({"name": name, "version": version, "source": "pip"})
-        return packages
-
-    @staticmethod
-    def _parse_conda_dep(dep_str: str) -> tuple[str, str | None]:
-        """Parse 'name>=1.0' or 'name==1.0' or 'name=1.0' into (name, version_spec)."""
-        for sep in ["==", ">=", "<=", "!=", "=", ">", "<"]:
-            if sep in dep_str:
-                parts = dep_str.split(sep, 1)
-                return parts[0].strip(), f"{sep}{parts[1].strip()}"
-        return dep_str.strip(), None
-
-    @staticmethod
-    def _parse_r_script(content: str) -> list[dict]:
-        """Parse R install script to extract package names."""
-        import re
-
-        packages = []
-        # Match strings inside install.packages or BiocManager::install
-        pattern = r"(?:install\.packages|BiocManager::install)\s*\(\s*c\s*\((.*?)\)\s*\)"
-        for match in re.finditer(pattern, content, re.DOTALL):
-            pkg_str = match.group(1)
-            for pkg_match in re.finditer(r'"([^"]+)"', pkg_str):
-                pkg_name = pkg_match.group(1)
-                # Guess source: Bioconductor packages are in BiocManager::install
-                source = "bioconductor" if "BiocManager" in match.group(0) else "cran"
-                packages.append({"name": pkg_name, "version": None, "source": source})
-
-        # Also match single-package install.packages calls
-        for match in re.finditer(r'install\.packages\s*\(\s*"([^"]+)"', content):
-            packages.append({"name": match.group(1), "version": None, "source": "cran"})
-
-        return packages
-
-    @staticmethod
-    async def list_environments(session: AsyncSession, org_id: int) -> list[dict]:
-        """List all environments with package counts."""
+    async def list_environments(session: AsyncSession, org_id: int) -> list[Environment]:
+        """List environments within an organization."""
         result = await session.execute(
-            select(Environment)
-            .where(
-                Environment.organization_id == org_id,
-                Environment.status != "archived",
-            )
-            .order_by(Environment.is_default.desc(), Environment.name)
+            select(Environment).where(Environment.organization_id == org_id).order_by(Environment.created_at.desc())
         )
-        envs = list(result.scalars().all())
-
-        env_list = []
-        for env in envs:
-            pkg_count = len(env.packages) if env.packages else 0
-            env_list.append(
-                {
-                    "id": env.id,
-                    "name": env.name,
-                    "env_type": env.env_type,
-                    "description": env.description,
-                    "is_default": env.is_default,
-                    "package_count": pkg_count,
-                    "jupyter_kernel_name": env.jupyter_kernel_name,
-                    "status": env.status,
-                    "last_synced_at": env.last_synced_at,
-                    "created_by": {
-                        "id": env.created_by.id,
-                        "name": env.created_by.name,
-                        "email": env.created_by.email,
-                    }
-                    if env.created_by
-                    else None,
-                    "created_at": env.created_at,
-                }
-            )
-        return env_list
+        return list(result.scalars().all())
 
     @staticmethod
-    async def get_environment(session: AsyncSession, org_id: int, env_name: str) -> Environment | None:
+    async def get_environment(session: AsyncSession, org_id: int, environment_id: int) -> Environment | None:
         result = await session.execute(
             select(Environment).where(
+                Environment.id == environment_id,
                 Environment.organization_id == org_id,
-                Environment.name == env_name,
             )
         )
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def create_custom_environment(
+    async def create_environment(
         session: AsyncSession,
         org_id: int,
         user_id: int,
         name: str,
         description: str | None = None,
-        clone_from: str | None = None,
+        visibility: str = "team",
     ) -> Environment:
-        """Create a custom conda environment."""
-        # Check if name already exists
-        existing = await EnvironmentService.get_environment(session, org_id, name)
-        if existing:
+        if visibility not in VALID_VISIBILITIES:
+            raise ValueError(f"Invalid visibility: {visibility}")
+
+        # Check for duplicate name within org
+        existing = await session.execute(
+            select(Environment).where(
+                Environment.organization_id == org_id,
+                Environment.name == name,
+            )
+        )
+        if existing.scalar_one_or_none():
             raise ValueError(f"Environment '{name}' already exists")
 
-        yaml_path = f"environments/custom/{name}.yml"
-
-        if clone_from:
-            source_env = await EnvironmentService.get_environment(session, org_id, clone_from)
-            if not source_env:
-                raise ValueError(f"Source environment '{clone_from}' not found")
-            # Read source YAML from GitOps
-            repo = await GitOpsService.get_repo(session, org_id)
-            if repo:
-                yaml_content = await GitOpsService.get_file(org_id, repo.github_repo_name, source_env.yaml_path)
-                # Update the name in YAML
-                data = yaml.safe_load(yaml_content)
-                data["name"] = name
-                yaml_content = yaml.dump(data, default_flow_style=False, sort_keys=False)
-            else:
-                yaml_content = EnvironmentService._generate_minimal_yaml(name)
-        else:
-            yaml_content = EnvironmentService._generate_minimal_yaml(name)
-
         env = Environment(
-            organization_id=org_id,
             name=name,
-            env_type="custom_conda",
-            yaml_path=yaml_path,
-            is_default=False,
             description=description,
+            organization_id=org_id,
             created_by_user_id=user_id,
-            jupyter_kernel_name=name,
-            status="syncing",
+            visibility=visibility,
         )
         session.add(env)
         await session.flush()
-
-        # Commit YAML to GitOps
-        repo = await GitOpsService.get_repo(session, org_id)
-        if repo:
-            commit_sha = await GitOpsService.commit_and_push(
-                session,
-                org_id,
-                user_id,
-                files={yaml_path: yaml_content},
-                message=f"env: create custom environment {name}",
-            )
-
-            # Create change record for reconciliation
-            change = EnvironmentChange(
-                organization_id=org_id,
-                environment_id=env.id,
-                user_id=user_id,
-                change_type="create",
-                git_commit_sha=commit_sha,
-                commit_message=f"Create custom environment {name}",
-            )
-            session.add(change)
 
         await log_action(
             session,
@@ -265,150 +70,150 @@ class EnvironmentService:
             entity_type="environment",
             entity_id=env.id,
             action="create",
-            details={"name": name, "clone_from": clone_from},
+            details={"name": name, "visibility": visibility},
         )
+        return env
+
+    @staticmethod
+    async def update_environment(
+        session: AsyncSession,
+        org_id: int,
+        environment_id: int,
+        name: str | None = None,
+        description: str | None = None,
+        visibility: str | None = None,
+    ) -> Environment:
+        env = await EnvironmentService.get_environment(session, org_id, environment_id)
+        if not env:
+            raise ValueError("Environment not found")
+
+        if visibility and visibility not in VALID_VISIBILITIES:
+            raise ValueError(f"Invalid visibility: {visibility}")
+
+        if name is not None:
+            existing = await session.execute(
+                select(Environment).where(
+                    Environment.organization_id == org_id,
+                    Environment.name == name,
+                    Environment.id != environment_id,
+                )
+            )
+            if existing.scalar_one_or_none():
+                raise ValueError(f"Environment '{name}' already exists")
+            env.name = name
+
+        if description is not None:
+            env.description = description
+        if visibility is not None:
+            env.visibility = visibility
+
         await session.flush()
         return env
 
     @staticmethod
-    def _generate_minimal_yaml(name: str) -> str:
-        data = {
-            "name": name,
-            "channels": ["conda-forge", "bioconda", "defaults"],
-            "dependencies": ["python=3.11", "jupyterlab", "ipykernel"],
-        }
-        return yaml.dump(data, default_flow_style=False, sort_keys=False)
-
-    @staticmethod
-    async def archive_environment(
-        session: AsyncSession,
-        org_id: int,
-        user_id: int,
-        env_name: str,
-    ) -> None:
-        env = await EnvironmentService.get_environment(session, org_id, env_name)
+    async def delete_environment(session: AsyncSession, org_id: int, user_id: int, environment_id: int) -> None:
+        env = await EnvironmentService.get_environment(session, org_id, environment_id)
         if not env:
-            raise ValueError(f"Environment '{env_name}' not found")
-        if env.is_default:
-            raise ValueError("Cannot archive a default environment")
-
-        env.status = "archived"
-        await session.flush()
+            raise ValueError("Environment not found")
 
         await log_action(
             session,
             user_id=user_id,
             entity_type="environment",
             entity_id=env.id,
-            action="archive",
-            details={"name": env_name},
+            action="delete",
+            details={"name": env.name},
         )
 
+        # Delete versions first
+        versions_result = await session.execute(
+            select(EnvironmentVersion).where(EnvironmentVersion.environment_id == environment_id)
+        )
+        for v in versions_result.scalars().all():
+            await session.delete(v)
+
+        await session.delete(env)
+        await session.flush()
+
+    # --- Version methods ---
+
     @staticmethod
-    async def sync_packages_from_yaml(
+    async def create_version(
         session: AsyncSession,
         org_id: int,
+        user_id: int,
         environment_id: int,
-        yaml_content: str,
-    ) -> None:
-        """Parse YAML and sync environment_packages table."""
-        result = await session.execute(select(Environment).where(Environment.id == environment_id))
-        env = result.scalar_one_or_none()
+        definition_format: str,
+        definition_content: str,
+    ) -> EnvironmentVersion:
+        env = await EnvironmentService.get_environment(session, org_id, environment_id)
         if not env:
-            return
+            raise ValueError("Environment not found")
 
-        if env.env_type in ("conda", "custom_conda"):
-            packages = EnvironmentService._parse_conda_yaml(yaml_content)
-        else:
-            packages = EnvironmentService._parse_r_script(yaml_content)
+        if definition_format not in VALID_DEFINITION_FORMATS:
+            raise ValueError(f"Invalid definition_format: {definition_format}")
 
-        # Delete existing packages
-        for pkg in list(env.packages):
-            await session.delete(pkg)
-        await session.flush()
-
-        # Insert new packages
-        for pkg in packages:
-            ep = EnvironmentPackage(
-                environment_id=environment_id,
-                package_name=pkg["name"],
-                version=pkg.get("version"),
-                source=pkg["source"],
+        # Auto-increment version number
+        result = await session.execute(
+            select(func.coalesce(func.max(EnvironmentVersion.version_number), 0)).where(
+                EnvironmentVersion.environment_id == environment_id
             )
-            session.add(ep)
+        )
+        max_version = result.scalar() or 0
+        next_version = max_version + 1
 
-        env.last_synced_at = datetime.now(timezone.utc)
+        version = EnvironmentVersion(
+            environment_id=environment_id,
+            version_number=next_version,
+            status="draft",
+            definition_format=definition_format,
+            definition_content=definition_content,
+            created_by_user_id=user_id,
+        )
+        session.add(version)
         await session.flush()
+
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="environment_version",
+            entity_id=version.id,
+            action="create",
+            details={
+                "environment_id": environment_id,
+                "version_number": next_version,
+                "definition_format": definition_format,
+            },
+        )
+        return version
 
     @staticmethod
-    def update_conda_yaml(yaml_content: str, package_name: str, version: str | None, source: str, action: str) -> str:
-        """Update a conda YAML file: add, remove, or update a package."""
-        data = yaml.safe_load(yaml_content)
-        if not data:
-            data = {"name": "env", "channels": ["conda-forge"], "dependencies": []}
+    async def get_version(
+        session: AsyncSession, org_id: int, environment_id: int, version_id: int
+    ) -> EnvironmentVersion | None:
+        env = await EnvironmentService.get_environment(session, org_id, environment_id)
+        if not env:
+            return None
 
-        deps = data.get("dependencies", [])
+        result = await session.execute(
+            select(EnvironmentVersion).where(
+                EnvironmentVersion.id == version_id,
+                EnvironmentVersion.environment_id == environment_id,
+            )
+        )
+        return result.scalar_one_or_none()
 
-        if source == "pip":
-            # Handle pip packages nested under pip key
-            pip_section = None
-            pip_idx = None
-            for i, dep in enumerate(deps):
-                if isinstance(dep, dict) and "pip" in dep:
-                    pip_section = dep["pip"]
-                    pip_idx = i
-                    break
+    @staticmethod
+    async def get_versions(session: AsyncSession, environment_id: int) -> list[EnvironmentVersion]:
+        result = await session.execute(
+            select(EnvironmentVersion)
+            .where(EnvironmentVersion.environment_id == environment_id)
+            .order_by(EnvironmentVersion.version_number.desc())
+        )
+        return list(result.scalars().all())
 
-            if action == "install":
-                pkg_spec = f"{package_name}=={version}" if version else package_name
-                if pip_section is None:
-                    deps.append({"pip": [pkg_spec]})
-                else:
-                    # Remove existing entry
-                    pip_section[:] = [
-                        p for p in pip_section if not p.split("==")[0].split(">=")[0].strip() == package_name
-                    ]
-                    pip_section.append(pkg_spec)
-            elif action == "remove":
-                if pip_section:
-                    pip_section[:] = [
-                        p for p in pip_section if not p.split("==")[0].split(">=")[0].strip() == package_name
-                    ]
-                    if not pip_section and pip_idx is not None:
-                        deps.pop(pip_idx)
-            elif action == "update":
-                if pip_section:
-                    for i, p in enumerate(pip_section):
-                        if p.split("==")[0].split(">=")[0].strip() == package_name:
-                            pip_section[i] = f"{package_name}=={version}" if version else package_name
-                            break
-        else:
-            # conda packages
-            pkg_spec = f"{package_name}=={version}" if version else package_name
-
-            if action == "install":
-                # Remove existing entry if present
-                deps[:] = [
-                    d
-                    for d in deps
-                    if not (
-                        isinstance(d, str) and d.split("==")[0].split(">=")[0].split("=")[0].strip() == package_name
-                    )
-                ]
-                deps.append(pkg_spec)
-            elif action == "remove":
-                deps[:] = [
-                    d
-                    for d in deps
-                    if not (
-                        isinstance(d, str) and d.split("==")[0].split(">=")[0].split("=")[0].strip() == package_name
-                    )
-                ]
-            elif action == "update":
-                for i, d in enumerate(deps):
-                    if isinstance(d, str) and d.split("==")[0].split(">=")[0].split("=")[0].strip() == package_name:
-                        deps[i] = pkg_spec
-                        break
-
-        data["dependencies"] = deps
-        return yaml.dump(data, default_flow_style=False, sort_keys=False)
+    @staticmethod
+    async def get_in_progress_builds(session: AsyncSession) -> list[EnvironmentVersion]:
+        """Get all versions currently in 'building' status."""
+        result = await session.execute(select(EnvironmentVersion).where(EnvironmentVersion.status == "building"))
+        return list(result.scalars().all())

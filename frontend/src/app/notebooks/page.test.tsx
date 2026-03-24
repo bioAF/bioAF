@@ -42,6 +42,26 @@ beforeEach(() => {
   mockPost.mockReset();
 });
 
+const mockEnvironments = {
+  environments: [
+    { id: 1, name: "Default scRNA-seq", description: null, version_count: 1, latest_version: 1, visibility: "team", created_at: "2026-03-12T10:00:00Z" },
+  ],
+  total: 1,
+};
+
+const mockEnvDetail = {
+  id: 1,
+  name: "Default scRNA-seq",
+  description: null,
+  visibility: "team",
+  created_by: { id: 1, name: "Admin", email: "admin@test.com" },
+  versions: [
+    { id: 1, version_number: 1, status: "ready", definition_format: "dockerfile", image_uri: "us-central1-docker.pkg.dev/proj/bioaf-images/default-scrna:1", created_at: "2026-03-12T10:00:00Z" },
+  ],
+  created_at: "2026-03-12T10:00:00Z",
+  updated_at: "2026-03-12T10:00:00Z",
+};
+
 function setupMocks(buildStatus: {
   build_id: string | null;
   build_status: string | null;
@@ -51,6 +71,8 @@ function setupMocks(buildStatus: {
     if (url.includes("sessions")) return Promise.resolve({ sessions: [] });
     if (url.includes("experiments")) return Promise.resolve({ experiments: [] });
     if (url.includes("build-status")) return Promise.resolve(buildStatus);
+    if (url.includes("/api/v1/environments/1")) return Promise.resolve(mockEnvDetail);
+    if (url.includes("/api/v1/environments")) return Promise.resolve(mockEnvironments);
     return Promise.resolve({});
   });
 }

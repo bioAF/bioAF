@@ -103,8 +103,12 @@ function SidebarSection({
 
 export function Sidebar() {
   const pathname = usePathname();
-  const user = getCurrentUser();
+  const [user, setUser] = useState<Record<string, unknown> | null>(null);
   const { canAccess, roleName, loading } = usePermissions();
+
+  useEffect(() => {
+    setUser(getCurrentUser());
+  }, []);
 
   // Filter sections and children based on permissions
   const visibleSections = useMemo(() => {

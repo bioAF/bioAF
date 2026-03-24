@@ -4,20 +4,75 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
 from app.api.dependencies import require_permission
 from app.schemas.environment import (
-    EnvironmentChangeResponse,
+    BuildLogsResponse,
     EnvironmentCreateRequest,
     EnvironmentDetailResponse,
-    EnvironmentDiff,
-    EnvironmentHistoryResponse,
     EnvironmentListResponse,
     EnvironmentResponse,
-    EnvironmentRollbackRequest,
+    EnvironmentUpdateRequest,
+    EnvironmentVersionSummary,
+    UserSummary,
+    VersionCreateRequest,
+    VersionResponse,
 )
-from app.schemas.package import InstalledPackageResponse
 from app.services.environment_service import EnvironmentService
-from app.services.environment_history_service import EnvironmentHistoryService
 
-router = APIRouter(prefix="/api/environments", tags=["environments"])
+router = APIRouter(prefix="/api/v1/environments", tags=["environments"])
+
+
+def _version_response(version) -> VersionResponse:
+    return VersionResponse(
+        id=version.id,
+        environment_id=version.environment_id,
+        version_number=version.version_number,
+        status=version.status,
+        definition_format=version.definition_format,
+        definition_content=version.definition_content,
+        build_id=version.build_id,
+        image_uri=version.image_uri,
+        created_by=UserSummary(
+            id=version.created_by.id,
+            name=version.created_by.name,
+            email=version.created_by.email,
+        )
+        if version.created_by
+        else None,
+        created_at=version.created_at,
+    )
+
+
+def _env_response(env) -> EnvironmentResponse:
+    versions = env.versions or []
+    latest = None
+    if versions:
+        sorted_versions = sorted(versions, key=lambda v: v.version_number, reverse=True)
+        v = sorted_versions[0]
+        latest = EnvironmentVersionSummary(
+            id=v.id,
+            version_number=v.version_number,
+            status=v.status,
+            definition_format=v.definition_format,
+            image_uri=v.image_uri,
+            created_at=v.created_at,
+        )
+
+    return EnvironmentResponse(
+        id=env.id,
+        name=env.name,
+        description=env.description,
+        visibility=env.visibility,
+        version_count=len(versions),
+        latest_version=latest,
+        created_by=UserSummary(
+            id=env.created_by.id,
+            name=env.created_by.name,
+            email=env.created_by.email,
+        )
+        if env.created_by
+        else None,
+        created_at=env.created_at,
+        updated_at=env.updated_at,
+    )
 
 
 @router.get("", response_model=EnvironmentListResponse)
@@ -26,62 +81,14 @@ async def list_environments(
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
-
-    # Initialize defaults on first access
-    await EnvironmentService.initialize_default_environments(session, org_id)
-    await session.commit()
-
     envs = await EnvironmentService.list_environments(session, org_id)
     return EnvironmentListResponse(
-        environments=[EnvironmentResponse(**e) for e in envs],
+        environments=[_env_response(e) for e in envs],
         total=len(envs),
     )
 
 
-@router.get("/{name}", response_model=EnvironmentDetailResponse)
-async def get_environment(
-    name: str,
-    current_user: dict = require_permission("environments", "view"),
-    session: AsyncSession = Depends(get_session),
-):
-    org_id = int(current_user["org_id"])
-    env = await EnvironmentService.get_environment(session, org_id, name)
-    if not env:
-        raise HTTPException(404, "Environment not found")
-
-    packages = [
-        InstalledPackageResponse(
-            name=p.package_name,
-            version=p.version,
-            source=p.source,
-            pinned=p.pinned,
-            installed_at=p.installed_at,
-        )
-        for p in (env.packages or [])
-    ]
-
-    return EnvironmentDetailResponse(
-        id=env.id,
-        name=env.name,
-        env_type=env.env_type,
-        description=env.description,
-        is_default=env.is_default,
-        jupyter_kernel_name=env.jupyter_kernel_name,
-        status=env.status,
-        packages=packages,
-        last_synced_at=env.last_synced_at,
-        created_by={
-            "id": env.created_by.id,
-            "name": env.created_by.name,
-            "email": env.created_by.email,
-        }
-        if env.created_by
-        else None,
-        created_at=env.created_at,
-    )
-
-
-@router.post("", response_model=EnvironmentResponse)
+@router.post("", response_model=EnvironmentResponse, status_code=201)
 async def create_environment(
     data: EnvironmentCreateRequest,
     current_user: dict = require_permission("environments", "create"),
@@ -91,74 +98,93 @@ async def create_environment(
     user_id = int(current_user["sub"])
 
     try:
-        env = await EnvironmentService.create_custom_environment(
+        env = await EnvironmentService.create_environment(
             session,
             org_id,
             user_id,
             name=data.name,
             description=data.description,
-            clone_from=data.clone_from,
+            visibility=data.visibility,
         )
         await session.commit()
+        # Re-fetch to load relationships
+        env = await EnvironmentService.get_environment(session, org_id, env.id)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    return EnvironmentResponse(
+    return _env_response(env)
+
+
+@router.get("/{environment_id}", response_model=EnvironmentDetailResponse)
+async def get_environment(
+    environment_id: int,
+    current_user: dict = require_permission("environments", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    env = await EnvironmentService.get_environment(session, org_id, environment_id)
+    if not env:
+        raise HTTPException(404, "Environment not found")
+
+    versions = sorted(env.versions or [], key=lambda v: v.version_number, reverse=True)
+
+    return EnvironmentDetailResponse(
         id=env.id,
         name=env.name,
-        env_type=env.env_type,
         description=env.description,
-        is_default=env.is_default,
-        package_count=0,
-        jupyter_kernel_name=env.jupyter_kernel_name,
-        status=env.status,
-        last_synced_at=env.last_synced_at,
-        created_by=None,
+        visibility=env.visibility,
+        versions=[
+            EnvironmentVersionSummary(
+                id=v.id,
+                version_number=v.version_number,
+                status=v.status,
+                definition_format=v.definition_format,
+                image_uri=v.image_uri,
+                created_at=v.created_at,
+            )
+            for v in versions
+        ],
+        created_by=UserSummary(
+            id=env.created_by.id,
+            name=env.created_by.name,
+            email=env.created_by.email,
+        )
+        if env.created_by
+        else None,
         created_at=env.created_at,
+        updated_at=env.updated_at,
     )
 
 
-@router.post("/{name}/clone", response_model=EnvironmentResponse)
-async def clone_environment(
-    name: str,
-    data: EnvironmentCreateRequest,
+@router.put("/{environment_id}", response_model=EnvironmentResponse)
+async def update_environment(
+    environment_id: int,
+    data: EnvironmentUpdateRequest,
     current_user: dict = require_permission("environments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
-    user_id = int(current_user["sub"])
 
     try:
-        env = await EnvironmentService.create_custom_environment(
+        env = await EnvironmentService.update_environment(
             session,
             org_id,
-            user_id,
+            environment_id,
             name=data.name,
             description=data.description,
-            clone_from=name,
+            visibility=data.visibility,
         )
         await session.commit()
+        env = await EnvironmentService.get_environment(session, org_id, env.id)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    return EnvironmentResponse(
-        id=env.id,
-        name=env.name,
-        env_type=env.env_type,
-        description=env.description,
-        is_default=env.is_default,
-        package_count=0,
-        jupyter_kernel_name=env.jupyter_kernel_name,
-        status=env.status,
-        last_synced_at=env.last_synced_at,
-        created_by=None,
-        created_at=env.created_at,
-    )
+    return _env_response(env)
 
 
-@router.delete("/{name}", status_code=204)
-async def archive_environment(
-    name: str,
+@router.delete("/{environment_id}", status_code=204)
+async def delete_environment(
+    environment_id: int,
     current_user: dict = require_permission("environments", "delete"),
     session: AsyncSession = Depends(get_session),
 ):
@@ -166,170 +192,103 @@ async def archive_environment(
     user_id = int(current_user["sub"])
 
     try:
-        await EnvironmentService.archive_environment(session, org_id, user_id, name)
+        await EnvironmentService.delete_environment(session, org_id, user_id, environment_id)
         await session.commit()
     except ValueError as e:
         raise HTTPException(400, str(e))
 
 
-@router.get("/{name}/packages")
-async def list_environment_packages(
-    name: str,
-    current_user: dict = require_permission("environments", "view"),
+# --- Version endpoints ---
+
+
+@router.post("/{environment_id}/versions", response_model=VersionResponse, status_code=201)
+async def create_version(
+    environment_id: int,
+    data: VersionCreateRequest,
+    current_user: dict = require_permission("environments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
-    env = await EnvironmentService.get_environment(session, org_id, name)
-    if not env:
-        raise HTTPException(404, "Environment not found")
+    user_id = int(current_user["sub"])
 
-    packages = [
-        InstalledPackageResponse(
-            name=p.package_name,
-            version=p.version,
-            source=p.source,
-            pinned=p.pinned,
-            installed_at=p.installed_at,
+    try:
+        version = await EnvironmentService.create_version(
+            session,
+            org_id,
+            user_id,
+            environment_id,
+            definition_format=data.definition_format,
+            definition_content=data.definition_content,
         )
-        for p in (env.packages or [])
-    ]
-    return {"packages": packages, "total": len(packages)}
+        await session.commit()
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    # Re-fetch to load relationships
+    version = await EnvironmentService.get_version(session, org_id, environment_id, version.id)
+    return _version_response(version)
 
 
-@router.get("/{name}/history", response_model=EnvironmentHistoryResponse)
-async def get_environment_history(
-    name: str,
-    page: int = 1,
-    page_size: int = 20,
-    current_user: dict = require_permission("environments", "view"),
-    session: AsyncSession = Depends(get_session),
-):
-    org_id = int(current_user["org_id"])
-    env = await EnvironmentService.get_environment(session, org_id, name)
-    if not env:
-        raise HTTPException(404, "Environment not found")
-
-    changes, total = await EnvironmentHistoryService.get_change_timeline(
-        session,
-        org_id,
-        env.id,
-        page=page,
-        page_size=page_size,
-    )
-
-    return EnvironmentHistoryResponse(
-        changes=[
-            EnvironmentChangeResponse(
-                id=c.id,
-                change_type=c.change_type,
-                package_name=c.package_name,
-                old_version=c.old_version,
-                new_version=c.new_version,
-                git_commit_sha=c.git_commit_sha,
-                commit_message=c.commit_message,
-                reconciled=c.reconciled,
-                reconciled_at=c.reconciled_at,
-                error_message=c.error_message,
-                user={"id": c.user.id, "name": c.user.name, "email": c.user.email} if c.user else None,
-                created_at=c.created_at,
-            )
-            for c in changes
-        ],
-        total=total,
-        page=page,
-        page_size=page_size,
-    )
-
-
-@router.get("/{name}/history/{change_id}", response_model=EnvironmentChangeResponse)
-async def get_change_detail(
-    name: str,
-    change_id: int,
-    current_user: dict = require_permission("environments", "view"),
-    session: AsyncSession = Depends(get_session),
-):
-    org_id = int(current_user["org_id"])
-    change = await EnvironmentHistoryService.get_change_detail(session, org_id, change_id)
-    if not change:
-        raise HTTPException(404, "Change not found")
-
-    return EnvironmentChangeResponse(
-        id=change.id,
-        change_type=change.change_type,
-        package_name=change.package_name,
-        old_version=change.old_version,
-        new_version=change.new_version,
-        git_commit_sha=change.git_commit_sha,
-        commit_message=change.commit_message,
-        reconciled=change.reconciled,
-        reconciled_at=change.reconciled_at,
-        error_message=change.error_message,
-        user={"id": change.user.id, "name": change.user.name, "email": change.user.email} if change.user else None,
-        created_at=change.created_at,
-    )
-
-
-@router.post("/{name}/rollback", response_model=EnvironmentChangeResponse)
-async def rollback_environment(
-    name: str,
-    data: EnvironmentRollbackRequest,
+@router.post("/{environment_id}/versions/{version_id}/build", response_model=VersionResponse)
+async def trigger_build(
+    environment_id: int,
+    version_id: int,
     current_user: dict = require_permission("environments", "build"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    env = await EnvironmentService.get_environment(session, org_id, name)
-    if not env:
-        raise HTTPException(404, "Environment not found")
+    from app.services.environment_build_service import EnvironmentBuildService
 
     try:
-        change = await EnvironmentHistoryService.rollback_environment(
-            session,
-            org_id,
-            user_id,
-            env.id,
-            data.target_change_id,
-        )
+        await EnvironmentBuildService.build_version(session, org_id, user_id, environment_id, version_id)
         await session.commit()
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    return EnvironmentChangeResponse(
-        id=change.id,
-        change_type=change.change_type,
-        package_name=change.package_name,
-        old_version=change.old_version,
-        new_version=change.new_version,
-        git_commit_sha=change.git_commit_sha,
-        commit_message=change.commit_message,
-        reconciled=change.reconciled,
-        reconciled_at=change.reconciled_at,
-        error_message=change.error_message,
-        user=None,
-        created_at=change.created_at,
-    )
+    version = await EnvironmentService.get_version(session, org_id, environment_id, version_id)
+    if not version:
+        raise HTTPException(404, "Version not found")
+
+    return _version_response(version)
 
 
-@router.get("/{name}/compare", response_model=EnvironmentDiff)
-async def compare_environments(
-    name: str,
-    sha1: str,
-    sha2: str,
+@router.get("/{environment_id}/versions/{version_id}", response_model=VersionResponse)
+async def get_version(
+    environment_id: int,
+    version_id: int,
     current_user: dict = require_permission("environments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
+    version = await EnvironmentService.get_version(session, org_id, environment_id, version_id)
+    if not version:
+        raise HTTPException(404, "Version not found")
 
-    try:
-        diff = await EnvironmentHistoryService.compare_environments(
-            session,
-            org_id,
-            name,
-            sha1,
-            sha2,
-        )
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    return _version_response(version)
 
-    return EnvironmentDiff(**diff)
+
+@router.get("/{environment_id}/versions/{version_id}/logs", response_model=BuildLogsResponse)
+async def get_build_logs(
+    environment_id: int,
+    version_id: int,
+    current_user: dict = require_permission("environments", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    version = await EnvironmentService.get_version(session, org_id, environment_id, version_id)
+    if not version:
+        raise HTTPException(404, "Version not found")
+
+    from app.services.environment_build_service import EnvironmentBuildService
+    from app.services.notebook_image_service import _read_config
+
+    project_id = await _read_config(session, "gcp_project_id")
+    logs_url = await EnvironmentBuildService.get_build_logs_url(session, project_id, version.build_id)
+
+    return BuildLogsResponse(
+        build_id=version.build_id,
+        status=version.status,
+        logs_url=logs_url,
+    )

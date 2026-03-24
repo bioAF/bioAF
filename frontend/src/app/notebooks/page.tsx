@@ -17,6 +17,9 @@ import type {
   SessionType,
   Experiment,
   ExperimentListResponse,
+  EnvironmentResponse,
+  EnvironmentListResponse,
+  EnvironmentDetailResponse,
 } from "@/lib/types";
 import { RESOURCE_PROFILES } from "@/lib/types";
 
@@ -46,6 +49,12 @@ export default function NotebooksPage() {
     image_uri: string | null;
   } | null>(null);
 
+  // Environment selection state
+  const [environments, setEnvironments] = useState<EnvironmentResponse[]>([]);
+  const [selectedEnvId, setSelectedEnvId] = useState<number | null>(null);
+  const [selectedEnvDetail, setSelectedEnvDetail] = useState<EnvironmentDetailResponse | null>(null);
+  const [selectedVersionImageUri, setSelectedVersionImageUri] = useState<string | null>(null);
+
   useEffect(() => {
     if (!isAuthenticated()) {
       router.push("/login");
@@ -54,6 +63,7 @@ export default function NotebooksPage() {
     loadSessions();
     loadExperiments();
     loadBuildStatus();
+    loadEnvironments();
   }, [router]);
 
   // Auto-refresh while any session is starting (waiting for pod + LB IP)
@@ -98,6 +108,35 @@ export default function NotebooksPage() {
     } catch {}
   }
 
+  async function loadEnvironments() {
+    try {
+      const data = await api.get<EnvironmentListResponse>("/api/v1/environments");
+      setEnvironments(data.environments);
+      // Auto-select first environment that has a ready version
+      const withReady = data.environments.find(
+        (e) => e.latest_version?.status === "ready" && e.latest_version?.image_uri
+      );
+      if (withReady && withReady.latest_version) {
+        setSelectedEnvId(withReady.id);
+        setSelectedVersionImageUri(withReady.latest_version.image_uri);
+      }
+    } catch {}
+  }
+
+  async function handleEnvChange(envId: number) {
+    setSelectedEnvId(envId);
+    setSelectedVersionImageUri(null);
+    try {
+      const detail = await api.get<EnvironmentDetailResponse>(`/api/v1/environments/${envId}`);
+      setSelectedEnvDetail(detail);
+      // Auto-select latest ready version
+      const readyVersion = detail.versions.find((v) => v.status === "ready" && v.image_uri);
+      if (readyVersion) {
+        setSelectedVersionImageUri(readyVersion.image_uri);
+      }
+    } catch {}
+  }
+
   async function handleLaunch(sessionType: SessionType) {
     setLaunching(true);
     setLaunchError(null);
@@ -106,6 +145,7 @@ export default function NotebooksPage() {
         session_type: sessionType,
         resource_profile: selectedProfile,
         experiment_id: selectedExperiment,
+        image_uri: selectedVersionImageUri,
       };
       await api.post("/api/v1/notebooks/sessions", req);
       loadSessions();
@@ -202,6 +242,46 @@ export default function NotebooksPage() {
                     );
                   })}
                 </div>
+              </div>
+
+              {/* Environment Selector */}
+              <div>
+                <label className="text-sm text-gray-500 mb-2 block">Environment</label>
+                <div className="flex gap-3">
+                  <select
+                    value={selectedEnvId || ""}
+                    onChange={(e) => e.target.value ? handleEnvChange(Number(e.target.value)) : null}
+                    className="border rounded px-3 py-2 text-sm w-64"
+                  >
+                    <option value="">Select environment</option>
+                    {environments.map((env) => (
+                      <option key={env.id} value={env.id}>
+                        {env.name}
+                        {env.latest_version ? ` (v${env.latest_version.version_number} - ${env.latest_version.status})` : " (no versions)"}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedEnvDetail && selectedEnvDetail.versions.filter((v) => v.status === "ready").length > 0 && (
+                    <select
+                      value={selectedVersionImageUri || ""}
+                      onChange={(e) => setSelectedVersionImageUri(e.target.value || null)}
+                      className="border rounded px-3 py-2 text-sm w-64"
+                    >
+                      {selectedEnvDetail.versions
+                        .filter((v) => v.status === "ready" && v.image_uri)
+                        .map((v) => (
+                          <option key={v.id} value={v.image_uri || ""}>
+                            v{v.version_number} ({v.definition_format})
+                          </option>
+                        ))}
+                    </select>
+                  )}
+                </div>
+                {selectedEnvId && !selectedVersionImageUri && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    No ready versions available. Build a version first in the Environments page.
+                  </p>
+                )}
               </div>
 
               {/* Optional Experiment Link */}

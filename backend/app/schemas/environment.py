@@ -1,8 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
-
-from app.schemas.package import InstalledPackageResponse, PackageInstallRequest
+from pydantic import BaseModel, Field
 
 
 class UserSummary(BaseModel):
@@ -11,18 +9,42 @@ class UserSummary(BaseModel):
     email: str
 
 
+# --- Environment schemas ---
+
+
+class EnvironmentCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    description: str | None = None
+    visibility: str = "team"
+
+
+class EnvironmentUpdateRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    visibility: str | None = None
+
+
+class EnvironmentVersionSummary(BaseModel):
+    id: int
+    version_number: int
+    status: str
+    definition_format: str
+    image_uri: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class EnvironmentResponse(BaseModel):
     id: int
     name: str
-    env_type: str
     description: str | None = None
-    is_default: bool
-    package_count: int
-    jupyter_kernel_name: str | None = None
-    status: str
-    last_synced_at: datetime | None = None
+    visibility: str
+    version_count: int = 0
+    latest_version: EnvironmentVersionSummary | None = None
     created_by: UserSummary | None = None
     created_at: datetime
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -35,55 +57,40 @@ class EnvironmentListResponse(BaseModel):
 class EnvironmentDetailResponse(BaseModel):
     id: int
     name: str
-    env_type: str
     description: str | None = None
-    is_default: bool
-    jupyter_kernel_name: str | None = None
+    visibility: str
+    versions: list[EnvironmentVersionSummary]
+    created_by: UserSummary | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# --- Environment Version schemas ---
+
+
+class VersionCreateRequest(BaseModel):
+    definition_format: str = Field(..., pattern="^(dockerfile|conda)$")
+    definition_content: str = Field(..., min_length=1)
+
+
+class VersionResponse(BaseModel):
+    id: int
+    environment_id: int
+    version_number: int
     status: str
-    packages: list[InstalledPackageResponse]
-    last_synced_at: datetime | None = None
+    definition_format: str
+    definition_content: str
+    build_id: str | None = None
+    image_uri: str | None = None
     created_by: UserSummary | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
 
 
-class EnvironmentCreateRequest(BaseModel):
-    name: str
-    description: str | None = None
-    packages: list[PackageInstallRequest] = []
-    clone_from: str | None = None
-
-
-class EnvironmentChangeResponse(BaseModel):
-    id: int
-    change_type: str
-    package_name: str | None = None
-    old_version: str | None = None
-    new_version: str | None = None
-    git_commit_sha: str | None = None
-    commit_message: str | None = None
-    reconciled: bool
-    reconciled_at: datetime | None = None
-    error_message: str | None = None
-    user: UserSummary | None = None
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
-class EnvironmentHistoryResponse(BaseModel):
-    changes: list[EnvironmentChangeResponse]
-    total: int
-    page: int
-    page_size: int
-
-
-class EnvironmentRollbackRequest(BaseModel):
-    target_change_id: int
-
-
-class EnvironmentDiff(BaseModel):
-    added: list[str]
-    removed: list[str]
-    changed: list[dict]
+class BuildLogsResponse(BaseModel):
+    build_id: str | None = None
+    status: str
+    logs_url: str | None = None
