@@ -78,6 +78,14 @@ class VocabularyValidator:
             )
 
     @staticmethod
+    async def validate_experiment_fields(session: AsyncSession, data: dict) -> None:
+        """Validate all controlled vocabulary fields on an experiment."""
+        for field_name in ("design_type",):
+            value = data.get(field_name)
+            if value is not None:
+                await VocabularyValidator.validate_field(session, field_name, value)
+
+    @staticmethod
     async def validate_sample_fields(session: AsyncSession, data: dict) -> None:
         """Validate all controlled vocabulary fields on a sample."""
         for field_name in ("molecule_type", "library_prep_method", "library_layout"):

@@ -35,7 +35,57 @@ class ProvenanceService:
         )
         seen_nodes.add(project_node_id)
 
-        # Load project samples with experiments (single JOIN query)
+        # Load experiments directly linked via experiment.project_id
+        direct_exp_result = await session.execute(select(Experiment).where(Experiment.project_id == project_id))
+        direct_experiments = direct_exp_result.scalars().all()
+
+        for experiment in direct_experiments:
+            exp_node_id = f"experiment:{experiment.id}"
+            if exp_node_id not in seen_nodes:
+                nodes.append(
+                    ProvenanceNode(
+                        id=exp_node_id,
+                        type="experiment",
+                        label=experiment.name,
+                        metadata={"status": experiment.status},
+                    )
+                )
+                seen_nodes.add(exp_node_id)
+                edges.append(
+                    ProvenanceEdge(
+                        source=exp_node_id,
+                        target=project_node_id,
+                        relationship="contains",
+                    )
+                )
+
+            # Load samples for this experiment
+            sample_result = await session.execute(select(Sample).where(Sample.experiment_id == experiment.id))
+            for sample in sample_result.scalars().all():
+                sample_node_id = f"sample:{sample.id}"
+                if sample_node_id not in seen_nodes:
+                    nodes.append(
+                        ProvenanceNode(
+                            id=sample_node_id,
+                            type="sample",
+                            label=sample.sample_id_external or f"Sample {sample.id}",
+                            metadata={
+                                "organism": sample.organism,
+                                "tissue_type": sample.tissue_type,
+                                "qc_status": sample.qc_status,
+                            },
+                        )
+                    )
+                    seen_nodes.add(sample_node_id)
+                    edges.append(
+                        ProvenanceEdge(
+                            source=exp_node_id,
+                            target=sample_node_id,
+                            relationship="contains",
+                        )
+                    )
+
+        # Load project samples with experiments (via junction table)
         ps_result = await session.execute(
             select(ProjectSample, Sample, Experiment)
             .join(Sample, Sample.id == ProjectSample.sample_id)
@@ -44,7 +94,7 @@ class ProvenanceService:
         )
         ps_rows = ps_result.all()
 
-        # Add experiment and sample nodes
+        # Add experiment and sample nodes (deduped via seen_nodes)
         for _, sample, experiment in ps_rows:
             exp_node_id = f"experiment:{experiment.id}"
             if exp_node_id not in seen_nodes:
@@ -97,7 +147,7 @@ class ProvenanceService:
         project_runs = run_result.scalars().all()
 
         # Also load experiment-scoped runs from source experiments
-        experiment_ids = list({exp.id for _, _, exp in ps_rows})
+        experiment_ids = list({exp.id for _, _, exp in ps_rows} | {exp.id for exp in direct_experiments})
         exp_run_result = (
             await session.execute(
                 select(PipelineRun)

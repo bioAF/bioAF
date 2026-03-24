@@ -7,6 +7,7 @@ import { Header } from "@/components/layout/Header";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { VocabularySelect } from "@/components/shared/VocabularySelect";
+import { ExtensibleVocabularySelect } from "@/components/shared/ExtensibleVocabularySelect";
 import type {
   Experiment,
   ExperimentCreateRequest,
@@ -27,6 +28,7 @@ export default function NewExperimentPage() {
     name: "",
     project_id: null,
     template_id: null,
+    design_type: null,
     hypothesis: null,
     description: null,
     start_date: new Date().toISOString().split("T")[0],
@@ -160,6 +162,17 @@ export default function NewExperimentPage() {
                     <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Design Type</label>
+                <ExtensibleVocabularySelect
+                  fieldName="design_type"
+                  value={form.design_type ?? null}
+                  onChange={(v) => setForm({ ...form, design_type: v })}
+                  placeholder="Select design type..."
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
               </div>
 
               <div>

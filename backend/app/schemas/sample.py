@@ -26,6 +26,9 @@ class SampleCreate(BaseModel):
     library_layout: str | None = None
     qc_status: str | None = None
     qc_notes: str | None = None
+    parent_sample_id: int | None = None
+    collection_timestamp: datetime | None = None
+    collection_method: str | None = None
 
     @field_validator("viability_pct")
     @classmethod
@@ -56,6 +59,9 @@ class SampleUpdate(BaseModel):
     molecule_type: str | None = None
     library_prep_method: str | None = None
     library_layout: str | None = None
+    parent_sample_id: int | None = None
+    collection_timestamp: datetime | None = None
+    collection_method: str | None = None
 
     @field_validator("viability_pct")
     @classmethod
@@ -116,6 +122,9 @@ class SampleResponse(BaseModel):
     library_layout: str | None = None
     qc_status: str | None
     qc_notes: str | None
+    parent_sample_id: int | None = None
+    collection_timestamp: datetime | None = None
+    collection_method: str | None = None
     status: str
     created_at: datetime
     updated_at: datetime

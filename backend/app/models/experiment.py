@@ -1,6 +1,7 @@
 from datetime import date, datetime
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -51,6 +52,10 @@ class Experiment(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+    design_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    protocol_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    variables_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     organization = relationship("Organization")
     project = relationship("Project", back_populates="experiments")

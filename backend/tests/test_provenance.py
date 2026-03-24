@@ -169,6 +169,79 @@ async def test_project_provenance_includes_experiment_runs(client, admin_token, 
     assert len(run_nodes) >= 2  # project run + experiment run
 
 
+@pytest_asyncio.fixture
+async def provenance_project_via_experiment_link(session, admin_user):
+    """Project with experiments linked via experiment.project_id (no project_samples rows)."""
+    project = Project(
+        organization_id=admin_user.organization_id,
+        name="Linked Project",
+        status="active",
+        owner_user_id=admin_user.id,
+        created_by_user_id=admin_user.id,
+    )
+    session.add(project)
+    await session.flush()
+
+    exp = Experiment(
+        organization_id=admin_user.organization_id,
+        name="Linked Experiment",
+        status="registered",
+        project_id=project.id,
+    )
+    session.add(exp)
+    await session.flush()
+
+    sample = Sample(
+        experiment_id=exp.id,
+        sample_id_external="L-1",
+        organism="Homo sapiens",
+        tissue_type="liver",
+        status="registered",
+    )
+    session.add(sample)
+    await session.flush()
+
+    run = PipelineRun(
+        organization_id=admin_user.organization_id,
+        experiment_id=exp.id,
+        submitted_by_user_id=admin_user.id,
+        pipeline_name="nf-core/rnaseq",
+        pipeline_version="3.14",
+        status="completed",
+    )
+    session.add(run)
+    await session.flush()
+    await session.commit()
+
+    return project, exp, sample, run
+
+
+@pytest.mark.asyncio
+async def test_provenance_includes_experiments_linked_by_project_id(
+    client, admin_token, provenance_project_via_experiment_link
+):
+    """Experiments linked via experiment.project_id should appear in DAG."""
+    project, exp, sample, run = provenance_project_via_experiment_link
+
+    response = await client.get(
+        f"/api/projects/{project.id}/provenance",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+
+    node_ids = {n["id"] for n in data["nodes"]}
+    assert f"project:{project.id}" in node_ids
+    assert f"experiment:{exp.id}" in node_ids
+    assert f"sample:{sample.id}" in node_ids
+    assert f"pipeline_run:{run.id}" in node_ids
+
+    edge_tuples = {(e["source"], e["target"], e["relationship"]) for e in data["edges"]}
+    assert (f"experiment:{exp.id}", f"project:{project.id}", "contains") in edge_tuples
+    assert (f"experiment:{exp.id}", f"sample:{sample.id}", "contains") in edge_tuples
+    assert (f"experiment:{exp.id}", f"pipeline_run:{run.id}", "input_to") in edge_tuples
+
+
 @pytest.mark.asyncio
 async def test_provenance_404_for_missing_project(client, admin_token):
     response = await client.get(

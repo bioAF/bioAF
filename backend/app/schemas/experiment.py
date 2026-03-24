@@ -62,6 +62,9 @@ class ExperimentCreate(BaseModel):
     expected_sample_count: int | None = None
     custom_fields: list[CustomFieldValue] | None = None
     field_defaults: list[FieldDefaultValue] | None = None
+    design_type: str | None = None
+    protocol_version: str | None = None
+    variables_json: dict | None = None
 
 
 class ExperimentUpdate(BaseModel):
@@ -71,6 +74,9 @@ class ExperimentUpdate(BaseModel):
     start_date: date | None = None
     expected_sample_count: int | None = None
     field_defaults: list[FieldDefaultValue] | None = None
+    design_type: str | None = None
+    protocol_version: str | None = None
+    variables_json: dict | None = None
 
 
 class ExperimentStatusUpdate(BaseModel):
@@ -103,6 +109,9 @@ class ExperimentResponse(BaseModel):
     start_date: date | None
     expected_sample_count: int | None
     owner: UserSummary | None = None
+    design_type: str | None = None
+    protocol_version: str | None = None
+    variables_json: dict | None = None
     sample_count: int = 0
     batch_count: int = 0
     created_at: datetime

@@ -15,11 +15,13 @@ from app.schemas.experiment import ExperimentCreate, ExperimentUpdate
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import EXPERIMENT_STATUS_CHANGED
+from app.services.vocabulary_validator import VocabularyValidator
 
 
 class ExperimentService:
     @staticmethod
     async def create_experiment(session: AsyncSession, org_id: int, user_id: int, data: ExperimentCreate) -> Experiment:
+        await VocabularyValidator.validate_experiment_fields(session, {"design_type": data.design_type})
         experiment = Experiment(
             organization_id=org_id,
             project_id=data.project_id,
@@ -31,6 +33,9 @@ class ExperimentService:
             expected_sample_count=data.expected_sample_count,
             owner_user_id=user_id,
             status="registered",
+            design_type=data.design_type,
+            protocol_version=data.protocol_version,
+            variables_json=data.variables_json,
         )
         session.add(experiment)
         await session.flush()
@@ -83,7 +88,16 @@ class ExperimentService:
 
         previous = {}
         updates = {}
-        for field in ["name", "hypothesis", "description", "start_date", "expected_sample_count"]:
+        for field in [
+            "name",
+            "hypothesis",
+            "description",
+            "start_date",
+            "expected_sample_count",
+            "design_type",
+            "protocol_version",
+            "variables_json",
+        ]:
             new_val = getattr(data, field, None)
             if new_val is not None:
                 old_val = getattr(experiment, field)

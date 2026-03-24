@@ -49,6 +49,9 @@ class Sample(Base):
     qc_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     qc_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="registered")
+    parent_sample_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("samples.id"), nullable=True)
+    collection_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    collection_method: Mapped[str | None] = mapped_column(String(200), nullable=True)
     is_unclaimed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -58,3 +61,5 @@ class Sample(Base):
     experiment = relationship("Experiment", back_populates="samples")
     batch = relationship("Batch", back_populates="samples")
     files = relationship("File", secondary=sample_files, lazy="select")
+    parent_sample = relationship("Sample", remote_side="Sample.id", foreign_keys=[parent_sample_id])
+    derived_samples = relationship("Sample", foreign_keys=[parent_sample_id], overlaps="parent_sample")

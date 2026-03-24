@@ -368,6 +368,7 @@ export interface ExperimentCreateRequest {
   expected_sample_count?: number | null;
   custom_fields?: CustomFieldValue[];
   field_defaults?: FieldDefaultValue[];
+  design_type?: string | null;
 }
 
 export interface SampleCreateRequest {

@@ -111,6 +111,9 @@ class SampleService:
             library_layout=data.library_layout,
             qc_status=data.qc_status,
             qc_notes=data.qc_notes,
+            parent_sample_id=data.parent_sample_id,
+            collection_timestamp=data.collection_timestamp,
+            collection_method=data.collection_method,
             status="registered",
         )
         session.add(sample)
@@ -176,6 +179,9 @@ class SampleService:
                 library_layout=data.library_layout,
                 qc_status=data.qc_status,
                 qc_notes=data.qc_notes,
+                parent_sample_id=data.parent_sample_id,
+                collection_timestamp=data.collection_timestamp,
+                collection_method=data.collection_method,
                 status="registered",
             )
             session.add(sample)
@@ -228,6 +234,9 @@ class SampleService:
             "molecule_type",
             "library_prep_method",
             "library_layout",
+            "parent_sample_id",
+            "collection_timestamp",
+            "collection_method",
         ]:
             new_val = getattr(data, field, None)
             if new_val is not None:

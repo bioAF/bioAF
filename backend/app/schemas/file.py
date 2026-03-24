@@ -30,6 +30,8 @@ class FileResponse(BaseModel):
     experiment_id: int | None = None
     source_type: str = "upload"
     source_pipeline_run_id: int | None = None
+    sha256_checksum: str | None = None
+    artifact_type: str | None = None
     upload_timestamp: datetime
     created_at: datetime
 

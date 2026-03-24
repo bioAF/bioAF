@@ -27,6 +27,8 @@ class File(Base):
     experiment_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("experiments.id"), nullable=True, index=True)
     source_type: Mapped[str] = mapped_column(String(30), server_default="upload", nullable=False)
     source_pipeline_run_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("pipeline_runs.id"), nullable=True)
+    sha256_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    artifact_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("idx_files_experiment_id", "experiment_id"),)

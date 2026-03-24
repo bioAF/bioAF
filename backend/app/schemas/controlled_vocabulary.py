@@ -12,6 +12,7 @@ CONTROLLED_FIELD_NAMES = [
     "quality_score_encoding",
     "reference_genome",
     "alignment_algorithm",
+    "design_type",
 ]
 
 
