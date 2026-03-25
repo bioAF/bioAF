@@ -45,6 +45,7 @@ export const navConfig: NavSection[] = [
       { label: "Project List", path: "/projects", permission: { resource: "projects", action: "view" } },
       { label: "Experiment Templates", path: "/projects/experiment-templates", permission: { resource: "experiments", action: "view" } },
       { label: "Experiment List", path: "/projects/experiments", permission: { resource: "experiments", action: "view" } },
+      { label: "Dataset Browser", path: "/data/browser", permission: { resource: "experiments", action: "view" } },
     ],
   },
   {
@@ -62,7 +63,6 @@ export const navConfig: NavSection[] = [
     children: [
       { label: "Upload", path: "/data/upload", permission: { resource: "files", action: "upload" } },
       { label: "Files", path: "/data/files", permission: { resource: "files", action: "view" } },
-      { label: "Dataset Browser", path: "/data/browser", permission: { resource: "files", action: "view" } },
       { label: "Documents", path: "/data/documents", permission: { resource: "files", action: "view" } },
       { label: "Reference Data", path: "/data/references", permission: { resource: "files", action: "view" } },
     ],

@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
+from app.models.audit_log import AuditLog
 from app.models.role import Role
 from app.models.session_credential import SessionCredential
 from app.models.user import User
@@ -254,6 +255,58 @@ async def lock_user(user_id: int, request: Request, session: AsyncSession = Depe
     await session.commit()
     await session.refresh(user)
     return await _user_response_with_role_name(session, user)
+
+
+@router.post("/{user_id}/reactivate", response_model=UserResponse)
+async def reactivate_user(user_id: int, request: Request, session: AsyncSession = Depends(get_session)):
+    current_user = request.state.current_user
+    if not await role_service.has_permission(session, int(current_user["role_id"]), "users", "deactivate"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    actor_id = int(current_user["sub"])
+
+    user = await UserService.get_by_id(session, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.status != "deactivated":
+        raise HTTPException(status_code=400, detail="Only deactivated users can be reactivated")
+
+    user = await UserService.reactivate(session, user, actor_id)
+    await session.commit()
+    await session.refresh(user)
+    return await _user_response_with_role_name(session, user)
+
+
+@router.delete("/{user_id}")
+async def delete_user(user_id: int, request: Request, session: AsyncSession = Depends(get_session)):
+    current_user = request.state.current_user
+    if not await role_service.has_permission(session, int(current_user["role_id"]), "users", "delete"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    actor_id = int(current_user["sub"])
+
+    user = await UserService.get_by_id(session, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.status != "deactivated":
+        raise HTTPException(status_code=400, detail="Only deactivated users can be deleted")
+
+    # Check if user has ever been an actor in the audit log (performed actions)
+    from sqlalchemy import func
+
+    audit_count_result = await session.execute(
+        select(func.count()).select_from(AuditLog).where(AuditLog.user_id == user_id)
+    )
+    audit_count = audit_count_result.scalar_one()
+    if audit_count > 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete user with audit log activity. They have performed actions in the system.",
+        )
+
+    await UserService.delete_user(session, user, actor_id)
+    await session.commit()
+    return {"message": "User deleted"}
 
 
 @router.post("/{user_id}/resend-invite")

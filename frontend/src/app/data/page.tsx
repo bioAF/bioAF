@@ -11,16 +11,14 @@ import type {
   DocumentSearchResponse,
   StorageDashboard,
 } from "@/lib/types";
-import { DatasetBrowser } from "@/components/data/DatasetBrowser";
 
-type Tab = "upload" | "datasets" | "documents" | "storage";
+type Tab = "upload" | "documents" | "storage";
 
 export default function DataPage() {
   const [activeTab, setActiveTab] = useState<Tab>("upload");
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "upload", label: "Upload" },
-    { key: "datasets", label: "Dataset Browser" },
     { key: "documents", label: "Documents" },
     { key: "storage", label: "Storage" },
   ];
@@ -52,7 +50,6 @@ export default function DataPage() {
           </div>
 
           {activeTab === "upload" && <UploadTab />}
-          {activeTab === "datasets" && <DatasetBrowser />}
           {activeTab === "documents" && <DocumentsTab />}
           {activeTab === "storage" && <StorageTab />}
         </main>

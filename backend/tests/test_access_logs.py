@@ -85,6 +85,41 @@ async def test_list_access_logs_with_data(client: AsyncClient, admin_token: str,
 
 
 @pytest.mark.asyncio
+async def test_never_logged_in_excludes_deactivated(client: AsyncClient, admin_token: str, admin_user, session):
+    """Deactivated users should not appear in the never-logged-in list."""
+    role_map = admin_user._test_role_map
+    # Invite a user (never logs in)
+    resp = await client.post(
+        "/api/users",
+        json={"email": "ghost@test.com", "role_id": role_map["bench"]},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    user_id = resp.json()["id"]
+
+    # Should appear in never-logged-in
+    resp = await client.get(
+        "/api/access-logs/never-logged-in",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert any(u["id"] == user_id for u in resp.json()["users"])
+
+    # Deactivate the user
+    resp = await client.post(
+        f"/api/users/{user_id}/deactivate",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+
+    # Should no longer appear in never-logged-in
+    resp = await client.get(
+        "/api/access-logs/never-logged-in",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert not any(u["id"] == user_id for u in resp.json()["users"])
+
+
+@pytest.mark.asyncio
 async def test_filter_access_logs_by_resource_type(client: AsyncClient, admin_token: str, admin_user, session):
     from app.services.access_log_service import AccessLogService
 

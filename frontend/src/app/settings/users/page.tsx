@@ -28,7 +28,9 @@ type PendingAction =
   | { type: "lock"; user: User }
   | { type: "role_change"; user: User; newRole: string }
   | { type: "resend_invite"; user: User }
-  | { type: "reset_password_email"; user: User };
+  | { type: "reset_password_email"; user: User }
+  | { type: "reactivate"; user: User }
+  | { type: "delete"; user: User };
 
 export default function SettingsUsersPage() {
   const router = useRouter();
@@ -58,9 +60,7 @@ export default function SettingsUsersPage() {
     api.get<RoleListResponse>("/api/roles")
       .then((data) => setRoles(data.roles))
       .catch(() => {});
-    api.get<{ users: NeverLoggedInUser[] }>("/api/access-logs/never-logged-in")
-      .then((data) => setNeverLoggedIn(data.users))
-      .catch(() => {});
+    fetchNeverLoggedIn();
     api.get<{ setup_complete: boolean; smtp_configured: boolean }>("/api/bootstrap/status")
       .then((data) => setSmtpConfigured(data.smtp_configured))
       .catch(() => {});
@@ -73,6 +73,12 @@ export default function SettingsUsersPage() {
     } catch { /* handled */ } finally {
       setLoading(false);
     }
+  };
+
+  const fetchNeverLoggedIn = () => {
+    api.get<{ users: NeverLoggedInUser[] }>("/api/access-logs/never-logged-in")
+      .then((data) => setNeverLoggedIn(data.users))
+      .catch(() => {});
   };
 
   const clearMessages = () => { setError(""); setSuccess(""); };
@@ -106,8 +112,17 @@ export default function SettingsUsersPage() {
           await api.post(`/api/users/${pendingAction.user.id}/admin-reset-password`, { mode: "email" });
           setSuccess(`Password reset email sent to ${pendingAction.user.email}`);
           break;
+        case "reactivate":
+          await api.post(`/api/users/${pendingAction.user.id}/reactivate`);
+          setSuccess(`${pendingAction.user.email} reactivated`);
+          break;
+        case "delete":
+          await api.delete(`/api/users/${pendingAction.user.id}`);
+          setSuccess(`${pendingAction.user.email} deleted`);
+          break;
       }
       fetchUsers();
+      fetchNeverLoggedIn();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Action failed");
     }
@@ -194,6 +209,18 @@ export default function SettingsUsersPage() {
           title: "Send Password Reset",
           message: `Send a password reset email to ${pendingAction.user.email}?`,
           variant: "default",
+        };
+      case "reactivate":
+        return {
+          title: "Reactivate User",
+          message: `Reactivate ${pendingAction.user.email}? They will regain access with their previous role.`,
+          variant: "default",
+        };
+      case "delete":
+        return {
+          title: "Delete User",
+          message: `Permanently delete ${pendingAction.user.email}? This cannot be undone.`,
+          variant: "danger",
         };
       default:
         return { title: "", message: "", variant: "default" };
@@ -282,6 +309,28 @@ export default function SettingsUsersPage() {
             className="px-3 py-1.5 text-sm bg-white border border-red-300 text-red-600 rounded hover:bg-red-50"
           >
             Deactivate
+          </button>
+        )}
+        {isDeactivated && (
+          <button
+            onClick={() => {
+              setPendingAction({ type: "reactivate", user });
+              setViewingUser(null);
+            }}
+            className="px-3 py-1.5 text-sm bg-white border border-green-300 text-green-700 rounded hover:bg-green-50"
+          >
+            Reactivate
+          </button>
+        )}
+        {isDeactivated && !user.last_login && (
+          <button
+            onClick={() => {
+              setPendingAction({ type: "delete", user });
+              setViewingUser(null);
+            }}
+            className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700"
+          >
+            Delete
           </button>
         )}
       </div>
@@ -422,7 +471,9 @@ export default function SettingsUsersPage() {
               confirmLabel={
                 pendingAction.type === "deactivate" ? "Deactivate"
                   : pendingAction.type === "lock" ? "Lock"
-                    : "Confirm"
+                    : pendingAction.type === "delete" ? "Delete"
+                      : pendingAction.type === "reactivate" ? "Reactivate"
+                        : "Confirm"
               }
               onConfirm={handleConfirmAction}
               onCancel={() => setPendingAction(null)}

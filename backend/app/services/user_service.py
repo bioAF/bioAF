@@ -141,3 +141,53 @@ class UserService:
             previous_value={"status": old_status},
         )
         return user
+
+    @staticmethod
+    async def reactivate(
+        session: AsyncSession,
+        user: User,
+        actor_user_id: int,
+    ) -> User:
+        old_status = user.status
+        user.status = "active"
+        await session.flush()
+
+        await log_action(
+            session,
+            user_id=actor_user_id,
+            entity_type="user",
+            entity_id=user.id,
+            action="reactivate",
+            details={
+                "status": "active",
+                "target_email": user.email,
+                "description": f"Reactivated {user.email}",
+            },
+            previous_value={"status": old_status},
+        )
+        return user
+
+    @staticmethod
+    async def delete_user(
+        session: AsyncSession,
+        user: User,
+        actor_user_id: int,
+    ) -> None:
+        """Hard-delete a user. Caller must verify eligibility first."""
+        email = user.email
+        user_id = user.id
+
+        await session.delete(user)
+        await session.flush()
+
+        await log_action(
+            session,
+            user_id=actor_user_id,
+            entity_type="user",
+            entity_id=user_id,
+            action="delete",
+            details={
+                "target_email": email,
+                "description": f"Deleted user {email}",
+            },
+        )

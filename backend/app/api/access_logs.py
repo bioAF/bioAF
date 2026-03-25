@@ -36,6 +36,7 @@ async def never_logged_in_users(
         select(User.id, User.email, User.name, User.role_id, User.status, User.created_at)
         .where(User.organization_id == org_id)
         .where(User.id.notin_(select(logged_in_subq.c.user_id)))
+        .where(User.status != "deactivated")
         .order_by(User.created_at.asc())
     )
     rows = result.all()

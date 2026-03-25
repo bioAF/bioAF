@@ -11,7 +11,7 @@ ALL_RESOURCES_ACTIONS: dict[str, list[str]] = {
     "environments": ["view", "create", "build", "delete"],
     "files": ["view", "upload", "download", "edit", "delete"],
     "projects": ["view", "create", "edit", "delete"],
-    "users": ["view", "invite", "edit_role", "deactivate"],
+    "users": ["view", "invite", "edit_role", "deactivate", "delete"],
     "infrastructure": ["view", "create", "edit", "configure", "deploy", "change_status", "build"],
     "audit_log": ["view"],
     "notifications": ["view", "configure"],
