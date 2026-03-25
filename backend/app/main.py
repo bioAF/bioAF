@@ -151,6 +151,7 @@ async def lifespan(app: FastAPI):
     background_tasks.append(asyncio.create_task(_notebook_image_build_loop()))
     background_tasks.append(asyncio.create_task(_environment_build_poll_loop()))
     background_tasks.append(asyncio.create_task(_work_node_heartbeat_loop()))
+    background_tasks.append(asyncio.create_task(_export_cleanup_loop()))
     logger.info("Background tasks started")
 
     yield
@@ -527,6 +528,46 @@ async def _work_node_heartbeat_loop():
             break
         except Exception as e:
             logger.error("Work node heartbeat check error: %s", e)
+
+
+async def _export_cleanup_loop():
+    """Delete export ZIPs older than 24 hours from GCS every hour."""
+    from datetime import datetime, timezone, timedelta
+
+    from sqlalchemy import text as sa_text
+
+    from app.database import async_session_factory
+    from app.services.gcs_storage import GcsStorageService
+
+    while True:
+        try:
+            await asyncio.sleep(3600)
+            async with async_session_factory() as session:
+                result = await session.execute(
+                    sa_text("SELECT value FROM platform_config WHERE key = 'config_backups_bucket_name'")
+                )
+                row = result.fetchone()
+                if not row or not row[0] or row[0] == "null":
+                    continue
+
+                bucket_name = row[0]
+                credentials = await GcsStorageService.get_credentials(session)
+
+                from google.cloud import storage as gcs
+
+                client = gcs.Client(credentials=credentials)
+                cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+                deleted = 0
+                for blob in client.list_blobs(bucket_name, prefix="exports/"):
+                    if blob.time_created and blob.time_created < cutoff:
+                        blob.delete()
+                        deleted += 1
+                if deleted:
+                    logger.info("Export cleanup: deleted %d expired ZIP(s) from gs://%s/exports/", deleted, bucket_name)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error("Export cleanup error: %s", e)
 
 
 app = FastAPI(

@@ -11,6 +11,7 @@ import { DetailModal } from "@/components/shared/DetailModal";
 import { ProvenanceDAGComponent } from "@/components/provenance/ProvenanceDAG";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportPanel";
+import { ProjectExportModal } from "@/components/projects/ProjectExportModal";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
@@ -44,6 +45,8 @@ export default function ProjectDetailPage() {
   const [selectedSampleIds, setSelectedSampleIds] = useState<Set<number>>(new Set());
   const [sampleSearch, setSampleSearch] = useState("");
   const [adding, setAdding] = useState(false);
+
+  const [showProjectExport, setShowProjectExport] = useState(false);
 
   const user = getCurrentUser();
   const canModify = user?.role_name === "admin" || user?.role_name === "comp_bio";
@@ -200,6 +203,16 @@ export default function ProjectDetailPage() {
             <div className="flex items-center gap-3 mb-2">
               <h1 className="text-2xl font-bold">{project.name}</h1>
               <StatusBadge status={project.status || "active"} />
+              <div className="ml-auto">
+                {canModify && (
+                  <button
+                    onClick={() => setShowProjectExport(true)}
+                    className="bg-gray-100 text-gray-800 px-4 py-2 rounded-md text-sm hover:bg-gray-200"
+                  >
+                    Export Data
+                  </button>
+                )}
+              </div>
             </div>
             {project.hypothesis && (
               <p className="text-gray-600 italic mb-1">{project.hypothesis}</p>
@@ -553,6 +566,12 @@ export default function ProjectDetailPage() {
           </div>
         </div>
       )}
+    <ProjectExportModal
+      projectId={Number(projectId)}
+      projectName={project?.name ?? ""}
+      isOpen={showProjectExport}
+      onClose={() => setShowProjectExport(false)}
+    />
     </div>
   );
 }
