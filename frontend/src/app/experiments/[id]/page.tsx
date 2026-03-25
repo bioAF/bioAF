@@ -12,6 +12,7 @@ import { PlotModal } from "@/components/shared/PlotModal";
 import { DetailModal } from "@/components/shared/DetailModal";
 import { ExportPdfButton } from "@/components/shared/ExportPdfButton";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
+import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportPanel";
 import { VocabularySelect } from "@/components/shared/VocabularySelect";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -44,7 +45,7 @@ import type {
   FileListResponse,
 } from "@/lib/types";
 
-type Tab = "overview" | "samples" | "batches" | "files" | "analysis" | "pipelines" | "results" | "audit";
+type Tab = "overview" | "samples" | "batches" | "files" | "analysis" | "pipelines" | "results" | "provenance" | "audit";
 
 export default function ExperimentDetailPage() {
   const router = useRouter();
@@ -385,6 +386,7 @@ export default function ExperimentDetailPage() {
     { key: "analysis", label: "Analysis" },
     { key: "pipelines", label: "Pipeline Runs" },
     { key: "results", label: "Results" },
+    { key: "provenance", label: "Provenance" },
     { key: "audit", label: "Audit Trail" },
   ];
 
@@ -1061,6 +1063,14 @@ export default function ExperimentDetailPage() {
 
           {activeTab === "results" && (
             <ExperimentResultsTab experimentId={Number(id)} />
+          )}
+
+          {activeTab === "provenance" && experiment && (
+            <ProvenanceReportPanel
+              entityType="experiment"
+              entityId={Number(id)}
+              entityName={experiment.name}
+            />
           )}
 
           {activeTab === "audit" && (

@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { usePermissions } from "@/hooks/usePermissions";
+import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportPanel";
 import { api } from "@/lib/api";
 import { getCurrentUser, getToken } from "@/lib/auth";
 import type {
@@ -45,6 +46,7 @@ export default function DataFilesPage() {
     failed: number;
   } | null>(null);
   const [viewingFile, setViewingFile] = useState<FileResponse | null>(null);
+  const [showProvenance, setShowProvenance] = useState(false);
   const [page, setPage] = useState(1);
   const [totalFiles, setTotalFiles] = useState(0);
   const [downloading, setDownloading] = useState(false);
@@ -607,18 +609,53 @@ export default function DataFilesPage() {
                 </dl>
 
                 {canDownload && (
-                  <div className="px-4 pb-4">
+                  <div className="px-4 pb-4 flex gap-3">
                     <button
                       onClick={() => triggerDownload(viewingFile.id)}
-                      className="w-full px-4 py-2 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700 flex items-center justify-center gap-2"
+                      className="flex-1 px-4 py-2 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700 flex items-center justify-center gap-2"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
                       </svg>
                       Download
                     </button>
+                    <button
+                      onClick={() => setShowProvenance(true)}
+                      className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md text-sm font-medium hover:bg-gray-50"
+                    >
+                      View Provenance
+                    </button>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {showProvenance && viewingFile && (
+            <div
+              className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40"
+              onClick={() => setShowProvenance(false)}
+            >
+              <div
+                className="relative bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[80vh] overflow-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="sticky top-0 flex items-center justify-between p-4 border-b bg-white rounded-t-lg">
+                  <h3 className="text-lg font-semibold">Provenance: {viewingFile.filename}</h3>
+                  <button
+                    onClick={() => setShowProvenance(false)}
+                    className="text-gray-400 hover:text-gray-600 text-xl leading-none px-2"
+                  >
+                    &times;
+                  </button>
+                </div>
+                <div className="p-4">
+                  <ProvenanceReportPanel
+                    entityType="artifact"
+                    entityId={viewingFile.id}
+                    entityName={viewingFile.filename}
+                  />
+                </div>
               </div>
             </div>
           )}

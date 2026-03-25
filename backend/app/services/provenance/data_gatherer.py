@@ -15,9 +15,11 @@ from app.models.batch import Batch
 from app.models.experiment import Experiment
 from app.models.experiment_custom_field import ExperimentCustomField
 from app.models.file import File
+from app.models.notebook_session import ComputeSession
 from app.models.pipeline_run import PipelineRun
 from app.models.project import Project
 from app.models.project_sample import ProjectSample
+from app.models.qc_dashboard import QCDashboard
 from app.models.sample import Sample
 from app.models.user import User
 from app.services.provenance.schema import (
@@ -210,13 +212,37 @@ class ProvenanceDataGatherer:
                     )
                     seen_refs.add(ref.id)
 
+        # Batches, notebook sessions, QC dashboards (for audit trail)
+        all_batches: list[Batch] = []
+        all_notebook_sessions: list[ComputeSession] = []
+        all_qc_dashboards: list[QCDashboard] = []
+        if exp_ids:
+            batch_result = await session.execute(select(Batch).where(Batch.experiment_id.in_(exp_ids)))
+            all_batches = list(batch_result.scalars().all())
+            ns_result = await session.execute(select(ComputeSession).where(ComputeSession.experiment_id.in_(exp_ids)))
+            all_notebook_sessions = list(ns_result.scalars().all())
+            qc_result = await session.execute(select(QCDashboard).where(QCDashboard.experiment_id.in_(exp_ids)))
+            all_qc_dashboards = list(qc_result.scalars().all())
+
         # Resolve users
         user_map = await _user_map(session, user_ids)
 
-        # Audit trail
+        # Audit trail -- include all related entity types
         audit_pairs: list[tuple[str, int]] = [("project", project_id)]
         for exp in experiments:
             audit_pairs.append(("experiment", exp.id))
+        for s in sample_list:
+            audit_pairs.append(("sample", s.id))
+        for r in project_runs:
+            audit_pairs.append(("pipeline_run", r.id))
+        for f in files:
+            audit_pairs.append(("file", f.id))
+        for b in all_batches:
+            audit_pairs.append(("batch", b.id))
+        for ns in all_notebook_sessions:
+            audit_pairs.append(("notebook_session", ns.id))
+        for qc in all_qc_dashboards:
+            audit_pairs.append(("qc_dashboard", qc.id))
         audit_trail = await _audit_entries(session, audit_pairs, user_map)
 
         return ProjectProvenanceData(
@@ -350,12 +376,28 @@ class ProvenanceDataGatherer:
         # Resolve users
         user_map = await _user_map(session, user_ids)
 
-        # Audit trail
+        # Notebook sessions
+        ns_result = await session.execute(select(ComputeSession).where(ComputeSession.experiment_id == experiment_id))
+        notebook_sessions = ns_result.scalars().all()
+
+        # QC dashboards
+        qc_result = await session.execute(select(QCDashboard).where(QCDashboard.experiment_id == experiment_id))
+        qc_dashboards = qc_result.scalars().all()
+
+        # Audit trail -- include all related entity types
         audit_pairs: list[tuple[str, int]] = [("experiment", experiment_id)]
         for s in samples:
             audit_pairs.append(("sample", s.id))
         for r in runs:
             audit_pairs.append(("pipeline_run", r.id))
+        for f in files:
+            audit_pairs.append(("file", f.id))
+        for b in batches:
+            audit_pairs.append(("batch", b.id))
+        for ns in notebook_sessions:
+            audit_pairs.append(("notebook_session", ns.id))
+        for qc in qc_dashboards:
+            audit_pairs.append(("qc_dashboard", qc.id))
         audit_trail = await _audit_entries(session, audit_pairs, user_map)
 
         return ExperimentProvenanceData(

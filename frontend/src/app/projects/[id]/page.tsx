@@ -10,6 +10,7 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { DetailModal } from "@/components/shared/DetailModal";
 import { ProvenanceDAGComponent } from "@/components/provenance/ProvenanceDAG";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
+import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportPanel";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
@@ -447,6 +448,13 @@ export default function ProjectDetailPage() {
                   No provenance data available.
                 </div>
               )}
+              <div className="mt-6">
+                <ProvenanceReportPanel
+                  entityType="project"
+                  entityId={Number(projectId)}
+                  entityName={project.name}
+                />
+              </div>
             </div>
           )}
 
