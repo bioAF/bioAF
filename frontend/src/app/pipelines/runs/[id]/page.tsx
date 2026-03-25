@@ -11,6 +11,7 @@ import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBad
 import { isAuthenticated } from "@/lib/auth";
 import { getToken } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import type { PipelineRunDetail, PipelineRunStatus, PipelineProcessStatus, ReferenceDataset } from "@/lib/types";
 
 const STATUS_COLORS: Record<PipelineRunStatus | PipelineProcessStatus, string> = {
@@ -282,10 +283,7 @@ export default function PipelineRunDetailPage() {
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-lg font-semibold">Provenance</h2>
-                  <div className="flex gap-2">
-                    <a href={`/api/pipeline-runs/${runId}/provenance?format=json`} target="_blank" className="border px-3 py-1.5 rounded text-sm hover:bg-gray-50">Export JSON</a>
-                    <a href={`/api/pipeline-runs/${runId}/provenance?format=yaml`} target="_blank" className="border px-3 py-1.5 rounded text-sm hover:bg-gray-50">Export YAML</a>
-                  </div>
+                  <ProvenanceExportMenu entityType="pipeline-runs" entityId={Number(runId)} />
                 </div>
                 {provenance ? (
                   <pre className="text-sm bg-gray-50 p-4 rounded overflow-auto max-h-96">

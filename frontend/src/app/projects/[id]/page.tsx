@@ -9,6 +9,7 @@ import { SampleQCBadge } from "@/components/experiments/SampleQCBadge";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { DetailModal } from "@/components/shared/DetailModal";
 import { ProvenanceDAGComponent } from "@/components/provenance/ProvenanceDAG";
+import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
@@ -431,9 +432,12 @@ export default function ProjectDetailPage() {
                 </div>
               ) : provenance ? (
                 <div className="bg-white rounded-lg shadow p-6">
-                  <h3 className="text-sm font-semibold text-gray-700 mb-4">
-                    Provenance DAG — {provenance.nodes.length} nodes, {provenance.edges.length} edges
-                  </h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-semibold text-gray-700">
+                      Provenance DAG — {provenance.nodes.length} nodes, {provenance.edges.length} edges
+                    </h3>
+                    <ProvenanceExportMenu entityType="projects" entityId={Number(projectId)} />
+                  </div>
                   <div className="min-h-[400px]">
                     <ProvenanceDAGComponent data={provenance} />
                   </div>

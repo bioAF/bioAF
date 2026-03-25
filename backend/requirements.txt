@@ -35,3 +35,6 @@ google-cloud-pubsub>=2.21
 google-cloud-bigquery>=3.20
 # Cloud Logging fallback for pipeline log persistence
 google-cloud-logging>=3.10
+# Provenance report generation
+weasyprint>=60
+markdown>=3.5

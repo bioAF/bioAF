@@ -11,6 +11,7 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { PlotModal } from "@/components/shared/PlotModal";
 import { DetailModal } from "@/components/shared/DetailModal";
 import { ExportPdfButton } from "@/components/shared/ExportPdfButton";
+import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { VocabularySelect } from "@/components/shared/VocabularySelect";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -399,18 +400,21 @@ export default function ExperimentDetailPage() {
             </button>
             <h1 className="text-2xl font-bold">{experiment.name}</h1>
             <ExperimentStatusBadge status={experiment.status} />
-            {(() => {
-              const user = getCurrentUser();
-              const role = (user?.role_name as string) || "viewer";
-              return ["admin", "comp_bio"].includes(role) ? (
-                <button
-                  onClick={() => setShowGeoExport(true)}
-                  className="ml-auto bg-indigo-600 text-white px-4 py-2 rounded-md text-sm hover:bg-indigo-700"
-                >
-                  Export to GEO
-                </button>
-              ) : null;
-            })()}
+            <div className="ml-auto flex items-center gap-2">
+              <ProvenanceExportMenu entityType="experiments" entityId={Number(id)} />
+              {(() => {
+                const user = getCurrentUser();
+                const role = (user?.role_name as string) || "viewer";
+                return ["admin", "comp_bio"].includes(role) ? (
+                  <button
+                    onClick={() => setShowGeoExport(true)}
+                    className="bg-indigo-600 text-white px-4 py-2 rounded-md text-sm hover:bg-indigo-700"
+                  >
+                    Export to GEO
+                  </button>
+                ) : null;
+              })()}
+            </div>
           </div>
 
           <div className="border-b border-gray-200 mb-6">
@@ -1063,24 +1067,6 @@ export default function ExperimentDetailPage() {
             <div>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold">Audit Trail ({auditTotal} entries)</h2>
-                <div className="flex gap-2">
-                  <button
-                    onClick={async () => {
-                      const blob = await api.post<Blob>(`/api/experiments/${id}/audit/export`, { format: "csv" });
-                    }}
-                    className="border px-3 py-1.5 rounded text-sm hover:bg-gray-50"
-                  >
-                    Export CSV
-                  </button>
-                  <button
-                    onClick={async () => {
-                      const blob = await api.post<Blob>(`/api/experiments/${id}/audit/export`, { format: "json" });
-                    }}
-                    className="border px-3 py-1.5 rounded text-sm hover:bg-gray-50"
-                  >
-                    Export JSON
-                  </button>
-                </div>
               </div>
               <div className="bg-white rounded-lg shadow overflow-hidden">
                 <table className="min-w-full divide-y divide-gray-200">

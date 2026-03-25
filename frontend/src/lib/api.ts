@@ -170,6 +170,59 @@ async function fetchWithRetry<T>(
   throw new Error("Unreachable");
 }
 
+async function downloadFile(
+  path: string,
+  method: "GET" | "POST" = "GET",
+  body?: unknown,
+): Promise<void> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  if (body) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  const response = await fetch(`${API_URL}${path}`, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (response.status === 401) {
+    removeToken();
+    clearPermissionsCache();
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
+    throw new ApiError(401, "Unauthorized");
+  }
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: "Download failed" }));
+    throw new ApiError(response.status, error.detail || "Download failed");
+  }
+
+  const blob = await response.blob();
+  const blobUrl = URL.createObjectURL(blob);
+
+  const contentDisposition = response.headers.get("Content-Disposition");
+  let filename = "download";
+  if (contentDisposition) {
+    const match = contentDisposition.match(/filename="?([^";\n]+)"?/);
+    if (match) {
+      filename = match[1];
+    }
+  }
+
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(blobUrl);
+}
+
 export const api = {
   get: <T>(path: string) => fetchApi<T>(path),
   getWithRetry: <T>(path: string, retries?: number) =>
@@ -194,6 +247,8 @@ export const api = {
   upload: <T>(path: string, file: File) => uploadFile<T>(path, file),
   uploadSigned: <T>(file: File, options?: SignedUploadOptions) =>
     uploadFileSigned<T>(file, options),
+  download: (path: string, method?: "GET" | "POST", body?: unknown) =>
+    downloadFile(path, method, body),
 };
 
 export { ApiError };

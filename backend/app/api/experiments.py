@@ -1,14 +1,9 @@
-import csv
-import io
-import json
-
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
-from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.api.dependencies import require_permission
-from app.schemas.audit import AuditLogEntry, AuditLogExportRequest, AuditLogResponse
+from app.schemas.audit import AuditLogEntry, AuditLogResponse
 from app.schemas.experiment import (
     CustomFieldResponse,
     ExperimentCreate,
@@ -489,60 +484,3 @@ async def get_experiment_audit(
         page=page,
         page_size=page_size,
     )
-
-
-@router.post("/{experiment_id}/audit/export")
-async def export_experiment_audit(
-    experiment_id: int,
-    body: AuditLogExportRequest,
-    current_user: dict = require_permission("experiments", "view"),
-    session: AsyncSession = Depends(get_session),
-):
-    org_id = int(current_user["org_id"])
-    entries, _ = await ExperimentService.get_audit_trail(session, experiment_id, org_id, page=1, page_size=10000)
-
-    if body.format == "csv":
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(
-            ["id", "timestamp", "user_id", "entity_type", "entity_id", "action", "details", "previous_value"]
-        )
-        for e in entries:
-            writer.writerow(
-                [
-                    e.id,
-                    e.timestamp.isoformat(),
-                    e.user_id,
-                    e.entity_type,
-                    e.entity_id,
-                    e.action,
-                    json.dumps(e.details_json) if e.details_json else "",
-                    json.dumps(e.previous_value_json) if e.previous_value_json else "",
-                ]
-            )
-        content = output.getvalue()
-        return StreamingResponse(
-            io.BytesIO(content.encode()),
-            media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename=audit_experiment_{experiment_id}.csv"},
-        )
-    else:
-        data = [
-            {
-                "id": e.id,
-                "timestamp": e.timestamp.isoformat(),
-                "user_id": e.user_id,
-                "entity_type": e.entity_type,
-                "entity_id": e.entity_id,
-                "action": e.action,
-                "details": e.details_json,
-                "previous_value": e.previous_value_json,
-            }
-            for e in entries
-        ]
-        content = json.dumps(data, indent=2)
-        return StreamingResponse(
-            io.BytesIO(content.encode()),
-            media_type="application/json",
-            headers={"Content-Disposition": f"attachment; filename=audit_experiment_{experiment_id}.json"},
-        )
