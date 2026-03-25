@@ -13,6 +13,7 @@ jest.mock("@/lib/api", () => ({
   api: {
     get: (...args: unknown[]) => mockApiGet(...args),
   },
+  fileContentUrl: (fileId: number) => `http://localhost:8000/api/files/${fileId}/content?token=fake`,
 }));
 
 jest.mock("@/components/layout/Sidebar", () => ({
@@ -88,7 +89,6 @@ beforeEach(() => {
     if (url.startsWith("/api/plots")) return Promise.resolve(mockPlots);
     if (url.startsWith("/api/experiments")) return Promise.resolve(mockExperiments);
     if (url.startsWith("/api/pipeline-runs")) return Promise.resolve(mockPipelineRuns);
-    if (url.includes("/download")) return Promise.resolve({ download_url: "https://signed-url.example.com/plot.png" });
     return Promise.resolve({});
   });
 });
@@ -160,13 +160,23 @@ test("passes pipeline_run_id filter to API", async () => {
   });
 });
 
-test("fetches signed URLs for plot thumbnails", async () => {
+test("plot thumbnails use content URL instead of download endpoint", async () => {
   render(<PlotArchivePage />);
 
   await waitFor(() => {
-    expect(mockApiGet).toHaveBeenCalledWith("/api/files/10/download");
-    expect(mockApiGet).toHaveBeenCalledWith("/api/files/11/download");
+    const images = screen.getAllByRole("img");
+    expect(images.length).toBeGreaterThan(0);
   });
+
+  const images = screen.getAllByRole("img");
+  expect(images[0]).toHaveAttribute("src", "http://localhost:8000/api/files/10/content?token=fake");
+  expect(images[1]).toHaveAttribute("src", "http://localhost:8000/api/files/11/content?token=fake");
+
+  // Must NOT call the download endpoint for inline display
+  const downloadCalls = mockApiGet.mock.calls.filter(
+    (c: string[]) => typeof c[0] === "string" && c[0].includes("/download")
+  );
+  expect(downloadCalls).toHaveLength(0);
 });
 
 test("renders tags on plot cards", async () => {

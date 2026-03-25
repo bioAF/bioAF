@@ -15,7 +15,7 @@ import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportPanel";
 import { VocabularySelect } from "@/components/shared/VocabularySelect";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
-import { api } from "@/lib/api";
+import { api, fileContentUrl } from "@/lib/api";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
 import type {
   ExperimentDetail,
@@ -1132,27 +1132,14 @@ export default function ExperimentDetailPage() {
 /* ─── Experiment Results Tab ─── */
 
 function ResultsPlotImage({ fileId, title, onExpand }: { fileId: number; title: string; onExpand: (url: string) => void }) {
-  const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const data = await api.get<{ download_url: string }>(`/api/files/${fileId}/download`);
-        if (!cancelled) setUrl(data.download_url);
-      } catch {
-        if (!cancelled) setError(true);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [fileId]);
+  const url = fileContentUrl(fileId);
 
   return (
     <div className="relative bg-gray-100 rounded min-h-[10rem] flex items-center justify-center group">
       {error ? (
         <span className="text-gray-400 text-sm">Failed to load plot</span>
-      ) : url ? (
+      ) : (
         <>
           <img src={url} alt={title} className="w-full rounded" onError={() => setError(true)} />
           <button
@@ -1165,8 +1152,6 @@ function ResultsPlotImage({ fileId, title, onExpand }: { fileId: number; title: 
             </svg>
           </button>
         </>
-      ) : (
-        <span className="text-gray-400 text-sm">Loading plot...</span>
       )}
     </div>
   );
@@ -1181,26 +1166,10 @@ function ExperimentPlotThumbnail({
   title: string;
   onExpand: (url: string) => void;
 }) {
-  const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const data = await api.get<{ download_url: string }>(
-          `/api/files/${fileId}/download`
-        );
-        if (!cancelled) setUrl(data.download_url);
-      } catch {
-        if (!cancelled) setError(true);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [fileId]);
+  const url = fileContentUrl(fileId);
 
   if (error) return <span className="text-gray-400 text-xs">Failed to load</span>;
-  if (!url) return <span className="text-gray-400 text-xs">Loading...</span>;
   return (
     <img
       src={url}

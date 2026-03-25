@@ -6,8 +6,8 @@ import { Header } from "@/components/layout/Header";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { usePermissions } from "@/hooks/usePermissions";
 import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportPanel";
-import { api } from "@/lib/api";
-import { getCurrentUser, getToken } from "@/lib/auth";
+import { api, fileContentUrl } from "@/lib/api";
+import { getCurrentUser } from "@/lib/auth";
 import type {
   FileResponse,
   FileListResponse,
@@ -235,13 +235,6 @@ export default function DataFilesPage() {
   };
 
   const isImageFile = (ft: string) => ["png", "jpg", "jpeg", "svg"].includes(ft.toLowerCase());
-
-  const fileContentUrl = (fileId: number): string => {
-    const token = getToken();
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-    const base = `${apiUrl}/api/files/${fileId}/content`;
-    return token ? `${base}?token=${encodeURIComponent(token)}` : base;
-  };
 
   return (
     <div className="flex h-screen">

@@ -102,6 +102,7 @@ jest.mock("@/lib/api", () => ({
     post: jest.fn(),
     patch: jest.fn(),
   },
+  fileContentUrl: (fileId: number) => `http://localhost:8000/api/files/${fileId}/content?token=fake`,
 }));
 
 beforeEach(() => {

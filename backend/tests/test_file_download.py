@@ -156,3 +156,39 @@ async def test_download_cross_org_isolation(client, other_org_token, sample_file
         headers={"Authorization": f"Bearer {other_org_token}"},
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_content_endpoint_does_not_create_audit_log(client, admin_token, sample_file, session):
+    """GET /api/files/{id}/content must NOT create audit entries -- it is
+    used for inline image display, not user-initiated downloads."""
+    from sqlalchemy import text
+
+    mock_client_cls = MagicMock()
+    mock_blob = mock_client_cls.return_value.bucket.return_value.blob.return_value
+    mock_blob.download_as_bytes.return_value = b"\x89PNG fake image bytes"
+
+    with (
+        patch("google.cloud.storage.Client", mock_client_cls),
+        patch(
+            "app.services.gcs_storage.GcsStorageService.get_credentials",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+    ):
+        resp = await client.get(
+            f"/api/files/{sample_file.id}/content",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+    assert resp.status_code == 200
+
+    row = (
+        await session.execute(
+            text(
+                "SELECT id FROM audit_log WHERE entity_type = 'file' AND action = 'downloaded' AND entity_id = :fid"
+            ).bindparams(fid=sample_file.id)
+        )
+    ).fetchone()
+
+    assert row is None, "Content endpoint should not create audit log entries"

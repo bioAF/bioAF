@@ -5,7 +5,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { PlotModal } from "@/components/shared/PlotModal";
 import { ContentLoading } from "@/components/shared/ContentLoading";
-import { api } from "@/lib/api";
+import { api, fileContentUrl } from "@/lib/api";
 import type {
   PlotArchiveResponse,
   PlotArchiveListResponse,
@@ -20,33 +20,13 @@ function PlotThumbnail({
 }: {
   fileId: number;
   title: string;
-  onClick: (signedUrl: string) => void;
+  onClick: (url: string) => void;
 }) {
-  const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const data = await api.get<{ download_url: string }>(
-          `/api/files/${fileId}/download`
-        );
-        if (!cancelled) setUrl(data.download_url);
-      } catch {
-        if (!cancelled) setError(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [fileId]);
+  const url = fileContentUrl(fileId);
 
   if (error) {
     return <span className="text-gray-400 text-xs">Failed to load</span>;
-  }
-  if (!url) {
-    return <span className="text-gray-400 text-xs">Loading...</span>;
   }
   return (
     <img

@@ -26,6 +26,7 @@ jest.mock("@/lib/api", () => ({
     post: jest.fn(),
     delete: jest.fn(),
   },
+  fileContentUrl: (fileId: number) => `http://localhost:8000/api/files/${fileId}/content?token=fake`,
 }));
 
 jest.mock("@/lib/auth", () => ({
