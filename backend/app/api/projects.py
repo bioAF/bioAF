@@ -53,6 +53,7 @@ async def create_project(
     return ProjectResponse(
         id=project.id,
         name=project.name,
+        code=project.code,
         description=project.description,
         hypothesis=project.hypothesis,
         status=project.status,

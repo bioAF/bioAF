@@ -21,18 +21,29 @@ jest.mock("@/lib/api", () => ({
   },
 }));
 
+const projectsResponse = {
+  projects: [{ id: 1, name: "Alpha Project", status: "active" }],
+  total: 1,
+};
+
+const experimentsResponse = {
+  experiments: [
+    { id: 10, name: "RNA-seq Batch A", status: "registered" },
+    { id: 20, name: "CRISPR Screen", status: "processing" },
+  ],
+  total: 2,
+  page: 1,
+  page_size: 100,
+};
+
 beforeEach(() => {
   mockUploadSigned.mockReset();
   mockUploadSigned.mockResolvedValue({ id: 1, filename: "sample.fastq.gz" });
   mockGet.mockReset();
-  mockGet.mockResolvedValue({
-    experiments: [
-      { id: 10, name: "RNA-seq Batch A", status: "registered" },
-      { id: 20, name: "CRISPR Screen", status: "processing" },
-    ],
-    total: 2,
-    page: 1,
-    page_size: 100,
+  mockGet.mockImplementation((path: string) => {
+    if (path.startsWith("/api/projects")) return Promise.resolve(projectsResponse);
+    if (path.startsWith("/api/experiments")) return Promise.resolve(experimentsResponse);
+    return Promise.resolve([]);
   });
 });
 
@@ -65,7 +76,6 @@ describe("DataUploadPage", () => {
     const select = screen.getByRole("combobox", { name: /experiment/i });
     expect(select).toBeInTheDocument();
 
-    // Options should include experiments by name
     await waitFor(() => {
       expect(screen.getByText("RNA-seq Batch A")).toBeInTheDocument();
     });
@@ -74,10 +84,8 @@ describe("DataUploadPage", () => {
   it("passes selected experiment id when uploading", async () => {
     render(<DataUploadPage />);
 
-    // Wait for experiments to load
     await waitFor(() => screen.getByRole("combobox", { name: /experiment/i }));
 
-    // Select an experiment from the dropdown
     fireEvent.change(screen.getByRole("combobox", { name: /experiment/i }), {
       target: { value: "10" },
     });
@@ -95,7 +103,12 @@ describe("DataUploadPage", () => {
   });
 
   it("shows empty state when no experiments exist", async () => {
-    mockGet.mockResolvedValue({ experiments: [], total: 0, page: 1, page_size: 100 });
+    mockGet.mockImplementation((path: string) => {
+      if (path.startsWith("/api/projects")) return Promise.resolve({ projects: [], total: 0 });
+      if (path.startsWith("/api/experiments"))
+        return Promise.resolve({ experiments: [], total: 0, page: 1, page_size: 100 });
+      return Promise.resolve([]);
+    });
     render(<DataUploadPage />);
 
     await waitFor(() => {
@@ -103,7 +116,6 @@ describe("DataUploadPage", () => {
       expect(select).toBeInTheDocument();
     });
 
-    // Should have a placeholder option but no experiment options
     expect(screen.queryByText("RNA-seq Batch A")).not.toBeInTheDocument();
   });
 });

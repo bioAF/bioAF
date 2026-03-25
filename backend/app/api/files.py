@@ -19,7 +19,7 @@ from app.services.upload_service import UploadService
 router = APIRouter(prefix="/api/files", tags=["files"])
 
 
-def _file_response(f) -> FileResponse:
+def _file_response(f, sample_ids: list[int] | None = None) -> FileResponse:
     return FileResponse(
         id=f.id,
         filename=f.filename,
@@ -29,7 +29,9 @@ def _file_response(f) -> FileResponse:
         file_type=f.file_type,
         tags=f.tags_json if isinstance(f.tags_json, list) else [],
         uploader=UserSummary(id=f.uploader.id, name=f.uploader.name, email=f.uploader.email) if f.uploader else None,
+        project_id=f.project_id,
         experiment_id=f.experiment_id,
+        sample_ids=sample_ids or [],
         source_type=f.source_type,
         source_pipeline_run_id=f.source_pipeline_run_id,
         upload_timestamp=f.upload_timestamp,
@@ -54,6 +56,7 @@ async def initiate_upload(
             filename=body.filename,
             expected_size=body.expected_size_bytes,
             expected_md5=body.expected_md5,
+            project_id=body.project_id,
             experiment_id=body.experiment_id,
             sample_ids=body.sample_ids,
         )
@@ -246,6 +249,7 @@ async def list_files(
     request: Request,
     file_type: str | None = None,
     experiment_id: int | None = None,
+    project_id: int | None = None,
     page: int = 1,
     page_size: int = 25,
     session: AsyncSession = Depends(get_session),
@@ -253,9 +257,11 @@ async def list_files(
     current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
-    files, total = await FileService.list_files(session, org_id, file_type, experiment_id, page, page_size)
+    files, total = await FileService.list_files(session, org_id, file_type, experiment_id, project_id, page, page_size)
+    file_ids = [f.id for f in files]
+    sample_ids_map = await FileService.get_sample_ids_for_files(session, file_ids)
     return FileListResponse(
-        files=[_file_response(f) for f in files],
+        files=[_file_response(f, sample_ids_map.get(f.id, [])) for f in files],
         total=total,
         page=page,
         page_size=page_size,
@@ -274,7 +280,8 @@ async def get_file(
     file = await FileService.get_file(session, file_id, org_id)
     if not file:
         raise HTTPException(404, "File not found")
-    return _file_response(file)
+    sample_ids_map = await FileService.get_sample_ids_for_files(session, [file_id])
+    return _file_response(file, sample_ids_map.get(file_id, []))
 
 
 @router.get("/{file_id}/download")
@@ -396,10 +403,14 @@ async def link_file(
     if not file:
         raise HTTPException(404, "File not found")
 
-    if body.experiment_id is not None:
-        from app.services.file_organization import FileOrganizationService
+    if body.project_id is not None:
+        file.project_id = body.project_id
 
-        await FileOrganizationService.assign_file_to_experiment(session, file_id, body.experiment_id, user_id)
+    if body.experiment_id is not None:
+        if file.experiment_id != body.experiment_id:
+            from app.services.file_organization import FileOrganizationService
+
+            await FileOrganizationService.assign_file_to_experiment(session, file_id, body.experiment_id, user_id)
 
         # Auto-transition experiment status for FASTQ files
         if file.file_type == "fastq":
@@ -407,5 +418,15 @@ async def link_file(
 
     if body.sample_id:
         await FileService.link_file_to_sample(session, file_id, body.sample_id)
+        from app.services.audit_service import log_action
+
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="file",
+            entity_id=file_id,
+            action="linked_to_sample",
+            details={"sample_id": body.sample_id, "filename": file.filename},
+        )
     await session.commit()
     return {"status": "linked"}

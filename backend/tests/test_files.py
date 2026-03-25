@@ -239,6 +239,49 @@ async def test_link_file_to_experiment(client, admin_token, sample_file, sample_
 
 
 @pytest.mark.asyncio
+async def test_link_already_linked_file_does_not_move_gcs(client, admin_token, session, admin_user):
+    """Re-linking a file to the same experiment must not attempt a GCS move."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.models.experiment import Experiment
+    from app.models.file import File
+
+    exp = Experiment(
+        organization_id=admin_user.organization_id,
+        name="Already Linked Exp",
+        owner_user_id=admin_user.id,
+        status="registered",
+    )
+    session.add(exp)
+    await session.flush()
+
+    # File already linked to the experiment (e.g. a pipeline output)
+    f = File(
+        organization_id=admin_user.organization_id,
+        gcs_uri=f"gs://bioaf-results/experiments/{exp.id}/pipeline-runs/1/plot.png",
+        filename="plot.png",
+        size_bytes=1000,
+        file_type="png",
+        uploader_user_id=admin_user.id,
+        experiment_id=exp.id,
+    )
+    session.add(f)
+    await session.flush()
+    await session.commit()
+
+    mock_move = AsyncMock()
+    with patch("app.services.file_organization.GcsStorageService.move_file", mock_move):
+        resp = await client.post(
+            f"/api/files/{f.id}/link",
+            json={"experiment_id": exp.id, "sample_id": None},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+    assert resp.status_code == 200
+    mock_move.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_link_file_moves_to_raw_bucket(client, admin_token, session, admin_user):
     """Linking a file should call FileOrganizationService to move it in GCS."""
     from unittest.mock import AsyncMock, patch
@@ -455,6 +498,164 @@ async def test_reconcile_requires_admin(client, viewer_token):
     assert resp.status_code == 403
 
 
+# --- Sample association tests ---
+
+
+@pytest.mark.asyncio
+async def test_link_file_to_sample_returns_sample_ids(client, admin_token, session, admin_user):
+    """After linking a file to a sample, GET /api/files/{id} should include that sample_id."""
+    from app.models.experiment import Experiment
+    from app.models.file import File
+    from app.models.sample import Sample
+
+    exp = Experiment(
+        organization_id=admin_user.organization_id,
+        name="Sample Link Exp",
+        owner_user_id=admin_user.id,
+        status="registered",
+    )
+    session.add(exp)
+    await session.flush()
+
+    sample = Sample(
+        experiment_id=exp.id,
+        sample_id_external="SMP-001",
+    )
+    session.add(sample)
+    await session.flush()
+
+    f = File(
+        organization_id=admin_user.organization_id,
+        gcs_uri="gs://test-bucket/reads.fastq.gz",
+        filename="reads.fastq.gz",
+        size_bytes=1000,
+        file_type="fastq",
+        uploader_user_id=admin_user.id,
+        experiment_id=exp.id,
+    )
+    session.add(f)
+    await session.flush()
+    await session.commit()
+
+    resp = await client.post(
+        f"/api/files/{f.id}/link",
+        json={"sample_id": sample.id},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+
+    resp2 = await client.get(
+        f"/api/files/{f.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    data = resp2.json()
+    assert sample.id in data["sample_ids"]
+
+
+@pytest.mark.asyncio
+async def test_link_file_to_sample_idempotent(client, admin_token, session, admin_user):
+    """Linking the same file to the same sample twice should not create duplicates."""
+    from app.models.experiment import Experiment
+    from app.models.file import File
+    from app.models.sample import Sample
+    from sqlalchemy import text
+
+    exp = Experiment(
+        organization_id=admin_user.organization_id,
+        name="Dedup Exp",
+        owner_user_id=admin_user.id,
+        status="registered",
+    )
+    session.add(exp)
+    await session.flush()
+
+    sample = Sample(
+        experiment_id=exp.id,
+        sample_id_external="SMP-002",
+    )
+    session.add(sample)
+    await session.flush()
+
+    f = File(
+        organization_id=admin_user.organization_id,
+        gcs_uri="gs://test-bucket/reads2.fastq.gz",
+        filename="reads2.fastq.gz",
+        size_bytes=1000,
+        file_type="fastq",
+        uploader_user_id=admin_user.id,
+    )
+    session.add(f)
+    await session.flush()
+    await session.commit()
+
+    for _ in range(3):
+        await client.post(
+            f"/api/files/{f.id}/link",
+            json={"sample_id": sample.id},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+    count = (
+        await session.execute(
+            text("SELECT COUNT(*) FROM sample_files WHERE file_id = :fid AND sample_id = :sid").bindparams(
+                fid=f.id, sid=sample.id
+            )
+        )
+    ).scalar_one()
+    assert count == 1, f"Expected 1 sample_files row, got {count}"
+
+
+@pytest.mark.asyncio
+async def test_list_files_includes_sample_ids(client, admin_token, session, admin_user):
+    """GET /api/files should include sample_ids for each file."""
+    from app.models.experiment import Experiment
+    from app.models.file import File
+    from app.models.sample import Sample
+    from sqlalchemy import text
+
+    exp = Experiment(
+        organization_id=admin_user.organization_id,
+        name="List Sample Ids Exp",
+        owner_user_id=admin_user.id,
+        status="registered",
+    )
+    session.add(exp)
+    await session.flush()
+
+    sample = Sample(
+        experiment_id=exp.id,
+        sample_id_external="SMP-003",
+    )
+    session.add(sample)
+    await session.flush()
+
+    f = File(
+        organization_id=admin_user.organization_id,
+        gcs_uri="gs://test-bucket/reads3.fastq.gz",
+        filename="reads3.fastq.gz",
+        size_bytes=1000,
+        file_type="fastq",
+        uploader_user_id=admin_user.id,
+    )
+    session.add(f)
+    await session.flush()
+    await session.commit()
+
+    await session.execute(
+        text("INSERT INTO sample_files (sample_id, file_id) VALUES (:sid, :fid)").bindparams(sid=sample.id, fid=f.id)
+    )
+    await session.commit()
+
+    resp = await client.get(
+        "/api/files",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    file_data = next((x for x in resp.json()["files"] if x["id"] == f.id), None)
+    assert file_data is not None
+    assert sample.id in file_data["sample_ids"]
+
+
 @pytest.mark.asyncio
 async def test_list_files_filter_by_experiment_id(client, admin_token, sample_file, sample_experiment, session):
     """GET /api/files?experiment_id=N should return only files for that experiment."""
@@ -527,7 +728,150 @@ async def test_get_experiment_files_not_found(client, admin_token):
     assert resp.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_link_file_to_project(client, admin_token, session, admin_user, sample_file):
+    """Linking a file to a project should set project_id on the file record."""
+    from app.models.project import Project
+    from sqlalchemy import text
+
+    proj = Project(
+        organization_id=admin_user.organization_id,
+        name="Link Test Project",
+        owner_user_id=admin_user.id,
+    )
+    session.add(proj)
+    await session.flush()
+    await session.commit()
+
+    resp = await client.post(
+        f"/api/files/{sample_file.id}/link",
+        json={"project_id": proj.id},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+
+    row = (
+        await session.execute(text("SELECT project_id FROM files WHERE id = :fid").bindparams(fid=sample_file.id))
+    ).fetchone()
+    assert row[0] == proj.id
+
+
+@pytest.mark.asyncio
+async def test_file_response_includes_project_id(client, admin_token, sample_file):
+    """FileResponse must include a project_id field (null when not linked)."""
+    resp = await client.get(
+        f"/api/files/{sample_file.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "project_id" in data
+    assert data["project_id"] is None
+
+
 # --- Upload Service Unit Tests ---
+
+
+@pytest.mark.asyncio
+async def test_link_file_to_experiment_inherits_project_id(client, admin_token, session, admin_user):
+    """Linking a file to an experiment should set project_id from the experiment's project."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.models.experiment import Experiment
+    from app.models.file import File
+    from app.models.project import Project
+
+    project = Project(
+        organization_id=admin_user.organization_id,
+        name="Inherit Project",
+        status="active",
+        owner_user_id=admin_user.id,
+    )
+    session.add(project)
+    await session.flush()
+
+    exp = Experiment(
+        organization_id=admin_user.organization_id,
+        project_id=project.id,
+        name="Inherit Exp",
+        owner_user_id=admin_user.id,
+        status="registered",
+    )
+    session.add(exp)
+    await session.flush()
+
+    f = File(
+        organization_id=admin_user.organization_id,
+        gcs_uri="gs://test-bucket/inherit.fastq.gz",
+        filename="inherit.fastq.gz",
+        size_bytes=1000,
+        file_type="fastq",
+        uploader_user_id=admin_user.id,
+    )
+    session.add(f)
+    await session.flush()
+    await session.commit()
+
+    with patch(
+        "app.services.file_organization.GcsStorageService.move_file",
+        new_callable=AsyncMock,
+        return_value=f"gs://test-bucket/experiments/{exp.id}/inherit.fastq.gz",
+    ):
+        resp = await client.post(
+            f"/api/files/{f.id}/link",
+            json={"experiment_id": exp.id},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    assert resp.status_code == 200
+
+    resp2 = await client.get(
+        f"/api/files/{f.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    data = resp2.json()
+    assert data["project_id"] == project.id
+
+
+@pytest.mark.asyncio
+async def test_list_files_filter_by_project_id(client, admin_token, session, admin_user, sample_file):
+    """GET /api/files?project_id=N should return only files linked to that project."""
+    from app.models.project import Project
+
+    proj = Project(
+        organization_id=admin_user.organization_id,
+        name="Filter Project",
+        owner_user_id=admin_user.id,
+        created_by_user_id=admin_user.id,
+    )
+    session.add(proj)
+    await session.flush()
+
+    sample_file.project_id = proj.id
+    await session.commit()
+
+    # Create a second file NOT linked to the project
+    from app.models.file import File
+
+    other = File(
+        organization_id=admin_user.organization_id,
+        gcs_uri="gs://test-bucket/other.csv",
+        filename="other.csv",
+        size_bytes=200,
+        file_type="csv",
+        uploader_user_id=admin_user.id,
+    )
+    session.add(other)
+    await session.commit()
+
+    resp = await client.get(
+        f"/api/files?project_id={proj.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 1
+    assert data["files"][0]["id"] == sample_file.id
+    assert data["files"][0]["project_id"] == proj.id
 
 
 def test_parse_illumina_filename():

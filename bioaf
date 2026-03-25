@@ -13,6 +13,11 @@ ENV_FILE="$SCRIPT_DIR/docker/.env"
 
 DC="docker compose -f $COMPOSE_FILE --env-file $ENV_FILE"
 
+# --progress is a global docker compose flag; must precede the build subcommand.
+# Use the fancy TTY display when stdout is a real terminal, plain text otherwise.
+[ -t 1 ] && _progress="auto" || _progress="plain"
+DC_BUILD="docker compose --progress=$_progress -f $COMPOSE_FILE --env-file $ENV_FILE build"
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -132,7 +137,8 @@ for v in cfg.get('volumes', {}).values():
 
     # Build and start
     bold "Building and starting containers..."
-    $DC up -d --build
+    $DC_BUILD
+    $DC up -d
 
     # Wait for DB
     wait_for_db
@@ -265,7 +271,8 @@ cmd_update() {
     git -C "$SCRIPT_DIR" pull
 
     echo "Rebuilding containers..."
-    $DC up -d --build
+    $DC_BUILD
+    $DC up -d
 
     wait_for_db
 
@@ -279,11 +286,11 @@ cmd_build() {
     local service="${1:-}"
     if [ -n "$service" ]; then
         bold "=== Building $service ==="
-        $DC build "$service"
+        $DC_BUILD "$service"
         green "$service built."
     else
         bold "=== Building All Services ==="
-        $DC build
+        $DC_BUILD
         green "All services built."
     fi
 }

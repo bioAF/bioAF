@@ -70,10 +70,29 @@ class FileOrganizationService:
             credentials = await GcsStorageService.get_credentials(session)
             new_uri = await GcsStorageService.move_file(old_uri, new_uri, credentials=credentials)
 
+        # Look up the experiment's project so we can denormalize project_id onto the file
+        exp_row = (
+            await session.execute(
+                text("SELECT project_id FROM experiments WHERE id = :eid").bindparams(eid=experiment_id)
+            )
+        ).fetchone()
+        exp_project_id = exp_row[0] if exp_row else None
+
         # Update DB
         await session.execute(
-            text("UPDATE files SET experiment_id = :exp_id, gcs_uri = :uri WHERE id = :fid").bindparams(
-                exp_id=experiment_id, uri=new_uri, fid=file_id
+            text(
+                "UPDATE files SET experiment_id = :exp_id, gcs_uri = :uri"
+                + (", project_id = :proj_id" if exp_project_id is not None else "")
+                + " WHERE id = :fid"
+            ).bindparams(
+                **(
+                    {
+                        "exp_id": experiment_id,
+                        "uri": new_uri,
+                        "fid": file_id,
+                        **({"proj_id": exp_project_id} if exp_project_id is not None else {}),
+                    }
+                )
             )
         )
 
@@ -122,10 +141,29 @@ class FileOrganizationService:
             credentials = await GcsStorageService.get_credentials(session)
             new_uri = await GcsStorageService.move_file(old_uri, new_uri, credentials=credentials)
 
+        # Look up the new experiment's project_id to keep file.project_id in sync
+        new_exp_row = (
+            await session.execute(
+                text("SELECT project_id FROM experiments WHERE id = :eid").bindparams(eid=new_experiment_id)
+            )
+        ).fetchone()
+        new_exp_project_id = new_exp_row[0] if new_exp_row else None
+
         # Update DB
         await session.execute(
-            text("UPDATE files SET experiment_id = :exp_id, gcs_uri = :uri WHERE id = :fid").bindparams(
-                exp_id=new_experiment_id, uri=new_uri, fid=file_id
+            text(
+                "UPDATE files SET experiment_id = :exp_id, gcs_uri = :uri"
+                + (", project_id = :proj_id" if new_exp_project_id is not None else "")
+                + " WHERE id = :fid"
+            ).bindparams(
+                **(
+                    {
+                        "exp_id": new_experiment_id,
+                        "uri": new_uri,
+                        "fid": file_id,
+                        **({"proj_id": new_exp_project_id} if new_exp_project_id is not None else {}),
+                    }
+                )
             )
         )
 

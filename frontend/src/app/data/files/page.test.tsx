@@ -65,7 +65,9 @@ const makeFile = (overrides: Record<string, unknown> = {}) => ({
   file_type: "fastq",
   tags: [],
   uploader: { id: 1, name: "Maria", email: "maria@test.com" },
+  project_id: null,
   experiment_id: null,
+  sample_ids: [],
   upload_timestamp: "2026-03-01T00:00:00Z",
   created_at: "2026-03-01T00:00:00Z",
   ...overrides,
@@ -101,13 +103,22 @@ const experimentsResponse = {
   page_size: 100,
 };
 
-test("renders file list from paginated response", async () => {
-  mockGet.mockImplementation((path: string) => {
-    if (path.startsWith("/api/files")) return Promise.resolve(filesResponse);
-    if (path.startsWith("/api/experiments"))
-      return Promise.resolve(experimentsResponse);
+const projectsResponse = {
+  projects: [{ id: 1, name: "Alpha Project", status: "active" }],
+  total: 1,
+};
+
+function makeGetMock(filesData = filesResponse) {
+  return (path: string) => {
+    if (path.startsWith("/api/files")) return Promise.resolve(filesData);
+    if (path.startsWith("/api/projects")) return Promise.resolve(projectsResponse);
+    if (path.startsWith("/api/experiments")) return Promise.resolve(experimentsResponse);
     return Promise.resolve([]);
-  });
+  };
+}
+
+test("renders file list from paginated response", async () => {
+  mockGet.mockImplementation(makeGetMock());
 
   render(<DataFilesPage />);
 
@@ -118,12 +129,7 @@ test("renders file list from paginated response", async () => {
 });
 
 test("shows experiment name when file is linked", async () => {
-  mockGet.mockImplementation((path: string) => {
-    if (path.startsWith("/api/files")) return Promise.resolve(filesResponse);
-    if (path.startsWith("/api/experiments"))
-      return Promise.resolve(experimentsResponse);
-    return Promise.resolve([]);
-  });
+  mockGet.mockImplementation(makeGetMock());
 
   render(<DataFilesPage />);
 
@@ -133,12 +139,7 @@ test("shows experiment name when file is linked", async () => {
 });
 
 test("shows unlinked label for files without experiment", async () => {
-  mockGet.mockImplementation((path: string) => {
-    if (path.startsWith("/api/files")) return Promise.resolve(filesResponse);
-    if (path.startsWith("/api/experiments"))
-      return Promise.resolve(experimentsResponse);
-    return Promise.resolve([]);
-  });
+  mockGet.mockImplementation(makeGetMock());
 
   render(<DataFilesPage />);
 
@@ -148,13 +149,7 @@ test("shows unlinked label for files without experiment", async () => {
 });
 
 test("shows empty state when no files", async () => {
-  mockGet.mockImplementation((path: string) => {
-    if (path.startsWith("/api/files"))
-      return Promise.resolve({ files: [], total: 0, page: 1, page_size: 25 });
-    if (path.startsWith("/api/experiments"))
-      return Promise.resolve(experimentsResponse);
-    return Promise.resolve([]);
-  });
+  mockGet.mockImplementation(makeGetMock({ files: [], total: 0, page: 1, page_size: 25 }));
 
   render(<DataFilesPage />);
 
@@ -164,12 +159,7 @@ test("shows empty state when no files", async () => {
 });
 
 test("formats file size in human-readable form", async () => {
-  mockGet.mockImplementation((path: string) => {
-    if (path.startsWith("/api/files")) return Promise.resolve(filesResponse);
-    if (path.startsWith("/api/experiments"))
-      return Promise.resolve(experimentsResponse);
-    return Promise.resolve([]);
-  });
+  mockGet.mockImplementation(makeGetMock());
 
   render(<DataFilesPage />);
 
@@ -179,13 +169,8 @@ test("formats file size in human-readable form", async () => {
   });
 });
 
-test("links single file to experiment via row Link button", async () => {
-  mockGet.mockImplementation((path: string) => {
-    if (path.startsWith("/api/files")) return Promise.resolve(filesResponse);
-    if (path.startsWith("/api/experiments"))
-      return Promise.resolve(experimentsResponse);
-    return Promise.resolve([]);
-  });
+test("links single file to experiment via row Associate button", async () => {
+  mockGet.mockImplementation(makeGetMock());
   mockPost.mockResolvedValue({ status: "linked" });
 
   render(<DataFilesPage />);
@@ -194,19 +179,18 @@ test("links single file to experiment via row Link button", async () => {
     expect(screen.getByText("sample_R1.fastq.gz")).toBeInTheDocument();
   });
 
-  // Click the "Link" button on the unlinked file
-  const linkButtons = screen.getAllByText("Link");
-  fireEvent.click(linkButtons[0]);
+  // Click the "Associate" button on the unlinked file
+  const associateButtons = screen.getAllByText("Associate");
+  fireEvent.click(associateButtons[0]);
 
   // Modal should appear
   await waitFor(() => {
-    expect(screen.getByText("Link to Experiment")).toBeInTheDocument();
+    expect(screen.getByText("Associate File")).toBeInTheDocument();
   });
 
-  // Select an experiment from the modal's dropdown
-  const selects = screen.getAllByRole("combobox");
-  const modalSelect = selects[selects.length - 1];
-  fireEvent.change(modalSelect, { target: { value: "20" } });
+  // Select an experiment from the modal's experiment dropdown
+  const experimentSelect = screen.getByRole("combobox", { name: /experiment/i });
+  fireEvent.change(experimentSelect, { target: { value: "20" } });
 
   fireEvent.click(screen.getByText("Save"));
 
@@ -217,7 +201,7 @@ test("links single file to experiment via row Link button", async () => {
   });
 });
 
-test("bulk-links selected files to experiment", async () => {
+test("bulk-associates selected files to experiment", async () => {
   const threeUnlinked = {
     files: [
       makeFile({ id: 1, filename: "a.fastq.gz" }),
@@ -229,12 +213,7 @@ test("bulk-links selected files to experiment", async () => {
     page_size: 25,
   };
 
-  mockGet.mockImplementation((path: string) => {
-    if (path.startsWith("/api/files")) return Promise.resolve(threeUnlinked);
-    if (path.startsWith("/api/experiments"))
-      return Promise.resolve(experimentsResponse);
-    return Promise.resolve([]);
-  });
+  mockGet.mockImplementation(makeGetMock(threeUnlinked));
   mockPost.mockResolvedValue({ status: "linked" });
 
   render(<DataFilesPage />);
@@ -252,20 +231,17 @@ test("bulk-links selected files to experiment", async () => {
   // Bulk action bar should appear
   expect(screen.getByText("2 selected")).toBeInTheDocument();
 
-  // Click the bulk "Link to Experiment" button
-  fireEvent.click(screen.getByText("Link to Experiment"));
+  // Click the bulk "Associate" button (first one in DOM = toolbar button)
+  fireEvent.click(screen.getAllByText("Associate")[0]);
 
   // Modal should appear
   await waitFor(() => {
-    expect(
-      screen.getByText("Link 2 files to Experiment")
-    ).toBeInTheDocument();
+    expect(screen.getByText("Associate 2 Files")).toBeInTheDocument();
   });
 
   // Select an experiment and save
-  const selects = screen.getAllByRole("combobox");
-  const modalSelect = selects[selects.length - 1];
-  fireEvent.change(modalSelect, { target: { value: "10" } });
+  const experimentSelect = screen.getByRole("combobox", { name: /experiment/i });
+  fireEvent.change(experimentSelect, { target: { value: "10" } });
   fireEvent.click(screen.getByText("Save"));
 
   await waitFor(() => {
@@ -300,12 +276,7 @@ test("shows reconcile banner for stuck files and fixes on click", async () => {
     page_size: 25,
   };
 
-  mockGet.mockImplementation((path: string) => {
-    if (path.startsWith("/api/files")) return Promise.resolve(stuckFiles);
-    if (path.startsWith("/api/experiments"))
-      return Promise.resolve(experimentsResponse);
-    return Promise.resolve([]);
-  });
+  mockGet.mockImplementation(makeGetMock(stuckFiles));
   mockPost.mockResolvedValue({ reconciled: 1, failed: 0, skipped: 1 });
 
   render(<DataFilesPage />);
@@ -332,12 +303,7 @@ test("shows reconcile banner for stuck files and fixes on click", async () => {
 });
 
 test("select-all checkbox toggles all rows", async () => {
-  mockGet.mockImplementation((path: string) => {
-    if (path.startsWith("/api/files")) return Promise.resolve(filesResponse);
-    if (path.startsWith("/api/experiments"))
-      return Promise.resolve(experimentsResponse);
-    return Promise.resolve([]);
-  });
+  mockGet.mockImplementation(makeGetMock());
 
   render(<DataFilesPage />);
 
@@ -358,12 +324,7 @@ test("select-all checkbox toggles all rows", async () => {
 });
 
 test("delete button removes selected files after confirmation", async () => {
-  mockGet.mockImplementation((path: string) => {
-    if (path.startsWith("/api/files")) return Promise.resolve(filesResponse);
-    if (path.startsWith("/api/experiments"))
-      return Promise.resolve(experimentsResponse);
-    return Promise.resolve([]);
-  });
+  mockGet.mockImplementation(makeGetMock());
   mockDelete.mockResolvedValue({});
 
   render(<DataFilesPage />);
@@ -388,12 +349,7 @@ test("delete button removes selected files after confirmation", async () => {
 });
 
 test("delete button does nothing when user cancels confirmation", async () => {
-  mockGet.mockImplementation((path: string) => {
-    if (path.startsWith("/api/files")) return Promise.resolve(filesResponse);
-    if (path.startsWith("/api/experiments"))
-      return Promise.resolve(experimentsResponse);
-    return Promise.resolve([]);
-  });
+  mockGet.mockImplementation(makeGetMock());
 
   render(<DataFilesPage />);
 

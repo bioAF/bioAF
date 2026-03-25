@@ -12,6 +12,8 @@ import type {
   FileResponse,
   FileListResponse,
   ExperimentListResponse,
+  ProjectListResponse,
+  SampleBrief,
 } from "@/lib/types";
 
 function formatBytes(bytes: number | null): string {
@@ -33,13 +35,10 @@ function countStuckFiles(files: FileResponse[]): number {
 export default function DataFilesPage() {
   const [files, setFiles] = useState<FileResponse[]>([]);
   const [loading, setLoading] = useState(true);
-  const [experiments, setExperiments] = useState<
-    { id: number; name: string }[]
-  >([]);
+  const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
+  const [experiments, setExperiments] = useState<{ id: number; name: string }[]>([]);
   const [filterType, setFilterType] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [linkingFileIds, setLinkingFileIds] = useState<number[]>([]);
-  const [selectedExperimentId, setSelectedExperimentId] = useState<string>("");
   const [reconciling, setReconciling] = useState(false);
   const [reconcileResult, setReconcileResult] = useState<{
     reconciled: number;
@@ -53,6 +52,14 @@ export default function DataFilesPage() {
   const [downloadProgress, setDownloadProgress] = useState("");
   const [downloadError, setDownloadError] = useState("");
   const pageSize = 25;
+
+  // Link modal state
+  const [linkingFileIds, setLinkingFileIds] = useState<number[]>([]);
+  const [linkProjectId, setLinkProjectId] = useState("");
+  const [linkExperimentId, setLinkExperimentId] = useState("");
+  const [linkExperiments, setLinkExperiments] = useState<{ id: number; name: string }[]>([]);
+  const [linkSampleId, setLinkSampleId] = useState("");
+  const [linkSamples, setLinkSamples] = useState<{ id: number; label: string }[]>([]);
 
   const user = getCurrentUser();
   const isAdmin = user?.role_name === "admin";
@@ -79,14 +86,14 @@ export default function DataFilesPage() {
     }
   }, [filterType, page]);
 
-  const fetchExperiments = useCallback(async () => {
+  const fetchMeta = useCallback(async () => {
     try {
-      const data = await api.get<ExperimentListResponse>(
-        "/api/experiments?page_size=100"
-      );
-      setExperiments(
-        data.experiments.map((e) => ({ id: e.id, name: e.name }))
-      );
+      const [projData, expData] = await Promise.all([
+        api.get<ProjectListResponse>("/api/projects?page_size=100"),
+        api.get<ExperimentListResponse>("/api/experiments?page_size=100"),
+      ]);
+      setProjects(projData.projects.map((p) => ({ id: p.id, name: p.name })));
+      setExperiments(expData.experiments.map((e) => ({ id: e.id, name: e.name })));
     } catch {
       // ignore
     }
@@ -94,26 +101,67 @@ export default function DataFilesPage() {
 
   useEffect(() => {
     fetchFiles();
-    fetchExperiments();
-  }, [fetchFiles, fetchExperiments]);
+    fetchMeta();
+  }, [fetchFiles, fetchMeta]);
+
+  // Reload link experiments when link project changes
+  useEffect(() => {
+    setLinkExperimentId("");
+    setLinkSampleId("");
+    setLinkSamples([]);
+    const qs = linkProjectId
+      ? `?project_id=${linkProjectId}&page_size=100`
+      : "?page_size=100";
+    api
+      .get<ExperimentListResponse>(`/api/experiments${qs}`)
+      .then((data) =>
+        setLinkExperiments(data.experiments.map((e) => ({ id: e.id, name: e.name }))),
+      )
+      .catch(() => setLinkExperiments([]));
+  }, [linkProjectId]);
+
+  // Load samples when link experiment changes
+  useEffect(() => {
+    setLinkSampleId("");
+    if (!linkExperimentId) {
+      setLinkSamples([]);
+      return;
+    }
+    api
+      .get<SampleBrief[]>(`/api/experiments/${linkExperimentId}/samples`)
+      .then((data) =>
+        setLinkSamples(
+          data.map((s) => ({
+            id: s.id,
+            label: s.sample_id_external ?? `Sample #${s.id}`,
+          })),
+        ),
+      )
+      .catch(() => setLinkSamples([]));
+  }, [linkExperimentId]);
 
   const openLinkModal = (fileIds: number[]) => {
     setLinkingFileIds(fileIds);
-    setSelectedExperimentId("");
+    setLinkProjectId("");
+    setLinkExperimentId("");
+    setLinkSampleId("");
+    setLinkSamples([]);
   };
 
   const handleLink = async () => {
-    if (linkingFileIds.length === 0 || !selectedExperimentId) return;
+    if (linkingFileIds.length === 0) return;
+    if (!linkProjectId && !linkExperimentId && !linkSampleId) return;
+
+    const body: Record<string, number> = {};
+    if (linkProjectId) body.project_id = Number(linkProjectId);
+    if (linkExperimentId) body.experiment_id = Number(linkExperimentId);
+    if (linkSampleId) body.sample_id = Number(linkSampleId);
+
     try {
       await Promise.all(
-        linkingFileIds.map((id) =>
-          api.post(`/api/files/${id}/link`, {
-            experiment_id: Number(selectedExperimentId),
-          })
-        )
+        linkingFileIds.map((id) => api.post(`/api/files/${id}/link`, body))
       );
       setLinkingFileIds([]);
-      setSelectedExperimentId("");
       fetchFiles();
     } catch {
       // ignore
@@ -223,6 +271,11 @@ export default function DataFilesPage() {
     return experiments.find((e) => e.id === expId)?.name ?? `#${expId}`;
   };
 
+  const projectName = (projId: number | null) => {
+    if (projId == null) return null;
+    return projects.find((p) => p.id === projId)?.name ?? `#${projId}`;
+  };
+
   const fileTypes = Array.from(new Set(files.map((f) => f.file_type))).sort();
 
   const sourceLabel = (file: FileResponse): string => {
@@ -235,6 +288,27 @@ export default function DataFilesPage() {
   };
 
   const isImageFile = (ft: string) => ["png", "jpg", "jpeg", "svg"].includes(ft.toLowerCase());
+
+  const associationLabel = (file: FileResponse) => {
+    if (file.experiment_id != null) return experimentName(file.experiment_id);
+    if (file.project_id != null) return projectName(file.project_id);
+    return null;
+  };
+
+  const associationBadge = (file: FileResponse) => {
+    if (file.experiment_id != null) return null;
+    if (file.project_id != null) return "project";
+    return null;
+  };
+
+  const sampleLabel = (file: FileResponse) => {
+    if (!file.sample_ids || file.sample_ids.length === 0) return null;
+    return file.sample_ids.length === 1
+      ? `1 sample`
+      : `${file.sample_ids.length} samples`;
+  };
+
+  const linkModalHasSelection = !!(linkProjectId || linkExperimentId || linkSampleId);
 
   return (
     <div className="flex h-screen">
@@ -274,12 +348,10 @@ export default function DataFilesPage() {
                     </button>
                   )}
                   <button
-                    onClick={() =>
-                      openLinkModal(Array.from(selectedIds))
-                    }
+                    onClick={() => openLinkModal(Array.from(selectedIds))}
                     className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
                   >
-                    Link to Experiment
+                    Associate
                   </button>
                   <button
                     onClick={handleDeleteSelected}
@@ -375,7 +447,7 @@ export default function DataFilesPage() {
                         Source
                       </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                        Experiment
+                        Association
                       </th>
                       {canDownload && (
                         <th className="px-4 py-3 w-10">
@@ -423,9 +495,21 @@ export default function DataFilesPage() {
                           {file.source_type === "upload" ? "Upload" : file.source_type === "qc_dashboard" ? "QC Dashboard" : file.source_type === "plot_archive" ? "Plot Archive" : file.source_type}
                         </td>
                         <td className="px-4 py-3 text-sm" onClick={(e) => e.stopPropagation()}>
-                          {file.experiment_id ? (
-                            <span className="text-gray-700">
-                              {experimentName(file.experiment_id)}
+                          {associationLabel(file) ? (
+                            <span className="text-gray-700 flex flex-col gap-0.5">
+                              <span className="flex items-center gap-1.5">
+                                {associationBadge(file) === "project" && (
+                                  <span className="text-xs text-purple-600 font-medium bg-purple-50 px-1.5 py-0.5 rounded">
+                                    Project
+                                  </span>
+                                )}
+                                {associationLabel(file)}
+                              </span>
+                              {sampleLabel(file) && (
+                                <span className="text-xs text-teal-700 font-medium bg-teal-50 px-1.5 py-0.5 rounded w-fit">
+                                  {sampleLabel(file)}
+                                </span>
+                              )}
                             </span>
                           ) : (
                             <span className="flex items-center gap-2">
@@ -436,7 +520,7 @@ export default function DataFilesPage() {
                                 onClick={() => openLinkModal([file.id])}
                                 className="text-blue-600 text-xs hover:underline"
                               >
-                                Link
+                                Associate
                               </button>
                             </span>
                           )}
@@ -490,6 +574,7 @@ export default function DataFilesPage() {
             )}
           </div>
 
+          {/* File detail modal */}
           {viewingFile && (
             <div
               className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
@@ -567,9 +652,27 @@ export default function DataFilesPage() {
                     </dd>
                   </div>
                   <div>
+                    <dt className="text-xs font-medium text-gray-500 uppercase">Project</dt>
+                    <dd className="mt-0.5 text-sm text-gray-900">
+                      {viewingFile.project_id ? projectName(viewingFile.project_id) : "---"}
+                    </dd>
+                  </div>
+                  <div>
                     <dt className="text-xs font-medium text-gray-500 uppercase">Experiment</dt>
                     <dd className="mt-0.5 text-sm text-gray-900">
                       {viewingFile.experiment_id ? experimentName(viewingFile.experiment_id) : "---"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-medium text-gray-500 uppercase">Sample</dt>
+                    <dd className="mt-0.5 text-sm text-gray-900">
+                      {viewingFile.sample_ids && viewingFile.sample_ids.length > 0
+                        ? viewingFile.sample_ids.map((id) => (
+                            <span key={id} className="inline-block mr-1 px-1.5 py-0.5 bg-teal-50 text-teal-700 text-xs rounded">
+                              #{id}
+                            </span>
+                          ))
+                        : "---"}
                     </dd>
                   </div>
                   <div>
@@ -653,21 +756,25 @@ export default function DataFilesPage() {
             </div>
           )}
 
+          {/* Associate modal */}
           {linkingFileIds.length > 0 && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
               <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
-                <h2 className="text-lg font-semibold mb-4">
+                <h2 className="text-lg font-semibold mb-1">
                   {linkingFileIds.length === 1
-                    ? "Link to Experiment"
-                    : `Link ${linkingFileIds.length} files to Experiment`}
+                    ? "Associate File"
+                    : `Associate ${linkingFileIds.length} Files`}
                 </h2>
+                <p className="text-xs text-gray-500 mb-4">
+                  Link to a project, experiment, or specific sample. Select the most specific level that applies.
+                </p>
                 {linkingFileIds.length === 1 && (
-                  <p className="text-sm text-gray-600 mb-4">
+                  <p className="text-sm text-gray-600 mb-4 font-medium">
                     {files.find((f) => f.id === linkingFileIds[0])?.filename}
                   </p>
                 )}
                 {linkingFileIds.length > 1 && (
-                  <ul className="text-sm text-gray-600 mb-4 list-disc pl-5 max-h-32 overflow-y-auto">
+                  <ul className="text-sm text-gray-600 mb-4 list-disc pl-5 max-h-24 overflow-y-auto">
                     {linkingFileIds.map((id) => (
                       <li key={id}>
                         {files.find((f) => f.id === id)?.filename}
@@ -675,19 +782,68 @@ export default function DataFilesPage() {
                     ))}
                   </ul>
                 )}
-                <select
-                  value={selectedExperimentId}
-                  onChange={(e) => setSelectedExperimentId(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm mb-4"
-                >
-                  <option value="">Select an experiment...</option>
-                  {experiments.map((exp) => (
-                    <option key={exp.id} value={String(exp.id)}>
-                      {exp.name}
-                    </option>
-                  ))}
-                </select>
-                <div className="flex justify-end gap-3">
+
+                <div className="space-y-3">
+                  {/* Project */}
+                  <div>
+                    <label htmlFor="link-project-select" className="block text-xs font-medium text-gray-600 mb-1">Project</label>
+                    <select
+                      id="link-project-select"
+                      value={linkProjectId}
+                      onChange={(e) => setLinkProjectId(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                    >
+                      <option value="">No project</option>
+                      {projects.map((p) => (
+                        <option key={p.id} value={String(p.id)}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Experiment */}
+                  <div>
+                    <label htmlFor="link-experiment-select" className="block text-xs font-medium text-gray-600 mb-1">Experiment</label>
+                    <select
+                      id="link-experiment-select"
+                      value={linkExperimentId}
+                      onChange={(e) => setLinkExperimentId(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                    >
+                      <option value="">No experiment</option>
+                      {linkExperiments.map((exp) => (
+                        <option key={exp.id} value={String(exp.id)}>
+                          {exp.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Sample */}
+                  <div>
+                    <label htmlFor="link-sample-select" className="block text-xs font-medium text-gray-600 mb-1">Sample</label>
+                    <select
+                      id="link-sample-select"
+                      value={linkSampleId}
+                      onChange={(e) => setLinkSampleId(e.target.value)}
+                      disabled={!linkExperimentId}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white disabled:bg-gray-50 disabled:text-gray-400"
+                    >
+                      <option value="">No sample</option>
+                      {linkSamples.map((s) => (
+                        <option key={s.id} value={String(s.id)}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+                    {!linkExperimentId && (
+                      <p className="text-xs text-gray-400 mt-1">Select an experiment first</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 mt-5">
                   <button
                     onClick={() => setLinkingFileIds([])}
                     className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
@@ -696,7 +852,7 @@ export default function DataFilesPage() {
                   </button>
                   <button
                     onClick={handleLink}
-                    disabled={!selectedExperimentId}
+                    disabled={!linkModalHasSelection}
                     className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
                   >
                     Save

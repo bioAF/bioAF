@@ -99,6 +99,7 @@ class UploadService:
         expected_md5: str | None,
         experiment_id: int | None,
         sample_ids: list[int] | None = None,
+        project_id: int | None = None,
     ) -> dict:
         """Initiate an upload, returning upload_id and signed URL."""
         upload_id = str(uuid.uuid4())
@@ -117,6 +118,7 @@ class UploadService:
             "gcs_uri": gcs_uri,
             "expected_size": expected_size,
             "expected_md5": expected_md5,
+            "project_id": project_id,
             "experiment_id": experiment_id,
             "sample_ids": sample_ids or [],
         }
@@ -166,6 +168,7 @@ class UploadService:
             md5_checksum=actual_md5,
             file_type=file_type,
             tags=tags,
+            project_id=pending.get("project_id"),
             experiment_id=pending["experiment_id"],
         )
 
@@ -211,6 +214,7 @@ class UploadService:
         file_obj,
         size_bytes: int | None = None,
         file_type: str | None = None,
+        project_id: int | None = None,
         experiment_id: int | None = None,
         sample_ids: list[int] | None = None,
     ) -> File:
@@ -236,6 +240,7 @@ class UploadService:
             size_bytes=size_bytes,
             md5_checksum=None,
             file_type=file_type,
+            project_id=project_id,
             experiment_id=experiment_id,
         )
 

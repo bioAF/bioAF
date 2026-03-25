@@ -53,6 +53,7 @@ class PipelineRunSummary(BaseModel):
 class ProjectResponse(BaseModel):
     id: int
     name: str
+    code: str | None = None
     description: str | None = None
     hypothesis: str | None = None
     status: str | None = None

@@ -11,6 +11,7 @@ from app.models.project_sample import ProjectSample
 from app.models.sample import Sample
 from app.schemas.project import ProjectCreate, ProjectSamplesAdd, ProjectUpdate
 from app.services.audit_service import log_action
+from app.services.code_service import CodeService
 
 
 class ProjectService:
@@ -24,9 +25,12 @@ class ProjectService:
             if missing:
                 raise HTTPException(404, f"Samples not found: {sorted(missing)}")
 
+        code = await CodeService.next_project_code(session, org_id, data.name)
+
         project = Project(
             organization_id=org_id,
             name=data.name,
+            code=code,
             description=data.description,
             hypothesis=data.hypothesis,
             owner_user_id=user_id,
@@ -126,9 +130,10 @@ class ProjectService:
         snap_counts = {}
         if project_ids:
             run_result = await session.execute(
-                select(PipelineRun.project_id, func.count(PipelineRun.id))
-                .where(PipelineRun.project_id.in_(project_ids))
-                .group_by(PipelineRun.project_id)
+                select(Experiment.project_id, func.count(PipelineRun.id))
+                .join(PipelineRun, PipelineRun.experiment_id == Experiment.id)
+                .where(Experiment.project_id.in_(project_ids))
+                .group_by(Experiment.project_id)
             )
             run_counts = dict(run_result.all())
 
@@ -268,11 +273,18 @@ class ProjectService:
                 exp_map[experiment.id]["sample_count"] += 1
         experiment_summaries = sorted(exp_map.values(), key=lambda e: e["name"])
 
-        # Get pipeline runs
-        run_result = await session.execute(
-            select(PipelineRun).where(PipelineRun.project_id == project_id).order_by(PipelineRun.created_at.desc())
-        )
-        runs = run_result.scalars().all()
+        # Get pipeline runs via experiment linkage (runs are scoped to experiments,
+        # not directly to projects, so join through experiments)
+        experiment_ids = list(exp_map.keys())
+        if experiment_ids:
+            run_result = await session.execute(
+                select(PipelineRun)
+                .where(PipelineRun.experiment_id.in_(experiment_ids))
+                .order_by(PipelineRun.created_at.desc())
+            )
+            runs = run_result.scalars().all()
+        else:
+            runs = []
 
         # Counts
         sample_count = len(all_sample_ids)

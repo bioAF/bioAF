@@ -38,6 +38,7 @@ def _experiment_response(exp) -> ExperimentResponse:
     return ExperimentResponse(
         id=exp.id,
         name=exp.name,
+        code=exp.code,
         project=ProjectSummary(id=exp.project.id, name=exp.project.name) if exp.project else None,
         template_id=exp.template_id,
         template_name=exp.template.name if exp.template else None,

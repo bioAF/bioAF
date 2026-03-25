@@ -9,6 +9,7 @@ class FileUploadInitiate(BaseModel):
     filename: str
     expected_size_bytes: int | None = None
     expected_md5: str | None = None
+    project_id: int | None = None
     experiment_id: int | None = None
     sample_ids: list[int] = []
 
@@ -27,7 +28,9 @@ class FileResponse(BaseModel):
     file_type: str
     tags: list[str] = []
     uploader: UserSummary | None = None
+    project_id: int | None = None
     experiment_id: int | None = None
+    sample_ids: list[int] = []
     source_type: str = "upload"
     source_pipeline_run_id: int | None = None
     sha256_checksum: str | None = None
@@ -46,6 +49,7 @@ class FileListResponse(BaseModel):
 
 
 class FileLinkRequest(BaseModel):
+    project_id: int | None = None
     experiment_id: int | None = None
     sample_id: int | None = None
     pipeline_run_id: int | None = None

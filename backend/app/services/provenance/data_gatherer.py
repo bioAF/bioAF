@@ -840,14 +840,15 @@ class ProvenanceDataGatherer:
             for r in linked_result.mappings().all()
         ]
 
-        # Downstream usage: pipeline runs that consumed this file as input
-        # Search input_files_json for references to this file_id
+        # Downstream usage: pipeline runs that consumed this file as input.
+        # input_files_json is stored as a plain integer array [1, 2, 3] by trigger_service.
+        # Use JSONB containment (@>) to find runs that include this file_id.
         downstream_result = await session.execute(
             text(
                 "SELECT id, pipeline_name FROM pipeline_runs "
-                "WHERE organization_id = :org AND input_files_json::text LIKE :pattern"
+                "WHERE organization_id = :org AND input_files_json @> jsonb_build_array(CAST(:fid AS INTEGER))"
             ),
-            {"org": org_id, "pattern": f'%"file_id": {file_id}%'},
+            {"org": org_id, "fid": file_id},
         )
         downstream_usage = [
             {"pipeline_run_id": r["id"], "pipeline_name": r["pipeline_name"]}

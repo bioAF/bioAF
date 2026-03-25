@@ -24,6 +24,9 @@ jest.mock("@/components/experiments/GeoExportModal", () => ({
 jest.mock("@/components/shared/LoadingSpinner", () => ({
   LoadingSpinner: () => <div data-testid="loading" />,
 }));
+jest.mock("@/components/shared/ContentLoading", () => ({
+  ContentLoading: () => <div data-testid="content-loading" />,
+}));
 jest.mock("@/components/shared/VocabularySelect", () => ({
   VocabularySelect: () => <select />,
 }));
@@ -31,11 +34,17 @@ jest.mock("@/components/SnapshotTimeline", () => ({
   __esModule: true,
   default: () => <div />,
 }));
+jest.mock("@/components/provenance/ProvenanceReportPanel", () => ({
+  ProvenanceReportPanel: () => <div data-testid="provenance-panel" />,
+}));
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({ canAccess: () => true }),
+}));
 jest.mock("@/lib/auth", () => ({
   isAuthenticated: () => true,
   getToken: () => "test-token",
   removeToken: jest.fn(),
-  getCurrentUser: () => ({ role: "admin" }),
+  getCurrentUser: () => ({ role_name: "admin" }),
 }));
 
 const mockExperiment = {
@@ -73,6 +82,10 @@ const mockFiles = {
       tags: [],
       uploader: { id: 1, name: "Admin", email: "admin@test.com" },
       experiment_id: 1,
+      project_id: null,
+      sample_ids: [],
+      source_type: "upload",
+      source_pipeline_run_id: null,
       upload_timestamp: "2026-03-12T10:00:00Z",
       created_at: "2026-03-12T10:00:00Z",
     },
@@ -86,6 +99,10 @@ const mockFiles = {
       tags: [],
       uploader: { id: 1, name: "Admin", email: "admin@test.com" },
       experiment_id: 1,
+      project_id: null,
+      sample_ids: [],
+      source_type: "upload",
+      source_pipeline_run_id: null,
       upload_timestamp: "2026-03-13T14:00:00Z",
       created_at: "2026-03-13T14:00:00Z",
     },
@@ -101,6 +118,7 @@ jest.mock("@/lib/api", () => ({
     get: (...args: unknown[]) => mockGet(...args),
     post: jest.fn(),
     patch: jest.fn(),
+    delete: jest.fn(),
   },
   fileContentUrl: (fileId: number) => `http://localhost:8000/api/files/${fileId}/content?token=fake`,
 }));
@@ -109,8 +127,11 @@ beforeEach(() => {
   mockGet.mockReset();
   mockGet.mockImplementation((path: string) => {
     if (path === "/api/experiments/1") return Promise.resolve(mockExperiment);
-    if (path.startsWith("/api/experiments/1/files")) return Promise.resolve(mockFiles);
-    return Promise.resolve({ entries: [], total: 0 });
+    if (path.includes("/api/files") && path.includes("experiment_id=1"))
+      return Promise.resolve(mockFiles);
+    if (path.includes("/api/projects")) return Promise.resolve({ projects: [] });
+    if (path.includes("/api/experiments")) return Promise.resolve({ experiments: [] });
+    return Promise.resolve({ entries: [], total: 0, files: [], page: 1, page_size: 25 });
   });
 });
 
@@ -128,7 +149,9 @@ describe("Experiment Detail - Files Tab", () => {
     fireEvent.click(screen.getByRole("button", { name: /files/i }));
 
     await waitFor(() => {
-      expect(mockGet).toHaveBeenCalledWith(expect.stringContaining("/api/experiments/1/files"));
+      expect(mockGet).toHaveBeenCalledWith(
+        expect.stringContaining("experiment_id=1"),
+      );
     });
 
     expect(await screen.findByText("sample_R1.fastq.gz")).toBeInTheDocument();
@@ -142,16 +165,16 @@ describe("Experiment Detail - Files Tab", () => {
     fireEvent.click(screen.getByRole("button", { name: /files/i }));
 
     await waitFor(() => screen.getByText("sample_R1.fastq.gz"));
-    expect(screen.getByText("fastq")).toBeInTheDocument();
-    expect(screen.getByText("h5ad")).toBeInTheDocument();
+    expect(screen.getAllByText("fastq").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("h5ad").length).toBeGreaterThan(0);
   });
 
   it("shows empty state when no files exist", async () => {
     mockGet.mockImplementation((path: string) => {
       if (path === "/api/experiments/1") return Promise.resolve(mockExperiment);
-      if (path.startsWith("/api/experiments/1/files"))
-        return Promise.resolve({ files: [], total: 0, page: 1, page_size: 25 });
-      return Promise.resolve({ entries: [], total: 0 });
+      if (path.includes("/api/projects")) return Promise.resolve({ projects: [] });
+      if (path.includes("/api/experiments")) return Promise.resolve({ experiments: [] });
+      return Promise.resolve({ files: [], total: 0, page: 1, page_size: 25 });
     });
 
     render(<ExperimentDetailPage />);
@@ -160,7 +183,7 @@ describe("Experiment Detail - Files Tab", () => {
     fireEvent.click(screen.getByRole("button", { name: /files/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/no files/i)).toBeInTheDocument();
+      expect(screen.getByText("No files found.")).toBeInTheDocument();
     });
   });
 });

@@ -13,6 +13,7 @@ from app.models.experiment_field_default import ExperimentFieldDefault
 from app.models.sample import Sample
 from app.schemas.experiment import ExperimentCreate, ExperimentUpdate
 from app.services.audit_service import log_action
+from app.services.code_service import CodeService
 from app.services.event_bus import event_bus
 from app.services.event_types import EXPERIMENT_STATUS_CHANGED
 from app.services.vocabulary_validator import VocabularyValidator
@@ -22,11 +23,13 @@ class ExperimentService:
     @staticmethod
     async def create_experiment(session: AsyncSession, org_id: int, user_id: int, data: ExperimentCreate) -> Experiment:
         await VocabularyValidator.validate_experiment_fields(session, {"design_type": data.design_type})
+        code = await CodeService.next_experiment_code(session, org_id, data.project_id)
         experiment = Experiment(
             organization_id=org_id,
             project_id=data.project_id,
             template_id=data.template_id,
             name=data.name,
+            code=code,
             hypothesis=data.hypothesis,
             description=data.description,
             start_date=data.start_date,

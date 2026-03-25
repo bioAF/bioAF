@@ -506,3 +506,82 @@ async def test_project_detail_counts_experiments_via_project_id(client, admin_to
 
     assert data["experiment_count"] >= 1, f"Expected >= 1 experiment, got {data['experiment_count']}"
     assert data["sample_count"] >= 1, f"Expected >= 1 sample, got {data['sample_count']}"
+
+
+@pytest.mark.asyncio
+async def test_project_list_counts_pipeline_runs_via_experiment(client, admin_token, session, admin_user):
+    """pipeline_run_count in project list should include runs linked via experiment_id,
+    not only runs with project_id set directly."""
+    from app.models.pipeline_run import PipelineRun
+
+    resp = await client.post(
+        "/api/projects",
+        json={"name": "Run Count List Project"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    project_id = resp.json()["id"]
+
+    exp = Experiment(
+        organization_id=admin_user.organization_id,
+        project_id=project_id,
+        name="Run Count Exp",
+        status="registered",
+    )
+    session.add(exp)
+    await session.flush()
+
+    run = PipelineRun(
+        organization_id=admin_user.organization_id,
+        experiment_id=exp.id,
+        pipeline_name="nf-core/scrnaseq",
+        status="completed",
+    )
+    session.add(run)
+    await session.commit()
+
+    response = await client.get(
+        "/api/projects",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    project = next(p for p in response.json()["projects"] if p["id"] == project_id)
+    assert project["pipeline_run_count"] == 1, f"Expected 1 run, got {project['pipeline_run_count']}"
+
+
+@pytest.mark.asyncio
+async def test_project_detail_counts_pipeline_runs_via_experiment(client, admin_token, session, admin_user):
+    """pipeline_run_count in project detail should include runs linked via experiment_id."""
+    from app.models.pipeline_run import PipelineRun
+
+    resp = await client.post(
+        "/api/projects",
+        json={"name": "Run Count Detail Project"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    project_id = resp.json()["id"]
+
+    exp = Experiment(
+        organization_id=admin_user.organization_id,
+        project_id=project_id,
+        name="Run Detail Exp",
+        status="registered",
+    )
+    session.add(exp)
+    await session.flush()
+
+    run = PipelineRun(
+        organization_id=admin_user.organization_id,
+        experiment_id=exp.id,
+        pipeline_name="nf-core/scrnaseq",
+        status="completed",
+    )
+    session.add(run)
+    await session.commit()
+
+    response = await client.get(
+        f"/api/projects/{project_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["pipeline_run_count"] == 1, f"Expected 1 run, got {data['pipeline_run_count']}"

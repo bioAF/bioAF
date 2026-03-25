@@ -23,6 +23,7 @@ class FileService:
         md5_checksum: str | None,
         file_type: str,
         tags: list[str] | None = None,
+        project_id: int | None = None,
         experiment_id: int | None = None,
         source_type: str = "upload",
         source_pipeline_run_id: int | None = None,
@@ -36,6 +37,7 @@ class FileService:
             uploader_user_id=user_id,
             file_type=file_type,
             tags_json=tags or [],
+            project_id=project_id,
             experiment_id=experiment_id,
             source_type=source_type,
             source_pipeline_run_id=source_pipeline_run_id,
@@ -66,6 +68,7 @@ class FileService:
         org_id: int,
         file_type: str | None = None,
         experiment_id: int | None = None,
+        project_id: int | None = None,
         page: int = 1,
         page_size: int = 25,
     ) -> tuple[list[File], int]:
@@ -80,6 +83,10 @@ class FileService:
             query = query.where(File.experiment_id == experiment_id)
             count_query = count_query.where(File.experiment_id == experiment_id)
 
+        if project_id is not None:
+            query = query.where(File.project_id == project_id)
+            count_query = count_query.where(File.project_id == project_id)
+
         total_result = await session.execute(count_query)
         total = total_result.scalar() or 0
 
@@ -92,11 +99,25 @@ class FileService:
         return files, total
 
     @staticmethod
-    async def link_file_to_sample(session: AsyncSession, file_id: int, sample_id: int) -> None:
-        from sqlalchemy import text
+    async def get_sample_ids_for_files(session: AsyncSession, file_ids: list[int]) -> dict[int, list[int]]:
+        """Return a mapping of file_id -> [sample_id, ...] for the given file IDs."""
+        if not file_ids:
+            return {}
+        rows = await session.execute(
+            text("SELECT file_id, sample_id FROM sample_files WHERE file_id = ANY(:ids)").bindparams(ids=file_ids)
+        )
+        result: dict[int, list[int]] = {fid: [] for fid in file_ids}
+        for file_id, sample_id in rows.all():
+            result[file_id].append(sample_id)
+        return result
 
+    @staticmethod
+    async def link_file_to_sample(session: AsyncSession, file_id: int, sample_id: int) -> None:
         await session.execute(
-            text("INSERT INTO sample_files (sample_id, file_id) VALUES (:sample_id, :file_id)"),
+            text(
+                "INSERT INTO sample_files (sample_id, file_id) VALUES (:sample_id, :file_id) "
+                "ON CONFLICT ON CONSTRAINT uq_sample_files_file_sample DO NOTHING"
+            ),
             {"sample_id": sample_id, "file_id": file_id},
         )
 

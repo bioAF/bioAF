@@ -11,6 +11,7 @@ import { DetailModal } from "@/components/shared/DetailModal";
 import { ProvenanceDAGComponent } from "@/components/provenance/ProvenanceDAG";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportPanel";
+import { FileBrowser } from "@/components/files/FileBrowser";
 import { ProjectExportModal } from "@/components/projects/ProjectExportModal";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -473,8 +474,9 @@ export default function ProjectDetailPage() {
 
           {/* Data Tab */}
           {activeTab === "data" && (
-            <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">
-              <p>Files linked to this project will appear here.</p>
+            <div>
+              <h2 className="text-lg font-semibold mb-4">Files</h2>
+              <FileBrowser projectId={project.id} />
             </div>
           )}
         </main>

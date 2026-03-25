@@ -394,6 +394,37 @@ class TestIntegration:
         assert any(n.endswith(".csv") for n in names)
 
     @pytest.mark.asyncio
+    async def test_artifact_downstream_usage_integer_array_format(self, session, admin_user):
+        """gather_artifact should find downstream pipeline runs when input_files_json
+        stores plain integer arrays (the format written by trigger_service)."""
+        org_id = admin_user.organization_id
+
+        # Raw input file
+        await session.execute(
+            text(
+                "INSERT INTO files (id, organization_id, filename, gcs_uri, file_type, size_bytes, source_type) "
+                "VALUES (800, :org, 'raw.fastq.gz', 'gs://bucket/raw.fastq.gz', 'fastq', 1000, 'upload')"
+            ),
+            {"org": org_id},
+        )
+
+        # Pipeline run that consumed the file -- stored as plain integer array (production format)
+        await session.execute(
+            text(
+                "INSERT INTO pipeline_runs (id, organization_id, pipeline_name, status, input_files_json) "
+                "VALUES (800, :org, 'nf-core/scrnaseq', 'completed', :inputs)"
+            ),
+            {"org": org_id, "inputs": json.dumps([800])},
+        )
+        await session.commit()
+
+        data = await ProvenanceDataGatherer.gather_artifact(session, 800, org_id)
+        assert len(data.downstream_usage) == 1, (
+            f"Expected 1 downstream run, got {len(data.downstream_usage)}: {data.downstream_usage}"
+        )
+        assert data.downstream_usage[0]["pipeline_run_id"] == 800
+
+    @pytest.mark.asyncio
     async def test_empty_experiment_report(self, session, admin_user):
         """Experiment with no samples or runs should produce a valid report."""
         await session.execute(

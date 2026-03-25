@@ -1,7 +1,19 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, Numeric, String, Table, Text, func
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -12,6 +24,7 @@ sample_files = Table(
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("sample_id", Integer, ForeignKey("samples.id"), nullable=False),
     Column("file_id", Integer, ForeignKey("files.id"), nullable=True),
+    UniqueConstraint("file_id", "sample_id", name="uq_sample_files_file_sample"),
     extend_existing=True,
 )
 

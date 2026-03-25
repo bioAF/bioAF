@@ -100,6 +100,7 @@ class ProjectSummary(BaseModel):
 class ExperimentResponse(BaseModel):
     id: int
     name: str
+    code: str | None = None
     project: ProjectSummary | None = None
     template_id: int | None = None
     template_name: str | None = None

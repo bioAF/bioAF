@@ -325,11 +325,31 @@ export default function SettingsNamingProfilesPage() {
               </div>
             )}
 
-            {loading ? (
+            {/* Default naming scheme */}
+            <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-5">
+              <h2 className="text-base font-semibold text-blue-900 mb-1">Default Naming Scheme</h2>
+              <p className="text-sm text-blue-700 mb-3">
+                Applied automatically when files are uploaded with a project or experiment association.
+                Custom profiles below can override this for auto-ingest.
+              </p>
+              <code className="block bg-white border border-blue-100 rounded px-3 py-2 text-sm font-mono text-gray-800 mb-2">
+                {"{ProjectCode}_{ExperimentCode}_{SampleID}_{DataType}_{YYYYMMDD}.ext"}
+              </code>
+              <ul className="text-xs text-blue-800 space-y-1 mt-2">
+                <li><span className="font-medium">ProjectCode</span> — first consonant of each word + 2-digit year + counter (e.g. <code>CS26-1</code>). Auto-assigned on project creation.</li>
+                <li><span className="font-medium">ExperimentCode</span> — sequential per project (e.g. <code>E001</code>, <code>E002</code>). Auto-assigned on experiment creation.</li>
+                <li><span className="font-medium">SampleID</span> — the sample external ID, when a sample association is selected.</li>
+                <li><span className="font-medium">DataType</span> — inferred from file extension: FQ (FASTQ), BAM, counts (h5ad), data (CSV/TSV), report (PDF/HTML), plot (PNG/SVG).</li>
+                <li><span className="font-medium">YYYYMMDD</span> — date of upload.</li>
+                <li className="text-blue-600 italic">Segments without a value are omitted. The rename is advisory — users can keep the original name at upload time.</li>
+              </ul>
+            </div>
+
+          {loading ? (
               <ContentLoading />
             ) : profiles.length === 0 ? (
               <div className="text-center py-12 text-gray-500">
-                No naming profiles configured. Create one to enable auto-ingest file parsing.
+                No custom naming profiles configured. Create one to override the default scheme for auto-ingest file parsing.
               </div>
             ) : (
               <div className="bg-white border rounded-lg overflow-hidden">
