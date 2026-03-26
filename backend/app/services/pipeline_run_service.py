@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 from app.models.experiment import Experiment
 from app.models.file import File
 from app.models.pipeline_run import PipelineRun, PipelineRunSample
+from app.models.pipeline_run_input_file import PipelineRunInputFile
 from app.models.sample import Sample
 from app.schemas.pipeline_run import PipelineRunLaunchRequest
 from app.services.audit_service import log_action
@@ -136,6 +137,18 @@ class PipelineRunService:
             link = PipelineRunSample(pipeline_run_id=run.id, sample_id=sample.id)
             session.add(link)
         await session.flush()
+
+        # 7b. Record input files in junction table (ADR-038)
+        seen_file_ids: set[int] = set()
+        for sample in samples:
+            for f in sample.files or []:
+                if f.id not in seen_file_ids:
+                    session.add(PipelineRunInputFile(pipeline_run_id=run.id, file_id=f.id))
+                    seen_file_ids.add(f.id)
+        if seen_file_ids:
+            # Also populate input_files_json for backward compat
+            run.input_files_json = sorted(seen_file_ids)
+            await session.flush()
 
         # 8. Generate sample sheet
         sample_sheet_csv = SampleSheetService.generate_sheet(

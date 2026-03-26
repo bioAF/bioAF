@@ -275,6 +275,15 @@ class PipelineMonitorService:
                 except Exception as e:
                     logger.warning("Could not advance experiment status: %s", e)
 
+        # Persist pipeline logs to GCS while the pod is still alive
+        k8s_job_name = run.k8s_job_name
+        if k8s_job_name:
+            try:
+                compute_adapter = get_compute_adapter()
+                await compute_adapter.persist_job_logs(k8s_job_name)
+            except Exception as e:
+                logger.warning("Failed to persist logs for run %d: %s", run.id, e)
+
         # Collect output files via storage adapter
         try:
             storage_adapter = get_storage_adapter()

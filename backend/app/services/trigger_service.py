@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.file import File
 from app.models.ingest_event import IngestEvent
 from app.models.pipeline_run import PipelineRun
+from app.models.pipeline_run_input_file import PipelineRunInputFile
 from app.models.pipeline_trigger import PipelineTrigger
 from app.models.trigger_evaluation import TriggerEvaluation
 from app.schemas.pipeline_trigger import PipelineTriggerCreate, PipelineTriggerUpdate
@@ -334,6 +335,10 @@ class TriggerService:
             db.add(run)
             await db.flush()
 
+            for fid in file_ids:
+                db.add(PipelineRunInputFile(pipeline_run_id=run.id, file_id=fid))
+            await db.flush()
+
             evaluation = TriggerEvaluation(
                 trigger_id=trigger.id,
                 evaluation_type="file_ingest",
@@ -368,6 +373,10 @@ class TriggerService:
                 cost_estimate=budget_result.estimated_cost,
             )
             db.add(run)
+            await db.flush()
+
+            for fid in file_ids:
+                db.add(PipelineRunInputFile(pipeline_run_id=run.id, file_id=fid))
             await db.flush()
 
             evaluation = TriggerEvaluation(

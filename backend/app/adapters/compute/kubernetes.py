@@ -127,6 +127,12 @@ class KubernetesComputeProvider(ComputeProvider):
             return ""
         return await self._read_gcs_report(job_id)
 
+    async def persist_job_logs(self, job_id: str) -> bool:
+        """Read pod logs and persist to GCS before pod cleanup."""
+        if self.is_local:
+            return False
+        return await self._k8s_persist_job_logs(job_id)
+
     async def get_job_progress(self, job_id: str) -> dict:
         if self.is_local:
             return await self._local_get_job_progress(job_id)
@@ -503,7 +509,11 @@ class KubernetesComputeProvider(ComputeProvider):
     NEXTFLOW_IMAGE = "nextflow/nextflow:25.10.4"
 
     @staticmethod
-    def _build_nextflow_command(job_spec: dict, report_gcs_path: str = "") -> list[str]:
+    def _build_nextflow_command(
+        job_spec: dict,
+        report_gcs_path: str = "",
+        trace_gcs_path: str = "",
+    ) -> list[str]:
         """Build a Nextflow run command from the job spec.
 
         Translates pipeline_source, pipeline_version, parameters, and
@@ -530,6 +540,10 @@ class KubernetesComputeProvider(ComputeProvider):
         # Write Nextflow HTML report to GCS so it persists after pod cleanup
         if report_gcs_path:
             parts.extend(["-with-report", report_gcs_path])
+
+        # Write Nextflow execution trace to GCS
+        if trace_gcs_path:
+            parts.extend(["-with-trace", trace_gcs_path])
 
         # Ensure outdir is always set (nf-core pipelines require it)
         if "outdir" not in parameters:
@@ -651,9 +665,10 @@ class KubernetesComputeProvider(ComputeProvider):
             nf_cfg = self._cluster_config or {}
             raw_bucket = nf_cfg.get("raw_bucket_name", "")
 
-            # Write the Nextflow HTML report directly to GCS so it persists
-            # after the head pod is cleaned up.
+            # Write the Nextflow HTML report and execution trace directly to
+            # GCS so they persist after the head pod is cleaned up.
             report_gcs_path = f"gs://{raw_bucket}/nextflow-reports/{job_name}/report.html" if raw_bucket else ""
+            trace_gcs_path = f"gs://{raw_bucket}/nextflow-traces/{job_name}/trace.tsv" if raw_bucket else ""
 
             # Set --outdir to a GCS path so pipeline outputs persist after
             # pod cleanup.  The path mirrors the prefix that
@@ -667,7 +682,11 @@ class KubernetesComputeProvider(ComputeProvider):
                 gcs_outdir = f"gs://{results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}"
                 job_spec = {**job_spec, "parameters": {**job_spec.get("parameters", {}), "outdir": gcs_outdir}}
 
-            command = self._build_nextflow_command(job_spec, report_gcs_path=report_gcs_path)
+            command = self._build_nextflow_command(
+                job_spec,
+                report_gcs_path=report_gcs_path,
+                trace_gcs_path=trace_gcs_path,
+            )
 
         # Build init containers for GCS input staging
         init_containers = []
@@ -913,6 +932,62 @@ class KubernetesComputeProvider(ComputeProvider):
             return self._extract_pod_termination_info(pod_list.items[0])
 
         return f"No logs available for job {job_id} (pod cleaned up, no Cloud Logging or GCS log found)"
+
+    async def _k8s_persist_job_logs(self, job_id: str) -> bool:
+        """Read pod logs and persist them to GCS before the pod is cleaned up.
+
+        Called by the completion handler while the pod still exists
+        (ttlSecondsAfterFinished gives a 1-hour window). Returns True
+        if the log was successfully persisted.
+        """
+        cfg = self._cluster_config or {}
+        raw_bucket = cfg.get("raw_bucket_name", "")
+        if not raw_bucket:
+            return False
+
+        core_client = self._get_k8s_core_client()
+        namespace = "bioaf-pipelines"
+
+        pod_list = core_client.list_namespaced_pod(
+            namespace=namespace,
+            label_selector=f"job-name={job_id}",
+        )
+        if not pod_list.items:
+            return False
+
+        pod_name = pod_list.items[0].metadata.name
+        try:
+            logs = core_client.read_namespaced_pod_log(
+                name=pod_name,
+                namespace=namespace,
+                container="pipeline",
+            )
+        except Exception:
+            logger.warning("Could not read logs from %s for persistence", pod_name)
+            return False
+
+        if not logs:
+            return False
+
+        log_path = f"nextflow-traces/{job_id}/pipeline.log"
+        try:
+            from google.cloud import storage as gcs_storage
+
+            sa_key = cfg.get("gcp_service_account_key", "")
+            if sa_key:
+                credentials = _get_gcp_credentials(sa_key)
+                storage_client = gcs_storage.Client(credentials=credentials)
+            else:
+                storage_client = gcs_storage.Client()
+
+            bucket = storage_client.bucket(raw_bucket)
+            blob = bucket.blob(log_path)
+            blob.upload_from_string(logs, content_type="text/plain")
+            logger.info("Persisted pipeline log to gs://%s/%s", raw_bucket, log_path)
+            return True
+        except Exception:
+            logger.warning("Failed to persist log to gs://%s/%s", raw_bucket, log_path)
+            return False
 
     async def _read_gcs_log(self, job_id: str) -> str | None:
         """Read persisted pipeline.log from GCS. Returns None if unavailable."""

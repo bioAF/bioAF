@@ -55,6 +55,14 @@ class ComputeProvider(ABC):
     async def get_connection_command(self, job_id: str) -> str:
         """Get kubectl exec/SSH command for direct access to a running job."""
 
+    async def persist_job_logs(self, job_id: str) -> bool:
+        """Persist job logs to durable storage before the pod is cleaned up.
+
+        Returns True if logs were successfully persisted. Default
+        implementation is a no-op for backends that don't need it.
+        """
+        return False
+
 
 class StorageProvider(ABC):
     """Abstract interface for storage backends (GCS, NFS)."""

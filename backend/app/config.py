@@ -1,10 +1,21 @@
+import tomllib
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
+
+
+def _read_pyproject_version() -> str:
+    """Read the version string from pyproject.toml (single source of truth)."""
+    pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    with open(pyproject_path, "rb") as f:
+        data = tomllib.load(f)
+    return data["project"]["version"]
 
 
 class Settings(BaseSettings):
     # Application
     app_name: str = "bioAF"
-    app_version: str = "0.1.0"
+    app_version: str = _read_pyproject_version()
     debug: bool = False
     environment: str = "production"
 

@@ -38,3 +38,4 @@ class File(Base):
     project = relationship("Project")
     experiment = relationship("Experiment")
     source_pipeline_run = relationship("PipelineRun", foreign_keys=[source_pipeline_run_id])
+    consumed_by_runs = relationship("PipelineRunInputFile", cascade="all, delete-orphan", passive_deletes=True)

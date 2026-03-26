@@ -687,24 +687,29 @@ class ProvenanceDataGatherer:
         output_result = await session.execute(select(File).where(File.source_pipeline_run_id == run_id))
         output_files = output_result.scalars().all()
 
-        # Input files (from input_files_json)
+        # Input files via junction table (ADR-038)
         input_files_data: list[dict[str, Any]] = []
-        if run.input_files_json:
-            file_ids = [entry.get("file_id") for entry in run.input_files_json if entry.get("file_id")]
-            if file_ids:
-                input_result = await session.execute(select(File).where(File.id.in_(file_ids)))
-                input_files = input_result.scalars().all()
-                input_files_data = [
-                    {
-                        "id": f.id,
-                        "filename": f.filename,
-                        "file_type": f.file_type,
-                        "size_bytes": f.size_bytes,
-                        "md5": f.md5_checksum,
-                        "sha256": f.sha256_checksum,
-                    }
-                    for f in input_files
-                ]
+        input_join_result = await session.execute(
+            text(
+                "SELECT f.id, f.filename, f.file_type, f.size_bytes, f.md5_checksum, f.sha256_checksum, prif.role "
+                "FROM pipeline_run_input_files prif "
+                "JOIN files f ON f.id = prif.file_id "
+                "WHERE prif.pipeline_run_id = :rid"
+            ),
+            {"rid": run_id},
+        )
+        for row in input_join_result.mappings().all():
+            input_files_data.append(
+                {
+                    "id": row["id"],
+                    "filename": row["filename"],
+                    "file_type": row["file_type"],
+                    "size_bytes": row["size_bytes"],
+                    "md5": row["md5_checksum"],
+                    "sha256": row["sha256_checksum"],
+                    "role": row["role"],
+                }
+            )
 
         # Resume from
         resume_from = None
@@ -840,15 +845,14 @@ class ProvenanceDataGatherer:
             for r in linked_result.mappings().all()
         ]
 
-        # Downstream usage: pipeline runs that consumed this file as input.
-        # input_files_json is stored as a plain integer array [1, 2, 3] by trigger_service.
-        # Use JSONB containment (@>) to find runs that include this file_id.
+        # Downstream usage via junction table (ADR-038)
         downstream_result = await session.execute(
             text(
-                "SELECT id, pipeline_name FROM pipeline_runs "
-                "WHERE organization_id = :org AND input_files_json @> jsonb_build_array(CAST(:fid AS INTEGER))"
+                "SELECT pr.id, pr.pipeline_name FROM pipeline_run_input_files prif "
+                "JOIN pipeline_runs pr ON pr.id = prif.pipeline_run_id "
+                "WHERE prif.file_id = :fid AND pr.organization_id = :org"
             ),
-            {"org": org_id, "fid": file_id},
+            {"fid": file_id, "org": org_id},
         )
         downstream_usage = [
             {"pipeline_run_id": r["id"], "pipeline_name": r["pipeline_name"]}

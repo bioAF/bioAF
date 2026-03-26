@@ -121,6 +121,9 @@ async def _seed_experiment_with_data(session, org_id: int, owner_id: int) -> dic
     # Link sample to pipeline run
     await session.execute(text("INSERT INTO pipeline_run_samples (id, pipeline_run_id, sample_id) VALUES (1, 1, 1)"))
 
+    # Junction row for input file lineage (ADR-038)
+    await session.execute(text("INSERT INTO pipeline_run_input_files (pipeline_run_id, file_id) VALUES (1, 1)"))
+
     # Create pipeline process
     await session.execute(
         text(
@@ -416,6 +419,9 @@ class TestIntegration:
             ),
             {"org": org_id, "inputs": json.dumps([800])},
         )
+
+        # Junction row (ADR-038) -- downstream_usage now queries junction table
+        await session.execute(text("INSERT INTO pipeline_run_input_files (pipeline_run_id, file_id) VALUES (800, 800)"))
         await session.commit()
 
         data = await ProvenanceDataGatherer.gather_artifact(session, 800, org_id)

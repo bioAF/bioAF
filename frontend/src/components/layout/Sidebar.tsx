@@ -205,7 +205,7 @@ export function Sidebar() {
             <div className="text-gray-500 mt-0.5">{user.role_name as string}</div>
           </div>
         )}
-        <div className="text-xs text-gray-600 mt-2">v0.1.0</div>
+        <div className="text-xs text-gray-600 mt-2">v{process.env.NEXT_PUBLIC_APP_VERSION}</div>
       </div>
     </aside>
   );
