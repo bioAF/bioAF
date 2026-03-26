@@ -134,6 +134,7 @@ async def get_experiment(
         status=experiment.status,
         start_date=experiment.start_date,
         expected_sample_count=experiment.expected_sample_count,
+        design_type=experiment.design_type,
         owner=_user_summary(experiment.owner),
         sample_count=len(experiment.samples),
         batch_count=len(experiment.batches),

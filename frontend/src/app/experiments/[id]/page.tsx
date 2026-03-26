@@ -16,6 +16,7 @@ import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportPanel";
 import { FileBrowser } from "@/components/files/FileBrowser";
 import { VocabularySelect } from "@/components/shared/VocabularySelect";
+import { ExtensibleVocabularySelect } from "@/components/shared/ExtensibleVocabularySelect";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api, fileContentUrl } from "@/lib/api";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
@@ -204,6 +205,7 @@ export default function ExperimentDetailPage() {
       description: experiment.description,
       start_date: experiment.start_date,
       expected_sample_count: experiment.expected_sample_count,
+      design_type: experiment.design_type,
     });
     setEditFieldDefaults(
       experiment.field_defaults.map((fd) => ({
@@ -451,6 +453,16 @@ export default function ExperimentDetailPage() {
                       <input value={overviewForm.name ?? ""} onChange={(e) => setOverviewForm({ ...overviewForm, name: e.target.value })} className="w-full border rounded px-3 py-1.5 text-sm" />
                     </div>
                     <div>
+                      <label className="block text-sm text-gray-500 mb-1">Design Type</label>
+                      <ExtensibleVocabularySelect
+                        fieldName="design_type"
+                        value={overviewForm.design_type ?? null}
+                        onChange={(v) => setOverviewForm({ ...overviewForm, design_type: v })}
+                        placeholder="Select design type..."
+                        className="w-full border rounded px-3 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div>
                       <label className="block text-sm text-gray-500 mb-1">Hypothesis</label>
                       <textarea value={overviewForm.hypothesis ?? ""} onChange={(e) => setOverviewForm({ ...overviewForm, hypothesis: e.target.value || null })} rows={3} className="w-full border rounded px-3 py-1.5 text-sm" />
                     </div>
@@ -516,6 +528,7 @@ export default function ExperimentDetailPage() {
                   <dl className="space-y-3">
                     <div><dt className="text-sm text-gray-500">Project</dt><dd className="text-sm">{experiment.project?.name || "—"}</dd></div>
                     <div><dt className="text-sm text-gray-500">Template</dt><dd className="text-sm">{experiment.template_name || "—"}</dd></div>
+                    <div><dt className="text-sm text-gray-500">Design Type</dt><dd className="text-sm">{experiment.design_type || "—"}</dd></div>
                     <div><dt className="text-sm text-gray-500">Owner</dt><dd className="text-sm">{experiment.owner?.name || experiment.owner?.email || "—"}</dd></div>
                     <div><dt className="text-sm text-gray-500">Hypothesis</dt><dd className="text-sm">{experiment.hypothesis || "—"}</dd></div>
                     <div><dt className="text-sm text-gray-500">Description</dt><dd className="text-sm">{experiment.description || "—"}</dd></div>
@@ -1182,7 +1195,13 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
       const data = await api.get<QCDashboardResponse>(`/api/qc-dashboards/${id}`);
       setSelectedQc(data);
     } catch {
-      // ignore
+      // Dashboard may have been regenerated (old ID deleted). Refresh the list.
+      try {
+        const updated = await api.get<QCDashboardSummary[]>(`/api/qc-dashboards?experiment_id=${experimentId}`);
+        setQcDashboards(updated);
+      } catch {
+        // ignore
+      }
     }
   };
 

@@ -49,8 +49,14 @@ async def db_engine(worker_id):
             await conn.execute(sa_text(f"SET search_path TO {schema}"))
             await conn.run_sync(Base.metadata.create_all)
     else:
+        # Drop each table individually in its own transaction to avoid FK deadlocks
         async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.drop_all, checkfirst=True)
+            rows = await conn.execute(sa_text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'"))
+            tables = [row[0] for row in rows.fetchall()]
+        for table in tables:
+            async with engine.begin() as conn:
+                await conn.execute(sa_text(f"DROP TABLE IF EXISTS {table} CASCADE"))
+        async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
     # Set search_path for all connections from this engine
@@ -70,7 +76,11 @@ async def db_engine(worker_id):
             await conn.execute(sa_text(f"DROP SCHEMA {schema} CASCADE"))
     else:
         async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.drop_all, checkfirst=True)
+            rows = await conn.execute(sa_text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'"))
+            tables = [row[0] for row in rows.fetchall()]
+        for table in tables:
+            async with engine.begin() as conn:
+                await conn.execute(sa_text(f"DROP TABLE IF EXISTS {table} CASCADE"))
 
     await engine.dispose()
 

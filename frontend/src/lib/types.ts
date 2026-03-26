@@ -214,6 +214,7 @@ export interface Experiment {
   owner: UserSummary | null;
   sample_count: number;
   batch_count: number;
+  design_type: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -224,6 +225,7 @@ export interface ExperimentUpdateRequest {
   description?: string | null;
   start_date?: string | null;
   expected_sample_count?: number | null;
+  design_type?: string | null;
   field_defaults?: FieldDefaultValue[];
 }
 
