@@ -23,6 +23,12 @@ variable "stack_uid" {
   description = "Short unique ID appended to resource names to avoid GCP soft-delete conflicts on redeploy"
 }
 
+variable "k8s_node_zones" {
+  type        = list(string)
+  default     = []
+  description = "Additional zones for node pool placement. When empty, uses the cluster zone only. Set to multiple zones (e.g. [\"us-central1-a\",\"us-central1-b\",\"us-central1-c\"]) so the autoscaler can fall back to another zone when a machine type is unavailable."
+}
+
 variable "k8s_pipeline_machine_type" {
   type        = string
   default     = "n2-highmem-16"

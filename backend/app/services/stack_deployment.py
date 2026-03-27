@@ -397,12 +397,14 @@ async def deploy_stack(
             cluster_name = outputs.get("cluster_name", {}).get("value", "")
             cluster_endpoint = outputs.get("cluster_endpoint", {}).get("value", "")
             cluster_ca_cert = outputs.get("cluster_ca_cert", {}).get("value", "")
+            notebook_runner_sa = outputs.get("notebook_runner_sa_email", {}).get("value", "")
 
             await _set_config(session, "compute_stack", "kubernetes")
             await _set_config(session, "compute_deployed", "true")
             await _set_config(session, "gke_cluster_name", cluster_name or "null")
             await _set_config(session, "gke_cluster_endpoint", cluster_endpoint or "null")
             await _set_config(session, "gke_cluster_ca_cert", cluster_ca_cert or "null")
+            await _set_config(session, "notebook_runner_sa_email", notebook_runner_sa or "null")
 
             # Update kubernetes_cluster component state
             await session.execute(

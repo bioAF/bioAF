@@ -39,6 +39,8 @@
 | [ADR-035](ADR-035-bioaf-cli.md) | bioaf CLI for In-Session Provenance and Heartbeat | Accepted | 2026-03-22 |
 | [ADR-036](ADR-036-data-export-download.md) | Data Export and Download System | Accepted | 2026-03-24 |
 | [ADR-037](ADR-037-provenance-reporting.md) | Provenance Reporting System | Accepted | 2026-03-24 |
+| [ADR-038](ADR-038-pipeline-io-lineage-junction.md) | Pipeline Input File Lineage as a Junction Table | Accepted | 2026-03-25 |
+| [ADR-039](ADR-039-notebook-output-provenance.md) | Notebook Output Provenance | Accepted | 2026-03-25 |
 
 ## How to Use This Directory
 

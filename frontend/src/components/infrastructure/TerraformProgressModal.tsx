@@ -52,6 +52,14 @@ const FRIENDLY_NAMES: Record<string, string> = {
   "google_container_node_pool.interactive": "Interactive session nodes",
   "google_project_iam_member.gke_storage_access":
     "Cluster storage permissions",
+  "google_project_iam_member.gke_default_node_sa":
+    "Node service account permissions",
+  "google_service_account.notebook_runner":
+    "Notebook service account",
+  "google_project_iam_member.notebook_runner_storage":
+    "Notebook storage permissions",
+  "google_service_account_iam_member.notebook_runner_workload_identity":
+    "Notebook identity binding",
 };
 
 // Rotating messages shown during long compute provisioning.
@@ -421,7 +429,7 @@ export function TerraformProgressModal({
               <div className="mt-2">
                 {((computePhaseStarted && mode === "deploy") || mode === "teardown") && (
                   <p className="text-xs text-gray-400">
-                    This may take 5–15 minutes.
+                    This can take 10-30 minutes based on Google Cloud traffic.
                   </p>
                 )}
                 <p className="text-xs text-gray-300 mt-1">

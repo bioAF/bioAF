@@ -833,6 +833,10 @@ class TerraformExecutor:
             tfvars["zone"] = zone
             tfvars["org_slug"] = org_slug
             tfvars["stack_uid"] = stack_uid
+            # Multi-zone node placement: derive all zones in the region so
+            # the autoscaler can fall back when a machine type is unavailable
+            # in the primary zone (e.g. GCE capacity exhaustion).
+            tfvars["k8s_node_zones"] = [f"{region}-a", f"{region}-b", f"{region}-c"]
             # Cluster configuration from platform_config
             if config.get("k8s_pipeline_machine_type"):
                 tfvars["k8s_pipeline_machine_type"] = config["k8s_pipeline_machine_type"]

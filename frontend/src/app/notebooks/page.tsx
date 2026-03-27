@@ -367,7 +367,7 @@ export default function NotebooksPage() {
                         {s.status === "starting" ? (
                           <span className="flex items-center gap-1 text-xs text-blue-700">
                             <LoadingSpinner size="sm" />
-                            Starting... this may take up to 2 minutes
+                            Starting... this may take a few minutes
                           </span>
                         ) : (
                           <span className={`text-xs px-2 py-1 rounded ${SESSION_STATUS_COLORS[s.status] || "bg-gray-100"}`}>

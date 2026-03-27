@@ -34,6 +34,7 @@ def _file_response(f, sample_ids: list[int] | None = None) -> FileResponse:
         sample_ids=sample_ids or [],
         source_type=f.source_type,
         source_pipeline_run_id=f.source_pipeline_run_id,
+        source_notebook_session_id=f.source_notebook_session_id,
         upload_timestamp=f.upload_timestamp,
         created_at=f.created_at,
     )

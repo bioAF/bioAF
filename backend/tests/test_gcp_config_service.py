@@ -61,6 +61,8 @@ ALL_REQUIRED_PERMISSIONS = [
     "pubsub.topics.setIamPolicy",
     "container.clusters.create",
     "iam.serviceAccounts.actAs",
+    "iam.serviceAccounts.create",
+    "iam.serviceAccounts.setIamPolicy",
     "compute.instances.create",
     "resourcemanager.projects.getIamPolicy",
     "resourcemanager.projects.setIamPolicy",

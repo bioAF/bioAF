@@ -33,6 +33,7 @@ class FileResponse(BaseModel):
     sample_ids: list[int] = []
     source_type: str = "upload"
     source_pipeline_run_id: int | None = None
+    source_notebook_session_id: int | None = None
     sha256_checksum: str | None = None
     artifact_type: str | None = None
     upload_timestamp: datetime

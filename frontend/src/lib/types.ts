@@ -726,6 +726,7 @@ export interface FileResponse {
   sample_ids: number[];
   source_type: string;
   source_pipeline_run_id: number | null;
+  source_notebook_session_id: number | null;
   upload_timestamp: string;
   created_at: string;
 }

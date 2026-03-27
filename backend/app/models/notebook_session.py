@@ -45,6 +45,7 @@ class ComputeSession(Base):
     experiment = relationship("Experiment")
     project = relationship("Project")
     environment_version = relationship("EnvironmentVersion")
+    accessed_files = relationship("NotebookSessionFile", foreign_keys="NotebookSessionFile.session_id")
 
 
 # Backwards-compatible alias for existing imports

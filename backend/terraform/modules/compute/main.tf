@@ -14,7 +14,7 @@ terraform {
 resource "google_container_cluster" "bioaf" {
   name     = "bioaf-${var.org_slug}-${var.stack_uid}"
   project  = var.project_id
-  location = var.zone # Zonal cluster (cheaper than regional for POC)
+  location = var.zone
 
   # Terraform-managed lifecycle -- teardown handles deletion
   deletion_protection      = false
@@ -40,14 +40,16 @@ resource "google_container_cluster" "bioaf" {
 # --- Pipeline Node Pool ---
 
 resource "google_container_node_pool" "pipelines" {
-  name     = "bioaf-pipelines"
-  cluster  = google_container_cluster.bioaf.id
-  project  = var.project_id
-  location = var.zone
+  name           = "bioaf-pipelines"
+  cluster        = google_container_cluster.bioaf.id
+  project        = var.project_id
+  location       = var.zone
+  node_locations = var.k8s_node_zones
 
   autoscaling {
-    min_node_count = 0
-    max_node_count = var.k8s_pipeline_max_nodes
+    min_node_count  = 0
+    max_node_count  = var.k8s_pipeline_max_nodes
+    location_policy = "ANY"
   }
 
   node_config {
@@ -73,14 +75,16 @@ resource "google_container_node_pool" "pipelines" {
 # --- Interactive Node Pool ---
 
 resource "google_container_node_pool" "interactive" {
-  name     = "bioaf-interactive"
-  cluster  = google_container_cluster.bioaf.id
-  project  = var.project_id
-  location = var.zone
+  name           = "bioaf-interactive"
+  cluster        = google_container_cluster.bioaf.id
+  project        = var.project_id
+  location       = var.zone
+  node_locations = var.k8s_node_zones
 
   autoscaling {
-    min_node_count = 0
-    max_node_count = var.k8s_interactive_max_nodes
+    min_node_count  = 0
+    max_node_count  = var.k8s_interactive_max_nodes
+    location_policy = "ANY"
   }
 
   node_config {
@@ -113,4 +117,36 @@ resource "google_project_iam_member" "gke_storage_access" {
   project = var.project_id
   role    = "roles/storage.objectAdmin"
   member  = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+}
+
+resource "google_project_iam_member" "gke_default_node_sa" {
+  project = var.project_id
+  role    = "roles/container.defaultNodeServiceAccount"
+  member  = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+}
+
+# --- Workload Identity for notebook pods ---
+#
+# With Workload Identity enabled, pods cannot use the node's default SA.
+# Create a dedicated GCP SA for notebook workloads, grant it GCS access,
+# and bind it to the bioaf-notebook-runner K8s SA so pods get credentials
+# via the metadata server.
+
+resource "google_service_account" "notebook_runner" {
+  project      = var.project_id
+  account_id   = "bioaf-notebook-runner"
+  display_name = "bioAF Notebook Runner"
+  description  = "GCP service account for notebook session pods (Workload Identity)"
+}
+
+resource "google_project_iam_member" "notebook_runner_storage" {
+  project = var.project_id
+  role    = "roles/storage.objectAdmin"
+  member  = "serviceAccount:${google_service_account.notebook_runner.email}"
+}
+
+resource "google_service_account_iam_member" "notebook_runner_workload_identity" {
+  service_account_id = google_service_account.notebook_runner.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "serviceAccount:${var.project_id}.svc.id.goog[bioaf-notebooks/bioaf-notebook-runner]"
 }

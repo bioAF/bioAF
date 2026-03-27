@@ -360,7 +360,6 @@ export default function InfraComponentsPage() {
                   </h3>
                   <p className="text-xs text-amber-700 mt-1">
                     GCS buckets and Pub/Sub topics are still running and accruing costs.
-                    Destroy them before redeploying to get fresh bucket names.
                   </p>
                 </div>
                 <button

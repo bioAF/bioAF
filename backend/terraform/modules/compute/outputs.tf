@@ -13,3 +13,8 @@ output "cluster_ca_cert" {
   description = "GKE cluster CA certificate (base64)"
   sensitive   = true
 }
+
+output "notebook_runner_sa_email" {
+  value       = google_service_account.notebook_runner.email
+  description = "GCP service account email for notebook pod Workload Identity"
+}

@@ -16,6 +16,7 @@ from app.models.experiment import Experiment
 from app.models.experiment_custom_field import ExperimentCustomField
 from app.models.file import File
 from app.models.notebook_session import ComputeSession
+from app.models.notebook_session_file import NotebookSessionFile
 from app.models.pipeline_run import PipelineRun
 from app.models.project import Project
 from app.models.project_sample import ProjectSample
@@ -811,6 +812,22 @@ class ProvenanceDataGatherer:
 
         user_ids: set[int | None] = {file.uploader_user_id}
 
+        # Source notebook session
+        source_notebook_session_data = None
+        if file.source_notebook_session_id:
+            ns_result = await session.execute(
+                select(ComputeSession).where(ComputeSession.id == file.source_notebook_session_id)
+            )
+            source_ns = ns_result.scalar_one_or_none()
+            if source_ns:
+                user_ids.add(source_ns.user_id)
+                source_notebook_session_data = {
+                    "id": source_ns.id,
+                    "session_type": source_ns.session_type,
+                    "status": source_ns.status,
+                    "started_at": _dt(source_ns.started_at),
+                }
+
         # Source pipeline run
         source_run_data = None
         if file.source_pipeline_run_id:
@@ -854,10 +871,27 @@ class ProvenanceDataGatherer:
             ),
             {"fid": file_id, "org": org_id},
         )
-        downstream_usage = [
+        downstream_usage: list[dict[str, Any]] = [
             {"pipeline_run_id": r["id"], "pipeline_name": r["pipeline_name"]}
             for r in downstream_result.mappings().all()
         ]
+
+        # Notebook sessions that consumed this file as input
+        nb_downstream_result = await session.execute(
+            select(NotebookSessionFile, ComputeSession)
+            .join(ComputeSession, ComputeSession.id == NotebookSessionFile.session_id)
+            .where(NotebookSessionFile.file_id == file_id, NotebookSessionFile.access_type == "input")
+        )
+        for nsf, cs in nb_downstream_result.all():
+            user_ids.add(cs.user_id)
+            downstream_usage.append(
+                {
+                    "notebook_session_id": cs.id,
+                    "session_type": cs.session_type,
+                    "status": cs.status,
+                    "started_at": _dt(cs.started_at),
+                }
+            )
 
         user_map = await _user_map(session, user_ids)
 
@@ -879,6 +913,7 @@ class ProvenanceDataGatherer:
                 "source": {
                     "type": "pipeline_output" if file.source_pipeline_run_id else file.source_type,
                     "pipeline_run": source_run_data,
+                    "notebook_session": source_notebook_session_data,
                 },
                 "uploader": _user_ref(user_map, file.uploader_user_id),
                 "created_at": _dt(file.created_at),

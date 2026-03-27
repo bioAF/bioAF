@@ -175,15 +175,9 @@ class FileService:
             )
         )
 
-        # notebook_session_files is created by migration, not ORM metadata;
-        # check existence at runtime before attempting cleanup
-        table_check = await session.execute(
-            text("SELECT 1 FROM information_schema.tables WHERE table_name = 'notebook_session_files' LIMIT 1")
-        )
-        if table_check.scalar_one_or_none():
-            await session.execute(
-                text("DELETE FROM notebook_session_files WHERE file_id = :fid").bindparams(fid=file_id)
-            )
+        from app.models.notebook_session_file import NotebookSessionFile
+
+        await session.execute(delete(NotebookSessionFile).where(NotebookSessionFile.file_id == file_id))
 
         await session.delete(file)
         await session.flush()

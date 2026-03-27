@@ -244,7 +244,9 @@ class KubernetesNotebookProvider(NotebookProvider):
 
     # -- Namespace setup --
 
-    async def ensure_notebook_namespace(self, namespace: str = DEFAULT_NOTEBOOK_NAMESPACE) -> None:
+    async def ensure_notebook_namespace(
+        self, namespace: str = DEFAULT_NOTEBOOK_NAMESPACE, gcp_sa_email: str = ""
+    ) -> None:
         """Ensure the notebook namespace and service account exist."""
         from kubernetes.client.rest import ApiException
 
@@ -257,6 +259,9 @@ class KubernetesNotebookProvider(NotebookProvider):
         try:
             core_v1.read_namespace(name=namespace)
             logger.info("Namespace %s already exists, skipping setup", namespace)
+            # Patch the SA annotation in case it was created before WI was configured
+            if gcp_sa_email:
+                self._patch_sa_annotation(core_v1, namespace, gcp_sa_email)
             self._namespace_ready = True
             return
         except ApiException as e:
@@ -273,12 +278,18 @@ class KubernetesNotebookProvider(NotebookProvider):
         )
         logger.info("Created namespace %s", namespace)
 
+        # Build SA annotations for Workload Identity
+        sa_annotations = {}
+        if gcp_sa_email:
+            sa_annotations["iam.gke.io/gcp-service-account"] = gcp_sa_email
+
         core_v1.create_namespaced_service_account(
             namespace=namespace,
             body=client.V1ServiceAccount(
                 metadata=client.V1ObjectMeta(
                     name="bioaf-notebook-runner",
                     labels={"bioaf.io/managed": "true"},
+                    annotations=sa_annotations or None,
                 )
             ),
         )
@@ -308,6 +319,22 @@ class KubernetesNotebookProvider(NotebookProvider):
         logger.info("Created role binding in %s", namespace)
         self._namespace_ready = True
 
+    @staticmethod
+    def _patch_sa_annotation(core_v1, namespace: str, gcp_sa_email: str) -> None:
+        """Ensure the notebook-runner SA has the Workload Identity annotation."""
+        try:
+            sa = core_v1.read_namespaced_service_account(name="bioaf-notebook-runner", namespace=namespace)
+            current = (sa.metadata.annotations or {}).get("iam.gke.io/gcp-service-account", "")
+            if current != gcp_sa_email:
+                core_v1.patch_namespaced_service_account(
+                    name="bioaf-notebook-runner",
+                    namespace=namespace,
+                    body={"metadata": {"annotations": {"iam.gke.io/gcp-service-account": gcp_sa_email}}},
+                )
+                logger.info("Patched Workload Identity annotation on bioaf-notebook-runner")
+        except Exception:
+            logger.warning("Could not patch SA annotation for Workload Identity")
+
     # -- K8s API implementations (production) --
 
     async def _k8s_launch_session(self, session_spec: dict) -> dict:
@@ -320,11 +347,12 @@ class KubernetesNotebookProvider(NotebookProvider):
         user_id = session_spec.get("user_id", 0)
         namespace = DEFAULT_NOTEBOOK_NAMESPACE
 
-        await self.ensure_notebook_namespace(namespace)
+        await self.ensure_notebook_namespace(namespace, gcp_sa_email=session_spec.get("notebook_runner_sa_email", ""))
 
         pod_name = f"bioaf-notebook-{session_id}"
         service_name = f"bioaf-notebook-svc-{session_id}"
-        gcs_home_prefix = f"gs://bioaf-working/notebooks/{user_id}/"
+        working_bucket = session_spec.get("working_bucket", "bioaf-working")
+        gcs_home_prefix = f"gs://{working_bucket}/notebooks/{user_id}/"
 
         # Determine container command based on session type
         if session_type == "jupyter":
@@ -397,7 +425,7 @@ class KubernetesNotebookProvider(NotebookProvider):
             session_creds = session_spec.get("session_credentials", {})
             cred_username = session_creds.get("username", "bioaf")
             home_dir = f"/home/{cred_username}"
-            gcs_home_prefix = f"gs://bioaf-working/home/{user_id}/"
+            gcs_home_prefix = f"gs://{working_bucket}/home/{user_id}/"
         else:
             home_dir = HOME_DIR
 
@@ -808,7 +836,7 @@ class KubernetesNotebookProvider(NotebookProvider):
             "namespace": "bioaf-interactive",
             "node_pool": session_spec.get("node_pool", "bioaf-interactive"),
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "gcs_home_prefix": f"gs://bioaf-working/home/{session_spec.get('user_id', 0)}/",
+            "gcs_home_prefix": f"gs://{session_spec.get('working_bucket', 'bioaf-working')}/home/{session_spec.get('user_id', 0)}/",
         }
         _local_sessions[session_id] = session_data
         logger.info("Local mode: launched session %s (%s)", session_id, session_type)

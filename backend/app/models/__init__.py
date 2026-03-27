@@ -51,6 +51,7 @@ from app.models.pipeline_cost_history import PipelineCostHistory
 from app.models.orphaned_resource import OrphanedResource
 from app.models.session_credential import SessionCredential
 from app.models.pipeline_run_input_file import PipelineRunInputFile
+from app.models.notebook_session_file import NotebookSessionFile
 from app.models.role import Role, RolePermission
 
 __all__ = [
@@ -112,6 +113,7 @@ __all__ = [
     "OrphanedResource",
     "SessionCredential",
     "PipelineRunInputFile",
+    "NotebookSessionFile",
     "Role",
     "RolePermission",
 ]
