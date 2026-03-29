@@ -27,6 +27,7 @@ class FileService:
         experiment_id: int | None = None,
         source_type: str = "upload",
         source_pipeline_run_id: int | None = None,
+        artifact_type: str | None = None,
     ) -> File:
         file = File(
             organization_id=org_id,
@@ -41,6 +42,7 @@ class FileService:
             experiment_id=experiment_id,
             source_type=source_type,
             source_pipeline_run_id=source_pipeline_run_id,
+            artifact_type=artifact_type,
         )
         session.add(file)
         await session.flush()
@@ -69,9 +71,13 @@ class FileService:
         file_type: str | None = None,
         experiment_id: int | None = None,
         project_id: int | None = None,
+        source_type: str | None = None,
+        sample_id: int | None = None,
         page: int = 1,
         page_size: int = 25,
     ) -> tuple[list[File], int]:
+        from app.models.sample import sample_files
+
         query = select(File).options(selectinload(File.uploader)).where(File.organization_id == org_id)
         count_query = select(func.count(File.id)).where(File.organization_id == org_id)
 
@@ -86,6 +92,18 @@ class FileService:
         if project_id is not None:
             query = query.where(File.project_id == project_id)
             count_query = count_query.where(File.project_id == project_id)
+
+        if source_type:
+            query = query.where(File.source_type == source_type)
+            count_query = count_query.where(File.source_type == source_type)
+
+        if sample_id is not None:
+            query = query.join(sample_files, sample_files.c.file_id == File.id).where(
+                sample_files.c.sample_id == sample_id
+            )
+            count_query = count_query.join(sample_files, sample_files.c.file_id == File.id).where(
+                sample_files.c.sample_id == sample_id
+            )
 
         total_result = await session.execute(count_query)
         total = total_result.scalar() or 0

@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -287,15 +287,43 @@ class PipelineMonitorService:
         # Collect output files via storage adapter
         try:
             storage_adapter = get_storage_adapter()
-            outdir = f"/data/results/experiments/{run.experiment_id}/pipeline-runs/{run.id}"
+            outdir = (run.parameters_json or {}).get("outdir", "")
+            if not outdir:
+                # Fall back: read results_bucket_name from platform_config
+                bucket_row = (
+                    await session.execute(text("SELECT value FROM platform_config WHERE key = 'results_bucket_name'"))
+                ).first()
+                if bucket_row:
+                    outdir = f"gs://{bucket_row[0]}/experiments/{run.experiment_id}/pipeline-runs/{run.id}"
+                else:
+                    outdir = f"/data/results/experiments/{run.experiment_id}/pipeline-runs/{run.id}"
             collected = await storage_adapter.collect_outputs(
                 outdir,
                 {"id": run.id, "experiment_id": run.experiment_id},
             )
             if collected:
                 run.output_files_json = {"files": [f["filename"] for f in collected]}
+                try:
+                    from app.services.pipeline_output_service import PipelineOutputService
+
+                    await PipelineOutputService.register_outputs(session, run, collected)
+                    logger.info("Registered %d output files for run %d", len(collected), run.id)
+                except Exception as reg_err:
+                    logger.warning("Failed to register output files for run %d: %s", run.id, reg_err)
         except Exception as e:
             logger.warning("Failed to collect output files for run %d: %s", run.id, e)
+
+        # Register Nextflow report and trace from the raw bucket
+        if run.k8s_job_name:
+            try:
+                from app.services.pipeline_output_service import PipelineOutputService
+
+                compute_adapter = get_compute_adapter()
+                raw_bucket = compute_adapter.get_raw_bucket_name()
+                if raw_bucket:
+                    await PipelineOutputService.register_nextflow_metadata(session, run, raw_bucket)
+            except Exception as e:
+                logger.warning("Failed to register NF metadata for run %d: %s", run.id, e)
 
         # Audit log
         await log_action(

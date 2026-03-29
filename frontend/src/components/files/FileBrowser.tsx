@@ -37,6 +37,9 @@ export function FileBrowser({ experimentId, projectId }: Props) {
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
   const [experiments, setExperiments] = useState<{ id: number; name: string }[]>([]);
   const [filterType, setFilterType] = useState("");
+  const [filterSource, setFilterSource] = useState("");
+  const [filterSampleId, setFilterSampleId] = useState("");
+  const [samples, setSamples] = useState<{ id: number; label: string }[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [viewingFile, setViewingFile] = useState<FileResponse | null>(null);
   const [showProvenance, setShowProvenance] = useState(false);
@@ -65,6 +68,8 @@ export function FileBrowser({ experimentId, projectId }: Props) {
     try {
       const params = new URLSearchParams();
       if (filterType) params.set("file_type", filterType);
+      if (filterSource) params.set("source_type", filterSource);
+      if (filterSampleId) params.set("sample_id", filterSampleId);
       if (experimentId != null) params.set("experiment_id", String(experimentId));
       if (projectId != null) params.set("project_id", String(projectId));
       params.set("page", String(page));
@@ -78,7 +83,7 @@ export function FileBrowser({ experimentId, projectId }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [experimentId, projectId, filterType, page]);
+  }, [experimentId, projectId, filterType, filterSource, filterSampleId, page]);
 
   const fetchMeta = useCallback(async () => {
     try {
@@ -97,6 +102,25 @@ export function FileBrowser({ experimentId, projectId }: Props) {
     fetchFiles();
     fetchMeta();
   }, [fetchFiles, fetchMeta]);
+
+  // Fetch samples when viewing files for an experiment
+  useEffect(() => {
+    if (!experimentId) {
+      setSamples([]);
+      return;
+    }
+    api
+      .get<SampleBrief[]>(`/api/experiments/${experimentId}/samples`)
+      .then((data) =>
+        setSamples(
+          data.map((s) => ({
+            id: s.id,
+            label: s.sample_id_external ?? `Sample #${s.id}`,
+          })),
+        ),
+      )
+      .catch(() => setSamples([]));
+  }, [experimentId]);
 
   // Reload link experiments when link project changes
   useEffect(() => {
@@ -255,6 +279,10 @@ export function FileBrowser({ experimentId, projectId }: Props) {
         return file.uploader
           ? `Uploaded by ${file.uploader.name ?? file.uploader.email}`
           : "Uploaded";
+      case "pipeline_output":
+        return `Nextflow${file.source_pipeline_run_id ? ` (run #${file.source_pipeline_run_id})` : ""}`;
+      case "notebook_output":
+        return `RStudio${file.source_notebook_session_id ? ` (session #${file.source_notebook_session_id})` : ""}`;
       case "qc_dashboard":
         return `QC Dashboard${file.source_pipeline_run_id ? ` (run #${file.source_pipeline_run_id})` : ""}`;
       case "plot_archive":
@@ -282,11 +310,36 @@ export function FileBrowser({ experimentId, projectId }: Props) {
   };
 
   const fileTypes = Array.from(new Set(files.map((f) => f.file_type))).sort();
+  const sourceTypes: { value: string; label: string }[] = [
+    { value: "upload", label: "Upload" },
+    { value: "pipeline_output", label: "Nextflow" },
+    { value: "notebook_output", label: "RStudio" },
+    { value: "qc_dashboard", label: "QC Dashboard" },
+    { value: "plot_archive", label: "Plot Archive" },
+  ];
   const linkModalHasSelection = !!(linkProjectId || linkExperimentId || linkSampleId);
 
   return (
     <div className="space-y-4">
       <div className="flex gap-4 items-center flex-wrap">
+        {samples.length > 0 && (
+          <select
+            value={filterSampleId}
+            onChange={(e) => {
+              setFilterSampleId(e.target.value);
+              setPage(1);
+            }}
+            className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+          >
+            <option value="">All samples</option>
+            {samples.map((s) => (
+              <option key={s.id} value={String(s.id)}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        )}
+
         <select
           value={filterType}
           onChange={(e) => {
@@ -299,6 +352,22 @@ export function FileBrowser({ experimentId, projectId }: Props) {
           {fileTypes.map((t) => (
             <option key={t} value={t}>
               {t}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={filterSource}
+          onChange={(e) => {
+            setFilterSource(e.target.value);
+            setPage(1);
+          }}
+          className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+        >
+          <option value="">All sources</option>
+          {sourceTypes.map((s) => (
+            <option key={s.value} value={s.value}>
+              {s.label}
             </option>
           ))}
         </select>
@@ -416,13 +485,7 @@ export function FileBrowser({ experimentId, projectId }: Props) {
                     {file.uploader?.name ?? file.uploader?.email ?? "-"}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-500">
-                    {file.source_type === "upload"
-                      ? "Upload"
-                      : file.source_type === "qc_dashboard"
-                        ? "QC Dashboard"
-                        : file.source_type === "plot_archive"
-                          ? "Plot Archive"
-                          : file.source_type}
+                    {sourceLabel(file)}
                   </td>
                   <td className="px-4 py-3 text-sm" onClick={(e) => e.stopPropagation()}>
                     {associationLabel(file) ? (

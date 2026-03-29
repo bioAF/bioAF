@@ -133,6 +133,10 @@ class KubernetesComputeProvider(ComputeProvider):
             return False
         return await self._k8s_persist_job_logs(job_id)
 
+    def get_raw_bucket_name(self) -> str:
+        cfg = self._cluster_config or {}
+        return cfg.get("raw_bucket_name", "")
+
     async def get_job_progress(self, job_id: str) -> dict:
         if self.is_local:
             return await self._local_get_job_progress(job_id)
