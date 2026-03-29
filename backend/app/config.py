@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     smtp_encryption: str = "starttls"
     smtp_configured: bool = False
 
+    # Slack OAuth
+    slack_client_id: str = ""
+    slack_client_secret: str = ""
+    slack_signing_secret: str = ""
+
     # Rate limiting
     rate_limit_login: int = 10
     rate_limit_verify: int = 5

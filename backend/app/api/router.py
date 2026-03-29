@@ -61,6 +61,7 @@ from app.api.work_nodes import router as work_nodes_router
 from app.api.work_nodes import settings_router as work_node_settings_router
 from app.api.provenance_reports import router as provenance_reports_router
 from app.api.data_export import router as data_export_router
+from app.api.slack_oauth import router as slack_oauth_router
 
 api_router = APIRouter()
 
@@ -125,3 +126,4 @@ api_router.include_router(work_nodes_router)
 api_router.include_router(work_node_settings_router)
 api_router.include_router(provenance_reports_router)
 api_router.include_router(data_export_router)
+api_router.include_router(slack_oauth_router)

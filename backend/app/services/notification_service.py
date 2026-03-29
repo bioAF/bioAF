@@ -11,12 +11,27 @@ from app.models.notification import (
     NotificationDeliveryLog,
     NotificationPreference,
     NotificationRule,
+    SlackChannelMapping,
+    SlackInstallation,
     SlackWebhook,
 )
 from app.services.notification_channels.email_adapter import EmailChannel
 from app.services.notification_channels.slack_adapter import SlackChannel
 
 logger = logging.getLogger("bioaf.notification_service")
+
+SLACK_ERROR_MESSAGES = {
+    "not_in_channel": (
+        'The bioAF app is not in this channel. Open the channel in Slack and type "@bioAF" to invite it.'
+    ),
+    "channel_not_found": ("This channel no longer exists in Slack. Remove this mapping and add the correct channel."),
+    "invalid_auth": (
+        "The Slack connection is no longer valid. Disconnect and reconnect from the Slack Integration page."
+    ),
+    "token_revoked": (
+        "The Slack connection has been revoked. Disconnect and reconnect from the Slack Integration page."
+    ),
+}
 
 
 class NotificationService:
@@ -260,6 +275,59 @@ class NotificationService:
                 return {"channel": "email", "status": "failed", "detail": "SMTP not configured"}
             return {"channel": "email", "status": "configured", "detail": "SMTP is configured"}
         elif channel == "slack":
+            # Try OAuth installation first
+            install_result = await session.execute(
+                select(SlackInstallation).where(
+                    SlackInstallation.organization_id == org_id,
+                    SlackInstallation.enabled == True,  # noqa: E712
+                )
+            )
+            install = install_result.scalar_one_or_none()
+
+            if install:
+                mappings_result = await session.execute(
+                    select(SlackChannelMapping).where(
+                        SlackChannelMapping.organization_id == org_id,
+                        SlackChannelMapping.enabled == True,  # noqa: E712
+                    )
+                )
+                mappings = list(mappings_result.scalars().all())
+                if not mappings:
+                    return {
+                        "channel": "slack",
+                        "status": "failed",
+                        "detail": "Slack connected but no channel mappings configured",
+                    }
+
+                results = []
+                any_sent = False
+                for mapping in mappings:
+                    success, error_code = await SlackChannel.deliver(
+                        bot_token=install.bot_token,
+                        channel_id=mapping.channel_id,
+                        title=title,
+                        message=message,
+                        severity=severity,
+                    )
+                    if success:
+                        any_sent = True
+                    detail = ""
+                    if not success:
+                        detail = SLACK_ERROR_MESSAGES.get(error_code, f"Delivery failed ({error_code})")
+                    results.append(
+                        {
+                            "webhook": mapping.channel_name,
+                            "status": "sent" if success else "failed",
+                            "detail": detail,
+                        }
+                    )
+                return {
+                    "channel": "slack",
+                    "status": "sent" if any_sent else "failed",
+                    "webhooks": results,
+                }
+
+            # Fallback to legacy webhooks
             webhooks_result = await session.execute(
                 select(SlackWebhook).where(
                     SlackWebhook.organization_id == org_id,
@@ -268,11 +336,11 @@ class NotificationService:
             )
             webhooks = list(webhooks_result.scalars().all())
             if not webhooks:
-                return {"channel": "slack", "status": "failed", "detail": "No Slack webhooks configured"}
+                return {"channel": "slack", "status": "failed", "detail": "Slack not connected"}
 
             results = []
             for webhook in webhooks:
-                success = await SlackChannel.deliver(
+                success = await SlackChannel.deliver_webhook(
                     webhook_url=webhook.webhook_url,
                     title=title,
                     message=message,

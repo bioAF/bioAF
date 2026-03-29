@@ -57,14 +57,16 @@ Navigate to **Infrastructure > Backup & Recovery**:
 
 ## Notifications
 
-### Slack Webhooks (Settings)
+### Slack Integration (Settings)
 
-1. Go to **Settings**
-2. Under Slack Webhooks, add a webhook:
-   - Name (e.g., "Alerts Channel")
-   - Webhook URL from Slack
-   - Channel name
-3. Test with the "Test Slack" button
+1. Go to **Settings > Slack Integration**
+2. Click **Generate Slack App Manifest** and copy the JSON
+3. Go to [api.slack.com/apps](https://api.slack.com/apps), click **Create New App > From a manifest**, paste the JSON
+4. Copy the Client ID, Client Secret, and Signing Secret from the app's Basic Information page
+5. Paste them into the credentials form in bioAF and click **Save Credentials**
+6. Click **Add to Slack** and approve the app for your workspace
+7. Add channel mappings to choose which channels receive which event types
+8. Click **Test Channel Mappings** to verify delivery
 
 ### Notification Rules
 
@@ -104,7 +106,7 @@ Navigate to **Settings > Audit Log**:
 The **Settings** page centralizes:
 
 - SMTP configuration
-- Slack webhook management
+- Slack integration (OAuth setup, channel mappings)
 - Platform version and upgrades
 - Test notification delivery
 
@@ -112,5 +114,5 @@ The **Settings** page centralizes:
 
 - The **Dashboard** shows admin-specific metrics: cost summary, system health, experiment counts
 - Use **Activity Feed** to monitor team activity
-- Set up Slack webhooks early for real-time alerts
+- Set up Slack integration early for real-time alerts
 - Review access logs periodically for security compliance

@@ -8,13 +8,9 @@ import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 
-interface SlackWebhook {
-  id: number;
-  name: string;
-  webhook_url: string;
-  channel_name: string | null;
-  event_types_json: string[];
-  enabled: boolean;
+interface SlackStatus {
+  connected: boolean;
+  team_name: string | null;
 }
 
 interface UpdateCheck {
@@ -48,11 +44,8 @@ export default function SettingsPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  // Slack webhooks
-  const [webhooks, setWebhooks] = useState<SlackWebhook[]>([]);
-  const [newWebhookName, setNewWebhookName] = useState("");
-  const [newWebhookUrl, setNewWebhookUrl] = useState("");
-  const [newWebhookChannel, setNewWebhookChannel] = useState("");
+  // Slack status
+  const [slackStatus, setSlackStatus] = useState<SlackStatus | null>(null);
 
   // Upgrade system
   const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null);
@@ -66,13 +59,13 @@ export default function SettingsPage() {
 
     const load = async () => {
       try {
-        const [wh, version, history, smtp] = await Promise.all([
-          api.get<SlackWebhook[]>("/api/notifications/slack-webhooks"),
+        const [slack, version, history, smtp] = await Promise.all([
+          api.get<SlackStatus>("/api/notifications/slack/status"),
           api.get<UpdateCheck>("/api/upgrades/check"),
           api.get<{ upgrades: UpgradeHistoryItem[] }>("/api/upgrades/history"),
           api.get<{ host: string; port: number; username: string; password?: string; from_address: string; encryption: string }>("/api/bootstrap/smtp-settings"),
         ]);
-        setWebhooks(wh);
+        setSlackStatus(slack);
         setUpdateCheck(version);
         setUpgradeHistory(history.upgrades);
         if (smtp.host) {
@@ -107,33 +100,6 @@ export default function SettingsPage() {
       setMessage("SMTP configuration saved");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save SMTP settings");
-    }
-  };
-
-  const handleAddWebhook = async () => {
-    if (!newWebhookName || !newWebhookUrl) return;
-    try {
-      const wh = await api.post<SlackWebhook>("/api/notifications/slack-webhooks", {
-        name: newWebhookName,
-        webhook_url: newWebhookUrl,
-        channel_name: newWebhookChannel || null,
-        event_types: [],
-      });
-      setWebhooks([...webhooks, wh]);
-      setNewWebhookName("");
-      setNewWebhookUrl("");
-      setNewWebhookChannel("");
-    } catch {
-      setError("Failed to add webhook");
-    }
-  };
-
-  const handleDeleteWebhook = async (id: number) => {
-    try {
-      await api.delete(`/api/notifications/slack-webhooks/${id}`);
-      setWebhooks(webhooks.filter((w) => w.id !== id));
-    } catch {
-      setError("Failed to delete webhook");
     }
   };
 
@@ -235,71 +201,23 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* Slack Webhook Management */}
+          {/* Slack Integration */}
           <div className="bg-white rounded-lg shadow p-6 mb-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold">Slack Webhooks</h2>
-              <button
-                onClick={() => handleTestNotification("slack")}
+              <h2 className="text-lg font-semibold">Slack Integration</h2>
+              <a
+                href="/settings/slack"
                 className="text-sm text-bioaf-600 hover:text-bioaf-700"
               >
-                Test Slack
-              </button>
+                Manage
+              </a>
             </div>
-
-            {webhooks.length > 0 && (
-              <div className="mb-4 space-y-2">
-                {webhooks.map((wh) => (
-                  <div key={wh.id} className="flex items-center justify-between p-3 bg-gray-50 rounded">
-                    <div>
-                      <span className="font-medium text-sm">{wh.name}</span>
-                      {wh.channel_name && (
-                        <span className="ml-2 text-xs text-gray-500">{wh.channel_name}</span>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => handleDeleteWebhook(wh.id)}
-                      className="text-xs text-red-500 hover:text-red-700"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="grid grid-cols-3 gap-3">
-              <input
-                type="text"
-                placeholder="Webhook name"
-                value={newWebhookName}
-                onChange={(e) => setNewWebhookName(e.target.value)}
-                className="px-3 py-2 border rounded text-sm"
-              />
-              <input
-                type="url"
-                placeholder="https://hooks.slack.com/..."
-                value={newWebhookUrl}
-                onChange={(e) => setNewWebhookUrl(e.target.value)}
-                className="px-3 py-2 border rounded text-sm"
-              />
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="#channel"
-                  value={newWebhookChannel}
-                  onChange={(e) => setNewWebhookChannel(e.target.value)}
-                  className="flex-1 px-3 py-2 border rounded text-sm"
-                />
-                <button
-                  onClick={handleAddWebhook}
-                  className="px-3 py-2 bg-bioaf-600 text-white rounded text-sm hover:bg-bioaf-700"
-                >
-                  Add
-                </button>
-              </div>
+            <div className="flex items-center gap-3">
+              <div className={`w-3 h-3 rounded-full ${slackStatus?.connected ? "bg-green-500" : "bg-gray-300"}`} />
+              <span className="text-sm text-gray-700">
+                {slackStatus?.connected ? `Connected to ${slackStatus.team_name}` : "Not connected"}
+              </span>
             </div>
-
             <div className="mt-3 flex gap-2">
               <button onClick={() => handleTestNotification("in_app")} className="text-xs text-gray-500 hover:text-gray-700">
                 Test In-App
@@ -307,6 +225,11 @@ export default function SettingsPage() {
               <button onClick={() => handleTestNotification("email")} className="text-xs text-gray-500 hover:text-gray-700">
                 Test Email
               </button>
+              {slackStatus?.connected && (
+                <button onClick={() => handleTestNotification("slack")} className="text-xs text-gray-500 hover:text-gray-700">
+                  Test Slack
+                </button>
+              )}
             </div>
           </div>
 

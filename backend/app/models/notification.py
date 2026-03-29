@@ -68,6 +68,38 @@ class SlackWebhook(Base):
     organization = relationship("Organization")
 
 
+class SlackInstallation(Base):
+    __tablename__ = "slack_installations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, unique=True)
+    team_id: Mapped[str] = mapped_column(String(50), nullable=False)
+    team_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    bot_token: Mapped[str] = mapped_column(String(500), nullable=False)
+    bot_user_id: Mapped[str] = mapped_column(String(50), nullable=False)
+    authed_user_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    installed_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, server_default="true", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    organization = relationship("Organization")
+    installer = relationship("User")
+
+
+class SlackChannelMapping(Base):
+    __tablename__ = "slack_channel_mappings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False)
+    channel_id: Mapped[str] = mapped_column(String(50), nullable=False)
+    channel_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    event_types_json: Mapped[list] = mapped_column(JSONB, server_default="[]", nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, server_default="true", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    organization = relationship("Organization")
+
+
 class NotificationDeliveryLog(Base):
     __tablename__ = "notification_delivery_log"
 
