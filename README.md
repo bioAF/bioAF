@@ -15,7 +15,7 @@ A turnkey computational biology platform for small biotech companies (5-50 resea
 - **Data Management** - File upload/download, dataset browser, GCS storage integration, GEO export, SuperSeries cross-experiment packaging
 - **Results & Visualization** - QC dashboards, cellxgene single-cell viewer, plot archive, search
 - **SSH Access** - One-click kubectl exec into running pipeline jobs and notebook sessions
-- **Notifications** - Event-driven alerts via in-app, email (SMTP), and Slack webhooks
+- **Notifications** - Event-driven alerts via in-app, email (SMTP), and Slack (OAuth integration)
 - **Cost Center** - GCP billing integration, budget alerts, component cost breakdown, projections
 - **Backup & Recovery** - Tiered backups (Cloud SQL PITR, GCS versioning, config exports), one-click restore
 - **Session Credentials** - Per-user RStudio credentials with PAM authentication, auto-generated usernames

@@ -108,3 +108,59 @@ class TestDeliveryResponse(BaseModel):
     status: str
     detail: str | None = None
     webhooks: list[dict] | None = None
+
+
+# ---- Slack OAuth ----
+
+
+class SlackAuthUrlResponse(BaseModel):
+    auth_url: str
+
+
+class SlackStatusResponse(BaseModel):
+    configured: bool = False
+    connected: bool
+    team_name: str | None = None
+    team_id: str | None = None
+    installed_by: str | None = None
+    installed_at: datetime | None = None
+    enabled: bool = False
+
+
+class SlackChannelResponse(BaseModel):
+    id: str
+    name: str
+    is_private: bool = False
+
+
+class SlackChannelMappingResponse(BaseModel):
+    id: int
+    channel_id: str
+    channel_name: str
+    event_types_json: list[str]
+    enabled: bool
+
+    model_config = {"from_attributes": True}
+
+
+class SlackChannelMappingCreate(BaseModel):
+    channel_id: str
+    channel_name: str
+    event_types: list[str] = []
+    enabled: bool = True
+
+
+class SlackChannelMappingUpdate(BaseModel):
+    event_types: list[str] | None = None
+    enabled: bool | None = None
+
+
+class SlackCredentialsSave(BaseModel):
+    client_id: str
+    client_secret: str
+    signing_secret: str
+
+
+class SlackCredentialsResponse(BaseModel):
+    configured: bool
+    client_id_preview: str | None = None

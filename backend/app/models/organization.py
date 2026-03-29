@@ -19,4 +19,7 @@ class Organization(Base):
     smtp_password: Mapped[str] = mapped_column(String(500), default="")
     smtp_from_address: Mapped[str] = mapped_column(String(255), default="")
     smtp_encryption: Mapped[str] = mapped_column(String(20), default="starttls")
+    slack_client_id: Mapped[str] = mapped_column(String(255), default="")
+    slack_client_secret: Mapped[str] = mapped_column(String(500), default="")
+    slack_signing_secret: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

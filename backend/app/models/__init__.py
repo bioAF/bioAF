@@ -32,6 +32,8 @@ from app.models.notification import (
     NotificationRule,
     NotificationPreference,
     SlackWebhook,
+    SlackInstallation,
+    SlackChannelMapping,
     NotificationDeliveryLog,
 )
 from app.models.upgrade_history import UpgradeHistory
@@ -93,6 +95,8 @@ __all__ = [
     "NotificationRule",
     "NotificationPreference",
     "SlackWebhook",
+    "SlackInstallation",
+    "SlackChannelMapping",
     "NotificationDeliveryLog",
     "UpgradeHistory",
     "AccessLog",

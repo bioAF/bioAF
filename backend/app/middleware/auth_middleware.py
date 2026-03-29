@@ -16,6 +16,7 @@ PUBLIC_PATHS = {
     "/api/bootstrap/status",
     "/api/bootstrap/create-admin",
     "/api/users/accept-invite",
+    "/api/notifications/slack/callback",
     "/docs",
     "/openapi.json",
 }
