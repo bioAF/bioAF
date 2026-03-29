@@ -420,6 +420,7 @@ async def list_experiment_files(
     from app.schemas.file import FileListResponse, FileResponse
     from app.schemas.experiment import UserSummary
     from app.services.file_service import FileService
+    from sqlalchemy import text as sa_text
 
     files, total = await FileService.list_files(
         session,
@@ -428,6 +429,40 @@ async def list_experiment_files(
         page=page,
         page_size=page_size,
     )
+
+    # Also find files linked via sample_files junction table
+    sample_file_rows = await session.execute(
+        sa_text(
+            "SELECT sf.file_id, sf.sample_id FROM sample_files sf "
+            "JOIN samples s ON s.id = sf.sample_id "
+            "WHERE s.experiment_id = :exp_id"
+        ),
+        {"exp_id": experiment_id},
+    )
+    # Build file_id -> [sample_ids] map
+    file_sample_map: dict[int, list[int]] = {}
+    sample_linked_file_ids: set[int] = set()
+    for row in sample_file_rows.fetchall():
+        fid, sid = row[0], row[1]
+        file_sample_map.setdefault(fid, []).append(sid)
+        sample_linked_file_ids.add(fid)
+
+    # Fetch sample-linked files that aren't already in the direct query
+    existing_ids = {f.id for f in files}
+    missing_ids = sample_linked_file_ids - existing_ids
+    extra_files = []
+    if missing_ids:
+        from app.models.file import File as FileModel
+        from sqlalchemy import select as sa_select
+        from sqlalchemy.orm import selectinload as sa_selectinload
+
+        extra_result = await session.execute(
+            sa_select(FileModel).options(sa_selectinload(FileModel.uploader)).where(FileModel.id.in_(missing_ids))
+        )
+        extra_files = list(extra_result.scalars().all())
+
+    all_files = list(files) + extra_files
+
     return FileListResponse(
         files=[
             FileResponse(
@@ -442,12 +477,17 @@ async def list_experiment_files(
                 if f.uploader
                 else None,
                 experiment_id=f.experiment_id,
+                project_id=f.project_id,
+                sample_ids=file_sample_map.get(f.id, []),
+                source_type=f.source_type,
+                source_pipeline_run_id=f.source_pipeline_run_id,
+                source_notebook_session_id=f.source_notebook_session_id,
                 upload_timestamp=f.upload_timestamp,
                 created_at=f.created_at,
             )
-            for f in files
+            for f in all_files
         ],
-        total=total,
+        total=total + len(extra_files),
         page=page,
         page_size=page_size,
     )

@@ -44,6 +44,8 @@ def _session_response(ns) -> SessionResponse:
         started_at=ns.started_at,
         stopped_at=ns.stopped_at,
         created_at=ns.created_at,
+        git_branch_name=ns.git_branch_name,
+        git_commit_hash=ns.git_commit_hash,
     )
 
 

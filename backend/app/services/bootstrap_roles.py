@@ -19,6 +19,7 @@ ALL_RESOURCES_ACTIONS: dict[str, list[str]] = {
     "cost_center": ["view", "configure_budgets"],
     "roles": ["view", "create", "edit", "delete"],
     "quotas": ["view", "configure"],
+    "settings": ["view", "configure"],
 }
 
 BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
