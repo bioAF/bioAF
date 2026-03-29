@@ -422,6 +422,11 @@ cmd_reset_db() {
     green "Database reset complete. Run './bioaf setup' to create a new admin account."
 }
 
+cmd_register_outputs() {
+    bold "=== Register Pipeline Output Files ==="
+    $DC exec -T backend python -m app.cli.register_outputs "$@"
+}
+
 cmd_help() {
     bold "bioAF Management"
     echo ""
@@ -448,6 +453,10 @@ cmd_help() {
     bold "Debugging:"
     echo "  shell [service]     Open a shell in a container (default: backend)"
     echo "  dbshell             Open a psql session to the database"
+    echo ""
+    bold "Pipeline:"
+    echo "  register-outputs [--run-id N] [--force]"
+    echo "                      Register pipeline output files from GCS into the database"
     echo ""
     bold "Maintenance:"
     echo "  update              Pull latest code, rebuild containers, and run migrations"
@@ -489,6 +498,7 @@ case "$command" in
     dbshell)  cmd_dbshell ;;
     update)   cmd_update ;;
     reset-db) cmd_reset_db ;;
+    register-outputs) cmd_register_outputs "$@" ;;
     help|-h|--help) cmd_help ;;
     *)
         red "Unknown command: $command"

@@ -7,8 +7,6 @@ entities, and catalogs files in the database.
 
 import asyncio
 import logging
-from pathlib import PurePosixPath
-
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,51 +24,11 @@ from app.services.event_types import (
     UNCLAIMED_ENTITY,
     UNMATCHED_FILE,
 )
+from app.services.file_type_utils import detect_file_type
 from app.services.naming_profile_parser import match_filename, resolve_entities
 from app.services.naming_profile_service import NamingProfileService
 
 logger = logging.getLogger("bioaf.ingest_service")
-
-# File type mapping by extension
-FILE_TYPE_MAP = {
-    ".fastq": "fastq",
-    ".fq": "fastq",
-    ".bam": "bam",
-    ".sam": "bam",
-    ".cram": "bam",
-    ".h5ad": "h5ad",
-    ".csv": "count_matrix",
-    ".tsv": "count_matrix",
-    ".mtx": "count_matrix",
-    ".png": "image",
-    ".jpg": "image",
-    ".jpeg": "image",
-    ".svg": "image",
-    ".tif": "image",
-    ".tiff": "image",
-    ".pdf": "document",
-    ".doc": "document",
-    ".docx": "document",
-    ".txt": "document",
-    ".md": "document",
-}
-
-# Extensions that imply compression - check inner extension too
-COMPRESSED_EXTS = {".gz", ".bz2", ".xz", ".zip"}
-
-
-def detect_file_type(filename: str) -> str:
-    """Map filename extension to file type category."""
-    p = PurePosixPath(filename)
-    ext = p.suffix.lower()
-
-    # Check for compressed double extensions like .fastq.gz
-    if ext in COMPRESSED_EXTS:
-        inner_ext = PurePosixPath(p.stem).suffix.lower()
-        if inner_ext in FILE_TYPE_MAP:
-            return FILE_TYPE_MAP[inner_ext]
-
-    return FILE_TYPE_MAP.get(ext, "other")
 
 
 async def check_duplicate(md5_checksum: str | None, org_id: int, db: AsyncSession) -> File | None:

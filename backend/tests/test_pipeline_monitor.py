@@ -318,6 +318,72 @@ async def test_k8s_monitor_sends_completion_audit(session, k8s_running_run):
     assert row[0] == "complete"
 
 
+# --- Output file registration on completion ---
+
+
+@pytest.mark.asyncio
+async def test_k8s_completion_registers_output_files(session, k8s_running_run):
+    """Completion creates File records for collected outputs."""
+    mock_compute = AsyncMock()
+    mock_compute.get_job_status.return_value = {
+        "status": "completed",
+        "pod_name": "bioaf-pipeline-99-xyz",
+    }
+    mock_compute.get_job_progress.return_value = {
+        "percent_complete": 100.0,
+        "processes": [],
+    }
+
+    run_id = k8s_running_run.id
+    exp_id = k8s_running_run.experiment_id
+    mock_storage = AsyncMock()
+    mock_storage.collect_outputs.return_value = [
+        {
+            "filename": "filtered.h5ad",
+            "gcs_uri": f"gs://bioaf-results-test/experiments/{exp_id}/pipeline-runs/{run_id}/filtered.h5ad",
+            "size_bytes": 50_000_000,
+            "md5_hash": "abc123",
+            "experiment_id": exp_id,
+            "pipeline_run_id": run_id,
+        },
+        {
+            "filename": "qc_plot.png",
+            "gcs_uri": f"gs://bioaf-results-test/experiments/{exp_id}/pipeline-runs/{run_id}/qc_plot.png",
+            "size_bytes": 50_000,
+            "md5_hash": "def456",
+            "experiment_id": exp_id,
+            "pipeline_run_id": run_id,
+        },
+    ]
+
+    with (
+        patch("app.services.pipeline_monitor_service.get_compute_adapter", return_value=mock_compute),
+        patch("app.services.pipeline_monitor_service.get_storage_adapter", return_value=mock_storage),
+        patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
+    ):
+        await PipelineMonitorService.sync_run_statuses(session)
+
+    from sqlalchemy import select
+    from app.models.file import File
+
+    result = await session.execute(
+        select(File).where(
+            File.source_pipeline_run_id == run_id,
+            File.source_type == "pipeline_output",
+        )
+    )
+    files = list(result.scalars().all())
+    assert len(files) == 2
+
+    filenames = {f.filename for f in files}
+    assert filenames == {"filtered.h5ad", "qc_plot.png"}
+
+    h5ad = next(f for f in files if f.filename == "filtered.h5ad")
+    assert h5ad.file_type == "h5ad"
+    assert h5ad.artifact_type == "anndata"
+    assert h5ad.experiment_id == exp_id
+
+
 # --- Legacy Nextflow trace-based tests ---
 
 
