@@ -174,7 +174,7 @@ for v in cfg.get('volumes', {}).values():
     echo ""
     echo "Management commands:"
     echo "  ./bioaf status     Show service status"
-    echo "  ./bioaf logs       Tail logs"
+    echo "  ./bioaf logs       Tail logs (use -n N for more lines)"
     echo "  ./bioaf stop       Stop all services"
     echo "  ./bioaf help       Show all commands"
 }
@@ -238,11 +238,24 @@ cmd_status() {
 }
 
 cmd_logs() {
-    local service="${1:-}"
+    local tail_lines=100
+    local service=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -n)
+                tail_lines="${2:-100}"
+                shift 2
+                ;;
+            *)
+                service="$1"
+                shift
+                ;;
+        esac
+    done
     if [ -n "$service" ]; then
-        $DC logs -f --tail=100 "$service"
+        $DC logs -f --tail="$tail_lines" "$service"
     else
-        $DC logs -f --tail=50
+        $DC logs -f --tail="$tail_lines"
     fi
 }
 
@@ -423,7 +436,7 @@ cmd_help() {
     echo "  stop                Stop all services"
     echo "  restart             Restart all services"
     echo "  status              Show status of all services"
-    echo "  logs [service]      Tail logs (all services, or just one)"
+    echo "  logs [service] [-n N]  Tail logs (default 100 lines, use -n to change)"
     echo "  build [service]     Build (or rebuild) container images"
     echo ""
     bold "Database:"
@@ -444,7 +457,8 @@ cmd_help() {
     echo "  ./bioaf setup               # First-time setup"
     echo "  ./bioaf build               # Build all container images"
     echo "  ./bioaf start               # Start services"
-    echo "  ./bioaf logs backend        # Tail backend logs"
+    echo "  ./bioaf logs backend        # Tail backend logs (last 100 lines)"
+    echo "  ./bioaf logs backend -n 500 # Tail backend logs (last 500 lines)"
     echo "  ./bioaf migrate             # Run pending migrations"
     echo "  ./bioaf seed seed_poc_data.py  # Seed demo data"
     echo "  ./bioaf shell backend       # Open shell in backend"

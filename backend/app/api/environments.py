@@ -292,3 +292,30 @@ async def get_build_logs(
         status=version.status,
         logs_url=logs_url,
     )
+
+
+@router.delete("/{environment_id}/versions/{version_id}", status_code=204)
+async def delete_version(
+    environment_id: int,
+    version_id: int,
+    current_user: dict = require_permission("environments", "delete"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Delete a single environment version and its image."""
+    org_id = int(current_user["org_id"])
+    version = await EnvironmentService.get_version(session, org_id, environment_id, version_id)
+    if not version:
+        raise HTTPException(404, "Version not found")
+
+    await EnvironmentService.delete_version(session, org_id, environment_id, version_id)
+    await session.commit()
+
+
+@router.get("/template/dockerfile")
+async def get_template_dockerfile(
+    current_user: dict = require_permission("environments", "view"),
+):
+    """Return the current bioAF base Dockerfile template."""
+    from app.services.notebook_image_service import DOCKERFILE_CONTENT
+
+    return {"definition_content": DOCKERFILE_CONTENT, "definition_format": "dockerfile"}

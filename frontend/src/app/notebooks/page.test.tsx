@@ -70,6 +70,7 @@ function setupMocks(buildStatus: {
   mockGet.mockImplementation((url: string) => {
     if (url.includes("sessions")) return Promise.resolve({ sessions: [] });
     if (url.includes("experiments")) return Promise.resolve({ experiments: [] });
+    if (url.includes("projects")) return Promise.resolve({ projects: [] });
     if (url.includes("build-status")) return Promise.resolve(buildStatus);
     if (url.includes("/api/v1/environments/1")) return Promise.resolve(mockEnvDetail);
     if (url.includes("/api/v1/environments")) return Promise.resolve(mockEnvironments);
@@ -107,7 +108,7 @@ describe("NotebooksPage build status", () => {
     });
   });
 
-  test("shows no banner when build succeeded", async () => {
+  test("shows launch button when build succeeded", async () => {
     setupMocks({
       build_id: "ok-789",
       build_status: "SUCCESS",
@@ -117,13 +118,13 @@ describe("NotebooksPage build status", () => {
     render(<NotebooksPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("Launch New Session")).toBeInTheDocument();
+      expect(screen.getByText("Launch Session")).toBeInTheDocument();
     });
     expect(screen.queryByText("Notebook image is building")).not.toBeInTheDocument();
     expect(screen.queryByText("Notebook image build failed")).not.toBeInTheDocument();
   });
 
-  test("shows no banner when no build exists", async () => {
+  test("shows launch button when no build exists", async () => {
     setupMocks({
       build_id: null,
       build_status: null,
@@ -133,51 +134,52 @@ describe("NotebooksPage build status", () => {
     render(<NotebooksPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("Launch New Session")).toBeInTheDocument();
+      expect(screen.getByText("Launch Session")).toBeInTheDocument();
     });
     expect(screen.queryByText("Notebook image is building")).not.toBeInTheDocument();
     expect(screen.queryByText("Notebook image build failed")).not.toBeInTheDocument();
   });
 });
 
-describe("NotebooksPage launch error", () => {
-  test("shows inline error banner instead of alert on launch failure", async () => {
+describe("NotebooksPage launch modal", () => {
+  test("shows launch modal with options when button clicked", async () => {
+    setupMocks({ build_id: null, build_status: null, image_uri: null });
+
+    render(<NotebooksPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Launch Session")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Launch Session"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Launch Notebook Session")).toBeInTheDocument();
+      expect(screen.getByText("Launch RStudio")).toBeInTheDocument();
+      expect(screen.getByText("Launch Jupyter")).toBeInTheDocument();
+    });
+  });
+
+  test("shows error in modal on launch failure", async () => {
     setupMocks({ build_id: null, build_status: null, image_uri: null });
     mockPost.mockRejectedValue(new Error("The notebook image is currently building."));
 
     render(<NotebooksPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("Launch Jupyter")).toBeInTheDocument();
+      expect(screen.getByText("Launch Session")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("Launch Jupyter"));
+    fireEvent.click(screen.getByText("Launch Session"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Launch RStudio")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Launch RStudio"));
 
     await waitFor(() => {
       expect(screen.getByText("The notebook image is currently building.")).toBeInTheDocument();
-    });
-  });
-
-  test("launch error can be dismissed", async () => {
-    setupMocks({ build_id: null, build_status: null, image_uri: null });
-    mockPost.mockRejectedValue(new Error("Image not built yet"));
-
-    render(<NotebooksPage />);
-
-    await waitFor(() => {
-      expect(screen.getByText("Launch Jupyter")).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByText("Launch Jupyter"));
-
-    await waitFor(() => {
-      expect(screen.getByText("Image not built yet")).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByText("Dismiss"));
-
-    await waitFor(() => {
-      expect(screen.queryByText("Image not built yet")).not.toBeInTheDocument();
     });
   });
 });

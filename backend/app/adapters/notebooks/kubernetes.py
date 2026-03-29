@@ -411,10 +411,50 @@ class KubernetesNotebookProvider(NotebookProvider):
             else:
                 chpasswd_cmd = f"echo '{cred_username}:{cred_password}' | chpasswd"
 
+            # SSH key setup for git
+            ssh_setup = ""
+            ssh_private_key = session_spec.get("ssh_private_key")
+            if ssh_private_key:
+                # Escape the key for shell embedding
+                escaped_key = ssh_private_key.replace("'", "'\\''")
+                ssh_setup = (
+                    f"mkdir -p {HOME_DIR}/.ssh && "
+                    f"printf '%s\\n' '{escaped_key}' > {HOME_DIR}/.ssh/id_rsa && "
+                    f"chmod 600 {HOME_DIR}/.ssh/id_rsa && "
+                    f"ssh-keyscan github.com >> {HOME_DIR}/.ssh/known_hosts 2>/dev/null && "
+                    f"chown -R {cred_username}:{cred_username} {HOME_DIR}/.ssh && "
+                )
+
+            # Build git setup commands if git_config is provided
+            git_setup = ""
+            git_config = session_spec.get("git_config")
+            if git_config:
+                repo_url = git_config["repo_url"]
+                branch = git_config["branch"]
+                git_user_name = git_config.get("user_name", "bioaf")
+                git_user_email = git_config.get("user_email", "bioaf@localhost")
+                git_setup = (
+                    f"git config --global user.name '{git_user_name}' && "
+                    f"git config --global user.email '{git_user_email}' && "
+                    f"git config --global init.defaultBranch main && "
+                    f"cd {HOME_DIR} && "
+                    f"git clone {repo_url} notebooks 2>/dev/null || "
+                    f"(mkdir -p notebooks && cd notebooks && git init && "
+                    f"git remote add origin {repo_url} && "
+                    f"echo '# Notebook workspace' > README.md && "
+                    f"git add -A && git commit -m 'Initial commit' && "
+                    f"git push -u origin main 2>/dev/null) && "
+                    f"cd {HOME_DIR}/notebooks && "
+                    f"git checkout -b {branch} && "
+                    f"chown -R {cred_username}:{cred_username} {HOME_DIR}/notebooks && "
+                )
+
             startup_script = (
                 f"useradd -m -d {HOME_DIR} -s /bin/bash {cred_username} || true && "
                 f"{chpasswd_cmd} && "
                 f"chown -R {cred_username}:{cred_username} {HOME_DIR} && "
+                f"{ssh_setup}"
+                f"{git_setup}"
                 f"exec /usr/lib/rstudio-server/bin/rserver "
                 f"--www-address=0.0.0.0 --www-port={container_port} --server-daemonize=0"
             )
@@ -444,6 +484,28 @@ class KubernetesNotebookProvider(NotebookProvider):
         image = session_spec.get("image", "bioaf-scrna:latest")
         volume_mounts = [{"name": "home", "mountPath": home_dir}]
         volumes = [{"name": "home", "emptyDir": {"sizeLimit": "10Gi"}}]
+
+        # Input file data sync init container
+        input_files = session_spec.get("input_files", [])
+        if input_files:
+            copy_cmds = [f"gsutil cp {f['gcs_uri']} /data/{f['relative_path']}" for f in input_files]
+            # Generate FILE_INVENTORY.md
+            inventory_lines = ["# File Inventory", "", "Files mounted at session start:", ""]
+            for f in input_files:
+                inventory_lines.append(f"- `/data/{f['relative_path']}` (source: `{f['gcs_uri']}`)")
+            inventory_content = "\\n".join(inventory_lines)
+            copy_cmds.append(f'printf "{inventory_content}" > /data/FILE_INVENTORY.md')
+            data_sync_cmd = " && ".join(copy_cmds)
+            init_containers.append(
+                {
+                    "name": "gcs-data-sync",
+                    "image": "google/cloud-sdk:slim",
+                    "command": ["/bin/sh", "-c", data_sync_cmd],
+                    "volumeMounts": [{"name": "data", "mountPath": "/data"}],
+                }
+            )
+            volumes.append({"name": "data", "emptyDir": {"sizeLimit": "50Gi"}})
+            volume_mounts.append({"name": "data", "mountPath": "/data", "readOnly": True})
 
         # SSH work nodes get additional volumes: scratch and data mounts
         if session_type == "ssh":
@@ -506,6 +568,38 @@ class KubernetesNotebookProvider(NotebookProvider):
         # Determine node pool based on session type
         node_pool = session_spec.get("node_pool", "interactive")
 
+        # Git auto-commit sidecar
+        containers = [notebook_container]
+        git_config = session_spec.get("git_config")
+        if git_config:
+            git_branch = git_config.get("branch", f"session/{session_id}")
+            git_user_name = git_config.get("user_name", "bioaf")
+            git_user_email = git_config.get("user_email", "bioaf@localhost")
+            notebooks_dir = f"{home_dir}/notebooks"
+            autocommit_script = (
+                f"git config --global user.name '{git_user_name}' && "
+                f"git config --global user.email '{git_user_email}' && "
+                "LAST_COMMIT=$(date +%s) && "
+                "while true; do "
+                "  sleep 60; "
+                f"  cd {notebooks_dir} 2>/dev/null || continue; "
+                "  NOW=$(date +%s); "
+                "  DIFF=$((NOW - LAST_COMMIT)); "
+                '  if [ $DIFF -ge 900 ] && [ -n "$(git status --porcelain 2>/dev/null)" ]; then '
+                f'    git add -A && git commit -m "Auto-save: $(date -u +%Y-%m-%dT%H:%M:%SZ)" && git push origin {git_branch} && '
+                "    LAST_COMMIT=$(date +%s); "
+                "  fi; "
+                "done"
+            )
+            containers.append(
+                {
+                    "name": "git-autocommit",
+                    "image": "alpine/git",
+                    "command": ["/bin/sh", "-c", autocommit_script],
+                    "volumeMounts": [{"name": "home", "mountPath": home_dir}],
+                }
+            )
+
         # Pod manifest
         pod_manifest = {
             "apiVersion": "v1",
@@ -531,7 +625,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                 ],
                 "serviceAccountName": "bioaf-notebook-runner",
                 "initContainers": init_containers,
-                "containers": [notebook_container],
+                "containers": containers,
                 "volumes": volumes,
                 "restartPolicy": "Never",
             },
@@ -697,10 +791,66 @@ class KubernetesNotebookProvider(NotebookProvider):
         namespace: str = DEFAULT_NOTEBOOK_NAMESPACE,
         gcs_home_prefix: str = "",
     ) -> dict:
-        """Sync to GCS, then delete pod and service."""
+        """Final git commit, sync to GCS, then delete pod and service."""
         from kubernetes.stream import stream
 
         core_client = self._get_k8s_core_client()
+
+        # Final git commit + push before sync-out
+        git_branch = None
+        git_commit = None
+        if pod_name:
+            try:
+                git_cmd = [
+                    "/bin/sh",
+                    "-c",
+                    "cd /home/jovyan/notebooks 2>/dev/null || cd /home/jovyan && "
+                    "if [ -d .git ]; then "
+                    "  git add -A && "
+                    f"  git commit -m 'Session {session_id} stopped: '$(date -u +%Y-%m-%dT%H:%M:%SZ) 2>/dev/null; "
+                    "  BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null); "
+                    "  HASH=$(git rev-parse --short HEAD 2>/dev/null); "
+                    "  git push origin $BRANCH 2>/dev/null; "
+                    '  echo "GIT_BRANCH=$BRANCH"; '
+                    '  echo "GIT_HASH=$HASH"; '
+                    "fi",
+                ]
+                result = stream(
+                    core_client.connect_get_namespaced_pod_exec,
+                    name=pod_name,
+                    namespace=namespace,
+                    command=git_cmd,
+                    stderr=True,
+                    stdin=False,
+                    stdout=True,
+                    tty=False,
+                )
+                if result:
+                    for line in str(result).split("\n"):
+                        if line.startswith("GIT_BRANCH="):
+                            git_branch = line.split("=", 1)[1].strip()
+                        elif line.startswith("GIT_HASH="):
+                            git_commit = line.split("=", 1)[1].strip()
+                logger.info("Final git commit for pod %s: branch=%s hash=%s", pod_name, git_branch, git_commit)
+            except Exception as e:
+                logger.warning("Final git commit failed for pod %s: %s", pod_name, e)
+
+        # Store git info in DB
+        if git_branch and self._session_factory:
+            try:
+                async with self._session_factory() as db:
+                    from sqlalchemy import text as sa_text
+
+                    await db.execute(
+                        sa_text(
+                            "UPDATE compute_sessions SET git_branch_name = :branch, git_commit_hash = :hash "
+                            "WHERE id = :id"
+                        ),
+                        {"branch": git_branch, "hash": git_commit, "id": session_id},
+                    )
+                    await db.commit()
+            except Exception:
+                logger.exception("Failed to store git info for session %s", session_id)
 
         # Sync home directory to GCS before termination
         if gcs_home_prefix and pod_name:

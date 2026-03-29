@@ -170,8 +170,10 @@ class TestTerminateSession:
                 gcs_home_prefix="gs://bucket/notebooks/7/",
             )
 
-        mock_stream.assert_called_once()
-        assert "gsutil" in str(mock_stream.call_args)
+        # stream is called twice: git commit + GCS sync
+        assert mock_stream.call_count == 2
+        # Last call should be the GCS sync
+        assert "gsutil" in str(mock_stream.call_args_list[-1])
 
     @pytest.mark.asyncio
     async def test_terminate_deletes_pod(self, adapter, mock_k8s_clients):

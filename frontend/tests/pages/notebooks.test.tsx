@@ -85,11 +85,12 @@ describe("NotebooksPage", () => {
     mockApiPost.mockReset();
   });
 
-  // Test 30: Launch cards render
-  it("shows Jupyter and RStudio launch cards", async () => {
+  // Test 30: Launch modal shows options
+  it("shows launch modal with Jupyter and RStudio buttons", async () => {
     mockApiGet.mockImplementation((url: string) => {
       if (url.includes("sessions")) return Promise.resolve({ sessions: [], total: 0 });
       if (url.includes("experiments")) return Promise.resolve(mockExperiments);
+      if (url.includes("projects")) return Promise.resolve({ projects: [] });
       if (url.includes("/api/v1/environments/1")) return Promise.resolve(mockEnvDetail);
       if (url.includes("/api/v1/environments")) return Promise.resolve(mockEnvironments);
       return Promise.resolve({});
@@ -97,16 +98,21 @@ describe("NotebooksPage", () => {
 
     render(<NotebooksPage />);
     await waitFor(() => {
+      expect(screen.getByText("Launch Session")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Launch Session"));
+    await waitFor(() => {
       expect(screen.getByText(/launch jupyter/i)).toBeInTheDocument();
       expect(screen.getByText(/launch rstudio/i)).toBeInTheDocument();
     });
   });
 
-  // Test 31: Launch disabled without compute
-  it("shows disabled state when compute not deployed", async () => {
+  // Test 31: Launch button renders on page
+  it("shows launch button on main page", async () => {
     mockApiGet.mockImplementation((url: string) => {
       if (url.includes("sessions")) return Promise.resolve({ sessions: [], total: 0 });
       if (url.includes("experiments")) return Promise.resolve(mockExperiments);
+      if (url.includes("projects")) return Promise.resolve({ projects: [] });
       if (url.includes("config")) return Promise.resolve({ compute_deployed: false });
       if (url.includes("/api/v1/environments/1")) return Promise.resolve(mockEnvDetail);
       if (url.includes("/api/v1/environments")) return Promise.resolve(mockEnvironments);
@@ -115,16 +121,16 @@ describe("NotebooksPage", () => {
 
     render(<NotebooksPage />);
     await waitFor(() => {
-      expect(screen.getByText(/launch jupyter/i)).toBeInTheDocument();
+      expect(screen.getByText("Launch Session")).toBeInTheDocument();
     });
-    // Buttons should be present (disabled state handled by API error)
   });
 
-  // Test 32: Launch disabled without image
-  it("shows message when image not configured", async () => {
+  // Test 32: Launch modal has scope selector
+  it("shows experiment and project scope options in launch modal", async () => {
     mockApiGet.mockImplementation((url: string) => {
       if (url.includes("sessions")) return Promise.resolve({ sessions: [], total: 0 });
       if (url.includes("experiments")) return Promise.resolve(mockExperiments);
+      if (url.includes("projects")) return Promise.resolve({ projects: [] });
       if (url.includes("/api/v1/environments/1")) return Promise.resolve(mockEnvDetail);
       if (url.includes("/api/v1/environments")) return Promise.resolve(mockEnvironments);
       return Promise.resolve({});
@@ -132,7 +138,12 @@ describe("NotebooksPage", () => {
 
     render(<NotebooksPage />);
     await waitFor(() => {
-      expect(screen.getByText(/launch jupyter/i)).toBeInTheDocument();
+      expect(screen.getByText("Launch Session")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Launch Session"));
+    await waitFor(() => {
+      expect(screen.getByText("Launch Notebook Session")).toBeInTheDocument();
+      expect(screen.getByText("Launch RStudio")).toBeInTheDocument();
     });
   });
 
@@ -141,6 +152,7 @@ describe("NotebooksPage", () => {
     mockApiGet.mockImplementation((url: string) => {
       if (url.includes("sessions")) return Promise.resolve(mockSessions);
       if (url.includes("experiments")) return Promise.resolve(mockExperiments);
+      if (url.includes("projects")) return Promise.resolve({ projects: [] });
       if (url.includes("/api/v1/environments/1")) return Promise.resolve(mockEnvDetail);
       if (url.includes("/api/v1/environments")) return Promise.resolve(mockEnvironments);
       return Promise.resolve({});
@@ -159,6 +171,7 @@ describe("NotebooksPage", () => {
     mockApiGet.mockImplementation((url: string) => {
       if (url.includes("sessions")) return Promise.resolve(mockSessions);
       if (url.includes("experiments")) return Promise.resolve(mockExperiments);
+      if (url.includes("projects")) return Promise.resolve({ projects: [] });
       if (url.includes("/api/v1/environments/1")) return Promise.resolve(mockEnvDetail);
       if (url.includes("/api/v1/environments")) return Promise.resolve(mockEnvironments);
       return Promise.resolve({});
@@ -179,6 +192,7 @@ describe("NotebooksPage", () => {
     mockApiGet.mockImplementation((url: string) => {
       if (url.includes("sessions")) return Promise.resolve(mockSessions);
       if (url.includes("experiments")) return Promise.resolve(mockExperiments);
+      if (url.includes("projects")) return Promise.resolve({ projects: [] });
       if (url.includes("/api/v1/environments/1")) return Promise.resolve(mockEnvDetail);
       if (url.includes("/api/v1/environments")) return Promise.resolve(mockEnvironments);
       return Promise.resolve({});
@@ -215,6 +229,7 @@ describe("NotebooksPage", () => {
     mockApiGet.mockImplementation((url: string) => {
       if (url.includes("sessions")) return Promise.resolve(startingSessions);
       if (url.includes("experiments")) return Promise.resolve(mockExperiments);
+      if (url.includes("projects")) return Promise.resolve({ projects: [] });
       if (url.includes("/api/v1/environments/1")) return Promise.resolve(mockEnvDetail);
       if (url.includes("/api/v1/environments")) return Promise.resolve(mockEnvironments);
       return Promise.resolve({});

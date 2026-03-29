@@ -44,6 +44,17 @@ export default function EnvironmentsPage() {
   const [selectedVersion, setSelectedVersion] = useState<EnvironmentVersionResponse | null>(null);
   const [buildLogs, setBuildLogs] = useState<BuildLogsResponse | null>(null);
 
+  // Rebuild modal state
+  const [showRebuildModal, setShowRebuildModal] = useState(false);
+  const [rebuildTemplateContent, setRebuildTemplateContent] = useState("");
+  const [rebuildTemplateMatch, setRebuildTemplateMatch] = useState(false);
+  const [rebuildLoading, setRebuildLoading] = useState(false);
+  const [rebuildAction, setRebuildAction] = useState<"new" | "replace">("new");
+
+  // Delete version modal state
+  const [showDeleteVersionModal, setShowDeleteVersionModal] = useState<EnvironmentVersionSummary | null>(null);
+  const [deletingVersion, setDeletingVersion] = useState(false);
+
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/login"); return; }
     loadEnvironments();
@@ -135,6 +146,81 @@ export default function EnvironmentsPage() {
       );
       setBuildLogs(logs);
     } catch {}
+  }
+
+  async function openRebuildModal() {
+    if (!selectedEnv) return;
+    setRebuildLoading(true);
+    setShowRebuildModal(true);
+    setRebuildAction("new");
+    try {
+      const template = await api.get<{ definition_content: string }>("/api/v1/environments/template/dockerfile");
+      setRebuildTemplateContent(template.definition_content);
+
+      // Compare with latest version
+      const latestVersion = selectedEnv.versions[0];
+      if (latestVersion) {
+        const detail = await api.get<EnvironmentVersionResponse>(
+          `/api/v1/environments/${selectedEnv.id}/versions/${latestVersion.id}`
+        );
+        const templateNorm = template.definition_content.trim();
+        const currentNorm = detail.definition_content.trim();
+        setRebuildTemplateMatch(templateNorm === currentNorm);
+      } else {
+        setRebuildTemplateMatch(false);
+      }
+    } catch {
+      setRebuildTemplateContent("");
+      setRebuildTemplateMatch(false);
+    } finally {
+      setRebuildLoading(false);
+    }
+  }
+
+  async function handleRebuild() {
+    if (!selectedEnv) return;
+    setRebuildLoading(true);
+
+    try {
+      const latestVersion = selectedEnv.versions[0];
+
+      // If replacing, delete the existing version first
+      if (rebuildAction === "replace" && latestVersion) {
+        await api.delete(`/api/v1/environments/${selectedEnv.id}/versions/${latestVersion.id}`);
+      }
+
+      // Create new version with the template content
+      const newVersion = await api.post<EnvironmentVersionResponse>(
+        `/api/v1/environments/${selectedEnv.id}/versions`,
+        {
+          definition_format: "dockerfile",
+          definition_content: rebuildTemplateContent,
+        }
+      );
+
+      // Trigger the build immediately
+      await api.post(`/api/v1/environments/${selectedEnv.id}/versions/${newVersion.id}/build`);
+
+      setShowRebuildModal(false);
+      selectEnvironment(selectedEnv.id);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Rebuild failed");
+    } finally {
+      setRebuildLoading(false);
+    }
+  }
+
+  async function handleDeleteVersion(envId: number, version: EnvironmentVersionSummary) {
+    setDeletingVersion(true);
+    try {
+      await api.delete(`/api/v1/environments/${envId}/versions/${version.id}`);
+      setShowDeleteVersionModal(null);
+      selectEnvironment(envId);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to delete version");
+    } finally {
+      setDeletingVersion(false);
+    }
   }
 
   const statusColor: Record<string, string> = {
@@ -247,14 +333,16 @@ export default function EnvironmentsPage() {
                         )}
                       </div>
                     </div>
-                    {canBuild && (selectedVersion.status === "draft" || selectedVersion.status === "failed") && (
-                      <button
-                        onClick={() => handleBuild(selectedEnv.id, selectedVersion.id)}
-                        className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
-                      >
-                        Build Image
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {canBuild && (selectedVersion.status === "draft" || selectedVersion.status === "failed") && (
+                        <button
+                          onClick={() => handleBuild(selectedEnv.id, selectedVersion.id)}
+                          className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
+                        >
+                          Build Image
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <div className="p-6">
@@ -299,6 +387,14 @@ export default function EnvironmentsPage() {
                       <p className="text-sm text-gray-500">{selectedEnv.description}</p>
                     </div>
                     <div className="flex items-center gap-3">
+                      {canBuild && (
+                        <button
+                          onClick={openRebuildModal}
+                          className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
+                        >
+                          Rebuild from Latest Template
+                        </button>
+                      )}
                       <span className={`px-2 py-0.5 text-xs rounded-full ${visibilityBadge[selectedEnv.visibility]}`}>
                         {selectedEnv.visibility}
                       </span>
@@ -358,6 +454,14 @@ export default function EnvironmentsPage() {
                                 className="text-xs text-bioaf-600 hover:underline"
                               >
                                 Build
+                              </button>
+                            )}
+                            {canDelete && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setShowDeleteVersionModal(v); }}
+                                className="text-xs text-red-500 hover:underline"
+                              >
+                                Delete
                               </button>
                             )}
                           </div>
@@ -459,6 +563,120 @@ export default function EnvironmentsPage() {
                   </button>
                   <button
                     onClick={() => setShowCreateModal(false)}
+                    className="flex-1 border py-2 rounded text-sm"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Rebuild from Latest Template Modal */}
+          {showRebuildModal && selectedEnv && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg shadow-xl p-6 w-[500px] max-h-[80vh] overflow-y-auto">
+                <h3 className="font-semibold text-lg mb-4">Rebuild from Latest Template</h3>
+
+                {rebuildLoading && !rebuildTemplateContent ? (
+                  <p className="text-sm text-gray-500">Loading template...</p>
+                ) : rebuildTemplateMatch ? (
+                  <>
+                    <div className="bg-amber-50 border border-amber-200 rounded p-3 mb-4">
+                      <p className="text-sm text-amber-800">
+                        The latest bioAF template matches what was used to create v{selectedEnv.versions[0]?.version_number}.
+                        There are no template changes to pick up.
+                      </p>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Would you like to replace v{selectedEnv.versions[0]?.version_number} (deletes it and rebuilds)
+                      or create a new version?
+                    </p>
+                    <div className="space-y-2 mb-6">
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="radio"
+                          name="rebuild-action"
+                          checked={rebuildAction === "replace"}
+                          onChange={() => setRebuildAction("replace")}
+                        />
+                        <span>
+                          <strong>Replace v{selectedEnv.versions[0]?.version_number}</strong> -- delete and rebuild
+                        </span>
+                      </label>
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="radio"
+                          name="rebuild-action"
+                          checked={rebuildAction === "new"}
+                          onChange={() => setRebuildAction("new")}
+                        />
+                        <span>
+                          <strong>Build as v{(selectedEnv.versions[0]?.version_number || 0) + 1}</strong> -- keep existing version
+                        </span>
+                      </label>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm text-gray-600 mb-4">
+                      This will create <strong>v{(selectedEnv.versions[0]?.version_number || 0) + 1}</strong> using
+                      the latest bioAF template. The build will run in the background.
+                      {selectedEnv.versions.length > 0 && (
+                        <> You can continue using v{selectedEnv.versions[0]?.version_number} while it builds.</>
+                      )}
+                    </p>
+                    <div className="bg-green-50 border border-green-200 rounded p-3 mb-4">
+                      <p className="text-sm text-green-800">
+                        The template has been updated since your last build. The new version will include the latest changes.
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleRebuild}
+                    disabled={rebuildLoading}
+                    className="flex-1 bg-bioaf-600 text-white py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
+                  >
+                    {rebuildLoading ? "Working..." : rebuildAction === "replace" ? "Replace and Rebuild" : "Build New Version"}
+                  </button>
+                  <button
+                    onClick={() => setShowRebuildModal(false)}
+                    className="flex-1 border py-2 rounded text-sm"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Delete Version Modal */}
+          {showDeleteVersionModal && selectedEnv && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg shadow-xl p-6 w-96">
+                <h3 className="font-semibold text-lg mb-4">Delete Version</h3>
+                <div className="bg-red-50 border border-red-200 rounded p-3 mb-4">
+                  <p className="text-sm text-red-800">
+                    This will permanently delete <strong>v{showDeleteVersionModal.version_number}</strong> and
+                    its container image. Users will no longer be able to launch sessions with this version.
+                  </p>
+                </div>
+                <p className="text-sm text-gray-600 mb-4">
+                  This action cannot be undone.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleDeleteVersion(selectedEnv.id, showDeleteVersionModal)}
+                    disabled={deletingVersion}
+                    className="flex-1 bg-red-600 text-white py-2 rounded text-sm hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {deletingVersion ? "Deleting..." : "Delete Version"}
+                  </button>
+                  <button
+                    onClick={() => setShowDeleteVersionModal(null)}
                     className="flex-1 border py-2 rounded text-sm"
                   >
                     Cancel

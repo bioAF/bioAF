@@ -213,6 +213,16 @@ class EnvironmentService:
         return list(result.scalars().all())
 
     @staticmethod
+    async def delete_version(session: AsyncSession, org_id: int, environment_id: int, version_id: int) -> None:
+        """Delete a single environment version."""
+        version = await EnvironmentService.get_version(session, org_id, environment_id, version_id)
+        if not version:
+            raise ValueError("Version not found")
+
+        await session.delete(version)
+        await session.flush()
+
+    @staticmethod
     async def get_in_progress_builds(session: AsyncSession) -> list[EnvironmentVersion]:
         """Get all versions currently in 'building' status."""
         result = await session.execute(select(EnvironmentVersion).where(EnvironmentVersion.status == "building"))

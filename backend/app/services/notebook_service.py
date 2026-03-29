@@ -39,6 +39,7 @@ class NotebookService:
         experiment_id: int | None = None,
         project_id: int | None = None,
         image: str | None = None,
+        input_file_ids: list[int] | None = None,
     ) -> NotebookSession:
         # Check quota
         allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=1.0)
@@ -112,6 +113,32 @@ class NotebookService:
                     "password_hash": cred.password_hash,
                 }
 
+                # Include SSH key if the user has one configured
+                if cred.ssh_private_key:
+                    spec["ssh_private_key"] = cred.ssh_private_key
+
+            # Validate and build input file list
+            input_files_spec: list[dict] = []
+            if input_file_ids:
+                from app.models.file import File
+
+                file_results = await session.execute(select(File).where(File.id.in_(input_file_ids)))
+                found_files = {f.id: f for f in file_results.scalars().all()}
+
+                for fid in input_file_ids:
+                    f = found_files.get(fid)
+                    if not f or f.organization_id != org_id:
+                        raise ValueError(f"File {fid} not found or not accessible")
+                    input_files_spec.append(
+                        {
+                            "file_id": f.id,
+                            "gcs_uri": f.gcs_uri,
+                            "relative_path": f.filename,
+                        }
+                    )
+
+                spec["input_files"] = input_files_spec
+
             result = await notebook_adapter.launch_session(spec)
 
             notebook_session.slurm_job_id = str(result.get("session_id", ""))
@@ -127,9 +154,25 @@ class NotebookService:
                 notebook_session.status = "running"
             else:
                 notebook_session.status = "starting"
+
+            # Create NotebookSessionFile input rows
+            if input_file_ids:
+                from app.models.notebook_session_file import NotebookSessionFile
+
+                for fid in input_file_ids:
+                    session.add(
+                        NotebookSessionFile(
+                            session_id=notebook_session.id,
+                            file_id=fid,
+                            access_type="input",
+                        )
+                    )
+
         except Exception as e:
             notebook_session.status = "failed"
             logger.error("Failed to launch notebook session %d: %s", notebook_session.id, e)
+            if "not found or not accessible" in str(e):
+                raise
 
         await session.flush()
 

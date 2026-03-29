@@ -195,7 +195,7 @@ class EnvironmentBuildService:
         }
         if sa_email and sa_email != "null":
             build_body["serviceAccount"] = f"projects/{project_id}/serviceAccounts/{sa_email}"
-            build_body["options"]["logging"] = "CLOUD_LOGGING_ONLY"
+            build_body["options"]["defaultLogsBucketBehavior"] = "REGIONAL_USER_OWNED_BUCKET"
 
         result = _authorized_request(credentials, "POST", build_url, build_body)
         build_id = result.get("metadata", {}).get("build", {}).get("id", "")

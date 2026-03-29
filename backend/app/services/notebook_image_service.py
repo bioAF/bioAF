@@ -33,15 +33,14 @@ FROM jupyter/scipy-notebook:latest
 
 USER root
 
-# System dependencies for R, HDF5, and build tools
+# System dependencies for R, HDF5, and git
 RUN apt-get update && apt-get install -y --no-install-recommends \\
     libhdf5-dev libcurl4-openssl-dev libssl-dev libxml2-dev \\
-    cmake r-base r-base-dev \\
+    r-base r-base-dev \\
+    git openssh-client \\
     && rm -rf /var/lib/apt/lists/*
 
 # Python scRNA-seq packages
-# Note: louvain is excluded (requires igraph C build); leidenalg is the
-# modern replacement and is used by scanpy by default.
 RUN pip install --no-cache-dir \\
     scanpy anndata scvi-tools leidenalg \\
     pandas numpy matplotlib seaborn plotly \\
@@ -241,7 +240,7 @@ async def submit_image_build(session: AsyncSession, project_id: str, region: str
     }
     if sa_email and sa_email != "null":
         build_body["serviceAccount"] = f"projects/{project_id}/serviceAccounts/{sa_email}"
-        build_body["options"]["logging"] = "CLOUD_LOGGING_ONLY"
+        build_body["options"]["defaultLogsBucketBehavior"] = "REGIONAL_USER_OWNED_BUCKET"
         logger.info("Cloud Build will run as SA: %s", sa_email)
 
     result = _authorized_request(credentials, "POST", build_url, build_body)

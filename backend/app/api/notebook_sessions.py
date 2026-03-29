@@ -31,6 +31,7 @@ class NotebookLaunchRequest(BaseModel):
     session_type: str
     resource_profile: str = "small"
     experiment_id: int | None = None
+    input_file_ids: list[int] = []
 
 
 class NotebookSettings(BaseModel):
@@ -70,6 +71,8 @@ def _session_response(ns) -> SessionResponse:
         started_at=ns.started_at,
         stopped_at=ns.stopped_at,
         created_at=ns.created_at,
+        git_branch_name=ns.git_branch_name,
+        git_commit_hash=ns.git_commit_hash,
     )
 
 
@@ -258,6 +261,7 @@ async def launch_session(
             resource_profile=body.resource_profile,
             experiment_id=body.experiment_id,
             image=scrna_image,
+            input_file_ids=body.input_file_ids or None,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -333,6 +337,99 @@ async def sync_session(
             pass  # Best effort in local/test mode
 
     return {"status": "ok", "message": "Sync triggered"}
+
+
+# System files and directories to exclude from output registration
+_EXCLUDED_FILENAMES = {
+    ".bash_history",
+    ".Rhistory",
+    ".bash_logout",
+    ".bashrc",
+    ".profile",
+    ".gitconfig",
+    ".ssh",
+    ".local",
+    ".cache",
+    ".ipython",
+}
+_EXCLUDED_PREFIXES = ("data/", ".git/", "__pycache__/", ".ipynb_checkpoints/")
+
+
+class OutputRegistrationRequest(BaseModel):
+    outputs: list[dict]
+
+
+def _file_type_from_extension(filename: str) -> str:
+    """Derive file_type from filename extension."""
+    parts = filename.rsplit(".", 1)
+    if len(parts) < 2:
+        return "unknown"
+    ext = parts[1].lower()
+    # Handle double extensions
+    if filename.lower().endswith(".fastq.gz"):
+        return "fastq"
+    return ext
+
+
+@router.post("/sessions/{session_id}/register-outputs")
+async def register_outputs(
+    session_id: int,
+    body: OutputRegistrationRequest,
+    current_user: dict = require_permission("notebooks", "edit"),
+    session: AsyncSession = Depends(get_session),
+):
+    notebook_session = await NotebookService.get_session(session, session_id)
+    if not notebook_session:
+        raise HTTPException(404, "Session not found")
+
+    from app.models.file import File
+    from app.models.notebook_session_file import NotebookSessionFile
+
+    registered = 0
+    for output in body.outputs:
+        filename = output.get("filename", "")
+        size_bytes = output.get("size_bytes", 0)
+        gcs_uri = output.get("gcs_uri", "")
+
+        # Exclude system files
+        if filename in _EXCLUDED_FILENAMES or filename.startswith("."):
+            if filename in _EXCLUDED_FILENAMES:
+                continue
+            # Allow dotfiles that aren't in the exclusion set only if they have a useful extension
+            base = filename.lstrip(".")
+            if not base or "." not in base:
+                continue
+
+        # Exclude /data/ directory files (inputs)
+        if any(filename.startswith(prefix) for prefix in _EXCLUDED_PREFIXES):
+            continue
+
+        file_record = File(
+            organization_id=notebook_session.organization_id,
+            gcs_uri=gcs_uri,
+            filename=filename,
+            size_bytes=size_bytes,
+            file_type=_file_type_from_extension(filename),
+            experiment_id=notebook_session.experiment_id,
+            project_id=notebook_session.project_id,
+            source_type="notebook_output",
+            source_notebook_session_id=session_id,
+            uploader_user_id=notebook_session.user_id,
+        )
+        session.add(file_record)
+        await session.flush()
+
+        session.add(
+            NotebookSessionFile(
+                session_id=session_id,
+                file_id=file_record.id,
+                access_type="output",
+            )
+        )
+        registered += 1
+
+    await session.commit()
+    return {"status": "ok", "registered_count": registered}
 
 
 # -- Settings endpoints --
