@@ -231,9 +231,10 @@ async def assign_file(
     try:
         await FileOrganizationService.assign_file_to_experiment(session, file_id, body.experiment_id, user_id)
     except ValueError as exc:
+        logger.warning("File assign failed for file %d: %s", file_id, exc)
         if "not found" in str(exc).lower():
-            raise HTTPException(status_code=404, detail=str(exc))
-        raise HTTPException(status_code=400, detail=str(exc))
+            raise HTTPException(status_code=404, detail="File or experiment not found")
+        raise HTTPException(status_code=400, detail="Failed to assign file")
     return {"status": "ok", "file_id": file_id, "experiment_id": body.experiment_id}
 
 
@@ -248,7 +249,8 @@ async def unlink_file(
     try:
         await FileOrganizationService.unlink_file_from_experiment(session, file_id, user_id)
     except ValueError as exc:
+        logger.warning("File unlink failed for file %d: %s", file_id, exc)
         if "not found" in str(exc).lower():
-            raise HTTPException(status_code=404, detail=str(exc))
-        raise HTTPException(status_code=400, detail=str(exc))
+            raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=400, detail="Failed to unlink file")
     return {"status": "ok", "file_id": file_id}

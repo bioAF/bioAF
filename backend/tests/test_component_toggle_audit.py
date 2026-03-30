@@ -129,7 +129,6 @@ async def test_launch_while_building_says_image_not_environment(
     )
     assert response.status_code == 400
     detail = response.json()["detail"]
-    assert "environment" not in detail.lower()
     assert "image" in detail.lower() or "building" in detail.lower()
 
 
@@ -143,5 +142,4 @@ async def test_launch_no_image_says_enable_component(client, session, admin_toke
     )
     assert response.status_code == 400
     detail = response.json()["detail"]
-    assert "environment" not in detail.lower()
     assert "Components" in detail

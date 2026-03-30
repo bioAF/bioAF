@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +16,8 @@ from app.schemas.upgrade import (
     RollbackResponse,
 )
 from app.services.upgrade_service import UpgradeService
+
+logger = logging.getLogger("bioaf.upgrades.api")
 
 router = APIRouter(prefix="/api/upgrades", tags=["upgrades"])
 
@@ -83,7 +87,8 @@ async def confirm_upgrade(
             message=f"Upgrade to {upgrade.to_version} completed",
         )
     except ValueError as e:
-        raise HTTPException(400, detail=str(e))
+        logger.warning("Upgrade confirm failed for %d: %s", upgrade_id, e)
+        raise HTTPException(400, detail="Failed to confirm upgrade")
 
 
 @router.post("/{upgrade_id}/rollback", response_model=RollbackResponse)
@@ -103,4 +108,5 @@ async def rollback_upgrade(
             message=f"Upgrade to {upgrade.to_version} rolled back",
         )
     except ValueError as e:
-        raise HTTPException(400, detail=str(e))
+        logger.warning("Upgrade rollback failed for %d: %s", upgrade_id, e)
+        raise HTTPException(400, detail="Failed to rollback upgrade")

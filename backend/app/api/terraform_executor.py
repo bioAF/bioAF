@@ -97,9 +97,10 @@ async def _stream_events(
         async for event in gen:
             yield _sse_event(event)
     except Exception as exc:
+        logger.error("Terraform event stream error: %s", exc, exc_info=True)
         error_event = TerraformProgressEvent(
             event_type="apply_error",
-            message=str(exc),
+            message="Apply failed unexpectedly",
         )
         yield _sse_event(error_event)
 
@@ -141,9 +142,10 @@ async def bootstrap_foundation(
             async for event in gen:
                 yield _sse_event(event)
         except Exception as exc:
+            logger.error("Bootstrap foundation stream error: %s", exc, exc_info=True)
             error_event = TerraformProgressEvent(
                 event_type="apply_error",
-                message=str(exc),
+                message="Apply failed unexpectedly",
             )
             yield _sse_event(error_event)
         finally:
@@ -173,7 +175,8 @@ async def run_plan(
         )
         await session.commit()
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        logger.warning("Terraform plan failed for module %s: %s", body.module_name, exc)
+        raise HTTPException(status_code=409, detail="Cannot start plan")
 
     return TerraformRunDetail.model_validate(run)
 
@@ -205,9 +208,10 @@ async def apply_plan(
             async for event in gen:
                 yield _sse_event(event)
         except Exception as exc:
+            logger.error("Terraform apply stream error for run %d: %s", run_id, exc, exc_info=True)
             error_event = TerraformProgressEvent(
                 event_type="apply_error",
-                message=str(exc),
+                message="Apply failed unexpectedly",
             )
             yield _sse_event(error_event)
         finally:
@@ -237,7 +241,8 @@ async def abandon_run(
         )
         await session.commit()
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        logger.warning("Terraform abandon failed for run %d: %s", run_id, exc)
+        raise HTTPException(status_code=409, detail="Cannot abandon run")
 
     return TerraformRunDetail.model_validate(run)
 

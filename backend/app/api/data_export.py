@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +14,8 @@ from app.api.dependencies import require_permission
 from app.database import get_session
 from app.services.audit_service import log_action
 from app.services import export_service
+
+logger = logging.getLogger("bioaf.data_export.api")
 
 router = APIRouter(tags=["data-export"])
 
@@ -82,7 +85,8 @@ async def export_experiment(
             user_email=user_email,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        logger.warning("Experiment export failed for %d: %s", experiment_id, exc)
+        raise HTTPException(status_code=404, detail="Experiment not found")
 
     await log_action(
         session=session,
@@ -103,7 +107,8 @@ async def export_experiment(
                 zip_bytes, org_id, f"experiment_{experiment_id}", session
             )
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"GCS upload failed: {exc}")
+            logger.error("GCS upload failed for experiment %d: %s", experiment_id, exc, exc_info=True)
+            raise HTTPException(status_code=500, detail="Export upload failed")
         await session.commit()
         return {"signed_url": signed_url, "expires_in_hours": 24}
 
@@ -139,7 +144,8 @@ async def export_project(
             user_email=user_email,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        logger.warning("Project export failed for %d: %s", project_id, exc)
+        raise HTTPException(status_code=404, detail="Project not found")
 
     await log_action(
         session=session,
@@ -158,7 +164,8 @@ async def export_project(
         try:
             signed_url = await export_service._upload_zip_to_gcs(zip_bytes, org_id, f"project_{project_id}", session)
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"GCS upload failed: {exc}")
+            logger.error("GCS upload failed for project %d: %s", project_id, exc, exc_info=True)
+            raise HTTPException(status_code=500, detail="Export upload failed")
         await session.commit()
         return {"signed_url": signed_url, "expires_in_hours": 24}
 

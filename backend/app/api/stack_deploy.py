@@ -371,8 +371,8 @@ async def sync_storage_config_endpoint(
         await session.commit()
         return {"status": "ok", "populated": populated}
     except Exception as exc:
-        logger.error("Storage config sync failed: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        logger.error("Storage config sync failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Storage config sync failed")
 
 
 @router.post("/api/v1/infrastructure/stack/sync-compute-config")
@@ -399,8 +399,8 @@ async def sync_compute_config_endpoint(
             pass  # Adapter may not be initialized yet
         return {"status": "ok", "populated": populated}
     except Exception as exc:
-        logger.error("Compute config sync failed: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        logger.error("Compute config sync failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Compute config sync failed")
 
 
 @router.get("/api/v1/infrastructure/stack/status")
@@ -645,7 +645,8 @@ async def notebook_image_cancel(
         await session.commit()
         return {"cancelled": True, "build_id": build_id}
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        logger.warning("Notebook image build cancel failed: %s", exc)
+        raise HTTPException(status_code=400, detail="Cannot cancel build")
 
 
 # -----------------------------------------------------------------------

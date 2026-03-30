@@ -264,7 +264,8 @@ async def launch_session(
             input_file_ids=body.input_file_ids or None,
         )
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        logger.warning("Session launch failed: %s", e)
+        raise HTTPException(400, "Failed to launch session")
 
     await session.commit()
 
@@ -303,7 +304,8 @@ async def stop_session(
     try:
         notebook_session = await NotebookService.stop_session(session, session_id, user_id)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        logger.warning("Session stop failed for session %d: %s", session_id, e)
+        raise HTTPException(400, "Failed to stop session")
 
     await session.commit()
     notebook_session = await NotebookService.get_session(session, notebook_session.id)

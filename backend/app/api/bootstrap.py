@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -22,6 +23,8 @@ from app.services.component_service import ComponentService
 from app.services.email_service import EmailService
 from app.services import role_service
 from app.services.user_service import UserService
+
+logger = logging.getLogger("bioaf.bootstrap.api")
 
 router = APIRouter(prefix="/api/bootstrap", tags=["bootstrap"])
 
@@ -302,10 +305,11 @@ async def test_smtp(body: TestSmtpRequest, request: Request, session: AsyncSessi
             f"Check your host and port settings. ({e})",
         )
     except Exception as e:
+        logger.error("SMTP test unexpected error: %s", e, exc_info=True)
         return TestSmtpResponse(
             status="failed",
             to=body.to,
-            detail=f"Unexpected error: {e}",
+            detail="Unexpected error while testing email delivery",
         )
 
 
