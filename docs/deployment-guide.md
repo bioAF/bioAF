@@ -93,14 +93,16 @@ organization and admin user in the database.
 ### 6. Access the Application
 
 Open the URL printed by `./bioaf status` or `./bioaf start`. The nginx
-reverse proxy serves the frontend on port 8080 and routes `/api/*`
-requests to the backend. All API calls use relative URLs, so the
-application works at any IP address or hostname without configuration.
+reverse proxy serves the frontend on port 443 (HTTPS) and routes `/api/*`
+requests to the backend. HTTP requests on port 80 are redirected to HTTPS
+automatically. All API calls use relative URLs, so the application works
+at any IP address or hostname without configuration.
 
 ## Architecture
 
 ```text
-                    :8080
+                :80 (redirect)
+                :443 (HTTPS)
                       |
                     nginx
                    /     \
@@ -115,7 +117,8 @@ application works at any IP address or hostname without configuration.
 ```
 
 All four services run as Docker containers orchestrated by Docker Compose.
-nginx handles TLS termination (when configured) and request routing.
+nginx handles TLS termination and request routing. HTTP on port 80 is
+redirected to HTTPS on port 443.
 
 ## Service Management
 
@@ -190,11 +193,11 @@ To deploy bioAF on a Google Cloud VM:
      --tags=bioaf
    ```
 
-2. Open port 8080 in the firewall:
+2. Open ports 80 and 443 in the firewall:
 
    ```bash
    gcloud compute firewall-rules create bioaf-allow-web \
-     --allow=tcp:8080 \
+     --allow=tcp:80,tcp:443 \
      --target-tags=bioaf \
      --source-ranges=0.0.0.0/0
    ```
@@ -214,7 +217,7 @@ To deploy bioAF on a Google Cloud VM:
    ./bioaf setup
    ```
 
-5. Access at `http://<VM_EXTERNAL_IP>:8080`.
+5. Access at `https://<VM_EXTERNAL_IP>`.
 
 ## Post-Deploy Configuration
 

@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     local_node_cost_hourly: float = 0.01
     local_storage_cost_monthly: float = 0.11
 
+    # SSL / TLS
+    ssl_enabled: bool = False
+    ssl_certfile: str = ""
+    ssl_keyfile: str = ""
+
     # Bcrypt
     bcrypt_rounds: int = 12
 

@@ -9,6 +9,7 @@ from app.database import engine
 from app.middleware.auth_middleware import AuthMiddleware
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
+from app.middleware.security_headers import SecurityHeadersMiddleware
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -598,10 +599,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Middleware (applied in reverse order)
+# Middleware (applied in reverse order -- last added is outermost)
 app.add_middleware(AuthMiddleware)
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Include routers
 from app.api.router import api_router  # noqa: E402
