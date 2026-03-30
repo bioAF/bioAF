@@ -25,3 +25,12 @@ async def test_hsts_header_when_ssl_enabled(client, monkeypatch):
     monkeypatch.setattr(settings, "ssl_enabled", False)
     resp = await client.get("/api/health/")
     assert "Strict-Transport-Security" not in resp.headers
+
+
+@pytest.mark.asyncio
+async def test_content_security_policy_present(client):
+    """Every response must include a Content-Security-Policy header."""
+    resp = await client.get("/api/health/")
+    csp = resp.headers["Content-Security-Policy"]
+    assert "default-src" in csp
+    assert "frame-ancestors 'none'" in csp
