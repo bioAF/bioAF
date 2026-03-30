@@ -1,5 +1,7 @@
 """API endpoints for orphaned resource tracking and cleanup."""
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +12,8 @@ from app.schemas.orphaned_resource import (
     OrphanedResourceResponse,
 )
 from app.services.orphaned_resource_service import OrphanedResourceService
+
+logger = logging.getLogger("bioaf.orphaned_resources.api")
 
 router = APIRouter(tags=["orphaned_resources"])
 
@@ -46,7 +50,8 @@ async def cleanup_orphaned_resource(
         resource = await OrphanedResourceService.cleanup_resource(session, resource_id, user_id)
         await session.commit()
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        logger.warning("Orphaned resource cleanup failed for %d: %s", resource_id, exc)
+        raise HTTPException(status_code=404, detail="Resource not found")
     return OrphanedResourceResponse.model_validate(resource)
 
 
@@ -65,5 +70,6 @@ async def dismiss_orphaned_resource(
         resource = await OrphanedResourceService.dismiss_resource(session, resource_id, user_id)
         await session.commit()
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        logger.warning("Orphaned resource dismiss failed for %d: %s", resource_id, exc)
+        raise HTTPException(status_code=404, detail="Resource not found")
     return OrphanedResourceResponse.model_validate(resource)

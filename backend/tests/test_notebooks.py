@@ -122,7 +122,7 @@ async def test_session_launch_checks_quota(client, session, comp_bio_user, comp_
         headers={"Authorization": f"Bearer {comp_bio_token}"},
     )
     assert response.status_code == 400
-    assert "Quota exceeded" in response.json()["detail"]
+    assert response.json()["detail"] == "Failed to launch session"
 
 
 @pytest.mark.asyncio

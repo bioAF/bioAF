@@ -120,7 +120,8 @@ async def confirm_run(run_id: int, request: Request, session: AsyncSession = Dep
         try:
             run = await TerraformService.apply_plan(session, run_id, user_id)
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            logger.warning("Terraform apply failed for run %d: %s", run_id, e)
+            raise HTTPException(status_code=400, detail="Failed to apply plan")
         await session.commit()
 
     return TerraformRunResponse(
@@ -144,7 +145,8 @@ async def cancel_run(run_id: int, request: Request, session: AsyncSession = Depe
     try:
         run = await TerraformService.cancel_run(session, run_id, user_id)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning("Terraform cancel failed for run %d: %s", run_id, e)
+        raise HTTPException(status_code=400, detail="Failed to cancel run")
 
     await session.commit()
     return TerraformRunResponse(

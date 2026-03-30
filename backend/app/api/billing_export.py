@@ -267,9 +267,10 @@ async def billing_export_teardown(
                     completed = True
                 yield _sse_event(event)
         except Exception as exc:
+            logger.error("Billing export apply error: %s", exc, exc_info=True)
             error_event = TerraformProgressEvent(
                 event_type="apply_error",
-                message=str(exc),
+                message="Apply failed unexpectedly",
             )
             yield _sse_event(error_event)
         finally:
