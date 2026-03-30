@@ -31,3 +31,13 @@
 | [ADR-027](../decisions/ADR-027-navigation-restructure.md) | Navigation Restructure | Reorganize sidebar navigation for clarity |
 | [ADR-028](../decisions/ADR-028-bigquery-billing-export.md) | BigQuery Billing Export | Use GCP BigQuery billing export for accurate cost data |
 | [ADR-029](../decisions/ADR-029-signed-url-direct-upload.md) | Signed URL Direct Upload | Browser uploads directly to GCS via signed URLs, bypassing backend |
+| [ADR-030](../decisions/ADR-030-session-credentials-pam-auth.md) | Session Credentials with PAM Auth | Per-user session credentials for RStudio PAM authentication |
+| [ADR-031](../decisions/ADR-031-notebook-image-build-pipeline.md) | Notebook Image Build Pipeline | Cloud Build pipeline for notebook container images |
+| [ADR-032](../decisions/ADR-032-custom-rbac.md) | Custom RBAC | Permission-based access control with custom roles |
+| [ADR-033](../decisions/ADR-033-versioned-compute-environments.md) | Versioned Compute Environments | Immutable, versioned notebook and compute environments |
+| [ADR-034](../decisions/ADR-034-custom-work-nodes.md) | Custom Work Nodes | Ephemeral Kubernetes pods for interactive compute sessions |
+| [ADR-035](../decisions/ADR-035-bioaf-cli.md) | bioaf CLI | In-session CLI for provenance capture and heartbeat |
+| [ADR-036](../decisions/ADR-036-data-export-download.md) | Data Export and Download | Bulk export and download system for experiment data |
+| [ADR-037](../decisions/ADR-037-provenance-reporting.md) | Provenance Reporting | Full lineage reports for files and analysis outputs |
+| [ADR-038](../decisions/ADR-038-pipeline-io-lineage-junction.md) | Pipeline I/O Lineage | Junction table tracking pipeline input file lineage |
+| [ADR-039](../decisions/ADR-039-notebook-output-provenance.md) | Notebook Output Provenance | Provenance tracking for notebook-generated outputs |

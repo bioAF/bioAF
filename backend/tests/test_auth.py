@@ -121,3 +121,31 @@ async def test_request_password_reset(client: AsyncClient, admin_user):
 async def test_unauthorized_without_token(client: AsyncClient):
     response = await client.get("/api/users")
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_query_param_token_rejected_on_non_content_path(client: AsyncClient, admin_token: str):
+    """JWT in query parameter must be rejected on non-file-content endpoints."""
+    response = await client.get(
+        f"/api/auth/me?token={admin_token}",
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_query_param_token_rejected_on_api_endpoints(client: AsyncClient, admin_token: str):
+    """Endpoints like /api/users must not accept tokens via query params."""
+    response = await client.get(
+        f"/api/users?token={admin_token}",
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_bearer_header_still_works(client: AsyncClient, admin_token: str):
+    """Authorization header must continue to work on all endpoints."""
+    response = await client.get(
+        "/api/auth/me",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
