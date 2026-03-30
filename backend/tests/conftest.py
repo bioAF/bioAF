@@ -55,13 +55,20 @@ async def db_engine(worker_id):
             await conn.execute(sa_text(f"SET search_path TO {schema}"))
             await conn.run_sync(Base.metadata.create_all)
     else:
-        # Drop each table individually in its own transaction to avoid FK deadlocks
+        # Drop all tables individually, then drop user-defined enum types
+        # that survive table drops and cause IntegrityError on create_all.
         async with engine.begin() as conn:
             rows = await conn.execute(sa_text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'"))
             tables = [row[0] for row in rows.fetchall()]
         for table in tables:
             async with engine.begin() as conn:
-                await conn.execute(sa_text(f"DROP TABLE IF EXISTS {table} CASCADE"))
+                await conn.execute(sa_text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
+        async with engine.begin() as conn:
+            rows = await conn.execute(
+                sa_text("SELECT typname FROM pg_type WHERE typnamespace = 'public'::regnamespace AND typtype = 'e'")
+            )
+            for (name,) in rows.fetchall():
+                await conn.execute(sa_text(f'DROP TYPE IF EXISTS "{name}" CASCADE'))
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
@@ -86,7 +93,13 @@ async def db_engine(worker_id):
             tables = [row[0] for row in rows.fetchall()]
         for table in tables:
             async with engine.begin() as conn:
-                await conn.execute(sa_text(f"DROP TABLE IF EXISTS {table} CASCADE"))
+                await conn.execute(sa_text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
+        async with engine.begin() as conn:
+            rows = await conn.execute(
+                sa_text("SELECT typname FROM pg_type WHERE typnamespace = 'public'::regnamespace AND typtype = 'e'")
+            )
+            for (name,) in rows.fetchall():
+                await conn.execute(sa_text(f'DROP TYPE IF EXISTS "{name}" CASCADE'))
 
     await engine.dispose()
 

@@ -6,8 +6,7 @@ import { Header } from "@/components/layout/Header";
 import { PlotModal } from "@/components/shared/PlotModal";
 import { ExportPdfButton } from "@/components/shared/ExportPdfButton";
 import { ContentLoading } from "@/components/shared/ContentLoading";
-import { api } from "@/lib/api";
-import { getToken } from "@/lib/auth";
+import { api, fileContentUrl } from "@/lib/api";
 import type { QCDashboardSummary, QCDashboardResponse, QCMetrics } from "@/lib/types";
 import {
   BarcodeRankChart,
@@ -124,13 +123,8 @@ function PlotImage({ fileId, title, onExpand }: { fileId: number; title: string;
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    // Build a same-origin proxy URL that serves file bytes directly,
-    // avoiding cross-origin issues with GCS signed URLs.
-    // URL is built client-side only (useEffect) to avoid hydration mismatch.
-    const token = getToken();
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-    const contentUrl = `${apiUrl}/api/files/${fileId}/content`;
-    setUrl(`${contentUrl}${token ? `?token=${encodeURIComponent(token)}` : ""}`);
+    // Built client-side only (useEffect) to avoid hydration mismatch.
+    setUrl(fileContentUrl(fileId));
   }, [fileId]);
 
   return (

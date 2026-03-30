@@ -1,3 +1,5 @@
+import re
+
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -22,6 +24,14 @@ PUBLIC_PATHS = {
 }
 
 
+_FILE_CONTENT_RE = re.compile(r"^/api/files/\d+/content$")
+
+
+def _is_file_content_path(path: str) -> bool:
+    """Return True for paths that legitimately need query-param token auth."""
+    return _FILE_CONTENT_RE.match(path) is not None
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -34,12 +44,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
         ):
             return await call_next(request)
 
-        # Extract token from Authorization header or query parameter
+        # Extract token from Authorization header.
+        # Query parameter tokens are only accepted on file content paths
+        # (used by <img src> tags that cannot send Authorization headers).
         auth_header = request.headers.get("Authorization")
         token: str | None = None
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header.split(" ", 1)[1]
-        elif request.query_params.get("token"):
+        elif request.query_params.get("token") and _is_file_content_path(path):
             token = request.query_params["token"]
 
         if not token:
