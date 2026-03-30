@@ -10,6 +10,9 @@ documentation/
 # Environment
 .env
 
+# TLS certificates
+docker/certs/
+
 # Python
 *.pyc
 __pycache__/
