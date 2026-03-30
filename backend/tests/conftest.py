@@ -41,7 +41,13 @@ async def db_engine(worker_id):
 
     schema = _worker_schema(worker_id)
 
-    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+    engine = create_async_engine(
+        TEST_DATABASE_URL,
+        echo=False,
+        pool_pre_ping=True,
+        pool_size=5,
+        max_overflow=5,
+    )
 
     if schema != "public":
         async with engine.begin() as conn:

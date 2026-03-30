@@ -16,6 +16,7 @@ import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportPanel";
 import { FileBrowser } from "@/components/files/FileBrowser";
 import { VocabularySelect } from "@/components/shared/VocabularySelect";
+import { CsvUploadModal } from "@/components/experiments/CsvUploadModal";
 import { ExtensibleVocabularySelect } from "@/components/shared/ExtensibleVocabularySelect";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api, fileContentUrl } from "@/lib/api";
@@ -69,6 +70,7 @@ export default function ExperimentDetailPage() {
   const [overviewForm, setOverviewForm] = useState<ExperimentUpdateRequest>({});
   const [overviewError, setOverviewError] = useState("");
   const [showSampleForm, setShowSampleForm] = useState(false);
+  const [showCsvUpload, setShowCsvUpload] = useState(false);
   const [showBatchForm, setShowBatchForm] = useState(false);
   const [sampleForm, setSampleForm] = useState<SampleCreateRequest>({});
   const [sampleFormError, setSampleFormError] = useState("");
@@ -253,12 +255,9 @@ export default function ExperimentDetailPage() {
     } catch {}
   }
 
-  async function handleCsvUpload(file: File) {
-    try {
-      await api.upload(`/api/experiments/${id}/samples/upload`, file);
-      loadSamples();
-      loadExperiment();
-    } catch {}
+  function handleCsvUploadSuccess() {
+    loadSamples();
+    loadExperiment();
   }
 
   function startEditSample(sample: Sample) {
@@ -392,6 +391,9 @@ export default function ExperimentDetailPage() {
               ← Back
             </button>
             <h1 className="text-2xl font-bold">{experiment.name}</h1>
+            {experiment.code && (
+              <span className="text-sm font-mono bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{experiment.code}</span>
+            )}
             <ExperimentStatusBadge status={experiment.status} />
             <div className="ml-auto flex items-center gap-2">
               <ProvenanceExportMenu entityType="experiments" entityId={Number(id)} />
@@ -615,15 +617,12 @@ export default function ExperimentDetailPage() {
                 >
                   Add Sample
                 </button>
-                <label className="bg-white border border-gray-300 px-4 py-2 rounded-md text-sm cursor-pointer hover:bg-gray-50">
+                <button
+                  onClick={() => setShowCsvUpload(true)}
+                  className="bg-white border border-gray-300 px-4 py-2 rounded-md text-sm hover:bg-gray-50"
+                >
                   Upload CSV
-                  <input
-                    type="file"
-                    accept=".csv,.tsv,.txt"
-                    className="hidden"
-                    onChange={(e) => { if (e.target.files?.[0]) handleCsvUpload(e.target.files[0]); }}
-                  />
-                </label>
+                </button>
                 {selectedSampleIds.size > 0 && (
                   <button
                     onClick={() => { setShowBulkEdit(true); setBulkEditForm({}); setBulkEditError(""); }}
@@ -1088,6 +1087,13 @@ export default function ExperimentDetailPage() {
                 </table>
               </div>
             </div>
+          )}
+          {showCsvUpload && (
+            <CsvUploadModal
+              experimentId={Number(id)}
+              onClose={() => setShowCsvUpload(false)}
+              onSuccess={handleCsvUploadSuccess}
+            />
           )}
           <DataExportModal
             experimentId={Number(id)}

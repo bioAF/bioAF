@@ -203,6 +203,9 @@ export default function ProjectDetailPage() {
           <div className="mb-6">
             <div className="flex items-center gap-3 mb-2">
               <h1 className="text-2xl font-bold">{project.name}</h1>
+              {project.code && (
+                <span className="text-sm font-mono bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{project.code}</span>
+              )}
               <StatusBadge status={project.status || "active"} />
               <div className="ml-auto">
                 {canModify && (

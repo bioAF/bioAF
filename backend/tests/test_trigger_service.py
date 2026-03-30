@@ -231,10 +231,12 @@ async def test_batching_window(client, admin_token, session, org_user, pipeline,
     await TriggerService.evaluate_event_triggers(ev2, session)
     await session.commit()
 
-    # Check that both files are in the batch
+    # Check that both files are in the batch (keyed by (trigger_id, experiment_id))
     batches = TriggerService.get_active_batches()
-    assert trigger.id in batches
-    assert len(batches[trigger.id]["file_ids"]) == 2
+    # Both events have no experiment, so key is (trigger.id, None)
+    batch_key = (trigger.id, None)
+    assert batch_key in batches
+    assert len(batches[batch_key]["file_ids"]) == 2
 
 
 @pytest.mark.asyncio

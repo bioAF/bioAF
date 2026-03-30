@@ -146,6 +146,7 @@ async def lifespan(app: FastAPI):
     background_tasks.append(asyncio.create_task(_review_reminder_loop()))
     background_tasks.append(asyncio.create_task(_trigger_batch_expiry_loop()))
     background_tasks.append(asyncio.create_task(_budget_queue_processing_loop()))
+    background_tasks.append(asyncio.create_task(_scheduled_trigger_loop()))
     background_tasks.append(asyncio.create_task(_pubsub_listener_loop()))
     background_tasks.append(asyncio.create_task(_session_monitor_loop()))
     background_tasks.append(asyncio.create_task(_notebook_image_build_loop()))
@@ -440,6 +441,27 @@ async def _budget_queue_processing_loop():
             break
         except Exception as e:
             logger.error("Budget queue processing error: %s", e)
+
+
+async def _scheduled_trigger_loop():
+    """Evaluate scheduled triggers every 60 seconds."""
+    from app.database import async_session_factory
+    from app.services.trigger_service import TriggerService
+
+    while True:
+        try:
+            await asyncio.sleep(60)
+            async with async_session_factory() as session:
+                evaluations = await TriggerService.evaluate_scheduled_triggers(session)
+                if evaluations:
+                    await session.commit()
+                    submitted = sum(1 for e in evaluations if e.result == "submitted")
+                    if submitted:
+                        logger.info("Scheduled triggers: submitted %d runs", submitted)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error("Scheduled trigger evaluation error: %s", e)
 
 
 async def _pubsub_listener_loop():

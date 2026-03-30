@@ -8,6 +8,7 @@ import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import type { NamingProfile, NamingProfileTestResult, SegmentDefinition } from "@/lib/types";
+import { NamingProfileWizard } from "@/components/naming/NamingProfileWizard";
 
 const FIELD_OPTIONS = [
   "date", "project_code", "experiment_code", "sample_id",
@@ -21,6 +22,7 @@ export default function NamingProfilesPage() {
   const [profiles, setProfiles] = useState<NamingProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
   const [showTest, setShowTest] = useState(false);
   const [editingProfile, setEditingProfile] = useState<NamingProfile | null>(null);
 
@@ -176,25 +178,39 @@ export default function NamingProfilesPage() {
         <main className="flex-1 overflow-y-auto p-6">
           <div className="max-w-6xl mx-auto">
             <div className="flex justify-between items-center mb-6">
-              <h1 className="text-2xl font-bold text-gray-900">Naming Profiles</h1>
+              <h1 className="text-2xl font-bold text-gray-900">Naming Profiles <span className="ml-2 text-xs font-medium bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full align-middle">Beta</span></h1>
               <div className="flex gap-2">
                 <button
-                  onClick={() => { setShowTest(!showTest); setShowCreate(false); }}
+                  onClick={() => { setShowTest(!showTest); setShowCreate(false); setShowWizard(false); }}
                   className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
                 >
                   Test Filenames
                 </button>
                 <button
-                  onClick={() => { resetForm(); setShowCreate(!showCreate); setShowTest(false); }}
+                  onClick={() => { setShowWizard(!showWizard); setShowCreate(false); setShowTest(false); }}
                   className="px-4 py-2 bg-bioaf-600 text-white rounded-lg hover:bg-bioaf-700"
                 >
                   New Profile
+                </button>
+                <button
+                  onClick={() => { resetForm(); setShowCreate(!showCreate); setShowTest(false); setShowWizard(false); }}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+                >
+                  Advanced
                 </button>
               </div>
             </div>
 
             {error && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg">{error}</div>}
             {message && <div className="mb-4 p-3 bg-green-50 text-green-700 rounded-lg">{message}</div>}
+
+            {/* Wizard */}
+            {showWizard && (
+              <NamingProfileWizard
+                onSave={() => { setShowWizard(false); loadProfiles(); setMessage("Profile created"); }}
+                onCancel={() => setShowWizard(false)}
+              />
+            )}
 
             {/* Test Panel */}
             {showTest && (

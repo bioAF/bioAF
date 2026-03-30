@@ -129,6 +129,7 @@ export default function ProjectsPage() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Owner</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Samples</th>
@@ -145,6 +146,7 @@ export default function ProjectsPage() {
                       className="hover:bg-gray-50 cursor-pointer"
                     >
                       <td className="px-6 py-4 text-sm font-medium text-gray-900">{p.name}</td>
+                      <td className="px-6 py-4 text-sm text-gray-500 font-mono">{p.code || "—"}</td>
                       <td className="px-6 py-4">
                         <StatusBadge status={p.status || "active"} />
                       </td>

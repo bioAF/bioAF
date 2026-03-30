@@ -27,8 +27,9 @@ from app.services.event_types import (
 )
 
 
-# In-memory batching windows: trigger_id -> {file_ids, expiry_time}
-_active_batches: dict[int, dict] = {}
+# In-memory batching windows: (trigger_id, experiment_id) -> {file_ids, expiry_time}
+# experiment_id may be None for files not associated with an experiment.
+_active_batches: dict[tuple[int, int | None], dict] = {}
 _batch_lock = asyncio.Lock()
 
 
@@ -144,9 +145,11 @@ class TriggerService:
             action="disable",
         )
 
-        # Remove any active batch for this trigger
+        # Remove all active batches for this trigger
         async with _batch_lock:
-            _active_batches.pop(trigger_id, None)
+            keys_to_remove = [k for k in _active_batches if k[0] == trigger_id]
+            for k in keys_to_remove:
+                del _active_batches[k]
 
         return trigger
 
@@ -178,12 +181,14 @@ class TriggerService:
             window_minutes = event_config.get("batching_window_minutes", 15)
 
             if window_minutes > 0:
-                # Add to batching window
+                # Add to per-experiment batching window
+                experiment_id = ingest_event.resolved_experiment_id
+                batch_key = (trigger.id, experiment_id)
                 async with _batch_lock:
-                    batch = _active_batches.get(trigger.id)
+                    batch = _active_batches.get(batch_key)
                     if batch is None:
                         batch = {"file_ids": [], "expiry_time": 0}
-                        _active_batches[trigger.id] = batch
+                        _active_batches[batch_key] = batch
                     batch["file_ids"].append(file_id)
                     batch["expiry_time"] = time.time() + window_minutes * 60
 
@@ -206,21 +211,23 @@ class TriggerService:
 
     @staticmethod
     async def process_expired_batches(db: AsyncSession) -> list[TriggerEvaluation]:
-        """Check for expired batches and submit pipeline runs."""
+        """Check for expired per-experiment batches and submit pipeline runs."""
         evaluations = []
         now = time.time()
-        expired_triggers: list[tuple[int, list[int]]] = []
+        expired: list[tuple[int, int | None, list[int]]] = []
 
         async with _batch_lock:
-            for trigger_id, batch in list(_active_batches.items()):
+            for batch_key, batch in list(_active_batches.items()):
                 if batch["expiry_time"] <= now and batch["file_ids"]:
-                    expired_triggers.append((trigger_id, list(batch["file_ids"])))
-                    del _active_batches[trigger_id]
+                    trigger_id, experiment_id = batch_key
+                    expired.append((trigger_id, experiment_id, list(batch["file_ids"])))
+                    del _active_batches[batch_key]
 
-        for trigger_id, file_ids in expired_triggers:
+        for trigger_id, experiment_id, file_ids in expired:
             result = await db.execute(select(PipelineTrigger).where(PipelineTrigger.id == trigger_id))
             trigger = result.scalar_one_or_none()
             if trigger and trigger.enabled:
+                exp_label = f" (experiment {experiment_id})" if experiment_id else ""
                 asyncio.create_task(
                     event_bus.emit(
                         BATCH_WINDOW_CLOSED,
@@ -229,7 +236,7 @@ class TriggerService:
                             "org_id": trigger.organization_id,
                             "entity_type": "pipeline_trigger",
                             "entity_id": trigger.id,
-                            "title": f"Batch window closed for trigger #{trigger.id}",
+                            "title": f"Batch window closed for trigger #{trigger.id}{exp_label}",
                             "message": f"Submitting {len(file_ids)} file(s) for evaluation",
                             "severity": "info",
                         },
@@ -512,7 +519,7 @@ class TriggerService:
         }
 
     @staticmethod
-    def get_active_batches() -> dict[int, dict]:
+    def get_active_batches() -> dict[tuple[int, int | None], dict]:
         """Expose active batches for testing."""
         return dict(_active_batches)
 

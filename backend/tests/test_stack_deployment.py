@@ -704,6 +704,61 @@ async def test_deploy_stack_stores_bucket_names_after_storage(session):
     assert await _get_config(session, "config_backups_bucket_name") == "bioaf-abc123-config-backups"
 
 
+@pytest.mark.asyncio
+async def test_deploy_stack_stores_pubsub_names_after_storage(session):
+    """Storage apply_complete event writes Pub/Sub topic and subscription to platform_config."""
+    from app.services.stack_deployment import deploy_stack
+
+    _, user_id = await _seed_org_and_user(session)
+
+    await _set_config(session, "gcp_credentials_configured", "true")
+    await _set_config(session, "terraform_initialized", "true")
+    await _set_config(session, "compute_deployed", "false")
+    await _set_config(session, "storage_deployed", "false")
+    await _set_config(session, "pubsub_topic_name", "null")
+    await _set_config(session, "pubsub_subscription_name", "null")
+    await session.commit()
+
+    storage_outputs = {
+        "ingest_bucket_name": {"value": "bioaf-abc123-ingest"},
+        "raw_bucket_name": {"value": "bioaf-abc123-raw"},
+        "working_bucket_name": {"value": "bioaf-abc123-working"},
+        "results_bucket_name": {"value": "bioaf-abc123-results"},
+        "config_backups_bucket_name": {"value": "bioaf-abc123-config-backups"},
+        "pubsub_topic_name": {"value": "bioaf-ingest-events-abc123"},
+        "pubsub_subscription_name": {"value": "bioaf-ingest-worker-abc123"},
+    }
+
+    async def mock_run_module(sess, uid, module_name):
+        if module_name == "storage":
+            yield _make_progress_event(
+                "apply_complete",
+                "storage done",
+                extra={"outputs": storage_outputs},
+            )
+        else:
+            yield _make_progress_event(
+                "apply_complete",
+                "compute done",
+                extra={
+                    "outputs": {
+                        "cluster_name": {"value": "bioaf-test"},
+                        "cluster_endpoint": {"value": "https://1.2.3.4"},
+                        "cluster_ca_cert": {"value": "Y2VydA=="},
+                    }
+                },
+            )
+
+    with patch("app.services.stack_deployment._run_module", side_effect=mock_run_module):
+        async for _ in deploy_stack(session, "kubernetes", user_id=user_id):
+            pass
+
+    await session.commit()
+
+    assert await _get_config(session, "pubsub_topic_name") == "bioaf-ingest-events-abc123"
+    assert await _get_config(session, "pubsub_subscription_name") == "bioaf-ingest-worker-abc123"
+
+
 # -----------------------------------------------------------------------
 # destroy_storage tests
 # -----------------------------------------------------------------------
@@ -752,6 +807,8 @@ async def test_destroy_storage_clears_config_and_resets_stack_uid(session):
     await _set_config(session, "working_bucket_name", "bioaf-working-abc123")
     await _set_config(session, "results_bucket_name", "bioaf-results-abc123")
     await _set_config(session, "config_backups_bucket_name", "bioaf-config-backups-abc123")
+    await _set_config(session, "pubsub_topic_name", "bioaf-ingest-events-abc123")
+    await _set_config(session, "pubsub_subscription_name", "bioaf-ingest-worker-abc123")
     await session.commit()
 
     async def mock_run_destroy(sess, uid, module_name):
@@ -771,6 +828,8 @@ async def test_destroy_storage_clears_config_and_resets_stack_uid(session):
     assert await _get_config(session, "working_bucket_name") == "null"
     assert await _get_config(session, "results_bucket_name") == "null"
     assert await _get_config(session, "config_backups_bucket_name") == "null"
+    assert await _get_config(session, "pubsub_topic_name") == "null"
+    assert await _get_config(session, "pubsub_subscription_name") == "null"
 
     event_types = [e.event_type for e in events]
     assert "stack_complete" in event_types
