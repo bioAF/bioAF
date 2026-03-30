@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     rate_limit_login: int = 10
     rate_limit_verify: int = 5
     rate_limit_reset: int = 3
+    trusted_proxy_cidrs: str = "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,::1/128"
 
     # Compute
     compute_mode: str = "kubernetes"
