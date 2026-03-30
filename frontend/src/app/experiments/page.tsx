@@ -128,6 +128,7 @@ export default function ExperimentsPage() {
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Project</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Owner</th>
@@ -143,6 +144,7 @@ export default function ExperimentsPage() {
                         className="hover:bg-gray-50 cursor-pointer"
                       >
                         <td className="px-6 py-4 text-sm font-medium text-gray-900">{exp.name}</td>
+                        <td className="px-6 py-4 text-sm text-gray-500 font-mono">{exp.code || "—"}</td>
                         <td className="px-6 py-4 text-sm text-gray-500">{exp.project?.name || "—"}</td>
                         <td className="px-6 py-4">
                           <ExperimentStatusBadge status={exp.status} />

@@ -57,10 +57,15 @@ async function fetchApi<T>(
   return response.json();
 }
 
-async function uploadFile<T>(path: string, file: File): Promise<T> {
+async function uploadFile<T>(path: string, file: File, extraFields?: Record<string, string>): Promise<T> {
   const token = getToken();
   const formData = new FormData();
   formData.append("file", file);
+  if (extraFields) {
+    for (const [key, value] of Object.entries(extraFields)) {
+      formData.append(key, value);
+    }
+  }
 
   const headers: Record<string, string> = {};
   if (token) {
@@ -253,7 +258,8 @@ export const api = {
     }),
   delete: <T>(path: string) =>
     fetchApi<T>(path, { method: "DELETE" }),
-  upload: <T>(path: string, file: File) => uploadFile<T>(path, file),
+  upload: <T>(path: string, file: File, extraFields?: Record<string, string>) =>
+    uploadFile<T>(path, file, extraFields),
   uploadSigned: <T>(file: File, options?: SignedUploadOptions) =>
     uploadFileSigned<T>(file, options),
   download: (path: string, method?: "GET" | "POST", body?: unknown) =>

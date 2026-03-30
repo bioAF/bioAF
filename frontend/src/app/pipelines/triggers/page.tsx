@@ -130,7 +130,7 @@ export default function PipelineTriggersPage() {
         <main className="flex-1 overflow-y-auto p-6">
           <div className="max-w-6xl mx-auto">
             <div className="flex justify-between items-center mb-6">
-              <h1 className="text-2xl font-bold text-gray-900">Pipeline Triggers</h1>
+              <h1 className="text-2xl font-bold text-gray-900">Pipeline Triggers <span className="ml-2 text-xs font-medium bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full align-middle">Beta</span></h1>
               <button
                 onClick={() => setShowCreate(!showCreate)}
                 className="px-4 py-2 bg-bioaf-600 text-white rounded-lg hover:bg-bioaf-700"

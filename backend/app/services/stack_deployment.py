@@ -61,6 +61,7 @@ class StackStatus(BaseModel):
     compute_stack: str | None
     compute_deployed: bool
     storage_deployed: bool
+    pubsub_configured: bool = False
     cluster: ClusterInfo | None = None
 
 
@@ -114,16 +115,19 @@ async def get_cluster_status(session: AsyncSession) -> StackStatus:
     compute_deployed = await _read_config(session, "compute_deployed")
     compute_stack_val = await _read_config(session, "compute_stack")
     storage_deployed = await _read_config(session, "storage_deployed")
+    pubsub_topic = await _read_config(session, "pubsub_topic_name")
 
     is_deployed = compute_deployed == "true"
     stack = compute_stack_val if compute_stack_val != "null" else None
     storage = storage_deployed == "true"
+    pubsub = pubsub_topic not in ("null", "")
 
     if not is_deployed:
         return StackStatus(
             compute_stack=stack,
             compute_deployed=False,
             storage_deployed=storage,
+            pubsub_configured=pubsub,
             cluster=None,
         )
 
@@ -190,6 +194,7 @@ async def get_cluster_status(session: AsyncSession) -> StackStatus:
             compute_stack=stack,
             compute_deployed=True,
             storage_deployed=storage,
+            pubsub_configured=pubsub,
             cluster=cluster_info,
         )
 
@@ -199,6 +204,7 @@ async def get_cluster_status(session: AsyncSession) -> StackStatus:
             compute_stack=stack,
             compute_deployed=True,
             storage_deployed=storage,
+            pubsub_configured=pubsub,
             cluster=None,
         )
 
@@ -338,10 +344,12 @@ async def deploy_stack(
                     "working_bucket_name",
                     "results_bucket_name",
                     "config_backups_bucket_name",
+                    "pubsub_topic_name",
+                    "pubsub_subscription_name",
                 ]:
-                    bucket_name = outputs.get(config_key, {}).get("value", "")
-                    if bucket_name:
-                        await _set_config(session, config_key, bucket_name)
+                    output_val = outputs.get(config_key, {}).get("value", "")
+                    if output_val:
+                        await _set_config(session, config_key, output_val)
                 await _set_config(session, "storage_deployed", "true")
                 await log_action(
                     session,
@@ -626,6 +634,8 @@ async def destroy_storage(
         "working_bucket_name",
         "results_bucket_name",
         "config_backups_bucket_name",
+        "pubsub_topic_name",
+        "pubsub_subscription_name",
         "stack_uid",
     ]:
         await _set_config(session, key, "null")

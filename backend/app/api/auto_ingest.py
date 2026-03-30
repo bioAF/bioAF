@@ -27,11 +27,13 @@ router = APIRouter(tags=["auto_ingest"])
 class AutoIngestConfig(BaseModel):
     enabled: bool
     cleanup_policy: str = "delete_after_copy"
+    default_delay_minutes: int | None = None
 
 
 class AutoIngestStatus(BaseModel):
     enabled: bool
     cleanup_policy: str
+    default_delay_minutes: int
     listener_running: bool
     pubsub_topic: str | None
     pubsub_subscription: str | None
@@ -68,10 +70,14 @@ async def configure_auto_ingest(
 
     # Update platform_config
     enabled_value = "true" if body.enabled else "false"
-    updates = {
+    updates: dict[str, str] = {
         "auto_ingest_enabled": enabled_value,
         "ingest_cleanup_policy": body.cleanup_policy,
     }
+    if body.default_delay_minutes is not None:
+        if body.default_delay_minutes < 0:
+            raise HTTPException(status_code=400, detail="default_delay_minutes must be non-negative.")
+        updates["ingest_default_delay_minutes"] = str(body.default_delay_minutes)
     for key, value in updates.items():
         await session.execute(
             text(
@@ -103,6 +109,7 @@ async def get_auto_ingest_status(
     keys = [
         "auto_ingest_enabled",
         "ingest_cleanup_policy",
+        "ingest_default_delay_minutes",
         "pubsub_topic_name",
         "pubsub_subscription_name",
     ]
@@ -115,6 +122,8 @@ async def get_auto_ingest_status(
 
     enabled = config.get("auto_ingest_enabled", "false") == "true"
     cleanup_policy = config.get("ingest_cleanup_policy", "delete_after_copy")
+    delay_str = config.get("ingest_default_delay_minutes", "15")
+    default_delay_minutes = int(delay_str) if delay_str and delay_str != "null" else 15
     topic = config.get("pubsub_topic_name")
     subscription = config.get("pubsub_subscription_name")
     if topic == "null":
@@ -149,6 +158,7 @@ async def get_auto_ingest_status(
     return AutoIngestStatus(
         enabled=enabled,
         cleanup_policy=cleanup_policy,
+        default_delay_minutes=default_delay_minutes,
         listener_running=listener_running,
         pubsub_topic=topic,
         pubsub_subscription=subscription,

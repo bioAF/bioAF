@@ -85,7 +85,7 @@ describe("AutoIngestControls", () => {
   // Test 29: Update notice when Pub/Sub not deployed
   it("shows update notice when pubsub not configured", async () => {
     render(<AutoIngestControls storageDeployed={true} pubsubConfigured={false} />);
-    expect(screen.getByText(/infrastructure update/i)).toBeInTheDocument();
+    expect(screen.getByText(/Pub\/Sub notification infrastructure/i)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /update storage/i }),
     ).toBeInTheDocument();

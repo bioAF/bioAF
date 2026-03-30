@@ -57,6 +57,7 @@ interface StackStatus {
   compute_stack: string | null;
   compute_deployed: boolean;
   storage_deployed: boolean;
+  pubsub_configured: boolean;
   cluster: ClusterInfo | null;
 }
 
@@ -847,7 +848,9 @@ export default function InfraComponentsPage() {
                 <StorageSection
                   storageDeployed={stackStatus?.storage_deployed ?? false}
                   terraformInitialized={tfInitialized}
-                  onDeploy={() => {}}
+                  pubsubConfigured={stackStatus?.pubsub_configured ?? false}
+                  onDeploy={() => setShowDeployModal(true)}
+                  onUpdateStorage={() => setRefreshKey((k) => k + 1)}
                 />
               </div>
             </>

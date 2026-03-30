@@ -17,8 +17,8 @@ Welcome to the bioAF documentation. bioAF is a turnkey computational biology pla
 ## Architecture
 
 - [ADR Index](adr-index.md) - All Architecture Decision Records
-- [Architecture Spec](../documentation/bioAF-architecture-spec-v0_2.md) - System architecture
-- [Product Spec](../documentation/bioAF-product-spec-v0_4.md) - Full product specification
+- [Architecture Spec](../documentation/bioAF-architecture-spec-v0_3.md) - System architecture
+- [Product Spec](../documentation/bioAF-product-spec-v0_5.md) - Full product specification
 
 ## API Reference
 

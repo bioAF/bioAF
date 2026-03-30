@@ -22,6 +22,39 @@ from app.services.gcs_storage import BucketMetrics, GcsStorageService
 
 logger = logging.getLogger("bioaf.storage_deploy_api")
 
+_STORAGE_OUTPUT_KEYS = [
+    "ingest_bucket_name",
+    "raw_bucket_name",
+    "working_bucket_name",
+    "results_bucket_name",
+    "config_backups_bucket_name",
+    "pubsub_topic_name",
+    "pubsub_subscription_name",
+]
+
+
+async def _store_storage_outputs(session: AsyncSession) -> None:
+    """Read Terraform outputs for the storage module and store them in platform_config."""
+    from app.services.terraform_executor import TerraformExecutor
+
+    try:
+        outputs = await TerraformExecutor.read_module_outputs(session, "storage")
+    except Exception:
+        logger.warning("Could not read storage module outputs after apply", exc_info=True)
+        return
+
+    for config_key in _STORAGE_OUTPUT_KEYS:
+        val = outputs.get(config_key, {}).get("value", "")
+        if val:
+            await session.execute(
+                text(
+                    "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
+                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+                ).bindparams(k=config_key, v=val)
+            )
+    await session.commit()
+
+
 router = APIRouter(tags=["storage_deploy"])
 
 
@@ -109,6 +142,48 @@ async def deploy_storage(
         )
 
     result = await deploy_storage_module(session, user_id)
+    return StorageDeployResponse(**result)
+
+
+@router.post(
+    "/api/v1/infrastructure/storage/update",
+    response_model=StorageDeployResponse,
+)
+async def update_storage(
+    current_user: dict = require_permission("infrastructure", "view"),
+    session: AsyncSession = Depends(get_session),
+) -> StorageDeployResponse:
+    """Re-apply the storage module to update infrastructure (e.g. add Pub/Sub).
+
+    Unlike /deploy, this endpoint works when storage is already deployed.
+    Terraform will only create or modify resources that have changed.
+    """
+    user_id = int(current_user["sub"])
+
+    rows = (
+        await session.execute(
+            text("SELECT key, value FROM platform_config WHERE key IN ('terraform_initialized', 'storage_deployed')")
+        )
+    ).fetchall()
+    config = {r[0]: r[1] for r in rows}
+
+    if config.get("terraform_initialized", "false") != "true":
+        raise HTTPException(
+            status_code=400,
+            detail="Terraform has not been initialized. Run bootstrap first.",
+        )
+    if config.get("storage_deployed", "false") != "true":
+        raise HTTPException(
+            status_code=400,
+            detail="Storage has not been deployed yet. Use /deploy instead.",
+        )
+
+    result = await deploy_storage_module(session, user_id)
+
+    # Store outputs since this apply may have added new resources (Pub/Sub).
+    if result.get("status") == "completed":
+        await _store_storage_outputs(session)
+
     return StorageDeployResponse(**result)
 
 

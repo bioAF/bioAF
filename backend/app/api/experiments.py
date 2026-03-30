@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
@@ -23,7 +23,7 @@ from app.schemas.batch import BatchCreate, BatchResponse
 from app.services.experiment_service import ExperimentService
 from app.services.sample_service import SampleService
 from app.services.batch_service import BatchService
-from app.services.csv_service import parse_sample_csv
+from app.services.csv_service import generate_sample_template, parse_sample_csv, preview_sample_csv
 
 router = APIRouter(prefix="/api/experiments", tags=["experiments"])
 
@@ -315,6 +315,93 @@ async def bulk_create_samples(
     return {"created": len(samples)}
 
 
+@router.get("/{experiment_id}/samples/csv-template")
+async def download_csv_template(
+    experiment_id: int,
+    request: Request,
+):
+    from fastapi.responses import Response
+
+    content = generate_sample_template()
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=sample_template.csv"},
+    )
+
+
+@router.post("/{experiment_id}/samples/upload/preview")
+async def preview_samples_csv(
+    experiment_id: int,
+    file: UploadFile = File(...),
+    current_user: dict = require_permission("experiments", "upload"),
+    session: AsyncSession = Depends(get_session),
+):
+    content = await file.read()
+    return preview_sample_csv(content)
+
+
+@router.post("/{experiment_id}/samples/upload/confirm")
+async def confirm_samples_csv(
+    experiment_id: int,
+    file: UploadFile = File(...),
+    column_mappings: str = Form(""),
+    current_user: dict = require_permission("experiments", "upload"),
+    session: AsyncSession = Depends(get_session),
+):
+    import json as json_mod
+
+    user_id = int(current_user["sub"])
+    content = await file.read()
+
+    mappings: dict[str, str] = {}
+    if column_mappings:
+        try:
+            mappings = json_mod.loads(column_mappings)
+        except (json_mod.JSONDecodeError, TypeError):
+            raise HTTPException(400, detail="Invalid column_mappings JSON")
+
+    parsed_samples, parse_errors, custom_field_rows = parse_sample_csv(content, experiment_id, column_mappings=mappings)
+
+    if not parsed_samples and parse_errors:
+        raise HTTPException(400, detail={"errors": parse_errors})
+
+    # Collect unique custom field names from mappings
+    custom_field_names: list[str] = sorted({name for row in custom_field_rows for name in row})
+
+    created = []
+    create_errors = []
+    for i, sample_data in enumerate(parsed_samples):
+        try:
+            sample = await SampleService.create_sample(session, experiment_id, user_id, sample_data)
+            created.append(sample)
+
+            # Store custom fields on the experiment if any
+            if i < len(custom_field_rows) and custom_field_rows[i]:
+                from app.models.experiment_custom_field import ExperimentCustomField
+
+                for field_name, field_value in custom_field_rows[i].items():
+                    cf = ExperimentCustomField(
+                        experiment_id=experiment_id,
+                        field_name=f"sample:{sample.id}:{field_name}",
+                        field_value=str(field_value),
+                        field_type="text",
+                    )
+                    session.add(cf)
+        except HTTPException as e:
+            create_errors.append(f"Sample {i + 1}: {e.detail}")
+
+    if created:
+        await session.commit()
+
+    return {
+        "created_count": len(created),
+        "error_count": len(parse_errors) + len(create_errors),
+        "errors": parse_errors + create_errors,
+        "custom_fields_created": custom_field_names,
+    }
+
+
 @router.post("/{experiment_id}/samples/upload")
 async def upload_samples_csv(
     experiment_id: int,
@@ -324,7 +411,7 @@ async def upload_samples_csv(
 ):
     user_id = int(current_user["sub"])
     content = await file.read()
-    parsed_samples, parse_errors = parse_sample_csv(content, experiment_id)
+    parsed_samples, parse_errors, _ = parse_sample_csv(content, experiment_id)
 
     if not parsed_samples and parse_errors:
         raise HTTPException(400, detail={"errors": parse_errors})
