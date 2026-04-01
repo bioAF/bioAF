@@ -730,6 +730,7 @@ export interface FileResponse {
   source_type: string;
   source_pipeline_run_id: number | null;
   source_notebook_session_id: number | null;
+  storage_deleted: boolean;
   upload_timestamp: string;
   created_at: string;
 }

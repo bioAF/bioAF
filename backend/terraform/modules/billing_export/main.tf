@@ -15,10 +15,11 @@ provider "google" {
 }
 
 resource "google_bigquery_dataset" "billing_export" {
-  dataset_id  = "billing_export"
-  project     = var.project_id
-  location    = "US"
-  description = "BigQuery billing export dataset managed by bioAF"
+  dataset_id                 = "billing_export"
+  project                    = var.project_id
+  location                   = "US"
+  description                = "BigQuery billing export dataset managed by bioAF"
+  delete_contents_on_destroy = true
 
   labels = {
     managed_by = "bioaf"

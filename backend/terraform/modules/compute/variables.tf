@@ -20,7 +20,8 @@ variable "org_slug" {
 
 variable "stack_uid" {
   type        = string
-  description = "Short unique ID appended to resource names to avoid GCP soft-delete conflicts on redeploy"
+  description = "Short unique ID appended to resource names to avoid GCP soft-delete conflicts on redeploy. Defaults to 'pending' so terraform destroy works from state without requiring the original value."
+  default     = "pending"
 }
 
 variable "k8s_node_zones" {

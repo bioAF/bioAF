@@ -35,6 +35,7 @@ def _file_response(f, sample_ids: list[int] | None = None) -> FileResponse:
         source_type=f.source_type,
         source_pipeline_run_id=f.source_pipeline_run_id,
         source_notebook_session_id=f.source_notebook_session_id,
+        storage_deleted=f.storage_deleted,
         upload_timestamp=f.upload_timestamp,
         created_at=f.created_at,
     )
@@ -301,6 +302,8 @@ async def download_file(
     file = await FileService.get_file(session, file_id, org_id)
     if not file:
         raise HTTPException(404, "File not found")
+    if file.storage_deleted:
+        raise HTTPException(410, "File storage has been deleted")
 
     # Generate signed download URL
     try:
@@ -350,6 +353,8 @@ async def file_content(
     file = await FileService.get_file(session, file_id, org_id)
     if not file:
         raise HTTPException(404, "File not found")
+    if file.storage_deleted:
+        raise HTTPException(410, "File storage has been deleted")
 
     try:
         from google.cloud import storage as gcs_storage

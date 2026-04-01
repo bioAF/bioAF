@@ -306,26 +306,15 @@ async def deploy_stack(
     compute_completed = 0
     compute_planned = 0
 
-    # Generate a stack_uid if one doesn't exist yet. This short hex string
-    # is appended to all GCP resource names so that teardown + redeploy
-    # avoids GCP's 7-day soft-delete window for buckets.
-    existing_uid = await _read_config(session, "stack_uid")
-    if existing_uid == "null":
-        new_uid = secrets.token_hex(3)  # 6 hex chars, e.g. "a1b2c3"
-        await _set_config(session, "stack_uid", new_uid)
-        await session.flush()
-    elif await OrphanedResourceService.has_orphaned_for_uid(session, existing_uid):
-        new_uid = secrets.token_hex(3)
-        await _set_config(session, "stack_uid", new_uid)
-        await session.flush()
-        logger.info(
-            "Re-seeded stack_uid from %s to %s (orphaned resources detected)",
-            existing_uid,
-            new_uid,
-        )
+    # Generate a fresh deploy suffix for each module. This short hex
+    # string is appended to GCP resource names so that redeploys after
+    # a teardown get new names (avoids GCP's 7-day soft-delete window).
+    # The suffix is set before each module runs and cleared after.
 
     # Step 1: Deploy storage if needed
     if storage_deployed != "true":
+        await _set_config(session, "deploy_suffix", secrets.token_hex(3))
+        await session.flush()
         yield TerraformProgressEvent(
             event_type="progress",
             message="Deploying storage infrastructure...",
@@ -390,6 +379,8 @@ async def deploy_stack(
             return
 
     # Step 2: Deploy compute
+    await _set_config(session, "deploy_suffix", secrets.token_hex(3))
+    await session.flush()
     yield TerraformProgressEvent(
         event_type="progress",
         message="Deploying compute infrastructure...",
@@ -472,16 +463,16 @@ async def deploy_stack(
         project_id = await _read_config(session, "gcp_project_id")
         zone = await _read_config(session, "gcp_zone")
         org_slug = await _read_config(session, "org_slug")
-        stack_uid = await _read_config(session, "stack_uid")
-        if stack_uid and stack_uid != "null" and org_slug and org_slug != "null":
-            cluster_name = f"bioaf-{org_slug}-{stack_uid}"
+        suffix = await _read_config(session, "deploy_suffix")
+        if suffix and suffix != "null" and org_slug and org_slug != "null":
+            cluster_name = f"bioaf-{org_slug}-{suffix}"
             await OrphanedResourceService.log_resource(
                 session,
                 resource_type="gke_cluster",
                 resource_name=cluster_name,
                 gcp_project_id=project_id if project_id != "null" else "",
                 gcp_zone=zone if zone != "null" else None,
-                stack_uid=stack_uid,
+                stack_uid=suffix,
             )
             await session.flush()
 
@@ -528,15 +519,14 @@ async def teardown_stack(
         project_id = await _read_config(session, "gcp_project_id")
         zone = await _read_config(session, "gcp_zone")
         cluster_name = await _read_config(session, "gke_cluster_name")
-        stack_uid = await _read_config(session, "stack_uid")
-        if cluster_name and cluster_name != "null" and stack_uid and stack_uid != "null":
+        if cluster_name and cluster_name != "null":
             await OrphanedResourceService.log_resource(
                 session,
                 resource_type="gke_cluster",
                 resource_name=cluster_name,
                 gcp_project_id=project_id if project_id != "null" else "",
                 gcp_zone=zone if zone != "null" else None,
-                stack_uid=stack_uid,
+                stack_uid=cluster_name.rsplit("-", 1)[-1],
             )
             await session.flush()
 
@@ -588,6 +578,42 @@ async def teardown_stack(
     )
 
 
+_BUCKET_CONFIG_KEYS = [
+    "ingest_bucket_name",
+    "raw_bucket_name",
+    "working_bucket_name",
+    "results_bucket_name",
+    "config_backups_bucket_name",
+]
+
+
+async def _empty_gcs_bucket(session: AsyncSession, bucket_name: str) -> int:
+    """Delete all objects (including noncurrent versions) from a GCS bucket.
+
+    Returns the number of objects deleted. Uses the same credential
+    resolution as GcsStorageService so it works with SA keys stored
+    in platform_config.
+    """
+    from google.cloud import storage as gcs_storage
+
+    from app.services.gcs_storage import GcsStorageService
+
+    credentials = await GcsStorageService.get_credentials(session)
+    client = gcs_storage.Client(credentials=credentials)
+
+    deleted = 0
+    # Delete current objects
+    for blob in client.list_blobs(bucket_name):
+        blob.delete()
+        deleted += 1
+    # Delete noncurrent versions (versioned buckets retain old copies)
+    for blob in client.list_blobs(bucket_name, versions=True):
+        blob.delete()
+        deleted += 1
+
+    return deleted
+
+
 async def destroy_storage(
     session: AsyncSession,
     user_id: int,
@@ -595,7 +621,8 @@ async def destroy_storage(
 ) -> AsyncGenerator[TerraformProgressEvent, None]:
     """Destroy the storage module (GCS buckets + Pub/Sub).
 
-    Only allowed when compute is not deployed. Clears all storage-related
+    Empties all GCS buckets before running terraform destroy (required
+    because buckets have force_destroy=false). Clears all storage-related
     platform_config keys and resets stack_uid so a fresh deploy generates
     new resource names (avoids GCS soft-delete name conflicts).
     """
@@ -607,6 +634,37 @@ async def destroy_storage(
     if storage_deployed != "true":
         raise ValueError("Storage is not deployed.")
 
+    # Step 1: Empty all GCS buckets so terraform destroy can remove them
+    # (buckets have force_destroy=false and cannot be deleted while non-empty)
+    for config_key in _BUCKET_CONFIG_KEYS:
+        bucket_name = await _read_config(session, config_key)
+        if not bucket_name or bucket_name == "null":
+            continue
+        yield TerraformProgressEvent(
+            event_type="progress",
+            message=f"Emptying bucket {bucket_name}...",
+        )
+        try:
+            count = await _empty_gcs_bucket(session, bucket_name)
+            logger.info("Emptied bucket %s (%d objects deleted)", bucket_name, count)
+        except Exception as exc:
+            logger.error("Failed to empty bucket %s: %s", bucket_name, exc)
+            yield TerraformProgressEvent(
+                event_type="stack_error",
+                message=f"Failed to empty bucket {bucket_name}: {exc}",
+            )
+            return
+
+    # Step 2: Mark all file records as storage_deleted. The metadata
+    # (experiment links, checksums, upload history) is preserved but
+    # the backing GCS objects no longer exist.
+    result = await session.execute(text("UPDATE files SET storage_deleted = true WHERE storage_deleted = false"))
+    marked_count = result.rowcount
+    await session.flush()
+    if marked_count:
+        logger.info("Marked %d file(s) as storage_deleted", marked_count)
+
+    # Step 3: Run terraform destroy on the now-empty buckets
     yield TerraformProgressEvent(
         event_type="progress",
         message="Destroying storage infrastructure...",
@@ -625,8 +683,8 @@ async def destroy_storage(
         )
         return
 
-    # Clear all storage-related config and reset stack_uid so next deploy
-    # generates fresh bucket names (GCS has a 7-day soft-delete window).
+    # Clear all storage-related resource names from platform_config.
+    # Next deploy generates a fresh suffix automatically.
     for key in [
         "storage_deployed",
         "ingest_bucket_name",
@@ -636,7 +694,6 @@ async def destroy_storage(
         "config_backups_bucket_name",
         "pubsub_topic_name",
         "pubsub_subscription_name",
-        "stack_uid",
     ]:
         await _set_config(session, key, "null")
 

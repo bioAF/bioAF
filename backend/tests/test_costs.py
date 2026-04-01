@@ -273,8 +273,10 @@ async def test_purge_cost_records(client: AsyncClient, admin_token: str, admin_u
     """DELETE /api/costs/records should remove records in the given date range."""
     from app.models.cost_record import CostRecord
 
+    from datetime import timedelta
+
     today = date.today()
-    yesterday = date(today.year, today.month, today.day - 1) if today.day > 1 else today
+    yesterday = today - timedelta(days=1)
 
     for d in [yesterday, today]:
         session.add(

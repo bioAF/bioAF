@@ -248,6 +248,20 @@ cmd_migrate() {
     green "Migrations complete."
 }
 
+cmd_migrate_down() {
+    local target="${1:-}"
+    if [ -z "$target" ]; then
+        red "Usage: ./bioaf migrate-down <revision>"
+        echo "  Downgrades the database to the specified alembic revision."
+        echo "  Example: ./bioaf migrate-down 052"
+        return 1
+    fi
+    bold "=== Downgrading Database to Revision $target ==="
+    wait_for_db
+    $DC exec -T backend alembic -c alembic/alembic.ini downgrade "$target"
+    green "Downgrade to $target complete."
+}
+
 cmd_backup() {
     bold "=== Database Backup ==="
     local timestamp
@@ -428,6 +442,7 @@ cmd_help() {
     echo ""
     bold "Database:"
     echo "  migrate             Run alembic database migrations"
+    echo "  migrate-down <rev>  Downgrade database to a specific revision"
     echo "  seed <script.py>    Run a seed/data script in the backend container"
     echo "  backup              Create a database backup"
     echo "  reset-db            Destroy and recreate the database (with confirmation)"
@@ -474,6 +489,7 @@ case "$command" in
     logs)     cmd_logs "$@" ;;
     build)    cmd_build "$@" ;;
     migrate)  cmd_migrate ;;
+    migrate-down) cmd_migrate_down "$@" ;;
     seed)     cmd_seed "$@" ;;
     backup)   cmd_backup ;;
     shell)    cmd_shell "$@" ;;

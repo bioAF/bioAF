@@ -812,7 +812,11 @@ class TerraformExecutor:
         region = config.get("gcp_region") or "us-central1"
         zone = config.get("gcp_zone") or f"{region}-a"
         org_slug = config.get("org_slug") or "bioaf"
-        stack_uid = config.get("stack_uid") or ""
+        # The deploy suffix is stored in platform_config for the
+        # duration of a deployment. On destroy, the variable is omitted
+        # and Terraform uses the default from variables.tf. Terraform
+        # destroy works from state, not from the variable value.
+        deploy_suffix = config.get("deploy_suffix") or ""
         state_bucket = config.get("terraform_state_bucket") or f"bioaf-tfstate-{project_id}"
 
         # Common variables shared by all modules
@@ -825,14 +829,16 @@ class TerraformExecutor:
             tfvars["state_bucket_name"] = state_bucket
         elif module_name == "storage":
             tfvars["org_slug"] = org_slug
-            tfvars["stack_uid"] = stack_uid
+            if deploy_suffix:
+                tfvars["stack_uid"] = deploy_suffix
             tfvars["backend_service_account_email"] = config.get("backend_service_account_email") or ""
         elif module_name == "billing_export":
             tfvars["backend_service_account_email"] = config.get("backend_service_account_email") or ""
         elif module_name == "compute":
             tfvars["zone"] = zone
             tfvars["org_slug"] = org_slug
-            tfvars["stack_uid"] = stack_uid
+            if deploy_suffix:
+                tfvars["stack_uid"] = deploy_suffix
             # Multi-zone node placement: derive all zones in the region so
             # the autoscaler can fall back when a machine type is unavailable
             # in the primary zone (e.g. GCE capacity exhaustion).
@@ -928,7 +934,7 @@ class TerraformExecutor:
             "gcp_zone",
             "gcp_service_account_key",
             "org_slug",
-            "stack_uid",
+            "deploy_suffix",
             "terraform_initialized",
             "terraform_state_bucket",
             "backend_service_account_email",
