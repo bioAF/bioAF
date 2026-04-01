@@ -68,3 +68,24 @@ def test_storage_module_raw_bucket_has_lifecycle_rule():
     # Find the raw bucket block - check for lifecycle_rule with NEARLINE
     assert "NEARLINE" in content, "Raw bucket should have NEARLINE lifecycle rule"
     assert "age = 90" in content, "Raw bucket lifecycle should trigger at 90 days"
+
+
+def test_storage_module_data_buckets_have_force_destroy_false():
+    """All data buckets must have force_destroy = false to prevent accidental data loss."""
+    import re
+
+    main_tf = STORAGE_MODULE_DIR / "main.tf"
+    content = main_tf.read_text()
+
+    # Parse each bucket resource block and verify force_destroy
+    data_buckets = ["ingest", "raw", "working", "results", "config_backups"]
+    for bucket in data_buckets:
+        pattern = rf'resource "google_storage_bucket" "{bucket}".*?(?=resource "|$)'
+        match = re.search(pattern, content, re.DOTALL)
+        assert match, f"Could not find google_storage_bucket.{bucket} resource block"
+
+        block = match.group(0)
+        assert "force_destroy = false" in block, (
+            f"google_storage_bucket.{bucket} must have force_destroy = false "
+            f"to prevent accidental data loss during terraform destroy"
+        )

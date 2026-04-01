@@ -318,7 +318,7 @@ async def stack_destroy_storage_endpoint(
 ):
     """Destroy the storage module (GCS buckets + Pub/Sub) via SSE stream.
 
-    Only allowed when compute stack is torn down. Resets stack_uid so the
+    Only allowed when compute stack is torn down. Resets storage_uid so the
     next deploy creates fresh bucket names (avoids GCS soft-delete conflicts).
     """
     # A missing body is treated as confirmed -- the UI enforces the 3-step

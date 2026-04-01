@@ -36,6 +36,7 @@ class FileResponse(BaseModel):
     source_notebook_session_id: int | None = None
     sha256_checksum: str | None = None
     artifact_type: str | None = None
+    storage_deleted: bool = False
     upload_timestamp: datetime
     created_at: datetime
 

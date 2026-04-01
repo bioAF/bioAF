@@ -662,14 +662,14 @@ def test_write_tfvars_foundation():
     assert "org_slug" not in tfvars
 
 
-def test_write_tfvars_storage():
-    """_write_tfvars writes project_id, region, org_slug, and stack_uid for storage."""
+def test_write_tfvars_storage_with_suffix():
+    """_write_tfvars includes stack_uid when deploy_suffix is set."""
     tmp = Path(tempfile.mkdtemp(prefix="tf_test_"))
     config = {
         "gcp_project_id": "my-project",
         "gcp_region": "us-west1",
         "org_slug": "my-lab",
-        "stack_uid": "a1b2c3",
+        "deploy_suffix": "a1b2c3",
     }
     TerraformExecutor._write_tfvars(tmp, "storage", config)
 
@@ -681,15 +681,29 @@ def test_write_tfvars_storage():
     assert "state_bucket_name" not in tfvars
 
 
-def test_write_tfvars_compute():
-    """_write_tfvars writes project_id, region, zone, org_slug, and stack_uid for compute."""
+def test_write_tfvars_storage_without_suffix():
+    """_write_tfvars omits stack_uid when deploy_suffix is not set (destroy path)."""
+    tmp = Path(tempfile.mkdtemp(prefix="tf_test_"))
+    config = {
+        "gcp_project_id": "my-project",
+        "gcp_region": "us-west1",
+        "org_slug": "my-lab",
+    }
+    TerraformExecutor._write_tfvars(tmp, "storage", config)
+
+    tfvars = json.loads((tmp / "terraform.tfvars.json").read_text())
+    assert "stack_uid" not in tfvars
+
+
+def test_write_tfvars_compute_with_suffix():
+    """_write_tfvars includes stack_uid when deploy_suffix is set."""
     tmp = Path(tempfile.mkdtemp(prefix="tf_test_"))
     config = {
         "gcp_project_id": "my-project",
         "gcp_region": "europe-west1",
         "gcp_zone": "europe-west1-b",
         "org_slug": "acme",
-        "stack_uid": "d4e5f6",
+        "deploy_suffix": "d4e5f6",
     }
     TerraformExecutor._write_tfvars(tmp, "compute", config)
 
