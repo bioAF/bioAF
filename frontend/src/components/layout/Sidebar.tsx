@@ -200,6 +200,18 @@ export function Sidebar() {
     });
   };
 
+  if (loading || componentsLoading) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900" data-testid="app-loading">
+        <div className="text-center">
+          <div className="text-3xl font-bold text-bioaf-400 mb-4">bioAF</div>
+          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-bioaf-400 border-t-transparent" />
+          <p className="mt-3 text-sm text-gray-400">Loading bioAF...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <aside className="w-64 bg-gray-900 text-white min-h-screen flex flex-col" data-testid="sidebar">
       <div className="p-6 border-b border-gray-700">

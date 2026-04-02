@@ -21,12 +21,9 @@ jest.mock("@/lib/auth", () => ({
   getCurrentUser: () => ({ role_name: "admin", email: "admin@test.com" }),
 }));
 
+const mockPermissions = jest.fn();
 jest.mock("@/hooks/usePermissions", () => ({
-  usePermissions: () => ({
-    canAccess: () => true,
-    roleName: "admin",
-    loading: false,
-  }),
+  usePermissions: () => mockPermissions(),
 }));
 
 const mockComponents = jest.fn();
@@ -36,6 +33,12 @@ jest.mock("@/hooks/useComponents", () => ({
 
 beforeEach(() => {
   mockComponents.mockReset();
+  mockPermissions.mockReset();
+  mockPermissions.mockReturnValue({
+    canAccess: () => true,
+    roleName: "admin",
+    loading: false,
+  });
 });
 
 function makeComponent(key: string, category: string, enabled: boolean) {
@@ -162,7 +165,7 @@ describe("Sidebar component gating", () => {
     expect(screen.queryByText("Cellxgene")).not.toBeInTheDocument();
   });
 
-  test("shows all sections when components are still loading", () => {
+  test("shows loading screen when components are still loading", () => {
     mockComponents.mockReturnValue({
       components: [],
       loading: true,
@@ -171,10 +174,43 @@ describe("Sidebar component gating", () => {
 
     render(<Sidebar />);
 
-    // While loading, sections should still appear (no false negatives)
-    expect(screen.getByText("Pipelines")).toBeInTheDocument();
+    expect(screen.getByText("Loading bioAF...")).toBeInTheDocument();
+    expect(screen.queryByText("Pipelines")).not.toBeInTheDocument();
+  });
 
-    fireEvent.click(screen.getByText("Workbench"));
-    expect(screen.getByText("Notebooks")).toBeInTheDocument();
+  test("shows loading screen when permissions are still loading", () => {
+    mockPermissions.mockReturnValue({
+      canAccess: () => true,
+      roleName: "",
+      loading: true,
+    });
+    mockComponents.mockReturnValue({
+      components: [
+        makeComponent("nextflow_k8s", "pipeline_orchestration", true),
+      ],
+      loading: false,
+      refetch: jest.fn(),
+    });
+
+    render(<Sidebar />);
+
+    expect(screen.getByText("Loading bioAF...")).toBeInTheDocument();
+    expect(screen.queryByText("Pipelines")).not.toBeInTheDocument();
+  });
+
+  test("shows nav after loading completes", () => {
+    mockComponents.mockReturnValue({
+      components: [
+        makeComponent("nextflow", "pipeline_orchestration", true),
+        makeComponent("jupyterhub", "analysis", true),
+      ],
+      loading: false,
+      refetch: jest.fn(),
+    });
+
+    render(<Sidebar />);
+
+    expect(screen.queryByText("Loading bioAF...")).not.toBeInTheDocument();
+    expect(screen.getByText("Pipelines")).toBeInTheDocument();
   });
 });

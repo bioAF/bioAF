@@ -16,6 +16,20 @@ jest.mock("@/lib/auth", () => ({
 // Mock usePermissions
 const mockCanAccess = jest.fn().mockReturnValue(true);
 const mockRoleName = jest.fn().mockReturnValue("admin");
+jest.mock("@/hooks/useComponents", () => ({
+  useComponents: () => ({
+    components: [
+      { key: "nextflow", category: "pipeline_orchestration", enabled: true },
+      { key: "jupyterhub", category: "analysis", enabled: true },
+      { key: "rstudio", category: "analysis", enabled: true },
+      { key: "qc_dashboard", category: "visualization", enabled: true },
+      { key: "cellxgene", category: "visualization", enabled: true },
+    ],
+    loading: false,
+    refetch: jest.fn(),
+  }),
+}));
+
 jest.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => ({
     canAccess: (...args: unknown[]) => mockCanAccess(...args),
