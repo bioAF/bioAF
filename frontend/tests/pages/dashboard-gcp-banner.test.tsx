@@ -26,6 +26,10 @@ jest.mock("@/hooks/usePermissions", () => ({
   clearPermissionsCache: jest.fn(),
 }));
 
+jest.mock("@/hooks/useComponents", () => ({
+  useComponents: () => ({ components: [], loading: false, refetch: jest.fn() }),
+}));
+
 const mockApiGet = jest.fn();
 jest.mock("@/lib/api", () => ({
   api: {

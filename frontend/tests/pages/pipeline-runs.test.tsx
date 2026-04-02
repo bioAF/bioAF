@@ -25,6 +25,10 @@ jest.mock("@/lib/auth", () => ({
     "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIiwicm9sZSI6ImFkbWluIn0.fake",
 }));
 
+jest.mock("@/hooks/useComponents", () => ({
+  useComponents: () => ({ components: [], loading: false, refetch: jest.fn() }),
+}));
+
 // Mock API
 const mockApiGet = jest.fn();
 const mockApiPost = jest.fn();

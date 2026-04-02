@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { getCurrentUser } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
-import { navConfig, NavSection, NavChild, isChildActive } from "@/lib/navConfig";
+import { useComponents } from "@/hooks/useComponents";
+import { navConfig, NavSection, NavChild, ComponentGate, isChildActive } from "@/lib/navConfig";
 
 function ChevronIcon({ expanded }: { expanded: boolean }) {
   return (
@@ -105,12 +106,29 @@ export function Sidebar() {
   const pathname = usePathname();
   const [user, setUser] = useState<Record<string, unknown> | null>(null);
   const { canAccess, roleName, loading } = usePermissions();
+  const { components, loading: componentsLoading } = useComponents();
 
   useEffect(() => {
     setUser(getCurrentUser());
   }, []);
 
-  // Filter sections and children based on permissions
+  const passesComponentGate = useCallback(
+    (gate?: ComponentGate): boolean => {
+      if (!gate) return true;
+      // While components are loading, show everything to avoid flash-of-missing-nav
+      if (componentsLoading) return true;
+      if (gate.category) {
+        return components.some((c) => c.category === gate.category && c.enabled);
+      }
+      if (gate.keys) {
+        return components.some((c) => gate.keys!.includes(c.key) && c.enabled);
+      }
+      return true;
+    },
+    [components, componentsLoading],
+  );
+
+  // Filter sections and children based on permissions and component gates
   const visibleSections = useMemo(() => {
     if (loading) return [];
     return navConfig
@@ -119,9 +137,12 @@ export function Sidebar() {
         if (section.permission && !canAccess(section.permission.resource, section.permission.action)) {
           return false;
         }
+        if (!passesComponentGate(section.componentGate)) return false;
         if (section.children) {
           return section.children.some(
-            (child) => !child.permission || canAccess(child.permission.resource, child.permission.action),
+            (child) =>
+              (!child.permission || canAccess(child.permission.resource, child.permission.action)) &&
+              passesComponentGate(child.componentGate),
           );
         }
         return true;
@@ -129,11 +150,13 @@ export function Sidebar() {
       .map((section) => {
         if (!section.children) return section;
         const filteredChildren = section.children.filter(
-          (child) => !child.permission || canAccess(child.permission.resource, child.permission.action),
+          (child) =>
+            (!child.permission || canAccess(child.permission.resource, child.permission.action)) &&
+            passesComponentGate(child.componentGate),
         );
         return { ...section, children: filteredChildren };
       });
-  }, [loading, roleName, canAccess]);
+  }, [loading, roleName, canAccess, passesComponentGate]);
 
   // Initialize expanded state: auto-expand section containing active path
   const [expandedSections, setExpandedSections] = useState<Set<string>>(() => {

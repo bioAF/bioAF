@@ -20,6 +20,17 @@ jest.mock("@/lib/api", () => ({
   },
 }));
 
+jest.mock("@/hooks/useComponents", () => ({
+  useComponents: () => ({
+    components: [
+      { key: "jupyterhub", category: "analysis", enabled: true },
+      { key: "rstudio", category: "analysis", enabled: true },
+    ],
+    loading: false,
+    refetch: jest.fn(),
+  }),
+}));
+
 // Mock layout components
 jest.mock("@/components/layout/Sidebar", () => ({
   Sidebar: () => <div data-testid="sidebar">Sidebar</div>,
