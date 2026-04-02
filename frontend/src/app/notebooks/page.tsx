@@ -9,6 +9,7 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { DetailModal } from "@/components/shared/DetailModal";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { useComponents } from "@/hooks/useComponents";
 import type {
   NotebookSession,
   SessionListResponse,
@@ -41,6 +42,9 @@ const SESSION_STATUS_COLORS: Record<string, string> = {
 
 export default function NotebooksPage() {
   const router = useRouter();
+  const { components } = useComponents();
+  const jupyterEnabled = components.some((c) => c.key === "jupyterhub" && c.enabled);
+  const rstudioEnabled = components.some((c) => c.key === "rstudio" && c.enabled);
   const [sessions, setSessions] = useState<NotebookSession[]>([]);
   const [viewingSession, setViewingSession] = useState<NotebookSession | null>(null);
   const [loading, setLoading] = useState(true);
@@ -590,20 +594,24 @@ export default function NotebooksPage() {
 
                 {/* Launch buttons */}
                 <div className="p-6 border-t bg-gray-50 flex gap-3">
-                  <button
-                    onClick={() => handleLaunch("rstudio")}
-                    disabled={launching}
-                    className="flex-1 bg-blue-600 text-white px-6 py-2.5 rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    {launching ? "Launching..." : "Launch RStudio"}
-                  </button>
-                  <button
-                    onClick={() => handleLaunch("jupyter")}
-                    disabled={launching}
-                    className="flex-1 bg-bioaf-600 text-white px-6 py-2.5 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
-                  >
-                    {launching ? "Launching..." : "Launch Jupyter"}
-                  </button>
+                  {rstudioEnabled && (
+                    <button
+                      onClick={() => handleLaunch("rstudio")}
+                      disabled={launching}
+                      className="flex-1 bg-blue-600 text-white px-6 py-2.5 rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {launching ? "Launching..." : "Launch RStudio"}
+                    </button>
+                  )}
+                  {jupyterEnabled && (
+                    <button
+                      onClick={() => handleLaunch("jupyter")}
+                      disabled={launching}
+                      className="flex-1 bg-bioaf-600 text-white px-6 py-2.5 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
+                    >
+                      {launching ? "Launching..." : "Launch Jupyter"}
+                    </button>
+                  )}
                   <button
                     onClick={() => setShowLaunchModal(false)}
                     className="px-4 py-2.5 border rounded-md text-sm text-gray-600 hover:bg-gray-100"

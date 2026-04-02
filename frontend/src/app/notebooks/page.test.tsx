@@ -32,14 +32,31 @@ jest.mock("@/lib/auth", () => ({
   isAuthenticated: () => true,
 }));
 
+const mockComponents = jest.fn();
+jest.mock("@/hooks/useComponents", () => ({
+  useComponents: () => mockComponents(),
+}));
+
 import { api } from "@/lib/api";
 
 const mockGet = api.get as jest.Mock;
 const mockPost = api.post as jest.Mock;
 
+function makeComponent(key: string, category: string, enabled: boolean) {
+  return { key, name: key, description: "", category, enabled, status: enabled ? "ready" : "disabled", config: {}, dependencies: [], estimated_monthly_cost: "", updated_at: null };
+}
+
 beforeEach(() => {
   mockGet.mockReset();
   mockPost.mockReset();
+  mockComponents.mockReturnValue({
+    components: [
+      makeComponent("jupyterhub", "analysis", true),
+      makeComponent("rstudio", "analysis", true),
+    ],
+    loading: false,
+    refetch: jest.fn(),
+  });
 });
 
 const mockEnvironments = {
@@ -180,6 +197,75 @@ describe("NotebooksPage launch modal", () => {
 
     await waitFor(() => {
       expect(screen.getByText("The notebook image is currently building.")).toBeInTheDocument();
+    });
+  });
+});
+
+describe("NotebooksPage launch button component gating", () => {
+  test("hides Launch RStudio when rstudio is not enabled", async () => {
+    mockComponents.mockReturnValue({
+      components: [
+        makeComponent("jupyterhub", "analysis", true),
+        makeComponent("rstudio", "analysis", false),
+      ],
+      loading: false,
+      refetch: jest.fn(),
+    });
+    setupMocks({ build_id: null, build_status: null, image_uri: null });
+
+    render(<NotebooksPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Launch Session")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Launch Session"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Launch Jupyter")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Launch RStudio")).not.toBeInTheDocument();
+  });
+
+  test("hides Launch Jupyter when jupyterhub is not enabled", async () => {
+    mockComponents.mockReturnValue({
+      components: [
+        makeComponent("jupyterhub", "analysis", false),
+        makeComponent("rstudio", "analysis", true),
+      ],
+      loading: false,
+      refetch: jest.fn(),
+    });
+    setupMocks({ build_id: null, build_status: null, image_uri: null });
+
+    render(<NotebooksPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Launch Session")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Launch Session"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Launch RStudio")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Launch Jupyter")).not.toBeInTheDocument();
+  });
+
+  test("shows both buttons when both components are enabled", async () => {
+    setupMocks({ build_id: null, build_status: null, image_uri: null });
+
+    render(<NotebooksPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Launch Session")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Launch Session"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Launch RStudio")).toBeInTheDocument();
+      expect(screen.getByText("Launch Jupyter")).toBeInTheDocument();
     });
   });
 });

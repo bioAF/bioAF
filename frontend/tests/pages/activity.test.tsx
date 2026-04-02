@@ -12,6 +12,10 @@ jest.mock("@/lib/auth", () => ({
   getCurrentUser: () => ({ email: "test@bioaf.org", role: "admin", sub: "1" }),
 }));
 
+jest.mock("@/hooks/useComponents", () => ({
+  useComponents: () => ({ components: [], loading: false, refetch: jest.fn() }),
+}));
+
 const mockApiGet = jest.fn();
 jest.mock("@/lib/api", () => ({
   api: { get: (...args: unknown[]) => mockApiGet(...args) },
