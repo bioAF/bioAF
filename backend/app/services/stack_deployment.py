@@ -319,7 +319,18 @@ async def deploy_stack(
             event_type="progress",
             message="Deploying storage infrastructure...",
         )
+        storage_phase_tagged = False
         async for event in _run_module(session, user_id, "storage"):
+            if not storage_phase_tagged:
+                await session.execute(
+                    text("""
+                    UPDATE terraform_runs SET deploy_phase = 'storage'
+                    WHERE module_name = 'storage'
+                      AND status IN ('planning', 'applying', 'awaiting_confirmation')
+                    """)
+                )
+                await session.flush()
+                storage_phase_tagged = True
             if event.event_type == "apply_error":
                 storage_failed = True
                 yield event
@@ -385,7 +396,18 @@ async def deploy_stack(
         event_type="progress",
         message="Deploying compute infrastructure...",
     )
+    compute_phase_tagged = False
     async for event in _run_module(session, user_id, "compute"):
+        if not compute_phase_tagged:
+            await session.execute(
+                text("""
+                UPDATE terraform_runs SET deploy_phase = 'compute'
+                WHERE module_name = 'compute'
+                  AND status IN ('planning', 'applying', 'awaiting_confirmation')
+                """)
+            )
+            await session.flush()
+            compute_phase_tagged = True
         if event.event_type == "apply_error":
             compute_failed = True
             yield event

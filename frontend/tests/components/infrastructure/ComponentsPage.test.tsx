@@ -179,9 +179,21 @@ describe("InfraComponentsPage", () => {
     });
   });
 
-  // Test 26: Deploy button opens modal
-  it("deploy button opens progress modal", async () => {
+  // Test 26: Deploy button starts background deploy
+  it("deploy button calls deploy-background endpoint", async () => {
+    const idleProgress = {
+      active: false,
+      status: null,
+      phase: null,
+      resources_completed: 0,
+      resources_total: 0,
+      completed_resources: [],
+      error_message: null,
+      run_id: null,
+    };
+
     mockApiGet.mockImplementation((url: string) => {
+      if (url.includes("deploy/progress")) return Promise.resolve(idleProgress);
       if (url.includes("terraform/status")) return Promise.resolve(mockTfStatus());
       if (url.includes("terraform/runs")) return Promise.resolve({ runs: [] });
       if (url.includes("stack/status")) return Promise.resolve(mockStackStatus());
@@ -189,7 +201,7 @@ describe("InfraComponentsPage", () => {
         return Promise.resolve({ compute_stack: null, compute_deployed: false, storage_deployed: false, components: [] });
       return Promise.reject(new Error("Not found"));
     });
-    mockApiPost.mockResolvedValue({ status: "ok" });
+    mockApiPost.mockResolvedValue({ message: "Deployment started" });
 
     await act(async () => {
       render(<InfraComponentsPage />);
@@ -199,11 +211,16 @@ describe("InfraComponentsPage", () => {
       expect(screen.getByText(/Kubernetes \+ GCS/)).toBeInTheDocument();
     });
 
-    const deployButton = screen.getByRole("button", { name: /Deploy/i });
-    fireEvent.click(deployButton);
+    const deployButton = screen.getByRole("button", { name: /^Deploy$/i });
+    await act(async () => {
+      fireEvent.click(deployButton);
+    });
 
     await waitFor(() => {
-      expect(screen.getByText(/Deploy Compute Stack/i)).toBeInTheDocument();
+      expect(mockApiPost).toHaveBeenCalledWith(
+        "/api/v1/infrastructure/stack/deploy-background",
+        { stack_type: "kubernetes" },
+      );
     });
   });
 

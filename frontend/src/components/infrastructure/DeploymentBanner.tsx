@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 
@@ -9,14 +9,34 @@ interface TerraformStatus {
   gcp_credentials_configured: boolean;
   active_run_id: number | null;
   active_run_status: string | null;
+  last_completed_module: string | null;
 }
 
 const POLL_INTERVAL_MS = 10_000;
 
+const TOAST_MESSAGES: Record<string, { text: string; link: string; linkText: string }> = {
+  storage: {
+    text: "Storage deployed successfully on Google GCS. You can now upload files.",
+    link: "/infrastructure/components",
+    linkText: "Go to Components",
+  },
+  compute: {
+    text: "Compute cluster successfully deployed on Google GKE. You can now select components and run pipelines.",
+    link: "/infrastructure/components",
+    linkText: "Go to Components",
+  },
+  default: {
+    text: "Infrastructure operation complete.",
+    link: "/infrastructure/components",
+    linkText: "Go to Components",
+  },
+};
+
 export function DeploymentBanner() {
   const [deploying, setDeploying] = useState(false);
   const [previouslyDeploying, setPreviouslyDeploying] = useState(false);
-  const [showToast, setShowToast] = useState(false);
+  const [toast, setToast] = useState<{ text: string; link: string; linkText: string } | null>(null);
+  const lastSeenModuleRef = useRef<string | null>(null);
 
   const checkStatus = useCallback(async () => {
     try {
@@ -26,15 +46,25 @@ export function DeploymentBanner() {
       const isActive = status.active_run_id !== null;
 
       if (previouslyDeploying && !isActive) {
-        // Deployment just finished
+        // A run just finished -- show a phase-specific toast
+        const completedModule = status.last_completed_module;
+        // Only show the toast if the completed module changed (avoids
+        // re-showing the same toast on every poll after completion).
+        if (completedModule !== lastSeenModuleRef.current) {
+          lastSeenModuleRef.current = completedModule;
+          const message = TOAST_MESSAGES[completedModule ?? "default"] ?? TOAST_MESSAGES.default;
+          setToast(message);
+          setTimeout(() => setToast(null), 10_000);
+        }
         setDeploying(false);
-        setShowToast(true);
         setPreviouslyDeploying(false);
-        // Auto-dismiss toast after 10 seconds
-        setTimeout(() => setShowToast(false), 10_000);
       } else {
         setDeploying(isActive);
         setPreviouslyDeploying(isActive);
+        if (isActive) {
+          // Track current module so we detect the transition
+          lastSeenModuleRef.current = status.last_completed_module;
+        }
       }
     } catch {
       // Silently ignore -- user may not be admin or not logged in
@@ -69,23 +99,23 @@ export function DeploymentBanner() {
         </div>
       )}
 
-      {showToast && (
+      {toast && (
         <div
           data-testid="deployment-toast"
-          className="fixed top-4 right-4 z-50 bg-green-600 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3"
+          className="fixed top-4 right-4 z-50 bg-green-600 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 max-w-md"
         >
           <span className="text-sm font-medium">
-            Compute stack deployed. You can now select components.
+            {toast.text}
           </span>
           <Link
-            href="/infrastructure/components"
-            className="text-sm underline text-green-100 hover:text-white"
+            href={toast.link}
+            className="text-sm underline text-green-100 hover:text-white shrink-0"
           >
-            Go to Components
+            {toast.linkText}
           </Link>
           <button
-            onClick={() => setShowToast(false)}
-            className="text-green-200 hover:text-white ml-2"
+            onClick={() => setToast(null)}
+            className="text-green-200 hover:text-white ml-2 shrink-0"
             aria-label="Dismiss"
           >
             x
