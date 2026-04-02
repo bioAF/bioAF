@@ -105,7 +105,6 @@ const CATEGORY_ORDER = [
 
 export default function InfraComponentsPage() {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const [tfStatus, setTfStatus] = useState<TerraformStatus | null>(null);
   const [runs, setRuns] = useState<TerraformRun[]>([]);
@@ -179,21 +178,35 @@ export default function InfraComponentsPage() {
   }, [router, refreshKey]);
 
   async function loadData() {
-    // Fetch all data in parallel so the page renders once with complete state
-    const [tfResult, runsResult, ssResult, cdResult, ccResult] = await Promise.allSettled([
-      api.get<TerraformStatus>("/api/v1/infrastructure/terraform/status"),
-      api.get<{ runs: TerraformRun[] }>("/api/v1/infrastructure/terraform/runs"),
-      api.get<StackStatus>("/api/v1/infrastructure/stack/status"),
-      api.get<ComponentsData>("/api/v1/infrastructure/stack/components"),
-      api.get<ClusterConfig>("/api/v1/infrastructure/cluster/config"),
-    ]);
+    try {
+      const status = await api.get<TerraformStatus>("/api/v1/infrastructure/terraform/status");
+      setTfStatus(status);
+      const runsData = await api.get<{ runs: TerraformRun[] }>("/api/v1/infrastructure/terraform/runs");
+      setRuns(runsData.runs);
+    } catch {
+      // non-admin users won't have access
+    }
 
-    if (tfResult.status === "fulfilled") setTfStatus(tfResult.value);
-    if (runsResult.status === "fulfilled") setRuns(runsResult.value.runs);
-    if (ssResult.status === "fulfilled") setStackStatus(ssResult.value);
-    if (cdResult.status === "fulfilled") setComponentsData(cdResult.value);
-    if (ccResult.status === "fulfilled") setClusterConfig(ccResult.value);
-    setLoading(false);
+    try {
+      const ss = await api.get<StackStatus>("/api/v1/infrastructure/stack/status");
+      setStackStatus(ss);
+    } catch {
+      // ignore
+    }
+
+    try {
+      const cd = await api.get<ComponentsData>("/api/v1/infrastructure/stack/components");
+      setComponentsData(cd);
+    } catch {
+      // ignore
+    }
+
+    try {
+      const cc = await api.get<ClusterConfig>("/api/v1/infrastructure/cluster/config");
+      setClusterConfig(cc);
+    } catch {
+      // ignore
+    }
   }
 
   // Fetch build status when any component is provisioning or build_failed
@@ -366,15 +379,6 @@ export default function InfraComponentsPage() {
         <main className="flex-1 overflow-y-auto p-6">
           <h1 className="text-2xl font-bold mb-6">Components</h1>
 
-          {loading ? (
-            <div className="flex items-center justify-center py-20">
-              <div className="text-center">
-                <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
-                <p className="mt-3 text-sm text-gray-500">Loading infrastructure status...</p>
-              </div>
-            </div>
-          ) : (
-          <>
           {/* Stuck Terraform run banner */}
           {tfStatus?.active_run_id && (
             <div className="bg-amber-50 border border-amber-300 rounded-lg p-4 mb-6">
@@ -955,8 +959,6 @@ export default function InfraComponentsPage() {
             <h2 className="text-xl font-semibold mb-4">Recent Operations</h2>
             <TerraformRunHistory runs={runs} />
           </div>
-          </>
-          )}
         </main>
       </div>
 
