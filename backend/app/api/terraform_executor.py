@@ -69,6 +69,7 @@ class TerraformStatusResponse(BaseModel):
     gcp_credentials_configured: bool
     active_run_id: int | None = None
     active_run_status: str | None = None
+    last_completed_module: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -271,12 +272,23 @@ async def get_terraform_status(
     )
     active_run = active_result.scalar_one_or_none()
 
+    # Find the most recently completed run so the banner can show
+    # a phase-specific toast ("storage deployed" vs "compute deployed").
+    last_completed_result = await session.execute(
+        select(TerraformRun)
+        .where(TerraformRun.status == "completed")
+        .order_by(TerraformRun.completed_at.desc())
+        .limit(1)
+    )
+    last_completed = last_completed_result.scalar_one_or_none()
+
     return TerraformStatusResponse(
         terraform_initialized=config.get("terraform_initialized", "false") == "true",
         terraform_state_bucket=config.get("terraform_state_bucket", ""),
         gcp_credentials_configured=config.get("gcp_credentials_configured", "false") == "true",
         active_run_id=active_run.id if active_run else None,
         active_run_status=active_run.status if active_run else None,
+        last_completed_module=last_completed.module_name if last_completed else None,
     )
 
 

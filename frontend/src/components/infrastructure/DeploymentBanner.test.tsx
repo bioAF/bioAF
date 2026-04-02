@@ -46,6 +46,7 @@ describe("DeploymentBanner", () => {
       gcp_credentials_configured: true,
       active_run_id: null,
       active_run_status: null,
+      last_completed_module: null,
     });
 
     const { container } = render(<DeploymentBanner />);
@@ -61,6 +62,7 @@ describe("DeploymentBanner", () => {
       gcp_credentials_configured: true,
       active_run_id: 42,
       active_run_status: "applying",
+      last_completed_module: null,
     });
 
     render(<DeploymentBanner />);
@@ -77,6 +79,7 @@ describe("DeploymentBanner", () => {
       gcp_credentials_configured: true,
       active_run_id: 42,
       active_run_status: "applying",
+      last_completed_module: null,
     });
 
     render(<DeploymentBanner />);
@@ -87,13 +90,14 @@ describe("DeploymentBanner", () => {
     });
   });
 
-  test("shows success toast when deployment completes", async () => {
+  test("shows storage toast when storage deploy completes", async () => {
     // First poll: active deployment
     mockGet.mockResolvedValueOnce({
       terraform_initialized: true,
       gcp_credentials_configured: true,
       active_run_id: 42,
       active_run_status: "applying",
+      last_completed_module: null,
     });
 
     render(<DeploymentBanner />);
@@ -102,12 +106,13 @@ describe("DeploymentBanner", () => {
       expect(screen.getByTestId("deployment-banner")).toBeInTheDocument();
     });
 
-    // Second poll: deployment complete
+    // Second poll: storage complete, compute not started yet
     mockGet.mockResolvedValueOnce({
       terraform_initialized: true,
       gcp_credentials_configured: true,
       active_run_id: null,
       active_run_status: null,
+      last_completed_module: "storage",
     });
 
     await act(async () => {
@@ -116,7 +121,7 @@ describe("DeploymentBanner", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("deployment-toast")).toBeInTheDocument();
-      expect(screen.getByText(/Compute stack deployed/)).toBeInTheDocument();
+      expect(screen.getByText(/Storage deployed successfully/)).toBeInTheDocument();
     });
   });
 });

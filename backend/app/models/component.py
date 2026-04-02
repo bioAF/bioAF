@@ -38,6 +38,8 @@ class TerraformRun(Base):
     plan_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     resources_planned: Mapped[int | None] = mapped_column(Integer, nullable=True)
     resources_completed: Mapped[int] = mapped_column(Integer, server_default="0", default=0)
+    deploy_phase: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    completed_resources: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     apply_log: Mapped[str | None] = mapped_column(Text, nullable=True)
     terraform_state_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 

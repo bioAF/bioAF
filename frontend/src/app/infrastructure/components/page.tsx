@@ -7,8 +7,10 @@ import { Header } from "@/components/layout/Header";
 import { StorageSection } from "@/components/components/StorageSection";
 import { BootstrapCard } from "@/components/infrastructure/BootstrapCard";
 import { TerraformProgressModal } from "@/components/infrastructure/TerraformProgressModal";
+import { DeployProgressModal } from "@/components/infrastructure/DeployProgressModal";
 import { TerraformRunHistory } from "@/components/infrastructure/TerraformRunHistory";
 import { OrphanedResourcesCard } from "@/components/infrastructure/OrphanedResourcesCard";
+import { useDeploymentProgress } from "@/hooks/useDeploymentProgress";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 
@@ -111,6 +113,9 @@ export default function InfraComponentsPage() {
   const [clusterConfig, setClusterConfig] = useState<ClusterConfig | null>(null);
   const [showBootstrapModal, setShowBootstrapModal] = useState(false);
   const [showDeployModal, setShowDeployModal] = useState(false);
+  const [deployStarted, setDeployStarted] = useState(false);
+  const [showAbortConfirm, setShowAbortConfirm] = useState(false);
+  const [abortLoading, setAbortLoading] = useState(false);
   const [showTeardownModal, setShowTeardownModal] = useState(false);
   const [showTeardownProgress, setShowTeardownProgress] = useState(false);
   const [teardownChecked, setTeardownChecked] = useState(false);
@@ -143,6 +148,26 @@ export default function InfraComponentsPage() {
   const [abandonLoading, setAbandonLoading] = useState(false);
 
   const DESTROY_STORAGE_PHRASE = "delete my data";
+
+  // Always poll for deployment progress on this page. This catches
+  // in-progress deploys on page load (e.g. after a refresh).
+  const deployProgress = useDeploymentProgress(true);
+
+  // Detect an in-progress deployment on page load and set deployStarted
+  useEffect(() => {
+    if (deployProgress.active && !deployStarted) {
+      setDeployStarted(true);
+    }
+  }, [deployProgress.active, deployStarted]);
+
+  // When a tracked deployment finishes, refresh page data
+  useEffect(() => {
+    if (!deployStarted) return;
+    if (!deployProgress.active && deployProgress.status !== null) {
+      setDeployStarted(false);
+      setRefreshKey((k) => k + 1);
+    }
+  }, [deployStarted, deployProgress.active, deployProgress.status]);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -227,9 +252,46 @@ export default function InfraComponentsPage() {
     };
   }, [hasBuildRelated, componentsData]);
 
+  const [deployLoading, setDeployLoading] = useState(false);
+
+  async function handleStartDeploy() {
+    if (deployLoading) return;
+    setDeployLoading(true);
+    try {
+      await api.post("/api/v1/infrastructure/stack/deploy-background", {
+        stack_type: "kubernetes",
+      });
+      setDeployStarted(true);
+      setShowDeployModal(true);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to start deployment";
+      alert(message);
+    } finally {
+      setDeployLoading(false);
+    }
+  }
+
   function handleDeployComplete() {
     setShowDeployModal(false);
+    setDeployStarted(false);
     setRefreshKey((k) => k + 1);
+  }
+
+  async function handleAbortDeploy() {
+    if (!deployProgress.run_id) return;
+    setAbortLoading(true);
+    try {
+      await api.post(`/api/v1/infrastructure/terraform/abandon/${deployProgress.run_id}`);
+      setShowAbortConfirm(false);
+      setShowDeployModal(false);
+      setDeployStarted(false);
+      setRefreshKey((k) => k + 1);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Abort failed";
+      alert(message);
+    } finally {
+      setAbortLoading(false);
+    }
   }
 
   function handleBootstrapComplete() {
@@ -397,12 +459,43 @@ export default function InfraComponentsPage() {
                   <p className="text-xs text-gray-500 mb-4">
                     $0 when idle. Scales automatically with your workloads.
                   </p>
-                  <button
-                    onClick={() => setShowDeployModal(true)}
-                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium"
-                  >
-                    Deploy
-                  </button>
+                  {deployProgress.active ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-block h-2 w-2 bg-blue-500 rounded-full animate-pulse" />
+                        <span className="text-sm text-blue-700 font-medium">
+                          Deployment in progress
+                        </span>
+                      </div>
+                      {deployProgress.resources_total > 0 && (
+                        <p className="text-xs text-gray-500">
+                          {deployProgress.resources_completed} of {deployProgress.resources_total} components
+                        </p>
+                      )}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setShowDeployModal(true)}
+                          className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 font-medium"
+                        >
+                          View Progress
+                        </button>
+                        <button
+                          onClick={() => setShowAbortConfirm(true)}
+                          className="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium"
+                        >
+                          Abort
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={handleStartDeploy}
+                      disabled={deployLoading}
+                      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {deployLoading ? "Starting..." : "Deploy"}
+                    </button>
+                  )}
                 </div>
 
                 {/* SLURM + NFS card (coming soon) */}
@@ -849,7 +942,7 @@ export default function InfraComponentsPage() {
                   storageDeployed={stackStatus?.storage_deployed ?? false}
                   terraformInitialized={tfInitialized}
                   pubsubConfigured={stackStatus?.pubsub_configured ?? false}
-                  onDeploy={() => setShowDeployModal(true)}
+                  onDeploy={handleStartDeploy}
                   onUpdateStorage={() => setRefreshKey((k) => k + 1)}
                 />
               </div>
@@ -879,13 +972,21 @@ export default function InfraComponentsPage() {
         />
       )}
 
-      {/* Deploy Stack Modal */}
+      {/* Deploy Stack Modal (poll-based) */}
       {showDeployModal && (
-        <TerraformProgressModal
-          title="Deploy Compute Stack"
-          sseUrl="/api/v1/infrastructure/stack/deploy"
-          onComplete={handleDeployComplete}
-          onClose={() => setShowDeployModal(false)}
+        <DeployProgressModal
+          phase={deployProgress.phase}
+          status={deployProgress.active ? deployProgress.status : deployStarted ? "planning" : deployProgress.status}
+          resourcesCompleted={deployProgress.resources_completed}
+          resourcesTotal={deployProgress.resources_total}
+          completedResources={deployProgress.completed_resources}
+          errorMessage={deployProgress.error_message}
+          onDismiss={() => setShowDeployModal(false)}
+          onAbort={() => {
+            setShowDeployModal(false);
+            setShowAbortConfirm(true);
+          }}
+          onDone={handleDeployComplete}
         />
       )}
 
@@ -1016,6 +1117,42 @@ export default function InfraComponentsPage() {
           onComplete={handleDestroyStorageComplete}
           onClose={() => setShowDestroyStorageProgress(false)}
         />
+      )}
+
+      {/* Abort Deployment Confirmation Modal */}
+      {showAbortConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+            <h2 className="text-lg font-semibold mb-3">Abort Deployment</h2>
+
+            <div className="bg-amber-50 border border-amber-200 rounded p-3 mb-4">
+              <p className="text-sm font-medium text-amber-800 mb-1">
+                This may leave infrastructure in an unexpected state
+              </p>
+              <p className="text-xs text-amber-700">
+                Aborting will cancel the current deployment. Some resources may
+                have already been created and will need to be cleaned up manually
+                or by re-running the deployment.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowAbortConfirm(false)}
+                className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50"
+              >
+                Continue Deploying
+              </button>
+              <button
+                onClick={handleAbortDeploy}
+                disabled={abortLoading}
+                className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+              >
+                {abortLoading ? "Aborting..." : "Abort Deployment"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Abandon Run Confirmation Modal */}

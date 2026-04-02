@@ -219,6 +219,9 @@ class TerraformExecutor:
 
                     resources_completed += 1
                     run.resources_completed = resources_completed
+                    if run.completed_resources is None:
+                        run.completed_resources = []
+                    run.completed_resources = [*run.completed_resources, addr]
                     await session.flush()
                     yield TerraformProgressEvent(
                         event_type="resource_complete",
@@ -642,6 +645,9 @@ class TerraformExecutor:
 
                     resources_completed += 1
                     run.resources_completed = resources_completed
+                    if run.completed_resources is None:
+                        run.completed_resources = []
+                    run.completed_resources = [*run.completed_resources, addr]
                     await session.flush()
                     yield TerraformProgressEvent(
                         event_type="resource_complete",
