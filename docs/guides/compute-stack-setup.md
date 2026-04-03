@@ -37,22 +37,14 @@ For a typical small biotech team processing 5-10 experiments per month, Kubernet
 
 ### Step 1: Enable the Compute Component
 
-Navigate to **Settings > Infrastructure > Optional Components** in the bioAF UI. Toggle on "Kubernetes Compute" and click "Plan Changes." bioAF generates a Terraform plan that provisions:
+Navigate to **Settings > Infrastructure > Optional Components** in the bioAF UI. Toggle on "Kubernetes Compute." bioAF automatically provisions:
 
 - A GKE Autopilot cluster in your selected region.
 - A dedicated node pool namespace for pipeline workloads.
 - IAM bindings for the bioAF service account to submit jobs.
 - Network policies restricting pod-to-pod communication.
 
-### Step 2: Review and Apply
-
-Review the Terraform plan displayed in the UI. Key items to verify:
-
-- The cluster region matches your data residency requirements.
-- The machine type for the default node pool is appropriate (e2-standard-4 is a good starting point).
-- The maximum node count for autoscaling fits your budget (start with 10, increase later).
-
-Click "Apply" to provision. This takes 5-10 minutes.
+Provisioning takes 5-10 minutes. You can track progress in the deployment modal.
 
 ### Step 3: Verify Connectivity
 
@@ -73,16 +65,14 @@ These defaults apply to all pipeline runs unless overridden at launch time.
 
 ### Step 1: Enable the Compute Component
 
-Navigate to **Settings > Infrastructure > Optional Components**. Toggle on "SLURM Compute" and click "Plan Changes." The Terraform plan provisions:
+Navigate to **Settings > Infrastructure > Optional Components**. Toggle on "SLURM Compute." bioAF automatically provisions:
 
 - A SLURM controller VM (e2-standard-2).
 - A login node VM (e2-standard-2).
 - A Filestore NFS instance (1TB minimum).
 - Compute node templates with autoscaling configuration.
 
-### Step 2: Review and Apply
-
-Review the plan carefully. Note the Filestore cost -- this is a fixed monthly expense regardless of usage. Click "Apply" to provision. This takes 10-15 minutes due to the Filestore and SLURM controller setup.
+Provisioning takes 10-15 minutes due to the Filestore and SLURM controller setup. Note the Filestore cost -- this is a fixed monthly expense regardless of usage.
 
 ### Step 3: Configure Partitions
 

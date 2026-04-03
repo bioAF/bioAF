@@ -252,7 +252,7 @@ class TestClusterConfigEndpoint:
     @pytest.mark.asyncio
     async def test_cluster_config_returns_current_values(self, client, admin_token, session):
         """Test 22: Config returns current machine types and node counts."""
-        await _set_config(session, "k8s_pipeline_machine_type", "n2-highmem-8")
+        await _set_config(session, "k8s_pipeline_machine_type", "n2-highmem-16")
         await _set_config(session, "k8s_pipeline_max_nodes", "20")
         await _set_config(session, "k8s_pipeline_use_spot", "true")
         await _set_config(session, "k8s_interactive_machine_type", "n2-standard-4")
@@ -265,15 +265,15 @@ class TestClusterConfigEndpoint:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["k8s_pipeline_machine_type"] == "n2-highmem-8"
+        assert data["k8s_pipeline_machine_type"] == "n2-highmem-16"
         assert data["k8s_pipeline_max_nodes"] == 20
         assert data["k8s_pipeline_use_spot"] is True
         assert data["k8s_interactive_machine_type"] == "n2-standard-4"
         assert data["k8s_interactive_max_nodes"] == 5
 
     @pytest.mark.asyncio
-    async def test_cluster_config_update_generates_plan(self, client, admin_token, session):
-        """Test 23: Config update generates a terraform plan."""
+    async def test_cluster_config_update_auto_applies(self, client, admin_token, session):
+        """Test 23: Config update plans and auto-applies."""
         await _set_config(session, "compute_deployed", "true")
         await _set_config(session, "compute_stack", "kubernetes")
         await session.commit()
@@ -297,7 +297,10 @@ class TestClusterConfigEndpoint:
         }
         mock_run.resources_planned = 1
 
-        with patch("app.api.stack_deploy.TerraformExecutor.run_plan", new_callable=AsyncMock) as mock_plan:
+        with (
+            patch("app.api.stack_deploy.TerraformExecutor.run_plan", new_callable=AsyncMock) as mock_plan,
+            patch("app.api.stack_deploy._run_apply_background", new_callable=AsyncMock),
+        ):
             mock_plan.return_value = mock_run
             response = await client.post(
                 "/api/v1/infrastructure/cluster/config",
@@ -310,9 +313,8 @@ class TestClusterConfigEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["run_id"] == 99
-        assert data["status"] == "awaiting_confirmation"
-        assert data["plan_summary"] is not None
-        assert data["plan_summary"]["change_count"] == 1
+        assert data["message"] == "Cluster configuration update started"
+        assert mock_run.status == "applying"
 
 
 # -----------------------------------------------------------------------

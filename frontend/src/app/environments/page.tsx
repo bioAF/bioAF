@@ -32,7 +32,7 @@ export default function EnvironmentsPage() {
   const [selectedEnv, setSelectedEnv] = useState<EnvironmentDetailResponse | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("versions");
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createForm, setCreateForm] = useState({ name: "", description: "", visibility: "team" });
+  const [createForm, setCreateForm] = useState({ name: "", description: "" });
   const [creating, setCreating] = useState(false);
 
   // Version creation state
@@ -85,10 +85,9 @@ export default function EnvironmentsPage() {
       await api.post("/api/v1/environments", {
         name: createForm.name,
         description: createForm.description || undefined,
-        visibility: createForm.visibility,
       });
       setShowCreateModal(false);
-      setCreateForm({ name: "", description: "", visibility: "team" });
+      setCreateForm({ name: "", description: "" });
       loadEnvironments();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to create environment");
@@ -237,11 +236,6 @@ export default function EnvironmentsPage() {
     failed: "Failed",
   };
 
-  const visibilityBadge: Record<string, string> = {
-    team: "bg-blue-100 text-blue-700",
-    organization: "bg-purple-100 text-purple-700",
-  };
-
   return (
     <div className="flex h-screen">
       <Sidebar />
@@ -279,11 +273,8 @@ export default function EnvironmentsPage() {
                   onClick={() => selectEnvironment(env.id)}
                   className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow cursor-pointer"
                 >
-                  <div className="flex items-start justify-between mb-3">
+                  <div className="mb-3">
                     <h3 className="font-semibold text-lg">{env.name}</h3>
-                    <span className={`px-2 py-0.5 text-xs rounded-full ${visibilityBadge[env.visibility] || "bg-gray-100"}`}>
-                      {env.visibility}
-                    </span>
                   </div>
                   <p className="text-sm text-gray-500 mb-4 line-clamp-2">{env.description || "No description"}</p>
                   <div className="flex items-center justify-between">
@@ -395,9 +386,6 @@ export default function EnvironmentsPage() {
                           Rebuild from Latest Template
                         </button>
                       )}
-                      <span className={`px-2 py-0.5 text-xs rounded-full ${visibilityBadge[selectedEnv.visibility]}`}>
-                        {selectedEnv.visibility}
-                      </span>
                       {canDelete && (
                         <button
                           onClick={() => handleDelete(selectedEnv.id)}
@@ -540,17 +528,6 @@ export default function EnvironmentsPage() {
                       placeholder="Optional description"
                       className="w-full border rounded px-3 py-2 text-sm"
                     />
-                  </div>
-                  <div>
-                    <label className="text-sm text-gray-500 block mb-1">Visibility</label>
-                    <select
-                      value={createForm.visibility}
-                      onChange={(e) => setCreateForm({ ...createForm, visibility: e.target.value })}
-                      className="w-full border rounded px-3 py-2 text-sm"
-                    >
-                      <option value="team">Team (only your team)</option>
-                      <option value="organization">Organization (everyone)</option>
-                    </select>
                   </div>
                 </div>
                 <div className="flex gap-2 mt-6">
