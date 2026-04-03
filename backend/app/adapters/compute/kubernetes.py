@@ -291,7 +291,7 @@ class KubernetesComputeProvider(ComputeProvider):
                     "WHERE key IN ("
                     "  'gke_cluster_endpoint', 'gke_cluster_ca_cert',"
                     "  'gcp_credential_source', 'gcp_service_account_key',"
-                    "  'gke_cluster_name', 'gcp_project_id', 'gcp_zone',"
+                    "  'gke_cluster_name', 'gcp_project_id', 'gcp_region',"
                     "  'raw_bucket_name'"
                     ")"
                 )
@@ -1257,10 +1257,10 @@ class KubernetesComputeProvider(ComputeProvider):
         cfg = self._cluster_config or {}
         cluster_name = cfg.get("gke_cluster_name") or os.environ.get("GKE_CLUSTER_NAME", "")
         project_id = cfg.get("gcp_project_id") or os.environ.get("GCP_PROJECT_ID", "")
-        zone = cfg.get("gcp_zone") or os.environ.get("GCP_ZONE", "")
+        region = cfg.get("gcp_region") or os.environ.get("GCP_REGION", "us-central1")
 
         gke_client = self._get_gke_client()
-        cluster = gke_client.get_cluster(name=f"projects/{project_id}/locations/{zone}/clusters/{cluster_name}")
+        cluster = gke_client.get_cluster(name=f"projects/{project_id}/locations/{region}/clusters/{cluster_name}")
 
         node_pools = []
         total_nodes = 0
@@ -1336,7 +1336,7 @@ class KubernetesComputeProvider(ComputeProvider):
         cfg = self._cluster_config or {}
         cluster_name = cfg.get("gke_cluster_name") or os.environ.get("GKE_CLUSTER_NAME", "")
         project_id = cfg.get("gcp_project_id") or os.environ.get("GCP_PROJECT_ID", "")
-        zone = cfg.get("gcp_zone") or os.environ.get("GCP_ZONE", "")
+        region = cfg.get("gcp_region") or os.environ.get("GCP_REGION", "us-central1")
 
         _fallback = {
             "cpu_utilization_pct": 0.0,
@@ -1345,19 +1345,19 @@ class KubernetesComputeProvider(ComputeProvider):
             "node_pools": [],
         }
 
-        if not cluster_name or not project_id or not zone:
+        if not cluster_name or not project_id or not region:
             logger.warning(
-                "Missing GKE cluster identity (name=%s, project=%s, zone=%s). "
-                "Store gke_cluster_name, gcp_project_id, gcp_zone in platform_config.",
+                "Missing GKE cluster identity (name=%s, project=%s, region=%s). "
+                "Store gke_cluster_name, gcp_project_id, gcp_region in platform_config.",
                 cluster_name,
                 project_id,
-                zone,
+                region,
             )
             return _fallback
 
         try:
             gke_client = self._get_gke_client()
-            cluster = gke_client.get_cluster(name=f"projects/{project_id}/locations/{zone}/clusters/{cluster_name}")
+            cluster = gke_client.get_cluster(name=f"projects/{project_id}/locations/{region}/clusters/{cluster_name}")
         except Exception:
             logger.exception("Failed to fetch GKE cluster metrics")
             return _fallback

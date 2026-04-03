@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
 import type { ComponentState } from "@/lib/types";
 
@@ -20,39 +20,70 @@ interface StackComponentsResponse {
   }>;
 }
 
-export function useComponents() {
-  const [components, setComponents] = useState<ComponentState[]>([]);
-  const [loading, setLoading] = useState(true);
+/** Module-level cache so navigation doesn't re-fetch or flash loading. */
+let cachedComponents: ComponentState[] | null = null;
+let fetchPromise: Promise<void> | null = null;
 
-  const fetchComponents = async () => {
+function mapComponents(
+  data: StackComponentsResponse,
+): ComponentState[] {
+  return data.components.map((c) => ({
+    key: c.key,
+    name: c.name,
+    description: c.description,
+    category: c.category,
+    enabled: c.status === "enabled" || c.status === "provisioning",
+    status: c.status,
+    config: {},
+    dependencies: c.dependencies,
+    estimated_monthly_cost: c.cost_estimate,
+    updated_at: null,
+  }));
+}
+
+export function useComponents() {
+  const [components, setComponents] = useState<ComponentState[]>(
+    cachedComponents ?? [],
+  );
+  const [loading, setLoading] = useState(!cachedComponents);
+
+  useEffect(() => {
+    if (cachedComponents) {
+      setComponents(cachedComponents);
+      setLoading(false);
+      return;
+    }
+
+    if (!fetchPromise) {
+      fetchPromise = api
+        .get<StackComponentsResponse>(
+          "/api/v1/infrastructure/stack/components",
+        )
+        .then((data) => {
+          cachedComponents = mapComponents(data);
+        })
+        .catch(() => {
+          cachedComponents = [];
+        });
+    }
+
+    fetchPromise.then(() => {
+      setComponents(cachedComponents!);
+      setLoading(false);
+    });
+  }, []);
+
+  const refetch = useCallback(async () => {
     try {
       const data = await api.get<StackComponentsResponse>(
         "/api/v1/infrastructure/stack/components",
       );
-      setComponents(
-        data.components.map((c) => ({
-          key: c.key,
-          name: c.name,
-          description: c.description,
-          category: c.category,
-          enabled: c.status === "enabled" || c.status === "provisioning",
-          status: c.status,
-          config: {},
-          dependencies: c.dependencies,
-          estimated_monthly_cost: c.cost_estimate,
-          updated_at: null,
-        })),
-      );
+      cachedComponents = mapComponents(data);
+      setComponents(cachedComponents);
     } catch {
       // handled by api client
-    } finally {
-      setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchComponents();
   }, []);
 
-  return { components, loading, refetch: fetchComponents };
+  return { components, loading, refetch };
 }

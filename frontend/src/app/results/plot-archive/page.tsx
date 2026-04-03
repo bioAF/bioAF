@@ -39,6 +39,19 @@ function PlotThumbnail({
   );
 }
 
+function StorageDeletedPlaceholder() {
+  return (
+    <div className="flex flex-col items-center justify-center gap-1.5 text-center px-2">
+      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-red-100 text-red-600">
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+        </svg>
+      </span>
+      <span className="text-gray-400 text-xs">Storage deleted</span>
+    </div>
+  );
+}
+
 export default function PlotArchivePage() {
   const [plots, setPlots] = useState<PlotArchiveResponse[]>([]);
   const [query, setQuery] = useState("");
@@ -231,43 +244,48 @@ export default function PlotArchivePage() {
             ) : (
               <>
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                  {plots.map((plot) => (
-                    <div
-                      key={plot.id}
-                      className="bg-white rounded-lg shadow overflow-hidden hover:shadow-md transition-shadow"
-                    >
-                      <div className="aspect-square bg-gray-100 flex items-center justify-center">
-                        {plot.file ? (
-                          <PlotThumbnail
-                            fileId={plot.file.id}
-                            title={plot.title ?? "Plot"}
-                            onClick={(url) => handleExpand(plot, url)}
-                          />
-                        ) : (
-                          <span className="text-gray-400 text-xs">
-                            No preview
-                          </span>
-                        )}
+                  {plots.map((plot) => {
+                    const deleted = plot.file?.storage_deleted === true;
+                    return (
+                      <div
+                        key={plot.id}
+                        className={`bg-white rounded-lg shadow overflow-hidden transition-shadow ${deleted ? "opacity-60" : "hover:shadow-md"}`}
+                      >
+                        <div className="aspect-square bg-gray-100 flex items-center justify-center">
+                          {deleted ? (
+                            <StorageDeletedPlaceholder />
+                          ) : plot.file ? (
+                            <PlotThumbnail
+                              fileId={plot.file.id}
+                              title={plot.title ?? "Plot"}
+                              onClick={(url) => handleExpand(plot, url)}
+                            />
+                          ) : (
+                            <span className="text-gray-400 text-xs">
+                              No preview
+                            </span>
+                          )}
+                        </div>
+                        <div className="p-2">
+                          <p className={`text-xs font-medium truncate ${deleted ? "text-gray-400" : ""}`}>
+                            {plot.title}
+                          </p>
+                          {plot.tags.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {plot.tags.slice(0, 3).map((tag) => (
+                                <span
+                                  key={tag}
+                                  className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px]"
+                                >
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      <div className="p-2">
-                        <p className="text-xs font-medium truncate">
-                          {plot.title}
-                        </p>
-                        {plot.tags.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {plot.tags.slice(0, 3).map((tag) => (
-                              <span
-                                key={tag}
-                                className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px]"
-                              >
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 <div className="flex justify-between items-center text-sm text-gray-500">

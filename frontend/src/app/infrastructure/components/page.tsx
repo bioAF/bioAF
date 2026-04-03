@@ -10,6 +10,7 @@ import { TerraformProgressModal } from "@/components/infrastructure/TerraformPro
 import { DeployProgressModal } from "@/components/infrastructure/DeployProgressModal";
 import { TerraformRunHistory } from "@/components/infrastructure/TerraformRunHistory";
 import { OrphanedResourcesCard } from "@/components/infrastructure/OrphanedResourcesCard";
+import { DeployRecoveryModal } from "@/components/infrastructure/DeployRecoveryModal";
 import { useDeploymentProgress } from "@/hooks/useDeploymentProgress";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -61,6 +62,7 @@ interface StackStatus {
   storage_deployed: boolean;
   pubsub_configured: boolean;
   cluster: ClusterInfo | null;
+  has_orphaned_clusters: boolean;
 }
 
 interface ComponentDef {
@@ -147,6 +149,8 @@ export default function InfraComponentsPage() {
   } | null>(null);
   const [showAbandonModal, setShowAbandonModal] = useState(false);
   const [abandonLoading, setAbandonLoading] = useState(false);
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
+  const [recoveryCheckedOnLoad, setRecoveryCheckedOnLoad] = useState(false);
 
   const DESTROY_STORAGE_PHRASE = "delete my data";
 
@@ -196,6 +200,17 @@ export default function InfraComponentsPage() {
     setLoading(false);
   }
 
+  // Auto-open recovery modal when orphaned clusters exist and compute is not deployed
+  useEffect(() => {
+    if (recoveryCheckedOnLoad) return;
+    if (!stackStatus) return;
+    if (stackStatus.compute_deployed) return;
+    if (!stackStatus.has_orphaned_clusters) return;
+    if (deployProgress.active) return;
+    setRecoveryCheckedOnLoad(true);
+    setShowRecoveryModal(true);
+  }, [stackStatus, deployProgress.active, recoveryCheckedOnLoad]);
+
   // Fetch build status when any component is provisioning or build_failed
   const hasBuildRelated = componentsData?.components.some(
     (c) => c.status === "provisioning" || c.status === "build_failed",
@@ -243,6 +258,13 @@ export default function InfraComponentsPage() {
 
   async function handleStartDeploy() {
     if (deployLoading) return;
+
+    // Check for orphaned clusters before deploying to prevent duplicates
+    if (stackStatus?.has_orphaned_clusters) {
+      setShowRecoveryModal(true);
+      return;
+    }
+
     setDeployLoading(true);
     try {
       await api.post("/api/v1/infrastructure/stack/deploy-background", {
@@ -262,6 +284,29 @@ export default function InfraComponentsPage() {
     setShowDeployModal(false);
     setDeployStarted(false);
     setRefreshKey((k) => k + 1);
+  }
+
+  function handleRecoveryComplete() {
+    setShowRecoveryModal(false);
+    setRefreshKey((k) => k + 1);
+  }
+
+  async function handleStartFresh() {
+    setShowRecoveryModal(false);
+    // Orphans were cleaned by the modal, now start fresh deploy
+    setDeployLoading(true);
+    try {
+      await api.post("/api/v1/infrastructure/stack/deploy-background", {
+        stack_type: "kubernetes",
+      });
+      setDeployStarted(true);
+      setShowDeployModal(true);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to start deployment";
+      alert(message);
+    } finally {
+      setDeployLoading(false);
+    }
   }
 
   async function handleAbortDeploy() {
@@ -806,7 +851,20 @@ export default function InfraComponentsPage() {
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {componentsData.components
                           .filter((c) => c.category === category)
-                          .map((comp) => (
+                          .map((comp) => comp.status === "coming_soon" ? (
+                            <div
+                              key={comp.key}
+                              className="bg-white rounded-lg shadow p-5 border border-gray-200 opacity-60"
+                            >
+                              <div className="flex items-start justify-between mb-2">
+                                <h3 className="font-semibold text-sm text-gray-400">{comp.name}</h3>
+                                <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-medium">
+                                  Coming Soon
+                                </span>
+                              </div>
+                              <p className="text-xs text-gray-400">{comp.description}</p>
+                            </div>
+                          ) : (
                             <div
                               key={comp.key}
                               className="bg-white rounded-lg shadow p-5 border border-gray-200"
@@ -969,6 +1027,14 @@ export default function InfraComponentsPage() {
           onClose={() => setShowBootstrapModal(false)}
         />
       )}
+
+      {/* Deploy Recovery Modal */}
+      <DeployRecoveryModal
+        open={showRecoveryModal}
+        onClose={() => setShowRecoveryModal(false)}
+        onRecovered={handleRecoveryComplete}
+        onStartFresh={handleStartFresh}
+      />
 
       {/* Deploy Stack Modal (poll-based) */}
       {showDeployModal && (

@@ -68,6 +68,52 @@ class TestComponentsEndpoint:
         assert filestore["status"] == "coming_soon"
 
     @pytest.mark.asyncio
+    async def test_snakemake_listed_as_coming_soon_on_kubernetes(self, client, admin_token, session):
+        await session.execute(
+            text(
+                "INSERT INTO platform_config (key, value) VALUES ('compute_stack', 'kubernetes') "
+                "ON CONFLICT (key) DO UPDATE SET value = 'kubernetes'"
+            )
+        )
+        await session.commit()
+
+        response = await client.get(
+            "/api/v1/infrastructure/components",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        snakemake_k8s = next((c for c in data["components"] if c["key"] == "snakemake_k8s"), None)
+        assert snakemake_k8s is not None
+        assert snakemake_k8s["status"] == "coming_soon"
+
+        snakemake_slurm = next((c for c in data["components"] if c["key"] == "snakemake"), None)
+        assert snakemake_slurm is not None
+        assert snakemake_slurm["status"] == "coming_soon"
+
+    @pytest.mark.asyncio
+    async def test_nextflow_k8s_available_on_kubernetes(self, client, admin_token, session):
+        await session.execute(
+            text(
+                "INSERT INTO platform_config (key, value) VALUES ('compute_stack', 'kubernetes') "
+                "ON CONFLICT (key) DO UPDATE SET value = 'kubernetes'"
+            )
+        )
+        await session.commit()
+
+        response = await client.get(
+            "/api/v1/infrastructure/components",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        nextflow_k8s = next((c for c in data["components"] if c["key"] == "nextflow_k8s"), None)
+        assert nextflow_k8s is not None
+        assert nextflow_k8s["status"] == "available"
+
+    @pytest.mark.asyncio
     async def test_response_includes_all_expected_categories(self, client, admin_token, session):
         await session.execute(
             text(

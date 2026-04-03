@@ -175,6 +175,30 @@ class TestComponentsListEndpoint:
         for comp in data["components"]:
             assert "K8s" not in comp["name"], f"Component name should not contain 'K8s': {comp['name']}"
 
+    @pytest.mark.asyncio
+    async def test_snakemake_listed_as_coming_soon(self, client, admin_token, session):
+        """Snakemake has no backend implementation yet so it must be coming_soon."""
+        await _set_config(session, "compute_stack", "kubernetes")
+        await _set_config(session, "compute_deployed", "true")
+        await _set_config(session, "storage_deployed", "true")
+        await session.commit()
+
+        response = await client.get(
+            "/api/v1/infrastructure/stack/components",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        snakemake = next((c for c in data["components"] if c["key"] == "snakemake"), None)
+        assert snakemake is not None
+        assert snakemake["status"] == "coming_soon"
+
+        # Nextflow should still be toggleable (disabled, not coming_soon)
+        nextflow = next((c for c in data["components"] if c["key"] == "nextflow"), None)
+        assert nextflow is not None
+        assert nextflow["status"] != "coming_soon"
+
 
 class TestComponentToggleEndpoint:
     @pytest.mark.asyncio

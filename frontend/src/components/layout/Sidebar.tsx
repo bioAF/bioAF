@@ -6,6 +6,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { getCurrentUser } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useComponents } from "@/hooks/useComponents";
+import { useBackendReady } from "@/hooks/useBackendReady";
 import { navConfig, NavSection, NavChild, ComponentGate, isChildActive } from "@/lib/navConfig";
 
 function ChevronIcon({ expanded }: { expanded: boolean }) {
@@ -105,6 +106,7 @@ function SidebarSection({
 export function Sidebar() {
   const pathname = usePathname();
   const [user, setUser] = useState<Record<string, unknown> | null>(null);
+  const { ready: backendReady } = useBackendReady();
   const { canAccess, roleName, loading } = usePermissions();
   const { components, loading: componentsLoading } = useComponents();
 
@@ -200,7 +202,7 @@ export function Sidebar() {
     });
   };
 
-  if (loading || componentsLoading) {
+  if (!backendReady || loading || componentsLoading) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900" data-testid="app-loading">
         <div className="text-center">
