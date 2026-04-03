@@ -65,7 +65,7 @@ class PipelineRunResponse(BaseModel):
     submitted_by: UserSummary | None = None
     status: str
     parameters: dict | None = None
-    input_files: dict | None = None
+    input_files: list[int] | dict | None = None
     output_files: dict | None = None
     progress: PipelineProgress | None = None
     cost_estimate: float | None = None

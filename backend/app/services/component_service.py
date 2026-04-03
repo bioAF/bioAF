@@ -23,7 +23,12 @@ COMPONENT_CATALOG: dict[str, dict] = {
         "provisioning_time_estimate": "~10 minutes",
         "config_schema": [
             {"key": "pipeline_pool_max_nodes", "label": "Max Nodes", "type": "number", "default": 20},
-            {"key": "pipeline_pool_machine_type", "label": "Machine Type", "type": "string", "default": "n2-highmem-8"},
+            {
+                "key": "pipeline_pool_machine_type",
+                "label": "Machine Type",
+                "type": "string",
+                "default": "n2-highmem-16",
+            },
             {"key": "pipeline_pool_use_spot", "label": "Use Spot VMs", "type": "boolean", "default": True},
         ],
     },
@@ -107,7 +112,7 @@ COMPONENT_CATALOG: dict[str, dict] = {
                 "key": "slurm_instance_type_standard",
                 "label": "Standard Instance Type",
                 "type": "string",
-                "default": "n2-highmem-8",
+                "default": "n2-highmem-16",
             },
             {"key": "slurm_use_spot_standard", "label": "Use Spot VMs", "type": "boolean", "default": True},
             {"key": "slurm_max_nodes_interactive", "label": "Max Interactive Nodes", "type": "number", "default": 5},

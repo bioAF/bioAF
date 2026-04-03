@@ -78,12 +78,6 @@ class ClusterConfigUpdate(BaseModel):
     k8s_interactive_max_nodes: int | None = None
 
 
-class ClusterConfigPlanResponse(BaseModel):
-    run_id: int
-    status: str
-    plan_summary: dict | None = None
-
-
 class ComponentInfo(BaseModel):
     key: str
     name: str
@@ -733,7 +727,7 @@ async def get_cluster_config(
     config = {r[0]: r[1] for r in rows}
 
     return ClusterConfigResponse(
-        k8s_pipeline_machine_type=config.get("k8s_pipeline_machine_type", "n2-highmem-8"),
+        k8s_pipeline_machine_type=config.get("k8s_pipeline_machine_type", "n2-highmem-16"),
         k8s_pipeline_max_nodes=int(config.get("k8s_pipeline_max_nodes", "20")),
         k8s_pipeline_use_spot=config.get("k8s_pipeline_use_spot", "true") == "true",
         k8s_interactive_machine_type=config.get("k8s_interactive_machine_type", "n2-standard-4"),
@@ -746,8 +740,8 @@ async def update_cluster_config(
     body: ClusterConfigUpdate,
     current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
-) -> ClusterConfigPlanResponse:
-    """Update cluster config by generating a Terraform plan."""
+) -> dict:
+    """Update cluster config, plan, and auto-apply."""
     # Verify compute is deployed
     deployed = (
         await session.execute(text("SELECT value FROM platform_config WHERE key = 'compute_deployed'"))
@@ -768,27 +762,26 @@ async def update_cluster_config(
     # Generate terraform plan
     user_id = int(current_user["sub"])
     run = await TerraformExecutor.run_plan(session, user_id, module_name="compute")
+
+    if run.status == "failed":
+        await session.commit()
+        raise HTTPException(status_code=500, detail=run.error_message or "Terraform plan failed")
+
+    # Auto-apply: transition to applying and kick off background apply
+    run.status = "applying"
     await session.commit()
+    asyncio.create_task(_run_apply_background(run.id, user_id))
 
-    # Build plan_summary from plan_json (run_plan writes to plan_json, not plan_summary_json)
-    plan_summary = None
-    if run.plan_json:
-        pj = run.plan_json
-        add_list = [r for r in pj.get("resources", []) if r.get("action") == "create"]
-        change_list = [r for r in pj.get("resources", []) if r.get("action") == "update"]
-        destroy_list = [r for r in pj.get("resources", []) if r.get("action") == "delete"]
-        replace_list = [r for r in pj.get("resources", []) if r.get("action") == "replace"]
-        plan_summary = {
-            "add": add_list + replace_list,
-            "change": change_list,
-            "destroy": destroy_list + replace_list,
-            "add_count": pj.get("add_count", 0),
-            "change_count": pj.get("change_count", 0),
-            "destroy_count": pj.get("destroy_count", 0),
-        }
+    return {"message": "Cluster configuration update started", "run_id": run.id}
 
-    return ClusterConfigPlanResponse(
-        run_id=run.id,
-        status=run.status,
-        plan_summary=plan_summary,
-    )
+
+async def _run_apply_background(run_id: int, user_id: int) -> None:
+    """Run TerraformExecutor.run_apply in the background with its own session."""
+    async with async_session_factory() as bg_session:
+        try:
+            async for _event in TerraformExecutor.run_apply(bg_session, run_id, user_id):
+                pass
+            await bg_session.commit()
+        except Exception:
+            logger.exception("Background terraform apply failed for run %d", run_id)
+            await bg_session.rollback()

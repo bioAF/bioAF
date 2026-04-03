@@ -342,6 +342,73 @@ async def build_notebook_image(session: AsyncSession) -> str:
     return build_id
 
 
+async def _ensure_default_environment(session: AsyncSession, image_uri: str) -> None:
+    """Create the default scRNA-seq environment if none exists yet.
+
+    Called after a successful notebook image build so users have an
+    environment to select immediately.
+    """
+    from app.models.environment import Environment
+    from app.models.environment_version import EnvironmentVersion
+
+    # Get the org -- single-tenant, so take the first one
+    row = (await session.execute(text("SELECT id FROM organizations LIMIT 1"))).fetchone()
+    if not row:
+        logger.warning("No organization found; skipping default environment creation")
+        return
+    org_id = row[0]
+
+    # Get the first admin user to attribute creation to
+    admin_row = (
+        await session.execute(
+            text(
+                "SELECT u.id FROM users u "
+                "JOIN roles r ON u.role_id = r.id "
+                "WHERE u.organization_id = :org_id AND r.name = 'admin' "
+                "ORDER BY u.id LIMIT 1"
+            ).bindparams(org_id=org_id)
+        )
+    ).fetchone()
+    if not admin_row:
+        logger.warning("No admin user found; skipping default environment creation")
+        return
+    user_id = admin_row[0]
+
+    # Skip if an environment already exists for this org
+    existing = (
+        await session.execute(
+            text("SELECT id FROM environments WHERE organization_id = :org_id LIMIT 1").bindparams(org_id=org_id)
+        )
+    ).fetchone()
+    if existing:
+        logger.info("Environment already exists for org %d; skipping default creation", org_id)
+        return
+
+    env = Environment(
+        name="bioAF scRNA-seq",
+        description="Default single-cell RNA-seq environment with scanpy, Seurat, and RStudio",
+        organization_id=org_id,
+        created_by_user_id=user_id,
+        visibility="team",
+    )
+    session.add(env)
+    await session.flush()
+
+    version = EnvironmentVersion(
+        environment_id=env.id,
+        version_number=1,
+        status="ready",
+        definition_format="dockerfile",
+        definition_content=DOCKERFILE_CONTENT,
+        image_uri=image_uri,
+        created_by_user_id=user_id,
+    )
+    session.add(version)
+    await session.flush()
+
+    logger.info("Created default environment '%s' (id=%d) with image %s", env.name, env.id, image_uri)
+
+
 async def poll_image_build(session: AsyncSession) -> str | None:
     """Check if there is an active image build and update its status.
 
@@ -377,6 +444,8 @@ async def poll_image_build(session: AsyncSession) -> str | None:
             AND enabled = true AND status = 'provisioning'
             """)
         )
+        # Create default environment if none exists yet
+        await _ensure_default_environment(session, image_uri)
     elif status in ("FAILURE", "CANCELLED", "TIMEOUT"):
         logger.error("Notebook image build %s failed with status %s", build_id, status)
         # Clear the image URI since the build failed

@@ -61,7 +61,7 @@ For GKE Autopilot, node provisioning is fully managed — bioAF simply specifies
 | Node Pool | Purpose | Machine Type | Autoscaling | Spot/On-Demand |
 |---|---|---|---|---|
 | `bioaf-platform` | Control plane services | e2-standard-2 | 1-3 nodes | On-demand |
-| `bioaf-pipelines` | Pipeline batch jobs | n2-highmem-8 | 0-20 nodes | Spot (default, configurable) |
+| `bioaf-pipelines` | Pipeline batch jobs | n2-highmem-16 | 0-20 nodes | Spot (default, configurable) |
 | `bioaf-interactive` | Notebook sessions | n2-standard-4 | 0-5 nodes | On-demand |
 
 Node pool configuration (machine types, max nodes, spot toggle) is managed through the bioAF UI, which updates `terraform.tfvars` and applies via the existing Terraform executor (ADR-007).
