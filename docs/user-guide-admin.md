@@ -29,6 +29,17 @@ Navigate to **Infrastructure > Components**:
 - View component health status
 - Dependencies are enforced (e.g., JupyterHub requires SLURM + Filestore)
 
+### Deployment Recovery
+
+If a deployment times out (e.g., due to a Google Cloud service delay), the app
+automatically detects orphaned clusters on your next visit:
+
+- **Cluster came online**: you are prompted to resume where you left off or start fresh
+- **Cluster still provisioning**: you are told Google Cloud is still working and to check back later
+- **Cluster failed or disappeared**: cleaned up automatically in the background
+
+The deploy button is disabled while orphaned resources exist to prevent duplicate clusters.
+
 ## Cost Center
 
 Navigate to **Infrastructure > Cost Center**:

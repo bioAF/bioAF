@@ -130,16 +130,21 @@ async def get_components(
     row = result.first()
     compute_stack = row[0] if row else "kubernetes"
 
+    # Components with no backend implementation yet, regardless of compute stack
+    unimplemented = {"snakemake_k8s", "snakemake"}
+
     components = []
     for key, defn in COMPONENT_CATALOG.items():
         comp_stack = defn.get("compute_stack")
-        if compute_stack == "kubernetes":
+        if key in unimplemented:
+            status = "coming_soon"
+        elif compute_stack == "kubernetes":
             if comp_stack == "slurm":
                 status = "coming_soon"
             else:
                 status = "available"
         else:
-            # slurm stack — all adapters are stubbed so mark k8s as coming_soon
+            # slurm stack -- all adapters are stubbed so mark k8s as coming_soon
             if comp_stack == "kubernetes":
                 status = "coming_soon"
             else:

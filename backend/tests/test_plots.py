@@ -1,5 +1,6 @@
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 
 
 @pytest_asyncio.fixture
@@ -59,6 +60,56 @@ async def test_search_plots(client, admin_token, sample_plot):
     data = resp.json()
     assert data["total"] >= 1
     assert any(p["title"] == "UMAP Clustering" for p in data["plots"])
+
+
+@pytest.mark.asyncio
+async def test_search_plots_includes_storage_deleted_flag(
+    client, admin_token, session, admin_user, experiment_for_plots
+):
+    from app.models.file import File
+    from app.models.plot_archive_entry import PlotArchiveEntry
+    from datetime import datetime, timezone
+
+    f = File(
+        organization_id=admin_user.organization_id,
+        gcs_uri="gs://test-bucket/plots/deleted-plot.png",
+        filename="deleted-plot.png",
+        size_bytes=10000,
+        file_type="image",
+        uploader_user_id=admin_user.id,
+    )
+    session.add(f)
+    await session.flush()
+
+    plot = PlotArchiveEntry(
+        organization_id=admin_user.organization_id,
+        file_id=f.id,
+        title="Deleted Plot",
+        experiment_id=experiment_for_plots.id,
+        tags_json=["deleted"],
+        indexed_at=datetime.now(timezone.utc),
+    )
+    session.add(plot)
+    await session.flush()
+    await session.commit()
+
+    # Mark as storage_deleted after insert to avoid server_default override
+    await session.execute(text("UPDATE files SET storage_deleted = true WHERE id = :fid").bindparams(fid=f.id))
+    await session.commit()
+
+    # Verify the update took effect
+    check = await session.execute(text("SELECT storage_deleted FROM files WHERE id = :fid").bindparams(fid=f.id))
+    assert check.scalar() is True
+
+    resp = await client.get(
+        "/api/plots",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    deleted_plot = next((p for p in data["plots"] if p["title"] == "Deleted Plot"), None)
+    assert deleted_plot is not None
+    assert deleted_plot["file"]["storage_deleted"] is True
 
 
 @pytest.mark.asyncio

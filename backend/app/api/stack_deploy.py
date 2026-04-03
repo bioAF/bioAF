@@ -503,17 +503,23 @@ async def stack_components_list(
     state_rows = (await session.execute(text("SELECT component_key, enabled, status FROM component_states"))).fetchall()
     state_map = {r[0]: {"enabled": r[1], "status": r[2]} for r in state_rows}
 
+    # Components with no backend implementation yet
+    unimplemented = {"snakemake"}
+
     components = []
     for comp_def in KUBERNETES_COMPONENTS:
-        state = state_map.get(comp_def["key"], {"enabled": False, "status": "disabled"})
-        if state["enabled"]:
-            # Preserve provisioning/build_failed status from component_states
-            if state["status"] in ("provisioning", "build_failed"):
-                status = state["status"]
-            else:
-                status = "enabled"
+        if comp_def["key"] in unimplemented:
+            status = "coming_soon"
         else:
-            status = "disabled"
+            state = state_map.get(comp_def["key"], {"enabled": False, "status": "disabled"})
+            if state["enabled"]:
+                # Preserve provisioning/build_failed status from component_states
+                if state["status"] in ("provisioning", "build_failed"):
+                    status = state["status"]
+                else:
+                    status = "enabled"
+            else:
+                status = "disabled"
 
         components.append(
             ComponentInfo(

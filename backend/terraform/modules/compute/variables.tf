@@ -10,7 +10,7 @@ variable "region" {
 
 variable "zone" {
   type        = string
-  description = "GCP zone for the zonal GKE cluster"
+  description = "GCP zone (retained for backward compatibility with tfvars generation)"
 }
 
 variable "org_slug" {

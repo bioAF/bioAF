@@ -21,6 +21,10 @@ jest.mock("@/lib/auth", () => ({
   getCurrentUser: () => ({ role_name: "admin", email: "admin@test.com" }),
 }));
 
+jest.mock("@/hooks/useBackendReady", () => ({
+  useBackendReady: () => ({ ready: true }),
+}));
+
 const mockPermissions = jest.fn();
 jest.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => mockPermissions(),

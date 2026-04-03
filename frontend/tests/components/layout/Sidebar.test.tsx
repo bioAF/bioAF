@@ -30,6 +30,10 @@ jest.mock("@/hooks/useComponents", () => ({
   }),
 }));
 
+jest.mock("@/hooks/useBackendReady", () => ({
+  useBackendReady: () => ({ ready: true }),
+}));
+
 jest.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => ({
     canAccess: (...args: unknown[]) => mockCanAccess(...args),

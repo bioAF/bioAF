@@ -14,7 +14,7 @@ terraform {
 resource "google_container_cluster" "bioaf" {
   name     = "bioaf-${var.org_slug}-${var.stack_uid}"
   project  = var.project_id
-  location = var.zone
+  location = var.region
 
   # Terraform-managed lifecycle -- teardown handles deletion
   deletion_protection      = false
@@ -43,7 +43,7 @@ resource "google_container_node_pool" "pipelines" {
   name           = "bioaf-pipelines"
   cluster        = google_container_cluster.bioaf.id
   project        = var.project_id
-  location       = var.zone
+  location       = var.region
   node_locations = var.k8s_node_zones
 
   autoscaling {
@@ -78,7 +78,7 @@ resource "google_container_node_pool" "interactive" {
   name           = "bioaf-interactive"
   cluster        = google_container_cluster.bioaf.id
   project        = var.project_id
-  location       = var.zone
+  location       = var.region
   node_locations = var.k8s_node_zones
 
   autoscaling {

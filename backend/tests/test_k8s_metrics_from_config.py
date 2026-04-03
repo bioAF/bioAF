@@ -1,6 +1,6 @@
 """Tests that _k8s_get_cluster_metrics reads cluster identity from platform_config.
 
-The GKE cluster name, project ID, and zone are stored in platform_config
+The GKE cluster name, project ID, and region are stored in platform_config
 (written during stack deployment). The metrics method should read them from
 _cluster_config rather than requiring separate environment variables.
 Also, if the GKE API call fails, get_cluster_metrics must return a safe
@@ -23,7 +23,7 @@ def adapter(monkeypatch):
         "gke_cluster_endpoint": "https://10.0.0.1",
         "gke_cluster_name": "bioaf-cluster-1",
         "gcp_project_id": "my-project",
-        "gcp_zone": "us-central1-a",
+        "gcp_region": "us-central1",
         "gcp_service_account_key": '{"type": "service_account", "project_id": "test"}',
     }
     return provider
@@ -49,7 +49,7 @@ class TestMetricsFromConfig:
             result = await adapter._k8s_get_cluster_metrics()
 
         # Verify the GKE client was called with the config values, not env vars
-        expected_name = "projects/my-project/locations/us-central1-a/clusters/bioaf-cluster-1"
+        expected_name = "projects/my-project/locations/us-central1/clusters/bioaf-cluster-1"
         mock_gke.get_cluster.assert_called_once_with(name=expected_name)
         assert result["cost_burn_rate_hourly"] > 0
 

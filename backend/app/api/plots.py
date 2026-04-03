@@ -25,6 +25,7 @@ def _plot_response(p) -> PlotArchiveResponse:
             uploader=UserSummary(id=p.file.uploader.id, name=p.file.uploader.name, email=p.file.uploader.email)
             if p.file and p.file.uploader
             else None,
+            storage_deleted=p.file.storage_deleted,
             upload_timestamp=p.file.upload_timestamp,
             created_at=p.file.created_at,
         )

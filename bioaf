@@ -400,22 +400,34 @@ cmd_reset_db() {
         exit 0
     fi
 
-    echo "Stopping backend..."
-    $DC stop backend
+    echo "Stopping backend and frontend..."
+    $DC stop backend frontend nginx 2>/dev/null || true
 
+    # Ensure the db container is running so we can drop the database
+    local db_state
+    db_state=$($DC ps --format "{{.State}}" db 2>/dev/null || echo "not created")
+    if [ "$db_state" != "running" ]; then
+        echo "Starting database..."
+        $DC up -d db
+    fi
+    wait_for_db
+
+    # Terminate any lingering connections before dropping
     echo "Dropping and recreating database..."
+    $DC exec -T db psql -U bioaf -d postgres -c \
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'bioaf' AND pid <> pg_backend_pid();" \
+        > /dev/null 2>&1 || true
     $DC exec -T db dropdb -U bioaf --if-exists bioaf
     $DC exec -T db createdb -U bioaf bioaf
 
     echo "Starting backend..."
-    $DC start backend
-
+    $DC up -d backend
     wait_for_db
 
     echo "Running migrations..."
     $DC exec -T backend alembic -c alembic/alembic.ini upgrade head
 
-    green "Database reset complete. Run './bioaf setup' to create a new admin account."
+    green "Database reset complete. Run './bioaf create-admin' to create a new admin account."
 }
 
 cmd_register_outputs() {
