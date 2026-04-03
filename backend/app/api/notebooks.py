@@ -98,7 +98,7 @@ async def launch_session(
         )
     except ValueError as e:
         logger.warning("Session launch failed: %s", e)
-        raise HTTPException(400, "Failed to launch session")
+        raise HTTPException(400, str(e))
 
     await session.commit()
 

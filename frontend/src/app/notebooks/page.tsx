@@ -588,6 +588,14 @@ export default function NotebooksPage() {
                   {launchError && (
                     <div className="bg-red-50 border border-red-200 rounded-lg p-3">
                       <p className="text-sm text-red-800">{launchError}</p>
+                      {launchError.toLowerCase().includes("session credentials") && (
+                        <p className="text-sm text-red-800 mt-1">
+                          <Link href="/profile" className="underline font-medium">
+                            Go to Profile Settings
+                          </Link>{" "}
+                          to configure your session credentials.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>

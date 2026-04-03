@@ -294,12 +294,26 @@ async def stack_deploy_progress(
     session: AsyncSession = Depends(get_session),
 ) -> DeployProgressResponse:
     """Poll deployment progress. Returns the most recent active run or idle state."""
+    from datetime import datetime, timedelta, timezone
+
     from app.models.component import TerraformRun
-    from sqlalchemy import select
+    from sqlalchemy import and_, or_, select
+
+    # Include active runs, plus recently completed/failed runs so the
+    # frontend can display the terminal state before dismissing.
+    recent_cutoff = datetime.now(timezone.utc) - timedelta(minutes=2)
 
     result = await session.execute(
         select(TerraformRun)
-        .where(TerraformRun.status.in_(["planning", "applying", "awaiting_confirmation"]))
+        .where(
+            or_(
+                TerraformRun.status.in_(["planning", "applying", "awaiting_confirmation"]),
+                and_(
+                    TerraformRun.status.in_(["failed", "completed"]),
+                    TerraformRun.completed_at >= recent_cutoff,
+                ),
+            )
+        )
         .order_by(TerraformRun.started_at.desc())
         .limit(1)
     )
@@ -308,8 +322,10 @@ async def stack_deploy_progress(
     if run is None:
         return DeployProgressResponse(active=False)
 
+    is_active = run.status in ("planning", "applying", "awaiting_confirmation")
+
     return DeployProgressResponse(
-        active=True,
+        active=is_active,
         status=run.status,
         phase=run.deploy_phase,
         resources_completed=run.resources_completed,
