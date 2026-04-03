@@ -958,7 +958,7 @@ export default function InfraComponentsPage() {
       {showDeployModal && (
         <DeployProgressModal
           phase={deployProgress.phase}
-          status={deployProgress.active ? deployProgress.status : deployStarted ? "planning" : deployProgress.status}
+          status={deployProgress.status ?? (deployStarted ? "planning" : null)}
           resourcesCompleted={deployProgress.resources_completed}
           resourcesTotal={deployProgress.resources_total}
           completedResources={deployProgress.completed_resources}

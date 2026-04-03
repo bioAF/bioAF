@@ -7,6 +7,7 @@ from app.services.auth_service import AuthService
 @pytest_asyncio.fixture
 async def comp_bio_user(session, admin_user):
     from app.models.user import User
+    from app.services.session_credential_service import SessionCredentialService
 
     password_hash = AuthService.hash_password("compbiopass123")
     user = User(
@@ -18,6 +19,11 @@ async def comp_bio_user(session, admin_user):
     )
     session.add(user)
     await session.flush()
+
+    # RStudio sessions require session credentials
+    await SessionCredentialService.create_or_update(
+        session, user_id=user.id, org_id=user.organization_id, email=user.email, password="testpass123"
+    )
     await session.commit()
     return user
 
@@ -122,7 +128,7 @@ async def test_session_launch_checks_quota(client, session, comp_bio_user, comp_
         headers={"Authorization": f"Bearer {comp_bio_token}"},
     )
     assert response.status_code == 400
-    assert response.json()["detail"] == "Failed to launch session"
+    assert "Quota exceeded" in response.json()["detail"]
 
 
 @pytest.mark.asyncio

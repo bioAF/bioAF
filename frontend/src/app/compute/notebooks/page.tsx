@@ -36,6 +36,7 @@ export default function NotebookSessionsPage() {
   const [viewingSession, setViewingSession] = useState<NotebookSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [launching, setLaunching] = useState(false);
+  const [launchError, setLaunchError] = useState("");
   const [selectedProfile, setSelectedProfile] = useState<ResourceProfile>("small");
   const [selectedExperiment, setSelectedExperiment] = useState<number | null>(null);
   const [experiments, setExperiments] = useState<Experiment[]>([]);
@@ -68,6 +69,7 @@ export default function NotebookSessionsPage() {
 
   async function handleLaunch(sessionType: SessionType) {
     setLaunching(true);
+    setLaunchError("");
     try {
       const req: SessionLaunchRequest = {
         session_type: sessionType,
@@ -77,7 +79,7 @@ export default function NotebookSessionsPage() {
       await api.post("/api/notebooks/sessions", req);
       loadSessions();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to launch session");
+      setLaunchError(err instanceof Error ? err.message : "Failed to launch session");
     } finally {
       setLaunching(false);
     }
@@ -162,6 +164,20 @@ export default function NotebookSessionsPage() {
                   {launching ? "Launching..." : "Launch RStudio"}
                 </button>
               </div>
+
+              {launchError && (
+                <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+                  <p>{launchError}</p>
+                  {launchError.toLowerCase().includes("session credentials") && (
+                    <p className="mt-1">
+                      <Link href="/profile" className="text-red-800 underline font-medium">
+                        Go to Profile Settings
+                      </Link>{" "}
+                      to configure your session credentials.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

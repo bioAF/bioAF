@@ -125,6 +125,12 @@ resource "google_project_iam_member" "gke_default_node_sa" {
   member  = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
 }
 
+resource "google_project_iam_member" "gke_artifact_registry_reader" {
+  project = var.project_id
+  role    = "roles/artifactregistry.reader"
+  member  = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+}
+
 # --- Workload Identity for notebook pods ---
 #
 # With Workload Identity enabled, pods cannot use the node's default SA.

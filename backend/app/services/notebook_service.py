@@ -168,6 +168,9 @@ class NotebookService:
                         )
                     )
 
+        except ValueError:
+            notebook_session.status = "failed"
+            raise
         except Exception as e:
             notebook_session.status = "failed"
             logger.error("Failed to launch notebook session %d: %s", notebook_session.id, e)
