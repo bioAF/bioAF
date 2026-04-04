@@ -15,6 +15,7 @@ class CellxgenePublication(Base):
     experiment_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("experiments.id"), nullable=True)
     dataset_name: Mapped[str] = mapped_column(String(255), nullable=False)
     stable_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    access_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="publishing")
     published_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

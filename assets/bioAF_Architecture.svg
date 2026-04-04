@@ -1,0 +1,270 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 950" width="1200" height="950">
+  <defs>
+    <marker id="ah" markerWidth="6" markerHeight="5" refX="6" refY="2.5" orient="auto">
+      <polygon points="0 0, 6 2.5, 0 5" fill="#94A3B8"/>
+    </marker>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="950" fill="#F8FAFC"/>
+
+  <!-- Title -->
+  <text x="430" y="32" text-anchor="middle" font-size="20" font-weight="bold" fill="#1E293B">bioAF v0.4.0 — System Architecture</text>
+
+  <!-- ==================== BROWSER ==================== -->
+  <rect x="295" y="52" width="250" height="38" rx="8" fill="#3B82F6"/>
+  <text x="420" y="76" text-anchor="middle" font-size="13" font-weight="600" fill="#FFFFFF">Researcher's Browser</text>
+
+  <!-- Arrow: Browser to Nginx -->
+  <line x1="420" y1="90" x2="420" y2="112" stroke="#94A3B8" stroke-width="2" marker-end="url(#ah)"/>
+
+  <!-- ==================== NGINX ==================== -->
+  <rect x="40" y="115" width="760" height="30" rx="6" fill="#475569"/>
+  <text x="420" y="135" text-anchor="middle" font-size="11" fill="#FFFFFF">Nginx Reverse Proxy · HTTP/HTTPS · TLS Termination</text>
+
+  <!-- Arrow: Nginx to Frontend -->
+  <line x1="420" y1="145" x2="420" y2="163" stroke="#94A3B8" stroke-width="2" marker-end="url(#ah)"/>
+
+  <!-- ==================== FRONTEND ==================== -->
+  <path d="M48,165 H792 Q800,165 800,173 V193 H40 V173 Q40,165 48,165 Z" fill="#2563EB"/>
+  <path d="M40,193 H800 V275 Q800,283 792,283 H48 Q40,283 40,275 V193 Z" fill="#EFF6FF"/>
+  <text x="420" y="183" text-anchor="middle" font-size="12" font-weight="600" fill="#FFFFFF">Frontend — Next.js 14 / React 18 / TypeScript / Tailwind CSS</text>
+
+  <!-- Frontend Row 1 -->
+  <rect x="50" y="199" width="180" height="32" rx="5" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="140" y="220" text-anchor="middle" font-size="11" fill="#1E40AF">Dashboard</text>
+
+  <rect x="237" y="199" width="180" height="32" rx="5" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="327" y="220" text-anchor="middle" font-size="11" fill="#1E40AF">Experiments &amp; Samples</text>
+
+  <rect x="424" y="199" width="180" height="32" rx="5" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="514" y="220" text-anchor="middle" font-size="11" fill="#1E40AF">Pipelines &amp; Runs</text>
+
+  <rect x="611" y="199" width="180" height="32" rx="5" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="701" y="220" text-anchor="middle" font-size="11" fill="#1E40AF">Notebooks &amp; Environments</text>
+
+  <!-- Frontend Row 2 -->
+  <rect x="50" y="241" width="180" height="32" rx="5" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="140" y="262" text-anchor="middle" font-size="11" fill="#1E40AF">Data &amp; Files</text>
+
+  <rect x="237" y="241" width="180" height="32" rx="5" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="327" y="262" text-anchor="middle" font-size="11" fill="#1E40AF">Results &amp; Visualization</text>
+
+  <rect x="424" y="241" width="180" height="32" rx="5" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="514" y="262" text-anchor="middle" font-size="11" fill="#1E40AF">Infrastructure</text>
+
+  <rect x="611" y="241" width="180" height="32" rx="5" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="701" y="262" text-anchor="middle" font-size="11" fill="#1E40AF">Settings &amp; Admin</text>
+
+  <!-- Arrow: Frontend to Backend -->
+  <line x1="420" y1="283" x2="420" y2="301" stroke="#94A3B8" stroke-width="2" marker-end="url(#ah)"/>
+
+  <!-- ==================== BACKEND ==================== -->
+  <path d="M48,303 H792 Q800,303 800,311 V331 H40 V311 Q40,303 48,303 Z" fill="#2563EB"/>
+  <path d="M40,331 H800 V453 Q800,461 792,461 H48 Q40,461 40,453 V331 Z" fill="#EFF6FF"/>
+  <text x="420" y="321" text-anchor="middle" font-size="12" font-weight="600" fill="#FFFFFF">Backend — FastAPI / Python 3.12 / Async</text>
+
+  <!-- Backend Row 1 -->
+  <rect x="50" y="337" width="180" height="32" rx="5" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="140" y="358" text-anchor="middle" font-size="11" fill="#1E40AF">Experiment Service</text>
+
+  <rect x="237" y="337" width="180" height="32" rx="5" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="327" y="358" text-anchor="middle" font-size="11" fill="#1E40AF">Pipeline Orchestrator</text>
+
+  <rect x="424" y="337" width="180" height="32" rx="5" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="514" y="358" text-anchor="middle" font-size="11" fill="#1E40AF">Notebook Manager</text>
+
+  <rect x="611" y="337" width="180" height="32" rx="5" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="701" y="358" text-anchor="middle" font-size="11" fill="#1E40AF">File Manager</text>
+
+  <!-- Backend Row 2 -->
+  <rect x="50" y="377" width="180" height="32" rx="5" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="140" y="398" text-anchor="middle" font-size="11" fill="#1E40AF">Environment Builder</text>
+
+  <rect x="237" y="377" width="180" height="32" rx="5" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="327" y="398" text-anchor="middle" font-size="11" fill="#1E40AF">Cost Service</text>
+
+  <rect x="424" y="377" width="180" height="32" rx="5" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="514" y="398" text-anchor="middle" font-size="11" fill="#1E40AF">Backup &amp; Recovery</text>
+
+  <rect x="611" y="377" width="180" height="32" rx="5" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="701" y="398" text-anchor="middle" font-size="11" fill="#1E40AF">Infrastructure (TF)</text>
+
+  <!-- Backend Row 3 -->
+  <rect x="50" y="417" width="180" height="32" rx="5" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="140" y="438" text-anchor="middle" font-size="11" fill="#1E40AF">Event Bus</text>
+
+  <rect x="237" y="417" width="180" height="32" rx="5" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="327" y="438" text-anchor="middle" font-size="11" fill="#1E40AF">Notification Router</text>
+
+  <rect x="424" y="417" width="180" height="32" rx="5" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="514" y="438" text-anchor="middle" font-size="11" fill="#1E40AF">Search Integration</text>
+
+  <rect x="611" y="417" width="180" height="32" rx="5" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="701" y="438" text-anchor="middle" font-size="11" fill="#1E40AF">GitOps</text>
+
+  <!-- Arrows: Backend to PostgreSQL and BAL -->
+  <line x1="150" y1="461" x2="150" y2="481" stroke="#94A3B8" stroke-width="2" marker-end="url(#ah)"/>
+  <line x1="540" y1="461" x2="540" y2="481" stroke="#94A3B8" stroke-width="2" marker-end="url(#ah)"/>
+
+  <!-- ==================== POSTGRESQL ==================== -->
+  <rect x="40" y="483" width="220" height="68" rx="8" fill="#059669"/>
+  <text x="150" y="510" text-anchor="middle" font-size="13" font-weight="600" fill="#FFFFFF">PostgreSQL 16</text>
+  <text x="150" y="527" text-anchor="middle" font-size="10" fill="#A7F3D0">Docker Container</text>
+  <text x="150" y="542" text-anchor="middle" font-size="10" fill="#A7F3D0">SQLAlchemy · Alembic (57 migrations)</text>
+
+  <!-- ==================== BAL ==================== -->
+  <path d="M288,483 H792 Q800,483 800,491 V511 H280 V491 Q280,483 288,483 Z" fill="#D97706"/>
+  <path d="M280,511 H800 V543 Q800,551 792,551 H288 Q280,551 280,543 V511 Z" fill="#FFFBEB"/>
+  <text x="540" y="501" text-anchor="middle" font-size="12" font-weight="600" fill="#FFFFFF">BioAF Adapter Layer (BAL)</text>
+
+  <rect x="286" y="515" width="122" height="30" rx="5" fill="#FFFFFF" stroke="#FDE68A" stroke-width="1"/>
+  <text x="347" y="534" text-anchor="middle" font-size="10" fill="#92400E">Compute Provider</text>
+
+  <rect x="414" y="515" width="122" height="30" rx="5" fill="#FFFFFF" stroke="#FDE68A" stroke-width="1"/>
+  <text x="475" y="534" text-anchor="middle" font-size="10" fill="#92400E">Storage Provider</text>
+
+  <rect x="542" y="515" width="122" height="30" rx="5" fill="#FFFFFF" stroke="#FDE68A" stroke-width="1"/>
+  <text x="603" y="534" text-anchor="middle" font-size="10" fill="#92400E">Notebook Provider</text>
+
+  <rect x="670" y="515" width="122" height="30" rx="5" fill="#FFFFFF" stroke="#FDE68A" stroke-width="1"/>
+  <text x="731" y="534" text-anchor="middle" font-size="10" fill="#92400E">Cellxgene Provider</text>
+
+  <!-- Arrow: BAL to GKE -->
+  <line x1="540" y1="551" x2="540" y2="571" stroke="#94A3B8" stroke-width="2" marker-end="url(#ah)"/>
+
+  <!-- ==================== GKE AUTOPILOT ==================== -->
+  <path d="M48,573 H792 Q800,573 800,581 V601 H40 V581 Q40,573 48,573 Z" fill="#059669"/>
+  <path d="M40,601 H800 V687 Q800,695 792,695 H48 Q40,695 40,687 V601 Z" fill="#ECFDF5"/>
+  <text x="420" y="591" text-anchor="middle" font-size="12" font-weight="600" fill="#FFFFFF">GKE Autopilot — Kubernetes Workloads</text>
+
+  <!-- GKE Row 1 (4 items) -->
+  <rect x="50" y="609" width="178" height="32" rx="5" fill="#FFFFFF" stroke="#A7F3D0" stroke-width="1"/>
+  <text x="139" y="630" text-anchor="middle" font-size="10" fill="#065F46">Pipelines (NF / Snakemake)</text>
+
+  <rect x="235" y="609" width="178" height="32" rx="5" fill="#FFFFFF" stroke="#A7F3D0" stroke-width="1"/>
+  <text x="324" y="630" text-anchor="middle" font-size="11" fill="#065F46">JupyterHub Sessions</text>
+
+  <rect x="420" y="609" width="178" height="32" rx="5" fill="#FFFFFF" stroke="#A7F3D0" stroke-width="1"/>
+  <text x="509" y="630" text-anchor="middle" font-size="11" fill="#065F46">RStudio Sessions</text>
+
+  <rect x="605" y="609" width="178" height="32" rx="5" fill="#FFFFFF" stroke="#A7F3D0" stroke-width="1"/>
+  <text x="694" y="630" text-anchor="middle" font-size="11" fill="#065F46">SSH Work Nodes</text>
+
+  <!-- GKE Row 2 (3 items) -->
+  <rect x="50" y="651" width="242" height="32" rx="5" fill="#FFFFFF" stroke="#A7F3D0" stroke-width="1"/>
+  <text x="171" y="672" text-anchor="middle" font-size="11" fill="#065F46">cellxgene Viewer</text>
+
+  <rect x="299" y="651" width="242" height="32" rx="5" fill="#FFFFFF" stroke="#A7F3D0" stroke-width="1"/>
+  <text x="420" y="672" text-anchor="middle" font-size="11" fill="#065F46">QC Dashboards</text>
+
+  <rect x="548" y="651" width="242" height="32" rx="5" fill="#FFFFFF" stroke="#A7F3D0" stroke-width="1"/>
+  <text x="669" y="672" text-anchor="middle" font-size="11" fill="#065F46">Meilisearch</text>
+
+  <!-- Arrow: GKE to GCP Services -->
+  <line x1="420" y1="695" x2="420" y2="713" stroke="#94A3B8" stroke-width="2" marker-end="url(#ah)"/>
+
+  <!-- ==================== GCP SERVICES ==================== -->
+  <rect x="50" y="715" width="242" height="34" rx="6" fill="#059669"/>
+  <text x="171" y="737" text-anchor="middle" font-size="11" font-weight="600" fill="#FFFFFF">Secret Manager</text>
+
+  <rect x="299" y="715" width="242" height="34" rx="6" fill="#059669"/>
+  <text x="420" y="737" text-anchor="middle" font-size="11" font-weight="600" fill="#FFFFFF">Cloud Build</text>
+
+  <rect x="548" y="715" width="242" height="34" rx="6" fill="#059669"/>
+  <text x="669" y="737" text-anchor="middle" font-size="11" font-weight="600" fill="#FFFFFF">Artifact Registry</text>
+
+  <!-- Arrow: GCP Services to GCS -->
+  <line x1="420" y1="749" x2="420" y2="767" stroke="#94A3B8" stroke-width="2" marker-end="url(#ah)"/>
+
+  <!-- ==================== GCS BUCKETS ==================== -->
+  <path d="M48,769 H792 Q800,769 800,777 V797 H40 V777 Q40,769 48,769 Z" fill="#059669"/>
+  <path d="M40,797 H800 V829 Q800,837 792,837 H48 Q40,837 40,829 V797 Z" fill="#ECFDF5"/>
+  <text x="420" y="787" text-anchor="middle" font-size="12" font-weight="600" fill="#FFFFFF">Google Cloud Storage</text>
+
+  <rect x="46" y="801" width="144" height="30" rx="5" fill="#FFFFFF" stroke="#A7F3D0" stroke-width="1"/>
+  <text x="118" y="820" text-anchor="middle" font-size="10" fill="#065F46">bioaf-ingest</text>
+
+  <rect x="197" y="801" width="144" height="30" rx="5" fill="#FFFFFF" stroke="#A7F3D0" stroke-width="1"/>
+  <text x="269" y="820" text-anchor="middle" font-size="10" fill="#065F46">bioaf-raw</text>
+
+  <rect x="348" y="801" width="144" height="30" rx="5" fill="#FFFFFF" stroke="#A7F3D0" stroke-width="1"/>
+  <text x="420" y="820" text-anchor="middle" font-size="10" fill="#065F46">bioaf-working</text>
+
+  <rect x="499" y="801" width="144" height="30" rx="5" fill="#FFFFFF" stroke="#A7F3D0" stroke-width="1"/>
+  <text x="571" y="820" text-anchor="middle" font-size="10" fill="#065F46">bioaf-results</text>
+
+  <rect x="650" y="801" width="144" height="30" rx="5" fill="#FFFFFF" stroke="#A7F3D0" stroke-width="1"/>
+  <text x="722" y="820" text-anchor="middle" font-size="10" fill="#065F46">bioaf-backups</text>
+
+  <!-- ==================== RIGHT SIDEBAR ==================== -->
+  <path d="M838,165 H1152 Q1160,165 1160,173 V193 H830 V173 Q830,165 838,165 Z" fill="#7C3AED"/>
+  <path d="M830,193 H1160 V829 Q1160,837 1152,837 H838 Q830,837 830,829 V193 Z" fill="#F5F3FF"/>
+  <text x="995" y="183" text-anchor="middle" font-size="12" font-weight="600" fill="#FFFFFF">Cross-Cutting Concerns</text>
+
+  <!-- 1. JWT Authentication -->
+  <rect x="842" y="210" width="306" height="65" rx="6" fill="#FFFFFF" stroke="#DDD6FE" stroke-width="1"/>
+  <text x="995" y="232" text-anchor="middle" font-size="12" font-weight="600" fill="#5B21B6">JWT Authentication</text>
+  <text x="995" y="248" text-anchor="middle" font-size="10" fill="#6B7280">HS256 tokens · Bearer auth</text>
+  <text x="995" y="263" text-anchor="middle" font-size="10" fill="#6B7280">Public path bypass for health / login</text>
+
+  <!-- 2. Middleware Stack -->
+  <rect x="842" y="289" width="306" height="65" rx="6" fill="#FFFFFF" stroke="#DDD6FE" stroke-width="1"/>
+  <text x="995" y="311" text-anchor="middle" font-size="12" font-weight="600" fill="#5B21B6">Middleware Stack</text>
+  <text x="995" y="327" text-anchor="middle" font-size="10" fill="#6B7280">Auth · Logging · Rate Limiting</text>
+  <text x="995" y="342" text-anchor="middle" font-size="10" fill="#6B7280">Security Headers (HSTS, CSP, XFO)</text>
+
+  <!-- 3. Immutable Audit Log -->
+  <rect x="842" y="368" width="306" height="65" rx="6" fill="#FFFFFF" stroke="#DDD6FE" stroke-width="1"/>
+  <text x="995" y="390" text-anchor="middle" font-size="12" font-weight="600" fill="#5B21B6">Immutable Audit Log</text>
+  <text x="995" y="406" text-anchor="middle" font-size="10" fill="#6B7280">Every action recorded with full context</text>
+  <text x="995" y="421" text-anchor="middle" font-size="10" fill="#6B7280">Filterable · Exportable · Paginated</text>
+
+  <!-- 4. Notifications -->
+  <rect x="842" y="447" width="306" height="65" rx="6" fill="#FFFFFF" stroke="#DDD6FE" stroke-width="1"/>
+  <text x="995" y="469" text-anchor="middle" font-size="12" font-weight="600" fill="#5B21B6">Event-Driven Notifications</text>
+  <text x="995" y="485" text-anchor="middle" font-size="10" fill="#6B7280">In-app · Email (SMTP) · Slack (OAuth)</text>
+  <text x="995" y="500" text-anchor="middle" font-size="10" fill="#6B7280">30+ subscribable event types</text>
+
+  <!-- 5. Custom RBAC -->
+  <rect x="842" y="526" width="306" height="65" rx="6" fill="#FFFFFF" stroke="#DDD6FE" stroke-width="1"/>
+  <text x="995" y="548" text-anchor="middle" font-size="12" font-weight="600" fill="#5B21B6">Custom RBAC</text>
+  <text x="995" y="564" text-anchor="middle" font-size="10" fill="#6B7280">4 built-in roles + custom creation</text>
+  <text x="995" y="579" text-anchor="middle" font-size="10" fill="#6B7280">Per-resource, per-action grants</text>
+
+  <!-- 6. 4-Tier Backup -->
+  <rect x="842" y="605" width="306" height="65" rx="6" fill="#FFFFFF" stroke="#DDD6FE" stroke-width="1"/>
+  <text x="995" y="627" text-anchor="middle" font-size="12" font-weight="600" fill="#5B21B6">4-Tier Backup System</text>
+  <text x="995" y="643" text-anchor="middle" font-size="10" fill="#6B7280">pg_dump · GCS versioning</text>
+  <text x="995" y="658" text-anchor="middle" font-size="10" fill="#6B7280">Config exports · Terraform state</text>
+
+  <!-- 7. UI-Driven Terraform -->
+  <rect x="842" y="684" width="306" height="65" rx="6" fill="#FFFFFF" stroke="#DDD6FE" stroke-width="1"/>
+  <text x="995" y="706" text-anchor="middle" font-size="12" font-weight="600" fill="#5B21B6">UI-Driven Terraform</text>
+  <text x="995" y="722" text-anchor="middle" font-size="10" fill="#6B7280">Infrastructure as Code via browser</text>
+  <text x="995" y="737" text-anchor="middle" font-size="10" fill="#6B7280">Component catalog with cost estimates</text>
+
+  <!-- ==================== NOTES ==================== -->
+  <text x="420" y="870" text-anchor="middle" font-size="11" fill="#94A3B8" font-style="italic">SLURM + NFS compute stack is architecturally defined in the BioAF Adapter Layer but not yet implemented.</text>
+
+  <!-- ==================== LEGEND ==================== -->
+  <rect x="280" y="895" width="14" height="14" rx="3" fill="#2563EB"/>
+  <text x="300" y="907" font-size="11" fill="#475569">Application Layer</text>
+
+  <rect x="430" y="895" width="14" height="14" rx="3" fill="#059669"/>
+  <text x="450" y="907" font-size="11" fill="#475569">GCP Infrastructure</text>
+
+  <rect x="590" y="895" width="14" height="14" rx="3" fill="#D97706"/>
+  <text x="610" y="907" font-size="11" fill="#475569">Adapter Layer</text>
+
+  <rect x="730" y="895" width="14" height="14" rx="3" fill="#7C3AED"/>
+  <text x="750" y="907" font-size="11" fill="#475569">Cross-Cutting</text>
+
+  <rect x="870" y="895" width="14" height="14" rx="3" fill="#475569"/>
+  <text x="890" y="907" font-size="11" fill="#475569">Reverse Proxy</text>
+
+</svg>

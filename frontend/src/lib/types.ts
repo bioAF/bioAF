@@ -814,10 +814,34 @@ export interface StorageDashboard {
   last_updated: string;
 }
 
+export interface CellxgenePublishableFile {
+  id: number;
+  filename: string;
+  gcs_uri: string;
+  size_bytes: number | null;
+  file_type: string;
+  project_name: string | null;
+  experiment_name: string | null;
+  sample_names: string[];
+  source_type: string;
+  cellxgene_ready: boolean;
+  cellxgene_status: string;
+  created_at: string;
+}
+
+export interface CellxgeneFileInspection {
+  embeddings: string[];
+  cell_count: number;
+  gene_count: number;
+  cellxgene_ready: boolean;
+  missing: string | null;
+}
+
 export interface CellxgenePublicationResponse {
   id: number;
   dataset_name: string;
   stable_url: string | null;
+  access_url: string | null;
   status: string;
   file: FileResponse | null;
   experiment_id: number | null;

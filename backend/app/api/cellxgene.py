@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import get_session
-from app.schemas.cellxgene import CellxgenePublicationResponse, CellxgenePublishRequest
+from app.schemas.cellxgene import CellxgenePublicationResponse, CellxgenePublishableFile, CellxgenePublishRequest
 from app.schemas.experiment import UserSummary
 from app.schemas.file import FileResponse
 from app.services.cellxgene_service import CellxgeneService
@@ -30,6 +30,7 @@ def _pub_response(pub) -> CellxgenePublicationResponse:
         id=pub.id,
         dataset_name=pub.dataset_name,
         stable_url=pub.stable_url,
+        access_url=pub.access_url,
         status=pub.status,
         file=file_resp,
         experiment_id=pub.experiment_id,
@@ -101,7 +102,7 @@ async def list_publications(
     return [_pub_response(p) for p in pubs]
 
 
-@router.get("/publishable-files")
+@router.get("/publishable-files", response_model=list[CellxgenePublishableFile])
 async def list_publishable_files(
     request: Request,
     session: AsyncSession = Depends(get_session),
@@ -111,21 +112,64 @@ async def list_publishable_files(
 
     files = await CellxgeneService.list_publishable_files(session, org_id)
     return [
-        FileResponse(
+        CellxgenePublishableFile(
             id=f.id,
             filename=f.filename,
             gcs_uri=f.gcs_uri,
             size_bytes=f.size_bytes,
-            md5_checksum=f.md5_checksum,
             file_type=f.file_type,
-            tags=f.tags_json if isinstance(f.tags_json, list) else [],
-            uploader=None,
-            experiment_id=f.experiment_id,
-            upload_timestamp=f.upload_timestamp,
+            project_name=f.project.name if f.project else None,
+            experiment_name=f.experiment.name if f.experiment else None,
+            sample_names=getattr(f, "_sample_names", []),
+            source_type=f.source_type,
+            cellxgene_ready=False,
+            cellxgene_status="not inspected",
             created_at=f.created_at,
         )
         for f in files
     ]
+
+
+@router.get("/inspect/{file_id}")
+async def inspect_file(
+    file_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Inspect an h5ad file for cellxgene compatibility.
+
+    Downloads and reads HDF5 metadata to check for embeddings.
+    """
+    from sqlalchemy import select as sa_select
+
+    from app.models.file import File
+    from app.services.credential_injector import load_gcp_credentials
+    from app.services.h5ad_inspector import inspect_h5ad
+
+    current_user = request.state.current_user
+    org_id = int(current_user["org_id"])
+
+    result = await session.execute(sa_select(File).where(File.id == file_id, File.organization_id == org_id))
+    file = result.scalar_one_or_none()
+    if not file:
+        raise HTTPException(404, "File not found")
+
+    # Load GCP credentials from platform_config
+    from sqlalchemy import text
+
+    config_rows = (
+        await session.execute(
+            text(
+                "SELECT key, value FROM platform_config "
+                "WHERE key IN ('gcp_credential_source', 'gcp_service_account_key', 'gcp_service_account_email')"
+            )
+        )
+    ).fetchall()
+    config = {r[0]: r[1] for r in config_rows}
+    credentials = load_gcp_credentials(config)
+
+    info = inspect_h5ad(file.gcs_uri, credentials=credentials)
+    return info
 
 
 @router.get("/{publication_id}", response_model=CellxgenePublicationResponse)

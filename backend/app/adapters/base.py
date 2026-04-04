@@ -114,3 +114,22 @@ class NotebookProvider(ABC):
     @abstractmethod
     async def get_connection_command(self, session_id: str) -> str:
         """Get SSH/exec command for direct access to the session."""
+
+
+class CellxgeneProvider(ABC):
+    """Abstract interface for cellxgene visualization backends."""
+
+    @abstractmethod
+    async def deploy(self, publication_id: int, gcs_uri: str, dataset_name: str) -> dict:
+        """Deploy a cellxgene instance for an h5ad dataset.
+
+        Returns dict with pod_name, namespace, status, and access_url.
+        """
+
+    @abstractmethod
+    async def teardown(self, publication_id: int) -> dict:
+        """Tear down a cellxgene instance. Returns confirmation dict."""
+
+    @abstractmethod
+    async def get_status(self, publication_id: int) -> dict:
+        """Get the status of a cellxgene instance."""

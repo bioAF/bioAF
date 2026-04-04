@@ -1,0 +1,16 @@
+# bioAF cellxgene explorer
+#
+# Lightweight image for serving h5ad datasets via cellxgene's interactive
+# single-cell data explorer. Includes google-cloud-storage for reading
+# files directly from GCS.
+#
+# Build:
+#   docker build -f docker/Dockerfile.cellxgene -t bioaf-cellxgene:latest .
+
+FROM python:3.11-slim
+
+RUN pip install --no-cache-dir cellxgene gcsfs
+
+EXPOSE 5005
+
+ENTRYPOINT ["cellxgene"]
