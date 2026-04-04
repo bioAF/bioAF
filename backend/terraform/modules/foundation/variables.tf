@@ -19,3 +19,9 @@ variable "bucket_location" {
   type        = string
   default     = "US"
 }
+
+variable "backups_bucket_name" {
+  description = "Name for the persistent backups bucket. If empty, auto-generates bioaf-backups-{project_id}."
+  type        = string
+  default     = ""
+}

@@ -2,8 +2,10 @@
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 
+import httpx
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,10 +16,27 @@ from app.services.event_types import PLATFORM_UPDATE_AVAILABLE
 
 logger = logging.getLogger("bioaf.upgrade_service")
 
+GITHUB_REPO = "not-that-guy-again/bioAF"
+GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+
 # Cache for version check results
 _version_cache: dict = {}
 _version_cache_time: datetime | None = None
 CACHE_TTL_SECONDS = 3600  # 1 hour
+
+
+def _clear_version_cache() -> None:
+    """Clear the version check cache (used by tests)."""
+    global _version_cache, _version_cache_time
+    _version_cache = {}
+    _version_cache_time = None
+
+
+def _parse_version(tag: str) -> tuple[int, ...]:
+    """Parse a version tag like 'v1.2.3' or '1.2.3' into a comparable tuple."""
+    cleaned = re.sub(r"^v", "", tag.strip())
+    parts = cleaned.split(".")
+    return tuple(int(p) for p in parts if p.isdigit())
 
 
 class UpgradeService:
@@ -41,9 +60,6 @@ class UpgradeService:
             return _version_cache
 
         current = settings.app_version
-
-        # In production, this would call GitHub Releases API
-        # For now, return mock data indicating no update
         result = {
             "current_version": current,
             "latest_version": current,
@@ -51,6 +67,27 @@ class UpgradeService:
             "changelog": None,
             "release_url": None,
         }
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    GITHUB_API_URL,
+                    headers={"Accept": "application/vnd.github+json"},
+                )
+
+            if resp.status_code == 200:
+                data = resp.json()
+                tag = data.get("tag_name", "")
+                latest = re.sub(r"^v", "", tag.strip())
+                if latest and _parse_version(latest) > _parse_version(current):
+                    result["update_available"] = True
+                result["latest_version"] = latest or current
+                result["changelog"] = data.get("body")
+                result["release_url"] = data.get("html_url")
+            else:
+                logger.warning("GitHub API returned %s checking for updates", resp.status_code)
+        except Exception:
+            logger.warning("Failed to check GitHub for updates", exc_info=True)
 
         _version_cache = result
         _version_cache_time = now

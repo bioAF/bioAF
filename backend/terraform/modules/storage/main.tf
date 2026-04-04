@@ -100,6 +100,10 @@ resource "google_storage_bucket" "results" {
   }
 }
 
+# DEPRECATED: Backups now go to the persistent backups bucket in the
+# foundation module (bioaf-backups-{project_id}). This bucket is kept for
+# backward compatibility with existing deployments but will be removed in
+# a future release.
 resource "google_storage_bucket" "config_backups" {
   name          = "${local.bucket_prefix}-config-backups-${var.org_slug}-${var.stack_uid}"
   project       = var.project_id

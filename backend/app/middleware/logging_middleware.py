@@ -39,4 +39,9 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             duration_ms,
         )
 
+        # Feed request health counters
+        from app.services.request_health import record
+
+        record(request.url.path, response.status_code)
+
         return response

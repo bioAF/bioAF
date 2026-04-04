@@ -494,10 +494,12 @@ class TerraformExecutor:
             )
 
             bucket_name = ""
+            backups_bucket = ""
             if output_result.returncode == 0:
                 try:
                     outputs = json.loads(output_result.stdout)
                     bucket_name = outputs.get("state_bucket_name", {}).get("value", "")
+                    backups_bucket = outputs.get("backups_bucket_name", {}).get("value", "")
                 except (json.JSONDecodeError, AttributeError):
                     pass
 
@@ -505,6 +507,7 @@ class TerraformExecutor:
             for key, value in [
                 ("terraform_initialized", "true"),
                 ("terraform_state_bucket", bucket_name),
+                ("backups_bucket_name", backups_bucket),
             ]:
                 await session.execute(
                     text(

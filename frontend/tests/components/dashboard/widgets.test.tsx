@@ -33,15 +33,15 @@ describe("Dashboard Widgets", () => {
   describe("InfrastructureHealthWidget", () => {
     it("renders with mock data", async () => {
       mockApiGet.mockResolvedValueOnce({
-        components: [
-          { name: "GKE", status: "healthy", enabled: true },
-          { name: "GCS", status: "healthy", enabled: true },
+        services: [
+          { name: "experiments", status: "healthy" },
+          { name: "storage", status: "healthy" },
         ],
       });
       render(<InfrastructureHealthWidget />);
       await waitFor(() => {
-        expect(screen.getByText("GKE")).toBeInTheDocument();
-        expect(screen.getByText("GCS")).toBeInTheDocument();
+        expect(screen.getByText("Experiments")).toBeInTheDocument();
+        expect(screen.getByText("Storage")).toBeInTheDocument();
       });
     });
 
@@ -52,7 +52,7 @@ describe("Dashboard Widgets", () => {
     });
 
     it("handles empty state", async () => {
-      mockApiGet.mockResolvedValueOnce({ components: [] });
+      mockApiGet.mockResolvedValueOnce({ services: [] });
       render(<InfrastructureHealthWidget />);
       await waitFor(() => {
         expect(screen.getByTestId("widget-empty")).toBeInTheDocument();

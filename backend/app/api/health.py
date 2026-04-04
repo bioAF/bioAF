@@ -38,3 +38,17 @@ async def system_status(session: AsyncSession = Depends(get_session)):
         "status": "healthy" if all_healthy else "degraded",
         "services": checks,
     }
+
+
+@router.get("/services")
+async def service_health():
+    """Return per-service health based on request success rates over the last 5 minutes.
+
+    Services with >75% success are healthy, 50-74% are degraded,
+    <50% are unhealthy. Services with no recent traffic are unknown.
+    """
+    from app.services.request_health import get_service_health
+
+    health = get_service_health()
+    services = [{"name": name, "status": status} for name, status in sorted(health.items())]
+    return {"services": services}
