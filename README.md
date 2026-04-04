@@ -26,68 +26,9 @@ A turnkey computational biology platform for small biotech companies (5-50 resea
 
 ## Architecture
 
-```text
-                        +----------------------------+
-                        |     Researcher's Browser   |
-                        +----------------------------+
-                                     |
-                    +----------------+-----------------+
-                    |        Frontend (Next.js 14)     |
-                    |                                  |
-                    |  Projects   Pipelines   Results  |
-                    |  Workbench  Data & Files  Infra  |
-                    +-----------------+----------------+
-                                      |
-                    +-----------------+-----------------+
-                    |        Backend (FastAPI)          |
-                    |                                   |
-                    |  Experiment     Pipeline    File  |
-                    |  Service        Orchestrator Mgr  |
-                    |                                   |
-                    |  Event Bus  Notifications  Audit  |
-                    +---------+----------+--------------+
-                              |          |
-               +--------------+    +-----+----------+
-               |                   |  PostgreSQL 16 |
-               |                   |  (Cloud SQL)   |
-               |                   +----------------+
-               |
-    +----------+-----------+
-    | BioAF Adapter Layer  |
-    |       (BAL)          |
-    |                      |
-    |  Compute   Storage   |
-    |  Provider  Provider  |
-    |  Notebook Provider   |
-    +--+-------+-------+---+
-       |       |       |
-       v       v       v
-  +---------+-----+---------+              +--------------------+
-  |     GKE Autopilot       |              |  SLURM + NFS       |
-  |  +---------+---------+  |              |  (coming soon)     |
-  |  |Pipelines|Notebooks|  |              +--------------------+
-  |  |Node Pool|Node Pool|  |
-  |  +---------+---------+  |
-  +----------+--+-----------+
-             |  |
-  +----------+  +----------+
-  |                        |
-  v                        v
-+----------+     +---------+---------+---------+---------+
-| Secret   |     |              GCS Buckets              |
-| Manager  |     |  ingest/  raw/  working/  results/    |
-+----------+     +---------------------------------------+
-
-                         Data Flow
-                         --------
-
-  FASTQs from sequencer         Pipeline results
-        |                              ^
-        v                              |
-  [ bioaf-ingest ]  -->  [ bioaf-raw ]  -->  [ bioaf-working ]  -->  [ bioaf-results ]
-    auto-ingest          permanent           intermediate             final outputs
-    (Pub/Sub)            storage             (TTL 30 days)            h5ad, plots, QC
-```
+<p align="center">
+  <img src="assets/bioAF_Architecture.svg" alt="bioAF System Architecture" width="100%" />
+</p>
 
 ### How it works
 

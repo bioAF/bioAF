@@ -41,6 +41,12 @@ function mapComponents(
   }));
 }
 
+/** Invalidate the module-level cache so the next render re-fetches. */
+export function invalidateComponentCache() {
+  cachedComponents = null;
+  fetchPromise = null;
+}
+
 export function useComponents() {
   const [components, setComponents] = useState<ComponentState[]>(
     cachedComponents ?? [],

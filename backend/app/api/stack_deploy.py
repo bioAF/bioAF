@@ -39,6 +39,8 @@ from app.services.terraform_executor import TerraformExecutor
 
 # Components that require the bioaf-scrna notebook image
 _NOTEBOOK_COMPONENTS = {"rstudio", "jupyterhub"}
+# Components that require the cellxgene image
+_CELLXGENE_COMPONENTS = {"cellxgene"}
 
 logger = logging.getLogger("bioaf.stack_deploy_api")
 
@@ -555,6 +557,7 @@ async def stack_components_list(
 @router.post("/api/v1/infrastructure/stack/components/{component_key}/toggle")
 async def stack_component_toggle(
     component_key: str,
+    force_rebuild: bool = False,
     current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ) -> ComponentToggleResponse:
@@ -620,15 +623,35 @@ async def stack_component_toggle(
                 )
             ).scalar_one_or_none()
 
-            # Trigger a build if: no image URI, or image URI is set but the
-            # build never succeeded (stale URI from a pre-fix attempt).
-            needs_build = not scrna_image or scrna_image == "null" or build_status not in ("SUCCESS",)
+            needs_build = force_rebuild or not scrna_image or scrna_image == "null" or build_status not in ("SUCCESS",)
             if needs_build:
                 try:
                     await build_notebook_image(session)
                     new_status = "provisioning"
                 except Exception as exc:
                     logger.warning("Failed to start notebook image build: %s", exc)
+                    new_status = "build_failed"
+
+        # Cellxgene needs its own image
+        if component_key in _CELLXGENE_COMPONENTS:
+            from app.services.cellxgene_image_service import build_cellxgene_image
+
+            cxg_image = (
+                await session.execute(text("SELECT value FROM platform_config WHERE key = 'cellxgene_image'"))
+            ).scalar_one_or_none()
+            cxg_build_status = (
+                await session.execute(
+                    text("SELECT value FROM platform_config WHERE key = 'cellxgene_image_build_status'")
+                )
+            ).scalar_one_or_none()
+
+            needs_build = force_rebuild or not cxg_image or cxg_image == "null" or cxg_build_status not in ("SUCCESS",)
+            if needs_build:
+                try:
+                    await build_cellxgene_image(session)
+                    new_status = "provisioning"
+                except Exception as exc:
+                    logger.warning("Failed to start cellxgene image build: %s", exc)
                     new_status = "build_failed"
 
         await session.execute(
@@ -699,6 +722,32 @@ async def notebook_image_build_status(
         build_id=_non_null(config.get("notebook_image_build_id")),
         build_status=_non_null(config.get("notebook_image_build_status")),
         image_uri=_non_null(config.get("bioaf_scrna_image")),
+    )
+
+
+@router.get("/api/v1/infrastructure/cellxgene-image/build-status")
+async def cellxgene_image_build_status(
+    current_user: dict = require_permission("infrastructure", "view"),
+    session: AsyncSession = Depends(get_session),
+) -> NotebookImageBuildStatus:
+    """Return current cellxgene image build status."""
+    rows = (
+        await session.execute(
+            text(
+                "SELECT key, value FROM platform_config "
+                "WHERE key IN ('cellxgene_image_build_id', 'cellxgene_image_build_status', 'cellxgene_image')"
+            )
+        )
+    ).fetchall()
+    config = {r[0]: r[1] for r in rows}
+
+    def _non_null(val: str | None) -> str | None:
+        return val if val and val != "null" else None
+
+    return NotebookImageBuildStatus(
+        build_id=_non_null(config.get("cellxgene_image_build_id")),
+        build_status=_non_null(config.get("cellxgene_image_build_status")),
+        image_uri=_non_null(config.get("cellxgene_image")),
     )
 
 

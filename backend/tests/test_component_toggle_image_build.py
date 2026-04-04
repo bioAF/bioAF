@@ -163,12 +163,19 @@ async def test_toggle_rstudio_rebuilds_when_no_build_status(
 
 
 @pytest.mark.asyncio
-async def test_toggle_cellxgene_does_not_trigger_build(client, session, admin_token, admin_user, seed_deployed_stack):
-    """Enabling non-notebook components does not trigger image build."""
-    with patch(
-        "app.api.stack_deploy.build_notebook_image",
-        new_callable=AsyncMock,
-    ) as mock_build:
+async def test_toggle_cellxgene_triggers_own_build(client, session, admin_token, admin_user, seed_deployed_stack):
+    """Enabling cellxgene triggers its own image build, not the notebook one."""
+    with (
+        patch(
+            "app.api.stack_deploy.build_notebook_image",
+            new_callable=AsyncMock,
+        ) as mock_notebook_build,
+        patch(
+            "app.services.cellxgene_image_service.build_cellxgene_image",
+            new_callable=AsyncMock,
+            return_value="fake-build-id",
+        ) as mock_cxg_build,
+    ):
         response = await client.post(
             "/api/v1/infrastructure/stack/components/cellxgene/toggle",
             headers={"Authorization": f"Bearer {admin_token}"},
@@ -176,8 +183,9 @@ async def test_toggle_cellxgene_does_not_trigger_build(client, session, admin_to
     assert response.status_code == 200
     data = response.json()
     assert data["enabled"] is True
-    assert data["status"] == "enabled"
-    mock_build.assert_not_called()
+    assert data["status"] == "provisioning"
+    mock_notebook_build.assert_not_called()
+    mock_cxg_build.assert_called_once()
 
 
 @pytest.mark.asyncio

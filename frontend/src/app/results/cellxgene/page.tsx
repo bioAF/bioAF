@@ -7,9 +7,9 @@ import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
 import type {
   CellxgenePublicationResponse,
-  FileResponse,
+  CellxgenePublishableFile,
+  CellxgeneFileInspection,
   ExperimentListResponse,
-  Experiment,
 } from "@/lib/types";
 
 function formatBytes(bytes: number | null): string {
@@ -27,7 +27,7 @@ function StatusBadge({ status }: { status: string }) {
       case "running":
         return "bg-green-100 text-green-700";
       case "publishing":
-        return "bg-blue-100 text-blue-700";
+        return "bg-yellow-100 text-yellow-700";
       case "unpublished":
         return "bg-gray-100 text-gray-500";
       case "failed":
@@ -37,9 +37,11 @@ function StatusBadge({ status }: { status: string }) {
     }
   })();
 
+  const label = status === "publishing" ? "publishing..." : status;
+
   return (
     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${colorClass}`}>
-      {status}
+      {label}
     </span>
   );
 }
@@ -51,16 +53,17 @@ function PublishForm({
   onPublish: (fileId: number, datasetName: string, experimentId: number | null) => void;
   onCancel: () => void;
 }) {
-  const [files, setFiles] = useState<FileResponse[]>([]);
+  const [files, setFiles] = useState<CellxgenePublishableFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(true);
   const [selectedFileId, setSelectedFileId] = useState<number | null>(null);
   const [datasetName, setDatasetName] = useState("");
-  const [experimentId, setExperimentId] = useState<number | null>(null);
+  const [inspection, setInspection] = useState<CellxgeneFileInspection | null>(null);
+  const [inspecting, setInspecting] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
-        const data = await api.get<FileResponse[]>("/api/cellxgene/publishable-files");
+        const data = await api.get<CellxgenePublishableFile[]>("/api/cellxgene/publishable-files");
         setFiles(data);
       } catch {
         // ignore
@@ -70,77 +73,122 @@ function PublishForm({
     })();
   }, []);
 
-  const handleFileSelect = (fileId: number) => {
+  const handleFileSelect = async (fileId: number) => {
     setSelectedFileId(fileId);
+    setInspection(null);
     const file = files.find((f) => f.id === fileId);
     if (file) {
-      // Auto-populate dataset name from filename (strip .h5ad extension)
       const suggestedName = file.filename.replace(/\.h5ad$/i, "");
       setDatasetName(suggestedName);
-      setExperimentId(file.experiment_id);
+    }
+
+    // Inspect the file for cellxgene compatibility
+    setInspecting(true);
+    try {
+      const info = await api.get<CellxgeneFileInspection>(`/api/cellxgene/inspect/${fileId}`);
+      setInspection(info);
+    } catch {
+      setInspection({ embeddings: [], cell_count: 0, gene_count: 0, cellxgene_ready: false, missing: "unable to inspect file" });
+    } finally {
+      setInspecting(false);
     }
   };
 
   const selectedFile = files.find((f) => f.id === selectedFileId);
-  const canPublish = selectedFileId != null && datasetName.trim().length > 0;
+  const canPublish = selectedFileId != null && datasetName.trim().length > 0 && inspection?.cellxgene_ready === true;
 
   return (
     <div className="bg-white rounded-lg shadow p-5 space-y-4 mb-6">
       <h3 className="font-semibold text-sm">Publish Dataset to cellxgene</h3>
 
-      {/* File picker */}
+      {/* File list */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Select h5ad file</label>
+        <label className="block text-sm font-medium text-gray-700 mb-2">Select h5ad file</label>
         {loadingFiles ? (
           <p className="text-sm text-gray-400">Loading available files...</p>
         ) : files.length === 0 ? (
           <p className="text-sm text-gray-400">No publishable h5ad files available.</p>
         ) : (
-          <select
-            value={selectedFileId ?? ""}
-            onChange={(e) => handleFileSelect(parseInt(e.target.value))}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
-          >
-            <option value="" disabled>Choose a file...</option>
+          <div className="border border-gray-200 rounded-md max-h-64 overflow-y-auto divide-y divide-gray-100">
             {files.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.filename} ({formatBytes(f.size_bytes)})
-              </option>
+              <button
+                key={f.id}
+                onClick={() => handleFileSelect(f.id)}
+                className={`w-full text-left px-3 py-2.5 flex items-start gap-2.5 hover:bg-gray-50 transition-colors ${
+                  selectedFileId === f.id ? "bg-blue-50 border-l-2 border-blue-500" : ""
+                }`}
+              >
+                <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${
+                  selectedFileId === f.id && inspection
+                    ? inspection.cellxgene_ready ? "bg-green-500" : "bg-yellow-500"
+                    : "bg-gray-300"
+                }`} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-gray-900 truncate">{f.filename}</p>
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-400 mt-0.5">
+                    {f.experiment_name && <span>Experiment: {f.experiment_name}</span>}
+                    {f.project_name && <span>Project: {f.project_name}</span>}
+                    {f.sample_names.length > 0 && <span>Samples: {f.sample_names.join(", ")}</span>}
+                    <span>{formatBytes(f.size_bytes)}</span>
+                    <span>{f.source_type === "pipeline_output" ? "Pipeline output" : f.source_type === "notebook_output" ? "Notebook output" : "Upload"}</span>
+                  </div>
+                </div>
+              </button>
             ))}
-          </select>
+          </div>
         )}
       </div>
 
-      {/* Selected file details */}
-      {selectedFile && (
-        <div className="bg-gray-50 rounded p-3 text-sm text-gray-600 space-y-1">
-          <p><span className="font-medium">File:</span> {selectedFile.filename}</p>
-          <p><span className="font-medium">Size:</span> {formatBytes(selectedFile.size_bytes)}</p>
-          {selectedFile.experiment_id && (
-            <p><span className="font-medium">Experiment ID:</span> {selectedFile.experiment_id}</p>
+      {/* Inspection result */}
+      {selectedFile && inspecting && (
+        <div className="bg-gray-50 rounded p-3 text-sm text-gray-500">
+          Inspecting file for cellxgene compatibility...
+        </div>
+      )}
+      {selectedFile && inspection && !inspecting && (
+        <div className={`rounded p-3 text-sm space-y-1 ${
+          inspection.cellxgene_ready ? "bg-green-50 text-green-800" : "bg-yellow-50 text-yellow-800"
+        }`}>
+          {inspection.cellxgene_ready ? (
+            <>
+              <p className="font-medium">Ready for cellxgene</p>
+              <p className="text-xs opacity-75">
+                {inspection.cell_count.toLocaleString()} cells, {inspection.gene_count.toLocaleString()} genes.
+                Embeddings: {inspection.embeddings.join(", ")}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="font-medium">Not ready for cellxgene</p>
+              <p className="text-xs opacity-75">
+                Missing: {inspection.missing}.
+                This file needs secondary analysis (normalization, PCA, UMAP) before it can be viewed in cellxgene.
+              </p>
+            </>
           )}
-          <p><span className="font-medium">Uploaded:</span> {new Date(selectedFile.upload_timestamp).toLocaleDateString()}</p>
         </div>
       )}
 
       {/* Dataset name */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Dataset name</label>
-        <input
-          type="text"
-          value={datasetName}
-          onChange={(e) => setDatasetName(e.target.value)}
-          placeholder="Name for this cellxgene dataset"
-          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
-        />
-      </div>
+      {selectedFile && inspection?.cellxgene_ready && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Dataset name</label>
+          <input
+            type="text"
+            value={datasetName}
+            onChange={(e) => setDatasetName(e.target.value)}
+            placeholder="Name for this cellxgene dataset"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+          />
+        </div>
+      )}
 
       {/* Actions */}
       <div className="flex gap-3">
         <button
           onClick={() => {
             if (selectedFileId && canPublish) {
-              onPublish(selectedFileId, datasetName.trim(), experimentId);
+              onPublish(selectedFileId, datasetName.trim(), null);
             }
           }}
           disabled={!canPublish}
@@ -190,15 +238,20 @@ function PublicationCard({
         </div>
       </div>
       <div className="flex gap-3 items-center ml-4 shrink-0">
-        {isActive && pub.stable_url && (
+        {isActive && pub.access_url && (
           <a
-            href={pub.stable_url}
+            href={pub.access_url}
             target="_blank"
             rel="noopener noreferrer"
             className="px-3 py-1 text-sm font-medium text-blue-600 bg-blue-50 rounded hover:bg-blue-100"
           >
             Open
           </a>
+        )}
+        {isActive && !pub.access_url && (
+          <span className="px-3 py-1 text-sm text-gray-400">
+            Starting...
+          </span>
         )}
         {isActive && (
           <button
@@ -238,6 +291,14 @@ export default function CellxgenePage() {
   useEffect(() => {
     fetchPublications();
   }, [fetchPublications]);
+
+  // Auto-refresh while any publication is still publishing
+  const hasPublishing = publications.some((p) => p.status === "publishing");
+  useEffect(() => {
+    if (!hasPublishing) return;
+    const interval = setInterval(fetchPublications, 5000);
+    return () => clearInterval(interval);
+  }, [hasPublishing, fetchPublications]);
 
   // Load experiment names for display
   useEffect(() => {
