@@ -1,0 +1,28 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-db-backup
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  schedule: {{ .Values.dbBackup.schedule | quote }}
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: {{ .Values.serviceAccount.name }}
+          containers:
+            - name: db-backup
+              image: "{{ .Values.dbBackup.image.repository }}:{{ .Values.dbBackup.image.tag }}"
+              imagePullPolicy: {{ .Values.dbBackup.image.pullPolicy }}
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  curl -sf -X POST \
+                    http://{{ .Release.Name }}-backend:{{ .Values.backend.port }}/api/backups/trigger/postgres \
+                    -H "Content-Type: application/json" \
+                    -H "X-Internal-Service: db-backup-cronjob"
+          restartPolicy: OnFailure

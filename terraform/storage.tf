@@ -79,7 +79,8 @@ resource "google_storage_bucket" "results" {
   }
 }
 
-# Config backups bucket
+# DEPRECATED: Backups now go to the persistent backups bucket in the
+# foundation module. Kept for backward compatibility with existing deploys.
 resource "google_storage_bucket" "config_backups" {
   name                        = "bioaf-config-backups-${local.bucket_suffix}"
   location                    = var.region

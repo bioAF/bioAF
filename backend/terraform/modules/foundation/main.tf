@@ -33,3 +33,25 @@ resource "google_storage_bucket" "terraform_state" {
     }
   }
 }
+
+# GCS bucket for persistent backups (pg_dump, config snapshots).
+# Uses fixed naming (no stack_uid) so it survives storage teardown/redeploy.
+resource "google_storage_bucket" "backups" {
+  name                        = var.backups_bucket_name != "" ? var.backups_bucket_name : "bioaf-backups-${var.project_id}"
+  location                    = var.bucket_location
+  uniform_bucket_level_access = true
+  force_destroy               = false
+
+  versioning {
+    enabled = true
+  }
+
+  lifecycle_rule {
+    action {
+      type = "Delete"
+    }
+    condition {
+      num_newer_versions = 10
+    }
+  }
+}

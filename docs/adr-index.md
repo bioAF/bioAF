@@ -5,7 +5,7 @@
 | [ADR-001](../decisions/ADR-001-gcp-only.md) | GCP-Only Infrastructure | Target GCP exclusively to reduce complexity and leverage managed services |
 | [ADR-002](../decisions/ADR-002-mandatory-optional-split.md) | Mandatory/Optional Component Split | Separate core platform from optional components for flexible deployment |
 | [ADR-003](../decisions/ADR-003-email-based-auth.md) | Email-Based Authentication | Use email/password auth with JWT tokens instead of OAuth/SSO for simplicity |
-| [ADR-004](../decisions/ADR-004-tiered-backup-strategy.md) | Tiered Backup Strategy | Multi-tier backup approach: Cloud SQL PITR, Filestore snapshots, GCS versioning, config exports |
+| [ADR-004](../decisions/ADR-004-tiered-backup-strategy.md) | Tiered Backup Strategy | 4-tier GCS-only backups: pg_dump, GCS versioning, platform config snapshots, terraform state |
 | [ADR-005](../decisions/ADR-005-github-based-upgrades.md) | GitHub-Based Upgrades | Use GitHub Releases for version checking and upgrade distribution |
 | [ADR-006](../decisions/ADR-006-experiment-tracking-as-foundation.md) | Experiment Tracking as Foundation | Build experiment lifecycle tracking as the core data model |
 | [ADR-007](../decisions/ADR-007-ui-driven-terraform.md) | UI-Driven Terraform | Users never touch HCL; all infrastructure changes through the web UI |

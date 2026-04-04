@@ -27,7 +27,7 @@ Navigate to **Infrastructure > Components**:
 - Enable/disable infrastructure components through the UI
 - Each toggle triggers a Terraform apply
 - View component health status
-- Dependencies are enforced (e.g., JupyterHub requires SLURM + Filestore)
+- Dependencies are enforced (e.g., JupyterHub requires SLURM)
 
 ### Deployment Recovery
 
@@ -60,11 +60,13 @@ Configure alerts at 50%, 80%, and 100% of budget:
 
 Navigate to **Infrastructure > Backup & Recovery**:
 
-- View backup status for each tier: Cloud SQL, Filestore, GCS, Platform Config, Terraform State
-- Each tier shows: last backup, size, next scheduled, retention policy
+- View backup status for each tier: PostgreSQL (pg_dump), GCS Object Versioning, Platform Config, Terraform State
+- Each tier shows: last backup, size, next scheduled, retention policy, backup count
+- **On-demand backups**: trigger database or config backups from the UI
+- **PostgreSQL snapshots**: browse backup history, restore with 1-hour review period
 - **Config snapshots**: browse and diff configuration backups
-- **Restore**: initiate restore for Cloud SQL (PITR), Filestore, or platform config
-- **Settings**: adjust retention periods (minimum 7 days PITR, 30 days snapshots)
+- **Terraform state**: list and download state files
+- **Settings**: adjust backup schedule (hours) and retention (days) for database and config
 
 ## Notifications
 

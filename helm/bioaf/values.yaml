@@ -41,9 +41,18 @@ ingress:
     networking.gke.io/managed-certificates: bioaf-cert
     kubernetes.io/ingress.global-static-ip-name: bioaf-ip
 
+backupsBucket: ""
+
 configBackup:
   schedule: "0 2 * * *"
   retentionDays: 7
+  image:
+    repository: ghcr.io/bioaf/bioaf-backend
+    tag: latest
+    pullPolicy: IfNotPresent
+
+dbBackup:
+  schedule: "0 3 * * *"
   image:
     repository: ghcr.io/bioaf/bioaf-backend
     tag: latest

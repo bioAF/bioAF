@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 # Install system dependencies (Terraform + weasyprint rendering libs)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl unzip \
+    curl unzip postgresql-client \
     libcairo2 libpango-1.0-0 libpangoft2-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev && \
     curl -fsSL https://releases.hashicorp.com/terraform/1.7.5/terraform_1.7.5_linux_amd64.zip -o terraform.zip && \
     unzip terraform.zip -d /usr/local/bin/ && \
@@ -28,4 +28,4 @@ RUN chmod +x /entrypoint.sh
 EXPOSE 8000
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

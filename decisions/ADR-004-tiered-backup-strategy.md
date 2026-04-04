@@ -1,70 +1,94 @@
-# ADR-004: Tiered Backup Strategy with Mandatory Database Backups
+# ADR-004: Tiered Backup Strategy
 
-**Status:** Accepted
-**Date:** 2026-03-05
+**Status:** Accepted (revised 2026-04-03)
+**Date:** 2026-03-05 (original), 2026-04-03 (revised)
 **Deciders:** Brent (product owner)
 
 ## Context
 
 bioAF manages several categories of data with different criticality levels, access patterns, and recovery requirements. A one-size-fits-all backup policy would either over-protect low-value data (wasteful) or under-protect high-value data (dangerous).
 
-The experiment tracking database and audit log are the crown jewels — if they're lost, the entire auditability story collapses. GCS data is inherently durable but vulnerable to accidental deletion. Platform configuration should be recoverable but isn't worth the same investment as scientific data.
+The experiment tracking database and audit log are the crown jewels -- if they're lost, the entire auditability story collapses. GCS data is inherently durable but vulnerable to accidental deletion. Platform configuration should be recoverable but isn't worth the same investment as scientific data.
+
+### Revision notes (2026-04-03)
+
+The original ADR assumed Cloud SQL for PostgreSQL and Filestore NFS for shared storage. The current architecture runs PostgreSQL in a Docker container and uses GCS exclusively for file storage. This revision aligns the backup strategy with the actual infrastructure:
+
+- Replaced Cloud SQL PITR/snapshots (Tier 1) with pg_dump to GCS
+- Removed Filestore NFS snapshots (Tier 4) entirely -- not in use
+- Consolidated from 5 tiers to 4
+- All backups go to GCS -- never to local filesystem
 
 ## Decision
 
-Implement a five-tier backup strategy with different mechanisms and policies per data category. Database backups are mandatory and cannot be disabled. Other tiers have user-configurable retention.
+Implement a four-tier backup strategy with different mechanisms and policies per data category. All backup data is stored in a persistent GCS bucket that survives infrastructure teardown.
 
-### Tier 1: Database (Cloud SQL) — Mandatory
+### Persistent backups bucket
 
-- Continuous WAL-based point-in-time recovery (PITR)
-- Daily automated snapshots via Cloud SQL
-- Default retention: 30 days PITR, 90 days snapshots
-- Minimum enforceable: 7 days PITR, 30 days snapshots
+A dedicated `bioaf-backups-{project_id}` bucket is created in the Terraform foundation module (alongside the tfstate bucket). It uses fixed naming with no `stack_uid` suffix, so it is not destroyed during storage module teardown or redeployment. All backup tiers write to prefixed paths within this single bucket:
+
+```text
+gs://bioaf-backups-{project_id}/
+  postgres/pgdump-20260403-030000.dump
+  config/config-20260403-020000.json
+```
+
+### Tier 1: Database (pg_dump to GCS) -- Mandatory
+
+- `pg_dump -Fc` (custom/compressed format) run on a configurable schedule
+- Dump written to `/tmp/`, uploaded to GCS `postgres/` prefix, temp file deleted
+- Default schedule: daily (configurable interval in hours)
+- Default retention: 14 days
+- Minimum enforceable: 1 day
+- Old dumps rotated automatically after each backup
+- Manual trigger available via API and UI ("Run Backup Now")
 - **Cannot be disabled.** The audit log's integrity is a core product promise.
 
-### Tier 2: Platform Configuration (GCS JSON snapshots) — Configurable
+In production (GKE), a Kubernetes CronJob triggers the backend API endpoint daily. In local/dev mode, an asyncio background loop handles scheduling.
 
-bioAF exports its own configuration as JSON to a dedicated GCS bucket on a tiered retention schedule:
+### Tier 2: Platform Configuration (GCS JSON snapshots) -- Configurable
 
-| Backup | Frequency | Retention |
-|---|---|---|
-| Nightly | Every night (configurable time) | 7 days rolling |
-| Weekly | Final nightly of each week (Sunday) promoted | 1 month |
-| Monthly | Final weekly of each month promoted | 1 year |
-| After 1 year | Monthly snapshots roll off | Deleted |
+A Kubernetes CronJob (or background loop) exports platform configuration as JSON to the `config/` prefix in the backups bucket.
 
-Admin can adjust cadence (every 6, 12, or 24 hours) and retention lengths. Admin can disable config backups entirely (with a warning about risk).
+- Default schedule: nightly at 2 AM
+- Default retention: 30 days
+- Minimum enforceable: 1 day
+- Admin can adjust cadence and retention
 
-### Tier 3: GCS Data Buckets — Always Protected
+### Tier 3: GCS Data Buckets -- Always Protected
 
-- Object versioning enabled on all buckets — **cannot be disabled via bioAF**
-- Delete protection enabled at bucket level — **cannot be disabled via bioAF**
-- Non-current version retention: 30 days default (configurable)
-- Cross-region replication: optional toggle (off by default; doubles storage cost)
+- Object versioning enabled on all managed buckets -- **cannot be disabled via bioAF**
+- Non-current version retention: 30 days default (configurable via Terraform)
+- `force_destroy = false` on all buckets prevents accidental deletion
+- Backup status page verifies versioning is enabled by querying the GCS API
 
-### Tier 4: Filestore (NFS) — Configurable
+### Tier 4: Terraform State -- Always Protected
 
-- Daily snapshots with 14-day retention (default)
-- Frequency and retention configurable by admin
-- Can be disabled if Filestore is not in use
+- Stored in a persistent GCS bucket (`bioaf-tfstate-{project_id}`) with object versioning
+- Every `terraform apply` preserves the previous state as a non-current version
+- Not configurable -- infrastructure state must always be recoverable
 
-### Tier 5: Terraform State — Always Protected
+## Design constraints
 
-- Stored in GCS backend with object versioning (every apply preserves previous state)
-- Not configurable — this is infrastructure state and must always be recoverable
+**GCS-only storage.** All backups must go to GCS, never the local filesystem. Local storage risks filling the node disk and causing a failure. Containers are ephemeral -- anything written inside one disappears on restart. The `/tmp/` directory is used only as a transient staging area before upload.
+
+**Off-node by default.** The backup system must not require manual intervention, CLI commands, or local scripts. Everything is automated through the application and triggered via the UI or scheduled CronJobs.
+
+**Persistent bucket naming.** The backups bucket uses fixed naming (`bioaf-backups-{project_id}`) with no random suffix or `stack_uid`. This means it survives `terraform destroy` of the storage module and redeployment with a new stack. Removing this bucket requires manual intervention -- by design.
 
 ## Rationale
 
-- **Mandatory database backups** prevent the catastrophic scenario where someone disables backups to save a few dollars and then loses the audit trail or experiment history.
-- **Tiered config retention (7d/1m/1y)** balances storage cost with recovery window. Most config errors are caught within days; the monthly/yearly snapshots cover "slowly creeping" misconfigurations.
-- **GCS versioning + delete protection** is the lightest-weight protection for object storage. It handles both accidental deletion and accidental overwrite without the cost of cross-region replication.
-- **User-configurable policies** respect that different teams have different risk tolerances and budgets. A funded Series B biotech handling clinical data wants aggressive retention; a pre-seed startup analyzing mouse data may want minimal.
+- **pg_dump over Cloud SQL backups** because the current architecture runs PostgreSQL in Docker, not Cloud SQL. pg_dump is portable and works with any Postgres deployment. If Cloud SQL is adopted later, its native PITR/snapshots can supplement or replace pg_dump.
+- **Single backups bucket** simplifies access control, lifecycle management, and monitoring. Prefixed paths (`postgres/`, `config/`) provide logical separation without the overhead of multiple buckets.
+- **Foundation module placement** ensures the bucket is created before any workload runs and is never torn down by storage or compute module operations.
+- **Mandatory database backups** prevent the scenario where someone disables backups to save a few dollars and then loses the audit trail or experiment history.
+- **User-configurable retention** respects that different teams have different risk tolerances and budgets.
 
 ## Consequences
 
-- The bioAF UI must include a Backup & Recovery admin page with per-tier configuration controls.
-- Database backup minimum enforcement must be implemented at the application level (prevent API calls that would set retention below minimums).
-- GCS bucket versioning and delete protection are set during Terraform provisioning and are not exposed as toggleable in the UI.
-- The config backup system needs a CronJob running on GKE that exports config JSON and manages the tiered promotion/deletion logic.
-- Backup monitoring (last successful backup time, failures) must be surfaced in the dashboard and integrated with the notification system.
-- Restore workflows must be documented and accessible from the UI: database PITR restore, config snapshot restore, GCS version recovery.
+- The bioAF UI includes a Backup & Recovery page with per-tier status, a manual backup trigger for PostgreSQL, and snapshot history for both database and config backups.
+- Database backup minimum enforcement is implemented at the application level (API rejects retention below 1 day).
+- The backend Docker image must include `postgresql-client` for `pg_dump`.
+- GCS bucket versioning is set during Terraform provisioning and is not exposed as toggleable in the UI.
+- Backup health monitoring runs hourly: checks the age of the most recent backup in each tier and emits notification events when backups are overdue.
+- The `backups_bucket_name` is stored in `platform_config` after foundation bootstrap and read by the backup service at runtime.

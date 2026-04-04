@@ -142,6 +142,7 @@ async def lifespan(app: FastAPI):
     background_tasks.append(asyncio.create_task(_reconciler_loop()))
     background_tasks.append(asyncio.create_task(_notification_cleanup_loop()))
     background_tasks.append(asyncio.create_task(_backup_health_check_loop()))
+    background_tasks.append(asyncio.create_task(_postgres_backup_loop()))
     background_tasks.append(asyncio.create_task(_cost_billing_sync_loop()))
     background_tasks.append(asyncio.create_task(_version_check_loop()))
     background_tasks.append(asyncio.create_task(_review_reminder_loop()))
@@ -330,13 +331,35 @@ async def _backup_health_check_loop():
                 orgs = list(result.scalars().all())
                 for org in orgs:
                     try:
-                        await BackupService.check_backup_health(org.id)
+                        await BackupService.check_backup_health(session, org.id)
                     except Exception as e:
                         logger.warning("Backup health check failed for org %d: %s", org.id, e)
         except asyncio.CancelledError:
             break
         except Exception as e:
             logger.error("Backup health check error: %s", e)
+
+
+async def _postgres_backup_loop():
+    """Run pg_dump backups on the configured interval."""
+    from app.config import settings
+    from app.database import async_session_factory
+    from app.services.backup_service import BackupService
+
+    interval = settings.backup_postgres_interval_hours * 3600
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            async with async_session_factory() as session:
+                result = await BackupService.run_postgres_backup(session, org_id=1)
+            if result["status"] == "completed":
+                logger.info("Scheduled pg_dump completed: %s", result.get("filename"))
+            else:
+                logger.error("Scheduled pg_dump failed: %s", result.get("message"))
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error("Postgres backup loop error: %s", e)
 
 
 async def _cost_billing_sync_loop():

@@ -17,7 +17,7 @@ A turnkey computational biology platform for small biotech companies (5-50 resea
 - **SSH Access** - One-click kubectl exec into running pipeline jobs and notebook sessions
 - **Notifications** - Event-driven alerts via in-app, email (SMTP), and Slack (OAuth integration)
 - **Cost Center** - GCP billing integration, budget alerts, component cost breakdown, projections
-- **Backup & Recovery** - Tiered backups (Cloud SQL PITR, GCS versioning, config exports), one-click restore
+- **Backup & Recovery** - 4-tier GCS backups (pg_dump, GCS versioning, platform config, terraform state), restore with review period
 - **Session Credentials** - Per-user RStudio credentials with PAM authentication, auto-generated usernames
 - **Role-Based Access** - Permission-based RBAC with four built-in roles, custom role creation, and per-resource/action grants
 - **Upgrade System** - GitHub-based version checking, managed upgrade flow with rollback

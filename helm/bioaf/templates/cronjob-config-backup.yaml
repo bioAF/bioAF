@@ -23,6 +23,6 @@ spec:
                   set -e
                   TIMESTAMP=$(date +%Y%m%d-%H%M%S)
                   curl -s http://{{ .Release.Name }}-backend:{{ .Values.backend.port }}/api/config > /tmp/config-backup.json
-                  gsutil cp /tmp/config-backup.json gs://{{ .Values.backend.env.BIOAF_GCS_BUCKET }}/config-backups/config-${TIMESTAMP}.json
-                  gsutil ls gs://{{ .Values.backend.env.BIOAF_GCS_BUCKET }}/config-backups/ | sort -r | tail -n +{{ add .Values.configBackup.retentionDays 1 }} | xargs -r gsutil rm
+                  gsutil cp /tmp/config-backup.json gs://{{ .Values.backupsBucket }}/config/config-${TIMESTAMP}.json
+                  gsutil ls gs://{{ .Values.backupsBucket }}/config/ | sort -r | tail -n +{{ add .Values.configBackup.retentionDays 1 }} | xargs -r gsutil rm
           restartPolicy: OnFailure
