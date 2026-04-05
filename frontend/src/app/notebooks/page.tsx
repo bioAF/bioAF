@@ -571,7 +571,7 @@ export default function NotebooksPage() {
           {/* Launch Modal */}
           {showLaunchModal && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg shadow-xl w-[600px] max-h-[85vh] overflow-y-auto">
+              <div className="bg-white rounded-lg shadow-xl w-[800px] max-h-[85vh] overflow-y-auto">
                 <div className="p-6 border-b flex items-center justify-between">
                   <h3 className="text-lg font-semibold">Launch Notebook Session</h3>
                   <button onClick={() => setShowLaunchModal(false)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
