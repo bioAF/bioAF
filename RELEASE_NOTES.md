@@ -1,0 +1,56 @@
+# Release Notes
+
+## v0.5.0
+
+Notebook file lifecycle and environment build versioning.
+This release introduces a complete file lifecycle for notebook and SSH sessions, fixing GCS storage mounting and adding structured input/output management with full provenance tracking.
+
+### GCS Storage Fixes
+
+- Fix GCS bucket mounting for notebook and SSH sessions: working bucket config, FUSE CSI annotation, SA key secret mount, and gcloud auth activation for Workload Identity environments
+- Fix Workload Identity annotation not applied after namespace was cached
+- Add gcs-sync sidecar container for reliable output persistence at shutdown
+
+### Notebook File Lifecycle (ADR-040)
+
+- Input files now mount with directory structure preserved: `/data/{project}/{experiment}/{sample}/{tool}/filename`
+- Designated `/outputs/` directory on all session types (Jupyter, RStudio, SSH) for persistent analysis outputs
+- On shutdown: outputs synced to GCS, notebook/script files (.ipynb, .Rmd, .R, .py) captured automatically
+- Two-phase output persistence: working bucket during session, moved to results bucket on close
+- Output files registered with full provenance (source_type=notebook_output, linked to project/experiment)
+- 30-minute shutdown timeout for large file sync with UI status indicator
+- Fix FILE_INVENTORY.md shell escaping that broke init container file copying partway through
+
+### Environment Build Versioning (ADR-041)
+
+- Rebuilding an environment version creates a minor version (v1 rebuild produces v1.1) instead of overwriting the image
+- New `build_number` column on EnvironmentVersion with unique constraint
+- Image tags use `v{version}.{build}` format (e.g., `v1.1`, `v1.2`)
+- New rebuild endpoint: `POST /environments/{id}/versions/{vid}/rebuild`
+- Notebook sessions now link to `environment_version_id` for traceability
+
+### Provenance
+
+- Session provenance endpoint: `GET /notebooks/sessions/{id}/provenance`
+- Provenance reports for notebook outputs now include environment version, input files, session resources, and git info
+- Markdown and PDF renderers display full source section for notebook and pipeline outputs
+- Provenance preview panel displays inline source details instead of skipping nested data
+
+### Frontend
+
+- Shutdown sync indicator: spinner with "Syncing outputs to GCS..." while session stops
+- Environment version picker shows `v{version}.{build}` format and passes `environment_version_id` in launch request
+- Session detail modal shows environment version and provenance for stopped sessions
+- Toggleable quick start guide on Notebooks and Work Nodes pages explaining `/data/`, `/outputs/`, environments, git, and credentials
+
+### Schema Changes
+
+- Migration 057: adds `build_number` to `environment_versions`, `gcs_output_prefix` to `compute_sessions`
+
+## v0.4.1
+
+Fix cellxgene adapter, image pipeline, and publish UX (#195)
+
+## v0.4.0
+
+Usability: real backups, service health, version checking (#194)
