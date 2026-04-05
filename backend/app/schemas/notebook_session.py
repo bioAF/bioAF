@@ -42,6 +42,7 @@ class SessionResponse(BaseModel):
     created_at: datetime
     git_branch_name: str | None = None
     git_commit_hash: str | None = None
+    environment_version_id: int | None = None
 
     model_config = {"from_attributes": True}
 

@@ -14,6 +14,7 @@ import type {
   NotebookSession,
   SessionListResponse,
   SessionLaunchRequest,
+  SessionProvenance,
   ResourceProfile,
   SessionType,
   Experiment,
@@ -68,11 +69,15 @@ export default function NotebooksPage() {
   const [selectedEnvId, setSelectedEnvId] = useState<number | null>(null);
   const [selectedEnvDetail, setSelectedEnvDetail] = useState<EnvironmentDetailResponse | null>(null);
   const [selectedVersionImageUri, setSelectedVersionImageUri] = useState<string | null>(null);
+  const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
+  const [stoppingSessions, setStoppingSessions] = useState<Set<number>>(new Set());
+  const [provenance, setProvenance] = useState<SessionProvenance | null>(null);
   const [showFileSelector, setShowFileSelector] = useState(false);
   const [experimentFiles, setExperimentFiles] = useState<FileResponse[]>([]);
   const [sampleNames, setSampleNames] = useState<Record<number, string>>({});
   const [selectedFileIds, setSelectedFileIds] = useState<number[]>([]);
   const [activeBranchCount, setActiveBranchCount] = useState(0);
+  const [showGuide, setShowGuide] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -148,12 +153,14 @@ export default function NotebooksPage() {
   async function handleEnvChange(envId: number) {
     setSelectedEnvId(envId);
     setSelectedVersionImageUri(null);
+    setSelectedVersionId(null);
     try {
       const detail = await api.get<EnvironmentDetailResponse>(`/api/v1/environments/${envId}`);
       setSelectedEnvDetail(detail);
       const readyVersion = detail.versions.find((v) => v.status === "ready" && v.image_uri);
       if (readyVersion) {
         setSelectedVersionImageUri(readyVersion.image_uri);
+        setSelectedVersionId(readyVersion.id);
       }
     } catch {}
   }
@@ -233,6 +240,7 @@ export default function NotebooksPage() {
         experiment_id: scopeType === "experiment" ? selectedExperiment : undefined,
         image_uri: selectedVersionImageUri,
         input_file_ids: selectedFileIds.length > 0 ? selectedFileIds : undefined,
+        environment_version_id: selectedVersionId,
       };
       await api.post("/api/v1/notebooks/sessions", req);
       setShowLaunchModal(false);
@@ -245,11 +253,19 @@ export default function NotebooksPage() {
   }
 
   async function handleStop(sessionId: number) {
-    if (!confirm("Stop this notebook session? Unsaved work may be lost.")) return;
+    if (!confirm("Stop this notebook session? Files in /outputs/ will be synced to GCS before shutdown. This may take a few minutes for large files.")) return;
+    setStoppingSessions((prev) => new Set(prev).add(sessionId));
     try {
       await api.post(`/api/v1/notebooks/sessions/${sessionId}/stop`);
       loadSessions();
-    } catch {}
+    } catch {
+    } finally {
+      setStoppingSessions((prev) => {
+        const next = new Set(prev);
+        next.delete(sessionId);
+        return next;
+      });
+    }
   }
 
   async function handleSync(sessionId: number) {
@@ -273,6 +289,32 @@ export default function NotebooksPage() {
             >
               Launch Session
             </button>
+          </div>
+
+          {/* Quick Start Guide */}
+          <div className="mb-6">
+            <button
+              onClick={() => setShowGuide(!showGuide)}
+              className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              How notebook sessions work
+            </button>
+            {showGuide && (
+              <div className="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-4">
+                <div className="text-sm text-blue-800 space-y-2">
+                  <ul className="space-y-1.5 text-blue-700">
+                    <li><strong>Input files</strong> are mounted at <code className="bg-blue-100 px-1 rounded">/data/</code>, organized by project, experiment, sample, and pipeline. Select files when launching a session.</li>
+                    <li><strong>Output files</strong> should be saved to <code className="bg-blue-100 px-1 rounded">/outputs/</code>. Everything in this directory is automatically synced to GCS and registered when you stop the session.</li>
+                    <li><strong>Environments</strong> control the packages available in your session. Choose an environment and version when launching. Admins can create and build new environments from the <a href="/environments" className="underline font-medium">Environments</a> page.</li>
+                    <li><strong>Git integration</strong> can be configured per-session via SSH keys in your <a href="/profile" className="underline font-medium">Profile Settings</a>. Notebooks are auto-committed every 15 minutes when a git repo is configured.</li>
+                    <li><strong>Session credentials</strong> (username and password for RStudio) are set in your <a href="/profile" className="underline font-medium">Profile Settings</a>.</li>
+                  </ul>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Build Status Banner */}
@@ -340,7 +382,12 @@ export default function NotebooksPage() {
                         {s.resource_profile} ({s.cpu_cores} CPU, {s.memory_gb}GB)
                       </td>
                       <td className="px-4 py-3">
-                        {s.status === "starting" ? (
+                        {stoppingSessions.has(s.id) ? (
+                          <span className="flex items-center gap-1 text-xs text-orange-700">
+                            <LoadingSpinner size="sm" />
+                            Syncing outputs to GCS...
+                          </span>
+                        ) : s.status === "starting" ? (
                           <span className="flex items-center gap-1 text-xs text-blue-700">
                             <LoadingSpinner size="sm" />
                             Starting... this may take a few minutes
@@ -399,43 +446,126 @@ export default function NotebooksPage() {
 
           {/* Session Detail Modal */}
           {viewingSession && (
-            <DetailModal
-              title={`${viewingSession.session_type.charAt(0).toUpperCase() + viewingSession.session_type.slice(1)} Session`}
-              onClose={() => setViewingSession(null)}
-              fields={[
-                { label: "Type", value: viewingSession.session_type },
-                { label: "Status", value: viewingSession.status },
-                { label: "User", value: viewingSession.user?.name || viewingSession.user?.email },
-                { label: "Resource Profile", value: viewingSession.resource_profile },
-                { label: "CPU Cores", value: viewingSession.cpu_cores },
-                { label: "Memory (GB)", value: viewingSession.memory_gb },
-                { label: "Experiment", value: viewingSession.experiment?.name },
-                { label: "Started", value: viewingSession.started_at ? new Date(viewingSession.started_at).toLocaleString() : null },
-                { label: "Access URL", value: viewingSession.proxy_url || null },
-                { label: "Idle Since", value: viewingSession.idle_since ? new Date(viewingSession.idle_since).toLocaleString() : null },
-                { label: "Git Branch", value: viewingSession.git_branch_name || null },
-                { label: "Git Commit", value: viewingSession.git_commit_hash || null },
-              ]}
-              actions={
-                <>
+            <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center" onClick={() => { setViewingSession(null); setProvenance(null); }}>
+              <div className="bg-white rounded-lg shadow-xl w-[600px] max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                <div className="p-6 border-b flex items-center justify-between">
+                  <h3 className="text-lg font-semibold">
+                    {viewingSession.session_type.charAt(0).toUpperCase() + viewingSession.session_type.slice(1)} Session
+                  </h3>
+                  <button onClick={() => { setViewingSession(null); setProvenance(null); }} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+                </div>
+                <div className="p-6 space-y-3">
+                  {(() => {
+                    // Resolve environment name from loaded environments
+                    let envLabel: string | null = null;
+                    if (viewingSession.environment_version_id) {
+                      for (const env of environments) {
+                        const v = env.latest_version;
+                        if (v && v.id === viewingSession.environment_version_id) {
+                          envLabel = `${env.name} v${v.version_number}.${v.build_number}`;
+                          break;
+                        }
+                      }
+                      if (!envLabel) {
+                        envLabel = `Version ID ${viewingSession.environment_version_id}`;
+                      }
+                    }
+                    return [
+                      { label: "Type", value: viewingSession.session_type },
+                      { label: "Status", value: viewingSession.status },
+                      { label: "User", value: viewingSession.user?.name || viewingSession.user?.email },
+                      { label: "Environment", value: envLabel },
+                      { label: "Resource Profile", value: viewingSession.resource_profile },
+                      { label: "CPU Cores", value: viewingSession.cpu_cores },
+                      { label: "Memory (GB)", value: viewingSession.memory_gb },
+                      { label: "Experiment", value: viewingSession.experiment?.name },
+                      { label: "Started", value: viewingSession.started_at ? new Date(viewingSession.started_at).toLocaleString() : null },
+                      { label: "Access URL", value: viewingSession.proxy_url || null },
+                      { label: "Idle Since", value: viewingSession.idle_since ? new Date(viewingSession.idle_since).toLocaleString() : null },
+                      { label: "Git Branch", value: viewingSession.git_branch_name || null },
+                      { label: "Git Commit", value: viewingSession.git_commit_hash || null },
+                    ];
+                  })().filter((f) => f.value != null).map((f) => (
+                    <div key={f.label} className="flex justify-between text-sm">
+                      <span className="text-gray-500">{f.label}</span>
+                      <span className="font-medium">{String(f.value)}</span>
+                    </div>
+                  ))}
+
+                  {/* Provenance section for stopped sessions */}
+                  {viewingSession.status === "stopped" && (
+                    <div className="mt-4 pt-4 border-t">
+                      {!provenance ? (
+                        <button
+                          onClick={async () => {
+                            try {
+                              const p = await api.get<SessionProvenance>(`/api/v1/notebooks/sessions/${viewingSession.id}/provenance`);
+                              setProvenance(p);
+                            } catch {}
+                          }}
+                          className="text-sm text-bioaf-600 hover:underline"
+                        >
+                          View provenance
+                        </button>
+                      ) : (
+                        <div className="space-y-3">
+                          <h4 className="text-sm font-semibold text-gray-700">Provenance</h4>
+                          {provenance.environment && (
+                            <div>
+                              <p className="text-xs text-gray-500 mb-1">Environment</p>
+                              <p className="text-sm">
+                                {provenance.environment.environment_name} v{provenance.environment.version_number}.{provenance.environment.build_number}
+                                <span className="text-gray-400 ml-1">({provenance.environment.definition_format})</span>
+                              </p>
+                            </div>
+                          )}
+                          {provenance.input_files.length > 0 && (
+                            <div>
+                              <p className="text-xs text-gray-500 mb-1">Input files ({provenance.input_files.length})</p>
+                              <ul className="text-sm space-y-0.5 max-h-32 overflow-y-auto">
+                                {provenance.input_files.map((f) => (
+                                  <li key={f.id} className="text-gray-700 truncate" title={f.gcs_uri}>{f.filename}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          {provenance.output_files.length > 0 && (
+                            <div>
+                              <p className="text-xs text-gray-500 mb-1">Output files ({provenance.output_files.length})</p>
+                              <ul className="text-sm space-y-0.5 max-h-32 overflow-y-auto">
+                                {provenance.output_files.map((f) => (
+                                  <li key={f.id} className="text-gray-700 truncate" title={f.gcs_uri}>{f.filename}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          {provenance.input_files.length === 0 && provenance.output_files.length === 0 && (
+                            <p className="text-sm text-gray-400">No input or output files recorded</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="p-4 border-t bg-gray-50 flex gap-2 justify-end">
                   {viewingSession.proxy_url && viewingSession.status === "running" && (
                     <a href={viewingSession.proxy_url} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 border border-bioaf-600 text-bioaf-600 rounded text-sm hover:bg-bioaf-50">
                       Open
                     </a>
                   )}
                   {viewingSession.status === "running" && (
-                    <button onClick={() => { handleSync(viewingSession.id); }} className="px-3 py-1.5 border border-green-600 text-green-600 rounded text-sm hover:bg-green-50">
+                    <button onClick={() => handleSync(viewingSession.id)} className="px-3 py-1.5 border border-green-600 text-green-600 rounded text-sm hover:bg-green-50">
                       Sync
                     </button>
                   )}
                   {["pending", "starting", "running", "idle"].includes(viewingSession.status) && (
-                    <button onClick={() => { handleStop(viewingSession.id); setViewingSession(null); }} className="px-3 py-1.5 border border-red-600 text-red-600 rounded text-sm hover:bg-red-50">
+                    <button onClick={() => { handleStop(viewingSession.id); setViewingSession(null); setProvenance(null); }} className="px-3 py-1.5 border border-red-600 text-red-600 rounded text-sm hover:bg-red-50">
                       Stop
                     </button>
                   )}
-                </>
-              }
-            />
+                </div>
+              </div>
+            </div>
           )}
 
           {/* Launch Modal */}
@@ -490,15 +620,20 @@ export default function NotebooksPage() {
                       </select>
                       {selectedEnvDetail && selectedEnvDetail.versions.filter((v) => v.status === "ready").length > 0 && (
                         <select
-                          value={selectedVersionImageUri || ""}
-                          onChange={(e) => setSelectedVersionImageUri(e.target.value || null)}
+                          value={selectedVersionId || ""}
+                          onChange={(e) => {
+                            const vid = e.target.value ? Number(e.target.value) : null;
+                            setSelectedVersionId(vid);
+                            const v = selectedEnvDetail?.versions.find((ver) => ver.id === vid);
+                            setSelectedVersionImageUri(v?.image_uri || null);
+                          }}
                           className="border rounded px-3 py-2 text-sm flex-1"
                         >
                           {selectedEnvDetail.versions
                             .filter((v) => v.status === "ready" && v.image_uri)
                             .map((v) => (
-                              <option key={v.id} value={v.image_uri || ""}>
-                                v{v.version_number} ({v.definition_format})
+                              <option key={v.id} value={v.id}>
+                                v{v.version_number}.{v.build_number} ({v.definition_format})
                               </option>
                             ))}
                         </select>

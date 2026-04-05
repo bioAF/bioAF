@@ -416,6 +416,119 @@ def _render_artifact_md(report: dict[str, Any]) -> str:
     )
     parts.append("")
 
+    # Source information
+    source = entity.get("source", {})
+    source_type = source.get("type", "unknown")
+    parts.append("## Source")
+    parts.append("")
+
+    if source_type == "notebook_output" and source.get("notebook_session"):
+        ns = source["notebook_session"]
+        parts.append(
+            _table(
+                ["Field", "Value"],
+                [
+                    ["Source Type", "Notebook session output"],
+                    ["Session ID", ns.get("id")],
+                    ["Session Type", ns.get("session_type")],
+                    ["Status", ns.get("status")],
+                    ["Resources", f"{ns.get('cpu_cores')} CPU, {ns.get('memory_gb')} GB"],
+                    ["Started", ns.get("started_at")],
+                    ["Stopped", ns.get("stopped_at")],
+                    ["Git Branch", ns.get("git_branch_name")],
+                    ["Git Commit", ns.get("git_commit_hash")],
+                ],
+            )
+        )
+        parts.append("")
+
+        env = ns.get("environment")
+        if env:
+            parts.append("### Environment")
+            parts.append("")
+            parts.append(
+                _table(
+                    ["Field", "Value"],
+                    [
+                        ["Environment", env.get("environment_name")],
+                        ["Version", f"v{env.get('version_number')}.{env.get('build_number')}"],
+                        ["Format", env.get("definition_format")],
+                        ["Image URI", env.get("image_uri")],
+                    ],
+                )
+            )
+            parts.append("")
+
+        input_files = ns.get("input_files", [])
+        if input_files:
+            parts.append("### Input Files")
+            parts.append("")
+            parts.append(
+                _table(
+                    ["ID", "Filename", "Type"],
+                    [[f.get("id"), f.get("filename"), f.get("file_type")] for f in input_files],
+                )
+            )
+            parts.append("")
+
+    elif source_type == "pipeline_output" and source.get("pipeline_run"):
+        pr = source["pipeline_run"]
+        parts.append(
+            _table(
+                ["Field", "Value"],
+                [
+                    ["Source Type", "Pipeline output"],
+                    ["Pipeline", pr.get("pipeline_name")],
+                    ["Version", pr.get("pipeline_version")],
+                    ["Run ID", pr.get("id")],
+                    ["Status", pr.get("status")],
+                    [
+                        "Submitted By",
+                        pr.get("submitted_by", {}).get("name")
+                        if isinstance(pr.get("submitted_by"), dict)
+                        else pr.get("submitted_by"),
+                    ],
+                ],
+            )
+        )
+        parts.append("")
+    else:
+        parts.append(f"Source type: {source_type}")
+        parts.append("")
+        uploader = entity.get("uploader")
+        if uploader:
+            name = uploader.get("name") if isinstance(uploader, dict) else uploader
+            parts.append(f"Uploaded by: {name}")
+            parts.append("")
+
+    # Related data
+    related = report.get("related_data", {})
+    linked_samples = related.get("linked_samples", [])
+    if linked_samples:
+        parts.append("## Linked Samples")
+        parts.append("")
+        parts.append(
+            _table(
+                ["ID", "External ID", "Organism"],
+                [[s.get("id"), s.get("external_id"), s.get("organism")] for s in linked_samples],
+            )
+        )
+        parts.append("")
+
+    downstream = related.get("downstream_usage", [])
+    if downstream:
+        parts.append("## Downstream Usage")
+        parts.append("")
+        rows = []
+        for d in downstream:
+            if "pipeline_run_id" in d:
+                rows.append([f"Pipeline run {d['pipeline_run_id']}", d.get("pipeline_name")])
+            elif "notebook_session_id" in d:
+                rows.append([f"Notebook session {d['notebook_session_id']}", d.get("session_type")])
+        if rows:
+            parts.append(_table(["Consumer", "Name/Type"], rows))
+            parts.append("")
+
     _append_audit_trail(parts, report.get("audit_trail", []))
     return "\n".join(parts)
 

@@ -28,6 +28,36 @@ def generate_sync_out_command(local_dir: str, gcs_prefix: str) -> list[str]:
     ]
 
 
+def generate_outputs_sync_command(local_dir: str, gcs_prefix: str) -> list[str]:
+    """Return shell command to sync /outputs/ to GCS (working bucket)."""
+    return [
+        "/bin/sh",
+        "-c",
+        f'if [ -d {local_dir} ] && [ "$(ls -A {local_dir})" ]; then gsutil -m rsync -r {local_dir} {gcs_prefix}; fi',
+    ]
+
+
+def generate_script_capture_command(home_dir: str, gcs_prefix: str) -> list[str]:
+    """Return shell command to find and copy notebook/script files to GCS."""
+    return [
+        "/bin/sh",
+        "-c",
+        f"find {home_dir} -maxdepth 3 "
+        r"\( -name '*.ipynb' -o -name '*.Rmd' -o -name '*.R' -o -name '*.py' \) "
+        "-type f "
+        f'| while read f; do gsutil cp "$f" {gcs_prefix}"$(basename "$f")"; done',
+    ]
+
+
+def generate_list_outputs_command(gcs_prefix: str) -> list[str]:
+    """Return shell command to list all files at a GCS prefix with sizes."""
+    return [
+        "/bin/sh",
+        "-c",
+        f"gsutil ls -l -r {gcs_prefix}** 2>/dev/null || true",
+    ]
+
+
 def _get_k8s_core_client():
     """Get a Kubernetes CoreV1Api client. Tests mock this function."""
     from kubernetes import client, config

@@ -825,8 +825,57 @@ class ProvenanceDataGatherer:
                     "id": source_ns.id,
                     "session_type": source_ns.session_type,
                     "status": source_ns.status,
+                    "resource_profile": source_ns.resource_profile,
+                    "cpu_cores": source_ns.cpu_cores,
+                    "memory_gb": source_ns.memory_gb,
                     "started_at": _dt(source_ns.started_at),
+                    "stopped_at": _dt(source_ns.stopped_at),
+                    "git_branch_name": source_ns.git_branch_name,
+                    "git_commit_hash": source_ns.git_commit_hash,
                 }
+
+                # Resolve environment version
+                if source_ns.environment_version_id:
+                    from app.models.environment_version import EnvironmentVersion
+                    from app.models.environment import Environment
+
+                    ev_result = await session.execute(
+                        select(EnvironmentVersion, Environment)
+                        .join(Environment, Environment.id == EnvironmentVersion.environment_id)
+                        .where(EnvironmentVersion.id == source_ns.environment_version_id)
+                    )
+                    ev_row = ev_result.first()
+                    if ev_row:
+                        ev, env = ev_row
+                        source_notebook_session_data["environment"] = {
+                            "environment_name": env.name,
+                            "version_number": ev.version_number,
+                            "build_number": ev.build_number,
+                            "image_uri": ev.image_uri,
+                            "definition_format": ev.definition_format,
+                        }
+
+                # Resolve input files for this session
+                input_result = await session.execute(
+                    select(NotebookSessionFile, File)
+                    .join(File, File.id == NotebookSessionFile.file_id)
+                    .where(
+                        NotebookSessionFile.session_id == source_ns.id,
+                        NotebookSessionFile.access_type == "input",
+                    )
+                )
+                session_inputs = []
+                for nsf, inp_file in input_result.all():
+                    session_inputs.append(
+                        {
+                            "id": inp_file.id,
+                            "filename": inp_file.filename,
+                            "file_type": inp_file.file_type,
+                            "gcs_uri": inp_file.gcs_uri,
+                        }
+                    )
+                if session_inputs:
+                    source_notebook_session_data["input_files"] = session_inputs
 
         # Source pipeline run
         source_run_data = None

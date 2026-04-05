@@ -250,7 +250,14 @@ class KubernetesNotebookProvider(NotebookProvider):
         """Ensure the notebook namespace and service account exist."""
         from kubernetes.client.rest import ApiException
 
+        # Always patch the SA annotation when a SA email is provided, even if
+        # the namespace was already set up on a previous call.  The annotation
+        # may be missing if the namespace was created before Workload Identity
+        # was configured.
         if self._namespace_ready:
+            if gcp_sa_email:
+                core_v1 = self._get_k8s_core_client()
+                self._patch_sa_annotation(core_v1, namespace, gcp_sa_email)
             return
 
         core_v1 = self._get_k8s_core_client()
@@ -319,6 +326,44 @@ class KubernetesNotebookProvider(NotebookProvider):
         logger.info("Created role binding in %s", namespace)
         self._namespace_ready = True
 
+    def _ensure_gcs_secret(self, namespace: str) -> bool:
+        """Create a K8s Secret with the GCP SA key for GCS access.
+
+        Returns True if the secret exists (created or already present).
+        """
+        import base64 as _b64
+
+        from kubernetes.client.rest import ApiException
+
+        cfg = self._cluster_config or {}
+        sa_key = cfg.get("gcp_service_account_key", "")
+        if not sa_key:
+            return False
+
+        core_client = self._get_k8s_core_client()
+        secret_name = "bioaf-gcs-sa-key"
+
+        try:
+            core_client.read_namespaced_secret(name=secret_name, namespace=namespace)
+            return True
+        except ApiException as e:
+            if e.status != 404:
+                logger.warning("Error checking GCS secret: %s", e)
+                return False
+
+        core_client.create_namespaced_secret(
+            namespace=namespace,
+            body={
+                "apiVersion": "v1",
+                "kind": "Secret",
+                "metadata": {"name": secret_name, "labels": {"bioaf.io/managed": "true"}},
+                "type": "Opaque",
+                "data": {"key.json": _b64.b64encode(sa_key.encode()).decode()},
+            },
+        )
+        logger.info("Created GCS SA key secret in %s", namespace)
+        return True
+
     @staticmethod
     def _patch_sa_annotation(core_v1, namespace: str, gcp_sa_email: str) -> None:
         """Ensure the notebook-runner SA has the Workload Identity annotation."""
@@ -333,24 +378,22 @@ class KubernetesNotebookProvider(NotebookProvider):
                 )
                 logger.info("Patched Workload Identity annotation on bioaf-notebook-runner")
         except Exception:
-            logger.warning("Could not patch SA annotation for Workload Identity")
+            logger.exception("Failed to patch Workload Identity annotation on bioaf-notebook-runner")
 
     # -- K8s API implementations (production) --
 
-    async def _k8s_launch_session(self, session_spec: dict) -> dict:
-        """Launch a notebook pod on the GKE interactive node pool."""
-        # Ensure API client is initialized (handles incluster vs out-of-cluster)
-        await self._get_api_client_async()
+    def _build_pod_manifest(self, session_spec: dict, has_gcs_secret: bool = False) -> dict:
+        """Build a Kubernetes Pod manifest from a session spec.
 
+        Extracted from _k8s_launch_session so it can be unit-tested without
+        requiring a live K8s API client.
+        """
         session_id = session_spec.get("session_id", 0)
         session_type = session_spec.get("session_type", "jupyter")
         user_id = session_spec.get("user_id", 0)
         namespace = DEFAULT_NOTEBOOK_NAMESPACE
 
-        await self.ensure_notebook_namespace(namespace, gcp_sa_email=session_spec.get("notebook_runner_sa_email", ""))
-
         pod_name = f"bioaf-notebook-{session_id}"
-        service_name = f"bioaf-notebook-svc-{session_id}"
         working_bucket = session_spec.get("working_bucket", "bioaf-working")
         gcs_home_prefix = f"gs://{working_bucket}/notebooks/{user_id}/"
 
@@ -488,13 +531,21 @@ class KubernetesNotebookProvider(NotebookProvider):
         # Input file data sync init container
         input_files = session_spec.get("input_files", [])
         if input_files:
-            copy_cmds = [f"gsutil cp {f['gcs_uri']} /data/{f['relative_path']}" for f in input_files]
-            # Generate FILE_INVENTORY.md
+            # Create subdirectories and copy files preserving hierarchy
+            copy_cmds: list[str] = []
+            for f in input_files:
+                dest_path = f"/data/{f['relative_path']}"
+                dest_dir = "/".join(dest_path.split("/")[:-1])
+                copy_cmds.append(f"mkdir -p {dest_dir} && gsutil cp {f['gcs_uri']} {dest_path}")
+            # Generate FILE_INVENTORY.md using a heredoc to avoid backtick
+            # interpretation by the shell (backticks in markdown trigger
+            # command substitution inside double-quoted printf)
             inventory_lines = ["# File Inventory", "", "Files mounted at session start:", ""]
             for f in input_files:
-                inventory_lines.append(f"- `/data/{f['relative_path']}` (source: `{f['gcs_uri']}`)")
-            inventory_content = "\\n".join(inventory_lines)
-            copy_cmds.append(f'printf "{inventory_content}" > /data/FILE_INVENTORY.md')
+                inventory_lines.append(f"- /data/{f['relative_path']} (source: {f['gcs_uri']})")
+            inventory_content = "\n".join(inventory_lines)
+            # Use heredoc with single-quoted delimiter to prevent all expansion
+            copy_cmds.append(f"cat > /data/FILE_INVENTORY.md << 'INVENTORY_EOF'\n{inventory_content}\nINVENTORY_EOF")
             data_sync_cmd = " && ".join(copy_cmds)
             init_containers.append(
                 {
@@ -507,6 +558,13 @@ class KubernetesNotebookProvider(NotebookProvider):
             volumes.append({"name": "data", "emptyDir": {"sizeLimit": "50Gi"}})
             volume_mounts.append({"name": "data", "mountPath": "/data", "readOnly": True})
 
+        # Writable /outputs/ directory for all session types (ADR-040)
+        volume_mounts.append({"name": "outputs", "mountPath": "/outputs"})
+        volumes.append({"name": "outputs", "emptyDir": {"sizeLimit": "50Gi"}})
+
+        # Track whether any GCS FUSE CSI volumes are used
+        has_fuse_volumes = False
+
         # SSH work nodes get additional volumes: scratch and data mounts
         if session_type == "ssh":
             volume_mounts.append({"name": "scratch", "mountPath": "/scratch"})
@@ -514,6 +572,8 @@ class KubernetesNotebookProvider(NotebookProvider):
 
             # GCS FUSE data mounts (read-only)
             data_mount_paths = session_spec.get("data_mount_paths", [])
+            if data_mount_paths:
+                has_fuse_volumes = True
             for i, mount_path in enumerate(data_mount_paths):
                 vol_name = f"data-{i}"
                 volume_mounts.append(
@@ -530,7 +590,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                             "driver": "gcsfuse.csi.storage.gke.io",
                             "readOnly": True,
                             "volumeAttributes": {
-                                "bucketName": "bioaf-data",
+                                "bucketName": working_bucket,
                                 "mountOptions": "implicit-dirs,file-cache:max-size-mb:-1",
                                 "gcsfuseLoggingSeverity": "warning",
                             },
@@ -600,20 +660,71 @@ class KubernetesNotebookProvider(NotebookProvider):
                 }
             )
 
+        # Mount GCS SA key secret into all init containers and the main container
+        # so gsutil / GCP client libraries can authenticate.
+        # On GKE with Workload Identity enabled, gsutil prefers the metadata
+        # server over GOOGLE_APPLICATION_CREDENTIALS, so we explicitly activate
+        # the service account in each init container command.
+        _GCS_KEY_PATH = "/secrets/gcp/key.json"
+        _GCS_AUTH_PREFIX = f"gcloud auth activate-service-account --key-file={_GCS_KEY_PATH} && "
+        if has_gcs_secret:
+            gcs_vol_mount = {"name": "gcp-sa-key", "mountPath": "/secrets/gcp", "readOnly": True}
+            gcs_env = {"name": "GOOGLE_APPLICATION_CREDENTIALS", "value": _GCS_KEY_PATH}
+            for ic in init_containers:
+                ic.setdefault("volumeMounts", []).append(gcs_vol_mount)
+                ic.setdefault("env", []).append(gcs_env)
+                # Prepend gcloud auth activation to the shell command
+                cmd: list[str] = ic.get("command", [])
+                if len(cmd) >= 3 and cmd[0] == "/bin/sh" and cmd[1] == "-c":
+                    cmd[2] = _GCS_AUTH_PREFIX + str(cmd[2])
+            notebook_container.setdefault("env", []).append(gcs_env)
+            notebook_container["volumeMounts"].append(gcs_vol_mount)
+            volumes.append({"name": "gcp-sa-key", "secret": {"secretName": "bioaf-gcs-sa-key"}})
+
+        # GCS sync sidecar: sleeps until exec'd at shutdown to sync /outputs/
+        # and capture scripts. Uses google/cloud-sdk:slim which has gsutil.
+        gcs_sync_mounts = [
+            {"name": "outputs", "mountPath": "/outputs"},
+            {"name": "home", "mountPath": home_dir},
+        ]
+        gcs_sync_env: list[dict] = []
+        if has_gcs_secret:
+            gcs_sync_mounts.append({"name": "gcp-sa-key", "mountPath": "/secrets/gcp", "readOnly": True})
+            gcs_sync_env.append({"name": "GOOGLE_APPLICATION_CREDENTIALS", "value": _GCS_KEY_PATH})
+        containers.append(
+            {
+                "name": "gcs-sync",
+                "image": "google/cloud-sdk:slim",
+                "command": ["/bin/sh", "-c", "trap 'exit 0' TERM; while true; do sleep 3600; done"],
+                "volumeMounts": gcs_sync_mounts,
+                "env": gcs_sync_env,
+                "resources": {"requests": {"cpu": "50m", "memory": "128Mi"}},
+            }
+        )
+
+        # Pod annotations -- GCS FUSE CSI driver requires this for sidecar injection
+        annotations: dict[str, str] = {}
+        if has_fuse_volumes:
+            annotations["gke-gcsfuse/volumes"] = "true"
+
         # Pod manifest
+        metadata: dict = {
+            "name": pod_name,
+            "namespace": namespace,
+            "labels": {
+                "bioaf.io/session": str(session_id),
+                "bioaf.io/user": str(user_id),
+                "bioaf.io/type": session_type,
+                "bioaf.io/pool": node_pool,
+            },
+        }
+        if annotations:
+            metadata["annotations"] = annotations
+
         pod_manifest = {
             "apiVersion": "v1",
             "kind": "Pod",
-            "metadata": {
-                "name": pod_name,
-                "namespace": namespace,
-                "labels": {
-                    "bioaf.io/session": str(session_id),
-                    "bioaf.io/user": str(user_id),
-                    "bioaf.io/type": session_type,
-                    "bioaf.io/pool": node_pool,
-                },
-            },
+            "metadata": metadata,
             "spec": {
                 "nodeSelector": {"bioaf.io/pool": node_pool},
                 "tolerations": [
@@ -630,6 +741,37 @@ class KubernetesNotebookProvider(NotebookProvider):
                 "restartPolicy": "Never",
             },
         }
+
+        # Stash gcs_home_prefix on the manifest for the caller to use
+        pod_manifest["_gcs_home_prefix"] = gcs_home_prefix
+
+        return pod_manifest
+
+    async def _k8s_launch_session(self, session_spec: dict) -> dict:
+        """Launch a notebook pod on the GKE interactive node pool."""
+        await self._get_api_client_async()
+
+        session_id = session_spec.get("session_id", 0)
+        namespace = DEFAULT_NOTEBOOK_NAMESPACE
+
+        await self.ensure_notebook_namespace(namespace, gcp_sa_email=session_spec.get("notebook_runner_sa_email", ""))
+
+        # Ensure GCS credentials secret exists for bucket access
+        has_gcs_secret = self._ensure_gcs_secret(namespace)
+
+        pod_manifest = self._build_pod_manifest(session_spec, has_gcs_secret=has_gcs_secret)
+        gcs_home_prefix = pod_manifest.pop("_gcs_home_prefix")
+
+        pod_name = pod_manifest["metadata"]["name"]
+        service_name = f"bioaf-notebook-svc-{session_id}"
+
+        session_type = session_spec.get("session_type", "jupyter")
+        if session_type == "jupyter":
+            container_port = 8888
+        elif session_type == "ssh":
+            container_port = 22
+        else:
+            container_port = 8787
 
         core_client = self._get_k8s_core_client()
         core_client.create_namespaced_pod(namespace=namespace, body=pod_manifest)
@@ -790,8 +932,10 @@ class KubernetesNotebookProvider(NotebookProvider):
         pod_name: str = "",
         namespace: str = DEFAULT_NOTEBOOK_NAMESPACE,
         gcs_home_prefix: str = "",
+        working_bucket: str = "",
+        session_type: str = "jupyter",
     ) -> dict:
-        """Final git commit, sync to GCS, then delete pod and service."""
+        """Final git commit, sync outputs to GCS, then delete pod and service."""
         from kubernetes.stream import stream
 
         core_client = self._get_k8s_core_client()
@@ -870,6 +1014,96 @@ class KubernetesNotebookProvider(NotebookProvider):
             except Exception as e:
                 logger.warning("GCS sync-out failed for pod %s: %s", pod_name, e)
 
+        # Sync /outputs/ and capture scripts to GCS via the gcs-sync sidecar (ADR-040).
+        # The sidecar has google/cloud-sdk:slim with gsutil; the main container may not.
+        _SYNC_CONTAINER = "gcs-sync"
+        _GCS_KEY = "/secrets/gcp/key.json"
+        _AUTH_CMD = f"gcloud auth activate-service-account --key-file={_GCS_KEY} 2>/dev/null; "
+
+        output_files: list[dict] = []
+        gcs_output_prefix = ""
+        if working_bucket and pod_name:
+            gcs_output_prefix = f"gs://{working_bucket}/sessions/{session_id}/outputs/"
+            gcs_scripts_prefix = f"gs://{working_bucket}/sessions/{session_id}/scripts/"
+
+            # Determine home directory based on session type
+            if session_type == "ssh":
+                exec_home = "/home"
+            else:
+                exec_home = HOME_DIR
+
+            # 1. Sync /outputs/ to working bucket
+            try:
+                outputs_shell = (
+                    f"{_AUTH_CMD}"
+                    f'if [ -d /outputs ] && [ "$(ls -A /outputs)" ]; then '
+                    f"gsutil -m rsync -r /outputs {gcs_output_prefix}; fi"
+                )
+                stream(
+                    core_client.connect_get_namespaced_pod_exec,
+                    name=pod_name,
+                    namespace=namespace,
+                    container=_SYNC_CONTAINER,
+                    command=["/bin/sh", "-c", outputs_shell],
+                    stderr=True,
+                    stdin=False,
+                    stdout=True,
+                    tty=False,
+                    _request_timeout=1800,
+                )
+                logger.info("Outputs sync complete for pod %s", pod_name)
+            except Exception as e:
+                logger.warning("Outputs sync failed for pod %s: %s", pod_name, e)
+
+            # 2. Capture notebook/script files
+            try:
+                scripts_shell = (
+                    f"{_AUTH_CMD}"
+                    f"find {exec_home} -maxdepth 3 "
+                    r"\( -name '*.ipynb' -o -name '*.Rmd' -o -name '*.R' -o -name '*.py' \) "
+                    "-type f "
+                    f'| while read f; do gsutil cp "$f" {gcs_scripts_prefix}"$(basename "$f")"; done'
+                )
+                stream(
+                    core_client.connect_get_namespaced_pod_exec,
+                    name=pod_name,
+                    namespace=namespace,
+                    container=_SYNC_CONTAINER,
+                    command=["/bin/sh", "-c", scripts_shell],
+                    stderr=True,
+                    stdin=False,
+                    stdout=True,
+                    tty=False,
+                    _request_timeout=300,
+                )
+                logger.info("Script capture complete for pod %s", pod_name)
+            except Exception as e:
+                logger.warning("Script capture failed for pod %s: %s", pod_name, e)
+
+            # 3. List all output files for registration
+            try:
+                list_prefix = f"gs://{working_bucket}/sessions/{session_id}/"
+                list_shell = f"{_AUTH_CMD}gsutil ls -l -r {list_prefix}** 2>/dev/null || true"
+                raw_output = stream(
+                    core_client.connect_get_namespaced_pod_exec,
+                    name=pod_name,
+                    namespace=namespace,
+                    container=_SYNC_CONTAINER,
+                    command=["/bin/sh", "-c", list_shell],
+                    stderr=True,
+                    stdin=False,
+                    stdout=True,
+                    tty=False,
+                    _request_timeout=60,
+                )
+                if raw_output:
+                    from app.services.session_output_service import parse_gsutil_ls_output
+
+                    output_files = parse_gsutil_ls_output(str(raw_output))
+                    logger.info("Found %d output files for session %s", len(output_files), session_id)
+            except Exception as e:
+                logger.warning("Output file listing failed for pod %s: %s", pod_name, e)
+
         # Delete pod
         try:
             core_client.delete_namespaced_pod(name=pod_name, namespace=namespace)
@@ -889,6 +1123,8 @@ class KubernetesNotebookProvider(NotebookProvider):
             "session_id": session_id,
             "status": "stopped",
             "stopped_at": datetime.now(timezone.utc).isoformat(),
+            "output_files": output_files,
+            "gcs_output_prefix": gcs_output_prefix,
         }
 
     async def _k8s_get_session_status(
@@ -1001,6 +1237,8 @@ class KubernetesNotebookProvider(NotebookProvider):
             "session_id": session_id,
             "status": "stopped",
             "stopped_at": datetime.now(timezone.utc).isoformat(),
+            "output_files": [],
+            "gcs_output_prefix": "",
         }
 
     def _local_get_session_status(self, session_id: str) -> dict:

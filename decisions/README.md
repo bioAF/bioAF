@@ -41,6 +41,8 @@
 | [ADR-037](ADR-037-provenance-reporting.md) | Provenance Reporting System | Accepted | 2026-03-24 |
 | [ADR-038](ADR-038-pipeline-io-lineage-junction.md) | Pipeline Input File Lineage as a Junction Table | Accepted | 2026-03-25 |
 | [ADR-039](ADR-039-notebook-output-provenance.md) | Notebook Output Provenance | Accepted | 2026-03-25 |
+| [ADR-040](ADR-040-notebook-file-lifecycle.md) | Notebook Session File Lifecycle | Accepted | 2026-04-04 |
+| [ADR-041](ADR-041-environment-build-versioning.md) | Environment Build Versioning | Accepted | 2026-04-04 |
 
 ## How to Use This Directory
 

@@ -44,11 +44,12 @@ WORKDIR /home
 """
 
 
-def _get_image_uri(project_id: str, region: str, env_name: str, version_number: int) -> str:
-    """Construct Artifact Registry image URI with version tag."""
+def _get_image_uri(project_id: str, region: str, env_name: str, version_number: int, build_number: int = 1) -> str:
+    """Construct Artifact Registry image URI with version.build tag."""
     # Sanitize env_name for use in image tag (lowercase, hyphens only)
     safe_name = env_name.lower().replace(" ", "-").replace("_", "-")
-    return f"{region}-docker.pkg.dev/{project_id}/{AR_REPO_ID}/{safe_name}:{version_number}"
+    tag = f"v{version_number}.{build_number}"
+    return f"{region}-docker.pkg.dev/{project_id}/{AR_REPO_ID}/{safe_name}:{tag}"
 
 
 def _build_conda_dockerfile(definition_content: str, env_name: str) -> tuple[str, str]:
@@ -166,7 +167,7 @@ class EnvironmentBuildService:
         object_path = await _upload_version_build_context(session, project_id, working_bucket, version, env.name)
 
         # Build image URI
-        image_uri = _get_image_uri(project_id, region, env.name, version.version_number)
+        image_uri = _get_image_uri(project_id, region, env.name, version.version_number, version.build_number)
 
         # Submit Cloud Build
         credentials = await _get_credentials(session)

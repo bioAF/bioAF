@@ -41,6 +41,7 @@ class ComputeSession(Base):
     heartbeat_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
     git_branch_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     git_commit_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    gcs_output_prefix: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     user = relationship("User")
     organization = relationship("Organization")

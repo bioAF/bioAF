@@ -1,10 +1,16 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+
+if TYPE_CHECKING:
+    from app.models.file import File
 
 from app.models.notebook_session import NotebookSession
 from app.services.audit_service import log_action
@@ -40,6 +46,7 @@ class NotebookService:
         project_id: int | None = None,
         image: str | None = None,
         input_file_ids: list[int] | None = None,
+        environment_version_id: int | None = None,
     ) -> NotebookSession:
         # Check quota
         allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=1.0)
@@ -54,6 +61,7 @@ class NotebookService:
             session_type=session_type,
             experiment_id=experiment_id,
             project_id=project_id,
+            environment_version_id=environment_version_id,
             resource_profile=resource_profile,
             cpu_cores=cpu_cores,
             memory_gb=memory_gb,
@@ -117,7 +125,7 @@ class NotebookService:
                 if cred.ssh_private_key:
                     spec["ssh_private_key"] = cred.ssh_private_key
 
-            # Validate and build input file list
+            # Validate and build input file list with hierarchical paths
             input_files_spec: list[dict] = []
             if input_file_ids:
                 from app.models.file import File
@@ -125,15 +133,19 @@ class NotebookService:
                 file_results = await session.execute(select(File).where(File.id.in_(input_file_ids)))
                 found_files = {f.id: f for f in file_results.scalars().all()}
 
+                # Resolve names for hierarchy: project, experiment, sample, pipeline
+                name_cache = await _resolve_input_file_context(session, found_files)
+
                 for fid in input_file_ids:
                     f = found_files.get(fid)
                     if not f or f.organization_id != org_id:
                         raise ValueError(f"File {fid} not found or not accessible")
+                    rel_path = _build_relative_path(f, name_cache)
                     input_files_spec.append(
                         {
                             "file_id": f.id,
                             "gcs_uri": f.gcs_uri,
-                            "relative_path": f.filename,
+                            "relative_path": rel_path,
                         }
                     )
 
@@ -203,18 +215,77 @@ class NotebookService:
 
         old_status = notebook_session.status
 
+        # Look up working bucket for output sync
+        from sqlalchemy import text as sa_text
+
+        bucket_row = await session.execute(
+            sa_text("SELECT value FROM platform_config WHERE key = 'working_bucket_name'")
+        )
+        working_bucket = ""
+        row = bucket_row.first()
+        if row:
+            val = (row[0] or "").strip()
+            if val and val != "null":
+                working_bucket = val
+
         # Terminate via the notebook adapter
+        terminate_result: dict = {}
         if notebook_session.slurm_job_id or notebook_session.k8s_pod_name:
             try:
                 notebook_adapter = get_notebook_adapter()
-                await notebook_adapter.terminate_session(
+                terminate_result = await notebook_adapter.terminate_session(
                     notebook_session.slurm_job_id or "",
                     pod_name=notebook_session.k8s_pod_name or "",
                     namespace=notebook_session.k8s_namespace or "bioaf-notebooks",
                     gcs_home_prefix=notebook_session.gcs_home_prefix or "",
+                    working_bucket=working_bucket,
+                    session_type=notebook_session.session_type,
                 )
             except Exception as e:
                 logger.warning("Failed to terminate session %s: %s", notebook_session.slurm_job_id, e)
+
+        # Register output files (ADR-040)
+        output_files = terminate_result.get("output_files", [])
+        if output_files:
+            try:
+                from app.services.session_output_service import SessionOutputService
+
+                await SessionOutputService.register_outputs(
+                    session,
+                    session_id=notebook_session.id,
+                    organization_id=notebook_session.organization_id,
+                    project_id=notebook_session.project_id,
+                    experiment_id=notebook_session.experiment_id,
+                    user_id=notebook_session.user_id,
+                    gcs_files=output_files,
+                )
+            except Exception as e:
+                logger.warning("Output registration failed for session %d: %s", session_id, e)
+
+        gcs_output_prefix = terminate_result.get("gcs_output_prefix", "")
+        if gcs_output_prefix:
+            notebook_session.gcs_output_prefix = gcs_output_prefix
+
+        # Move outputs from working to results bucket (ADR-040: two-phase)
+        if working_bucket and output_files:
+            try:
+                results_row = await session.execute(
+                    sa_text("SELECT value FROM platform_config WHERE key = 'results_bucket_name'")
+                )
+                r_row = results_row.first()
+                results_bucket = (r_row[0] or "").strip() if r_row else ""
+                if results_bucket and results_bucket != "null":
+                    from app.services.session_output_service import SessionOutputService
+
+                    final_prefix = await SessionOutputService.move_outputs_to_results_bucket(
+                        session,
+                        session_id=notebook_session.id,
+                        working_bucket=working_bucket,
+                        results_bucket=results_bucket,
+                    )
+                    notebook_session.gcs_output_prefix = final_prefix
+            except Exception as e:
+                logger.warning("Failed to move outputs to results bucket for session %d: %s", session_id, e)
 
         notebook_session.status = "stopped"
         notebook_session.stopped_at = datetime.now(timezone.utc)
@@ -327,3 +398,93 @@ class NotebookService:
 
         except Exception as e:
             logger.error("Idle session check failed: %s", e)
+
+
+def _slugify(name: str) -> str:
+    """Convert a display name to a filesystem-safe slug."""
+    import re
+
+    slug = re.sub(r"[^\w\s-]", "", name.lower())
+    return re.sub(r"[\s_]+", "-", slug).strip("-") or "unknown"
+
+
+async def _resolve_input_file_context(
+    session: "AsyncSession",
+    files: dict[int, "File"],
+) -> dict:
+    """Resolve project, experiment, sample, and pipeline names for input files."""
+    from sqlalchemy import text as sa_text
+
+    project_ids = {f.project_id for f in files.values() if f.project_id}
+    experiment_ids = {f.experiment_id for f in files.values() if f.experiment_id}
+    pipeline_run_ids = {f.source_pipeline_run_id for f in files.values() if f.source_pipeline_run_id}
+    file_ids = list(files.keys())
+
+    cache: dict = {"projects": {}, "experiments": {}, "pipelines": {}, "file_samples": {}}
+
+    if project_ids:
+        rows = await session.execute(
+            sa_text("SELECT id, name FROM projects WHERE id = ANY(:ids)"),
+            {"ids": list(project_ids)},
+        )
+        cache["projects"] = {r[0]: r[1] for r in rows.fetchall()}
+
+    if experiment_ids:
+        rows = await session.execute(
+            sa_text("SELECT id, name FROM experiments WHERE id = ANY(:ids)"),
+            {"ids": list(experiment_ids)},
+        )
+        cache["experiments"] = {r[0]: r[1] for r in rows.fetchall()}
+
+    if pipeline_run_ids:
+        rows = await session.execute(
+            sa_text("SELECT id, pipeline_name FROM pipeline_runs WHERE id = ANY(:ids)"),
+            {"ids": list(pipeline_run_ids)},
+        )
+        cache["pipelines"] = {r[0]: r[1] for r in rows.fetchall()}
+
+    # Resolve sample identifiers for files via sample_files junction
+    if file_ids:
+        rows = await session.execute(
+            sa_text(
+                "SELECT sf.file_id, COALESCE(s.sample_id_external, CAST(s.id AS TEXT)) "
+                "FROM sample_files sf "
+                "JOIN samples s ON s.id = sf.sample_id "
+                "WHERE sf.file_id = ANY(:ids)"
+            ),
+            {"ids": file_ids},
+        )
+        for r in rows.fetchall():
+            cache["file_samples"][r[0]] = r[1]
+
+    return cache
+
+
+def _build_relative_path(f: "File", cache: dict) -> str:
+    """Build a hierarchical relative path for a file based on its associations.
+
+    Structure: {project}/{experiment}/{sample}/{tool}/filename
+    Falls back gracefully when associations are missing.
+    """
+    parts: list[str] = []
+
+    project_name = cache["projects"].get(f.project_id) if f.project_id else None
+    if project_name:
+        parts.append(_slugify(project_name))
+
+    experiment_name = cache["experiments"].get(f.experiment_id) if f.experiment_id else None
+    if experiment_name:
+        parts.append(_slugify(experiment_name))
+
+    sample_name = cache["file_samples"].get(f.id)
+    if sample_name:
+        parts.append(_slugify(sample_name))
+
+    pipeline_name = cache["pipelines"].get(f.source_pipeline_run_id) if f.source_pipeline_run_id else None
+    if pipeline_name:
+        parts.append(_slugify(pipeline_name))
+    elif f.source_type == "upload":
+        parts.append("uploads")
+
+    parts.append(f.filename)
+    return "/".join(parts)
