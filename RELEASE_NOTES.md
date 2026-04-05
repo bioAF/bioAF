@@ -1,5 +1,14 @@
 # Release Notes
 
+## v0.5.1
+
+Improve notebook file selection UX.
+
+- Files in the notebook launch picker are now sub-grouped by GCS subdirectory path (e.g., star/001/Gene/filtered vs star/001/Gene/raw), so identically named files from different pipeline stages are clearly distinguishable
+- Each file shows a source type badge (Pipeline, Notebook, Upload) and creation date
+- Files linked to a sample no longer duplicate under "Experiment Files"
+- Launch and detail modals widened to 800px to prevent truncation
+
 ## v0.5.0
 
 Notebook file lifecycle and environment build versioning.

@@ -18,16 +18,58 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(1)} ${units[i]}`;
 }
 
+function gcsSubpath(gcsUri: string): string {
+  // Extract the meaningful subdirectory from a GCS URI
+  // e.g., gs://bucket/experiments/1/pipeline-runs/6/star/001/Gene/filtered/barcodes.tsv.gz
+  //     -> star/001/Gene/filtered
+  const parts = gcsUri.replace(/^gs:\/\/[^/]+\//, "").split("/");
+  // Drop the filename (last part)
+  parts.pop();
+  // Find the first meaningful directory after pipeline-runs/{id}/
+  const prIdx = parts.indexOf("pipeline-runs");
+  if (prIdx >= 0 && prIdx + 2 < parts.length) {
+    return parts.slice(prIdx + 2).join("/");
+  }
+  // For non-pipeline files, show last 2-3 dirs
+  if (parts.length > 3) {
+    return parts.slice(-3).join("/");
+  }
+  return parts.join("/");
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  pipeline_output: "Pipeline",
+  notebook_output: "Notebook",
+  upload: "Upload",
+};
+
+function sourceLabel(sourceType: string): string {
+  return SOURCE_LABELS[sourceType] || sourceType;
+}
+
+const SOURCE_COLORS: Record<string, string> = {
+  pipeline_output: "bg-purple-100 text-purple-700",
+  notebook_output: "bg-teal-100 text-teal-700",
+  upload: "bg-gray-100 text-gray-600",
+};
+
 interface FileTreeSelectorProps {
   files: FileResponse[];
   sampleNames: Record<number, string>;
   onSelectionChange: (fileIds: number[]) => void;
 }
 
+interface SourceSubgroup {
+  key: string;
+  label: string;
+  files: FileResponse[];
+}
+
 interface SampleGroup {
   sampleId: number;
   sampleName: string;
   files: FileResponse[];
+  subgroups: SourceSubgroup[];
 }
 
 export function FileTreeSelector({ files, sampleNames, onSelectionChange }: FileTreeSelectorProps) {
@@ -38,9 +80,13 @@ export function FileTreeSelector({ files, sampleNames, onSelectionChange }: File
   const sampleGroups = useMemo((): SampleGroup[] => {
     const groupMap = new Map<number, FileResponse[]>();
     const ungrouped: FileResponse[] = [];
+    // Track files already assigned to a sample to avoid showing them
+    // again under "Experiment Files"
+    const sampleLinkedIds = new Set<number>();
 
     for (const file of files) {
       if (file.sample_ids && file.sample_ids.length > 0) {
+        sampleLinkedIds.add(file.id);
         for (const sampleId of file.sample_ids) {
           const existing = groupMap.get(sampleId) || [];
           existing.push(file);
@@ -51,20 +97,37 @@ export function FileTreeSelector({ files, sampleNames, onSelectionChange }: File
       }
     }
 
+    function buildSubgroups(groupFiles: FileResponse[]): SourceSubgroup[] {
+      const subMap = new Map<string, FileResponse[]>();
+      for (const f of groupFiles) {
+        const path = f.gcs_uri ? gcsSubpath(f.gcs_uri) : sourceLabel(f.source_type);
+        const existing = subMap.get(path) || [];
+        existing.push(f);
+        subMap.set(path, existing);
+      }
+      return Array.from(subMap.entries())
+        .map(([key, subFiles]) => ({ key, label: key || "Other", files: subFiles }))
+        .sort((a, b) => a.label.localeCompare(b.label));
+    }
+
     const groups: SampleGroup[] = [];
     for (const [sampleId, sampleFiles] of groupMap) {
       groups.push({
         sampleId,
         sampleName: sampleNames[sampleId] || `Sample ${sampleId}`,
         files: sampleFiles,
+        subgroups: buildSubgroups(sampleFiles),
       });
     }
 
-    if (ungrouped.length > 0) {
+    // Only show experiment-level files that are not already under a sample
+    const dedupedUngrouped = ungrouped.filter((f) => !sampleLinkedIds.has(f.id));
+    if (dedupedUngrouped.length > 0) {
       groups.push({
         sampleId: 0,
         sampleName: "Experiment Files",
-        files: ungrouped,
+        files: dedupedUngrouped,
+        subgroups: buildSubgroups(dedupedUngrouped),
       });
     }
 
@@ -240,27 +303,47 @@ export function FileTreeSelector({ files, sampleNames, onSelectionChange }: File
                 </div>
 
                 {isExpanded && (
-                  <div className="ml-8 space-y-0.5">
-                    {visible.map((file) => (
-                      <label
-                        key={file.id}
-                        className="flex items-center gap-2 py-0.5 text-sm cursor-pointer hover:bg-gray-50 rounded px-1"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.has(file.id)}
-                          onChange={() => toggleFile(file.id)}
-                          aria-label={file.filename}
-                        />
-                        <span>{file.filename}</span>
-                        <span className="text-xs text-gray-300">{file.file_type}</span>
-                        {file.size_bytes != null && (
-                          <span className="text-xs text-gray-400">
-                            ({formatBytes(file.size_bytes)})
-                          </span>
-                        )}
-                      </label>
-                    ))}
+                  <div className="ml-8 space-y-1">
+                    {group.subgroups.map((sub) => {
+                      const subVisible = sub.files.filter(
+                        (f) => showLargeFiles || !isLargeFormat(f.filename)
+                      );
+                      if (subVisible.length === 0) return null;
+                      return (
+                        <div key={sub.key} className="ml-1">
+                          <div className="text-xs text-gray-400 font-mono py-0.5 border-l-2 border-gray-200 pl-2 mb-0.5">
+                            {sub.label}
+                          </div>
+                          <div className="ml-3 space-y-0.5">
+                            {subVisible.map((file) => (
+                              <label
+                                key={file.id}
+                                className="flex items-center gap-2 py-0.5 text-sm cursor-pointer hover:bg-gray-50 rounded px-1"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedIds.has(file.id)}
+                                  onChange={() => toggleFile(file.id)}
+                                  aria-label={file.filename}
+                                />
+                                <span>{file.filename}</span>
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded ${SOURCE_COLORS[file.source_type] || "bg-gray-100 text-gray-500"}`}>
+                                  {sourceLabel(file.source_type)}
+                                </span>
+                                {file.size_bytes != null && (
+                                  <span className="text-xs text-gray-400">
+                                    ({formatBytes(file.size_bytes)})
+                                  </span>
+                                )}
+                                <span className="text-[10px] text-gray-300">
+                                  {new Date(file.created_at).toLocaleDateString()}
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

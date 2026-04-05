@@ -3,8 +3,6 @@ name: CI
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -17,10 +15,7 @@ jobs:
   terraform-validate:
     name: Terraform Validate
     runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'terraform') ||
-      true
+    if: true
     defaults:
       run:
         working-directory: terraform
