@@ -32,6 +32,7 @@ class NotebookLaunchRequest(BaseModel):
     resource_profile: str = "small"
     experiment_id: int | None = None
     input_file_ids: list[int] = []
+    environment_version_id: int | None = None
 
 
 class NotebookSettings(BaseModel):
@@ -73,6 +74,7 @@ def _session_response(ns) -> SessionResponse:
         created_at=ns.created_at,
         git_branch_name=ns.git_branch_name,
         git_commit_hash=ns.git_commit_hash,
+        environment_version_id=ns.environment_version_id,
     )
 
 
@@ -237,20 +239,43 @@ async def launch_session(
             "Compute infrastructure is not deployed. Deploy it from Infrastructure > Components first.",
         )
 
-    scrna_image = await _get_config_value(session, "bioaf_scrna_image")
-    if not scrna_image or scrna_image == "null":
-        build_status = await _get_config_value(session, "notebook_image_build_status")
-        if build_status in ("QUEUED", "WORKING"):
+    # Resolve image: prefer environment_version_id, fall back to global scrna_image
+    image: str | None = None
+    environment_version_id = body.environment_version_id
+
+    if environment_version_id:
+        from app.models.environment_version import EnvironmentVersion
+        from sqlalchemy import select as sa_select
+
+        ev_result = await session.execute(
+            sa_select(EnvironmentVersion).where(EnvironmentVersion.id == environment_version_id)
+        )
+        env_version = ev_result.scalar_one_or_none()
+        if not env_version:
+            raise HTTPException(400, "Environment version not found")
+        if env_version.status != "ready":
             raise HTTPException(
                 400,
-                "The notebook image is currently building. "
-                "This one-time setup can take up to an hour. Check progress in Infrastructure > Components.",
+                f"Environment version must be in ready status (current: {env_version.status}). "
+                "Build the environment first.",
             )
-        raise HTTPException(
-            400,
-            "The notebook image has not been built yet. "
-            "Enable RStudio or JupyterHub in Infrastructure > Components to start the build.",
-        )
+        image = env_version.image_uri
+    else:
+        scrna_image = await _get_config_value(session, "bioaf_scrna_image")
+        if not scrna_image or scrna_image == "null":
+            build_status = await _get_config_value(session, "notebook_image_build_status")
+            if build_status in ("QUEUED", "WORKING"):
+                raise HTTPException(
+                    400,
+                    "The notebook image is currently building. "
+                    "This one-time setup can take up to an hour. Check progress in Infrastructure > Components.",
+                )
+            raise HTTPException(
+                400,
+                "The notebook image has not been built yet. "
+                "Enable RStudio or JupyterHub in Infrastructure > Components to start the build.",
+            )
+        image = scrna_image
 
     try:
         notebook_session = await NotebookService.launch_session(
@@ -260,8 +285,9 @@ async def launch_session(
             session_type=body.session_type,
             resource_profile=body.resource_profile,
             experiment_id=body.experiment_id,
-            image=scrna_image,
+            image=image,
             input_file_ids=body.input_file_ids or None,
+            environment_version_id=environment_version_id,
         )
     except ValueError as e:
         logger.warning("Session launch failed: %s", e)
@@ -339,6 +365,88 @@ async def sync_session(
             pass  # Best effort in local/test mode
 
     return {"status": "ok", "message": "Sync triggered"}
+
+
+@router.get("/sessions/{session_id}/provenance")
+async def get_session_provenance(
+    session_id: int,
+    current_user: dict = require_permission("notebooks", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Return full provenance for a session: inputs, outputs, environment, user."""
+    notebook_session = await NotebookService.get_session(session, session_id)
+    if not notebook_session:
+        raise HTTPException(404, "Session not found")
+
+    from app.models.notebook_session_file import NotebookSessionFile
+    from app.models.file import File
+    from sqlalchemy import select as sa_select
+
+    # Gather input and output files
+    nsf_result = await session.execute(
+        sa_select(NotebookSessionFile, File)
+        .join(File, File.id == NotebookSessionFile.file_id)
+        .where(NotebookSessionFile.session_id == session_id)
+    )
+    input_files = []
+    output_files = []
+    for nsf, f in nsf_result.all():
+        file_info = {
+            "id": f.id,
+            "filename": f.filename,
+            "gcs_uri": f.gcs_uri,
+            "file_type": f.file_type,
+            "size_bytes": f.size_bytes,
+        }
+        if nsf.access_type == "input":
+            input_files.append(file_info)
+        else:
+            output_files.append(file_info)
+
+    # Gather environment version info
+    environment = None
+    if notebook_session.environment_version_id:
+        from app.models.environment_version import EnvironmentVersion
+        from app.models.environment import Environment
+
+        ev_result = await session.execute(
+            sa_select(EnvironmentVersion, Environment)
+            .join(Environment, Environment.id == EnvironmentVersion.environment_id)
+            .where(EnvironmentVersion.id == notebook_session.environment_version_id)
+        )
+        row = ev_result.first()
+        if row:
+            ev, env = row
+            environment = {
+                "environment_id": env.id,
+                "environment_name": env.name,
+                "version_id": ev.id,
+                "version_number": ev.version_number,
+                "build_number": ev.build_number,
+                "image_uri": ev.image_uri,
+                "definition_format": ev.definition_format,
+            }
+
+    return {
+        "session_id": notebook_session.id,
+        "session_type": notebook_session.session_type,
+        "status": notebook_session.status,
+        "user": {
+            "id": notebook_session.user.id,
+            "name": notebook_session.user.name,
+            "email": notebook_session.user.email,
+        }
+        if notebook_session.user
+        else None,
+        "project_id": notebook_session.project_id,
+        "experiment_id": notebook_session.experiment_id,
+        "environment": environment,
+        "input_files": input_files,
+        "output_files": output_files,
+        "gcs_output_prefix": notebook_session.gcs_output_prefix,
+        "started_at": notebook_session.started_at.isoformat() if notebook_session.started_at else None,
+        "stopped_at": notebook_session.stopped_at.isoformat() if notebook_session.stopped_at else None,
+    }
 
 
 # System files and directories to exclude from output registration

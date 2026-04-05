@@ -223,6 +223,60 @@ class EnvironmentService:
         await session.flush()
 
     @staticmethod
+    async def rebuild_version(
+        session: AsyncSession,
+        org_id: int,
+        user_id: int,
+        environment_id: int,
+        version_id: int,
+    ) -> EnvironmentVersion:
+        """Create a new build of an existing version (v1.1 -> v1.2)."""
+        env = await EnvironmentService.get_environment(session, org_id, environment_id)
+        if not env:
+            raise ValueError("Environment not found")
+
+        original = await EnvironmentService.get_version(session, org_id, environment_id, version_id)
+        if not original:
+            raise ValueError("Version not found")
+
+        # Find the max build_number for this version_number
+        result = await session.execute(
+            select(func.coalesce(func.max(EnvironmentVersion.build_number), 0)).where(
+                EnvironmentVersion.environment_id == environment_id,
+                EnvironmentVersion.version_number == original.version_number,
+            )
+        )
+        max_build = result.scalar() or 0
+        next_build = max_build + 1
+
+        rebuild = EnvironmentVersion(
+            environment_id=environment_id,
+            version_number=original.version_number,
+            build_number=next_build,
+            status="draft",
+            definition_format=original.definition_format,
+            definition_content=original.definition_content,
+            created_by_user_id=user_id,
+        )
+        session.add(rebuild)
+        await session.flush()
+
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="environment_version",
+            entity_id=rebuild.id,
+            action="rebuild",
+            details={
+                "environment_id": environment_id,
+                "version_number": original.version_number,
+                "build_number": next_build,
+                "original_version_id": version_id,
+            },
+        )
+        return rebuild
+
+    @staticmethod
     async def get_in_progress_builds(session: AsyncSession) -> list[EnvironmentVersion]:
         """Get all versions currently in 'building' status."""
         result = await session.execute(select(EnvironmentVersion).where(EnvironmentVersion.status == "building"))

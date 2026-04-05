@@ -546,6 +546,7 @@ export interface NotebookSession {
   created_at: string;
   git_branch_name: string | null;
   git_commit_hash: string | null;
+  environment_version_id: number | null;
 }
 
 export interface SessionListResponse {
@@ -559,6 +560,42 @@ export interface SessionLaunchRequest {
   experiment_id?: number | null;
   image_uri?: string | null;
   input_file_ids?: number[];
+  environment_version_id?: number | null;
+}
+
+export interface SessionProvenance {
+  session_id: number;
+  session_type: string;
+  status: string;
+  user: UserSummary | null;
+  project_id: number | null;
+  experiment_id: number | null;
+  environment: {
+    environment_id: number;
+    environment_name: string;
+    version_id: number;
+    version_number: number;
+    build_number: number;
+    image_uri: string | null;
+    definition_format: string;
+  } | null;
+  input_files: {
+    id: number;
+    filename: string;
+    gcs_uri: string;
+    file_type: string;
+    size_bytes: number | null;
+  }[];
+  output_files: {
+    id: number;
+    filename: string;
+    gcs_uri: string;
+    file_type: string;
+    size_bytes: number | null;
+  }[];
+  gcs_output_prefix: string | null;
+  started_at: string | null;
+  stopped_at: string | null;
 }
 
 export interface UserQuota {
@@ -1046,6 +1083,7 @@ export interface InstalledPackage {
 export interface EnvironmentVersionSummary {
   id: number;
   version_number: number;
+  build_number: number;
   status: "draft" | "building" | "ready" | "failed";
   definition_format: "dockerfile" | "conda";
   image_uri: string | null;

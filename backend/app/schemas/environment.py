@@ -27,6 +27,7 @@ class EnvironmentUpdateRequest(BaseModel):
 class EnvironmentVersionSummary(BaseModel):
     id: int
     version_number: int
+    build_number: int = 1
     status: str
     definition_format: str
     image_uri: str | None = None
@@ -79,6 +80,7 @@ class VersionResponse(BaseModel):
     id: int
     environment_id: int
     version_number: int
+    build_number: int = 1
     status: str
     definition_format: str
     definition_content: str

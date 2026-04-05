@@ -80,12 +80,13 @@ export function ProvenanceReportPanel({ entityType, entityId, entityName }: Prov
 
         for (const [key, val] of Object.entries(entity)) {
           if (val == null || val === "") continue;
+          // Skip source -- rendered separately below
+          if (key === "source") continue;
 
           if (Array.isArray(val)) {
             const label = key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
             collectionLines.push(`- **${label}:** ${val.length} item${val.length !== 1 ? "s" : ""}`);
           } else if (typeof val === "object") {
-            // Objects: user refs show name/email, nested file groups show counts
             const obj = val as Record<string, unknown>;
             if (obj.email) {
               scalarLines.push(`- **${key}:** ${obj.name || obj.email}`);
@@ -94,7 +95,6 @@ export function ProvenanceReportPanel({ entityType, entityId, entityName }: Prov
               const resCount = Array.isArray(obj.results) ? obj.results.length : 0;
               collectionLines.push(`- **Files:** ${rawCount} raw, ${resCount} results`);
             } else if (obj.files !== undefined || obj.samples !== undefined) {
-              // inputs/outputs groupings
               for (const [subKey, subVal] of Object.entries(obj)) {
                 if (Array.isArray(subVal)) {
                   const label = subKey.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -112,6 +112,56 @@ export function ProvenanceReportPanel({ entityType, entityId, entityName }: Prov
           lines.push(...scalarLines);
           lines.push("");
         }
+
+        // Render source section for artifacts
+        const source = entity.source as Record<string, unknown> | undefined;
+        if (source) {
+          const sourceType = source.type as string;
+          lines.push("## Source");
+          lines.push(`- **Source Type:** ${sourceType}`);
+
+          const ns = source.notebook_session as Record<string, unknown> | undefined;
+          if (ns) {
+            lines.push(`- **Session ID:** ${ns.id}`);
+            lines.push(`- **Session Type:** ${ns.session_type}`);
+            lines.push(`- **Status:** ${ns.status}`);
+            lines.push(`- **Resources:** ${ns.cpu_cores} CPU, ${ns.memory_gb} GB`);
+            if (ns.started_at) lines.push(`- **Started:** ${ns.started_at}`);
+            if (ns.stopped_at) lines.push(`- **Stopped:** ${ns.stopped_at}`);
+            if (ns.git_branch_name) lines.push(`- **Git Branch:** ${ns.git_branch_name}`);
+            if (ns.git_commit_hash) lines.push(`- **Git Commit:** ${ns.git_commit_hash}`);
+
+            const env = ns.environment as Record<string, unknown> | undefined;
+            if (env) {
+              lines.push("");
+              lines.push("### Environment");
+              lines.push(`- **Name:** ${env.environment_name}`);
+              lines.push(`- **Version:** v${env.version_number}.${env.build_number}`);
+              lines.push(`- **Format:** ${env.definition_format}`);
+              if (env.image_uri) lines.push(`- **Image:** ${env.image_uri}`);
+            }
+
+            const inputFiles = ns.input_files as Array<Record<string, unknown>> | undefined;
+            if (inputFiles && inputFiles.length > 0) {
+              lines.push("");
+              lines.push(`### Input Files (${inputFiles.length})`);
+              for (const f of inputFiles) {
+                lines.push(`- ${f.filename} (${f.file_type})`);
+              }
+            }
+          }
+
+          const pr = source.pipeline_run as Record<string, unknown> | undefined;
+          if (pr) {
+            lines.push(`- **Pipeline:** ${pr.pipeline_name}`);
+            if (pr.pipeline_version) lines.push(`- **Version:** ${pr.pipeline_version}`);
+            lines.push(`- **Run ID:** ${pr.id}`);
+            lines.push(`- **Status:** ${pr.status}`);
+          }
+
+          lines.push("");
+        }
+
         if (collectionLines.length > 0) {
           lines.push("## Related Data");
           lines.push(...collectionLines);

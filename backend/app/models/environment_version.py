@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -8,10 +8,14 @@ from app.database import Base
 
 class EnvironmentVersion(Base):
     __tablename__ = "environment_versions"
+    __table_args__ = (
+        UniqueConstraint("environment_id", "version_number", "build_number", name="uq_env_version_build"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     environment_id: Mapped[int] = mapped_column(Integer, ForeignKey("environments.id"), nullable=False)
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    build_number: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     status: Mapped[str] = mapped_column(String(50), nullable=False, server_default="draft")
     definition_format: Mapped[str] = mapped_column(String(50), nullable=False)
     definition_content: Mapped[str] = mapped_column(Text, nullable=False)

@@ -58,6 +58,8 @@ export default function WorkNodesPage() {
   const [selectedMachineType, setSelectedMachineType] = useState<string>("");
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
+  const [stoppingNodes, setStoppingNodes] = useState<Set<number>>(new Set());
+  const [showGuide, setShowGuide] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/login"); return; }
@@ -157,12 +159,20 @@ export default function WorkNodesPage() {
   }
 
   async function handleStop(nodeId: number) {
-    if (!confirm("Stop this work node? Data in /scratch will be lost.")) return;
+    if (!confirm("Stop this work node? Files in /outputs/ will be synced to GCS. Data in /scratch will be lost.")) return;
+    setStoppingNodes((prev) => new Set(prev).add(nodeId));
     try {
       await api.post(`/api/v1/work-nodes/sessions/${nodeId}/stop`);
       loadNodes();
       if (viewingNode?.id === nodeId) setViewingNode(null);
-    } catch {}
+    } catch {
+    } finally {
+      setStoppingNodes((prev) => {
+        const next = new Set(prev);
+        next.delete(nodeId);
+        return next;
+      });
+    }
   }
 
   function formatUptime(startedAt: string | null): string {
@@ -211,6 +221,33 @@ export default function WorkNodesPage() {
             )}
           </div>
 
+          {/* Quick Start Guide */}
+          <div className="mb-6">
+            <button
+              onClick={() => setShowGuide(!showGuide)}
+              className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              How work nodes work
+            </button>
+            {showGuide && (
+              <div className="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-4">
+                <div className="text-sm text-blue-800 space-y-2">
+                  <ul className="space-y-1.5 text-blue-700">
+                    <li><strong>Input files</strong> are mounted at <code className="bg-blue-100 px-1 rounded">/data/</code>. Select data mounts during launch to access pipeline outputs, uploads, and shared results for your project.</li>
+                    <li><strong>Output files</strong> should be saved to <code className="bg-blue-100 px-1 rounded">/outputs/</code>. Everything in this directory is automatically synced to GCS and registered when you stop the node.</li>
+                    <li><strong>Scratch space</strong> at <code className="bg-blue-100 px-1 rounded">/scratch/</code> is for temporary computation. This data is lost when the node stops.</li>
+                    <li><strong>Environments</strong> control the packages and tools available. Choose an environment and version when launching. Admins can create new environments from the <a href="/environments" className="underline font-medium">Environments</a> page.</li>
+                    <li><strong>SSH access</strong> uses the credentials you set in your <a href="/profile" className="underline font-medium">Profile Settings</a>. The connection command appears in the node detail panel after launch.</li>
+                    <li><strong>Machine types</strong> range from standard (4 CPU) to high-memory (128 GB) and GPU. Choose based on your workload.</li>
+                  </ul>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Node list */}
           {nodes.length === 0 ? (
             <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
@@ -235,9 +272,16 @@ export default function WorkNodesPage() {
                   {nodes.map((node) => (
                     <tr key={node.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3">
-                        <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${STATUS_COLORS[node.status] || "bg-gray-100"}`}>
-                          {node.status}
-                        </span>
+                        {stoppingNodes.has(node.id) ? (
+                          <span className="flex items-center gap-1 text-xs text-orange-700">
+                            <LoadingSpinner size="sm" />
+                            Syncing outputs...
+                          </span>
+                        ) : (
+                          <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${STATUS_COLORS[node.status] || "bg-gray-100"}`}>
+                            {node.status}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-900">{node.machine_type || "-"}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">{node.cpu_cores} CPU / {node.memory_gb} GB</td>
@@ -340,7 +384,7 @@ export default function WorkNodesPage() {
                     >
                       Stop Work Node
                     </button>
-                    <p className="text-xs text-gray-400 mt-1 text-center">Data in /scratch will be lost</p>
+                    <p className="text-xs text-gray-400 mt-1 text-center">Files in /outputs/ will be synced. Data in /scratch will be lost.</p>
                   </div>
                 )}
               </div>
@@ -451,7 +495,7 @@ export default function WorkNodesPage() {
                           {envDetail.versions
                             .filter((v) => v.status === "ready" && v.image_uri)
                             .map((v) => (
-                              <option key={v.id} value={v.id}>v{v.version_number} (ready)</option>
+                              <option key={v.id} value={v.id}>v{v.version_number}.{v.build_number} (ready)</option>
                             ))}
                         </select>
                       </div>

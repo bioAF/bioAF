@@ -25,6 +25,7 @@ def _version_response(version) -> VersionResponse:
         id=version.id,
         environment_id=version.environment_id,
         version_number=version.version_number,
+        build_number=version.build_number,
         status=version.status,
         definition_format=version.definition_format,
         definition_content=version.definition_content,
@@ -50,6 +51,7 @@ def _env_response(env) -> EnvironmentResponse:
         latest = EnvironmentVersionSummary(
             id=v.id,
             version_number=v.version_number,
+            build_number=v.build_number,
             status=v.status,
             definition_format=v.definition_format,
             image_uri=v.image_uri,
@@ -137,6 +139,7 @@ async def get_environment(
             EnvironmentVersionSummary(
                 id=v.id,
                 version_number=v.version_number,
+                build_number=v.build_number,
                 status=v.status,
                 definition_format=v.definition_format,
                 image_uri=v.image_uri,
@@ -292,6 +295,27 @@ async def get_build_logs(
         status=version.status,
         logs_url=logs_url,
     )
+
+
+@router.post("/{environment_id}/versions/{version_id}/rebuild", response_model=VersionResponse)
+async def rebuild_version(
+    environment_id: int,
+    version_id: int,
+    current_user: dict = require_permission("environments", "build"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Create a rebuild of an existing version (v1 -> v1.2, v1.3, etc.)."""
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+
+    try:
+        rebuild = await EnvironmentService.rebuild_version(session, org_id, user_id, environment_id, version_id)
+        await session.commit()
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    rebuild = await EnvironmentService.get_version(session, org_id, environment_id, rebuild.id)
+    return _version_response(rebuild)
 
 
 @router.delete("/{environment_id}/versions/{version_id}", status_code=204)
