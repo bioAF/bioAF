@@ -23,6 +23,8 @@ SAMPLE_FIELDS = [
     "qc_notes",
     "collection_timestamp",
     "collection_method",
+    "sample_batch",
+    "sequencing_batch",
 ]
 
 # Maps common CSV header names to sample model field names
@@ -51,6 +53,12 @@ COLUMN_MAP = {
     "library_layout": "library_layout",
     "collection_timestamp": "collection_timestamp",
     "collection_method": "collection_method",
+    "sample_batch": "sample_batch_code",
+    "sample_batch_code": "sample_batch_code",
+    "prep_batch": "sample_batch_code",
+    "sequencing_batch": "sequencing_batch_code",
+    "sequencing_batch_code": "sequencing_batch_code",
+    "seq_batch": "sequencing_batch_code",
 }
 
 NUMERIC_FIELDS = {"viability_pct", "cell_count"}

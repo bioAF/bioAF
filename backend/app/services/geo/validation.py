@@ -218,8 +218,10 @@ def _get_source_value(
         obj = experiment_data
     elif parts[0] == "sample":
         obj = sample_data or {}
-    elif parts[0] == "batch":
-        obj = sample_data.get("batch", {}) if sample_data else {}
+    elif parts[0] in ("batch", "sample_batch"):
+        obj = sample_data.get("sample_batch") or {} if sample_data else {}
+    elif parts[0] == "sequencing_batch":
+        obj = sample_data.get("sequencing_batch") or {} if sample_data else {}
     elif parts[0] == "pipeline_run":
         obj = pipeline_data or {}
     elif parts[0] == "files":

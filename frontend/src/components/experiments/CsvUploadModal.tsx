@@ -41,6 +41,8 @@ const SAMPLE_FIELDS = [
   { value: "qc_notes", label: "QC Notes" },
   { value: "collection_timestamp", label: "Collection Timestamp" },
   { value: "collection_method", label: "Collection Method" },
+  { value: "sample_batch", label: "Sample Batch" },
+  { value: "sequencing_batch", label: "Sequencing Batch" },
 ];
 
 const EXAMPLE_VALUES: Record<string, string> = {

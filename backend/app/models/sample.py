@@ -46,7 +46,8 @@ class Sample(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     experiment_id: Mapped[int] = mapped_column(Integer, ForeignKey("experiments.id"), nullable=False)
-    batch_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("batches.id"), nullable=True)
+    sample_batch_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("sample_batches.id"), nullable=True)
+    sequencing_batch_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("sequencing_batches.id"), nullable=True)
     sample_id_external: Mapped[str | None] = mapped_column(String(255), nullable=True)
     organism: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tissue_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -72,7 +73,9 @@ class Sample(Base):
     )
 
     experiment = relationship("Experiment", back_populates="samples")
-    batch = relationship("Batch", back_populates="samples")
+    sample_batch = relationship("SampleBatch", back_populates="samples")
+    sequencing_batch = relationship("SequencingBatch")
     files = relationship("File", secondary=sample_files, lazy="select")
     parent_sample = relationship("Sample", remote_side="Sample.id", foreign_keys=[parent_sample_id])
     derived_samples = relationship("Sample", foreign_keys=[parent_sample_id], overlaps="parent_sample")
+    custom_fields = relationship("SampleCustomField", back_populates="sample", cascade="all, delete-orphan")

@@ -63,7 +63,7 @@ async def bench_token(bench_user) -> str:
 
 @pytest_asyncio.fixture
 async def export_experiment(client, admin_token, session, admin_user):
-    from app.models.batch import Batch
+    from app.models.sample_batch import SampleBatch
     from app.models.pipeline_run import PipelineRun
     from app.models.sample import Sample
 
@@ -76,17 +76,16 @@ async def export_experiment(client, admin_token, session, admin_user):
     )
     exp_id = resp.json()["id"]
 
-    batch = Batch(
+    batch = SampleBatch(
         experiment_id=exp_id,
         name="Batch1",
-        instrument_model="Illumina NovaSeq 6000",
     )
     session.add(batch)
     await session.flush()
 
     s1 = Sample(
         experiment_id=exp_id,
-        batch_id=batch.id,
+        sample_batch_id=batch.id,
         sample_id_external="S001",
         organism="Homo sapiens",
         molecule_type="total RNA",

@@ -28,12 +28,20 @@ class AutoIngestConfig(BaseModel):
     enabled: bool
     cleanup_policy: str = "delete_after_copy"
     default_delay_minutes: int | None = None
+    manifest_filename: str | None = None
+    manifest_format: str | None = None
+    manifest_retry_interval_minutes: int | None = None
+    manifest_max_retries: int | None = None
 
 
 class AutoIngestStatus(BaseModel):
     enabled: bool
     cleanup_policy: str
     default_delay_minutes: int
+    manifest_filename: str
+    manifest_format: str
+    manifest_retry_interval_minutes: int
+    manifest_max_retries: int
     listener_running: bool
     pubsub_topic: str | None
     pubsub_subscription: str | None
@@ -78,6 +86,16 @@ async def configure_auto_ingest(
         if body.default_delay_minutes < 0:
             raise HTTPException(status_code=400, detail="default_delay_minutes must be non-negative.")
         updates["ingest_default_delay_minutes"] = str(body.default_delay_minutes)
+    if body.manifest_filename is not None:
+        updates["manifest_filename"] = body.manifest_filename
+    if body.manifest_format is not None:
+        if body.manifest_format not in ("md5sum", "csv"):
+            raise HTTPException(status_code=400, detail="manifest_format must be 'md5sum' or 'csv'")
+        updates["manifest_format"] = body.manifest_format
+    if body.manifest_retry_interval_minutes is not None:
+        updates["manifest_retry_interval_minutes"] = str(body.manifest_retry_interval_minutes)
+    if body.manifest_max_retries is not None:
+        updates["manifest_max_retries"] = str(body.manifest_max_retries)
     for key, value in updates.items():
         await session.execute(
             text(
@@ -112,6 +130,10 @@ async def get_auto_ingest_status(
         "ingest_default_delay_minutes",
         "pubsub_topic_name",
         "pubsub_subscription_name",
+        "manifest_filename",
+        "manifest_format",
+        "manifest_retry_interval_minutes",
+        "manifest_max_retries",
     ]
     rows = (
         await session.execute(
@@ -155,10 +177,21 @@ async def get_auto_ingest_status(
     )
     failed_24h = failed_result.scalar() or 0
 
+    manifest_filename = config.get("manifest_filename", "md5.txt")
+    manifest_format = config.get("manifest_format", "md5sum")
+    manifest_retry_str = config.get("manifest_retry_interval_minutes", "15")
+    manifest_retry_interval = int(manifest_retry_str) if manifest_retry_str and manifest_retry_str != "null" else 15
+    manifest_max_str = config.get("manifest_max_retries", "48")
+    manifest_max_retries = int(manifest_max_str) if manifest_max_str and manifest_max_str != "null" else 48
+
     return AutoIngestStatus(
         enabled=enabled,
         cleanup_policy=cleanup_policy,
         default_delay_minutes=default_delay_minutes,
+        manifest_filename=manifest_filename,
+        manifest_format=manifest_format,
+        manifest_retry_interval_minutes=manifest_retry_interval,
+        manifest_max_retries=manifest_max_retries,
         listener_running=listener_running,
         pubsub_topic=topic,
         pubsub_subscription=subscription,

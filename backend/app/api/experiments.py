@@ -15,14 +15,14 @@ from app.schemas.experiment import (
     FieldDefaultResponse,
     ProjectSummary,
     SampleResponseBrief,
-    BatchResponseBrief,
+    SampleBatchResponseBrief,
     UserSummary,
 )
 from app.schemas.sample import SampleBulkCreate, SampleCreate, SampleResponse
-from app.schemas.batch import BatchCreate, BatchResponse
+from app.schemas.sample_batch import SampleBatchCreate, SampleBatchResponse
 from app.services.experiment_service import ExperimentService
 from app.services.sample_service import SampleService
-from app.services.batch_service import BatchService
+from app.services.sample_batch_service import SampleBatchService
 from app.services.csv_service import generate_sample_template, parse_sample_csv, preview_sample_csv
 
 router = APIRouter(prefix="/api/experiments", tags=["experiments"])
@@ -52,7 +52,7 @@ def _experiment_response(exp) -> ExperimentResponse:
         protocol_version=exp.protocol_version,
         variables_json=exp.variables_json,
         sample_count=len(exp.samples) if exp.samples else 0,
-        batch_count=len(exp.batches) if exp.batches else 0,
+        batch_count=len(exp.sample_batches) if exp.sample_batches else 0,
         created_at=exp.created_at,
         updated_at=exp.updated_at,
     )
@@ -137,7 +137,7 @@ async def get_experiment(
         design_type=experiment.design_type,
         owner=_user_summary(experiment.owner),
         sample_count=len(experiment.samples),
-        batch_count=len(experiment.batches),
+        batch_count=len(experiment.sample_batches),
         created_at=experiment.created_at,
         updated_at=experiment.updated_at,
         samples=[
@@ -155,16 +155,14 @@ async def get_experiment(
             )
             for s in experiment.samples
         ],
-        batches=[
-            BatchResponseBrief(
+        sample_batches=[
+            SampleBatchResponseBrief(
                 id=b.id,
                 name=b.name,
-                instrument_model=b.instrument_model,
-                instrument_platform=b.instrument_platform,
-                sample_count=len([s for s in experiment.samples if s.batch_id == b.id]),
+                sample_count=len([s for s in experiment.samples if s.sample_batch_id == b.id]),
                 created_at=b.created_at,
             )
-            for b in experiment.batches
+            for b in experiment.sample_batches
         ],
         custom_fields=[
             CustomFieldResponse(
@@ -227,13 +225,13 @@ async def update_experiment_status(
 async def list_experiment_samples(
     experiment_id: int,
     request: Request,
-    batch_id: int | None = None,
+    sample_batch_id: int | None = None,
     qc_status: str | None = None,
     status: str | None = None,
     session: AsyncSession = Depends(get_session),
 ):
     samples = await SampleService.list_samples(
-        session, experiment_id, batch_id=batch_id, qc_status=qc_status, status=status
+        session, experiment_id, sample_batch_id=sample_batch_id, qc_status=qc_status, status=status
     )
     return [
         SampleResponse(
@@ -244,7 +242,10 @@ async def list_experiment_samples(
             donor_source=s.donor_source,
             treatment_condition=s.treatment_condition,
             chemistry_version=s.chemistry_version,
-            batch={"id": s.batch.id, "name": s.batch.name} if s.batch else None,
+            sample_batch={"id": s.sample_batch.id, "name": s.sample_batch.name} if s.sample_batch else None,
+            sequencing_batch={"id": s.sequencing_batch.id, "code": s.sequencing_batch.code}
+            if s.sequencing_batch
+            else None,
             viability_pct=float(s.viability_pct) if s.viability_pct is not None else None,
             cell_count=s.cell_count,
             prep_notes=s.prep_notes,
@@ -284,7 +285,10 @@ async def create_sample(
         donor_source=sample.donor_source,
         treatment_condition=sample.treatment_condition,
         chemistry_version=sample.chemistry_version,
-        batch={"id": sample.batch.id, "name": sample.batch.name} if sample.batch else None,
+        sample_batch={"id": sample.sample_batch.id, "name": sample.sample_batch.name} if sample.sample_batch else None,
+        sequencing_batch={"id": sample.sequencing_batch.id, "code": sample.sequencing_batch.code}
+        if sample.sequencing_batch
+        else None,
         viability_pct=float(sample.viability_pct) if sample.viability_pct is not None else None,
         cell_count=sample.cell_count,
         prep_notes=sample.prep_notes,
@@ -435,15 +439,15 @@ async def upload_samples_csv(
     }
 
 
-@router.get("/{experiment_id}/batches")
-async def list_experiment_batches(
+@router.get("/{experiment_id}/sample-batches")
+async def list_experiment_sample_batches(
     experiment_id: int,
     request: Request,
     session: AsyncSession = Depends(get_session),
 ):
-    batches = await BatchService.list_batches(session, experiment_id)
+    batches = await SampleBatchService.list_batches(session, experiment_id)
     return [
-        BatchResponse(
+        SampleBatchResponse(
             id=b.id,
             name=b.name,
             prep_date=b.prep_date,
@@ -461,19 +465,19 @@ async def list_experiment_batches(
     ]
 
 
-@router.post("/{experiment_id}/batches", response_model=BatchResponse)
-async def create_batch(
+@router.post("/{experiment_id}/sample-batches", response_model=SampleBatchResponse)
+async def create_sample_batch(
     experiment_id: int,
-    body: BatchCreate,
+    body: SampleBatchCreate,
     current_user: dict = require_permission("experiments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
-    batch = await BatchService.create_batch(session, experiment_id, user_id, body)
+    batch = await SampleBatchService.create_batch(session, experiment_id, user_id, body)
     await session.commit()
 
-    batch = await BatchService.get_batch(session, batch.id)
-    return BatchResponse(
+    batch = await SampleBatchService.get_batch(session, batch.id)
+    return SampleBatchResponse(
         id=batch.id,
         name=batch.name,
         prep_date=batch.prep_date,
@@ -487,6 +491,52 @@ async def create_batch(
         created_at=batch.created_at,
         updated_at=batch.updated_at,
     )
+
+
+@router.get("/{experiment_id}/sequencing-batches")
+async def list_experiment_sequencing_batches(
+    experiment_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """List sequencing batches that contain samples from this experiment."""
+    from sqlalchemy import distinct, select as sa_select
+
+    from app.models.sample import Sample as SampleModel
+    from app.models.sequencing_batch import SequencingBatch
+    from app.schemas.sequencing_batch import SequencingBatchResponse
+
+    # Find sequencing batch IDs via samples in this experiment
+    batch_ids_q = sa_select(distinct(SampleModel.sequencing_batch_id)).where(
+        SampleModel.experiment_id == experiment_id,
+        SampleModel.sequencing_batch_id.is_not(None),
+    )
+    result = await session.execute(
+        sa_select(SequencingBatch)
+        .where(SequencingBatch.id.in_(batch_ids_q))
+        .order_by(SequencingBatch.created_at.desc())
+    )
+    batches = result.scalars().all()
+    return [
+        SequencingBatchResponse(
+            id=b.id,
+            organization_id=b.organization_id,
+            name=b.name,
+            code=b.code,
+            status=b.status,
+            instrument_model=b.instrument_model,
+            instrument_platform=b.instrument_platform,
+            quality_score_encoding=b.quality_score_encoding,
+            sequencer_run_id=b.sequencer_run_id,
+            manifest_received_at=b.manifest_received_at,
+            expected_file_count=b.expected_file_count,
+            ingested_file_count=b.ingested_file_count,
+            notes=b.notes,
+            created_at=b.created_at,
+            updated_at=b.updated_at,
+        )
+        for b in batches
+    ]
 
 
 @router.get("/{experiment_id}/files")
