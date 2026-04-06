@@ -1,5 +1,41 @@
 # Release Notes
 
+## v0.5.3
+
+Setup wizard overhaul and installer improvements.
+
+### Setup Wizard
+
+- Setup flow now starts with a terminal-issued setup code that proves host access, replacing the old email verification step
+- Wizard steps reordered: setup code, admin creation, org name, GCP credentials, SMTP, infrastructure decision, stack selection
+- "Skip for now" buttons renamed to "Do this later" throughout
+- Infrastructure step is a decision fork: deploy now or configure later
+- Infrastructure init button shows processing state during terraform setup
+- Removed team invite step from the wizard (available later from Settings)
+- Price estimate removed from Kubernetes + GCS card
+
+### CLI
+
+- `./bioaf setup` now auto-runs the installer when `.env` or TLS certs are missing, so users can go from `git clone` to `./bioaf setup` in one step
+- `./bioaf setup` prints the one-time setup code in green with the login URL
+- macOS and Windows are detected early with a message pointing to the GCP setup docs
+- `./bioaf create-admin` deprecated in favor of the web-based setup wizard
+
+### Backend
+
+- New `SetupCodeService` generates 6-character alphanumeric codes (bcrypt hashed, 1-hour TTL, single-use)
+- New bootstrap endpoints: `generate-setup-code` and `verify-setup-code`
+- `create-admin` endpoint now requires a setup JWT instead of being fully open
+- Bootstrap status endpoint returns `has_setup_code` and `has_admin` fields
+- Non-streaming `POST /api/v1/infrastructure/terraform/init` endpoint for the setup wizard
+- Migration 061 adds `setup_code_hash` and `setup_code_expires_at` to organizations
+
+### Getting Started (stubbed)
+
+- 13-slide onboarding component with highlight overlays built but not yet linked
+- Screenshots from marketing site included as placeholders, will be recaptured from the running app
+- Route and component exist at `/getting-started` but are not accessible from the UI
+
 ## v0.5.2
 
 Batch UX rework, custom fields, and entity snapshots.

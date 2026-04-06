@@ -2,26 +2,32 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_session
-from app.models.component import VerificationCode
 from app.models.organization import Organization
+from app.models.user import User
 from app.schemas.bootstrap import (
     BootstrapStatus,
     ConfigureOrgRequest,
     ConfigureSmtpRequest,
     CreateAdminRequest,
+    GenerateSetupCodeResponse,
     SmtpSettingsResponse,
     TestSmtpRequest,
     TestSmtpResponse,
+    VerifySetupCodeRequest,
+    VerifySetupCodeResponse,
 )
 from app.services.audit_service import log_action
 from app.services.auth_service import AuthService
 from app.services.component_service import ComponentService
 from app.services.email_service import EmailService
 from app.services import role_service
+from app.services.setup_code_service import SetupCodeService
 from app.services.user_service import UserService
 
 logger = logging.getLogger("bioaf.bootstrap.api")
@@ -34,26 +40,113 @@ async def _get_org(session: AsyncSession) -> Organization | None:
     return result.scalar_one_or_none()
 
 
+async def _has_admin(session: AsyncSession) -> bool:
+    """Check whether any admin user exists."""
+    from app.models.role import Role
+
+    result = await session.execute(
+        select(User.id).join(Role, User.role_id == Role.id).where(Role.name == "admin").limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+def _validate_setup_token(request: Request) -> dict:
+    """Extract and validate a setup JWT from the Authorization header."""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Setup token required")
+    token = auth_header.split(" ", 1)[1]
+    try:
+        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+        if payload.get("purpose") != "setup":
+            raise HTTPException(status_code=401, detail="Not a setup token")
+        return payload
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired setup token")
+
+
 @router.get("/status", response_model=BootstrapStatus)
 async def get_bootstrap_status(session: AsyncSession = Depends(get_session)):
     org = await _get_org(session)
+    has_admin_user = await _has_admin(session) if org else False
+    has_code = bool(org and org.setup_code_hash is not None) if org else False
     return BootstrapStatus(
         setup_complete=org.setup_complete if org else False,
         smtp_configured=org.smtp_configured if org else False,
+        has_setup_code=has_code,
+        has_admin=has_admin_user,
     )
 
 
-@router.post("/create-admin")
-async def create_admin(body: CreateAdminRequest, session: AsyncSession = Depends(get_session)):
-    # Only callable once — if org exists, block
+@router.post("/generate-setup-code", response_model=GenerateSetupCodeResponse)
+async def generate_setup_code(request: Request, session: AsyncSession = Depends(get_session)):
+    """Generate a setup code for terminal-based setup. No auth required."""
+    # Defense in depth: log if not from localhost/docker
+    client_host = request.client.host if request.client else "unknown"
+    if client_host not in ("127.0.0.1", "::1", "localhost"):
+        logger.warning("generate-setup-code called from non-local address: %s", client_host)
+
+    # If admin already exists, return already_setup
+    if await _has_admin(session):
+        return GenerateSetupCodeResponse(already_setup=True)
+
+    # Get or create org
     org = await _get_org(session)
-    if org:
+    if not org:
+        org = Organization(name="My Organization", setup_complete=False, smtp_configured=False)
+        session.add(org)
+        await session.flush()
+
+    code = await SetupCodeService.generate_code(session, org)
+    await session.commit()
+
+    return GenerateSetupCodeResponse(
+        code=code,
+        expires_at=org.setup_code_expires_at.isoformat() if org.setup_code_expires_at else None,
+        already_setup=False,
+    )
+
+
+@router.post("/verify-setup-code", response_model=VerifySetupCodeResponse)
+async def verify_setup_code(body: VerifySetupCodeRequest, session: AsyncSession = Depends(get_session)):
+    """Verify a setup code and return a setup session JWT."""
+    org = await _get_org(session)
+    if not org:
+        raise HTTPException(status_code=401, detail="Invalid setup code")
+
+    valid = await SetupCodeService.verify_code(session, org, body.code)
+    if not valid:
+        raise HTTPException(status_code=401, detail="Invalid or expired setup code")
+
+    await session.commit()
+
+    # Issue a short-lived setup JWT
+    payload = {
+        "purpose": "setup",
+        "org_id": org.id,
+        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
+    }
+    setup_token = jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+    return VerifySetupCodeResponse(setup_token=setup_token, message="Setup code verified")
+
+
+@router.post("/create-admin")
+async def create_admin(body: CreateAdminRequest, request: Request, session: AsyncSession = Depends(get_session)):
+    # Require setup token
+    _validate_setup_token(request)
+
+    # Only callable once -- if admin exists, block
+    if await _has_admin(session):
         raise HTTPException(status_code=409, detail="Admin account already created")
 
-    # Create organization
-    org = Organization(name="My Organization", setup_complete=False, smtp_configured=False)
-    session.add(org)
-    await session.flush()
+    # Get or create organization
+    org = await _get_org(session)
+    if not org:
+        org = Organization(name="My Organization", setup_complete=False, smtp_configured=False)
+        session.add(org)
+        await session.flush()
 
     # Seed built-in roles for this organization
     from app.services.bootstrap_roles import seed_builtin_roles
@@ -71,38 +164,19 @@ async def create_admin(body: CreateAdminRequest, session: AsyncSession = Depends
         status="active",
     )
 
-    # Generate verification code
-    code, code_hash = AuthService.generate_verification_code()
-    verification = VerificationCode(
-        user_id=user.id,
-        code_hash=code_hash,
-        purpose="email_verification",
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
-    )
-    session.add(verification)
-    await session.flush()
-
     # Initialize component states
     await ComponentService.initialize_states(session)
-
-    # Try to send verification email
-    email_sent = EmailService.send_verification_code(user.email, code)
 
     await session.commit()
 
     # Issue JWT token
     token = AuthService.create_token(user.id, user.email, user.role_id, org.id, role_name="admin")
 
-    response = {
+    return {
         "message": "Admin account created",
         "access_token": token,
         "token_type": "bearer",
-        "email_sent": email_sent,
     }
-    if not email_sent:
-        response["verification_code"] = code  # Fallback for when SMTP isn't configured
-
-    return response
 
 
 @router.post("/configure-org")
