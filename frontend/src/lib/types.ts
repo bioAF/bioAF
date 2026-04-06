@@ -39,6 +39,9 @@ export interface LoginResponse {
 
 export interface BootstrapStatus {
   setup_complete: boolean;
+  smtp_configured: boolean;
+  has_setup_code: boolean;
+  has_admin: boolean;
 }
 
 export interface ComponentState {

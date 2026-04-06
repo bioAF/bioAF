@@ -23,6 +23,38 @@ green()  { printf '\033[0;32m%s\033[0m\n' "$*"; }
 yellow() { printf '\033[0;33m%s\033[0m\n' "$*"; }
 bold()   { printf '\033[1m%s\033[0m\n' "$*"; }
 
+# ---------------------------------------------------------------------------
+# OS check -- bioAF requires a Linux host (typically a GCP VM)
+# ---------------------------------------------------------------------------
+check_os() {
+    local os
+    os="$(uname -s)"
+    case "$os" in
+        Darwin)
+            echo ""
+            red "bioAF cannot be installed on macOS."
+            echo ""
+            echo "bioAF requires a Linux server, typically a VM in Google Cloud."
+            echo "See the installation guide for step-by-step instructions:"
+            echo ""
+            bold "  https://bioaf.co/docs/installation/gcp-setup/"
+            echo ""
+            exit 1
+            ;;
+        MINGW*|MSYS*|CYGWIN*|Windows_NT)
+            echo ""
+            red "bioAF cannot be installed on Windows."
+            echo ""
+            echo "bioAF requires a Linux server, typically a VM in Google Cloud."
+            echo "See the installation guide for step-by-step instructions:"
+            echo ""
+            bold "  https://bioaf.co/docs/installation/gcp-setup/"
+            echo ""
+            exit 1
+            ;;
+    esac
+}
+
 usage() {
     bold "bioAF Installer"
     echo ""
@@ -53,6 +85,8 @@ read_env_value() {
 # Prerequisite checks
 # ---------------------------------------------------------------------------
 check_prereqs() {
+    check_os
+
     local missing=0
 
     bold "Checking prerequisites..."
@@ -275,18 +309,20 @@ for v in cfg.get('volumes', {}).values():
 full_install() {
     local non_interactive=false
     local force=false
+    local quiet=false
 
     for arg in "$@"; do
         case "$arg" in
             --non-interactive) non_interactive=true ;;
             --force)           force=true ;;
+            --quiet)           quiet=true ;;
         esac
     done
 
     bold "=== bioAF Installer ==="
     echo ""
 
-    # Step 1: Prerequisites
+    # Step 1: Prerequisites (includes OS check)
     check_prereqs || exit 1
     echo ""
 
@@ -301,20 +337,22 @@ full_install() {
     generate_certs || exit 1
     echo ""
 
-    # Step 4: Show next steps
-    bold "=== Installation Complete ==="
-    echo ""
-    echo "Next steps:"
-    echo "  1. Review docker/.env and adjust if needed"
-    echo "  2. Run './bioaf setup' to build, migrate, and create your admin account"
-    echo ""
-    echo "Or run individual commands:"
-    echo "  ./bioaf build      Build container images"
-    echo "  ./bioaf start      Start all services"
-    echo "  ./bioaf migrate    Run database migrations"
-    echo "  ./bioaf status     Check service status"
-    echo "  ./bioaf help       Show all commands"
-    echo ""
+    # Step 4: Show next steps (skip when called from ./bioaf setup)
+    if [ "$quiet" = false ]; then
+        bold "=== Installation Complete ==="
+        echo ""
+        echo "Next steps:"
+        echo "  1. Review docker/.env and adjust if needed"
+        echo "  2. Run './bioaf setup' to build, migrate, and create your admin account"
+        echo ""
+        echo "Or run individual commands:"
+        echo "  ./bioaf build      Build container images"
+        echo "  ./bioaf start      Start all services"
+        echo "  ./bioaf migrate    Run database migrations"
+        echo "  ./bioaf status     Check service status"
+        echo "  ./bioaf help       Show all commands"
+        echo ""
+    fi
 }
 
 # ---------------------------------------------------------------------------

@@ -178,9 +178,25 @@ async def test_create_admin_blocked_after_cli_setup(client, session):
     session.add(user)
     await session.commit()
 
+    # Get a setup token (even though admin exists, we need one to test the 409 path)
+    from datetime import datetime, timedelta, timezone
+
+    from jose import jwt
+
+    from app.config import settings
+
+    setup_payload = {
+        "purpose": "setup",
+        "org_id": org.id,
+        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
+    }
+    setup_token = jwt.encode(setup_payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
     resp = await client.post(
         "/api/bootstrap/create-admin",
         json={"email": "other@example.com", "password": "pass", "name": "Other"},
+        headers={"Authorization": f"Bearer {setup_token}"},
     )
     assert resp.status_code == 409
 
