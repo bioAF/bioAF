@@ -7,6 +7,7 @@ import { Header } from "@/components/layout/Header";
 import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 
 interface BackupTier {
   tier: string;
@@ -90,6 +91,14 @@ export default function InfraBackupPage() {
   const [runningAction, setRunningAction] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
   const [restoringFile, setRestoringFile] = useState("");
+  const [confirmDialog, setConfirmDialog] = useState<{
+    open: boolean;
+    title: string;
+    message: string;
+    confirmLabel: string;
+    variant: "danger" | "default";
+    onConfirm: () => void;
+  }>({ open: false, title: "", message: "", confirmLabel: "Confirm", variant: "default", onConfirm: () => {} });
   const pollRef = useRef<NodeJS.Timeout | null>(null);
 
   const loadData = useCallback(async () => {
@@ -141,17 +150,26 @@ export default function InfraBackupPage() {
     }
   }, [restoreStatus.active, loadData]);
 
-  const handleConfigRestore = async () => {
-    if (!confirm("Are you sure you want to initiate a config restore?")) return;
-    try {
-      const data = await api.post<{ status: string; message: string }>(
-        "/api/backups/restore/config",
-        { confirmation_token: "CONFIRM" }
-      );
-      setActionMessage(data.message);
-    } catch (e) {
-      setActionMessage(e instanceof Error ? e.message : "Restore failed");
-    }
+  const handleConfigRestore = () => {
+    setConfirmDialog({
+      open: true,
+      title: "Restore Configuration",
+      message: "Are you sure you want to initiate a config restore?",
+      confirmLabel: "Restore",
+      variant: "danger",
+      onConfirm: async () => {
+        setConfirmDialog((prev) => ({ ...prev, open: false }));
+        try {
+          const data = await api.post<{ status: string; message: string }>(
+            "/api/backups/restore/config",
+            { confirmation_token: "CONFIRM" }
+          );
+          setActionMessage(data.message);
+        } catch (e) {
+          setActionMessage(e instanceof Error ? e.message : "Restore failed");
+        }
+      },
+    });
   };
 
   const handleTriggerBackup = async (type: "postgres" | "config") => {
@@ -171,49 +189,75 @@ export default function InfraBackupPage() {
     }
   };
 
-  const handleStartRestore = async (filename: string) => {
-    const msg = `This will restore the database from "${filename}". The current database will remain available as a fallback. You will have 1 hour to review the restored data before accepting or rejecting.\n\nProceed?`;
-    if (!confirm(msg)) return;
-    setRestoringFile(filename);
-    setActionMessage("");
-    try {
-      const data = await api.post<{ status: string; message: string }>(
-        "/api/backups/restore/postgres",
-        { filename }
-      );
-      setActionMessage(data.message);
-      await loadData();
-    } catch (e) {
-      setActionMessage(e instanceof Error ? e.message : "Restore failed");
-    } finally {
-      setRestoringFile("");
-    }
+  const handleStartRestore = (filename: string) => {
+    setConfirmDialog({
+      open: true,
+      title: "Restore Database",
+      message: `This will restore the database from "${filename}". The current database will remain available as a fallback. You will have 1 hour to review the restored data before accepting or rejecting.`,
+      confirmLabel: "Restore",
+      variant: "danger",
+      onConfirm: async () => {
+        setConfirmDialog((prev) => ({ ...prev, open: false }));
+        setRestoringFile(filename);
+        setActionMessage("");
+        try {
+          const data = await api.post<{ status: string; message: string }>(
+            "/api/backups/restore/postgres",
+            { filename }
+          );
+          setActionMessage(data.message);
+          await loadData();
+        } catch (e) {
+          setActionMessage(e instanceof Error ? e.message : "Restore failed");
+        } finally {
+          setRestoringFile("");
+        }
+      },
+    });
   };
 
-  const handleAcceptRestore = async () => {
-    if (!confirm("Accept this restored database? This will permanently replace the previous database. This cannot be undone.")) return;
-    setActionMessage("");
-    try {
-      const data = await api.post<{ status: string; message: string }>("/api/backups/restore/accept", {});
-      setActionMessage(data.message);
-      setRestoreStatus({ active: false });
-      await loadData();
-    } catch (e) {
-      setActionMessage(e instanceof Error ? e.message : "Accept failed");
-    }
+  const handleAcceptRestore = () => {
+    setConfirmDialog({
+      open: true,
+      title: "Accept Restored Database",
+      message: "This will permanently replace the previous database. This cannot be undone.",
+      confirmLabel: "Accept",
+      variant: "danger",
+      onConfirm: async () => {
+        setConfirmDialog((prev) => ({ ...prev, open: false }));
+        setActionMessage("");
+        try {
+          const data = await api.post<{ status: string; message: string }>("/api/backups/restore/accept", {});
+          setActionMessage(data.message);
+          setRestoreStatus({ active: false });
+          await loadData();
+        } catch (e) {
+          setActionMessage(e instanceof Error ? e.message : "Accept failed");
+        }
+      },
+    });
   };
 
-  const handleRejectRestore = async () => {
-    if (!confirm("Reject this restore and revert to the original database?")) return;
-    setActionMessage("");
-    try {
-      const data = await api.post<{ status: string; message: string }>("/api/backups/restore/reject", {});
-      setActionMessage(data.message);
-      setRestoreStatus({ active: false });
-      await loadData();
-    } catch (e) {
-      setActionMessage(e instanceof Error ? e.message : "Reject failed");
-    }
+  const handleRejectRestore = () => {
+    setConfirmDialog({
+      open: true,
+      title: "Reject Restore",
+      message: "Reject this restore and revert to the original database?",
+      confirmLabel: "Reject",
+      variant: "default",
+      onConfirm: async () => {
+        setConfirmDialog((prev) => ({ ...prev, open: false }));
+        setActionMessage("");
+        try {
+          const data = await api.post<{ status: string; message: string }>("/api/backups/restore/reject", {});
+          setActionMessage(data.message);
+          setRestoreStatus({ active: false });
+          await loadData();
+        } catch (e) {
+          setActionMessage(e instanceof Error ? e.message : "Reject failed");
+        }
+      },
+    });
   };
 
   const handleDownloadTfstate = (filename: string) => {
@@ -558,6 +602,15 @@ export default function InfraBackupPage() {
           )}
         </main>
       </div>
+      <ConfirmDialog
+        open={confirmDialog.open}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmLabel={confirmDialog.confirmLabel}
+        variant={confirmDialog.variant}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog((prev) => ({ ...prev, open: false }))}
+      />
     </div>
   );
 }
