@@ -85,7 +85,7 @@ def _render_sample(data: ProvenanceData) -> dict[str, Any]:
         "type": "sample",
         **data.sample,
         "derived_samples": data.derived_samples,
-        "batch": data.batch,
+        "sample_batch": data.batch,
         "files": data.files,
         "pipeline_runs": data.pipeline_runs,
     }

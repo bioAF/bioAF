@@ -227,6 +227,7 @@ export interface ExperimentUpdateRequest {
   expected_sample_count?: number | null;
   design_type?: string | null;
   field_defaults?: FieldDefaultValue[];
+  custom_fields?: CustomFieldValue[];
 }
 
 export interface ExperimentListResponse {
@@ -240,6 +241,7 @@ export interface CustomFieldValue {
   field_name: string;
   field_value: string;
   field_type: string;
+  is_required?: boolean;
 }
 
 export interface CustomFieldResponse {
@@ -247,6 +249,7 @@ export interface CustomFieldResponse {
   field_name: string;
   field_value: string | null;
   field_type: string;
+  is_required: boolean;
 }
 
 export interface SampleBrief {
@@ -262,11 +265,9 @@ export interface SampleBrief {
   created_at: string;
 }
 
-export interface BatchBrief {
+export interface SampleBatchBrief {
   id: number;
   name: string;
-  instrument_model: string | null;
-  instrument_platform: string | null;
   sample_count: number;
   created_at: string;
 }
@@ -286,15 +287,26 @@ export interface FieldDefaultResponse {
 
 export interface ExperimentDetail extends Experiment {
   samples: SampleBrief[];
-  batches: BatchBrief[];
+  sample_batches: SampleBatchBrief[];
   custom_fields: CustomFieldResponse[];
   field_defaults: FieldDefaultResponse[];
   audit_trail_count: number;
 }
 
-export interface BatchSummary {
+export interface SampleBatchSummary {
   id: number;
   name: string;
+}
+
+export interface SampleCustomFieldValue {
+  field_name: string;
+  field_value: string;
+}
+
+export interface SampleCustomFieldResponse {
+  id: number;
+  field_name: string;
+  field_value: string | null;
 }
 
 export interface Sample {
@@ -305,7 +317,8 @@ export interface Sample {
   donor_source: string | null;
   treatment_condition: string | null;
   chemistry_version: string | null;
-  batch: BatchSummary | null;
+  sample_batch: SampleBatchSummary | null;
+  sequencing_batch: { id: number; code: string } | null;
   viability_pct: number | null;
   cell_count: number | null;
   prep_notes: string | null;
@@ -317,21 +330,57 @@ export interface Sample {
   status: SampleStatus;
   created_at: string;
   updated_at: string;
+  custom_fields: SampleCustomFieldResponse[];
 }
 
-export interface Batch {
+export interface SampleBatch {
   id: number;
   name: string;
   prep_date: string | null;
   operator: UserSummary | null;
-  sequencer_run_id: string | null;
-  instrument_model: string | null;
-  instrument_platform: string | null;
-  quality_score_encoding: string | null;
   notes: string | null;
   sample_count: number;
   created_at: string;
   updated_at: string;
+}
+
+export type SequencingBatchStatus = "pending" | "ingesting" | "complete" | "partial_complete" | "failed";
+
+export interface SequencingBatch {
+  id: number;
+  organization_id: number;
+  name: string;
+  code: string;
+  status: SequencingBatchStatus;
+  instrument_model: string | null;
+  instrument_platform: string | null;
+  quality_score_encoding: string | null;
+  sequencer_run_id: string | null;
+  manifest_received_at: string | null;
+  expected_file_count: number | null;
+  ingested_file_count: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ManifestEntry {
+  id: number;
+  expected_filename: string;
+  expected_md5: string;
+  resolved_sample_id: number | null;
+  resolved_experiment_id: number | null;
+  resolved_project_id: number | null;
+  file_id: number | null;
+  status: "pending" | "verified" | "checksum_mismatch" | "missing" | "failed";
+  last_check_at: string | null;
+  retry_count: number;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface SequencingBatchDetail extends SequencingBatch {
+  manifest_entries: ManifestEntry[];
 }
 
 export interface ExperimentTemplate {
@@ -382,7 +431,8 @@ export interface SampleCreateRequest {
   donor_source?: string | null;
   treatment_condition?: string | null;
   chemistry_version?: string | null;
-  batch_id?: number | null;
+  sample_batch_code?: string | null;
+  sequencing_batch_code?: string | null;
   viability_pct?: number | null;
   cell_count?: number | null;
   prep_notes?: string | null;
@@ -391,6 +441,7 @@ export interface SampleCreateRequest {
   library_layout?: string | null;
   qc_status?: string | null;
   qc_notes?: string | null;
+  custom_fields?: SampleCustomFieldValue[];
 }
 
 export interface SampleUpdateRequest {
@@ -400,13 +451,15 @@ export interface SampleUpdateRequest {
   donor_source?: string | null;
   treatment_condition?: string | null;
   chemistry_version?: string | null;
-  batch_id?: number | null;
+  sample_batch_code?: string | null;
+  sequencing_batch_code?: string | null;
   viability_pct?: number | null;
   cell_count?: number | null;
   prep_notes?: string | null;
   molecule_type?: string | null;
   library_prep_method?: string | null;
   library_layout?: string | null;
+  custom_fields?: SampleCustomFieldValue[];
 }
 
 export interface SampleBulkUpdateRequest {
@@ -414,14 +467,10 @@ export interface SampleBulkUpdateRequest {
   update: SampleUpdateRequest;
 }
 
-export interface BatchCreateRequest {
+export interface SampleBatchCreateRequest {
   name: string;
   prep_date?: string | null;
   operator_user_id?: number | null;
-  sequencer_run_id?: string | null;
-  instrument_model?: string | null;
-  instrument_platform?: string | null;
-  quality_score_encoding?: string | null;
   notes?: string | null;
 }
 

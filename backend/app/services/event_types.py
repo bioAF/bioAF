@@ -65,6 +65,12 @@ DUPLICATE_FILE = "ingest.duplicate_file"
 INGEST_FAILURE = "ingest.failure"
 INGEST_BATCH_COMPLETE = "ingest.batch_complete"
 
+# Sequencing batch events
+SEQUENCING_BATCH_DETECTED = "sequencing_batch.detected"
+SEQUENCING_BATCH_FILE_VERIFIED = "sequencing_batch.file_verified"
+SEQUENCING_BATCH_COMPLETE = "sequencing_batch.complete"
+SEQUENCING_BATCH_PARTIAL = "sequencing_batch.partial"
+
 # Trigger events
 AUTO_RUN_SUBMITTED = "trigger.auto_run_submitted"
 RUN_QUEUED_BUDGET = "trigger.run_queued_budget"
@@ -115,6 +121,10 @@ ALL_EVENT_TYPES = [
     WORK_NODE_LAUNCHED,
     WORK_NODE_STOPPED,
     WORK_NODE_HEARTBEAT_TIMEOUT,
+    SEQUENCING_BATCH_DETECTED,
+    SEQUENCING_BATCH_FILE_VERIFIED,
+    SEQUENCING_BATCH_COMPLETE,
+    SEQUENCING_BATCH_PARTIAL,
 ]
 
 # Severity mapping for event types
@@ -157,4 +167,8 @@ EVENT_SEVERITY = {
     WORK_NODE_LAUNCHED: "info",
     WORK_NODE_STOPPED: "info",
     WORK_NODE_HEARTBEAT_TIMEOUT: "warning",
+    SEQUENCING_BATCH_DETECTED: "info",
+    SEQUENCING_BATCH_FILE_VERIFIED: "info",
+    SEQUENCING_BATCH_COMPLETE: "info",
+    SEQUENCING_BATCH_PARTIAL: "warning",
 }

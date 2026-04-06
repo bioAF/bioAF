@@ -9,6 +9,8 @@ class EventTriggerConfig(BaseModel):
     project_filter: list[int] | None = None
     experiment_filter: list[int] | None = None
     batching_window_minutes: int = 15
+    trigger_on: Literal["file_upload", "sample_complete"] = "file_upload"
+    required_file_types: list[str] | None = None
 
     @field_validator("file_types")
     @classmethod

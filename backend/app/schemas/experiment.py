@@ -17,6 +17,7 @@ class CustomFieldValue(BaseModel):
     field_name: str
     field_value: str
     field_type: str = "string"
+    is_required: bool = False
 
 
 class FieldDefaultValue(BaseModel):
@@ -48,6 +49,7 @@ class CustomFieldResponse(BaseModel):
     field_name: str
     field_value: str | None
     field_type: str
+    is_required: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -74,6 +76,7 @@ class ExperimentUpdate(BaseModel):
     start_date: date | None = None
     expected_sample_count: int | None = None
     field_defaults: list[FieldDefaultValue] | None = None
+    custom_fields: list[CustomFieldValue] | None = None
     design_type: str | None = None
     protocol_version: str | None = None
     variables_json: dict | None = None
@@ -143,11 +146,9 @@ class SampleResponseBrief(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class BatchResponseBrief(BaseModel):
+class SampleBatchResponseBrief(BaseModel):
     id: int
     name: str
-    instrument_model: str | None = None
-    instrument_platform: str | None = None
     sample_count: int = 0
     created_at: datetime
 
@@ -156,7 +157,7 @@ class BatchResponseBrief(BaseModel):
 
 class ExperimentDetailResponse(ExperimentResponse):
     samples: list[SampleResponseBrief] = []
-    batches: list[BatchResponseBrief] = []
+    sample_batches: list[SampleBatchResponseBrief] = []
     custom_fields: list[CustomFieldResponse] = []
     field_defaults: list[FieldDefaultResponse] = []
     audit_trail_count: int = 0

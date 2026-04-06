@@ -8,7 +8,7 @@ from app.api.terraform import router as terraform_router
 from app.api.users import router as users_router
 from app.api.experiments import router as experiments_router
 from app.api.samples import router as samples_router
-from app.api.batches import router as batches_router
+from app.api.sample_batches import router as sample_batches_router
 from app.api.projects import router as projects_router
 from app.api.templates import router as templates_router
 from app.api.audit import router as audit_router
@@ -61,6 +61,7 @@ from app.api.work_nodes import router as work_nodes_router
 from app.api.work_nodes import settings_router as work_node_settings_router
 from app.api.provenance_reports import router as provenance_reports_router
 from app.api.data_export import router as data_export_router
+from app.api.sequencing_batches import router as sequencing_batches_router
 from app.api.slack_oauth import router as slack_oauth_router
 
 api_router = APIRouter()
@@ -73,7 +74,7 @@ api_router.include_router(components_router)
 api_router.include_router(terraform_router)
 api_router.include_router(experiments_router)
 api_router.include_router(samples_router)
-api_router.include_router(batches_router)
+api_router.include_router(sample_batches_router)
 api_router.include_router(projects_router)
 api_router.include_router(templates_router)
 api_router.include_router(audit_router)
@@ -126,4 +127,5 @@ api_router.include_router(work_nodes_router)
 api_router.include_router(work_node_settings_router)
 api_router.include_router(provenance_reports_router)
 api_router.include_router(data_export_router)
+api_router.include_router(sequencing_batches_router)
 api_router.include_router(slack_oauth_router)

@@ -38,6 +38,8 @@ export default function NewExperimentPage() {
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [fieldDefaults, setFieldDefaults] = useState<FieldDefaultValue[]>([]);
   const [showFieldDefaults, setShowFieldDefaults] = useState(false);
+  const [customFieldValues, setCustomFieldValues] = useState<Record<string, string>>({});
+  const [extraCustomFields, setExtraCustomFields] = useState<{ name: string; value: string; required: boolean }[]>([]);
 
   const DEFAULTABLE_FIELDS = [
     { name: "organism", label: "Organism", type: "text" as const },
@@ -45,6 +47,8 @@ export default function NewExperimentPage() {
     { name: "donor_source", label: "Donor ID", type: "text" as const },
     { name: "treatment_condition", label: "Treatment Condition", type: "text" as const },
     { name: "chemistry_version", label: "Chemistry Version", type: "text" as const },
+    { name: "sample_batch_code", label: "Sample Batch", type: "text" as const },
+    { name: "sequencing_batch_code", label: "Sequencing Batch", type: "text" as const },
     { name: "molecule_type", label: "Molecule Type", type: "vocabulary" as const },
     { name: "library_prep_method", label: "Library Prep Method", type: "vocabulary" as const },
     { name: "library_layout", label: "Library Layout", type: "vocabulary" as const },
@@ -92,7 +96,27 @@ export default function NewExperimentPage() {
     setError("");
 
     try {
-      const payload = { ...form, field_defaults: fieldDefaults.length > 0 ? fieldDefaults : undefined };
+      const templateFields = Object.entries(customFieldValues)
+        .filter(([, v]) => v.trim())
+        .map(([name, value]) => ({
+          field_name: name,
+          field_value: value,
+          field_type: "string",
+        }));
+      const userFields = extraCustomFields
+        .filter((f) => f.name.trim())
+        .map((f) => ({
+          field_name: f.name.trim(),
+          field_value: f.value.trim(),
+          field_type: "string",
+          is_required: f.required,
+        }));
+      const allCustomFields = [...templateFields, ...userFields];
+      const payload = {
+        ...form,
+        field_defaults: fieldDefaults.length > 0 ? fieldDefaults : undefined,
+        custom_fields: allCustomFields.length > 0 ? allCustomFields : undefined,
+      };
       const experiment = await api.post<Experiment>("/api/experiments", payload);
 
       if (csvFile) {
@@ -218,26 +242,6 @@ export default function NewExperimentPage() {
               </div>
             </div>
 
-            {selectedTemplate?.custom_fields_schema_json && (
-              <div className="bg-white rounded-lg shadow p-6 space-y-4">
-                <h2 className="text-lg font-semibold">Custom Fields</h2>
-                <p className="text-sm text-gray-500">
-                  Fields defined by the &quot;{selectedTemplate.name}&quot; template.
-                </p>
-                {(selectedTemplate.custom_fields_schema_json as { fields?: Array<{ name: string; type: string; required?: boolean }> })?.fields?.map((field) => (
-                  <div key={field.name}>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      {field.name} {field.required && "*"}
-                    </label>
-                    <input
-                      type={field.type === "number" ? "number" : "text"}
-                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-
             <div className="bg-white rounded-lg shadow p-6 space-y-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -260,27 +264,28 @@ export default function NewExperimentPage() {
                   {DEFAULTABLE_FIELDS.map((field) => {
                     const current = fieldDefaults.find((d) => d.field_name === field.name);
                     return (
-                      <div key={field.name} className="grid grid-cols-3 gap-3 items-center">
-                        <label className="text-sm text-gray-700">{field.label}</label>
-                        <div>
+                      <div key={field.name} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto] gap-3 items-center">
+                        <label className="text-sm text-gray-700 truncate">{field.label}</label>
+                        <div className="min-w-0">
                           {field.type === "vocabulary" ? (
                             <VocabularySelect
                               fieldName={field.name}
                               value={current?.default_value ?? null}
                               onChange={(v) => updateFieldDefault(field.name, v, current?.is_required ?? null)}
-                              placeholder={`Default ${field.label}...`}
+                              placeholder={`Default...`}
+                              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
                             />
                           ) : (
                             <input
                               type="text"
                               value={current?.default_value ?? ""}
                               onChange={(e) => updateFieldDefault(field.name, e.target.value || null, current?.is_required ?? null)}
-                              placeholder={`Default ${field.label}`}
+                              placeholder="Default..."
                               className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
                             />
                           )}
                         </div>
-                        <label className="flex items-center gap-2 text-sm text-gray-600">
+                        <label className="flex items-center gap-2 text-sm text-gray-600 whitespace-nowrap">
                           <input
                             type="checkbox"
                             checked={current?.is_required ?? false}
@@ -292,6 +297,71 @@ export default function NewExperimentPage() {
                       </div>
                     );
                   })}
+
+                  {selectedTemplate?.custom_fields_schema_json &&
+                    (selectedTemplate.custom_fields_schema_json as { fields?: Array<{ name: string; type: string; required?: boolean }> })?.fields?.map((field) => (
+                      <div key={`tmpl-${field.name}`} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto] gap-3 items-center">
+                        <label className="text-sm text-gray-700 truncate">{field.name} {field.required && "*"}</label>
+                        <div className="min-w-0">
+                          <input
+                            type={field.type === "number" ? "number" : "text"}
+                            value={customFieldValues[field.name] ?? ""}
+                            onChange={(e) => setCustomFieldValues((prev) => ({ ...prev, [field.name]: e.target.value }))}
+                            placeholder="Default..."
+                            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                          />
+                        </div>
+                        <span className="text-xs text-gray-400 whitespace-nowrap">from template</span>
+                      </div>
+                    ))
+                  }
+
+                  {extraCustomFields.map((field, idx) => (
+                    <div key={`extra-${idx}`} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto] gap-3 items-center">
+                      <input
+                        type="text"
+                        value={field.name}
+                        onChange={(e) => setExtraCustomFields((prev) => prev.map((f, i) => i === idx ? { ...f, name: e.target.value } : f))}
+                        placeholder="Field name..."
+                        className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                      />
+                      <div className="min-w-0">
+                        <input
+                          type="text"
+                          value={field.value}
+                          onChange={(e) => setExtraCustomFields((prev) => prev.map((f, i) => i === idx ? { ...f, value: e.target.value } : f))}
+                          placeholder="Default..."
+                          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2 whitespace-nowrap">
+                        <label className="flex items-center gap-1 text-sm text-gray-600">
+                          <input
+                            type="checkbox"
+                            checked={field.required}
+                            onChange={(e) => setExtraCustomFields((prev) => prev.map((f, i) => i === idx ? { ...f, required: e.target.checked } : f))}
+                            className="rounded border-gray-300"
+                          />
+                          Required
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setExtraCustomFields((prev) => prev.filter((_, i) => i !== idx))}
+                          className="text-red-400 hover:text-red-600 text-xs ml-1"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={() => setExtraCustomFields((prev) => [...prev, { name: "", value: "", required: false }])}
+                    className="text-sm text-bioaf-600 hover:underline"
+                  >
+                    + Add Field
+                  </button>
                 </div>
               )}
             </div>
