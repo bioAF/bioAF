@@ -1,5 +1,12 @@
 # Release Notes
 
+## v0.5.4
+
+Bug fix for database restore and UI cleanup on the Backup & Recovery page.
+
+- Fix `_build_restore_url()` mangling database credentials when the PostgreSQL username contains "bioaf" (caused auth failures after restore swap)
+- Replace browser `confirm()` dialogs with in-app ConfirmDialog on all backup restore/accept/reject actions
+
 ## v0.5.3
 
 Setup wizard overhaul and installer improvements.

@@ -665,7 +665,9 @@ _restore_state: dict = {
 
 def _build_restore_url() -> str:
     """Build a SQLAlchemy async URL pointing at bioaf_restore."""
-    return settings.database_url.replace("/bioaf", "/bioaf_restore")
+    parsed = urlparse(settings.database_url)
+    new_path = parsed.path.rstrip("/") + "_restore"
+    return parsed._replace(path=new_path).geturl()
 
 
 async def _run_admin_sql(statements: list[str]) -> None:
