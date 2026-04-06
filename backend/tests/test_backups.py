@@ -278,6 +278,43 @@ async def test_restore_forbidden_for_viewer(client: AsyncClient, viewer_token: s
     assert response.status_code == 403
 
 
+# --- _build_restore_url tests ---
+
+
+def test_build_restore_url_only_replaces_database_name():
+    """_build_restore_url must change only the database path, not the username."""
+    from app.services.backup_service import _build_restore_url
+
+    # Production-style URL where username matches database name
+    with patch("app.services.backup_service.settings") as mock_settings:
+        mock_settings.database_url = "postgresql+asyncpg://bioaf:secretpass@db:5432/bioaf"
+        result = _build_restore_url()
+
+    assert result == "postgresql+asyncpg://bioaf:secretpass@db:5432/bioaf_restore"
+
+
+def test_build_restore_url_preserves_dev_username():
+    """_build_restore_url must not mangle usernames containing 'bioaf'."""
+    from app.services.backup_service import _build_restore_url
+
+    with patch("app.services.backup_service.settings") as mock_settings:
+        mock_settings.database_url = "postgresql+asyncpg://bioaf_app:devpassword@postgres:5432/bioaf"
+        result = _build_restore_url()
+
+    assert result == "postgresql+asyncpg://bioaf_app:devpassword@postgres:5432/bioaf_restore"
+
+
+def test_build_restore_url_preserves_password_containing_bioaf():
+    """_build_restore_url must not mangle passwords that happen to contain 'bioaf'."""
+    from app.services.backup_service import _build_restore_url
+
+    with patch("app.services.backup_service.settings") as mock_settings:
+        mock_settings.database_url = "postgresql+asyncpg://user:bioaf_pass@db:5432/bioaf"
+        result = _build_restore_url()
+
+    assert result == "postgresql+asyncpg://user:bioaf_pass@db:5432/bioaf_restore"
+
+
 # --- GCS backup status tests ---
 
 
