@@ -55,32 +55,23 @@ See all architecture decision records in [decisions/README.md](decisions/README.
 git clone https://github.com/not-that-guy-again/bioAF.git
 cd bioAF
 
-# Option A: All-in-one setup (generates config, builds, migrates, creates admin)
+# All-in-one setup
 ./bioaf setup
-
-# Option B: Step-by-step
-./install.sh                    # Check prerequisites and generate docker/.env
-./bioaf build                   # Build container images
-./bioaf start                   # Start all services
-./bioaf migrate                 # Run database migrations
-./bioaf create-admin            # Create your admin account
 ```
 
-The `setup` command prompts for your organization name, admin email, and
-password. It generates all secrets, builds containers, runs database
-migrations, and creates the admin account automatically. When setup
-completes, it prints the access URL for your instance.
+The `setup` command handles everything: checks prerequisites, generates
+secrets and TLS certs, builds containers, runs migrations, and prints a
+one-time setup code. Open the URL it shows in your browser and enter the
+code to create your admin account and configure the platform.
 
-For step-by-step installs, `install.sh` checks that prerequisites are
-installed and generates `docker/.env` with auto-generated database
-credentials and secret keys. Run `./install.sh --help` for options
-including `--non-interactive` and `--force`.
+bioAF requires a Linux server (typically a GCP VM). Running `./bioaf setup`
+on macOS or Windows will print instructions for setting up a GCP instance.
 
 ### Management Commands
 
 | Command | Description |
 | ------- | ----------- |
-| `./bioaf setup` | Interactive first-run setup (all-in-one) |
+| `./bioaf setup` | First-run setup (installs, builds, prints setup code) |
 | `./bioaf start` | Start all services in dependency order |
 | `./bioaf stop` | Stop all services |
 | `./bioaf restart` | Restart all services |
@@ -88,7 +79,7 @@ including `--non-interactive` and `--force`.
 | `./bioaf logs [service]` | Tail logs (all or one service) |
 | `./bioaf build [service]` | Build (or rebuild) container images |
 | `./bioaf migrate` | Run database migrations |
-| `./bioaf create-admin` | Create an admin user account |
+| `./bioaf create-admin` | Deprecated (use `./bioaf setup`) |
 | `./bioaf seed <script.py>` | Run a seed/data script in the backend container |
 | `./bioaf backup` | Create a database backup |
 | `./bioaf update` | Pull latest code, rebuild, and migrate |

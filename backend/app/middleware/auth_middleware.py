@@ -17,6 +17,8 @@ PUBLIC_PATHS = {
     "/api/auth/reset-password",
     "/api/bootstrap/status",
     "/api/bootstrap/create-admin",
+    "/api/bootstrap/generate-setup-code",
+    "/api/bootstrap/verify-setup-code",
     "/api/users/accept-invite",
     "/api/notifications/slack/callback",
     "/docs",

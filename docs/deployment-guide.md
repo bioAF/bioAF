@@ -19,84 +19,34 @@ cd bioAF
 ./bioaf setup
 ```
 
-`setup` walks you through everything interactively:
+`setup` handles everything automatically:
 
-1. Prompts for organization name, admin email, and password
+1. Checks prerequisites (Docker, Docker Compose, Git, openssl)
 2. Generates `docker/.env` with secure random credentials
-3. Removes any stale database volumes from a previous install
-4. Builds all container images
-5. Starts services in dependency order (db, backend, frontend, nginx)
-6. Runs database migrations
-7. Creates the admin account
-8. Prints the access URL for your instance
+3. Generates self-signed TLS certificates
+4. Removes any stale database volumes from a previous install
+5. Builds all container images
+6. Starts services in dependency order (db, backend, frontend, nginx)
+7. Runs database migrations
+8. Prints a one-time setup code and the access URL
 
-When it finishes, open the printed URL in your browser and log in.
+Open the printed URL in your browser, enter the setup code, and follow the
+wizard to create your admin account and configure the platform.
 
-## Step-by-Step Deploy
+bioAF requires a Linux server (typically a GCP VM). Running `./bioaf setup`
+on macOS or Windows will print instructions for setting up a GCP instance.
 
-For more control over each stage, use the installer and management commands
-separately.
+## Installer
 
-### 1. Generate Environment Config
+`./install.sh` can also be run standalone for more control. `setup` calls
+it automatically when needed.
 
-```bash
-./install.sh
-```
-
-This checks that prerequisites are installed and generates `docker/.env`
-from `.env.example` with auto-generated database credentials and a secret
-key. It prompts for optional overrides (PostgreSQL user and database name).
-
-Options:
-
+- `./install.sh` -- interactive install (checks prereqs, generates env + certs)
 - `./install.sh --non-interactive` -- accept all defaults, no prompts
-- `./install.sh --force` -- overwrite an existing `docker/.env`
-- `./install.sh check-prereqs` -- only check prerequisites, skip env generation
-- `./install.sh generate-env` -- only generate env, skip prereq checks
-
-### 2. Build Container Images
-
-```bash
-./bioaf build
-```
-
-Builds backend, frontend, and nginx images. You can also rebuild a single
-service: `./bioaf build backend`.
-
-### 3. Start Services
-
-```bash
-./bioaf start
-```
-
-Starts services in dependency order: database first (waits for it to accept
-connections), then backend (with a short initialization delay), then
-frontend, then nginx. Prints service status when complete.
-
-### 4. Run Migrations
-
-```bash
-./bioaf migrate
-```
-
-Runs Alembic database migrations against the running PostgreSQL instance.
-
-### 5. Create Admin Account
-
-```bash
-./bioaf create-admin
-```
-
-Prompts for organization name, admin email, and password. Creates the
-organization and admin user in the database.
-
-### 6. Access the Application
-
-Open the URL printed by `./bioaf status` or `./bioaf start`. The nginx
-reverse proxy serves the frontend on port 443 (HTTPS) and routes `/api/*`
-requests to the backend. HTTP requests on port 80 are redirected to HTTPS
-automatically. All API calls use relative URLs, so the application works
-at any IP address or hostname without configuration.
+- `./install.sh --force` -- regenerate secrets (breaks existing DB volume)
+- `./install.sh check-prereqs` -- only check prerequisites
+- `./install.sh generate-env` -- only generate env file
+- `./install.sh generate-certs` -- only generate TLS certificates
 
 ## Architecture
 
@@ -166,16 +116,14 @@ If you need to start fresh (e.g., after changing database credentials):
 ```bash
 ./bioaf stop
 docker compose -f docker/docker-compose.yml down -v   # Remove containers and volumes
-./install.sh --force                                    # Regenerate docker/.env
-./bioaf build
-./bioaf start
-./bioaf migrate
-./bioaf create-admin
+rm docker/.env docker/certs/tls.crt docker/certs/tls.key
+./bioaf setup
 ```
 
-The `--force` flag overwrites the existing `docker/.env`. The `down -v`
-removes the PostgreSQL data volume, which is necessary because PostgreSQL
-bakes the initial password into the volume on first startup.
+Removing `docker/.env` and the certs causes `setup` to re-run the full
+installer. The `down -v` removes the PostgreSQL data volume, which is
+necessary because PostgreSQL bakes the initial password into the volume
+on first startup.
 
 ## GCP VM Deployment
 

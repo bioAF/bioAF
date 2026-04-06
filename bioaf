@@ -61,44 +61,48 @@ get_access_url() {
 # Commands
 # ---------------------------------------------------------------------------
 cmd_setup() {
+    # OS gate -- catch macOS/Windows before anything else
+    local os
+    os="$(uname -s)"
+    case "$os" in
+        Darwin)
+            echo ""
+            red "bioAF cannot be installed on macOS."
+            echo ""
+            echo "bioAF requires a Linux server, typically a VM in Google Cloud."
+            echo "See the installation guide for step-by-step instructions:"
+            echo ""
+            bold "  https://bioaf.co/docs/installation/gcp-setup/"
+            echo ""
+            exit 1
+            ;;
+        MINGW*|MSYS*|CYGWIN*|Windows_NT)
+            echo ""
+            red "bioAF cannot be installed on Windows."
+            echo ""
+            echo "bioAF requires a Linux server, typically a VM in Google Cloud."
+            echo "See the installation guide for step-by-step instructions:"
+            echo ""
+            bold "  https://bioaf.co/docs/installation/gcp-setup/"
+            echo ""
+            exit 1
+            ;;
+    esac
+
     bold "=== bioAF First-Run Setup ==="
     echo ""
 
-    # Prompt for org name
-    read -rp "Organization name: " org_name
-    if [ -z "$org_name" ]; then
-        red "Organization name cannot be empty."
-        exit 1
-    fi
-
-    org_slug=$(slugify "$org_name")
-    echo "  Org slug: $org_slug"
-    echo ""
-
-    # Prompt for admin email
-    read -rp "Admin email: " admin_email
-    if [ -z "$admin_email" ]; then
-        red "Admin email cannot be empty."
-        exit 1
-    fi
-
-    # Prompt for admin password (hidden)
-    while true; do
-        read -rsp "Admin password: " admin_password
+    # Auto-run install.sh if it hasn't been run yet
+    if [ ! -f "$ENV_FILE" ] || [ ! -f "$SCRIPT_DIR/docker/certs/tls.crt" ]; then
+        bold "Running installer (first time)..."
+        "$SCRIPT_DIR/install.sh" --non-interactive --quiet
         echo ""
-        read -rsp "Confirm password: " admin_password_confirm
+    else
+        # .env and certs exist -- just ensure they're current (idempotent)
+        "$SCRIPT_DIR/install.sh" generate-env --non-interactive
+        "$SCRIPT_DIR/install.sh" generate-certs
         echo ""
-        if [ "$admin_password" = "$admin_password_confirm" ]; then
-            break
-        fi
-        red "Passwords do not match. Try again."
-    done
-    echo ""
-
-    # Generate .env and TLS certs via install.sh (idempotent)
-    "$SCRIPT_DIR/install.sh" generate-env --non-interactive
-    "$SCRIPT_DIR/install.sh" generate-certs
-    echo ""
+    fi
 
     # Remove stale database volume if it exists. The volume holds the
     # old password from a previous install, which won't match the newly
@@ -131,28 +135,51 @@ for v in cfg.get('volumes', {}).values():
     green "Migrations complete."
     echo ""
 
-    # Create admin user
-    bold "Creating admin account..."
-    $DC exec -T backend python -m app.cli.create_admin \
-        --email "$admin_email" \
-        --password "$admin_password" \
-        --org-name "$org_name" \
-        --org-slug "$org_slug"
-    green "Admin account created."
-    echo ""
+    # Generate setup code via the Python service
+    bold "Generating setup code..."
+    local setup_response
+    setup_response=$($DC exec -T backend python -c "
+import asyncio, json
+from app.services.setup_code_service import generate_setup_code_for_cli
+result = asyncio.run(generate_setup_code_for_cli())
+print(json.dumps(result))
+")
+
+    local already_setup
+    already_setup=$(echo "$setup_response" | python3 -c "import sys, json; print(json.load(sys.stdin).get('already_setup', False))")
+
+    if [ "$already_setup" = "True" ]; then
+        local access_url
+        access_url=$(get_access_url)
+        echo ""
+        green "bioAF is already set up."
+        echo "Log in at: $access_url"
+        return 0
+    fi
+
+    local setup_code
+    setup_code=$(echo "$setup_response" | python3 -c "import sys, json; print(json.load(sys.stdin).get('code', ''))")
 
     local access_url
     access_url=$(get_access_url)
 
-    bold "=== Setup Complete ==="
     echo ""
-    echo "Access bioAF at: $access_url"
-    echo "Log in with: $admin_email"
+    bold "=================================================="
+    bold "  bioAF Setup Code"
+    bold "=================================================="
     echo ""
-    echo "Next steps:"
-    echo "  - Open $access_url in your browser"
-    echo "  - Log in with your admin credentials"
-    echo "  - Configure SMTP, compute stack, and invite your team from Settings"
+    echo "  Your one-time setup code is:"
+    echo ""
+    green "    $setup_code"
+    echo ""
+    echo "  Open the setup wizard in your browser:"
+    echo ""
+    echo "    ${access_url}/setup"
+    echo ""
+    echo "  Enter the code above to begin platform setup."
+    echo "  The code expires in 1 hour."
+    echo ""
+    bold "=================================================="
     echo ""
     echo "Management commands:"
     echo "  ./bioaf status     Show service status"
@@ -346,49 +373,9 @@ cmd_seed() {
 }
 
 cmd_create_admin() {
-    bold "=== Create Admin Account ==="
-    echo ""
-
-    # Prompt for org name
-    read -rp "Organization name: " org_name
-    if [ -z "$org_name" ]; then
-        red "Organization name cannot be empty."
-        exit 1
-    fi
-
-    org_slug=$(slugify "$org_name")
-    echo "  Org slug: $org_slug"
-    echo ""
-
-    # Prompt for admin email
-    read -rp "Admin email: " admin_email
-    if [ -z "$admin_email" ]; then
-        red "Admin email cannot be empty."
-        exit 1
-    fi
-
-    # Prompt for admin password (hidden)
-    while true; do
-        read -rsp "Admin password: " admin_password
-        echo ""
-        read -rsp "Confirm password: " admin_password_confirm
-        echo ""
-        if [ "$admin_password" = "$admin_password_confirm" ]; then
-            break
-        fi
-        red "Passwords do not match. Try again."
-    done
-    echo ""
-
-    bold "Creating admin account..."
-    $DC exec -T backend python -m app.cli.create_admin \
-        --email "$admin_email" \
-        --password "$admin_password" \
-        --org-name "$org_name" \
-        --org-slug "$org_slug"
-    green "Admin account created."
-    echo ""
-    echo "Log in at $(get_access_url) with: $admin_email"
+    yellow "DEPRECATED: 'create-admin' has been replaced by the setup wizard."
+    echo "Run './bioaf setup' instead -- it generates a setup code that you"
+    echo "enter in the web UI to create your admin account securely."
 }
 
 cmd_reset_db() {
@@ -427,7 +414,7 @@ cmd_reset_db() {
     echo "Running migrations..."
     $DC exec -T backend alembic -c alembic/alembic.ini upgrade head
 
-    green "Database reset complete. Run './bioaf create-admin' to create a new admin account."
+    green "Database reset complete. Run './bioaf setup' to generate a new setup code."
 }
 
 cmd_register_outputs() {
@@ -441,8 +428,7 @@ cmd_help() {
     echo "Usage: ./bioaf <command> [args]"
     echo ""
     bold "First-Run:"
-    echo "  setup               Interactive setup wizard (generates .env, starts services, creates admin)"
-    echo "  create-admin        Create an admin user account (services must be running)"
+    echo "  setup               Start services and generate a setup code for the web wizard"
     echo ""
     bold "Service Management:"
     echo "  start               Start all services"

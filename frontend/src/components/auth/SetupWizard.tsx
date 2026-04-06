@@ -3,17 +3,19 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { setToken } from "@/lib/auth";
-import { InviteForm } from "./InviteForm";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 const STEPS = [
+  "Setup Code",
   "Create Admin Account",
-  "Verify Email",
   "Organization Name",
-  "SMTP Configuration",
-  "GCP Configuration",
-  "Compute Stack",
-  "Invite Team",
-  "Confirmation",
+  "GCP Credentials",
+  "SMTP Settings",
+  "Infrastructure",
+  "Select Stack",
+  "Deploying",
+  "Getting Started",
 ];
 
 const GCP_REGIONS = [
@@ -71,20 +73,21 @@ interface SetupWizardProps {
 export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [step, setStep] = useState(0);
   const [error, setError] = useState("");
+
+  // Step 0: Setup code
+  const [setupCode, setSetupCode] = useState("");
+  const [setupToken, setSetupToken] = useState("");
+
+  // Step 1: Admin creation
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
-  const [verificationCode, setVerificationCode] = useState("");
-  const [fallbackCode, setFallbackCode] = useState("");
-  const [orgName, setOrgName] = useState("");
-  const [smtpHost, setSmtpHost] = useState("");
-  const [smtpPort, setSmtpPort] = useState("587");
-  const [smtpUsername, setSmtpUsername] = useState("");
-  const [smtpPassword, setSmtpPassword] = useState("");
-  const [smtpFrom, setSmtpFrom] = useState("");
 
-  // GCP configuration state
+  // Step 2: Org name
+  const [orgName, setOrgName] = useState("");
+
+  // Step 3: GCP
   const [gcpProjectId, setGcpProjectId] = useState("");
   const [gcpRegion, setGcpRegion] = useState("us-central1");
   const [gcpZone, setGcpZone] = useState("us-central1-a");
@@ -93,8 +96,42 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [gcpServiceAccountKey, setGcpServiceAccountKey] = useState("");
   const [gcpServiceAccountEmail, setGcpServiceAccountEmail] = useState("");
   const [gcpSaving, setGcpSaving] = useState(false);
+  const [gcpConfigured, setGcpConfigured] = useState(false);
 
+  // Step 4: SMTP
+  const [smtpHost, setSmtpHost] = useState("");
+  const [smtpPort, setSmtpPort] = useState("587");
+  const [smtpUsername, setSmtpUsername] = useState("");
+  const [smtpPassword, setSmtpPassword] = useState("");
+  const [smtpFrom, setSmtpFrom] = useState("");
+
+  // Step 6: Compute stack
   const [computeStack, setComputeStack] = useState("kubernetes");
+  const [stackDeploying, setStackDeploying] = useState(false);
+
+  // --- Handlers ---
+
+  const handleVerifyCode = async () => {
+    setError("");
+    try {
+      // Use raw fetch since the api module auto-redirects on 401
+      const resp = await fetch(`${API_URL}/api/bootstrap/verify-setup-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: setupCode }),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({ detail: "Verification failed" }));
+        setError(data.detail || "Invalid or expired setup code");
+        return;
+      }
+      const data = await resp.json();
+      setSetupToken(data.setup_token);
+      setStep(1);
+    } catch {
+      setError("Failed to verify setup code");
+    }
+  };
 
   const handleCreateAdmin = async () => {
     if (password !== confirmPassword) {
@@ -103,28 +140,25 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     }
     setError("");
     try {
-      const response = await api.post<{
-        access_token: string;
-        email_sent: boolean;
-        verification_code?: string;
-      }>("/api/bootstrap/create-admin", { email, password, name: name || undefined });
-      setToken(response.access_token);
-      if (response.verification_code) {
-        setFallbackCode(response.verification_code);
+      // Use raw fetch with setup token (not the stored auth token)
+      const resp = await fetch(`${API_URL}/api/bootstrap/create-admin`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${setupToken}`,
+        },
+        body: JSON.stringify({ email, password, name: name || undefined }),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({ detail: "Failed to create admin" }));
+        setError(data.detail || "Failed to create admin");
+        return;
       }
-      setStep(1);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to create admin");
-    }
-  };
-
-  const handleVerifyEmail = async () => {
-    setError("");
-    try {
-      await api.post("/api/auth/verify-email", { email, code: verificationCode });
+      const data = await resp.json();
+      setToken(data.access_token);
       setStep(2);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Verification failed");
+    } catch {
+      setError("Failed to create admin");
     }
   };
 
@@ -135,22 +169,6 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       setStep(3);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to configure org");
-    }
-  };
-
-  const handleConfigureSmtp = async () => {
-    setError("");
-    try {
-      await api.post("/api/bootstrap/configure-smtp", {
-        host: smtpHost,
-        port: parseInt(smtpPort),
-        username: smtpUsername,
-        password: smtpPassword,
-        from_address: smtpFrom,
-      });
-      setStep(4);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to configure SMTP");
     }
   };
 
@@ -170,10 +188,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             : undefined,
         gcp_service_account_email: gcpServiceAccountEmail || undefined,
       });
-
-      // Validate after saving
       await api.post("/api/v1/settings/gcp/validate");
-      setStep(5);
+      setGcpConfigured(true);
+      setStep(4);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save GCP configuration");
     } finally {
@@ -181,42 +198,57 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     }
   };
 
-  const handleSelectComputeStack = async () => {
+  const handleConfigureSmtp = async () => {
     setError("");
     try {
-      // Save the stack selection (non-critical if endpoint doesn't exist)
-      try {
-        await api.post("/api/bootstrap/configure-compute-stack", {
-          compute_stack: computeStack,
-        });
-      } catch {
-        // Non-critical
-      }
+      await api.post("/api/bootstrap/configure-smtp", {
+        host: smtpHost,
+        port: parseInt(smtpPort),
+        username: smtpUsername,
+        password: smtpPassword,
+        from_address: smtpFrom,
+      });
+      setStep(5);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to configure SMTP");
+    }
+  };
 
-      // Start deployment in the background -- the DeploymentBanner will
-      // track progress and show a toast when complete.
+  const handleSetupInfrastructure = () => {
+    setStep(6);
+  };
+
+  const handleDoInfraLater = async () => {
+    try {
+      await api.post("/api/bootstrap/complete");
+    } catch {
+      // Non-critical
+    }
+    setStep(8);
+  };
+
+  const handleSelectStack = async () => {
+    setError("");
+    setStackDeploying(true);
+    try {
+      await api.post("/api/v1/infrastructure/terraform/init");
       try {
         await api.post("/api/v1/infrastructure/stack/deploy-background", {
           stack_type: computeStack,
         });
       } catch {
-        // Deployment may fail if bootstrap hasn't run yet or preconditions
-        // aren't met. The user can trigger deployment later from the
-        // Infrastructure page.
+        // Deployment may fail; user can retry from Infrastructure page
       }
-
-      setStep(6);
+      try {
+        await api.post("/api/bootstrap/complete");
+      } catch {
+        // Non-critical
+      }
+      setStep(7);
     } catch (e) {
-      setStep(6);
-    }
-  };
-
-  const handleComplete = async () => {
-    try {
-      await api.post("/api/bootstrap/complete");
-      onComplete();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to complete setup");
+      setError(e instanceof Error ? e.message : "Failed to initialize infrastructure");
+    } finally {
+      setStackDeploying(false);
     }
   };
 
@@ -252,8 +284,39 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         </div>
       )}
 
-      {/* Step 1: Create Admin */}
+      {/* Step 0: Setup Code */}
       {step === 0 && (
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            Enter the 6-character setup code shown in your terminal after running{" "}
+            <code className="bg-gray-100 px-1 rounded">./bioaf setup</code>.
+          </p>
+          <div>
+            <label htmlFor="setup-code" className="block text-sm font-medium text-gray-700 mb-1">
+              Setup Code
+            </label>
+            <input
+              id="setup-code"
+              type="text"
+              value={setupCode}
+              onChange={(e) => setSetupCode(e.target.value.toUpperCase())}
+              placeholder="Enter 6-character code"
+              maxLength={6}
+              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500 font-mono text-lg tracking-widest text-center"
+            />
+          </div>
+          <button
+            onClick={handleVerifyCode}
+            disabled={setupCode.length !== 6}
+            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
+          >
+            Verify
+          </button>
+        </div>
+      )}
+
+      {/* Step 1: Create Admin Account */}
+      {step === 1 && (
         <div className="space-y-4">
           <div>
             <label htmlFor="setup-name" className="block text-sm font-medium text-gray-700 mb-1">Name</label>
@@ -281,30 +344,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         </div>
       )}
 
-      {/* Step 2: Verify Email */}
-      {step === 1 && (
-        <div className="space-y-4">
-          {fallbackCode && (
-            <div className="p-3 bg-yellow-50 border border-yellow-200 text-yellow-800 rounded text-sm">
-              SMTP not configured. Your verification code is: <strong>{fallbackCode}</strong>
-            </div>
-          )}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Verification Code</label>
-            <input type="text" value={verificationCode} onChange={(e) => setVerificationCode(e.target.value)}
-              placeholder="Enter 6-digit code"
-              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
-          </div>
-          <button onClick={handleVerifyEmail} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
-            Verify Email
-          </button>
-          <button onClick={() => setStep(2)} className="w-full text-gray-500 text-sm hover:text-gray-700">
-            Skip for now
-          </button>
-        </div>
-      )}
-
-      {/* Step 3: Org Name */}
+      {/* Step 2: Organization Name */}
       {step === 2 && (
         <div className="space-y-4">
           <div>
@@ -319,54 +359,14 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         </div>
       )}
 
-      {/* Step 4: SMTP */}
+      {/* Step 3: GCP Credentials */}
       {step === 3 && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">SMTP Host</label>
-              <input type="text" value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)}
-                className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Port</label>
-              <input type="number" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)}
-                className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-            <input type="text" value={smtpUsername} onChange={(e) => setSmtpUsername(e.target.value)}
-              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-            <input type="password" value={smtpPassword} onChange={(e) => setSmtpPassword(e.target.value)}
-              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">From Address</label>
-            <input type="email" value={smtpFrom} onChange={(e) => setSmtpFrom(e.target.value)}
-              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
-          </div>
-          <button onClick={handleConfigureSmtp} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
-            Save SMTP Configuration
-          </button>
-          <button onClick={() => setStep(4)} className="w-full text-gray-500 text-sm hover:text-gray-700">
-            Skip for now
-          </button>
-        </div>
-      )}
-
-      {/* Step 5: GCP Configuration */}
-      {step === 4 && (
         <div className="space-y-4">
           <p className="text-sm text-gray-600 mb-2">
             Configure your Google Cloud Platform project. Credentials are required before
             deploying a compute stack.
           </p>
 
-          {/* Prerequisites */}
           <details data-testid="gcp-prerequisites" className="bg-gray-50 border rounded p-4">
             <summary className="cursor-pointer text-sm font-semibold text-gray-700 select-none">
               Prerequisites: IAM Roles &amp; APIs
@@ -399,44 +399,25 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
           <div>
             <label htmlFor="gcp-project-id" className="block text-sm font-medium text-gray-700 mb-1">GCP Project ID</label>
-            <input
-              id="gcp-project-id"
-              type="text"
-              value={gcpProjectId}
-              onChange={(e) => setGcpProjectId(e.target.value)}
-              placeholder="my-gcp-project"
-              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500"
-            />
+            <input id="gcp-project-id" type="text" value={gcpProjectId}
+              onChange={(e) => setGcpProjectId(e.target.value)} placeholder="my-gcp-project"
+              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label htmlFor="gcp-region" className="block text-sm font-medium text-gray-700 mb-1">Region</label>
-              <select
-                id="gcp-region"
-                value={gcpRegion}
-                onChange={(e) => {
-                  setGcpRegion(e.target.value);
-                  setGcpZone(zonesForRegion(e.target.value)[0]);
-                }}
-                className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500"
-              >
-                {GCP_REGIONS.map((r) => (
-                  <option key={r} value={r}>{r}</option>
-                ))}
+              <select id="gcp-region" value={gcpRegion}
+                onChange={(e) => { setGcpRegion(e.target.value); setGcpZone(zonesForRegion(e.target.value)[0]); }}
+                className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500">
+                {GCP_REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
             <div>
               <label htmlFor="gcp-zone" className="block text-sm font-medium text-gray-700 mb-1">Zone</label>
-              <select
-                id="gcp-zone"
-                value={gcpZone}
-                onChange={(e) => setGcpZone(e.target.value)}
-                className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500"
-              >
-                {zonesForRegion(gcpRegion).map((z) => (
-                  <option key={z} value={z}>{z}</option>
-                ))}
+              <select id="gcp-zone" value={gcpZone} onChange={(e) => setGcpZone(e.target.value)}
+                className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500">
+                {zonesForRegion(gcpRegion).map((z) => <option key={z} value={z}>{z}</option>)}
               </select>
             </div>
           </div>
@@ -446,37 +427,21 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               Organization Slug
               <span className="ml-1 text-gray-400 font-normal text-xs">(3-30 chars, lowercase, hyphens allowed)</span>
             </label>
-            <input
-              id="gcp-org-slug"
-              type="text"
-              value={gcpOrgSlug}
-              onChange={(e) => setGcpOrgSlug(e.target.value)}
-              placeholder="my-bioaf-org"
-              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500"
-            />
+            <input id="gcp-org-slug" type="text" value={gcpOrgSlug} onChange={(e) => setGcpOrgSlug(e.target.value)}
+              placeholder="my-bioaf-org" className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Authentication</label>
             <div className="space-y-2">
               <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="gcp_credential_source"
-                  value="vm_default"
-                  checked={gcpCredentialSource === "vm_default"}
-                  onChange={() => setGcpCredentialSource("vm_default")}
-                />
+                <input type="radio" name="gcp_credential_source" value="vm_default"
+                  checked={gcpCredentialSource === "vm_default"} onChange={() => setGcpCredentialSource("vm_default")} />
                 <span className="text-sm">VM default credentials</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="gcp_credential_source"
-                  value="service_account_key"
-                  checked={gcpCredentialSource === "service_account_key"}
-                  onChange={() => setGcpCredentialSource("service_account_key")}
-                />
+                <input type="radio" name="gcp_credential_source" value="service_account_key"
+                  checked={gcpCredentialSource === "service_account_key"} onChange={() => setGcpCredentialSource("service_account_key")} />
                 <span className="text-sm">Service account key (JSON)</span>
               </label>
             </div>
@@ -484,56 +449,107 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             {gcpCredentialSource === "service_account_key" && (
               <div className="mt-3">
                 <label htmlFor="gcp-sa-key" className="block text-sm font-medium text-gray-700 mb-1">Service Account Key (JSON)</label>
-                <textarea
-                  id="gcp-sa-key"
-                  value={gcpServiceAccountKey}
-                  onChange={(e) => setGcpServiceAccountKey(e.target.value)}
-                  rows={4}
-                  className="w-full px-3 py-2 border rounded font-mono text-xs focus:ring-2 focus:ring-bioaf-500"
-                  placeholder='{"type": "service_account", ...}'
-                />
+                <textarea id="gcp-sa-key" value={gcpServiceAccountKey} onChange={(e) => setGcpServiceAccountKey(e.target.value)}
+                  rows={4} className="w-full px-3 py-2 border rounded font-mono text-xs focus:ring-2 focus:ring-bioaf-500"
+                  placeholder='{"type": "service_account", ...}' />
               </div>
             )}
 
             {gcpCredentialSource === "vm_default" && (
               <div className="mt-3">
                 <label htmlFor="gcp-sa-email" className="block text-sm font-medium text-gray-700 mb-1">
-                  Service Account Email
-                  <span className="ml-1 text-gray-400 font-normal text-xs">(optional)</span>
+                  Service Account Email <span className="ml-1 text-gray-400 font-normal text-xs">(optional)</span>
                 </label>
-                <input
-                  id="gcp-sa-email"
-                  type="email"
-                  value={gcpServiceAccountEmail}
+                <input id="gcp-sa-email" type="email" value={gcpServiceAccountEmail}
                   onChange={(e) => setGcpServiceAccountEmail(e.target.value)}
                   className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500"
-                  placeholder="bioaf-sa@my-project.iam.gserviceaccount.com"
-                />
+                  placeholder="bioaf-sa@my-project.iam.gserviceaccount.com" />
               </div>
             )}
           </div>
 
-          <button
-            onClick={handleSaveGcp}
-            disabled={gcpSaving}
-            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
-          >
+          <button onClick={handleSaveGcp} disabled={gcpSaving}
+            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50">
             {gcpSaving ? "Saving..." : "Save & Validate"}
           </button>
-          <button onClick={() => setStep(5)} className="w-full text-gray-500 text-sm hover:text-gray-700">
-            Skip for now
+          <button onClick={() => setStep(4)} className="w-full text-gray-500 text-sm hover:text-gray-700">
+            Do this later
           </button>
         </div>
       )}
 
-      {/* Step 6: Compute Stack */}
+      {/* Step 4: SMTP Settings */}
+      {step === 4 && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">SMTP Host</label>
+              <input type="text" value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)}
+                className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Port</label>
+              <input type="number" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)}
+                className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+            <input type="text" value={smtpUsername} onChange={(e) => setSmtpUsername(e.target.value)}
+              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+            <input type="password" value={smtpPassword} onChange={(e) => setSmtpPassword(e.target.value)}
+              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">From Address</label>
+            <input type="email" value={smtpFrom} onChange={(e) => setSmtpFrom(e.target.value)}
+              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
+          </div>
+          <button onClick={handleConfigureSmtp} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
+            Save SMTP Configuration
+          </button>
+          <button onClick={() => setStep(5)} className="w-full text-gray-500 text-sm hover:text-gray-700">
+            Do this later
+          </button>
+        </div>
+      )}
+
+      {/* Step 5: Infrastructure Decision */}
       {step === 5 && (
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            Would you like to set up cloud infrastructure now? This deploys a Kubernetes
+            cluster, storage buckets, and supporting resources on GCP.
+          </p>
+          {!gcpConfigured && (
+            <p className="text-sm text-amber-600">
+              GCP credentials are required to set up infrastructure. You can configure them
+              later in Settings.
+            </p>
+          )}
+          <button
+            onClick={handleSetupInfrastructure}
+            disabled={!gcpConfigured}
+            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
+          >
+            Set up infrastructure
+          </button>
+          <button onClick={handleDoInfraLater} className="w-full text-gray-500 text-sm hover:text-gray-700">
+            Do this later
+          </button>
+        </div>
+      )}
+
+      {/* Step 6: Select Stack */}
+      {step === 6 && (
         <div className="space-y-4">
           <p className="text-sm text-gray-600 mb-4">
             Choose the compute infrastructure for running pipelines and notebooks.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Kubernetes option */}
             <div
               data-testid="compute-stack-kubernetes"
               onClick={() => setComputeStack("kubernetes")}
@@ -549,19 +565,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                   Recommended
                 </span>
               </div>
-              <p className="text-sm text-gray-600 mb-2">
+              <p className="text-sm text-gray-600">
                 Cloud-native autoscaling with Google Kubernetes Engine and Cloud Storage.
-                Pay only for what you use.
               </p>
-              <div className="text-xs text-gray-500">
-                Estimated: $50-200/month depending on workload
-              </div>
-              <div className="mt-2 text-xs text-gray-400" title="Portable across GCP, AWS, and Azure. Autoscales to zero when idle. Docker container ecosystem.">
-                Hover for details
-              </div>
             </div>
 
-            {/* SLURM option - disabled */}
             <div
               data-testid="compute-stack-slurm"
               className="p-4 border-2 border-gray-200 rounded-lg opacity-60 cursor-not-allowed"
@@ -573,51 +581,46 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 </span>
               </div>
               <p className="text-sm text-gray-400 mb-2">
-                Traditional HPC cluster with shared filesystem. Familiar to academic environments.
+                Traditional HPC cluster with shared filesystem.
               </p>
-              <div className="text-xs text-gray-400">
-                Minimum: ~$250/month (SLURM controller + NFS)
-              </div>
             </div>
           </div>
 
-          <button
-            onClick={handleSelectComputeStack}
-            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700"
-          >
-            Continue with {computeStack === "kubernetes" ? "Kubernetes + GCS" : "SLURM + NFS"}
+          <button onClick={handleSelectStack}
+            disabled={stackDeploying}
+            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50">
+            {stackDeploying ? "Initializing infrastructure..." : `Continue with ${computeStack === "kubernetes" ? "Kubernetes + GCS" : "SLURM + NFS"}`}
           </button>
         </div>
       )}
 
-      {/* Step 7: Invite Team */}
-      {step === 6 && (
-        <div className="space-y-4">
-          <InviteForm />
-          <button onClick={() => setStep(7)} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
-            Continue
-          </button>
-          <button onClick={() => setStep(7)} className="w-full text-gray-500 text-sm hover:text-gray-700">
-            Skip for now
-          </button>
-        </div>
-      )}
-
-      {/* Step 8: Confirmation */}
+      {/* Step 7: Deploying */}
       {step === 7 && (
         <div className="space-y-4">
-          <div className="p-4 bg-green-50 border border-green-200 rounded">
-            <h3 className="font-semibold text-green-800">Setup Summary</h3>
-            <ul className="mt-2 text-sm text-green-700 space-y-1">
-              <li>Admin account created</li>
-              {orgName && <li>Organization: {orgName}</li>}
-              {gcpProjectId && <li>GCP Project: {gcpProjectId}</li>}
-              <li>Compute stack: {computeStack === "kubernetes" ? "Kubernetes + GCS" : "SLURM + NFS"}</li>
-              <li>Platform ready to use</li>
-            </ul>
+          <div className="p-4 bg-blue-50 border border-blue-200 rounded">
+            <p className="text-sm text-blue-800">
+              Infrastructure deployment has started. This usually takes 10-15 minutes.
+              You can monitor progress on the Infrastructure page after setup.
+            </p>
           </div>
-          <button onClick={handleComplete} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
-            Launch bioAF
+          <button onClick={() => setStep(8)} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
+            Continue to Getting Started
+          </button>
+        </div>
+      )}
+
+      {/* Step 8: Getting Started */}
+      {step === 8 && (
+        <div className="space-y-4">
+          <div className="p-4 bg-green-50 border border-green-200 rounded">
+            <h3 className="font-semibold text-green-800">Setup Complete</h3>
+            <p className="text-sm text-green-700 mt-1">
+              Your bioAF platform is configured. You can explore the Getting Started guide
+              anytime from your profile page.
+            </p>
+          </div>
+          <button onClick={onComplete} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
+            Go to Dashboard
           </button>
         </div>
       )}

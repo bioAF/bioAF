@@ -159,6 +159,49 @@ async def bootstrap_foundation(
     )
 
 
+@router.post("/init")
+async def terraform_init(
+    current_user: dict = require_permission("infrastructure", "deploy"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Run the foundation bootstrap (state bucket + terraform init).
+
+    Non-streaming wrapper around bootstrap_foundation for use by the setup
+    wizard. Consumes the SSE generator and returns a simple JSON response.
+    """
+    user_id = int(current_user["sub"])
+    org_id = int(current_user["org_id"])
+
+    # Pre-flight checks
+    config_rows = (
+        await session.execute(
+            text(
+                "SELECT key, value FROM platform_config "
+                "WHERE key IN ('gcp_credentials_configured', 'terraform_initialized')"
+            )
+        )
+    ).fetchall()
+    config = {r[0]: r[1] for r in config_rows}
+
+    if config.get("gcp_credentials_configured", "false") != "true":
+        raise HTTPException(status_code=400, detail="GCP credentials are not configured")
+    if config.get("terraform_initialized", "false") == "true":
+        return {"message": "Terraform already initialized"}
+
+    # Consume the SSE generator to completion
+    last_error = None
+    async for event in TerraformExecutor.bootstrap_foundation(session=session, user_id=user_id, org_id=org_id):
+        if event.event_type == "apply_error":
+            last_error = event.message
+
+    await session.commit()
+
+    if last_error:
+        raise HTTPException(status_code=500, detail=last_error)
+
+    return {"message": "Terraform initialized"}
+
+
 @router.post("/plan", response_model=TerraformRunDetail)
 async def run_plan(
     body: TerraformPlanRequest,

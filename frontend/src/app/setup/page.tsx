@@ -15,7 +15,9 @@ export default function SetupPage() {
     async function checkStatus() {
       try {
         const status = await api.get<BootstrapStatus>("/api/bootstrap/status");
-        if (status.setup_complete) {
+        if (status.has_admin) {
+          // Admin exists -- redirect to login (setup was either completed
+          // or interrupted after admin creation)
           router.push("/login");
           return;
         }

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -22,4 +23,8 @@ class Organization(Base):
     slack_client_id: Mapped[str] = mapped_column(String(255), default="")
     slack_client_secret: Mapped[str] = mapped_column(String(500), default="")
     slack_signing_secret: Mapped[str] = mapped_column(String(255), default="")
+    setup_code_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, default=None)
+    setup_code_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
