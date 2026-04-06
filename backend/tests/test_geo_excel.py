@@ -31,7 +31,7 @@ def _complete_sample(sid: int = 101, name: str = "PBMC_001"):
         "library_prep_method": "10x Chromium 3' v3.1",
         "library_layout": "paired",
         "prep_notes": "Standard protocol",
-        "batch": {"instrument_model": "Illumina NovaSeq 6000"},
+        "sample_batch": None,
     }
 
 

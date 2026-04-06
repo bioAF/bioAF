@@ -129,7 +129,7 @@
         },
         {
           "geo_column": "instrument_model",
-          "bioaf_source": "batch.instrument_model",
+          "bioaf_source": "sequencing_batch.instrument_model",
           "required": true,
           "description": "Sequencing instrument model",
           "controlled_vocabulary": [

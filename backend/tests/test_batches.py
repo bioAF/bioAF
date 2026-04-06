@@ -14,9 +14,9 @@ async def experiment_id(client, admin_token):
 
 
 @pytest.mark.asyncio
-async def test_create_batch(client, admin_token, experiment_id, session):
+async def test_create_sample_batch(client, admin_token, experiment_id, session):
     response = await client.post(
-        f"/api/experiments/{experiment_id}/batches",
+        f"/api/experiments/{experiment_id}/sample-batches",
         json={"name": "Batch 1", "notes": "First batch"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
@@ -26,37 +26,41 @@ async def test_create_batch(client, admin_token, experiment_id, session):
     assert data["sample_count"] == 0
 
     # Verify audit
-    result = await session.execute(text("SELECT * FROM audit_log WHERE entity_type = 'batch' AND action = 'create'"))
+    result = await session.execute(
+        text("SELECT * FROM audit_log WHERE entity_type = 'sample_batch' AND action = 'create'")
+    )
     assert result.fetchone() is not None
 
 
 @pytest.mark.asyncio
-async def test_update_batch(client, admin_token, experiment_id, session):
+async def test_update_sample_batch(client, admin_token, experiment_id, session):
     resp = await client.post(
-        f"/api/experiments/{experiment_id}/batches",
+        f"/api/experiments/{experiment_id}/sample-batches",
         json={"name": "Original Batch"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     batch_id = resp.json()["id"]
 
     response = await client.patch(
-        f"/api/batches/{batch_id}",
-        json={"name": "Updated Batch", "sequencer_run_id": "RUN001"},
+        f"/api/sample-batches/{batch_id}",
+        json={"name": "Updated Batch"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert response.status_code == 200
     assert response.json()["name"] == "Updated Batch"
 
     # Verify audit
-    result = await session.execute(text("SELECT * FROM audit_log WHERE entity_type = 'batch' AND action = 'update'"))
+    result = await session.execute(
+        text("SELECT * FROM audit_log WHERE entity_type = 'sample_batch' AND action = 'update'")
+    )
     assert result.fetchone() is not None
 
 
 @pytest.mark.asyncio
-async def test_assign_samples_to_batch(client, admin_token, experiment_id, session):
+async def test_assign_samples_to_sample_batch(client, admin_token, experiment_id, session):
     # Create batch
     batch_resp = await client.post(
-        f"/api/experiments/{experiment_id}/batches",
+        f"/api/experiments/{experiment_id}/sample-batches",
         json={"name": "Assignment Batch"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
@@ -76,7 +80,7 @@ async def test_assign_samples_to_batch(client, admin_token, experiment_id, sessi
 
     # Assign samples
     response = await client.post(
-        f"/api/batches/{batch_id}/assign-samples",
+        f"/api/sample-batches/{batch_id}/assign-samples",
         json={"sample_ids": [s1.json()["id"], s2.json()["id"]]},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
@@ -85,7 +89,7 @@ async def test_assign_samples_to_batch(client, admin_token, experiment_id, sessi
 
     # Verify batch now has samples
     batch = await client.get(
-        f"/api/batches/{batch_id}",
+        f"/api/sample-batches/{batch_id}",
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert batch.json()["sample_count"] == 2
@@ -98,9 +102,9 @@ async def test_assign_samples_to_batch(client, admin_token, experiment_id, sessi
 
 
 @pytest.mark.asyncio
-async def test_list_batches_with_sample_counts(client, admin_token, experiment_id):
+async def test_list_sample_batches_with_sample_counts(client, admin_token, experiment_id):
     batch_resp = await client.post(
-        f"/api/experiments/{experiment_id}/batches",
+        f"/api/experiments/{experiment_id}/sample-batches",
         json={"name": "Count Batch"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
@@ -109,12 +113,12 @@ async def test_list_batches_with_sample_counts(client, admin_token, experiment_i
     # Add samples to batch
     await client.post(
         f"/api/experiments/{experiment_id}/samples",
-        json={"sample_id_external": "CB001", "batch_id": batch_id},
+        json={"sample_id_external": "CB001", "sample_batch_code": "Count Batch"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
 
     response = await client.get(
-        f"/api/experiments/{experiment_id}/batches",
+        f"/api/experiments/{experiment_id}/sample-batches",
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert response.status_code == 200

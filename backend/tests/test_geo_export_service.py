@@ -29,7 +29,7 @@ async def comp_bio_user(session, admin_user):
 @pytest_asyncio.fixture
 async def export_experiment(client, admin_token, session, admin_user):
     """Create experiment with samples, batch, pipeline run for GEO export."""
-    from app.models.batch import Batch
+    from app.models.sample_batch import SampleBatch
     from app.models.pipeline_run import PipelineRun
     from app.models.sample import Sample
 
@@ -44,11 +44,9 @@ async def export_experiment(client, admin_token, session, admin_user):
     exp_id = resp.json()["id"]
 
     # Create batch
-    batch = Batch(
+    batch = SampleBatch(
         experiment_id=exp_id,
         name="Batch1",
-        instrument_model="Illumina NovaSeq 6000",
-        instrument_platform="ILLUMINA",
     )
     session.add(batch)
     await session.flush()
@@ -56,7 +54,7 @@ async def export_experiment(client, admin_token, session, admin_user):
     # Create samples
     s1 = Sample(
         experiment_id=exp_id,
-        batch_id=batch.id,
+        sample_batch_id=batch.id,
         sample_id_external="SAMPLE_001",
         organism="Homo sapiens",
         tissue_type="blood",
@@ -68,7 +66,7 @@ async def export_experiment(client, admin_token, session, admin_user):
     )
     s2 = Sample(
         experiment_id=exp_id,
-        batch_id=batch.id,
+        sample_batch_id=batch.id,
         sample_id_external="SAMPLE_002",
         organism="Homo sapiens",
         tissue_type="liver",

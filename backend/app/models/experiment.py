@@ -63,6 +63,6 @@ class Experiment(Base):
     owner = relationship("User")
     template = relationship("ExperimentTemplate")
     samples = relationship("Sample", back_populates="experiment")
-    batches = relationship("Batch", back_populates="experiment")
+    sample_batches = relationship("SampleBatch", back_populates="experiment")
     custom_fields = relationship("ExperimentCustomField", back_populates="experiment")
     field_defaults = relationship("ExperimentFieldDefault", back_populates="experiment")

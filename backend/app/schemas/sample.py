@@ -3,9 +3,29 @@ from datetime import datetime
 from pydantic import BaseModel, field_validator
 
 
-class BatchSummary(BaseModel):
+class SampleBatchSummary(BaseModel):
     id: int
     name: str
+
+    model_config = {"from_attributes": True}
+
+
+class SequencingBatchSummary(BaseModel):
+    id: int
+    code: str
+
+    model_config = {"from_attributes": True}
+
+
+class SampleCustomFieldValue(BaseModel):
+    field_name: str
+    field_value: str
+
+
+class SampleCustomFieldResponse(BaseModel):
+    id: int
+    field_name: str
+    field_value: str | None
 
     model_config = {"from_attributes": True}
 
@@ -17,7 +37,8 @@ class SampleCreate(BaseModel):
     donor_source: str | None = None
     treatment_condition: str | None = None
     chemistry_version: str | None = None
-    batch_id: int | None = None
+    sample_batch_code: str | None = None
+    sequencing_batch_code: str | None = None
     viability_pct: float | None = None
     cell_count: int | None = None
     prep_notes: str | None = None
@@ -29,6 +50,7 @@ class SampleCreate(BaseModel):
     parent_sample_id: int | None = None
     collection_timestamp: datetime | None = None
     collection_method: str | None = None
+    custom_fields: list[SampleCustomFieldValue] | None = None
 
     @field_validator("viability_pct")
     @classmethod
@@ -52,7 +74,8 @@ class SampleUpdate(BaseModel):
     donor_source: str | None = None
     treatment_condition: str | None = None
     chemistry_version: str | None = None
-    batch_id: int | None = None
+    sample_batch_code: str | None = None
+    sequencing_batch_code: str | None = None
     viability_pct: float | None = None
     cell_count: int | None = None
     prep_notes: str | None = None
@@ -62,6 +85,7 @@ class SampleUpdate(BaseModel):
     parent_sample_id: int | None = None
     collection_timestamp: datetime | None = None
     collection_method: str | None = None
+    custom_fields: list[SampleCustomFieldValue] | None = None
 
     @field_validator("viability_pct")
     @classmethod
@@ -113,7 +137,8 @@ class SampleResponse(BaseModel):
     donor_source: str | None
     treatment_condition: str | None
     chemistry_version: str | None
-    batch: BatchSummary | None = None
+    sample_batch: SampleBatchSummary | None = None
+    sequencing_batch: SequencingBatchSummary | None = None
     viability_pct: float | None
     cell_count: int | None
     prep_notes: str | None
@@ -128,5 +153,6 @@ class SampleResponse(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+    custom_fields: list[SampleCustomFieldResponse] = []
 
     model_config = {"from_attributes": True}

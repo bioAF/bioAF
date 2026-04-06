@@ -51,10 +51,7 @@ async def _seed_experiment_with_data(session, org_id: int, owner_id: int) -> dic
 
     # Create batch
     await session.execute(
-        text(
-            "INSERT INTO batches (id, experiment_id, name, instrument_model, operator_user_id) "
-            "VALUES (1, 1, 'Batch A', 'NovaSeq 6000', :owner)"
-        ),
+        text("INSERT INTO sample_batches (id, experiment_id, name, operator_user_id) VALUES (1, 1, 'Batch A', :owner)"),
         {"owner": owner_id},
     )
 
@@ -62,7 +59,7 @@ async def _seed_experiment_with_data(session, org_id: int, owner_id: int) -> dic
     for i in range(1, 4):
         await session.execute(
             text(
-                "INSERT INTO samples (id, experiment_id, batch_id, sample_id_external, organism, "
+                "INSERT INTO samples (id, experiment_id, sample_batch_id, sample_id_external, organism, "
                 "tissue_type, qc_status, status, library_prep_method, library_layout, molecule_type, "
                 "chemistry_version, donor_source, treatment_condition) "
                 "VALUES (:id, 1, 1, :ext, 'Homo sapiens', 'PBMC', 'pass', 'registered', "
@@ -171,7 +168,7 @@ async def _seed_experiment_with_data(session, org_id: int, owner_id: int) -> dic
         "sample_ids": [1, 2, 3],
         "file_ids": [1, 2],
         "pipeline_run_id": 1,
-        "batch_id": 1,
+        "sample_batch_id": 1,
     }
 
 

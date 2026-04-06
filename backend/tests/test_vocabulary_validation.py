@@ -81,30 +81,13 @@ async def test_create_sample_with_null_molecule_type(client, admin_token, experi
 
 
 @pytest.mark.asyncio
-async def test_create_batch_auto_derives_platform(client, admin_token, experiment_id, seeded_vocab):
+async def test_create_sample_batch_with_instrument_fields(client, admin_token, experiment_id, seeded_vocab):
+    """SampleBatch retains instrument fields for prep equipment tracking."""
     response = await client.post(
-        f"/api/experiments/{experiment_id}/batches",
-        json={
-            "name": "Batch with instrument",
-            "instrument_model": "Illumina NovaSeq 6000",
-        },
+        f"/api/experiments/{experiment_id}/sample-batches",
+        json={"name": "Simple Batch", "instrument_model": "Illumina NovaSeq 6000"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert response.status_code == 200
     data = response.json()
     assert data["instrument_model"] == "Illumina NovaSeq 6000"
-    assert data["instrument_platform"] == "ILLUMINA"
-
-
-@pytest.mark.asyncio
-async def test_create_batch_pacbio_platform_derivation(client, admin_token, experiment_id, seeded_vocab):
-    response = await client.post(
-        f"/api/experiments/{experiment_id}/batches",
-        json={
-            "name": "PacBio Batch",
-            "instrument_model": "PacBio Sequel II",
-        },
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-    assert response.status_code == 200
-    assert response.json()["instrument_platform"] == "PACBIO_SMRT"

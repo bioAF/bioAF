@@ -236,7 +236,7 @@ async def test_get_experiment_detail(client, admin_token):
     assert response.status_code == 200
     data = response.json()
     assert "samples" in data
-    assert "batches" in data
+    assert "sample_batches" in data
     assert "custom_fields" in data
     assert "audit_trail_count" in data
     assert data["template_id"] is None

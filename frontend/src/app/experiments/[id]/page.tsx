@@ -26,13 +26,14 @@ import type {
   ExperimentUpdateRequest,
   FieldDefaultValue,
   Sample,
-  Batch,
+  SampleBatch,
+  SequencingBatch,
   AuditLogResponse,
   AuditLogEntry,
   SampleCreateRequest,
   SampleUpdateRequest,
   SampleBulkUpdateRequest,
-  BatchCreateRequest,
+  SampleBatchCreateRequest,
   ExperimentStatus,
   QCStatus,
   NotebookSession,
@@ -56,7 +57,8 @@ export default function ExperimentDetailPage() {
 
   const [experiment, setExperiment] = useState<ExperimentDetail | null>(null);
   const [samples, setSamples] = useState<Sample[]>([]);
-  const [batches, setBatches] = useState<Batch[]>([]);
+  const [batches, setBatches] = useState<SampleBatch[]>([]);
+  const [seqBatches, setSeqBatches] = useState<SequencingBatch[]>([]);
   const [auditEntries, setAuditEntries] = useState<AuditLogEntry[]>([]);
   const [auditTotal, setAuditTotal] = useState(0);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
@@ -74,8 +76,10 @@ export default function ExperimentDetailPage() {
   const [showBatchForm, setShowBatchForm] = useState(false);
   const [sampleForm, setSampleForm] = useState<SampleCreateRequest>({});
   const [sampleFormError, setSampleFormError] = useState("");
-  const [batchForm, setBatchForm] = useState<BatchCreateRequest>({ name: "" });
+  const [sampleCustomFieldValues, setSampleCustomFieldValues] = useState<Record<string, string>>({});
+  const [batchForm, setBatchForm] = useState<SampleBatchCreateRequest>({ name: "" });
   const [editFieldDefaults, setEditFieldDefaults] = useState<FieldDefaultValue[]>([]);
+  const [editCustomFields, setEditCustomFields] = useState<{ field_name: string; field_value: string; is_required: boolean }[]>([]);
 
   // Sample viewing/editing state
   const [viewingSample, setViewingSample] = useState<Sample | null>(null);
@@ -83,6 +87,7 @@ export default function ExperimentDetailPage() {
   const [editingSampleId, setEditingSampleId] = useState<number | null>(null);
   const [editSampleForm, setEditSampleForm] = useState<SampleUpdateRequest>({});
   const [editSampleError, setEditSampleError] = useState("");
+  const [editSampleCustomFields, setEditSampleCustomFields] = useState<Record<string, string>>({});
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [bulkEditForm, setBulkEditForm] = useState<SampleUpdateRequest>({});
   const [bulkEditError, setBulkEditError] = useState("");
@@ -93,6 +98,8 @@ export default function ExperimentDetailPage() {
     { name: "donor_source", label: "Donor ID", type: "text" as const },
     { name: "treatment_condition", label: "Treatment Condition", type: "text" as const },
     { name: "chemistry_version", label: "Chemistry Version", type: "text" as const },
+    { name: "sample_batch_code", label: "Sample Batch", type: "text" as const },
+    { name: "sequencing_batch_code", label: "Sequencing Batch", type: "text" as const },
     { name: "molecule_type", label: "Molecule Type", type: "vocabulary" as const },
     { name: "library_prep_method", label: "Library Prep Method", type: "vocabulary" as const },
     { name: "library_layout", label: "Library Layout", type: "vocabulary" as const },
@@ -136,8 +143,12 @@ export default function ExperimentDetailPage() {
 
   async function loadBatches() {
     try {
-      const data = await api.get<Batch[]>(`/api/experiments/${id}/batches`);
-      setBatches(data);
+      const [sampleBatchData, seqBatchData] = await Promise.all([
+        api.get<SampleBatch[]>(`/api/experiments/${id}/sample-batches`),
+        api.get<SequencingBatch[]>(`/api/experiments/${id}/sequencing-batches`),
+      ]);
+      setBatches(sampleBatchData);
+      setSeqBatches(seqBatchData);
     } catch {}
   }
 
@@ -179,8 +190,13 @@ export default function ExperimentDetailPage() {
   async function handleAddSample() {
     setSampleFormError("");
     try {
-      await api.post(`/api/experiments/${id}/samples`, sampleForm);
+      const cfPayload = Object.entries(sampleCustomFieldValues)
+        .filter(([, v]) => v.trim())
+        .map(([name, value]) => ({ field_name: name, field_value: value }));
+      const payload = { ...sampleForm, custom_fields: cfPayload.length > 0 ? cfPayload : undefined };
+      await api.post(`/api/experiments/${id}/samples`, payload);
       setSampleForm({});
+      setSampleCustomFieldValues({});
       setShowSampleForm(false);
       loadSamples();
       loadExperiment();
@@ -191,7 +207,7 @@ export default function ExperimentDetailPage() {
 
   async function handleAddBatch() {
     try {
-      await api.post(`/api/experiments/${id}/batches`, batchForm);
+      await api.post(`/api/experiments/${id}/sample-batches`, batchForm);
       setBatchForm({ name: "" });
       setShowBatchForm(false);
       loadBatches();
@@ -214,6 +230,13 @@ export default function ExperimentDetailPage() {
         field_name: fd.field_name,
         default_value: fd.default_value,
         is_required: fd.is_required,
+      }))
+    );
+    setEditCustomFields(
+      experiment.custom_fields.map((cf) => ({
+        field_name: cf.field_name,
+        field_value: cf.field_value ?? "",
+        is_required: cf.is_required,
       }))
     );
     setOverviewError("");
@@ -239,7 +262,10 @@ export default function ExperimentDetailPage() {
   async function handleSaveOverview() {
     setOverviewError("");
     try {
-      const payload = { ...overviewForm, field_defaults: editFieldDefaults };
+      const customFields = editCustomFields
+        .filter((f) => f.field_name.trim())
+        .map((f) => ({ field_name: f.field_name.trim(), field_value: f.field_value.trim(), field_type: "string", is_required: f.is_required }));
+      const payload = { ...overviewForm, field_defaults: editFieldDefaults, custom_fields: customFields };
       await api.patch(`/api/experiments/${id}`, payload);
       setEditingOverview(false);
       loadExperiment();
@@ -274,7 +300,14 @@ export default function ExperimentDetailPage() {
       molecule_type: sample.molecule_type,
       library_prep_method: sample.library_prep_method,
       library_layout: sample.library_layout,
+      sample_batch_code: sample.sample_batch?.name ?? null,
+      sequencing_batch_code: sample.sequencing_batch?.code ?? null,
     });
+    const cfValues: Record<string, string> = {};
+    for (const cf of sample.custom_fields ?? []) {
+      cfValues[cf.field_name] = cf.field_value ?? "";
+    }
+    setEditSampleCustomFields(cfValues);
     setEditSampleError("");
   }
 
@@ -282,7 +315,11 @@ export default function ExperimentDetailPage() {
     if (!editingSampleId) return;
     setEditSampleError("");
     try {
-      await api.patch(`/api/samples/${editingSampleId}`, editSampleForm);
+      const cfPayload = Object.entries(editSampleCustomFields)
+        .filter(([, v]) => v.trim())
+        .map(([name, value]) => ({ field_name: name, field_value: value }));
+      const payload = { ...editSampleForm, custom_fields: cfPayload };
+      await api.patch(`/api/samples/${editingSampleId}`, payload);
       setEditingSampleId(null);
       setEditSampleForm({});
       loadSamples();
@@ -371,7 +408,7 @@ export default function ExperimentDetailPage() {
   const tabs: { key: Tab; label: string }[] = [
     { key: "overview", label: "Overview" },
     { key: "samples", label: `Samples (${experiment.sample_count})` },
-    { key: "batches", label: `Batches (${experiment.batch_count})` },
+    { key: "batches", label: "Batches" },
     { key: "files", label: "Files" },
     { key: "analysis", label: "Analysis" },
     { key: "pipelines", label: "Pipeline Runs" },
@@ -520,6 +557,54 @@ export default function ExperimentDetailPage() {
                         })}
                       </div>
                     </div>
+                    <div className="border-t pt-3 mt-3">
+                      <h3 className="text-sm font-medium text-gray-700 mb-2">Custom Fields</h3>
+                      <div className="space-y-2">
+                        {editCustomFields.map((cf, idx) => (
+                          <div key={idx} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto] gap-2 items-center">
+                            <input
+                              value={cf.field_name}
+                              onChange={(e) => setEditCustomFields((prev) => prev.map((f, i) => i === idx ? { ...f, field_name: e.target.value } : f))}
+                              placeholder="Field name"
+                              className="w-full border rounded px-2 py-1 text-sm"
+                            />
+                            <div className="min-w-0">
+                              <input
+                                value={cf.field_value}
+                                onChange={(e) => setEditCustomFields((prev) => prev.map((f, i) => i === idx ? { ...f, field_value: e.target.value } : f))}
+                                placeholder="Value"
+                                className="w-full border rounded px-2 py-1 text-sm"
+                              />
+                            </div>
+                            <div className="flex items-center gap-2 whitespace-nowrap">
+                              <label className="flex items-center gap-1 text-xs text-gray-600">
+                                <input
+                                  type="checkbox"
+                                  checked={cf.is_required}
+                                  onChange={(e) => setEditCustomFields((prev) => prev.map((f, i) => i === idx ? { ...f, is_required: e.target.checked } : f))}
+                                  className="rounded border-gray-300"
+                                />
+                                Required
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => setEditCustomFields((prev) => prev.filter((_, i) => i !== idx))}
+                                className="text-red-400 hover:text-red-600 text-xs ml-1"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => setEditCustomFields((prev) => [...prev, { field_name: "", field_value: "", is_required: false }])}
+                          className="text-sm text-bioaf-600 hover:underline"
+                        >
+                          + Add Field
+                        </button>
+                      </div>
+                    </div>
                     {overviewError && <p className="text-red-600 text-sm">{overviewError}</p>}
                     <div className="flex gap-2 pt-1">
                       <button onClick={handleSaveOverview} className="bg-bioaf-600 text-white px-4 py-1.5 rounded text-sm">Save</button>
@@ -568,9 +653,10 @@ export default function ExperimentDetailPage() {
                     )}
                     <dl className="space-y-2">
                       {experiment.custom_fields.map((cf) => (
-                        <div key={cf.id}>
+                        <div key={cf.id} className="flex items-center gap-2">
                           <dt className="text-sm text-gray-400">{cf.field_name}</dt>
                           <dd className="text-sm text-gray-500">{cf.field_value || "—"}</dd>
+                          {cf.is_required && <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">required</span>}
                         </div>
                       ))}
                     </dl>
@@ -610,6 +696,12 @@ export default function ExperimentDetailPage() {
                         if (fd.default_value) prefill[fd.field_name] = fd.default_value;
                       }
                       setSampleForm(prefill as unknown as SampleCreateRequest);
+                      // Initialize custom field values from experiment-level defaults
+                      const cfDefaults: Record<string, string> = {};
+                      for (const cf of experiment.custom_fields) {
+                        cfDefaults[cf.field_name] = cf.field_value ?? "";
+                      }
+                      setSampleCustomFieldValues(cfDefaults);
                     }
                     setShowSampleForm(!showSampleForm);
                   }}
@@ -647,6 +739,17 @@ export default function ExperimentDetailPage() {
                     <VocabularySelect fieldName="molecule_type" value={sampleForm.molecule_type} onChange={(v) => setSampleForm({ ...sampleForm, molecule_type: v })} placeholder="Molecule Type..." />
                     <VocabularySelect fieldName="library_prep_method" value={sampleForm.library_prep_method} onChange={(v) => setSampleForm({ ...sampleForm, library_prep_method: v })} placeholder="Library Prep Method..." />
                     <VocabularySelect fieldName="library_layout" value={sampleForm.library_layout} onChange={(v) => setSampleForm({ ...sampleForm, library_layout: v })} placeholder="Library Layout..." />
+                    <input placeholder="Sample Batch" value={sampleForm.sample_batch_code ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, sample_batch_code: e.target.value || null })} className="border rounded px-3 py-2 text-sm" />
+                    <input placeholder="Sequencing Batch" value={sampleForm.sequencing_batch_code ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, sequencing_batch_code: e.target.value || null })} className="border rounded px-3 py-2 text-sm" />
+                    {experiment?.custom_fields.map((cf) => (
+                      <input
+                        key={cf.id}
+                        placeholder={cf.field_name}
+                        value={sampleCustomFieldValues[cf.field_name] ?? ""}
+                        onChange={(e) => setSampleCustomFieldValues((prev) => ({ ...prev, [cf.field_name]: e.target.value }))}
+                        className="border rounded px-3 py-2 text-sm"
+                      />
+                    ))}
                   </div>
                   {sampleFormError && (
                     <p className="text-red-600 text-sm mt-2">{sampleFormError}</p>
@@ -701,7 +804,8 @@ export default function ExperimentDetailPage() {
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Treatment</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Library Prep</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Library Layout</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Batch</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sample Batch</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Seq. Batch</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">QC</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                       <th className="px-4 py-3"></th>
@@ -725,7 +829,8 @@ export default function ExperimentDetailPage() {
                         <td className="px-4 py-3 text-sm">{s.treatment_condition || "---"}</td>
                         <td className="px-4 py-3 text-sm">{s.library_prep_method || "---"}</td>
                         <td className="px-4 py-3 text-sm">{s.library_layout || "---"}</td>
-                        <td className="px-4 py-3 text-sm">{s.batch?.name || "---"}</td>
+                        <td className="px-4 py-3 text-sm">{s.sample_batch?.name || "---"}</td>
+                        <td className="px-4 py-3 text-sm">{s.sequencing_batch?.code || "---"}</td>
                         <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                           <select
                             value={s.qc_status ?? ""}
@@ -774,10 +879,15 @@ export default function ExperimentDetailPage() {
                     { label: "Chemistry Version", value: viewingSample.chemistry_version },
                     { label: "Cell Count", value: viewingSample.cell_count?.toLocaleString() },
                     { label: "Viability %", value: viewingSample.viability_pct != null ? `${viewingSample.viability_pct}%` : null },
-                    { label: "Batch", value: viewingSample.batch?.name },
+                    { label: "Sample Batch", value: viewingSample.sample_batch?.name },
+                    { label: "Sequencing Batch", value: viewingSample.sequencing_batch?.code },
                     { label: "QC Status", value: viewingSample.qc_status },
                     { label: "QC Notes", value: viewingSample.qc_notes },
                     { label: "Prep Notes", value: viewingSample.prep_notes },
+                    ...(viewingSample.custom_fields ?? []).map((cf) => ({
+                      label: cf.field_name,
+                      value: cf.field_value,
+                    })),
                     { label: "Created", value: new Date(viewingSample.created_at).toLocaleString() },
                     { label: "Updated", value: new Date(viewingSample.updated_at).toLocaleString() },
                   ]}
@@ -842,10 +952,28 @@ export default function ExperimentDetailPage() {
                         <label className="block text-xs font-medium text-gray-500 mb-1">Library Prep Method</label>
                         <VocabularySelect fieldName="library_prep_method" value={editSampleForm.library_prep_method} onChange={(v) => setEditSampleForm({ ...editSampleForm, library_prep_method: v })} placeholder="Library Prep Method..." />
                       </div>
-                      <div className="col-span-2">
+                      <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Library Layout</label>
                         <VocabularySelect fieldName="library_layout" value={editSampleForm.library_layout} onChange={(v) => setEditSampleForm({ ...editSampleForm, library_layout: v })} placeholder="Library Layout..." />
                       </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Sample Batch</label>
+                        <input value={editSampleForm.sample_batch_code ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, sample_batch_code: e.target.value || null })} className="border rounded px-3 py-2 text-sm w-full" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Sequencing Batch</label>
+                        <input value={editSampleForm.sequencing_batch_code ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, sequencing_batch_code: e.target.value || null })} className="border rounded px-3 py-2 text-sm w-full" />
+                      </div>
+                      {experiment?.custom_fields.map((cf) => (
+                        <div key={cf.id}>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">{cf.field_name}{cf.is_required ? " *" : ""}</label>
+                          <input
+                            value={editSampleCustomFields[cf.field_name] ?? ""}
+                            onChange={(e) => setEditSampleCustomFields((prev) => ({ ...prev, [cf.field_name]: e.target.value }))}
+                            className="border rounded px-3 py-2 text-sm w-full"
+                          />
+                        </div>
+                      ))}
                     </div>
                     {editSampleError && (
                       <p className="text-red-600 text-sm mt-3">{editSampleError}</p>
@@ -861,52 +989,103 @@ export default function ExperimentDetailPage() {
           )}
 
           {activeTab === "batches" && (
-            <div>
-              <button
-                onClick={() => setShowBatchForm(!showBatchForm)}
-                className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700 mb-4"
-              >
-                Create Batch
-              </button>
-
-              {showBatchForm && (
-                <div className="bg-white rounded-lg shadow p-4 mb-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    <input placeholder="Batch Name *" value={batchForm.name} onChange={(e) => setBatchForm({ ...batchForm, name: e.target.value })} className="border rounded px-3 py-2 text-sm" />
-                    <input type="date" placeholder="Prep Date" value={batchForm.prep_date ?? ""} onChange={(e) => setBatchForm({ ...batchForm, prep_date: e.target.value || null })} className="border rounded px-3 py-2 text-sm" />
-                    <input placeholder="Sequencer Run ID" value={batchForm.sequencer_run_id ?? ""} onChange={(e) => setBatchForm({ ...batchForm, sequencer_run_id: e.target.value || null })} className="border rounded px-3 py-2 text-sm" />
-                    <VocabularySelect fieldName="instrument_model" value={batchForm.instrument_model} onChange={(v) => setBatchForm({ ...batchForm, instrument_model: v })} placeholder="Instrument Model..." />
-                    <VocabularySelect fieldName="quality_score_encoding" value={batchForm.quality_score_encoding} onChange={(v) => setBatchForm({ ...batchForm, quality_score_encoding: v })} placeholder="Quality Encoding..." />
-                    <input placeholder="Notes" value={batchForm.notes ?? ""} onChange={(e) => setBatchForm({ ...batchForm, notes: e.target.value || null })} className="border rounded px-3 py-2 text-sm" />
-                  </div>
-                  <div className="flex gap-2 mt-3">
-                    <button onClick={handleAddBatch} className="bg-bioaf-600 text-white px-4 py-1.5 rounded text-sm">Save</button>
-                    <button onClick={() => setShowBatchForm(false)} className="border px-4 py-1.5 rounded text-sm">Cancel</button>
-                  </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Sample Batches */}
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold">Sample Batches</h3>
+                  <button
+                    onClick={() => setShowBatchForm(!showBatchForm)}
+                    className="bg-bioaf-600 text-white px-3 py-1.5 rounded text-sm hover:bg-bioaf-700"
+                  >
+                    Create Sample Batch
+                  </button>
                 </div>
-              )}
 
-              <div className="grid gap-4">
-                {batches.map((b) => (
-                  <div key={b.id} className="bg-white rounded-lg shadow p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="font-semibold">{b.name}</h3>
-                        <p className="text-sm text-gray-500">{b.sample_count} samples</p>
-                      </div>
-                      <div className="text-sm text-gray-500 flex flex-wrap gap-x-4">
-                        {b.prep_date && <span>Prep: {b.prep_date}</span>}
-                        {b.sequencer_run_id && <span>Run: {b.sequencer_run_id}</span>}
-                        {b.instrument_model && <span>{b.instrument_model}</span>}
-                        {b.instrument_platform && <span className="text-xs bg-gray-100 px-2 py-0.5 rounded">{b.instrument_platform}</span>}
-                      </div>
+                {showBatchForm && (
+                  <div className="bg-white rounded-lg shadow p-4 mb-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <input placeholder="Batch Name *" value={batchForm.name} onChange={(e) => setBatchForm({ ...batchForm, name: e.target.value })} className="border rounded px-3 py-2 text-sm" />
+                      <input type="date" placeholder="Prep Date" value={batchForm.prep_date ?? ""} onChange={(e) => setBatchForm({ ...batchForm, prep_date: e.target.value || null })} className="border rounded px-3 py-2 text-sm" />
+                      <input placeholder="Notes" value={batchForm.notes ?? ""} onChange={(e) => setBatchForm({ ...batchForm, notes: e.target.value || null })} className="border rounded px-3 py-2 text-sm col-span-2" />
                     </div>
-                    {b.notes && <p className="text-sm text-gray-500 mt-2">{b.notes}</p>}
+                    <div className="flex gap-2 mt-3">
+                      <button onClick={handleAddBatch} className="bg-bioaf-600 text-white px-4 py-1.5 rounded text-sm">Save</button>
+                      <button onClick={() => setShowBatchForm(false)} className="border px-4 py-1.5 rounded text-sm">Cancel</button>
+                    </div>
                   </div>
-                ))}
-                {batches.length === 0 && (
-                  <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">No batches yet</div>
                 )}
+
+                <div className="grid gap-3">
+                  {batches.map((b) => (
+                    <div key={b.id} className="bg-white rounded-lg shadow p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-semibold">{b.name}</h4>
+                          <p className="text-sm text-gray-500">{b.sample_count} samples</p>
+                        </div>
+                        <div className="text-sm text-gray-500">
+                          {b.prep_date && <span>Prep: {b.prep_date}</span>}
+                        </div>
+                      </div>
+                      {b.notes && <p className="text-sm text-gray-500 mt-2">{b.notes}</p>}
+                    </div>
+                  ))}
+                  {batches.length === 0 && (
+                    <div className="bg-white rounded-lg shadow p-6 text-center text-gray-400 text-sm">No sample batches yet</div>
+                  )}
+                </div>
+              </div>
+
+              {/* Sequencing Batches */}
+              <div>
+                <h3 className="text-lg font-semibold mb-4">Sequencing Batches</h3>
+                <div className="grid gap-3">
+                  {seqBatches.map((sb) => {
+                    const statusColors: Record<string, string> = {
+                      pending: "bg-gray-100 text-gray-700",
+                      ingesting: "bg-blue-100 text-blue-700",
+                      complete: "bg-green-100 text-green-700",
+                      partial_complete: "bg-yellow-100 text-yellow-700",
+                      failed: "bg-red-100 text-red-700",
+                    };
+                    const progress = sb.expected_file_count ? Math.round((sb.ingested_file_count / sb.expected_file_count) * 100) : 0;
+
+                    return (
+                      <div key={sb.id} className="bg-white rounded-lg shadow p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <div>
+                            <h4 className="font-semibold">{sb.code}</h4>
+                            {sb.instrument_model && <p className="text-sm text-gray-500">{sb.instrument_model}</p>}
+                          </div>
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusColors[sb.status] || "bg-gray-100"}`}>
+                            {sb.status.replace("_", " ")}
+                          </span>
+                        </div>
+                        {sb.expected_file_count && (
+                          <div className="mt-2">
+                            <div className="flex justify-between text-xs text-gray-500 mb-1">
+                              <span>Files: {sb.ingested_file_count}/{sb.expected_file_count}</span>
+                              <span>{progress}%</span>
+                            </div>
+                            <div className="w-full bg-gray-200 rounded-full h-1.5">
+                              <div
+                                className={`h-1.5 rounded-full ${sb.status === "complete" ? "bg-green-500" : sb.status === "failed" ? "bg-red-500" : "bg-blue-500"}`}
+                                style={{ width: `${progress}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                        {sb.manifest_received_at && (
+                          <p className="text-xs text-gray-400 mt-2">Received: {new Date(sb.manifest_received_at).toLocaleString()}</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {seqBatches.length === 0 && (
+                    <div className="bg-white rounded-lg shadow p-6 text-center text-gray-400 text-sm">No sequencing batches linked to this experiment</div>
+                  )}
+                </div>
               </div>
             </div>
           )}

@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.analysis_snapshot import AnalysisSnapshot
-from app.models.batch import Batch
+from app.models.sample_batch import SampleBatch
 from app.models.experiment import Experiment
 from app.models.experiment_custom_field import ExperimentCustomField
 from app.models.file import File
@@ -214,11 +214,11 @@ class ProvenanceDataGatherer:
                     seen_refs.add(ref.id)
 
         # Batches, notebook sessions, QC dashboards (for audit trail)
-        all_batches: list[Batch] = []
+        all_batches: list[SampleBatch] = []
         all_notebook_sessions: list[ComputeSession] = []
         all_qc_dashboards: list[QCDashboard] = []
         if exp_ids:
-            batch_result = await session.execute(select(Batch).where(Batch.experiment_id.in_(exp_ids)))
+            batch_result = await session.execute(select(SampleBatch).where(SampleBatch.experiment_id.in_(exp_ids)))
             all_batches = list(batch_result.scalars().all())
             ns_result = await session.execute(select(ComputeSession).where(ComputeSession.experiment_id.in_(exp_ids)))
             all_notebook_sessions = list(ns_result.scalars().all())
@@ -239,7 +239,7 @@ class ProvenanceDataGatherer:
         for f in files:
             audit_pairs.append(("file", f.id))
         for b in all_batches:
-            audit_pairs.append(("batch", b.id))
+            audit_pairs.append(("sample_batch", b.id))
         for ns in all_notebook_sessions:
             audit_pairs.append(("notebook_session", ns.id))
         for qc in all_qc_dashboards:
@@ -332,7 +332,7 @@ class ProvenanceDataGatherer:
         samples = sample_result.scalars().all()
 
         # Batches
-        batch_result = await session.execute(select(Batch).where(Batch.experiment_id == experiment_id))
+        batch_result = await session.execute(select(SampleBatch).where(SampleBatch.experiment_id == experiment_id))
         batches = batch_result.scalars().all()
         for b in batches:
             user_ids.add(b.operator_user_id)
@@ -394,7 +394,7 @@ class ProvenanceDataGatherer:
         for f in files:
             audit_pairs.append(("file", f.id))
         for b in batches:
-            audit_pairs.append(("batch", b.id))
+            audit_pairs.append(("sample_batch", b.id))
         for ns in notebook_sessions:
             audit_pairs.append(("notebook_session", ns.id))
         for qc in qc_dashboards:
@@ -422,7 +422,7 @@ class ProvenanceDataGatherer:
                     "id": s.id,
                     "external_id": s.sample_id_external,
                     "experiment_id": s.experiment_id,
-                    "batch_id": s.batch_id,
+                    "sample_batch_id": s.sample_batch_id,
                     "biological": {
                         "organism": s.organism,
                         "tissue_type": s.tissue_type,
@@ -455,7 +455,6 @@ class ProvenanceDataGatherer:
                     "id": b.id,
                     "name": b.name,
                     "prep_date": _dt(b.prep_date),
-                    "instrument_model": b.instrument_model,
                     "operator": _user_ref(user_map, b.operator_user_id),
                 }
                 for b in batches
@@ -571,15 +570,14 @@ class ProvenanceDataGatherer:
 
         # Batch
         batch_data = None
-        if sample.batch_id:
-            batch_result = await session.execute(select(Batch).where(Batch.id == sample.batch_id))
+        if sample.sample_batch_id:
+            batch_result = await session.execute(select(SampleBatch).where(SampleBatch.id == sample.sample_batch_id))
             batch = batch_result.scalar_one_or_none()
             if batch:
                 user_ids.add(batch.operator_user_id)
                 batch_data = {
                     "id": batch.id,
                     "name": batch.name,
-                    "instrument_model": batch.instrument_model,
                     "prep_date": _dt(batch.prep_date),
                 }
 

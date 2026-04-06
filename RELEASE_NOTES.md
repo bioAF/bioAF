@@ -1,5 +1,48 @@
 # Release Notes
 
+## v0.5.2
+
+Batch UX rework, custom fields, and entity snapshots.
+
+### Batch UX
+
+- Batches are now text fields on samples with find-or-create behavior instead of separate management pages with ID assignment
+- Sample batches scoped per experiment, sequencing batches scoped per organization
+- Batch codes added to sample field defaults at experiment creation
+- CSV upload columns renamed to user-facing `sample_batch` and `sequencing_batch`
+- Batches tab renamed from "Sample Batches" and counter removed
+
+### Custom Fields
+
+- Custom fields section on experiment create always visible (no longer gated behind template selection)
+- Template-driven custom fields auto-populate; users can add arbitrary fields on top
+- Custom fields support `is_required` flag with migration 059
+- Custom fields editable on experiment detail page overview
+- Experiment custom fields now inherited by samples as per-sample values (migration 060, new `sample_custom_fields` table)
+- Sample create/edit forms render experiment custom field inputs
+- Sample view modal displays custom field values
+
+### Entity Snapshots
+
+- Entity snapshots model and migration for point-in-time metadata capture
+- Snapshot integration into audit service with optional snapshot parameter
+
+### Manifest-Driven Ingest (foundation)
+
+- Sequencing batch and manifest entry models with API
+- Manifest parsing service for md5sum and CSV formats
+- Manifest retry service for pending file verification
+- Activity feed logging for manifest ingest events
+- Sample completeness trigger and trigger_on schema field
+- Auto-ingest manifest configuration UI
+- This lays the groundwork for pipeline automation but does not finalize it
+
+### Other
+
+- Restored dropped columns on `sample_batches` (instrument model, platform, quality score encoding, sequencer run ID)
+- GEO export reads instrument from sequencing batch
+- Dropdown widths in field defaults now match text input widths
+
 ## v0.5.1
 
 Improve notebook file selection UX.

@@ -6,7 +6,8 @@ from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
 
 from app.models.audit_log import AuditLog
-from app.models.batch import Batch
+from app.models.sample_batch import SampleBatch
+from app.services.snapshot_utils import serialize_entity
 from app.models.experiment import Experiment, EXPERIMENT_STATUS_TRANSITIONS
 from app.models.experiment_custom_field import ExperimentCustomField
 from app.models.experiment_field_default import ExperimentFieldDefault
@@ -50,6 +51,7 @@ class ExperimentService:
                     field_name=cf.field_name,
                     field_value=cf.field_value,
                     field_type=cf.field_type,
+                    is_required=cf.is_required,
                 )
                 session.add(custom_field)
             await session.flush()
@@ -72,6 +74,7 @@ class ExperimentService:
             entity_id=experiment.id,
             action="create",
             details={"name": data.name, "status": "registered"},
+            snapshot=serialize_entity(experiment),
         )
         return experiment
 
@@ -130,7 +133,31 @@ class ExperimentService:
                 for fd in data.field_defaults
             ]
 
+        if data.custom_fields is not None:
+            # Delete existing custom fields and replace
+            existing_cf = await session.execute(
+                select(ExperimentCustomField).where(ExperimentCustomField.experiment_id == experiment_id)
+            )
+            for row in existing_cf.scalars().all():
+                await session.delete(row)
+            await session.flush()
+
+            for cf in data.custom_fields:
+                custom_field = ExperimentCustomField(
+                    experiment_id=experiment_id,
+                    field_name=cf.field_name,
+                    field_value=cf.field_value,
+                    field_type=cf.field_type,
+                    is_required=cf.is_required,
+                )
+                session.add(custom_field)
+            updates["custom_fields"] = [
+                {"field_name": cf.field_name, "field_value": cf.field_value, "is_required": cf.is_required}
+                for cf in data.custom_fields
+            ]
+
         if updates:
+            snap = serialize_entity(experiment)
             await session.flush()
             await log_action(
                 session,
@@ -140,6 +167,7 @@ class ExperimentService:
                 action="update",
                 details=updates,
                 previous_value=previous,
+                snapshot=snap,
             )
         return experiment
 
@@ -167,6 +195,7 @@ class ExperimentService:
 
         old_status = experiment.status
         experiment.status = new_status
+        snap = serialize_entity(experiment)
         await session.flush()
 
         await log_action(
@@ -177,6 +206,7 @@ class ExperimentService:
             action="status_change",
             details={"status": new_status},
             previous_value={"status": old_status},
+            snapshot=snap,
         )
 
         asyncio.create_task(
@@ -204,7 +234,7 @@ class ExperimentService:
             select(Experiment)
             .options(
                 selectinload(Experiment.samples),
-                selectinload(Experiment.batches),
+                selectinload(Experiment.sample_batches),
                 selectinload(Experiment.custom_fields),
                 selectinload(Experiment.field_defaults),
                 selectinload(Experiment.project),
@@ -253,7 +283,7 @@ class ExperimentService:
                 selectinload(Experiment.project),
                 selectinload(Experiment.owner),
                 selectinload(Experiment.samples),
-                selectinload(Experiment.batches),
+                selectinload(Experiment.sample_batches),
                 selectinload(Experiment.template),
             )
             .order_by(Experiment.created_at.desc())
@@ -279,6 +309,7 @@ class ExperimentService:
 
         old_status = experiment.status
         experiment.status = "deleted"
+        snap = serialize_entity(experiment)
         await session.flush()
 
         await log_action(
@@ -289,6 +320,7 @@ class ExperimentService:
             action="delete",
             details={"status": "deleted"},
             previous_value={"status": old_status},
+            snapshot=snap,
         )
         return experiment
 
@@ -321,8 +353,8 @@ class ExperimentService:
         if sample_ids:
             conditions.append((AuditLog.entity_type == "sample") & (AuditLog.entity_id.in_(sample_ids)))
         conditions.append(
-            (AuditLog.entity_type == "batch")
-            & (AuditLog.entity_id.in_(select(Batch.id).where(Batch.experiment_id == experiment_id)))
+            (AuditLog.entity_type.in_(["batch", "sample_batch"]))
+            & (AuditLog.entity_id.in_(select(SampleBatch.id).where(SampleBatch.experiment_id == experiment_id)))
         )
 
         base_query = select(AuditLog).where(or_(*conditions))

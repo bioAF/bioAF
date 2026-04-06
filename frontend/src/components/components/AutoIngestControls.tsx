@@ -7,6 +7,10 @@ interface AutoIngestStatus {
   enabled: boolean;
   cleanup_policy: string;
   default_delay_minutes: number;
+  manifest_filename: string;
+  manifest_format: string;
+  manifest_retry_interval_minutes: number;
+  manifest_max_retries: number;
   listener_running: boolean;
   pubsub_topic: string | null;
   pubsub_subscription: string | null;
@@ -134,6 +138,23 @@ export function AutoIngestControls({
     }
   };
 
+  const handleManifestUpdate = async (updates: Record<string, string | number>) => {
+    setLoading(true);
+    try {
+      await api.post("/api/v1/settings/auto-ingest", {
+        enabled: status?.enabled ?? false,
+        cleanup_policy: status?.cleanup_policy || "delete_after_copy",
+        ...updates,
+      });
+      const updated = await api.get<AutoIngestStatus>("/api/v1/settings/auto-ingest");
+      setStatus(updated);
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const dotColor = status?.enabled
     ? status.listener_running
       ? "bg-green-500"
@@ -230,6 +251,68 @@ export function AutoIngestControls({
               before triggering pipelines. Increase if pipelines run with
               incomplete datasets.
             </p>
+          </div>
+
+          <div className="border-t border-gray-200 pt-3">
+            <p className="text-xs font-medium text-gray-700 uppercase tracking-wide mb-2">Manifest Configuration</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="manifest-filename" className="text-xs text-gray-600 block mb-1">Manifest filename</label>
+                <input
+                  id="manifest-filename"
+                  type="text"
+                  value={status.manifest_filename}
+                  onChange={(e) => handleManifestUpdate({ manifest_filename: e.target.value })}
+                  disabled={loading}
+                  className="text-xs border border-gray-300 rounded px-2 py-1 w-full"
+                />
+              </div>
+              <div>
+                <label htmlFor="manifest-format" className="text-xs text-gray-600 block mb-1">Manifest format</label>
+                <select
+                  id="manifest-format"
+                  value={status.manifest_format}
+                  onChange={(e) => handleManifestUpdate({ manifest_format: e.target.value })}
+                  disabled={loading}
+                  className="text-xs border border-gray-300 rounded px-2 py-1 w-full"
+                >
+                  <option value="md5sum">md5sum</option>
+                  <option value="csv">CSV</option>
+                </select>
+              </div>
+              <div>
+                <label htmlFor="retry-interval" className="text-xs text-gray-600 block mb-1">Retry interval (min)</label>
+                <input
+                  id="retry-interval"
+                  type="number"
+                  min="1"
+                  max="1440"
+                  value={status.manifest_retry_interval_minutes}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    if (!isNaN(val) && val > 0) handleManifestUpdate({ manifest_retry_interval_minutes: val });
+                  }}
+                  disabled={loading}
+                  className="text-xs border border-gray-300 rounded px-2 py-1 w-full"
+                />
+              </div>
+              <div>
+                <label htmlFor="max-retries" className="text-xs text-gray-600 block mb-1">Max retries</label>
+                <input
+                  id="max-retries"
+                  type="number"
+                  min="1"
+                  max="500"
+                  value={status.manifest_max_retries}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    if (!isNaN(val) && val > 0) handleManifestUpdate({ manifest_max_retries: val });
+                  }}
+                  disabled={loading}
+                  className="text-xs border border-gray-300 rounded px-2 py-1 w-full"
+                />
+              </div>
+            </div>
           </div>
 
           <div className="flex gap-4 text-xs text-gray-500">

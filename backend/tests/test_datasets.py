@@ -72,7 +72,7 @@ async def test_search_datasets_empty_org(client, admin_token):
 @pytest_asyncio.fixture
 async def experiment_with_samples_and_batches(session, admin_user):
     """Create two experiments with different molecule_type, instrument_model, and review verdicts."""
-    from app.models.batch import Batch
+    from app.models.sample_batch import SampleBatch
     from app.models.experiment import Experiment
     from app.models.pipeline_run import PipelineRun
     from app.models.pipeline_run_review import PipelineRunReview
@@ -88,13 +88,13 @@ async def experiment_with_samples_and_batches(session, admin_user):
     session.add(exp1)
     await session.flush()
 
-    batch1 = Batch(experiment_id=exp1.id, name="Batch-1", instrument_model="NovaSeq 6000")
+    batch1 = SampleBatch(experiment_id=exp1.id, name="Batch-1")
     session.add(batch1)
     await session.flush()
 
     sample1 = Sample(
         experiment_id=exp1.id,
-        batch_id=batch1.id,
+        sample_batch_id=batch1.id,
         organism="Human",
         molecule_type="total RNA",
     )
@@ -128,13 +128,13 @@ async def experiment_with_samples_and_batches(session, admin_user):
     session.add(exp2)
     await session.flush()
 
-    batch2 = Batch(experiment_id=exp2.id, name="Batch-2", instrument_model="NextSeq 2000")
+    batch2 = SampleBatch(experiment_id=exp2.id, name="Batch-2")
     session.add(batch2)
     await session.flush()
 
     sample2 = Sample(
         experiment_id=exp2.id,
-        batch_id=batch2.id,
+        sample_batch_id=batch2.id,
         organism="Mouse",
         molecule_type="mRNA",
     )
@@ -178,6 +178,7 @@ async def test_filter_by_molecule_type(client, admin_token, experiment_with_samp
 
 @pytest.mark.asyncio
 async def test_filter_by_instrument_model(client, admin_token, experiment_with_samples_and_batches):
+    """Instrument model filtering returns empty until POBatch is implemented."""
     exp1, exp2 = experiment_with_samples_and_batches
     resp = await client.get(
         "/api/datasets?instrument_model=NextSeq+2000",
@@ -185,9 +186,8 @@ async def test_filter_by_instrument_model(client, admin_token, experiment_with_s
     )
     assert resp.status_code == 200
     data = resp.json()
-    ids = [d["experiment_id"] for d in data["experiments"]]
-    assert exp2.id in ids
-    assert exp1.id not in ids
+    # instrument_model moved from SampleBatch to POBatch; filter yields empty for now
+    assert data["experiments"] == []
 
 
 @pytest.mark.asyncio
@@ -216,7 +216,8 @@ async def test_response_includes_filter_fields(client, admin_token, experiment_w
     match = next((d for d in data["experiments"] if d["experiment_id"] == exp1.id), None)
     assert match is not None
     assert match["molecule_type"] == "total RNA"
-    assert match["instrument_model"] == "NovaSeq 6000"
+    # instrument_model moved from SampleBatch to POBatch; None until POBatch implemented
+    assert match["instrument_model"] is None
     assert match["review_status"] == "approved"
 
 

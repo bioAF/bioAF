@@ -13,6 +13,8 @@ DEFAULTABLE_SAMPLE_FIELDS = [
     "donor_source",
     "treatment_condition",
     "chemistry_version",
+    "sample_batch_code",
+    "sequencing_batch_code",
     "molecule_type",
     "library_prep_method",
     "library_layout",

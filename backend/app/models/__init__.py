@@ -7,7 +7,7 @@ from app.models.project_sample import ProjectSample
 from app.models.analysis_snapshot import AnalysisSnapshot
 from app.models.experiment import Experiment
 from app.models.sample import Sample
-from app.models.batch import Batch
+from app.models.sample_batch import SampleBatch
 from app.models.experiment_template import ExperimentTemplate
 from app.models.experiment_custom_field import ExperimentCustomField
 from app.models.experiment_field_default import ExperimentFieldDefault
@@ -54,7 +54,11 @@ from app.models.orphaned_resource import OrphanedResource
 from app.models.session_credential import SessionCredential
 from app.models.pipeline_run_input_file import PipelineRunInputFile
 from app.models.notebook_session_file import NotebookSessionFile
+from app.models.sequencing_batch import SequencingBatch
+from app.models.manifest_entry import ManifestEntry
+from app.models.entity_snapshot import EntitySnapshot
 from app.models.role import Role, RolePermission
+from app.models.sample_custom_field import SampleCustomField
 
 __all__ = [
     "User",
@@ -69,7 +73,7 @@ __all__ = [
     "AnalysisSnapshot",
     "Experiment",
     "Sample",
-    "Batch",
+    "SampleBatch",
     "ExperimentTemplate",
     "ExperimentCustomField",
     "ExperimentFieldDefault",
@@ -118,6 +122,10 @@ __all__ = [
     "SessionCredential",
     "PipelineRunInputFile",
     "NotebookSessionFile",
+    "SequencingBatch",
+    "ManifestEntry",
+    "EntitySnapshot",
     "Role",
     "RolePermission",
+    "SampleCustomField",
 ]

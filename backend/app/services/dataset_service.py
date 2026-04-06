@@ -4,7 +4,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.batch import Batch
 from app.models.cellxgene_publication import CellxgenePublication
 from app.models.experiment import Experiment
 from app.models.sample import Sample
@@ -81,14 +80,9 @@ class DatasetService:
             if molecule_type and not any(s.molecule_type == molecule_type for s in samples):
                 continue
 
-            # Instrument model from batches
-            batch_result = await session.execute(
-                select(Batch.instrument_model).where(Batch.experiment_id == exp.id, Batch.instrument_model.is_not(None))
-            )
-            instrument_models = [row[0] for row in batch_result.all()]
-            top_instrument = max(set(instrument_models), key=instrument_models.count) if instrument_models else None
-
-            if instrument_model and instrument_model not in instrument_models:
+            # Instrument model filtering (will be re-added with POBatch/sequencing batches)
+            top_instrument = None
+            if instrument_model:
                 continue
 
             # Review status from pipeline run reviews (latest non-superseded)
