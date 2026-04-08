@@ -7,7 +7,7 @@ from app.schemas.sample import SampleCreate
 
 # All user-facing sample fields (excludes internal fields like id, status, experiment_id)
 SAMPLE_FIELDS = [
-    "sample_id_external",
+    "sample_id_unique",
     "organism",
     "tissue_type",
     "donor_source",
@@ -25,13 +25,16 @@ SAMPLE_FIELDS = [
     "collection_method",
     "sample_batch",
     "sequencing_batch",
+    "sequencing_batch_position",
 ]
 
 # Maps common CSV header names to sample model field names
 COLUMN_MAP = {
-    "sample_id": "sample_id_external",
-    "external_id": "sample_id_external",
-    "sample_id_external": "sample_id_external",
+    "sample": "sample_id_unique",
+    "sample_id": "sample_id_unique",
+    "sample_id_unique": "sample_id_unique",
+    "sample_id_external": "sample_id_unique",
+    "external_id": "sample_id_unique",
     "organism": "organism",
     "tissue": "tissue_type",
     "tissue_type": "tissue_type",
@@ -59,14 +62,17 @@ COLUMN_MAP = {
     "sequencing_batch": "sequencing_batch_code",
     "sequencing_batch_code": "sequencing_batch_code",
     "seq_batch": "sequencing_batch_code",
+    "sequencing_batch_position": "sequencing_batch_position",
+    "seq_batch_position": "sequencing_batch_position",
+    "batch_position": "sequencing_batch_position",
 }
 
-NUMERIC_FIELDS = {"viability_pct", "cell_count"}
+NUMERIC_FIELDS = {"viability_pct", "cell_count", "sequencing_batch_position"}
 DATETIME_FIELDS = {"collection_timestamp"}
 
 # Example values for the template CSV
 _EXAMPLE_VALUES = {
-    "sample_id_external": "SAMPLE-001",
+    "sample_id_unique": "SAMPLE-001",
     "organism": "Homo sapiens",
     "tissue_type": "PBMC",
     "donor_source": "Donor-A",
@@ -141,7 +147,7 @@ def _convert_value(field_name: str, raw_val: str) -> tuple[Any, str | None]:
     """
     if field_name in NUMERIC_FIELDS:
         try:
-            if field_name == "cell_count":
+            if field_name in ("cell_count", "sequencing_batch_position"):
                 return int(raw_val), None
             return float(raw_val), None
         except ValueError:

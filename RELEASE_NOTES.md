@@ -1,5 +1,37 @@
 # Release Notes
 
+## v0.5.5
+
+Auto-ingest pipeline hardening and manifest-driven file association. Groundwork for the upcoming auto-run pipeline feature.
+
+### Auto-Ingest Fixes
+
+- Pass stored GCP service account credentials through all downstream GCS operations (manifest reads, file copies, cleanup deletes)
+- Fix double-delete: skip cleanup when move_file already deletes the source
+- Fix duplicate manifest entries on Pub/Sub message redelivery
+- Fix ManifestEntry reconciliation when duplicate pending entries exist
+- Convert base64 MD5 from GCS Pub/Sub to hex for manifest checksum comparison
+- Move manifest reconciliation before file copy so resolved experiment IDs determine the GCS prefix
+
+### Manifest-Driven Sample Linkage
+
+- Derive experiment and project from resolved samples in manifest ingest
+- Create sample_files junction rows during file ingest for manifest-resolved samples
+- Set file.experiment_id from manifest resolution so files appear in the correct experiment
+- Add batch-position mapping via sample_index (S-number) segment in naming profiles
+
+### UI
+
+- Replace Sample Batch, Seq. Batch, and Pos. columns on the samples table with a Files count column
+- Fix CSV upload custom field storage and mapping
+- Fix auto-ingest settings save and listener restart behavior
+
+### Housekeeping
+
+- Rename sample_id_external to sample_id_unique across the codebase (DB column unchanged, additive-only)
+- Fix file deletion blocked by manifest_entries FK constraint
+- Fix serialize_entity to handle attribute/column name mismatches
+
 ## v0.5.4
 
 Bug fix for database restore and UI cleanup on the Backup & Recovery page.

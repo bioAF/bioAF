@@ -23,7 +23,7 @@ def _complete_experiment():
 def _complete_sample(sid: int = 101, name: str = "PBMC_001"):
     return {
         "id": sid,
-        "sample_id_external": name,
+        "sample_id_unique": name,
         "organism": "Homo sapiens",
         "molecule_type": "total RNA",
         "tissue_type": "blood",

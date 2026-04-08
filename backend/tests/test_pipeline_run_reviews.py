@@ -82,7 +82,7 @@ async def experiment_and_run(client, admin_token, session):
     # Create sample
     resp = await client.post(
         f"/api/experiments/{experiment_id}/samples",
-        json={"sample_id_external": "S001", "organism": "Human"},
+        json={"sample_id_unique": "S001", "organism": "Human"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     sample_id = resp.json()["id"]

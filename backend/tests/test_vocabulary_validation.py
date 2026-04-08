@@ -40,7 +40,7 @@ async def test_create_sample_with_valid_minseqe_fields(client, admin_token, expe
     response = await client.post(
         f"/api/experiments/{experiment_id}/samples",
         json={
-            "sample_id_external": "S001",
+            "sample_id_unique": "S001",
             "organism": "Human",
             "molecule_type": "total RNA",
             "library_prep_method": "10x Chromium 3' v3.1",
@@ -59,7 +59,7 @@ async def test_create_sample_with_invalid_molecule_type(client, admin_token, exp
     response = await client.post(
         f"/api/experiments/{experiment_id}/samples",
         json={
-            "sample_id_external": "S002",
+            "sample_id_unique": "S002",
             "molecule_type": "invalid_type",
         },
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -72,7 +72,7 @@ async def test_create_sample_with_null_molecule_type(client, admin_token, experi
     response = await client.post(
         f"/api/experiments/{experiment_id}/samples",
         json={
-            "sample_id_external": "S003",
+            "sample_id_unique": "S003",
             "molecule_type": None,
         },
         headers={"Authorization": f"Bearer {admin_token}"},

@@ -142,7 +142,7 @@ export interface Project {
 
 export interface ProjectSampleResponse {
   sample_id: number;
-  sample_id_external: string | null;
+  sample_id_unique: string | null;
   organism: string | null;
   tissue_type: string | null;
   qc_status: QCStatus | null;
@@ -257,7 +257,7 @@ export interface CustomFieldResponse {
 
 export interface SampleBrief {
   id: number;
-  sample_id_external: string | null;
+  sample_id_unique: string | null;
   organism: string | null;
   tissue_type: string | null;
   molecule_type: string | null;
@@ -314,7 +314,7 @@ export interface SampleCustomFieldResponse {
 
 export interface Sample {
   id: number;
-  sample_id_external: string | null;
+  sample_id_unique: string | null;
   organism: string | null;
   tissue_type: string | null;
   donor_source: string | null;
@@ -322,6 +322,7 @@ export interface Sample {
   chemistry_version: string | null;
   sample_batch: SampleBatchSummary | null;
   sequencing_batch: { id: number; code: string } | null;
+  sequencing_batch_position: number | null;
   viability_pct: number | null;
   cell_count: number | null;
   prep_notes: string | null;
@@ -330,6 +331,7 @@ export interface Sample {
   library_layout: string | null;
   qc_status: QCStatus | null;
   qc_notes: string | null;
+  file_count: number;
   status: SampleStatus;
   created_at: string;
   updated_at: string;
@@ -428,7 +430,7 @@ export interface ExperimentCreateRequest {
 }
 
 export interface SampleCreateRequest {
-  sample_id_external?: string | null;
+  sample_id_unique?: string | null;
   organism?: string | null;
   tissue_type?: string | null;
   donor_source?: string | null;
@@ -448,7 +450,7 @@ export interface SampleCreateRequest {
 }
 
 export interface SampleUpdateRequest {
-  sample_id_external?: string | null;
+  sample_id_unique?: string | null;
   organism?: string | null;
   tissue_type?: string | null;
   donor_source?: string | null;
@@ -768,7 +770,7 @@ export interface PipelineRunDetail extends PipelineRun {
   processes: PipelineProcess[];
   samples: Array<{
     id: number;
-    sample_id_external: string | null;
+    sample_id_unique: string | null;
     organism: string | null;
   }>;
 }
@@ -1425,7 +1427,7 @@ export interface SnapshotComparison {
 
 export interface SegmentDefinition {
   position: number;
-  field: "date" | "project_code" | "experiment_code" | "sample_id" | "data_type" | "analysis_type" | "researcher_initials" | "version" | "organism" | "ignore" | "custom";
+  field: "date" | "project_code" | "experiment_code" | "sample_id" | "sample_index" | "data_type" | "analysis_type" | "researcher_initials" | "version" | "organism" | "ignore" | "custom";
   format?: string | null;
   required: boolean;
   custom_label?: string | null;

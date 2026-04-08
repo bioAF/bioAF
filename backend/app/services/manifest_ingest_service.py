@@ -10,6 +10,7 @@ import logging
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.experiment import Experiment
 from app.models.manifest_entry import ManifestEntry
 from app.models.sequencing_batch import SequencingBatch
 from app.services.manifest_parser import parse_manifest
@@ -60,6 +61,20 @@ async def process_manifest_ingest(
         )
         return seq_batch
 
+    # If the batch already has manifest entries, this is a redelivery.
+    # Return the existing batch to avoid creating duplicate entries.
+    if seq_batch:
+        existing_entries = await db.execute(
+            select(ManifestEntry).where(ManifestEntry.sequencing_batch_id == seq_batch.id).limit(1)
+        )
+        if existing_entries.scalar_one_or_none():
+            logger.info(
+                "Manifest redelivery for batch %s (org %d), skipping duplicate entry creation",
+                batch_number,
+                org_id,
+            )
+            return seq_batch
+
     if not seq_batch:
         seq_batch = SequencingBatch(
             organization_id=org_id,
@@ -93,6 +108,33 @@ async def process_manifest_ingest(
                 resolved_sample_id = resolution.sample_id
                 resolved_experiment_id = resolution.experiment_id
                 resolved_project_id = resolution.project_id
+
+            # If naming profile extracted a sample_index but didn't resolve
+            # a sample (no sample_id segment), try batch-position lookup
+            sample_index_str = parse.segments.get("sample_index")
+            if sample_index_str and not resolved_sample_id:
+                from app.services.sample_service import SampleService
+
+                sample = await SampleService.resolve_by_batch_position(db, seq_batch.id, int(sample_index_str))
+                if sample:
+                    resolved_sample_id = sample.id
+                    resolved_experiment_id = resolved_experiment_id or sample.experiment_id
+
+        # If we resolved a sample but not its experiment, derive from sample
+        if resolved_sample_id and not resolved_experiment_id:
+            from app.models.sample import Sample
+
+            sample_result = await db.execute(select(Sample).where(Sample.id == resolved_sample_id))
+            sample = sample_result.scalar_one_or_none()
+            if sample:
+                resolved_experiment_id = sample.experiment_id
+
+        # If we have an experiment but not a project, derive from experiment
+        if resolved_experiment_id and not resolved_project_id:
+            exp_result = await db.execute(select(Experiment).where(Experiment.id == resolved_experiment_id))
+            exp = exp_result.scalar_one_or_none()
+            if exp:
+                resolved_project_id = exp.project_id
 
         manifest_entry = ManifestEntry(
             sequencing_batch_id=seq_batch.id,

@@ -20,6 +20,7 @@ const SEGMENT_ROLES = [
   { value: "project_code", label: "Project" },
   { value: "experiment_code", label: "Experiment" },
   { value: "sample_id", label: "Sample" },
+  { value: "sample_index", label: "Sample Index (S-number)" },
   { value: "data_type", label: "Data type (e.g. R1, R2, I1)" },
   { value: "date", label: "Date" },
   { value: "version", label: "Version" },

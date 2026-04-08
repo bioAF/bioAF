@@ -19,7 +19,7 @@ def _complete_experiment():
 def _complete_sample():
     return {
         "id": 101,
-        "sample_id_external": "PBMC_001",
+        "sample_id_unique": "PBMC_001",
         "organism": "Homo sapiens",
         "molecule_type": "total RNA",
         "tissue_type": "blood",
@@ -170,8 +170,8 @@ def test_file_manifest_missing_checksums():
 def test_multiple_samples():
     """Multiple samples produce individual validation records."""
     samples = [
-        {**_complete_sample(), "id": 101, "sample_id_external": "S001"},
-        {**_complete_sample(), "id": 102, "sample_id_external": "S002", "organism": None},
+        {**_complete_sample(), "id": 101, "sample_id_unique": "S001"},
+        {**_complete_sample(), "id": 102, "sample_id_unique": "S002", "organism": None},
     ]
 
     report = validate_experiment_for_geo(

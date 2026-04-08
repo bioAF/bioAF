@@ -21,7 +21,7 @@ async def test_sample_create_creates_snapshot(client, admin_token, session):
     # Create sample
     sample_resp = await client.post(
         f"/api/experiments/{exp_id}/samples",
-        json={"sample_id_external": "SNAP001", "organism": "Human"},
+        json={"sample_id_unique": "SNAP001", "organism": "Human"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert sample_resp.status_code == 200
@@ -38,7 +38,7 @@ async def test_sample_create_creates_snapshot(client, admin_token, session):
     assert len(snapshots) >= 1
 
     snap = snapshots[0]
-    assert snap.snapshot_json["sample_id_external"] == "SNAP001"
+    assert snap.snapshot_json["sample_id_unique"] == "SNAP001"
     assert snap.snapshot_json["organism"] == "Human"
 
 
@@ -74,7 +74,7 @@ async def test_sample_update_creates_new_snapshot(client, admin_token, session):
 
     sample_resp = await client.post(
         f"/api/experiments/{exp_id}/samples",
-        json={"sample_id_external": "SNAP002"},
+        json={"sample_id_unique": "SNAP002"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     sample_id = sample_resp.json()["id"]

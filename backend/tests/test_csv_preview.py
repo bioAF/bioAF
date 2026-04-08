@@ -52,7 +52,7 @@ def test_preview_recognized_columns():
     assert len(result["errors"]) == 0
     # All columns should be recognized
     mapped_names = [c["mapped_to"] for c in result["recognized_columns"]]
-    assert "sample_id_external" in mapped_names
+    assert "sample_id_unique" in mapped_names
     assert "organism" in mapped_names
     assert "tissue_type" in mapped_names
     assert len(result["unknown_columns"]) == 0
@@ -66,7 +66,7 @@ def test_preview_detects_unknown_columns():
     assert "mystery_field" in unknown
     # Known columns should still be recognized
     mapped_names = [c["mapped_to"] for c in result["recognized_columns"]]
-    assert "sample_id_external" in mapped_names
+    assert "sample_id_unique" in mapped_names
     assert "organism" in mapped_names
 
 
@@ -77,7 +77,7 @@ def test_preview_returns_preview_rows():
     assert result["total_rows"] == 20
     # Preview should return at most 5 rows
     assert len(result["preview_rows"]) == 5
-    assert result["preview_rows"][0]["sample_id_external"] == "S001"
+    assert result["preview_rows"][0]["sample_id_unique"] == "S001"
 
 
 def test_preview_empty_file():
@@ -99,7 +99,7 @@ def test_preview_alternative_headers():
     content = b"external_id,tissue,donor\nEX1,Brain,Donor1\n"
     result = preview_sample_csv(content)
     mapped = {c["csv_header"]: c["mapped_to"] for c in result["recognized_columns"]}
-    assert mapped["external_id"] == "sample_id_external"
+    assert mapped["external_id"] == "sample_id_unique"
     assert mapped["tissue"] == "tissue_type"
     assert mapped["donor"] == "donor_source"
 
@@ -123,7 +123,7 @@ def test_parse_with_custom_field_mapping():
     # User says "cell_line" is a custom field
     samples, errors, _ = parse_sample_csv(content, experiment_id=1, column_mappings={"cell_line": "custom:cell_line"})
     assert len(samples) == 1
-    assert samples[0].sample_id_external == "S001"
+    assert samples[0].sample_id_unique == "S001"
     # Custom fields should be collected separately
     assert len(errors) == 0
 
@@ -198,7 +198,7 @@ async def test_template_download_endpoint(client, admin_token):
     # Should be parseable CSV
     reader = csv.reader(io.StringIO(response.text))
     headers = next(reader)
-    assert "sample_id_external" in headers
+    assert "sample_id_unique" in headers
     assert "organism" in headers
 
 

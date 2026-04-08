@@ -109,7 +109,7 @@ async def test_experiment_sequencing_batches(client, admin_token, session):
     # Create a sample in the experiment
     sample_resp = await client.post(
         f"/api/experiments/{exp_id}/samples",
-        json={"sample_id_external": "SB_SAMPLE001"},
+        json={"sample_id_unique": "SB_SAMPLE001"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     sample_id = sample_resp.json()["id"]

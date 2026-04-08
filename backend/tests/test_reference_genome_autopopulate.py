@@ -29,7 +29,7 @@ async def samples(session, experiment):
     for i in range(2):
         s = Sample(
             experiment_id=experiment.id,
-            sample_id_external=f"AUTOP_{i + 1}",
+            sample_id_unique=f"AUTOP_{i + 1}",
             organism="Homo sapiens",
         )
         session.add(s)

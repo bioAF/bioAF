@@ -100,7 +100,7 @@ class SampleSheetService:
         input_paths = parameters.get("input_paths", {})
 
         for sample in samples:
-            sample_name = sample.sample_id_external or f"sample_{sample.id}"
+            sample_name = sample.sample_id_unique or f"sample_{sample.id}"
             paths = input_paths.get(str(sample.id), [])
             expected_cells = parameters.get("expected_cells", 10000)
             if paths:
@@ -123,7 +123,7 @@ class SampleSheetService:
         input_paths = parameters.get("input_paths", {})
 
         for sample in samples:
-            sample_name = sample.sample_id_external or f"sample_{sample.id}"
+            sample_name = sample.sample_id_unique or f"sample_{sample.id}"
             paths = input_paths.get(str(sample.id), [])
             strandedness = parameters.get("strandedness", "auto")
             if paths:
@@ -146,7 +146,7 @@ class SampleSheetService:
         input_paths = parameters.get("input_paths", {})
 
         for sample in samples:
-            sample_name = sample.sample_id_external or f"sample_{sample.id}"
+            sample_name = sample.sample_id_unique or f"sample_{sample.id}"
             paths = input_paths.get(str(sample.id), [])
             if paths:
                 fastq_1 = paths[0] if len(paths) > 0 else ""

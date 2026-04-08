@@ -102,7 +102,7 @@ A naming profile defines:
 | `date` | File date, parsed according to `format` | `files.file_date` |
 | `project_code` | Short code identifying the project | Looked up in `project_code_mappings` -> `projects.id` |
 | `experiment_code` | Short code identifying the experiment | Looked up in `experiment_code_mappings` -> `experiments.id` |
-| `sample_id` | External sample identifier | `samples.sample_id_external` |
+| `sample_id` | External sample identifier | `samples.sample_id_unique` |
 | `data_type` | Type of data (RNA-Seq, ChIP-Seq, etc.) | Stored as experiment or file metadata |
 | `analysis_type` | Type of analysis | Stored as file metadata |
 | `researcher_initials` | Researcher who produced the file | Stored as file metadata |

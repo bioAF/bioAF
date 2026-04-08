@@ -133,7 +133,7 @@ class ExperimentListResponse(BaseModel):
 
 class SampleResponseBrief(BaseModel):
     id: int
-    sample_id_external: str | None
+    sample_id_unique: str | None
     organism: str | None
     tissue_type: str | None
     molecule_type: str | None = None

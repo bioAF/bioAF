@@ -86,7 +86,7 @@ async def export_experiment(client, admin_token, session, admin_user):
     s1 = Sample(
         experiment_id=exp_id,
         sample_batch_id=batch.id,
-        sample_id_external="S001",
+        sample_id_unique="S001",
         organism="Homo sapiens",
         molecule_type="total RNA",
         library_prep_method="10x Chromium 3' v3.1",

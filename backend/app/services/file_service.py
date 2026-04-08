@@ -197,6 +197,11 @@ class FileService:
 
         await session.execute(delete(NotebookSessionFile).where(NotebookSessionFile.file_id == file_id))
 
+        # Detach from manifest entries (keep entries for audit, just unlink the file)
+        await session.execute(
+            text("UPDATE manifest_entries SET file_id = NULL WHERE file_id = :fid").bindparams(fid=file_id)
+        )
+
         await session.delete(file)
         await session.flush()
         return True

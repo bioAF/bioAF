@@ -49,7 +49,7 @@ async def setup_data(session):
 
     sample = Sample(
         experiment_id=exp.id,
-        sample_id_external="S01-001",
+        sample_id_unique="S01-001",
         organism="Homo sapiens",
     )
     session.add(sample)

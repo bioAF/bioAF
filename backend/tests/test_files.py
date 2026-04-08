@@ -519,7 +519,7 @@ async def test_link_file_to_sample_returns_sample_ids(client, admin_token, sessi
 
     sample = Sample(
         experiment_id=exp.id,
-        sample_id_external="SMP-001",
+        sample_id_unique="SMP-001",
     )
     session.add(sample)
     await session.flush()
@@ -571,7 +571,7 @@ async def test_link_file_to_sample_idempotent(client, admin_token, session, admi
 
     sample = Sample(
         experiment_id=exp.id,
-        sample_id_external="SMP-002",
+        sample_id_unique="SMP-002",
     )
     session.add(sample)
     await session.flush()
@@ -624,7 +624,7 @@ async def test_list_files_includes_sample_ids(client, admin_token, session, admi
 
     sample = Sample(
         experiment_id=exp.id,
-        sample_id_external="SMP-003",
+        sample_id_unique="SMP-003",
     )
     session.add(sample)
     await session.flush()

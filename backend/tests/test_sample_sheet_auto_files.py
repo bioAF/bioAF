@@ -14,7 +14,7 @@ def _make_sample(sample_id: int, external_id: str, files: list[dict] | None = No
     """Create a mock sample with optional linked files."""
     sample = MagicMock()
     sample.id = sample_id
-    sample.sample_id_external = external_id
+    sample.sample_id_unique = external_id
     sample.files = files or []
     return sample
 

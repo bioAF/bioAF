@@ -9,9 +9,9 @@ def test_parse_valid_csv():
     samples, errors, _ = parse_sample_csv(content, experiment_id=1)
     assert len(samples) == 2
     assert len(errors) == 0
-    assert samples[0].sample_id_external == "S001"
+    assert samples[0].sample_id_unique == "S001"
     assert samples[0].organism == "Human"
-    assert samples[1].sample_id_external == "S002"
+    assert samples[1].sample_id_unique == "S002"
 
 
 def test_parse_tsv():
@@ -25,7 +25,7 @@ def test_parse_alternative_headers():
     content = b"external_id,tissue,donor,treatment,chemistry\nEX1,Brain,Donor1,Drug A,v3\n"
     samples, errors, _ = parse_sample_csv(content, experiment_id=1)
     assert len(samples) == 1
-    assert samples[0].sample_id_external == "EX1"
+    assert samples[0].sample_id_unique == "EX1"
     assert samples[0].tissue_type == "Brain"
     assert samples[0].donor_source == "Donor1"
     assert samples[0].treatment_condition == "Drug A"
