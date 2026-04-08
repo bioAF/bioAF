@@ -118,7 +118,7 @@ async def test_sample_inherits_experiment_defaults(client, admin_token, session)
     # Create sample without specifying organism, tissue_type, or molecule_type
     response = await client.post(
         f"/api/experiments/{exp_id}/samples",
-        json={"sample_id_external": "S001"},
+        json={"sample_id_unique": "S001"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert response.status_code == 200
@@ -148,7 +148,7 @@ async def test_sample_override_beats_experiment_default(client, admin_token, ses
     response = await client.post(
         f"/api/experiments/{exp_id}/samples",
         json={
-            "sample_id_external": "S002",
+            "sample_id_unique": "S002",
             "organism": "Mus musculus",
         },
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -178,8 +178,8 @@ async def test_bulk_samples_inherit_defaults(client, admin_token, session):
         f"/api/experiments/{exp_id}/samples/bulk",
         json={
             "samples": [
-                {"sample_id_external": "B001"},
-                {"sample_id_external": "B002", "organism": "Mus musculus"},
+                {"sample_id_unique": "B001"},
+                {"sample_id_unique": "B002", "organism": "Mus musculus"},
             ],
         },
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -193,7 +193,7 @@ async def test_bulk_samples_inherit_defaults(client, admin_token, session):
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     samples = samples_resp.json()
-    by_ext_id = {s["sample_id_external"]: s for s in samples}
+    by_ext_id = {s["sample_id_unique"]: s for s in samples}
     assert by_ext_id["B001"]["organism"] == "Homo sapiens"
     assert by_ext_id["B001"]["library_layout"] == "paired"
     assert by_ext_id["B002"]["organism"] == "Mus musculus"
@@ -230,7 +230,7 @@ async def test_field_default_requirement_override(client, admin_token, session):
     # Create sample without organism -- default should satisfy template requirement
     response = await client.post(
         f"/api/experiments/{exp_id}/samples",
-        json={"sample_id_external": "S003"},
+        json={"sample_id_unique": "S003"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert response.status_code == 200

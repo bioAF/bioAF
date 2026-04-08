@@ -86,8 +86,8 @@ async def test_ingest_copies_file_to_raw_bucket(client, admin_token, session, _s
 
 
 @pytest.mark.asyncio
-async def test_ingest_deletes_from_ingest_on_cleanup(client, admin_token, session, _setup_org_and_profile):
-    """With delete_after_copy policy, ingest bucket object is deleted after copy."""
+async def test_ingest_skips_cleanup_with_delete_after_copy(client, admin_token, session, _setup_org_and_profile):
+    """With delete_after_copy policy, cleanup is skipped because move_file already deletes the source."""
     from app.services.ingest_service import process_ingest_event
 
     mock_copy = AsyncMock(return_value="gs://bioaf-raw-testorg/experiments/1/PROJ1_EXP1_S001.fastq.gz")
@@ -110,9 +110,10 @@ async def test_ingest_deletes_from_ingest_on_cleanup(client, admin_token, sessio
         )
         await session.commit()
 
-    mock_cleanup.assert_called_once()
-    call_args = mock_cleanup.call_args
-    assert call_args[1].get("policy") == "delete_after_copy" or "delete_after_copy" in str(call_args)
+    mock_copy.assert_called_once()
+    # cleanup_ingest_file should NOT be called because move_file already
+    # deletes the source file as part of the copy+verify+delete sequence
+    mock_cleanup.assert_not_called()
 
 
 @pytest.mark.asyncio

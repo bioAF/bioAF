@@ -50,6 +50,7 @@ DATE_PATTERNS = {
 }
 
 VERSION_PATTERN = r"^[vV]\d+$"
+SAMPLE_INDEX_PATTERN = re.compile(r"^[Ss]?(\d+)$")
 
 
 def _strip_extension(filename: str) -> str:
@@ -134,6 +135,18 @@ def parse_filename(filename: str, profile: NamingProfile) -> ParseResult:
                 if required:
                     return ParseResult(success=False, error=f"Invalid version format at position {pos}: '{value}'")
                 continue
+        elif seg_field == "sample_index":
+            m = SAMPLE_INDEX_PATTERN.match(value)
+            if not m:
+                if required:
+                    return ParseResult(
+                        success=False,
+                        error=f"Invalid sample_index format at position {pos}: '{value}'",
+                    )
+                continue
+            # Store the numeric part only (strip S prefix)
+            parsed["sample_index"] = m.group(1)
+            continue
 
         if seg_field != "ignore":
             parsed[seg_field] = value
@@ -250,10 +263,10 @@ async def resolve_entities(
     sample_id_ext = segments.get("sample_id")
     if sample_id_ext:
         resolution.sample_name = sample_id_ext
-        result = await db.execute(select(Sample).where(Sample.sample_id_external == sample_id_ext))
+        result = await db.execute(select(Sample).where(Sample.sample_id_unique == sample_id_ext))
         sample = result.scalar_one_or_none()
         if sample:
             resolution.sample_id = sample.id
-            resolution.sample_name = sample.sample_id_external
+            resolution.sample_name = sample.sample_id_unique
 
     return resolution

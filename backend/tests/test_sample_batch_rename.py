@@ -181,7 +181,7 @@ async def test_assign_samples_endpoint(client: AsyncClient, admin_token: str):
     # Create a sample
     sample_resp = await client.post(
         f"/api/experiments/{exp_id}/samples",
-        json={"sample_id_external": "SAMPLE001"},
+        json={"sample_id_unique": "SAMPLE001"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     sample_id = sample_resp.json()["id"]

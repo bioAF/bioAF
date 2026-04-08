@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
@@ -67,6 +67,29 @@ class SampleService:
         return batch.id
 
     @staticmethod
+    async def _next_batch_position(session: AsyncSession, sequencing_batch_id: int) -> int:
+        """Return the next available position in a sequencing batch."""
+        result = await session.execute(
+            text(
+                "SELECT COALESCE(MAX(sequencing_batch_position), 0) + 1 FROM samples WHERE sequencing_batch_id = :bid"
+            ).bindparams(bid=sequencing_batch_id)
+        )
+        return result.scalar_one()
+
+    @staticmethod
+    async def resolve_by_batch_position(
+        session: AsyncSession, sequencing_batch_id: int, position: int
+    ) -> "Sample | None":
+        """Find a sample by its position within a sequencing batch."""
+        result = await session.execute(
+            select(Sample).where(
+                Sample.sequencing_batch_id == sequencing_batch_id,
+                Sample.sequencing_batch_position == position,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
     def _apply_defaults(data: SampleCreate, defaults: dict[str, str]) -> SampleCreate:
         """Return a copy of data with experiment-level defaults filled in for empty fields."""
         if not defaults:
@@ -131,18 +154,24 @@ class SampleService:
         if data.sample_batch_code:
             sample_batch_id = await SampleService._resolve_sample_batch(session, experiment_id, data.sample_batch_code)
         sequencing_batch_id = None
+        sequencing_batch_position = None
         if data.sequencing_batch_code:
             exp_result = await session.execute(select(Experiment).where(Experiment.id == experiment_id))
             exp = exp_result.scalar_one()
             sequencing_batch_id = await SampleService._resolve_sequencing_batch(
                 session, exp.organization_id, data.sequencing_batch_code
             )
+            if data.sequencing_batch_position is not None:
+                sequencing_batch_position = data.sequencing_batch_position
+            else:
+                sequencing_batch_position = await SampleService._next_batch_position(session, sequencing_batch_id)
 
         sample = Sample(
             experiment_id=experiment_id,
             sample_batch_id=sample_batch_id,
             sequencing_batch_id=sequencing_batch_id,
-            sample_id_external=data.sample_id_external,
+            sequencing_batch_position=sequencing_batch_position,
+            sample_id_unique=data.sample_id_unique,
             organism=data.organism,
             tissue_type=data.tissue_type,
             donor_source=data.donor_source,
@@ -183,7 +212,7 @@ class SampleService:
             action="create",
             details={
                 "experiment_id": experiment_id,
-                "sample_id_external": data.sample_id_external,
+                "sample_id_unique": data.sample_id_unique,
             },
             snapshot=serialize_entity(sample),
         )
@@ -222,6 +251,9 @@ class SampleService:
         exp_for_org = exp_result.scalar_one()
         org_id = exp_for_org.organization_id
 
+        # Track next positions per batch within this bulk operation
+        batch_position_tracker: dict[int, int] = {}
+
         created = []
         for data in samples_data:
             sample_batch_id = None
@@ -230,16 +262,31 @@ class SampleService:
                     session, experiment_id, data.sample_batch_code
                 )
             sequencing_batch_id = None
+            sequencing_batch_position = None
             if data.sequencing_batch_code:
                 sequencing_batch_id = await SampleService._resolve_sequencing_batch(
                     session, org_id, data.sequencing_batch_code
                 )
+                if data.sequencing_batch_position is not None:
+                    sequencing_batch_position = data.sequencing_batch_position
+                    # Update tracker to stay ahead of explicit positions
+                    current_max = batch_position_tracker.get(sequencing_batch_id, 0)
+                    if data.sequencing_batch_position >= current_max:
+                        batch_position_tracker[sequencing_batch_id] = data.sequencing_batch_position + 1
+                else:
+                    if sequencing_batch_id not in batch_position_tracker:
+                        batch_position_tracker[sequencing_batch_id] = await SampleService._next_batch_position(
+                            session, sequencing_batch_id
+                        )
+                    sequencing_batch_position = batch_position_tracker[sequencing_batch_id]
+                    batch_position_tracker[sequencing_batch_id] += 1
 
             sample = Sample(
                 experiment_id=experiment_id,
                 sample_batch_id=sample_batch_id,
                 sequencing_batch_id=sequencing_batch_id,
-                sample_id_external=data.sample_id_external,
+                sequencing_batch_position=sequencing_batch_position,
+                sample_id_unique=data.sample_id_unique,
                 organism=data.organism,
                 tissue_type=data.tissue_type,
                 donor_source=data.donor_source,
@@ -280,7 +327,7 @@ class SampleService:
                 action="create",
                 details={
                     "experiment_id": experiment_id,
-                    "sample_id_external": data.sample_id_external,
+                    "sample_id_unique": data.sample_id_unique,
                 },
                 snapshot=serialize_entity(sample),
             )
@@ -323,14 +370,30 @@ class SampleService:
             updates["sample_batch_code"] = data.sample_batch_code
         if data.sequencing_batch_code is not None:
             previous["sequencing_batch_id"] = str(sample.sequencing_batch_id) if sample.sequencing_batch_id else None
+            previous["sequencing_batch_position"] = (
+                str(sample.sequencing_batch_position) if sample.sequencing_batch_position else None
+            )
             exp_result = await session.execute(select(Experiment).where(Experiment.id == sample.experiment_id))
             exp = exp_result.scalar_one()
-            sample.sequencing_batch_id = await SampleService._resolve_sequencing_batch(
+            new_batch_id = await SampleService._resolve_sequencing_batch(
                 session, exp.organization_id, data.sequencing_batch_code
             )
+            batch_changed = new_batch_id != sample.sequencing_batch_id
+            sample.sequencing_batch_id = new_batch_id
+            if data.sequencing_batch_position is not None:
+                sample.sequencing_batch_position = data.sequencing_batch_position
+            elif batch_changed:
+                sample.sequencing_batch_position = await SampleService._next_batch_position(session, new_batch_id)
             updates["sequencing_batch_code"] = data.sequencing_batch_code
+            updates["sequencing_batch_position"] = str(sample.sequencing_batch_position)
+        elif data.sequencing_batch_position is not None:
+            previous["sequencing_batch_position"] = (
+                str(sample.sequencing_batch_position) if sample.sequencing_batch_position else None
+            )
+            sample.sequencing_batch_position = data.sequencing_batch_position
+            updates["sequencing_batch_position"] = str(data.sequencing_batch_position)
         for field in [
-            "sample_id_external",
+            "sample_id_unique",
             "organism",
             "tissue_type",
             "donor_source",
@@ -460,6 +523,7 @@ class SampleService:
                 selectinload(Sample.sample_batch),
                 selectinload(Sample.sequencing_batch),
                 selectinload(Sample.custom_fields),
+                selectinload(Sample.files),
             )
             .where(Sample.experiment_id == experiment_id)
         )

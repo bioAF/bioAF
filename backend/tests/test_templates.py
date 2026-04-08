@@ -90,7 +90,7 @@ async def test_template_enforces_sample_fields(client, admin_token):
     # Sample without required fields should fail
     response = await client.post(
         f"/api/experiments/{exp_id}/samples",
-        json={"sample_id_external": "MISS001"},
+        json={"sample_id_unique": "MISS001"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert response.status_code == 400
@@ -98,7 +98,7 @@ async def test_template_enforces_sample_fields(client, admin_token):
     # Sample with required fields should succeed
     response = await client.post(
         f"/api/experiments/{exp_id}/samples",
-        json={"sample_id_external": "OK001", "organism": "Human", "donor_source": "Biobank"},
+        json={"sample_id_unique": "OK001", "organism": "Human", "donor_source": "Biobank"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert response.status_code == 200

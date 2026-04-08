@@ -34,7 +34,7 @@ def parse_manifest(content: str, format: str) -> ManifestParseResult:
     Raises:
         ValueError: If format is not supported.
     """
-    if format == "md5sum":
+    if format in ("md5sum", "txt"):
         return _parse_md5sum(content)
     elif format == "csv":
         return _parse_csv(content)

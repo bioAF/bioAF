@@ -196,7 +196,7 @@ export default function NotebooksPage() {
           );
           const names: Record<number, string> = {};
           for (const s of samplesData.samples) {
-            names[s.id] = s.sample_id_external || `Sample ${s.id}`;
+            names[s.id] = s.sample_id_unique || `Sample ${s.id}`;
           }
           setSampleNames(names);
         } catch {

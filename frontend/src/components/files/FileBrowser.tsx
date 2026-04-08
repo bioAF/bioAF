@@ -115,7 +115,7 @@ export function FileBrowser({ experimentId, projectId }: Props) {
         setSamples(
           data.map((s) => ({
             id: s.id,
-            label: s.sample_id_external ?? `Sample #${s.id}`,
+            label: s.sample_id_unique ?? `Sample #${s.id}`,
           })),
         ),
       )
@@ -151,7 +151,7 @@ export function FileBrowser({ experimentId, projectId }: Props) {
         setLinkSamples(
           data.map((s) => ({
             id: s.id,
-            label: s.sample_id_external ?? `Sample #${s.id}`,
+            label: s.sample_id_unique ?? `Sample #${s.id}`,
           })),
         ),
       )

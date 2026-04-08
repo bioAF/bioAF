@@ -55,7 +55,7 @@ async def export_experiment(client, admin_token, session, admin_user):
     s1 = Sample(
         experiment_id=exp_id,
         sample_batch_id=batch.id,
-        sample_id_external="SAMPLE_001",
+        sample_id_unique="SAMPLE_001",
         organism="Homo sapiens",
         tissue_type="blood",
         molecule_type="total RNA",
@@ -67,7 +67,7 @@ async def export_experiment(client, admin_token, session, admin_user):
     s2 = Sample(
         experiment_id=exp_id,
         sample_batch_id=batch.id,
-        sample_id_external="SAMPLE_002",
+        sample_id_unique="SAMPLE_002",
         organism="Homo sapiens",
         tissue_type="liver",
         molecule_type="total RNA",

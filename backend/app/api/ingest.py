@@ -234,9 +234,9 @@ async def claim_sample(
 
     sample.is_unclaimed = False
     if body.name:
-        sample.sample_id_external = body.name
+        sample.sample_id_unique = body.name
     await session.flush()
 
     await log_action(session, user_id=user_id, entity_type="sample", entity_id=sample.id, action="claim")
     await session.commit()
-    return {"id": sample.id, "sample_id_external": sample.sample_id_external, "is_unclaimed": False}
+    return {"id": sample.id, "sample_id_unique": sample.sample_id_unique, "is_unclaimed": False}

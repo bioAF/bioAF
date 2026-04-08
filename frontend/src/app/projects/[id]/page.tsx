@@ -36,7 +36,7 @@ export default function ProjectDetailPage() {
   const [showSamplePicker, setShowSamplePicker] = useState(false);
   const [availableSamples, setAvailableSamples] = useState<Array<{
     id: number;
-    sample_id_external: string;
+    sample_id_unique: string;
     experiment_name: string;
     experiment_id: number;
     organism: string | null;
@@ -98,7 +98,7 @@ export default function ProjectDetailPage() {
           name: string;
           samples: Array<{
             id: number;
-            sample_id_external: string;
+            sample_id_unique: string;
             organism: string | null;
             tissue_type: string | null;
             qc_status: QCStatus | null;
@@ -166,7 +166,7 @@ export default function ProjectDetailPage() {
     (s) =>
       !existingSampleIds.has(s.id) &&
       (sampleSearch === "" ||
-        s.sample_id_external.toLowerCase().includes(sampleSearch.toLowerCase()) ||
+        s.sample_id_unique.toLowerCase().includes(sampleSearch.toLowerCase()) ||
         s.experiment_name.toLowerCase().includes(sampleSearch.toLowerCase()) ||
         (s.organism || "").toLowerCase().includes(sampleSearch.toLowerCase()))
   );
@@ -335,7 +335,7 @@ export default function ProjectDetailPage() {
                           {group.samples.map((s) => (
                             <tr key={s.sample_id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setViewingSample({ ...s, experiment_name: group.experiment_name })}>
                               <td className="px-6 py-4 text-sm font-medium text-gray-900">
-                                {s.sample_id_external || `#${s.sample_id}`}
+                                {s.sample_id_unique || `#${s.sample_id}`}
                               </td>
                               <td className="px-6 py-4 text-sm text-gray-500">{s.organism || "—"}</td>
                               <td className="px-6 py-4 text-sm text-gray-500">{s.tissue_type || "—"}</td>
@@ -369,10 +369,10 @@ export default function ProjectDetailPage() {
 
           {viewingSample && (
             <DetailModal
-              title={viewingSample.sample_id_external || `Sample #${viewingSample.sample_id}`}
+              title={viewingSample.sample_id_unique || `Sample #${viewingSample.sample_id}`}
               onClose={() => setViewingSample(null)}
               fields={[
-                { label: "Sample ID", value: viewingSample.sample_id_external || `#${viewingSample.sample_id}` },
+                { label: "Sample ID", value: viewingSample.sample_id_unique || `#${viewingSample.sample_id}` },
                 { label: "Experiment", value: viewingSample.experiment_name },
                 { label: "Organism", value: viewingSample.organism },
                 { label: "Tissue Type", value: viewingSample.tissue_type },
@@ -531,7 +531,7 @@ export default function ProjectDetailPage() {
                             className="rounded"
                           />
                         </td>
-                        <td className="px-4 py-2 text-sm">{s.sample_id_external}</td>
+                        <td className="px-4 py-2 text-sm">{s.sample_id_unique}</td>
                         <td className="px-4 py-2 text-sm text-gray-500">{s.experiment_name}</td>
                         <td className="px-4 py-2 text-sm text-gray-500">{s.organism || "—"}</td>
                         <td className="px-4 py-2 text-sm text-gray-500">{s.tissue_type || "—"}</td>

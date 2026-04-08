@@ -80,7 +80,7 @@ async def two_experiments_with_samples(session, admin_user):
     for i in range(4):
         s = Sample(
             experiment_id=exp1.id,
-            sample_id_external=f"TUMOR-{i + 1}",
+            sample_id_unique=f"TUMOR-{i + 1}",
             organism="Homo sapiens",
             tissue_type="brain",
             status="registered",
@@ -89,7 +89,7 @@ async def two_experiments_with_samples(session, admin_user):
     for i in range(4):
         s = Sample(
             experiment_id=exp2.id,
-            sample_id_external=f"HEALTHY-{i + 1}",
+            sample_id_unique=f"HEALTHY-{i + 1}",
             organism="Homo sapiens",
             tissue_type="brain",
             status="registered",
@@ -455,9 +455,9 @@ async def test_list_projects_counts_experiments_via_project_id(client, admin_tok
     await session.flush()
 
     # Add samples to one of the experiments
-    s1 = Sample(experiment_id=exp1.id, sample_id_external="CNT-1", organism="Homo sapiens", status="registered")
-    s2 = Sample(experiment_id=exp1.id, sample_id_external="CNT-2", organism="Homo sapiens", status="registered")
-    s3 = Sample(experiment_id=exp2.id, sample_id_external="CNT-3", organism="Homo sapiens", status="registered")
+    s1 = Sample(experiment_id=exp1.id, sample_id_unique="CNT-1", organism="Homo sapiens", status="registered")
+    s2 = Sample(experiment_id=exp1.id, sample_id_unique="CNT-2", organism="Homo sapiens", status="registered")
+    s3 = Sample(experiment_id=exp2.id, sample_id_unique="CNT-3", organism="Homo sapiens", status="registered")
     session.add_all([s1, s2, s3])
     await session.commit()
 
@@ -493,7 +493,7 @@ async def test_project_detail_counts_experiments_via_project_id(client, admin_to
     session.add(exp)
     await session.flush()
 
-    s1 = Sample(experiment_id=exp.id, sample_id_external="DET-1", organism="Homo sapiens", status="registered")
+    s1 = Sample(experiment_id=exp.id, sample_id_unique="DET-1", organism="Homo sapiens", status="registered")
     session.add(s1)
     await session.commit()
 

@@ -28,7 +28,7 @@ async def provenance_project(session, admin_user):
     for i in range(2):
         s = Sample(
             experiment_id=exp1.id,
-            sample_id_external=f"T-{i + 1}",
+            sample_id_unique=f"T-{i + 1}",
             organism="Homo sapiens",
             tissue_type="brain",
             status="registered",
@@ -37,7 +37,7 @@ async def provenance_project(session, admin_user):
     for i in range(2):
         s = Sample(
             experiment_id=exp2.id,
-            sample_id_external=f"H-{i + 1}",
+            sample_id_unique=f"H-{i + 1}",
             organism="Homo sapiens",
             tissue_type="blood",
             status="registered",
@@ -193,7 +193,7 @@ async def provenance_project_via_experiment_link(session, admin_user):
 
     sample = Sample(
         experiment_id=exp.id,
-        sample_id_external="L-1",
+        sample_id_unique="L-1",
         organism="Homo sapiens",
         tissue_type="liver",
         status="registered",

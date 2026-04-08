@@ -68,7 +68,7 @@ class ProvenanceService:
                         ProvenanceNode(
                             id=sample_node_id,
                             type="sample",
-                            label=sample.sample_id_external or f"Sample {sample.id}",
+                            label=sample.sample_id_unique or f"Sample {sample.id}",
                             metadata={
                                 "organism": sample.organism,
                                 "tissue_type": sample.tissue_type,
@@ -121,7 +121,7 @@ class ProvenanceService:
                     ProvenanceNode(
                         id=sample_node_id,
                         type="sample",
-                        label=sample.sample_id_external or f"Sample {sample.id}",
+                        label=sample.sample_id_unique or f"Sample {sample.id}",
                         metadata={
                             "organism": sample.organism,
                             "tissue_type": sample.tissue_type,
@@ -283,7 +283,7 @@ class ProvenanceService:
                 ProvenanceNode(
                     id=sample_node_id,
                     type="sample",
-                    label=sample.sample_id_external or f"Sample {sample.id}",
+                    label=sample.sample_id_unique or f"Sample {sample.id}",
                     metadata={
                         "organism": sample.organism,
                         "tissue_type": sample.tissue_type,

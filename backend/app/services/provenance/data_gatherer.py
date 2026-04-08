@@ -270,7 +270,7 @@ class ProvenanceDataGatherer:
             samples=[
                 {
                     "id": s.id,
-                    "external_id": s.sample_id_external,
+                    "external_id": s.sample_id_unique,
                     "organism": s.organism,
                     "tissue_type": s.tissue_type,
                     "qc_status": s.qc_status,
@@ -420,7 +420,7 @@ class ProvenanceDataGatherer:
             samples=[
                 {
                     "id": s.id,
-                    "external_id": s.sample_id_external,
+                    "external_id": s.sample_id_unique,
                     "experiment_id": s.experiment_id,
                     "sample_batch_id": s.sample_batch_id,
                     "biological": {
@@ -560,7 +560,7 @@ class ProvenanceDataGatherer:
             if ps:
                 parent_sample = {
                     "id": ps.id,
-                    "external_id": ps.sample_id_external,
+                    "external_id": ps.sample_id_unique,
                     "organism": ps.organism,
                 }
 
@@ -610,7 +610,7 @@ class ProvenanceDataGatherer:
         return SampleProvenanceData(
             sample={
                 "id": sample.id,
-                "external_id": sample.sample_id_external,
+                "external_id": sample.sample_id_unique,
                 "experiment_id": sample.experiment_id,
                 "parent_sample_id": sample.parent_sample_id,
                 "biological": {
@@ -638,7 +638,7 @@ class ProvenanceDataGatherer:
                 "status": sample.status,
             },
             parent_sample=parent_sample,
-            derived_samples=[{"id": d.id, "external_id": d.sample_id_external} for d in derived],
+            derived_samples=[{"id": d.id, "external_id": d.sample_id_unique} for d in derived],
             files=[
                 {
                     "id": fr["id"],
@@ -783,7 +783,7 @@ class ProvenanceDataGatherer:
             samples=[
                 {
                     "id": s.id,
-                    "external_id": s.sample_id_external,
+                    "external_id": s.sample_id_unique,
                     "organism": s.organism,
                 }
                 for s in (run.samples or [])

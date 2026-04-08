@@ -25,7 +25,7 @@ class ProjectSamplesAdd(BaseModel):
 
 class ProjectSampleResponse(BaseModel):
     sample_id: int
-    sample_id_external: str | None = None
+    sample_id_unique: str | None = None
     organism: str | None = None
     tissue_type: str | None = None
     qc_status: str | None = None

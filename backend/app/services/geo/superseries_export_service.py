@@ -222,8 +222,8 @@ class SuperSeriesExportService:
         sample_ids: list[str] = []
         for exp in experiments:
             for sample in exp.samples:
-                if sample.sample_id_external:
-                    sample_ids.append(sample.sample_id_external)
+                if sample.sample_id_unique:
+                    sample_ids.append(sample.sample_id_unique)
         duplicates = {sid for sid in sample_ids if sample_ids.count(sid) > 1}
         if duplicates:
             validation.errors.append(f"Duplicate sample IDs across experiments: {', '.join(sorted(duplicates))}")

@@ -171,7 +171,7 @@ class CellxgeneService:
             file_ids = [f.id for f in files]
             sample_rows = (
                 await session.execute(
-                    select(sample_files.c.file_id, Sample.sample_id_external)
+                    select(sample_files.c.file_id, Sample.sample_id_unique)
                     .join(Sample, Sample.id == sample_files.c.sample_id)
                     .where(sample_files.c.file_id.in_(file_ids))
                 )

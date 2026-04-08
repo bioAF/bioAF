@@ -124,21 +124,21 @@ async def resolve_or_create_experiment(
 
 
 async def resolve_or_create_sample(
-    sample_id_external: str | None,
+    sample_id_unique: str | None,
     experiment_id: int | None,
     org_id: int,
     user_id: int | None,
     db: AsyncSession,
 ) -> int | None:
     """Resolve an existing sample or auto-create an unclaimed one."""
-    if not sample_id_external:
+    if not sample_id_unique:
         return None
     if not experiment_id:
         return None
 
     result = await db.execute(
         select(Sample).where(
-            Sample.sample_id_external == sample_id_external,
+            Sample.sample_id_unique == sample_id_unique,
             Sample.experiment_id == experiment_id,
         )
     )
@@ -148,7 +148,7 @@ async def resolve_or_create_sample(
 
     sample = Sample(
         experiment_id=experiment_id,
-        sample_id_external=sample_id_external,
+        sample_id_unique=sample_id_unique,
         status="registered",
         is_unclaimed=True,
     )
@@ -161,7 +161,7 @@ async def resolve_or_create_sample(
         entity_type="sample",
         entity_id=sample.id,
         action="auto_create",
-        details={"sample_id_external": sample_id_external, "experiment_id": experiment_id, "is_unclaimed": True},
+        details={"sample_id_unique": sample_id_unique, "experiment_id": experiment_id, "is_unclaimed": True},
     )
     return sample.id
 
@@ -172,6 +172,7 @@ async def copy_to_raw_bucket(
     raw_bucket: str,
     destination_prefix: str,
     filename: str,
+    credentials=None,
 ) -> str:
     """Copy a file from the ingest bucket to the raw bucket.
 
@@ -182,7 +183,7 @@ async def copy_to_raw_bucket(
     source_uri = f"gs://{source_bucket}/{source_path}"
     destination_uri = f"gs://{raw_bucket}/{destination_prefix}{filename}"
 
-    await GcsStorageService.move_file(source_uri, destination_uri)
+    await GcsStorageService.move_file(source_uri, destination_uri, credentials=credentials)
     return destination_uri
 
 
@@ -190,6 +191,7 @@ async def cleanup_ingest_file(
     source_bucket: str,
     source_path: str,
     policy: str,
+    credentials=None,
 ) -> None:
     """Apply the cleanup policy to the ingest bucket file.
 
@@ -199,7 +201,7 @@ async def cleanup_ingest_file(
     if policy == "delete_after_copy":
         from google.cloud import storage
 
-        client = storage.Client()
+        client = storage.Client(credentials=credentials)
         bucket = client.get_bucket(source_bucket)
         blob = bucket.blob(source_path)
         blob.delete()
@@ -223,6 +225,7 @@ async def process_ingest_event(
     file_size_bytes: int | None = None,
     content_md5: str | None = None,
     ingest_source: str = "simulate",
+    credentials=None,
 ) -> IngestEvent:
     """Main ingest pipeline orchestrator.
 
@@ -348,7 +351,77 @@ async def process_ingest_event(
     db.add(file_record)
     await db.flush()
 
-    # Step 5b: Copy file to raw bucket (real GCS only)
+    # Step 5b: ManifestEntry reconciliation (before copy, so resolution
+    # from the manifest can determine the correct experiment prefix)
+    from datetime import datetime, timezone
+
+    from app.models.manifest_entry import ManifestEntry
+    from app.models.sequencing_batch import SequencingBatch
+
+    manifest_entry_result = await db.execute(
+        select(ManifestEntry)
+        .where(
+            ManifestEntry.expected_filename == filename,
+            ManifestEntry.status == "pending",
+        )
+        .limit(1)
+    )
+    manifest_entry = manifest_entry_result.scalar_one_or_none()
+    if manifest_entry:
+        manifest_entry.file_id = file_record.id
+        manifest_entry.last_check_at = datetime.now(timezone.utc)
+
+        if content_md5 and manifest_entry.expected_md5:
+            if content_md5 == manifest_entry.expected_md5:
+                manifest_entry.status = "verified"
+            else:
+                manifest_entry.status = "checksum_mismatch"
+                manifest_entry.error_message = f"Expected {manifest_entry.expected_md5}, got {content_md5}"
+        else:
+            manifest_entry.status = "verified"
+
+        # Enhance resolution from manifest entry if naming profile didn't resolve
+        if manifest_entry.resolved_sample_id and not resolved_sample_id:
+            resolved_sample_id = manifest_entry.resolved_sample_id
+        if manifest_entry.resolved_experiment_id and not resolved_experiment_id:
+            resolved_experiment_id = manifest_entry.resolved_experiment_id
+
+        # If we have a sample but still no experiment, derive from sample
+        if resolved_sample_id and not resolved_experiment_id:
+            sample_result = await db.execute(select(Sample).where(Sample.id == resolved_sample_id))
+            sample_obj = sample_result.scalar_one_or_none()
+            if sample_obj:
+                resolved_experiment_id = sample_obj.experiment_id
+
+        # Link file to sample via junction table
+        if resolved_sample_id:
+            from app.models.sample import sample_files
+
+            existing_link = await db.execute(
+                sample_files.select().where(
+                    sample_files.c.sample_id == resolved_sample_id,
+                    sample_files.c.file_id == file_record.id,
+                )
+            )
+            if not existing_link.fetchone():
+                await db.execute(sample_files.insert().values(sample_id=resolved_sample_id, file_id=file_record.id))
+
+        # Link file to experiment and sequencing batch
+        if resolved_experiment_id and not file_record.experiment_id:
+            file_record.experiment_id = resolved_experiment_id
+        file_record.sequencing_batch_id = manifest_entry.sequencing_batch_id
+
+        # Increment batch ingested_file_count
+        batch_result = await db.execute(
+            select(SequencingBatch).where(SequencingBatch.id == manifest_entry.sequencing_batch_id)
+        )
+        seq_batch = batch_result.scalar_one_or_none()
+        if seq_batch:
+            seq_batch.ingested_file_count = (seq_batch.ingested_file_count or 0) + 1
+
+        await db.flush()
+
+    # Step 5c: Copy file to raw bucket (real GCS only)
     if ingest_source == "auto_ingest":
         config = await _read_ingest_config(db)
         raw_bucket = config.get("raw_bucket_name", "")
@@ -368,13 +441,16 @@ async def process_ingest_event(
                 raw_bucket,
                 prefix,
                 filename,
+                credentials=credentials,
             )
             file_record.gcs_uri = new_uri
             await db.flush()
 
-            # Apply cleanup policy
+            # move_file already deletes the source after copy+verify.
+            # Only call cleanup for retain policies (which skip deletion).
             cleanup_policy = config.get("ingest_cleanup_policy", "delete_after_copy")
-            await cleanup_ingest_file(source_bucket, source_path, policy=cleanup_policy)
+            if cleanup_policy != "delete_after_copy":
+                await cleanup_ingest_file(source_bucket, source_path, policy=cleanup_policy, credentials=credentials)
 
     # Step 6: Create file_parse_result
     parse_result_record = FileParseResult(
@@ -549,7 +625,7 @@ async def get_unclaimed_entities(org_id: int, db: AsyncSession) -> list[dict]:
             {
                 "entity_type": "sample",
                 "entity_id": s.id,
-                "name": s.sample_id_external or f"Sample {s.id}",
+                "name": s.sample_id_unique or f"Sample {s.id}",
                 "created_at": s.created_at,
             }
         )

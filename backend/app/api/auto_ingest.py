@@ -58,6 +58,10 @@ async def configure_auto_ingest(
     """Enable or disable auto-ingest with optional cleanup policy."""
     user_id = int(current_user["sub"])
 
+    # Check if enabled state is actually changing (not just a config save)
+    prev_row = await session.execute(text("SELECT value FROM platform_config WHERE key = 'auto_ingest_enabled'"))
+    was_enabled = (prev_row.scalar() or "false") == "true"
+
     # Check storage is deployed
     if body.enabled:
         row = await session.execute(text("SELECT value FROM platform_config WHERE key = 'storage_deployed'"))
@@ -89,8 +93,8 @@ async def configure_auto_ingest(
     if body.manifest_filename is not None:
         updates["manifest_filename"] = body.manifest_filename
     if body.manifest_format is not None:
-        if body.manifest_format not in ("md5sum", "csv"):
-            raise HTTPException(status_code=400, detail="manifest_format must be 'md5sum' or 'csv'")
+        if body.manifest_format not in ("md5sum", "txt", "csv"):
+            raise HTTPException(status_code=400, detail="manifest_format must be 'txt', 'csv', or 'md5sum'")
         updates["manifest_format"] = body.manifest_format
     if body.manifest_retry_interval_minutes is not None:
         updates["manifest_retry_interval_minutes"] = str(body.manifest_retry_interval_minutes)
@@ -115,6 +119,13 @@ async def configure_auto_ingest(
     )
 
     await session.commit()
+
+    # Only start the listener when transitioning from disabled to enabled
+    if body.enabled and not was_enabled:
+        from app.services.pubsub_listener import restart_listener_if_needed
+
+        await restart_listener_if_needed()
+
     return {"status": "ok", "enabled": body.enabled, "cleanup_policy": body.cleanup_policy}
 
 

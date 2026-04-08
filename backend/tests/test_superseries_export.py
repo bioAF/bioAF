@@ -42,20 +42,20 @@ async def project_with_experiments(session, admin_user):
     # Samples for exp1
     s1 = Sample(
         experiment_id=exp1.id,
-        sample_id_external="SAMPLE_001",
+        sample_id_unique="SAMPLE_001",
         organism="Homo sapiens",
         chemistry_version="v3",
     )
     s2 = Sample(
         experiment_id=exp1.id,
-        sample_id_external="SAMPLE_002",
+        sample_id_unique="SAMPLE_002",
         organism="Homo sapiens",
         chemistry_version="v3",
     )
     # Samples for exp2
     s3 = Sample(
         experiment_id=exp2.id,
-        sample_id_external="SAMPLE_003",
+        sample_id_unique="SAMPLE_003",
         organism="Homo sapiens",
         chemistry_version="v3",
     )
@@ -92,12 +92,12 @@ async def project_with_mixed_organisms(session, admin_user):
 
     s1 = Sample(
         experiment_id=exp1.id,
-        sample_id_external="HUMAN_001",
+        sample_id_unique="HUMAN_001",
         organism="Homo sapiens",
     )
     s2 = Sample(
         experiment_id=exp2.id,
-        sample_id_external="MOUSE_001",
+        sample_id_unique="MOUSE_001",
         organism="Mus musculus",
     )
     session.add_all([s1, s2])
@@ -134,12 +134,12 @@ async def project_with_duplicate_samples(session, admin_user):
     # Same sample ID in both experiments
     s1 = Sample(
         experiment_id=exp1.id,
-        sample_id_external="DUP_SAMPLE",
+        sample_id_unique="DUP_SAMPLE",
         organism="Homo sapiens",
     )
     s2 = Sample(
         experiment_id=exp2.id,
-        sample_id_external="DUP_SAMPLE",
+        sample_id_unique="DUP_SAMPLE",
         organism="Homo sapiens",
     )
     session.add_all([s1, s2])

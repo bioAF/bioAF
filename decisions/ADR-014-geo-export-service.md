@@ -57,8 +57,8 @@ The service maps bioAF's internal schema to GEO's template columns:
 
 | GEO Field | bioAF Source |
 |---|---|
-| Sample name | `samples.sample_id_external` |
-| title | `samples.sample_id_external` + `samples.tissue_type` + `samples.treatment_condition` |
+| Sample name | `samples.sample_id_unique` |
+| title | `samples.sample_id_unique` + `samples.tissue_type` + `samples.treatment_condition` |
 | organism | `samples.organism` |
 | molecule | `samples.molecule_type` (ADR-013) |
 | tissue | `samples.tissue_type` |

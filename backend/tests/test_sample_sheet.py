@@ -7,7 +7,7 @@ def _make_sample(sample_id: int, external_id: str):
     """Create a mock sample object."""
     sample = MagicMock()
     sample.id = sample_id
-    sample.sample_id_external = external_id
+    sample.sample_id_unique = external_id
     return sample
 
 

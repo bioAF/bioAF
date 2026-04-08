@@ -143,7 +143,7 @@ async def get_experiment(
         samples=[
             SampleResponseBrief(
                 id=s.id,
-                sample_id_external=s.sample_id_external,
+                sample_id_unique=s.sample_id_unique,
                 organism=s.organism,
                 tissue_type=s.tissue_type,
                 molecule_type=s.molecule_type,
@@ -236,7 +236,7 @@ async def list_experiment_samples(
     return [
         SampleResponse(
             id=s.id,
-            sample_id_external=s.sample_id_external,
+            sample_id_unique=s.sample_id_unique,
             organism=s.organism,
             tissue_type=s.tissue_type,
             donor_source=s.donor_source,
@@ -246,6 +246,7 @@ async def list_experiment_samples(
             sequencing_batch={"id": s.sequencing_batch.id, "code": s.sequencing_batch.code}
             if s.sequencing_batch
             else None,
+            sequencing_batch_position=s.sequencing_batch_position,
             viability_pct=float(s.viability_pct) if s.viability_pct is not None else None,
             cell_count=s.cell_count,
             prep_notes=s.prep_notes,
@@ -257,6 +258,7 @@ async def list_experiment_samples(
             parent_sample_id=s.parent_sample_id,
             collection_timestamp=s.collection_timestamp,
             collection_method=s.collection_method,
+            file_count=len(s.files) if s.files else 0,
             status=s.status,
             created_at=s.created_at,
             updated_at=s.updated_at,
@@ -279,7 +281,7 @@ async def create_sample(
     sample = await SampleService.get_sample(session, sample.id)
     return SampleResponse(
         id=sample.id,
-        sample_id_external=sample.sample_id_external,
+        sample_id_unique=sample.sample_id_unique,
         organism=sample.organism,
         tissue_type=sample.tissue_type,
         donor_source=sample.donor_source,
@@ -289,6 +291,7 @@ async def create_sample(
         sequencing_batch={"id": sample.sequencing_batch.id, "code": sample.sequencing_batch.code}
         if sample.sequencing_batch
         else None,
+        sequencing_batch_position=sample.sequencing_batch_position,
         viability_pct=float(sample.viability_pct) if sample.viability_pct is not None else None,
         cell_count=sample.cell_count,
         prep_notes=sample.prep_notes,
@@ -380,18 +383,18 @@ async def confirm_samples_csv(
             sample = await SampleService.create_sample(session, experiment_id, user_id, sample_data)
             created.append(sample)
 
-            # Store custom fields on the experiment if any
+            # Store custom fields on the sample
             if i < len(custom_field_rows) and custom_field_rows[i]:
-                from app.models.experiment_custom_field import ExperimentCustomField
+                from app.models.sample_custom_field import SampleCustomField
 
                 for field_name, field_value in custom_field_rows[i].items():
-                    cf = ExperimentCustomField(
-                        experiment_id=experiment_id,
-                        field_name=f"sample:{sample.id}:{field_name}",
-                        field_value=str(field_value),
-                        field_type="text",
+                    session.add(
+                        SampleCustomField(
+                            sample_id=sample.id,
+                            field_name=field_name,
+                            field_value=str(field_value),
+                        )
                     )
-                    session.add(cf)
         except HTTPException as e:
             create_errors.append(f"Sample {i + 1}: {e.detail}")
 

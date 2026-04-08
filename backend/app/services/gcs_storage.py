@@ -165,6 +165,14 @@ class GcsStorageService:
         return destination_uri
 
     @staticmethod
+    async def read_object_text(bucket_name: str, object_path: str, credentials=None) -> str:
+        """Download a GCS object as UTF-8 text."""
+        client = storage.Client(credentials=credentials)
+        bucket = client.get_bucket(bucket_name)
+        blob = bucket.blob(object_path)
+        return blob.download_as_text()
+
+    @staticmethod
     def build_experiment_prefix(experiment_id: int) -> str:
         """Returns the GCS prefix for an experiment's files."""
         return f"experiments/{experiment_id}/"
