@@ -185,7 +185,7 @@ class ProjectService:
             select(Experiment, Sample)
             .outerjoin(Sample, Sample.experiment_id == Experiment.id)
             .where(Experiment.project_id == project_id)
-            .order_by(Experiment.name, Sample.sample_id_external)
+            .order_by(Experiment.name, Sample.sample_id_unique)
         )
         exp_result = await session.execute(exp_stmt)
         exp_rows = exp_result.all()
@@ -196,7 +196,7 @@ class ProjectService:
             .join(Sample, Sample.id == ProjectSample.sample_id)
             .join(Experiment, Experiment.id == Sample.experiment_id)
             .where(ProjectSample.project_id == project_id)
-            .order_by(Experiment.name, Sample.sample_id_external)
+            .order_by(Experiment.name, Sample.sample_id_unique)
         )
         ps_result = await session.execute(ps_stmt)
         ps_rows = ps_result.all()
@@ -225,7 +225,7 @@ class ProjectService:
                 groups[experiment.id]["samples"].append(
                     {
                         "sample_id": sample.id,
-                        "sample_id_external": sample.sample_id_external,
+                        "sample_id_unique": sample.sample_id_unique,
                         "organism": sample.organism,
                         "tissue_type": sample.tissue_type,
                         "qc_status": sample.qc_status,
@@ -249,7 +249,7 @@ class ProjectService:
             groups[experiment.id]["samples"].append(
                 {
                     "sample_id": sample.id,
-                    "sample_id_external": sample.sample_id_external,
+                    "sample_id_unique": sample.sample_id_unique,
                     "organism": sample.organism,
                     "tissue_type": sample.tissue_type,
                     "qc_status": sample.qc_status,

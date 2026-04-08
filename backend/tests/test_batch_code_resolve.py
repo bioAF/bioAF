@@ -24,7 +24,7 @@ async def test_sample_batch_code_creates_batch(client, admin_token, session):
 
     resp = await client.post(
         f"/api/experiments/{exp_id}/samples",
-        json={"sample_id_external": "S001", "sample_batch_code": "prep-42"},
+        json={"sample_id_unique": "S001", "sample_batch_code": "prep-42"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert resp.status_code == 200
@@ -46,12 +46,12 @@ async def test_sample_batch_code_reuses_existing(client, admin_token, session):
 
     await client.post(
         f"/api/experiments/{exp_id}/samples",
-        json={"sample_id_external": "S002", "sample_batch_code": "prep-42"},
+        json={"sample_id_unique": "S002", "sample_batch_code": "prep-42"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     await client.post(
         f"/api/experiments/{exp_id}/samples",
-        json={"sample_id_external": "S003", "sample_batch_code": "prep-42"},
+        json={"sample_id_unique": "S003", "sample_batch_code": "prep-42"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
 
@@ -68,7 +68,7 @@ async def test_sequencing_batch_code_creates_batch(client, admin_token, session)
 
     resp = await client.post(
         f"/api/experiments/{exp_id}/samples",
-        json={"sample_id_external": "S004", "sequencing_batch_code": "cro123"},
+        json={"sample_id_unique": "S004", "sequencing_batch_code": "cro123"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert resp.status_code == 200
@@ -89,12 +89,12 @@ async def test_sequencing_batch_code_shared_across_experiments(client, admin_tok
 
     await client.post(
         f"/api/experiments/{exp1}/samples",
-        json={"sample_id_external": "S005", "sequencing_batch_code": "cro-shared"},
+        json={"sample_id_unique": "S005", "sequencing_batch_code": "cro-shared"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     await client.post(
         f"/api/experiments/{exp2}/samples",
-        json={"sample_id_external": "S006", "sequencing_batch_code": "cro-shared"},
+        json={"sample_id_unique": "S006", "sequencing_batch_code": "cro-shared"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
 
@@ -109,7 +109,7 @@ async def test_update_sample_with_batch_codes(client, admin_token, session):
 
     create_resp = await client.post(
         f"/api/experiments/{exp_id}/samples",
-        json={"sample_id_external": "S007"},
+        json={"sample_id_unique": "S007"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     sample_id = create_resp.json()["id"]
@@ -139,7 +139,7 @@ async def test_no_batch_code_leaves_null(client, admin_token):
 
     resp = await client.post(
         f"/api/experiments/{exp_id}/samples",
-        json={"sample_id_external": "S008"},
+        json={"sample_id_unique": "S008"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert resp.status_code == 200

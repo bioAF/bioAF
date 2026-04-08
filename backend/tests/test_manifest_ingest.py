@@ -71,12 +71,12 @@ async def org_and_experiment(session: AsyncSession):
     # Create samples
     s1 = Sample(
         experiment_id=exp.id,
-        sample_id_external="SAMPLE0003",
+        sample_id_unique="SAMPLE0003",
         status="registered",
     )
     s2 = Sample(
         experiment_id=exp.id,
-        sample_id_external="SAMPLE0007",
+        sample_id_unique="SAMPLE0007",
         status="registered",
     )
     session.add_all([s1, s2])

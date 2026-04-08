@@ -170,7 +170,7 @@ class PipelineRunService:
                 "experiment_id": data.experiment_id,
                 "work_dir": run.work_dir,
                 "resume_from_run_id": data.resume_from_run_id,
-                "input_files": [s.sample_id_external or str(s.id) for s in samples],
+                "input_files": [s.sample_id_unique or str(s.id) for s in samples],
             }
             job_result = await compute_adapter.submit_job(job_spec)
 
@@ -556,7 +556,7 @@ class PipelineRunService:
             if run.experiment
             else None,
             "samples": [
-                {"id": s.id, "sample_id_external": s.sample_id_external, "organism": s.organism}
+                {"id": s.id, "sample_id_unique": s.sample_id_unique, "organism": s.organism}
                 for s in (run.samples or [])
             ],
             "submitted_by": {

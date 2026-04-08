@@ -32,11 +32,11 @@ async def experiment(session, admin_user):
 async def samples(session, admin_user, experiment):
     """Create two test samples linked to the experiment."""
     s1 = Sample(
-        sample_id_external="Sample-001",
+        sample_id_unique="Sample-001",
         experiment_id=experiment.id,
     )
     s2 = Sample(
-        sample_id_external="Sample-002",
+        sample_id_unique="Sample-002",
         experiment_id=experiment.id,
     )
     session.add_all([s1, s2])

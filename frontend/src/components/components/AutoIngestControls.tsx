@@ -33,12 +33,34 @@ export function AutoIngestControls({
   const [loading, setLoading] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [updateError, setUpdateError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [showCleanupInfo, setShowCleanupInfo] = useState(false);
+
+  // Local form state (decoupled from server state)
+  const [form, setForm] = useState({
+    cleanup_policy: "delete_after_copy",
+    manifest_filename: "md5.txt",
+    manifest_format: "txt",
+    manifest_retry_interval_minutes: 15,
+    manifest_max_retries: 48,
+  });
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     if (!storageDeployed || !pubsubConfigured) return;
     api
       .get<AutoIngestStatus>("/api/v1/settings/auto-ingest")
-      .then(setStatus)
+      .then((data) => {
+        setStatus(data);
+        setForm({
+          cleanup_policy: data.cleanup_policy,
+          manifest_filename: data.manifest_filename,
+          manifest_format: data.manifest_format,
+          manifest_retry_interval_minutes: data.manifest_retry_interval_minutes,
+          manifest_max_retries: data.manifest_max_retries,
+        });
+      })
       .catch(() => {});
   }, [storageDeployed, pubsubConfigured]);
 
@@ -49,7 +71,6 @@ export function AutoIngestControls({
     setUpdateError("");
     try {
       await api.post("/api/v1/infrastructure/storage/update");
-      // Trigger parent refresh so pubsubConfigured updates
       if (onUpdateStorage) onUpdateStorage();
     } catch (err) {
       setUpdateError(
@@ -88,7 +109,7 @@ export function AutoIngestControls({
     try {
       await api.post("/api/v1/settings/auto-ingest", {
         enabled: newEnabled,
-        cleanup_policy: status?.cleanup_policy || "delete_after_copy",
+        cleanup_policy: form.cleanup_policy,
       });
       const updated = await api.get<AutoIngestStatus>(
         "/api/v1/settings/auto-ingest",
@@ -101,57 +122,33 @@ export function AutoIngestControls({
     }
   };
 
-  const handleDelayChange = async (minutes: number) => {
-    setLoading(true);
-    try {
-      await api.post("/api/v1/settings/auto-ingest", {
-        enabled: status?.enabled ?? false,
-        cleanup_policy: status?.cleanup_policy || "delete_after_copy",
-        default_delay_minutes: minutes,
-      });
-      const updated = await api.get<AutoIngestStatus>(
-        "/api/v1/settings/auto-ingest",
-      );
-      setStatus(updated);
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
+  const updateForm = (updates: Partial<typeof form>) => {
+    setForm((prev) => ({ ...prev, ...updates }));
+    setDirty(true);
+    setSaveSuccess(false);
   };
 
-  const handlePolicyChange = async (policy: string) => {
-    setLoading(true);
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveSuccess(false);
     try {
       await api.post("/api/v1/settings/auto-ingest", {
         enabled: status?.enabled ?? false,
-        cleanup_policy: policy,
-      });
-      const updated = await api.get<AutoIngestStatus>(
-        "/api/v1/settings/auto-ingest",
-      );
-      setStatus(updated);
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleManifestUpdate = async (updates: Record<string, string | number>) => {
-    setLoading(true);
-    try {
-      await api.post("/api/v1/settings/auto-ingest", {
-        enabled: status?.enabled ?? false,
-        cleanup_policy: status?.cleanup_policy || "delete_after_copy",
-        ...updates,
+        cleanup_policy: form.cleanup_policy,
+        manifest_filename: form.manifest_filename,
+        manifest_format: form.manifest_format,
+        manifest_retry_interval_minutes: form.manifest_retry_interval_minutes,
+        manifest_max_retries: form.manifest_max_retries,
       });
       const updated = await api.get<AutoIngestStatus>("/api/v1/settings/auto-ingest");
       setStatus(updated);
+      setDirty(false);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
     } catch {
       // ignore
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
@@ -201,56 +198,49 @@ export function AutoIngestControls({
       {status?.enabled && (
         <>
           <div>
-            <label
-              htmlFor="cleanup-policy"
-              className="text-xs text-gray-600 block mb-1"
-            >
-              Cleanup policy
-            </label>
+            <div className="flex items-center gap-1 mb-1">
+              <label
+                htmlFor="cleanup-policy"
+                className="text-xs text-gray-600"
+              >
+                Ingest bucket cleanup
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowCleanupInfo(!showCleanupInfo)}
+                className="w-4 h-4 rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300 text-xs font-medium flex items-center justify-center"
+                title="What does this do?"
+              >
+                i
+              </button>
+            </div>
+            {showCleanupInfo && (
+              <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
+                <p className="font-medium mb-1">How file cleanup works</p>
+                <p>
+                  When files arrive in the ingest bucket, they are copied into the correct
+                  storage bucket based on their project and experiment. This setting controls
+                  what happens to the original file in the ingest bucket after the copy completes.
+                </p>
+                <ul className="mt-1 ml-3 list-disc space-y-0.5">
+                  <li><strong>Delete after copy</strong> -- removes the original from the ingest bucket immediately after a successful copy. Your data is safe in the destination bucket.</li>
+                  <li><strong>Retain for 7/30 days</strong> -- keeps the original in the ingest bucket for the specified period before automatic deletion. Useful if you want a temporary backup in case of issues.</li>
+                </ul>
+              </div>
+            )}
             <select
               id="cleanup-policy"
               data-testid="cleanup-policy-select"
-              value={status.cleanup_policy}
-              onChange={(e) => handlePolicyChange(e.target.value)}
-              disabled={loading}
+              value={form.cleanup_policy}
+              onChange={(e) => updateForm({ cleanup_policy: e.target.value })}
               className="text-xs border border-gray-300 rounded px-2 py-1 w-full"
             >
               <option value="delete_after_copy">
-                Delete after cataloging
+                Delete after copy
               </option>
               <option value="retain_7d">Retain for 7 days</option>
               <option value="retain_30d">Retain for 30 days</option>
             </select>
-          </div>
-
-          <div>
-            <label
-              htmlFor="delay-minutes"
-              className="text-xs text-gray-600 block mb-1"
-            >
-              Pipeline delay after last file upload
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                id="delay-minutes"
-                type="number"
-                min="0"
-                max="1440"
-                value={status.default_delay_minutes}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value, 10);
-                  if (!isNaN(val) && val >= 0) handleDelayChange(val);
-                }}
-                disabled={loading}
-                className="text-xs border border-gray-300 rounded px-2 py-1 w-20"
-              />
-              <span className="text-xs text-gray-500">minutes</span>
-            </div>
-            <p className="text-xs text-gray-400 mt-0.5">
-              How long to wait after the last file arrives for an experiment
-              before triggering pipelines. Increase if pipelines run with
-              incomplete datasets.
-            </p>
           </div>
 
           <div className="border-t border-gray-200 pt-3">
@@ -261,23 +251,21 @@ export function AutoIngestControls({
                 <input
                   id="manifest-filename"
                   type="text"
-                  value={status.manifest_filename}
-                  onChange={(e) => handleManifestUpdate({ manifest_filename: e.target.value })}
-                  disabled={loading}
+                  value={form.manifest_filename}
+                  onChange={(e) => updateForm({ manifest_filename: e.target.value })}
                   className="text-xs border border-gray-300 rounded px-2 py-1 w-full"
                 />
               </div>
               <div>
-                <label htmlFor="manifest-format" className="text-xs text-gray-600 block mb-1">Manifest format</label>
+                <label htmlFor="manifest-format" className="text-xs text-gray-600 block mb-1">File format</label>
                 <select
                   id="manifest-format"
-                  value={status.manifest_format}
-                  onChange={(e) => handleManifestUpdate({ manifest_format: e.target.value })}
-                  disabled={loading}
+                  value={form.manifest_format}
+                  onChange={(e) => updateForm({ manifest_format: e.target.value })}
                   className="text-xs border border-gray-300 rounded px-2 py-1 w-full"
                 >
-                  <option value="md5sum">md5sum</option>
-                  <option value="csv">CSV</option>
+                  <option value="txt">Text (.txt)</option>
+                  <option value="csv">CSV (.csv)</option>
                 </select>
               </div>
               <div>
@@ -287,12 +275,11 @@ export function AutoIngestControls({
                   type="number"
                   min="1"
                   max="1440"
-                  value={status.manifest_retry_interval_minutes}
+                  value={form.manifest_retry_interval_minutes}
                   onChange={(e) => {
                     const val = parseInt(e.target.value, 10);
-                    if (!isNaN(val) && val > 0) handleManifestUpdate({ manifest_retry_interval_minutes: val });
+                    if (!isNaN(val) && val > 0) updateForm({ manifest_retry_interval_minutes: val });
                   }}
-                  disabled={loading}
                   className="text-xs border border-gray-300 rounded px-2 py-1 w-full"
                 />
               </div>
@@ -303,17 +290,31 @@ export function AutoIngestControls({
                   type="number"
                   min="1"
                   max="500"
-                  value={status.manifest_max_retries}
+                  value={form.manifest_max_retries}
                   onChange={(e) => {
                     const val = parseInt(e.target.value, 10);
-                    if (!isNaN(val) && val > 0) handleManifestUpdate({ manifest_max_retries: val });
+                    if (!isNaN(val) && val > 0) updateForm({ manifest_max_retries: val });
                   }}
-                  disabled={loading}
                   className="text-xs border border-gray-300 rounded px-2 py-1 w-full"
                 />
               </div>
             </div>
           </div>
+
+          {dirty && (
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="px-3 py-1.5 bg-bioaf-600 text-white rounded text-xs hover:bg-bioaf-700 disabled:opacity-50"
+              >
+                {saving ? "Saving..." : "Save changes"}
+              </button>
+              {saveSuccess && (
+                <span className="text-xs text-green-600">Saved</span>
+              )}
+            </div>
+          )}
 
           <div className="flex gap-4 text-xs text-gray-500">
             <span>

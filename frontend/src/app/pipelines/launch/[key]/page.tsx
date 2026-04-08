@@ -195,7 +195,7 @@ export default function PipelineLauncherPage() {
                       <td className="px-4 py-3">
                         <input type="checkbox" checked={selectedSampleIds.includes(s.id)} onChange={() => toggleSample(s.id)} />
                       </td>
-                      <td className="px-4 py-3 text-sm">{s.sample_id_external || `#${s.id}`}</td>
+                      <td className="px-4 py-3 text-sm">{s.sample_id_unique || `#${s.id}`}</td>
                       <td className="px-4 py-3 text-sm">{s.organism || "—"}</td>
                       <td className="px-4 py-3 text-sm">{s.tissue_type || "—"}</td>
                       <td className="px-4 py-3 text-sm">

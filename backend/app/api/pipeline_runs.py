@@ -81,8 +81,7 @@ def _detail_response(run) -> PipelineRunDetailResponse:
         for p in (run.processes or [])
     ]
     samples = [
-        SampleSummary(id=s.id, sample_id_external=s.sample_id_external, organism=s.organism)
-        for s in (run.samples or [])
+        SampleSummary(id=s.id, sample_id_unique=s.sample_id_unique, organism=s.organism) for s in (run.samples or [])
     ]
     return PipelineRunDetailResponse(
         **base.model_dump(),

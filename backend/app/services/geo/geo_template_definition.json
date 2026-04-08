@@ -47,7 +47,7 @@
       "fields": [
         {
           "geo_column": "Sample_name",
-          "bioaf_source": "sample.sample_id_external",
+          "bioaf_source": "sample.sample_id_unique",
           "required": true,
           "description": "Unique sample identifier"
         },

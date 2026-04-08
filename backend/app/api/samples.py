@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/samples", tags=["samples"])
 def _sample_response(s) -> SampleResponse:
     return SampleResponse(
         id=s.id,
-        sample_id_external=s.sample_id_external,
+        sample_id_unique=s.sample_id_unique,
         organism=s.organism,
         tissue_type=s.tissue_type,
         donor_source=s.donor_source,
@@ -20,6 +20,7 @@ def _sample_response(s) -> SampleResponse:
         chemistry_version=s.chemistry_version,
         sample_batch={"id": s.sample_batch.id, "name": s.sample_batch.name} if s.sample_batch else None,
         sequencing_batch={"id": s.sequencing_batch.id, "code": s.sequencing_batch.code} if s.sequencing_batch else None,
+        sequencing_batch_position=s.sequencing_batch_position,
         viability_pct=float(s.viability_pct) if s.viability_pct is not None else None,
         cell_count=s.cell_count,
         prep_notes=s.prep_notes,

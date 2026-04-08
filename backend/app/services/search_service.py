@@ -74,7 +74,7 @@ class SearchService:
                     Sample.experiment_id.in_(select(Experiment.id).where(Experiment.organization_id == org_id)),
                     func.to_tsvector(
                         "english",
-                        func.coalesce(Sample.sample_id_external, "")
+                        func.coalesce(Sample.sample_id_unique, "")
                         + " "
                         + func.coalesce(Sample.organism, "")
                         + " "
@@ -88,7 +88,7 @@ class SearchService:
                     {
                         "entity_type": "sample",
                         "entity_id": s.id,
-                        "title": s.sample_id_external or f"Sample {s.id}",
+                        "title": s.sample_id_unique or f"Sample {s.id}",
                         "snippet": f"{s.organism or ''} - {s.tissue_type or ''}",
                         "experiment_id": s.experiment_id,
                         "relevance_score": None,

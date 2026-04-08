@@ -289,7 +289,7 @@ export default function ExperimentDetailPage() {
   function startEditSample(sample: Sample) {
     setEditingSampleId(sample.id);
     setEditSampleForm({
-      sample_id_external: sample.sample_id_external,
+      sample_id_unique: sample.sample_id_unique,
       organism: sample.organism,
       tissue_type: sample.tissue_type,
       donor_source: sample.donor_source,
@@ -728,7 +728,7 @@ export default function ExperimentDetailPage() {
               {showSampleForm && (
                 <div className="bg-white rounded-lg shadow p-4 mb-4">
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    <input placeholder="External Sample ID" value={sampleForm.sample_id_external ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, sample_id_external: e.target.value })} className="border rounded px-3 py-2 text-sm" />
+                    <input placeholder="External Sample ID" value={sampleForm.sample_id_unique ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, sample_id_unique: e.target.value })} className="border rounded px-3 py-2 text-sm" />
                     <input placeholder="Organism" value={sampleForm.organism ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, organism: e.target.value })} className="border rounded px-3 py-2 text-sm" />
                     <input placeholder="Tissue Type" value={sampleForm.tissue_type ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, tissue_type: e.target.value })} className="border rounded px-3 py-2 text-sm" />
                     <input placeholder="Donor ID" value={sampleForm.donor_source ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, donor_source: e.target.value })} className="border rounded px-3 py-2 text-sm" />
@@ -804,8 +804,7 @@ export default function ExperimentDetailPage() {
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Treatment</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Library Prep</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Library Layout</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sample Batch</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Seq. Batch</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Files</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">QC</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                       <th className="px-4 py-3"></th>
@@ -822,15 +821,14 @@ export default function ExperimentDetailPage() {
                             className="rounded border-gray-300"
                           />
                         </td>
-                        <td className="px-4 py-3 text-sm">{s.sample_id_external || "---"}</td>
+                        <td className="px-4 py-3 text-sm">{s.sample_id_unique || "---"}</td>
                         <td className="px-4 py-3 text-sm">{s.organism || "---"}</td>
                         <td className="px-4 py-3 text-sm">{s.tissue_type || "---"}</td>
                         <td className="px-4 py-3 text-sm">{s.molecule_type || "---"}</td>
                         <td className="px-4 py-3 text-sm">{s.treatment_condition || "---"}</td>
                         <td className="px-4 py-3 text-sm">{s.library_prep_method || "---"}</td>
                         <td className="px-4 py-3 text-sm">{s.library_layout || "---"}</td>
-                        <td className="px-4 py-3 text-sm">{s.sample_batch?.name || "---"}</td>
-                        <td className="px-4 py-3 text-sm">{s.sequencing_batch?.code || "---"}</td>
+                        <td className="px-4 py-3 text-sm">{s.file_count}</td>
                         <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                           <select
                             value={s.qc_status ?? ""}
@@ -855,7 +853,7 @@ export default function ExperimentDetailPage() {
                       </tr>
                     ))}
                     {samples.length === 0 && (
-                      <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-400">No samples yet</td></tr>
+                      <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-400">No samples yet</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -864,10 +862,10 @@ export default function ExperimentDetailPage() {
               {/* View Sample Modal */}
               {viewingSample && (
                 <DetailModal
-                  title={viewingSample.sample_id_external || `Sample #${viewingSample.id}`}
+                  title={viewingSample.sample_id_unique || `Sample #${viewingSample.id}`}
                   onClose={() => setViewingSample(null)}
                   fields={[
-                    { label: "External ID", value: viewingSample.sample_id_external },
+                    { label: "External ID", value: viewingSample.sample_id_unique },
                     { label: "Status", value: viewingSample.status.replace(/_/g, " ") },
                     { label: "Organism", value: viewingSample.organism },
                     { label: "Tissue Type", value: viewingSample.tissue_type },
@@ -881,6 +879,7 @@ export default function ExperimentDetailPage() {
                     { label: "Viability %", value: viewingSample.viability_pct != null ? `${viewingSample.viability_pct}%` : null },
                     { label: "Sample Batch", value: viewingSample.sample_batch?.name },
                     { label: "Sequencing Batch", value: viewingSample.sequencing_batch?.code },
+                    { label: "Batch Position", value: viewingSample.sequencing_batch_position },
                     { label: "QC Status", value: viewingSample.qc_status },
                     { label: "QC Notes", value: viewingSample.qc_notes },
                     { label: "Prep Notes", value: viewingSample.prep_notes },
@@ -914,7 +913,7 @@ export default function ExperimentDetailPage() {
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">External Sample ID</label>
-                        <input value={editSampleForm.sample_id_external ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, sample_id_external: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
+                        <input value={editSampleForm.sample_id_unique ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, sample_id_unique: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Organism</label>
@@ -1270,6 +1269,7 @@ export default function ExperimentDetailPage() {
           {showCsvUpload && (
             <CsvUploadModal
               experimentId={Number(id)}
+              existingCustomFields={experiment?.custom_fields?.map((cf) => cf.field_name) ?? []}
               onClose={() => setShowCsvUpload(false)}
               onSuccess={handleCsvUploadSuccess}
             />

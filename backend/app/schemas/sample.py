@@ -31,7 +31,7 @@ class SampleCustomFieldResponse(BaseModel):
 
 
 class SampleCreate(BaseModel):
-    sample_id_external: str | None = None
+    sample_id_unique: str | None = None
     organism: str | None = None
     tissue_type: str | None = None
     donor_source: str | None = None
@@ -39,6 +39,7 @@ class SampleCreate(BaseModel):
     chemistry_version: str | None = None
     sample_batch_code: str | None = None
     sequencing_batch_code: str | None = None
+    sequencing_batch_position: int | None = None
     viability_pct: float | None = None
     cell_count: int | None = None
     prep_notes: str | None = None
@@ -68,7 +69,7 @@ class SampleCreate(BaseModel):
 
 
 class SampleUpdate(BaseModel):
-    sample_id_external: str | None = None
+    sample_id_unique: str | None = None
     organism: str | None = None
     tissue_type: str | None = None
     donor_source: str | None = None
@@ -76,6 +77,7 @@ class SampleUpdate(BaseModel):
     chemistry_version: str | None = None
     sample_batch_code: str | None = None
     sequencing_batch_code: str | None = None
+    sequencing_batch_position: int | None = None
     viability_pct: float | None = None
     cell_count: int | None = None
     prep_notes: str | None = None
@@ -131,7 +133,7 @@ class SampleStatusUpdate(BaseModel):
 
 class SampleResponse(BaseModel):
     id: int
-    sample_id_external: str | None
+    sample_id_unique: str | None
     organism: str | None
     tissue_type: str | None
     donor_source: str | None
@@ -139,6 +141,7 @@ class SampleResponse(BaseModel):
     chemistry_version: str | None
     sample_batch: SampleBatchSummary | None = None
     sequencing_batch: SequencingBatchSummary | None = None
+    sequencing_batch_position: int | None = None
     viability_pct: float | None
     cell_count: int | None
     prep_notes: str | None
@@ -150,6 +153,7 @@ class SampleResponse(BaseModel):
     parent_sample_id: int | None = None
     collection_timestamp: datetime | None = None
     collection_method: str | None = None
+    file_count: int = 0
     status: str
     created_at: datetime
     updated_at: datetime
