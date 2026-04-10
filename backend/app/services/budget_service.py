@@ -11,9 +11,21 @@ from statistics import mean, stdev
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pydantic import BaseModel
+
 from app.models.pipeline_cost_history import PipelineCostHistory
 from app.models.pipeline_run import PipelineRun
-from app.schemas.pipeline_trigger import BudgetCheckResult
+
+
+class BudgetCheckResult(BaseModel):
+    estimated_cost: float
+    confidence_interval_pct: float
+    current_month_spend: float
+    queued_running_cost: float
+    projected_total: float
+    monthly_budget: float
+    decision: str
+
 
 # Default values for local/POC mode
 DEFAULT_PIPELINE_COST = Decimal("5.00")

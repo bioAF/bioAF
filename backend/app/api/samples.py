@@ -1,10 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.api.dependencies import require_permission
 from app.schemas.sample import SampleBulkUpdate, SampleQCUpdate, SampleResponse, SampleStatusUpdate, SampleUpdate
 from app.services.sample_service import SampleService
+
+
+class SampleBulkDeleteRequest(BaseModel):
+    sample_ids: list[int]
+
 
 router = APIRouter(prefix="/api/samples", tags=["samples"])
 
@@ -114,3 +120,17 @@ async def update_sample_status(
     await session.commit()
     sample = await SampleService.get_sample(session, sample_id)
     return _sample_response(sample)
+
+
+@router.post("/bulk/delete")
+async def bulk_delete_samples(
+    body: SampleBulkDeleteRequest,
+    current_user: dict = require_permission("samples", "delete"),
+    session: AsyncSession = Depends(get_session),
+):
+    if not body.sample_ids:
+        return {"deleted": 0}
+    user_id = int(current_user["sub"])
+    deleted = await SampleService.delete_samples(session, body.sample_ids, user_id)
+    await session.commit()
+    return {"deleted": deleted}

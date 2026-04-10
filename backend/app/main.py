@@ -146,9 +146,7 @@ async def lifespan(app: FastAPI):
     background_tasks.append(asyncio.create_task(_cost_billing_sync_loop()))
     background_tasks.append(asyncio.create_task(_version_check_loop()))
     background_tasks.append(asyncio.create_task(_review_reminder_loop()))
-    background_tasks.append(asyncio.create_task(_trigger_batch_expiry_loop()))
-    background_tasks.append(asyncio.create_task(_budget_queue_processing_loop()))
-    background_tasks.append(asyncio.create_task(_scheduled_trigger_loop()))
+    background_tasks.append(asyncio.create_task(_auto_run_launch_loop()))
     background_tasks.append(asyncio.create_task(_pubsub_listener_loop()))
     background_tasks.append(asyncio.create_task(_session_monitor_loop()))
     background_tasks.append(asyncio.create_task(_notebook_image_build_loop()))
@@ -428,65 +426,23 @@ async def _review_reminder_loop():
             logger.error("Review reminder error: %s", e)
 
 
-async def _trigger_batch_expiry_loop():
-    """Check for expired batching windows every 5 seconds."""
+async def _auto_run_launch_loop():
+    """Launch pending auto-runs every 30 seconds."""
     from app.database import async_session_factory
-    from app.services.trigger_service import TriggerService
+    from app.services.auto_run_service import AutoRunService
 
     while True:
         try:
-            await asyncio.sleep(5)
+            await asyncio.sleep(30)
             async with async_session_factory() as session:
-                evaluations = await TriggerService.process_expired_batches(session)
-                if evaluations:
+                processed = await AutoRunService.process_pending_runs(session)
+                if processed:
                     await session.commit()
-                    logger.info("Processed %d expired trigger batches", len(evaluations))
+                    logger.info("Auto-run loop: processed %d pending runs", processed)
         except asyncio.CancelledError:
             break
         except Exception as e:
-            logger.error("Trigger batch expiry error: %s", e)
-
-
-async def _budget_queue_processing_loop():
-    """Process budget queue every 60 seconds."""
-    from app.database import async_session_factory
-    from app.services.trigger_service import TriggerService
-
-    while True:
-        try:
-            await asyncio.sleep(60)
-            async with async_session_factory() as session:
-                results = await TriggerService.process_budget_queue(session)
-                if results:
-                    await session.commit()
-                    submitted = sum(1 for r in results if r["action"] == "submitted")
-                    if submitted:
-                        logger.info("Budget queue: submitted %d runs", submitted)
-        except asyncio.CancelledError:
-            break
-        except Exception as e:
-            logger.error("Budget queue processing error: %s", e)
-
-
-async def _scheduled_trigger_loop():
-    """Evaluate scheduled triggers every 60 seconds."""
-    from app.database import async_session_factory
-    from app.services.trigger_service import TriggerService
-
-    while True:
-        try:
-            await asyncio.sleep(60)
-            async with async_session_factory() as session:
-                evaluations = await TriggerService.evaluate_scheduled_triggers(session)
-                if evaluations:
-                    await session.commit()
-                    submitted = sum(1 for e in evaluations if e.result == "submitted")
-                    if submitted:
-                        logger.info("Scheduled triggers: submitted %d runs", submitted)
-        except asyncio.CancelledError:
-            break
-        except Exception as e:
-            logger.error("Scheduled trigger evaluation error: %s", e)
+            logger.error("Auto-run launch loop error: %s", e)
 
 
 async def _pubsub_listener_loop():

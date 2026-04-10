@@ -79,6 +79,11 @@ BUDGET_MID_QUEUE = "trigger.budget_mid_queue"
 EVALUATION_FAILED = "trigger.evaluation_failed"
 BATCH_WINDOW_CLOSED = "trigger.batch_window_closed"
 
+# Auto-run events
+AUTO_RUN_BUDGET_DISABLED = "auto_run.budget_disabled"
+AUTO_RUN_LAUNCHED = "auto_run.launched"
+AUTO_RUN_CANCELLED = "auto_run.cancelled"
+
 # Terraform events
 TERRAFORM_APPLY_FAILURE = "terraform.apply_failure"
 
@@ -125,6 +130,9 @@ ALL_EVENT_TYPES = [
     SEQUENCING_BATCH_FILE_VERIFIED,
     SEQUENCING_BATCH_COMPLETE,
     SEQUENCING_BATCH_PARTIAL,
+    AUTO_RUN_BUDGET_DISABLED,
+    AUTO_RUN_LAUNCHED,
+    AUTO_RUN_CANCELLED,
 ]
 
 # Severity mapping for event types
@@ -171,4 +179,7 @@ EVENT_SEVERITY = {
     SEQUENCING_BATCH_FILE_VERIFIED: "info",
     SEQUENCING_BATCH_COMPLETE: "info",
     SEQUENCING_BATCH_PARTIAL: "warning",
+    AUTO_RUN_BUDGET_DISABLED: "critical",
+    AUTO_RUN_LAUNCHED: "info",
+    AUTO_RUN_CANCELLED: "warning",
 }

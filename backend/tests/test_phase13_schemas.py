@@ -10,12 +10,7 @@ from app.schemas.ingest import (
     BulkReassignRequest,
     IngestSimulateRequest,
 )
-from app.schemas.pipeline_trigger import (
-    BudgetCheckResult,
-    EventTriggerConfig,
-    PipelineTriggerCreate,
-    ScheduleTriggerConfig,
-)
+from app.services.budget_service import BudgetCheckResult
 
 
 class TestSegmentDefinition:
@@ -89,63 +84,6 @@ class TestBulkReassignRequest:
             BulkReassignRequest(file_ids=[])
 
 
-class TestEventTriggerConfig:
-    def test_valid_config(self):
-        cfg = EventTriggerConfig(file_types=["fastq"], batching_window_minutes=15)
-        assert cfg.batching_window_minutes == 15
-
-    def test_empty_file_types_rejected(self):
-        with pytest.raises(ValidationError):
-            EventTriggerConfig(file_types=[])
-
-    def test_negative_window_rejected(self):
-        with pytest.raises(ValidationError):
-            EventTriggerConfig(file_types=["fastq"], batching_window_minutes=-1)
-
-
-class TestScheduleTriggerConfig:
-    def test_valid_config(self):
-        cfg = ScheduleTriggerConfig(
-            cron_expression="0 6 * * 1-5",
-            file_types=["fastq"],
-        )
-        assert cfg.timezone == "UTC"
-
-    def test_invalid_cron_rejected(self):
-        with pytest.raises(ValidationError):
-            ScheduleTriggerConfig(cron_expression="bad", file_types=["fastq"])
-
-
-class TestPipelineTriggerCreate:
-    def test_event_driven_requires_event_config(self):
-        with pytest.raises(ValidationError):
-            PipelineTriggerCreate(
-                pipeline_id=1,
-                trigger_mode="event_driven",
-                event_config=None,
-            )
-
-    def test_scheduled_requires_schedule_config(self):
-        with pytest.raises(ValidationError):
-            PipelineTriggerCreate(
-                pipeline_id=1,
-                trigger_mode="scheduled",
-                schedule_config=None,
-            )
-
-    def test_manual_needs_no_config(self):
-        trigger = PipelineTriggerCreate(pipeline_id=1, trigger_mode="manual")
-        assert trigger.trigger_mode == "manual"
-
-    def test_event_driven_with_config(self):
-        trigger = PipelineTriggerCreate(
-            pipeline_id=1,
-            trigger_mode="event_driven",
-            event_config=EventTriggerConfig(file_types=["fastq"]),
-        )
-        assert trigger.event_config is not None
-
-
 class TestBudgetCheckResult:
     def test_valid_result(self):
         result = BudgetCheckResult(
@@ -158,15 +96,3 @@ class TestBudgetCheckResult:
             decision="within_budget",
         )
         assert result.decision == "within_budget"
-
-    def test_invalid_decision_rejected(self):
-        with pytest.raises(ValidationError):
-            BudgetCheckResult(
-                estimated_cost=5.0,
-                confidence_interval_pct=15.0,
-                current_month_spend=100.0,
-                queued_running_cost=10.0,
-                projected_total=115.0,
-                monthly_budget=500.0,
-                decision="invalid",
-            )

@@ -17,6 +17,7 @@ import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportP
 import { FileBrowser } from "@/components/files/FileBrowser";
 import { VocabularySelect } from "@/components/shared/VocabularySelect";
 import { CsvUploadModal } from "@/components/experiments/CsvUploadModal";
+import { AutoRunConfigSection } from "@/components/experiments/AutoRunConfigSection";
 import { ExtensibleVocabularySelect } from "@/components/shared/ExtensibleVocabularySelect";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api, fileContentUrl } from "@/lib/api";
@@ -91,6 +92,8 @@ export default function ExperimentDetailPage() {
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [bulkEditForm, setBulkEditForm] = useState<SampleUpdateRequest>({});
   const [bulkEditError, setBulkEditError] = useState("");
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const DEFAULTABLE_FIELDS = [
     { name: "organism", label: "Organism", type: "text" as const },
@@ -354,6 +357,21 @@ export default function ExperimentDetailPage() {
       loadSamples();
     } catch (err) {
       setBulkEditError(err instanceof Error ? err.message : "Failed to save");
+    }
+  }
+
+  async function handleBulkDelete() {
+    if (selectedSampleIds.size === 0) return;
+    setDeleting(true);
+    try {
+      await api.post("/api/samples/bulk/delete", {
+        sample_ids: Array.from(selectedSampleIds),
+      });
+      setShowDeleteConfirm(false);
+      setSelectedSampleIds(new Set());
+      loadSamples();
+    } catch {} finally {
+      setDeleting(false);
     }
   }
 
@@ -716,12 +734,20 @@ export default function ExperimentDetailPage() {
                   Upload CSV
                 </button>
                 {selectedSampleIds.size > 0 && (
-                  <button
-                    onClick={() => { setShowBulkEdit(true); setBulkEditForm({}); setBulkEditError(""); }}
-                    className="bg-amber-600 text-white px-4 py-2 rounded-md text-sm hover:bg-amber-700"
-                  >
-                    Edit Selected ({selectedSampleIds.size})
-                  </button>
+                  <>
+                    <button
+                      onClick={() => { setShowBulkEdit(true); setBulkEditForm({}); setBulkEditError(""); }}
+                      className="bg-amber-600 text-white px-4 py-2 rounded-md text-sm hover:bg-amber-700"
+                    >
+                      Edit Selected ({selectedSampleIds.size})
+                    </button>
+                    <button
+                      onClick={() => setShowDeleteConfirm(true)}
+                      className="bg-red-600 text-white px-4 py-2 rounded-md text-sm hover:bg-red-700"
+                    >
+                      Delete Selected ({selectedSampleIds.size})
+                    </button>
+                  </>
                 )}
               </div>
 
@@ -1210,6 +1236,8 @@ export default function ExperimentDetailPage() {
                   </table>
                 </div>
               )}
+
+              <AutoRunConfigSection experimentId={Number(id)} />
             </div>
           )}
 
@@ -1273,6 +1301,35 @@ export default function ExperimentDetailPage() {
               onClose={() => setShowCsvUpload(false)}
               onSuccess={handleCsvUploadSuccess}
             />
+          )}
+          {showDeleteConfirm && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full">
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Samples</h3>
+                <p className="text-sm text-gray-600 mb-1">
+                  You are about to delete <span className="font-semibold">{selectedSampleIds.size}</span> sample{selectedSampleIds.size > 1 ? "s" : ""}.
+                </p>
+                <p className="text-sm text-red-600 mb-4">
+                  This action cannot be undone. File links and pending auto-runs for these samples will be removed. Existing pipeline runs will be kept for audit purposes.
+                </p>
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => setShowDeleteConfirm(false)}
+                    disabled={deleting}
+                    className="border px-4 py-2 rounded-md text-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleBulkDelete}
+                    disabled={deleting}
+                    className="bg-red-600 text-white px-4 py-2 rounded-md text-sm hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {deleting ? "Deleting..." : "Delete"}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
           <DataExportModal
             experimentId={Number(id)}

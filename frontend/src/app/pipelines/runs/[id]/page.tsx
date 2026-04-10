@@ -136,7 +136,7 @@ export default function PipelineRunDetailPage() {
 
   useEffect(() => {
     if (activeTab !== "logs") return;
-    if (run?.k8s_job_name && !run.processes?.length) {
+    if (run?.k8s_job_name) {
       loadLogs();
     } else if (selectedProcess) {
       loadLogs(selectedProcess);
@@ -358,20 +358,19 @@ export default function PipelineRunDetailPage() {
             <div className="bg-white rounded-lg shadow p-6">
               <div className="flex items-center gap-4 mb-4">
                 <h2 className="text-lg font-semibold">Logs</h2>
-                {run.processes.length > 0 && (
+                {!run.k8s_job_name && run.processes.length > 0 && (
                   <select value={selectedProcess} onChange={(e) => setSelectedProcess(e.target.value)} className="border rounded px-3 py-1.5 text-sm">
                     <option value="">Select process...</option>
                     {run.processes.map((p) => <option key={p.id} value={p.process_name}>{p.process_name}</option>)}
                   </select>
                 )}
               </div>
-              {(selectedProcess || (run.k8s_job_name && !run.processes.length)) ? (
+              {(run.k8s_job_name || selectedProcess) ? (
                 logsLoading ? (
                   <div className="flex items-center gap-2 text-gray-400"><LoadingSpinner size="sm" /><span>Loading logs...</span></div>
                 ) : (
                   <div className="space-y-4">
                     <div>
-                      <h3 className="text-sm font-medium mb-1">stdout</h3>
                       <pre className="text-xs bg-gray-900 text-green-400 p-4 rounded overflow-auto max-h-96 whitespace-pre-wrap">{logs.stdout || "(empty)"}</pre>
                     </div>
                     {logs.stderr && (

@@ -553,7 +553,12 @@ class KubernetesComputeProvider(ComputeProvider):
         if "outdir" not in parameters:
             parameters = {**parameters, "outdir": "/data/results"}
 
+        # Strip bioAF-internal config knobs that are not Nextflow parameters
+        internal_keys = {"fusion_enabled"}
+
         for key, value in sorted(parameters.items()):
+            if key in internal_keys:
+                continue
             parts.extend([f"--{key}", str(value)])
 
         return ["/bin/sh", "-c", " ".join(parts)]
@@ -1211,7 +1216,7 @@ class KubernetesComputeProvider(ComputeProvider):
 
             processes.append(
                 {
-                    "name": row.get("process", ""),
+                    "name": row.get("name", "") or row.get("process", ""),
                     "status": mapped_status,
                     "cpu": cpu,
                     "memory_gb": memory_gb,

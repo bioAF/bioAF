@@ -59,6 +59,8 @@ from app.models.manifest_entry import ManifestEntry
 from app.models.entity_snapshot import EntitySnapshot
 from app.models.role import Role, RolePermission
 from app.models.sample_custom_field import SampleCustomField
+from app.models.experiment_auto_run import ExperimentAutoRun
+from app.models.pending_auto_run import PendingAutoRun
 
 __all__ = [
     "User",
@@ -128,4 +130,6 @@ __all__ = [
     "Role",
     "RolePermission",
     "SampleCustomField",
+    "ExperimentAutoRun",
+    "PendingAutoRun",
 ]

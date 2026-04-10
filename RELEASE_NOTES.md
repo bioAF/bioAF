@@ -1,5 +1,44 @@
 # Release Notes
 
+## v0.6.0
+
+Automatic pipeline runs triggered by sample completeness, manifest reconciliation fixes, pipeline execution fixes, and UI cleanup.
+
+### Auto-Run Pipelines
+
+- Configure pipelines to run automatically when all expected files for a sample arrive and pass MD5 verification
+- New ExperimentAutoRun and PendingAutoRun models with API endpoints for CRUD and status
+- Background loop launches pending runs after configurable delay
+- Auto-run evaluation integrated into the manifest ingest flow
+- Replaced old trigger infrastructure (trigger_service, pipeline_triggers) with the new auto-run system
+
+### Manifest Ingest Fixes
+
+- Fix race condition where files arriving before the manifest were never linked to samples
+- Retroactive reconciliation: when a manifest arrives, match already-ingested files by MD5 + filename + org + 2-hour time window
+- Content-aware redelivery guard: compare incoming manifest entries against existing ones instead of just checking for existence
+- Forward-path query now prefers MD5+filename match, falls back to filename-only for checksum mismatch detection
+- Shared reconcile_manifest_entry() helper eliminates duplication between forward and retroactive paths
+
+### Pipeline Execution Fixes
+
+- Re-enable Fusion for GCS-backed pipeline runs (was incorrectly made opt-in, breaking all K8s process pods)
+- Fix trace parser reading wrong column for process names ("process" vs "name" in Nextflow trace.tsv)
+- Fix Nextflow K8s executor test to match Fusion-always-on behavior
+
+### Pipeline Run UI
+
+- Show pipeline logs directly without process dropdown for K8s runs (single log, no selection needed)
+- Auto-detect protocol from sample chemistry_version, remove manual CV dropdowns from launch wizard
+- Add bulk sample deletion with confirmation modal
+
+### Navigation and Settings
+
+- Remove unused Pipeline Scheduling placeholder page
+- Move Naming Profiles from Settings to Data & Files section
+- Consolidate GCP, SMTP, and Slack settings into Settings > Integrations with tabbed layout
+- Add Seqera tab with coming-soon placeholder for Fusion license support
+
 ## v0.5.5
 
 Auto-ingest pipeline hardening and manifest-driven file association. Groundwork for the upcoming auto-run pipeline feature.
