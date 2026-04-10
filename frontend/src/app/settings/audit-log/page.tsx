@@ -114,13 +114,18 @@ export default function AuditLogPage() {
     "experiment", "sample", "user", "auth", "pipeline_run",
     "pipeline_catalog", "project", "file", "batch", "system",
     "notebook", "reference", "session_credential",
+    "environment_version", "backup", "user_quota",
   ];
 
   const actions = [
-    "create", "update", "delete", "login", "logout", "status_change",
+    "create", "update", "delete", "login", "login_failed", "logout",
+    "status_change", "role_change",
     "launch", "invite", "deactivate", "verify_email",
-    "download", "read", "view", "session",
+    "download", "read", "view", "session", "session_access",
     "change_password", "admin_reset_password", "resend_invite", "lock",
+    "build", "build_succeeded", "build_failed",
+    "backup_completed", "backup_failed",
+    "quota_exceeded",
   ];
 
   return (
@@ -221,9 +226,11 @@ export default function AuditLogPage() {
                       </td>
                       <td className="px-4 py-2.5">
                         <span className={`text-xs px-2 py-0.5 rounded ${
-                          entry.action === "delete" ? "bg-red-100 text-red-700" :
-                          entry.action === "create" ? "bg-green-100 text-green-700" :
-                          entry.action === "login" ? "bg-blue-100 text-blue-700" :
+                          entry.action === "delete" || entry.action === "backup_failed" || entry.action === "build_failed" ? "bg-red-100 text-red-700" :
+                          entry.action === "create" || entry.action === "backup_completed" || entry.action === "build_succeeded" ? "bg-green-100 text-green-700" :
+                          entry.action === "login" || entry.action === "logout" ? "bg-blue-100 text-blue-700" :
+                          entry.action === "login_failed" || entry.action === "quota_exceeded" ? "bg-amber-100 text-amber-700" :
+                          entry.action === "role_change" ? "bg-purple-100 text-purple-700" :
                           "bg-gray-100 text-gray-700"
                         }`}>
                           {entry.action}
