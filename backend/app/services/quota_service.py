@@ -89,6 +89,20 @@ class QuotaService:
                     },
                 )
             )
+            await log_action(
+                session,
+                user_id=user_id,
+                entity_type="user_quota",
+                entity_id=quota.id,
+                action="quota_exceeded",
+                details={
+                    "cpu_hours_used": float(quota.cpu_hours_used_current_month),
+                    "cpu_hours_limit": quota.cpu_hours_monthly_limit,
+                    "estimated_hours": estimated_hours,
+                    "projected_total": projected,
+                },
+            )
+            await session.flush()
             return False, (
                 f"Would exceed monthly limit: {float(quota.cpu_hours_used_current_month):.1f} used "
                 f"+ {estimated_hours:.1f} estimated = {projected:.1f} / {quota.cpu_hours_monthly_limit} limit"

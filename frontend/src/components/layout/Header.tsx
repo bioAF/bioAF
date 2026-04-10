@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getCurrentUser, removeToken } from "@/lib/auth";
 import { clearPermissionsCache } from "@/hooks/usePermissions";
+import { api } from "@/lib/api";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { DeploymentBanner } from "@/components/infrastructure/DeploymentBanner";
 
@@ -15,7 +16,12 @@ export function Header() {
     setUser(getCurrentUser());
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await api.post("/api/auth/logout");
+    } catch {
+      // Best effort -- token may already be expired
+    }
     removeToken();
     clearPermissionsCache();
     router.push("/login");

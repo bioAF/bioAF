@@ -308,6 +308,23 @@ async def get_session_detail(
     notebook_session = await NotebookService.get_session(session, session_id)
     if not notebook_session:
         raise HTTPException(404, "Session not found")
+
+    from app.services.audit_service import log_action
+
+    user_id = int(current_user["sub"])
+    await log_action(
+        session,
+        user_id=user_id,
+        entity_type="notebook",
+        entity_id=notebook_session.id,
+        action="session_access",
+        details={
+            "session_type": notebook_session.session_type,
+            "status": notebook_session.status,
+        },
+    )
+    await session.commit()
+
     return _session_response(notebook_session)
 
 

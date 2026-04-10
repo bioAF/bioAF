@@ -13,7 +13,7 @@ from app.models.sample import Sample
 from app.schemas.pipeline_run import PipelineRunLaunchRequest
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
-from app.services.event_types import PIPELINE_FAILED
+from app.services.event_types import PIPELINE_FAILED, PIPELINE_STARTED
 from app.services.pipeline_catalog_service import PipelineCatalogService
 from app.services.quota_service import QuotaService
 from app.services.sample_sheet_service import SampleSheetService
@@ -183,6 +183,25 @@ class PipelineRunService:
             estimated_cost = job_result.get("estimated_cost", {})
             if estimated_cost:
                 run.cost_estimate = estimated_cost.get("estimated_cost_usd")
+
+            import asyncio
+
+            asyncio.create_task(
+                event_bus.emit(
+                    PIPELINE_STARTED,
+                    {
+                        "event_type": PIPELINE_STARTED,
+                        "org_id": org_id,
+                        "user_id": user_id,
+                        "target_user_id": user_id,
+                        "entity_type": "pipeline_run",
+                        "entity_id": run.id,
+                        "title": f"Pipeline '{pipeline.name}' started",
+                        "message": f"Run {run.id} submitted for experiment {data.experiment_id}",
+                        "summary": f"Pipeline '{pipeline.name}' run {run.id} started",
+                    },
+                )
+            )
 
         except Exception as e:
             run.status = "failed"

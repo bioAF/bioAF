@@ -1,5 +1,31 @@
 # Release Notes
 
+## v0.6.2
+
+Audit log coverage gaps and activity feed event fixes.
+
+### Audit Log Coverage (closes #153)
+
+- Add logout endpoint (POST /api/auth/logout) with audit logging
+- Log failed login attempts with reason (invalid credentials, account deactivated)
+- Log file content serving as download audit entries
+- Change role update audit action from generic "update" to "role_change" with old/new role names
+- Log environment build success and failure from the build poller
+- Log postgres and config backup completion and failure
+- Log quota exceeded events alongside event bus emission
+- Log notebook session access (who opened which session)
+- Normalize download action name from "downloaded" to "download"
+- Update audit log page filters with new entity types and actions
+- Color-code new action badges (failures red, success green, warnings amber, role changes purple)
+
+### Activity Feed Fixes
+
+- Add PIPELINE_STARTED event type, emitted on successful run submission
+- Emit PIPELINE_COMPLETED and PIPELINE_FAILED from pipeline monitor completion handler (event types existed but were never fired)
+- Fix AUTO_RUN_BUDGET_DISABLED payload using wrong key ("organization_id" instead of "org_id"), silently dropped by NotificationRouter
+- Fix AUTO_RUN_LAUNCHED payload missing org_id, user_id, and all display fields
+- Frontend logout now calls backend endpoint so audit log entry is created
+
 ## v0.6.1
 
 Pipeline run cost estimates based on actual GCP instance pricing.

@@ -312,10 +312,22 @@ class AutoRunService:
                     await event_bus.emit(
                         AUTO_RUN_BUDGET_DISABLED,
                         {
-                            "organization_id": org_id,
-                            "current_spend": float(current_spend),
-                            "monthly_budget": float(budget_config.monthly_budget),
-                            "cancelled_count": len(org_runs),
+                            "event_type": AUTO_RUN_BUDGET_DISABLED,
+                            "org_id": org_id,
+                            "entity_type": "auto_run",
+                            "title": "Auto-run disabled due to budget limit",
+                            "message": (
+                                f"Spend ${float(current_spend):.2f} reached 90% of "
+                                f"${float(budget_config.monthly_budget):.2f} budget. "
+                                f"{len(org_runs)} pending run(s) cancelled."
+                            ),
+                            "severity": "critical",
+                            "summary": f"Auto-run disabled: budget limit reached ({len(org_runs)} runs cancelled)",
+                            "metadata": {
+                                "current_spend": float(current_spend),
+                                "monthly_budget": float(budget_config.monthly_budget),
+                                "cancelled_count": len(org_runs),
+                            },
                         },
                     )
                     processed += len(org_runs)
@@ -356,10 +368,22 @@ class AutoRunService:
                     await event_bus.emit(
                         AUTO_RUN_LAUNCHED,
                         {
-                            "pipeline_run_id": run.id,
-                            "sample_id": pr.sample_id,
-                            "experiment_id": config.experiment_id,
-                            "pipeline_key": config.pipeline_key,
+                            "event_type": AUTO_RUN_LAUNCHED,
+                            "org_id": config.organization_id,
+                            "user_id": config.configured_by_user_id,
+                            "entity_type": "pipeline_run",
+                            "entity_id": run.id,
+                            "title": f"Auto-run launched: {config.pipeline_key}",
+                            "message": (
+                                f"Pipeline '{config.pipeline_key}' auto-launched for experiment {config.experiment_id}"
+                            ),
+                            "summary": f"Auto-run launched pipeline '{config.pipeline_key}' (run {run.id})",
+                            "metadata": {
+                                "pipeline_run_id": run.id,
+                                "sample_id": pr.sample_id,
+                                "experiment_id": config.experiment_id,
+                                "pipeline_key": config.pipeline_key,
+                            },
                         },
                     )
                 except Exception as exc:

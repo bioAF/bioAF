@@ -98,7 +98,14 @@ class UserService:
         new_role_id: int,
         actor_user_id: int,
     ) -> User:
+        from app.services import role_service
+
         old_role_id = user.role_id
+        old_role = await role_service.get_role_by_id(session, old_role_id)
+        new_role = await role_service.get_role_by_id(session, new_role_id)
+        old_role_name = old_role.name if old_role else str(old_role_id)
+        new_role_name = new_role.name if new_role else str(new_role_id)
+
         user.role_id = new_role_id
         await session.flush()
 
@@ -107,13 +114,17 @@ class UserService:
             user_id=actor_user_id,
             entity_type="user",
             entity_id=user.id,
-            action="update",
+            action="role_change",
             details={
-                "field": "role_id",
-                "new_value": new_role_id,
+                "new_role_id": new_role_id,
+                "new_role_name": new_role_name,
                 "target_email": user.email,
+                "description": f"Changed {user.email} role from {old_role_name} to {new_role_name}",
             },
-            previous_value={"field": "role_id", "old_value": old_role_id},
+            previous_value={
+                "old_role_id": old_role_id,
+                "old_role_name": old_role_name,
+            },
         )
         return user
 

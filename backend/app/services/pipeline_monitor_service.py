@@ -13,6 +13,8 @@ from sqlalchemy.orm import selectinload
 from app.models.pipeline_process import PipelineProcess
 from app.models.pipeline_run import PipelineRun
 from app.services.audit_service import log_action
+from app.services.event_bus import event_bus
+from app.services.event_types import PIPELINE_COMPLETED, PIPELINE_FAILED
 from app.adapters.registry import get_compute_adapter, get_storage_adapter
 
 if TYPE_CHECKING:
@@ -334,6 +336,45 @@ class PipelineMonitorService:
             action="complete",
             details={"status": run.status, "progress": run.progress_json},
         )
+
+        # Emit event for activity feed / notifications
+        import asyncio
+
+        if run.status == "completed":
+            asyncio.create_task(
+                event_bus.emit(
+                    PIPELINE_COMPLETED,
+                    {
+                        "event_type": PIPELINE_COMPLETED,
+                        "org_id": run.organization_id,
+                        "user_id": run.submitted_by_user_id,
+                        "target_user_id": run.submitted_by_user_id,
+                        "entity_type": "pipeline_run",
+                        "entity_id": run.id,
+                        "title": f"Pipeline '{run.pipeline_name}' completed",
+                        "message": f"Run {run.id} finished successfully",
+                        "summary": f"Pipeline '{run.pipeline_name}' run {run.id} completed",
+                    },
+                )
+            )
+        else:
+            asyncio.create_task(
+                event_bus.emit(
+                    PIPELINE_FAILED,
+                    {
+                        "event_type": PIPELINE_FAILED,
+                        "org_id": run.organization_id,
+                        "user_id": run.submitted_by_user_id,
+                        "target_user_id": run.submitted_by_user_id,
+                        "entity_type": "pipeline_run",
+                        "entity_id": run.id,
+                        "title": f"Pipeline '{run.pipeline_name}' failed",
+                        "message": run.error_message or "Run failed",
+                        "severity": "critical",
+                        "summary": f"Pipeline '{run.pipeline_name}' run {run.id} failed",
+                    },
+                )
+            )
 
         # Auto-generate QC dashboard if component is enabled and run succeeded
         if run.status == "completed":

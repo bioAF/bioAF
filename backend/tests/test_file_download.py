@@ -111,7 +111,7 @@ async def test_single_file_download_creates_audit_log(client, admin_token, admin
             text(
                 "SELECT entity_type, entity_id, action, details_json "
                 "FROM audit_log "
-                "WHERE entity_type = 'file' AND action = 'downloaded' AND entity_id = :fid"
+                "WHERE entity_type = 'file' AND action = 'download' AND entity_id = :fid"
             ).bindparams(fid=sample_file.id)
         )
     ).fetchone()
@@ -119,7 +119,7 @@ async def test_single_file_download_creates_audit_log(client, admin_token, admin
     assert row is not None, "Expected an audit log entry for the download"
     assert row[0] == "file"
     assert row[1] == sample_file.id
-    assert row[2] == "downloaded"
+    assert row[2] == "download"
     import json
 
     details = json.loads(row[3]) if isinstance(row[3], str) else row[3]

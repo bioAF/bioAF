@@ -1,6 +1,7 @@
 """Event type string constants for the bioAF notification system."""
 
 # Pipeline events
+PIPELINE_STARTED = "pipeline.started"
 PIPELINE_COMPLETED = "pipeline.completed"
 PIPELINE_FAILED = "pipeline.failed"
 PIPELINE_STAGE_ERROR = "pipeline.stage_error"
@@ -88,6 +89,7 @@ AUTO_RUN_CANCELLED = "auto_run.cancelled"
 TERRAFORM_APPLY_FAILURE = "terraform.apply_failure"
 
 ALL_EVENT_TYPES = [
+    PIPELINE_STARTED,
     PIPELINE_COMPLETED,
     PIPELINE_FAILED,
     PIPELINE_STAGE_ERROR,
@@ -137,6 +139,7 @@ ALL_EVENT_TYPES = [
 
 # Severity mapping for event types
 EVENT_SEVERITY = {
+    PIPELINE_STARTED: "info",
     PIPELINE_COMPLETED: "info",
     PIPELINE_FAILED: "critical",
     PIPELINE_STAGE_ERROR: "warning",

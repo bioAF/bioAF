@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import BACKUP_FAILURE
 
@@ -454,6 +455,22 @@ class BackupService:
 
             duration = time.monotonic() - start
             logger.info("pg_dump completed: %s (%d bytes, %.1fs)", filename, size, duration)
+
+            await log_action(
+                session,
+                user_id=None,
+                entity_type="backup",
+                entity_id=0,
+                action="backup_completed",
+                details={
+                    "tier": "postgres",
+                    "filename": filename,
+                    "size_bytes": size,
+                    "duration_seconds": round(duration, 1),
+                },
+            )
+            await session.commit()
+
             return {
                 "status": "completed",
                 "filename": filename,
@@ -463,12 +480,30 @@ class BackupService:
 
         except FileNotFoundError:
             logger.error("pg_dump not found. Install postgresql-client in the container.")
+            await log_action(
+                session,
+                user_id=None,
+                entity_type="backup",
+                entity_id=0,
+                action="backup_failed",
+                details={"tier": "postgres", "reason": "pg_dump binary not found"},
+            )
+            await session.commit()
             return {"status": "error", "message": "pg_dump binary not found"}
         except Exception as e:
             logger.error("pg_dump backup failed: %s", e)
             # Clean up temp file on failure
             if os.path.exists(output_path):
                 os.remove(output_path)
+            await log_action(
+                session,
+                user_id=None,
+                entity_type="backup",
+                entity_id=0,
+                action="backup_failed",
+                details={"tier": "postgres", "reason": str(e)[:500]},
+            )
+            await session.commit()
             return {"status": "error", "message": str(e)[:500]}
 
     @staticmethod
@@ -561,12 +596,32 @@ class BackupService:
                 logger.info("Rotated %d old config backups", deleted)
 
             logger.info("Config backup completed: %s (%d bytes)", filename, size)
+
+            await log_action(
+                session,
+                user_id=None,
+                entity_type="backup",
+                entity_id=0,
+                action="backup_completed",
+                details={"tier": "platform_config", "filename": filename, "size_bytes": size},
+            )
+            await session.commit()
+
             return {"status": "completed", "filename": filename, "size_bytes": size}
 
         except Exception as e:
             logger.error("Config backup failed: %s", e)
             if os.path.exists(output_path):
                 os.remove(output_path)
+            await log_action(
+                session,
+                user_id=None,
+                entity_type="backup",
+                entity_id=0,
+                action="backup_failed",
+                details={"tier": "platform_config", "reason": str(e)[:500]},
+            )
+            await session.commit()
             return {"status": "error", "message": str(e)[:500]}
 
     @staticmethod
