@@ -1,5 +1,15 @@
 # Release Notes
 
+## v0.6.1
+
+Pipeline run cost estimates based on actual GCP instance pricing.
+
+### Cost Estimates
+
+- Store cost estimate from compute adapter when launching a pipeline run (closes #203)
+- Replace flat-fee stub with actual hourly spot rate for the pipeline node pool (n2-highmem-16)
+- UI column renamed from "Cost" to "Est. $/hr" to clarify that values are hourly node rates, not totals
+
 ## v0.6.0
 
 Automatic pipeline runs triggered by sample completeness, manifest reconciliation fixes, pipeline execution fixes, and UI cleanup.

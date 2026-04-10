@@ -362,7 +362,7 @@ export default function PipelineTriggersPage() {
                         <span className="text-sm text-gray-500 ml-2">Run #{run.id}</span>
                         {run.cost_estimate && (
                           <span className="ml-2 text-sm text-orange-600">
-                            Est. ${Number(run.cost_estimate).toFixed(2)}
+                            ~${Number(run.cost_estimate).toFixed(2)}/hr
                           </span>
                         )}
                       </div>

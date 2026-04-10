@@ -117,22 +117,24 @@ class TestKubernetesComputeClusterMetrics:
 
 class TestKubernetesComputeCostEstimate:
     @pytest.mark.asyncio
-    async def test_cost_estimate_with_no_files(self, adapter):
+    async def test_cost_estimate_returns_hourly_rate(self, adapter):
+        """Cost estimate should return the pipeline pool's hourly node rate."""
         result = await adapter.get_cost_estimate({})
-        assert result["estimated_cost_usd"] == 0.50
-        assert result["confidence_low"] < result["estimated_cost_usd"]
-        assert result["confidence_high"] > result["estimated_cost_usd"]
+        # n2-highmem-16 on-demand $1.0482/hr * 0.35 spot = ~$0.3669/hr
+        assert result["estimated_cost_usd"] == 0.3669
         assert result["currency"] == "USD"
 
     @pytest.mark.asyncio
-    async def test_cost_estimate_scales_with_files(self, adapter):
-        result = await adapter.get_cost_estimate({"input_files": ["a", "b", "c", "d", "e"]})
-        assert result["estimated_cost_usd"] == 1.0  # 0.50 + 5 * 0.10
+    async def test_cost_estimate_basis_describes_node(self, adapter):
+        """Basis string should identify the machine type and pricing tier."""
+        result = await adapter.get_cost_estimate({})
+        assert "n2-highmem-16" in result["basis"]
+        assert "spot" in result["basis"]
+        assert "$/hr" in result["basis"]
 
     @pytest.mark.asyncio
-    async def test_cost_estimate_has_confidence_interval(self, adapter):
-        result = await adapter.get_cost_estimate({"input_files": ["a"]})
-        assert "confidence_low" in result
-        assert "confidence_high" in result
-        assert result["confidence_low"] <= result["estimated_cost_usd"]
-        assert result["confidence_high"] >= result["estimated_cost_usd"]
+    async def test_cost_estimate_same_regardless_of_input_count(self, adapter):
+        """Hourly rate doesn't change with input file count."""
+        result_0 = await adapter.get_cost_estimate({})
+        result_5 = await adapter.get_cost_estimate({"input_files": ["a", "b", "c", "d", "e"]})
+        assert result_0["estimated_cost_usd"] == result_5["estimated_cost_usd"]
