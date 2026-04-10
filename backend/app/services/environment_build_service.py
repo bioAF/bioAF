@@ -261,6 +261,17 @@ class EnvironmentBuildService:
                     version.build_id,
                     version.id,
                 )
+                await log_action(
+                    session,
+                    user_id=None,
+                    entity_type="environment_version",
+                    entity_id=version.id,
+                    action="build_succeeded",
+                    details={
+                        "build_id": version.build_id,
+                        "version_number": version.version_number,
+                    },
+                )
             elif status in ("FAILURE", "CANCELLED", "TIMEOUT"):
                 version.status = "failed"
                 changed += 1
@@ -269,6 +280,18 @@ class EnvironmentBuildService:
                     version.build_id,
                     status,
                     version.id,
+                )
+                await log_action(
+                    session,
+                    user_id=None,
+                    entity_type="environment_version",
+                    entity_id=version.id,
+                    action="build_failed",
+                    details={
+                        "build_id": version.build_id,
+                        "version_number": version.version_number,
+                        "cloud_build_status": status,
+                    },
                 )
 
         if changed:

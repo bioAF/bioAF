@@ -30,9 +30,27 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 async def login(body: LoginRequest, session: AsyncSession = Depends(get_session)):
     user = await UserService.get_by_email(session, body.email)
     if not user or not AuthService.verify_password(body.password, user.password_hash):
+        await log_action(
+            session,
+            user_id=user.id if user else None,
+            entity_type="auth",
+            entity_id=user.id if user else 0,
+            action="login_failed",
+            details={"email": body.email, "reason": "invalid_credentials"},
+        )
+        await session.commit()
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     if user.status == "deactivated":
+        await log_action(
+            session,
+            user_id=user.id,
+            entity_type="auth",
+            entity_id=user.id,
+            action="login_failed",
+            details={"email": body.email, "reason": "account_deactivated"},
+        )
+        await session.commit()
         raise HTTPException(status_code=403, detail="Account deactivated")
 
     if user.status == "invited":
@@ -56,6 +74,21 @@ async def login(body: LoginRequest, session: AsyncSession = Depends(get_session)
     await session.commit()
 
     return LoginResponse(access_token=token)
+
+
+@router.post("/logout")
+async def logout(request: Request, session: AsyncSession = Depends(get_session)):
+    current_user = request.state.current_user
+    user_id = int(current_user["sub"])
+    await log_action(
+        session,
+        user_id=user_id,
+        entity_type="auth",
+        entity_id=user_id,
+        action="logout",
+    )
+    await session.commit()
+    return {"message": "Logged out"}
 
 
 @router.post("/refresh", response_model=LoginResponse)

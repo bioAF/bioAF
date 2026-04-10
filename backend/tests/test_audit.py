@@ -179,3 +179,125 @@ async def test_login_creates_audit_entry(client, admin_user, session):
         {"id": admin_user.id},
     )
     assert result.fetchone() is not None
+
+
+@pytest.mark.asyncio
+async def test_failed_login_creates_audit_entry(client, admin_user, session):
+    """Failed login with wrong password creates login_failed audit entry."""
+    response = await client.post(
+        "/api/auth/login",
+        json={"email": "admin@test.com", "password": "wrongpassword"},
+    )
+    assert response.status_code == 401
+
+    result = await session.execute(
+        text("SELECT details_json FROM audit_log WHERE action = 'login_failed' AND entity_id = :id"),
+        {"id": admin_user.id},
+    )
+    row = result.fetchone()
+    assert row is not None
+    assert row.details_json["reason"] == "invalid_credentials"
+
+
+@pytest.mark.asyncio
+async def test_failed_login_nonexistent_user_creates_audit_entry(client, session):
+    """Failed login for nonexistent email still creates login_failed audit entry."""
+    response = await client.post(
+        "/api/auth/login",
+        json={"email": "nobody@test.com", "password": "password"},
+    )
+    assert response.status_code == 401
+
+    result = await session.execute(
+        text("SELECT details_json FROM audit_log WHERE action = 'login_failed' AND entity_id = 0"),
+    )
+    row = result.fetchone()
+    assert row is not None
+    assert row.details_json["email"] == "nobody@test.com"
+
+
+@pytest.mark.asyncio
+async def test_logout_creates_audit_entry(client, admin_token, admin_user, session):
+    """Logout creates an audit entry."""
+    response = await client.post(
+        "/api/auth/logout",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+
+    result = await session.execute(
+        text("SELECT * FROM audit_log WHERE action = 'logout' AND entity_id = :id"),
+        {"id": admin_user.id},
+    )
+    assert result.fetchone() is not None
+
+
+@pytest.mark.asyncio
+async def test_role_change_audit_action(client, admin_token, admin_user, session):
+    """Role change uses 'role_change' action with old/new role details."""
+    from app.models.user import User
+    from app.services.auth_service import AuthService
+
+    role_map = admin_user._test_role_map
+
+    # Create a second user to change role on
+    user2 = User(
+        email="roletest@test.com",
+        password_hash=AuthService.hash_password("pass123"),
+        role_id=role_map["viewer"],
+        organization_id=admin_user.organization_id,
+        status="active",
+    )
+    session.add(user2)
+    await session.flush()
+    await session.commit()
+
+    response = await client.patch(
+        f"/api/users/{user2.id}",
+        json={"role_id": role_map["comp_bio"]},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+
+    result = await session.execute(
+        text(
+            "SELECT details_json, previous_value_json FROM audit_log WHERE action = 'role_change' AND entity_id = :id"
+        ),
+        {"id": user2.id},
+    )
+    row = result.fetchone()
+    assert row is not None
+    assert row.details_json["new_role_name"] == "comp_bio"
+    assert row.previous_value_json["old_role_name"] == "viewer"
+
+
+@pytest.mark.asyncio
+async def test_quota_exceeded_creates_audit_entry(session, admin_user):
+    """Quota exceeded creates an audit log entry."""
+    from app.services.quota_service import QuotaService
+
+    # Set a low quota
+    await QuotaService.set_quota(
+        session,
+        user_id=admin_user.id,
+        admin_user_id=admin_user.id,
+        org_id=admin_user.organization_id,
+        limit=10,
+    )
+    await session.commit()
+
+    # Use up the quota
+    await QuotaService.update_usage(session, admin_user.id, 9.5)
+    await session.commit()
+
+    # Try to exceed it
+    allowed, _ = await QuotaService.check_quota(session, admin_user.id, 5.0)
+    assert allowed is False
+    await session.commit()
+
+    result = await session.execute(
+        text("SELECT details_json FROM audit_log WHERE action = 'quota_exceeded'"),
+    )
+    row = result.fetchone()
+    assert row is not None
+    assert row.details_json["cpu_hours_limit"] == 10
