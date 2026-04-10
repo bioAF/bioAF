@@ -116,7 +116,7 @@ export default function PipelineRunsPage() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Submitter</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Started</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cost</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Est. $/hr</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
@@ -144,7 +144,7 @@ export default function PipelineRunsPage() {
                     <td className="px-4 py-3 text-sm">{r.submitted_by?.name || r.submitted_by?.email || "—"}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">{formatDateTime(r.started_at)}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">{formatDuration(r.started_at, r.completed_at)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-500">{r.cost_estimate ? `$${r.cost_estimate.toFixed(2)}` : "—"}</td>
+                    <td className="px-4 py-3 text-sm text-gray-500">{r.cost_estimate ? `$${r.cost_estimate.toFixed(2)}/hr` : "—"}</td>
                   </tr>
                 ))}
                 {runs.length === 0 && (

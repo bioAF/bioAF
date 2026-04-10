@@ -180,6 +180,10 @@ class PipelineRunService:
             run.k8s_job_name = job_result.get("job_id", "")
             run.k8s_namespace = job_result.get("namespace", "")
 
+            estimated_cost = job_result.get("estimated_cost", {})
+            if estimated_cost:
+                run.cost_estimate = estimated_cost.get("estimated_cost_usd")
+
         except Exception as e:
             run.status = "failed"
             run.error_message = str(e)
