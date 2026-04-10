@@ -263,6 +263,7 @@ export interface SampleBrief {
   molecule_type: string | null;
   library_prep_method: string | null;
   library_layout: string | null;
+  chemistry_version: string | null;
   qc_status: QCStatus | null;
   status: SampleStatus;
   created_at: string;
@@ -1520,6 +1521,65 @@ export interface CostEstimate {
   confidence_interval_pct: number;
   historical_run_count: number;
   budget_check: Record<string, unknown>;
+}
+
+// Experiment Auto-Run
+
+export interface AutoRunConfig {
+  id: number;
+  experiment_id: number;
+  pipeline_key: string;
+  parameters: Record<string, unknown> | null;
+  reference_genome: string | null;
+  alignment_algorithm: string | null;
+  delay_minutes: number;
+  enabled: boolean;
+  configured_by_user_id: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AutoRunConfigCreate {
+  pipeline_key: string;
+  parameters?: Record<string, unknown>;
+  reference_genome?: string | null;
+  alignment_algorithm?: string | null;
+  delay_minutes?: number;
+}
+
+export interface AutoRunConfigUpdate {
+  parameters?: Record<string, unknown>;
+  reference_genome?: string | null;
+  alignment_algorithm?: string | null;
+  delay_minutes?: number;
+  enabled?: boolean;
+}
+
+export interface PendingAutoRun {
+  id: number;
+  auto_run_config_id: number;
+  experiment_id: number;
+  sample_id: number;
+  sample_completed_at: string;
+  scheduled_at: string;
+  status: "waiting" | "launched" | "cancelled";
+  pipeline_run_id: number | null;
+  cancelled_reason: string | null;
+  created_at: string;
+}
+
+export interface VocabularyValue {
+  id: number;
+  value: string;
+  display_label: string | null;
+  display_order: number;
+  is_default: boolean;
+  is_active: boolean;
+}
+
+export interface VocabularyResponse {
+  field_name: string;
+  values: VocabularyValue[];
 }
 
 // Work Nodes (ADR-034)

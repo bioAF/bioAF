@@ -353,32 +353,36 @@ async def process_ingest_event(
 
     # Step 5b: ManifestEntry reconciliation (before copy, so resolution
     # from the manifest can determine the correct experiment prefix)
-    from datetime import datetime, timezone
-
     from app.models.manifest_entry import ManifestEntry
-    from app.models.sequencing_batch import SequencingBatch
+    from app.services.manifest_ingest_service import reconcile_manifest_entry
 
-    manifest_entry_result = await db.execute(
-        select(ManifestEntry)
-        .where(
-            ManifestEntry.expected_filename == filename,
-            ManifestEntry.status == "pending",
+    # Scope query: prefer MD5+filename match, fall back to filename-only
+    # so we can still detect checksum mismatches.
+    manifest_entry = None
+    if content_md5:
+        manifest_entry_result = await db.execute(
+            select(ManifestEntry)
+            .where(
+                ManifestEntry.expected_filename == filename,
+                ManifestEntry.expected_md5 == content_md5,
+                ManifestEntry.status == "pending",
+            )
+            .limit(1)
         )
-        .limit(1)
-    )
-    manifest_entry = manifest_entry_result.scalar_one_or_none()
-    if manifest_entry:
-        manifest_entry.file_id = file_record.id
-        manifest_entry.last_check_at = datetime.now(timezone.utc)
+        manifest_entry = manifest_entry_result.scalar_one_or_none()
 
-        if content_md5 and manifest_entry.expected_md5:
-            if content_md5 == manifest_entry.expected_md5:
-                manifest_entry.status = "verified"
-            else:
-                manifest_entry.status = "checksum_mismatch"
-                manifest_entry.error_message = f"Expected {manifest_entry.expected_md5}, got {content_md5}"
-        else:
-            manifest_entry.status = "verified"
+    if not manifest_entry:
+        manifest_entry_result = await db.execute(
+            select(ManifestEntry)
+            .where(
+                ManifestEntry.expected_filename == filename,
+                ManifestEntry.status == "pending",
+            )
+            .limit(1)
+        )
+        manifest_entry = manifest_entry_result.scalar_one_or_none()
+    if manifest_entry:
+        await reconcile_manifest_entry(db, manifest_entry, file_record, content_md5)
 
         # Enhance resolution from manifest entry if naming profile didn't resolve
         if manifest_entry.resolved_sample_id and not resolved_sample_id:
@@ -392,34 +396,6 @@ async def process_ingest_event(
             sample_obj = sample_result.scalar_one_or_none()
             if sample_obj:
                 resolved_experiment_id = sample_obj.experiment_id
-
-        # Link file to sample via junction table
-        if resolved_sample_id:
-            from app.models.sample import sample_files
-
-            existing_link = await db.execute(
-                sample_files.select().where(
-                    sample_files.c.sample_id == resolved_sample_id,
-                    sample_files.c.file_id == file_record.id,
-                )
-            )
-            if not existing_link.fetchone():
-                await db.execute(sample_files.insert().values(sample_id=resolved_sample_id, file_id=file_record.id))
-
-        # Link file to experiment and sequencing batch
-        if resolved_experiment_id and not file_record.experiment_id:
-            file_record.experiment_id = resolved_experiment_id
-        file_record.sequencing_batch_id = manifest_entry.sequencing_batch_id
-
-        # Increment batch ingested_file_count
-        batch_result = await db.execute(
-            select(SequencingBatch).where(SequencingBatch.id == manifest_entry.sequencing_batch_id)
-        )
-        seq_batch = batch_result.scalar_one_or_none()
-        if seq_batch:
-            seq_batch.ingested_file_count = (seq_batch.ingested_file_count or 0) + 1
-
-        await db.flush()
 
     # Step 5c: Copy file to raw bucket (real GCS only)
     if ingest_source == "auto_ingest":
@@ -563,15 +539,6 @@ async def process_ingest_event(
             "auto_created": auto_created,
         },
     )
-
-    # Step 10: Evaluate pipeline triggers for cataloged files
-    if ingest_status == "cataloged" and event.file_id:
-        try:
-            from app.services.trigger_service import TriggerService
-
-            await TriggerService.evaluate_event_triggers(event, db)
-        except Exception:
-            logger.exception("Trigger evaluation failed for event %d", event.id)
 
     return event
 

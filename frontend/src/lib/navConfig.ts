@@ -45,7 +45,6 @@ export const navConfig: NavSection[] = [
     children: [
       { label: "Pipeline Catalog", path: "/pipelines/catalog", permission: { resource: "pipelines", action: "view" } },
       { label: "Pipeline Runs", path: "/pipelines/runs", permission: { resource: "pipelines", action: "view" } },
-      { label: "Pipeline Scheduling", path: "/pipelines/scheduling", permission: { resource: "pipelines", action: "view" } },
     ],
   },
   {
@@ -75,6 +74,7 @@ export const navConfig: NavSection[] = [
       { label: "Files", path: "/data/files", permission: { resource: "files", action: "view" } },
       { label: "Documents", path: "/data/documents", permission: { resource: "files", action: "view" } },
       { label: "Reference Data", path: "/data/references", permission: { resource: "files", action: "view" } },
+      { label: "Naming Profiles", path: "/settings/naming-profiles", permission: { resource: "infrastructure", action: "configure" } },
     ],
   },
   {
@@ -103,11 +103,8 @@ export const navConfig: NavSection[] = [
       { label: "Users", path: "/settings/users", permission: { resource: "users", action: "view" } },
       { label: "Roles & Permissions", path: "/settings/roles", permission: { resource: "roles", action: "view" } },
       { label: "Audit Log", path: "/settings/audit-log", permission: { resource: "audit_log", action: "view" } },
-      { label: "GCP Configuration", path: "/settings/gcp", permission: { resource: "infrastructure", action: "configure" } },
-      { label: "Naming Profiles", path: "/settings/naming-profiles", permission: { resource: "infrastructure", action: "configure" } },
+      { label: "Integrations", path: "/settings/integrations", permission: { resource: "infrastructure", action: "configure" } },
       { label: "Work Nodes", path: "/settings/work-nodes", permission: { resource: "work_nodes", action: "configure" } },
-      { label: "SMTP Configuration", path: "/settings/smtp", permission: { resource: "notifications", action: "configure" } },
-      { label: "Slack Integration", path: "/settings/slack", permission: { resource: "notifications", action: "configure" } },
       { label: "Information", path: "/settings/info", permission: { resource: "infrastructure", action: "view" } },
     ],
   },

@@ -549,3 +549,79 @@ class SampleService:
             .where(Sample.id == sample_id)
         )
         return result.scalar_one_or_none()
+
+    @staticmethod
+    async def delete_samples(session: AsyncSession, sample_ids: list[int], user_id: int) -> int:
+        """Delete samples and clean up FK references.
+
+        Nullifies references in manifest_entries, ingest_events,
+        pending_auto_runs, and documents. Removes sample_files and
+        pipeline_run_samples junction rows. project_samples cascade
+        automatically via ondelete=CASCADE.
+        """
+        if not sample_ids:
+            return 0
+
+        # Nullify nullable FK references
+        await session.execute(
+            text("UPDATE manifest_entries SET resolved_sample_id = NULL WHERE resolved_sample_id = ANY(:ids)"),
+            {"ids": sample_ids},
+        )
+        await session.execute(
+            text("UPDATE ingest_events SET resolved_sample_id = NULL WHERE resolved_sample_id = ANY(:ids)"),
+            {"ids": sample_ids},
+        )
+        await session.execute(
+            text("UPDATE documents SET linked_sample_id = NULL WHERE linked_sample_id = ANY(:ids)"),
+            {"ids": sample_ids},
+        )
+
+        # Cancel waiting auto-runs for these samples
+        await session.execute(
+            text(
+                "UPDATE pending_auto_runs SET status = 'cancelled', cancelled_reason = 'sample_deleted' "
+                "WHERE sample_id = ANY(:ids) AND status = 'waiting'"
+            ),
+            {"ids": sample_ids},
+        )
+        # Delete the pending_auto_run rows (non-waiting are historical)
+        await session.execute(
+            text("DELETE FROM pending_auto_runs WHERE sample_id = ANY(:ids)"),
+            {"ids": sample_ids},
+        )
+
+        # Remove junction table rows
+        await session.execute(
+            text("DELETE FROM sample_files WHERE sample_id = ANY(:ids)"),
+            {"ids": sample_ids},
+        )
+        await session.execute(
+            text("DELETE FROM pipeline_run_samples WHERE sample_id = ANY(:ids)"),
+            {"ids": sample_ids},
+        )
+
+        # Delete custom fields (cascade should handle, but be explicit)
+        await session.execute(
+            text("DELETE FROM sample_custom_fields WHERE sample_id = ANY(:ids)"),
+            {"ids": sample_ids},
+        )
+
+        # Delete the samples
+        result = await session.execute(
+            text("DELETE FROM samples WHERE id = ANY(:ids)"),
+            {"ids": sample_ids},
+        )
+        deleted = result.rowcount
+
+        # Audit each deletion
+        for sid in sample_ids:
+            await log_action(
+                session,
+                user_id=user_id,
+                entity_type="sample",
+                entity_id=sid,
+                action="delete",
+                details={"sample_id": sid},
+            )
+
+        return deleted
