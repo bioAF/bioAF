@@ -163,3 +163,21 @@ class TestSubmitWritesAuditLog:
         assert row[0] == "launch"
         assert row[1] == "pipeline_run"
         assert row[2] == run.id
+
+
+class TestSubmitStoresCostEstimate:
+    @pytest.mark.asyncio
+    async def test_stores_cost_estimate_from_adapter(self, session, setup_data):
+        """launch_run should store the adapter's estimated_cost on the run."""
+        data = setup_data
+        request = PipelineRunLaunchRequest(
+            pipeline_key="bioaf-system-test",
+            experiment_id=data["experiment"].id,
+        )
+
+        run = await PipelineRunService.launch_run(session, data["org"].id, data["user"].id, request)
+        await session.commit()
+
+        assert run.cost_estimate is not None
+        # Stores the pipeline pool's hourly node rate (n2-highmem-16 spot)
+        assert float(run.cost_estimate) == 0.3669
