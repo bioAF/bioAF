@@ -32,6 +32,9 @@ services:
       BIOAF_GCP_PROJECT_ID: ${GCP_PROJECT_ID:-}
       BIOAF_DEBUG: "false"
       BIOAF_USE_SECRET_MANAGER: "false"
+    volumes:
+      - ../update-requests:/app/update-requests
+      - ../update-status:/app/update-status
     depends_on:
       db:
         condition: service_healthy

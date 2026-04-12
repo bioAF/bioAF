@@ -48,14 +48,30 @@ See all architecture decision records in [decisions/README.md](decisions/README.
 - Git
 - openssl (for secret generation)
 
-### Deploy
+### Deploy on GCP (one command)
+
+Run this on your local machine to provision a GCP VM and get started:
 
 ```bash
-# Clone the repository
+curl -fsSL https://raw.githubusercontent.com/not-that-guy-again/bioAF/main/install-gcp.sh | bash
+```
+
+The script sets up gcloud, creates a VM with Docker, and walks you through
+the process. Once the VM is ready, SSH in and run:
+
+```bash
 git clone https://github.com/not-that-guy-again/bioAF.git
 cd bioAF
+./bioaf setup
+```
 
-# All-in-one setup
+### Deploy on an existing server
+
+If you already have a Linux server with Docker installed:
+
+```bash
+git clone https://github.com/not-that-guy-again/bioAF.git
+cd bioAF
 ./bioaf setup
 ```
 
@@ -63,9 +79,6 @@ The `setup` command handles everything: checks prerequisites, generates
 secrets and TLS certs, builds containers, runs migrations, and prints a
 one-time setup code. Open the URL it shows in your browser and enter the
 code to create your admin account and configure the platform.
-
-bioAF requires a Linux server (typically a GCP VM). Running `./bioaf setup`
-on macOS or Windows will print instructions for setting up a GCP instance.
 
 ### Management Commands
 
@@ -79,13 +92,14 @@ on macOS or Windows will print instructions for setting up a GCP instance.
 | `./bioaf logs [service]` | Tail logs (all or one service) |
 | `./bioaf build [service]` | Build (or rebuild) container images |
 | `./bioaf migrate` | Run database migrations |
-| `./bioaf create-admin` | Deprecated (use `./bioaf setup`) |
+| `./bioaf migrate-down <rev>` | Downgrade database to a specific revision |
 | `./bioaf seed <script.py>` | Run a seed/data script in the backend container |
 | `./bioaf backup` | Create a database backup |
-| `./bioaf update` | Pull latest code, rebuild, and migrate |
+| `./bioaf update [version]` | Update to latest (or specific) version |
 | `./bioaf reset-db` | Destroy and recreate the database (with confirmation) |
 | `./bioaf shell [service]` | Open a shell in a container (default: backend) |
 | `./bioaf dbshell` | Open a psql session to the database |
+| `./bioaf register-outputs` | Register pipeline output files from GCS |
 | `./bioaf help` | Show all commands |
 
 See the full [Deployment Guide](docs/deployment-guide.md) for detailed instructions.
@@ -177,10 +191,11 @@ bioAF/
   decisions/         Architecture Decision Records
   documentation/     Product and architecture specs
   docs/              User-facing documentation
-  scripts/           Database seed and utility scripts
+  scripts/           Utility scripts (seed data, update agent)
   tests/shell/       BATS tests for install.sh and bioaf scripts
   bioaf              Management script (entry point)
   install.sh         First-time installer (prereq checks + env generation)
+  install-gcp.sh     One-command GCP provisioning script
 ```
 
 ## Contributing

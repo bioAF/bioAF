@@ -1,0 +1,25 @@
+[Unit]
+Description=bioAF Update Agent
+Documentation=https://github.com/not-that-guy-again/bioAF
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+# __BIOAF_DIR__ is replaced during installation with the actual repo path
+ExecStart=__BIOAF_DIR__/scripts/update-agent.sh
+WorkingDirectory=__BIOAF_DIR__
+Restart=always
+RestartSec=5
+
+# Run as the user who owns the repo (set during installation)
+User=__BIOAF_USER__
+Group=__BIOAF_GROUP__
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bioaf-update-agent
+
+[Install]
+WantedBy=multi-user.target

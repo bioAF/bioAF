@@ -123,7 +123,7 @@ Command logging is optional and disabled by default for privacy reasons. To enab
 2. Toggle "Log SSH Commands" to enabled.
 3. Set the retention period for command logs (default: 90 days).
 
-When enabled, all commands typed during SSH sessions are recorded and visible in the audit log at **Admin > Audit Log**. Users are informed at login with a banner message that command logging is active.
+When enabled, all commands typed during SSH sessions are recorded and visible in the audit log at **Settings > Audit Log**. Users are informed at login with a banner message that command logging is active.
 
 ### Viewing Session History
 
@@ -133,7 +133,7 @@ To review SSH sessions for a specific pipeline run:
 2. Click the "Sessions" tab.
 3. Each session shows the connecting user, start/end times, and (if command logging is enabled) a transcript of commands.
 
-Alternatively, query the audit log directly at **Admin > Audit Log** with the filter `event_type = ssh.session_start`.
+Alternatively, query the audit log directly at **Settings > Audit Log** with the filter `event_type = ssh.session_start`.
 
 ## Security Considerations
 

@@ -131,6 +131,16 @@ check_prereqs() {
         return 1
     fi
 
+    # Check Docker socket permissions (catches the "usermod but no re-login" case)
+    if ! docker info &>/dev/null; then
+        echo ""
+        red "Docker is installed but your user cannot connect to it."
+        echo "Add yourself to the docker group, then try again:"
+        bold "  sudo usermod -aG docker \$USER && newgrp docker"
+        echo ""
+        return 1
+    fi
+
     green "All prerequisites satisfied."
     return 0
 }

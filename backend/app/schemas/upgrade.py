@@ -58,3 +58,22 @@ class RollbackResponse(BaseModel):
     upgrade_id: int
     status: str
     message: str
+
+
+class ExecuteUpgradeRequest(BaseModel):
+    target_version: str
+
+
+class ExecuteUpgradeResponse(BaseModel):
+    upgrade_id: int
+    status: str
+    from_version: str
+    to_version: str
+
+
+class UpdateStatusResponse(BaseModel):
+    status: str
+    from_version: str | None = None
+    to_version: str | None = None
+    step: str | None = None
+    error: str | None = None
