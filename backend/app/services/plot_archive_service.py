@@ -5,10 +5,12 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.experiment import Experiment
 from app.models.file import File
 from app.models.plot_archive_entry import PlotArchiveEntry
 from app.services.audit_service import log_action
 from app.services.file_service import FileService
+from app.services.thumbnail_service import THUMBNAIL_PREFIX, ThumbnailService
 
 logger = logging.getLogger("bioaf.plot_archive_service")
 
@@ -56,7 +58,12 @@ class PlotArchiveService:
     ) -> tuple[list[PlotArchiveEntry], int]:
         base = (
             select(PlotArchiveEntry)
-            .options(selectinload(PlotArchiveEntry.file).selectinload(File.uploader))
+            .options(
+                selectinload(PlotArchiveEntry.file).selectinload(File.uploader),
+                selectinload(PlotArchiveEntry.experiment).selectinload(Experiment.project),
+                selectinload(PlotArchiveEntry.pipeline_run),
+                selectinload(PlotArchiveEntry.notebook_session),
+            )
             .where(PlotArchiveEntry.organization_id == org_id)
         )
         count_base = select(func.count(PlotArchiveEntry.id)).where(PlotArchiveEntry.organization_id == org_id)
@@ -92,7 +99,12 @@ class PlotArchiveService:
     async def get_plot(session: AsyncSession, org_id: int, plot_id: int) -> PlotArchiveEntry | None:
         result = await session.execute(
             select(PlotArchiveEntry)
-            .options(selectinload(PlotArchiveEntry.file).selectinload(File.uploader))
+            .options(
+                selectinload(PlotArchiveEntry.file).selectinload(File.uploader),
+                selectinload(PlotArchiveEntry.experiment).selectinload(Experiment.project),
+                selectinload(PlotArchiveEntry.pipeline_run),
+                selectinload(PlotArchiveEntry.notebook_session),
+            )
             .where(PlotArchiveEntry.id == plot_id, PlotArchiveEntry.organization_id == org_id)
         )
         return result.scalar_one_or_none()
@@ -133,9 +145,12 @@ class PlotArchiveService:
         try:
             from google.cloud import storage as gcs_storage
 
-            client = gcs_storage.Client()
+            from app.services.gcs_storage import GcsStorageService
 
-            # Get all organizations (simplified — in practice scope by active orgs)
+            credentials = await GcsStorageService.get_credentials(session)
+            client = gcs_storage.Client(credentials=credentials)
+
+            # Get all organizations (simplified -- in practice scope by active orgs)
             from app.models.organization import Organization
 
             orgs_result = await session.execute(select(Organization))
@@ -144,7 +159,7 @@ class PlotArchiveService:
             cfg_result = await session.execute(
                 text("SELECT value FROM platform_config WHERE key = 'results_bucket_name'")
             )
-            results_bucket = cfg_result.scalar_one_or_none()
+            results_bucket = cfg_result.scalars().first()
             if not results_bucket or results_bucket == "null":
                 logger.warning("results_bucket_name not configured in platform_config, skipping plot scan")
                 return 0
@@ -159,6 +174,10 @@ class PlotArchiveService:
                     blobs = bucket.list_blobs()
 
                     for blob in blobs:
+                        # Skip generated thumbnails
+                        if blob.name.startswith(THUMBNAIL_PREFIX):
+                            continue
+
                         # Filter image files
                         if not blob.name.lower().endswith((".png", ".svg", ".pdf")):
                             continue
@@ -196,7 +215,7 @@ class PlotArchiveService:
                         )
 
                         # Create archive entry
-                        await PlotArchiveService.index_plot(
+                        entry = await PlotArchiveService.index_plot(
                             session,
                             org_id=org_id,
                             file_id=file.id,
@@ -204,6 +223,13 @@ class PlotArchiveService:
                             pipeline_run_id=pipeline_run_id,
                             title=blob.name.split("/")[-1],
                         )
+
+                        # Generate PDF thumbnail
+                        if ext == "pdf":
+                            thumb_uri = await ThumbnailService.generate_and_upload(session, gcs_uri, entry.id)
+                            if thumb_uri:
+                                entry.thumbnail_gcs_uri = thumb_uri
+
                         indexed += 1
 
                 except Exception as e:
@@ -271,3 +297,42 @@ class PlotArchiveService:
             await session.commit()
             logger.info("Backfilled metadata for %d plot archive entries", updated)
         return updated
+
+    @staticmethod
+    async def backfill_thumbnails(session: AsyncSession) -> int:
+        """Generate missing thumbnails for PDF plot entries.
+
+        Processes one entry at a time with commits every 5 to avoid
+        holding the event loop or accumulating too much work in a
+        single transaction.
+        """
+        result = await session.execute(
+            select(PlotArchiveEntry)
+            .options(selectinload(PlotArchiveEntry.file))
+            .where(PlotArchiveEntry.thumbnail_gcs_uri.is_(None))
+        )
+        entries = list(result.scalars().all())
+        generated = 0
+        batch = 0
+        for entry in entries:
+            if not entry.file or not entry.file.gcs_uri:
+                continue
+            if not entry.file.filename.lower().endswith(".pdf"):
+                continue
+
+            thumb_uri = await ThumbnailService.generate_and_upload(session, entry.file.gcs_uri, entry.id)
+            if thumb_uri:
+                entry.thumbnail_gcs_uri = thumb_uri
+                generated += 1
+                batch += 1
+
+            # Commit in batches of 5 to keep transactions short
+            if batch >= 5:
+                await session.commit()
+                batch = 0
+
+        if batch > 0:
+            await session.commit()
+        if generated > 0:
+            logger.info("Generated thumbnails for %d PDF plot entries", generated)
+        return generated

@@ -392,6 +392,10 @@ async def file_content(
             content_type = "image/png"
         elif file.filename.endswith(".jpg") or file.filename.endswith(".jpeg"):
             content_type = "image/jpeg"
+        elif file.filename.endswith(".svg"):
+            content_type = "image/svg+xml"
+        elif file.filename.endswith(".pdf"):
+            content_type = "application/pdf"
 
         return Response(
             content=data,

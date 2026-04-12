@@ -167,6 +167,25 @@ class FileService:
             details={"filename": file.filename},
         )
 
+        # Clean up any associated plot thumbnails from GCS before removing entries
+        plot_entries = (
+            (
+                await session.execute(
+                    select(PlotArchiveEntry.thumbnail_gcs_uri).where(
+                        PlotArchiveEntry.file_id == file_id,
+                        PlotArchiveEntry.thumbnail_gcs_uri.isnot(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if plot_entries:
+            from app.services.thumbnail_service import ThumbnailService
+
+            for thumb_uri in plot_entries:
+                await ThumbnailService.delete_thumbnail(session, thumb_uri)
+
         # Remove dependent rows from tables with FK references to files.id
         await session.execute(delete(PlotArchiveEntry).where(PlotArchiveEntry.file_id == file_id))
 

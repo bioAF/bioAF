@@ -1,5 +1,32 @@
 # Release Notes
 
+## v0.6.4
+
+Plot archive bug fixes, PDF thumbnail generation, and detail modal improvements.
+
+### Bug Fixes (Issue #151)
+
+- Add unique constraint on `platform_config.key` to prevent duplicate rows that broke the plot archive scanner
+- Fix scanner using bare ADC instead of app service account credentials
+- Add SVG (`image/svg+xml`) and PDF (`application/pdf`) content-type mappings to file content endpoint
+- Preserve click handler on plot thumbnails that fail to load
+
+### PDF Thumbnails
+
+- Render PDF page 1 to PNG thumbnails using PyMuPDF, stored under `_thumbnails/` prefix in the results bucket
+- Scanner auto-generates thumbnails when indexing new PDF plots
+- Add `GET /api/plots/{id}/thumbnail/content` endpoint for serving thumbnail bytes
+- Extend `POST /api/plots/backfill` to generate missing thumbnails for existing PDFs
+- Clean up thumbnail blobs from GCS when associated files are deleted
+- Offload PDF rendering to thread pool to avoid blocking the event loop
+
+### Plot Detail Modal
+
+- Rework modal to match Data & Files detail layout with metadata grid and download button
+- Display project, experiment, pipeline, session, source, and indexed date
+- Add file format badge (PNG, SVG, PDF) to thumbnail cards
+- Standardize card title font sizing
+
 ## v0.6.3
 
 Infrastructure lifecycle stability, Cloud Logging, and deploy UX improvements.
