@@ -5,7 +5,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { PlotModal } from "@/components/shared/PlotModal";
 import { ContentLoading } from "@/components/shared/ContentLoading";
-import { api, fileContentUrl } from "@/lib/api";
+import { api, fileContentUrl, plotThumbnailContentUrl } from "@/lib/api";
 import type {
   PlotArchiveResponse,
   PlotArchiveListResponse,
@@ -14,26 +14,62 @@ import type {
 } from "@/lib/types";
 
 function PlotThumbnail({
-  fileId,
-  title,
+  plot,
   onClick,
 }: {
-  fileId: number;
-  title: string;
-  onClick: (url: string) => void;
+  plot: PlotArchiveResponse;
+  onClick: () => void;
 }) {
   const [error, setError] = useState(false);
-  const url = fileContentUrl(fileId);
+  const fileType = plot.file?.file_type?.toLowerCase() ?? "";
+  const isPdf = fileType === "pdf";
+  const hasThumbnail = !!plot.thumbnail_url;
+
+  // For PDFs without a generated thumbnail, show file-type icon
+  if (isPdf && !hasThumbnail) {
+    return (
+      <button
+        type="button"
+        className="flex flex-col items-center gap-2 py-6 cursor-pointer hover:opacity-80"
+        onClick={onClick}
+      >
+        <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center text-gray-500 text-xs font-bold uppercase">
+          PDF
+        </div>
+        <span className="text-xs text-gray-400">No preview available</span>
+      </button>
+    );
+  }
+
+  // Determine the image source: thumbnail for PDFs, content for images
+  const imgUrl = isPdf && hasThumbnail
+    ? plotThumbnailContentUrl(plot.id)
+    : plot.file
+      ? fileContentUrl(plot.file.id)
+      : "";
 
   if (error) {
-    return <span className="text-gray-400 text-xs">Failed to load</span>;
+    return (
+      <button
+        type="button"
+        className="flex flex-col items-center gap-2 py-6 cursor-pointer hover:opacity-80"
+        onClick={onClick}
+      >
+        <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center text-gray-500 text-xs font-bold uppercase">
+          {fileType || "?"}
+        </div>
+        <span className="text-xs text-gray-400">No preview available</span>
+      </button>
+    );
   }
+
   return (
+    // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={url}
-      alt={title}
+      src={imgUrl}
+      alt={plot.title ?? "Plot"}
       className="w-full h-full object-cover cursor-pointer"
-      onClick={() => onClick(url)}
+      onClick={onClick}
       onError={() => setError(true)}
     />
   );
@@ -64,6 +100,7 @@ export default function PlotArchivePage() {
   const [loading, setLoading] = useState(true);
   const [expandedUrl, setExpandedUrl] = useState<string | null>(null);
   const [expandedTitle, setExpandedTitle] = useState("");
+  const [expandedPlot, setExpandedPlot] = useState<PlotArchiveResponse | null>(null);
   const pageSize = 24;
 
   const [experiments, setExperiments] = useState<
@@ -136,9 +173,16 @@ export default function PlotArchivePage() {
 
   const resetPage = () => setPage(1);
 
-  const handleExpand = (plot: PlotArchiveResponse, signedUrl: string) => {
-    setExpandedUrl(signedUrl);
+  const handleExpand = (plot: PlotArchiveResponse) => {
+    const isPdf = plot.file?.file_type?.toLowerCase() === "pdf";
+    const url = isPdf && plot.thumbnail_url
+      ? plotThumbnailContentUrl(plot.id)
+      : plot.file
+        ? fileContentUrl(plot.file.id)
+        : "";
+    setExpandedUrl(url);
     setExpandedTitle(plot.title ?? "Plot");
+    setExpandedPlot(plot);
   };
 
   return (
@@ -251,23 +295,27 @@ export default function PlotArchivePage() {
                         key={plot.id}
                         className={`bg-white rounded-lg shadow overflow-hidden transition-shadow ${deleted ? "opacity-60" : "hover:shadow-md"}`}
                       >
-                        <div className="aspect-square bg-gray-100 flex items-center justify-center">
+                        <div className="aspect-square bg-gray-100 flex items-center justify-center relative">
                           {deleted ? (
                             <StorageDeletedPlaceholder />
                           ) : plot.file ? (
                             <PlotThumbnail
-                              fileId={plot.file.id}
-                              title={plot.title ?? "Plot"}
-                              onClick={(url) => handleExpand(plot, url)}
+                              plot={plot}
+                              onClick={() => handleExpand(plot)}
                             />
                           ) : (
                             <span className="text-gray-400 text-xs">
                               No preview
                             </span>
                           )}
+                          {plot.file && (
+                            <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 bg-black/50 text-white text-[10px] font-semibold uppercase rounded">
+                              {plot.file.file_type}
+                            </span>
+                          )}
                         </div>
                         <div className="p-2">
-                          <p className={`text-xs font-medium truncate ${deleted ? "text-gray-400" : ""}`}>
+                          <p className={`text-[11px] leading-tight font-medium line-clamp-2 ${deleted ? "text-gray-400" : ""}`} title={plot.title ?? undefined}>
                             {plot.title}
                           </p>
                           {plot.tags.length > 0 && (
@@ -312,11 +360,26 @@ export default function PlotArchivePage() {
               </>
             )}
 
-            {expandedUrl && (
+            {expandedUrl && expandedPlot && (
               <PlotModal
                 url={expandedUrl}
                 title={expandedTitle}
-                onClose={() => setExpandedUrl(null)}
+                metadata={{
+                  experimentName: expandedPlot.experiment_name,
+                  projectName: expandedPlot.project_name,
+                  pipelineRunId: expandedPlot.pipeline_run_id,
+                  pipelineRunName: expandedPlot.pipeline_run_name,
+                  notebookSessionId: expandedPlot.notebook_session_id,
+                  notebookSessionType: expandedPlot.notebook_session_type,
+                  sourceType: expandedPlot.source_type,
+                  tags: expandedPlot.tags,
+                  indexedAt: expandedPlot.indexed_at,
+                  file: expandedPlot.file,
+                }}
+                onClose={() => {
+                  setExpandedUrl(null);
+                  setExpandedPlot(null);
+                }}
               />
             )}
           </div>

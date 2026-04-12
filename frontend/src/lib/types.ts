@@ -1014,8 +1014,13 @@ export interface PlotArchiveResponse {
   title: string | null;
   file: FileResponse | null;
   experiment_id: number | null;
+  experiment_name: string | null;
+  project_name: string | null;
   pipeline_run_id: number | null;
+  pipeline_run_name: string | null;
   notebook_session_id: number | null;
+  notebook_session_type: string | null;
+  source_type: string | null;
   tags: string[];
   thumbnail_url: string | null;
   indexed_at: string;

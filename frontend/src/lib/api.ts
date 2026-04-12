@@ -277,4 +277,10 @@ export function fileContentUrl(fileId: number): string {
   return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 }
 
+export function plotThumbnailContentUrl(plotId: number): string {
+  const token = getToken();
+  const base = `${API_URL}/api/plots/${plotId}/thumbnail/content`;
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+}
+
 export { ApiError };
