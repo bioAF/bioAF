@@ -10,8 +10,13 @@ class PlotArchiveResponse(BaseModel):
     title: str | None
     file: FileResponse | None = None
     experiment_id: int | None
+    experiment_name: str | None = None
+    project_name: str | None = None
     pipeline_run_id: int | None
+    pipeline_run_name: str | None = None
     notebook_session_id: int | None
+    notebook_session_type: str | None = None
+    source_type: str | None = None
     tags: list[str] = []
     thumbnail_url: str | None = None
     indexed_at: datetime

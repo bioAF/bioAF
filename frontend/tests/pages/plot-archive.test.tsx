@@ -14,6 +14,7 @@ jest.mock("@/lib/api", () => ({
     get: (...args: unknown[]) => mockApiGet(...args),
   },
   fileContentUrl: (fileId: number) => `http://localhost:8000/api/files/${fileId}/content?token=fake`,
+  plotThumbnailContentUrl: (plotId: number) => `http://localhost:8000/api/plots/${plotId}/thumbnail/content?token=fake`,
 }));
 
 jest.mock("@/components/layout/Sidebar", () => ({
@@ -23,9 +24,13 @@ jest.mock("@/components/layout/Header", () => ({
   Header: () => <div data-testid="header">Header</div>,
 }));
 jest.mock("@/components/shared/PlotModal", () => ({
-  PlotModal: ({ title, onClose }: { title: string; onClose: () => void }) => (
+  PlotModal: ({ title, metadata, onClose }: { title: string; metadata?: { experimentName?: string | null; projectName?: string | null; pipelineRunName?: string | null; sourceType?: string | null }; onClose: () => void }) => (
     <div data-testid="plot-modal">
       <span>{title}</span>
+      {metadata?.experimentName && <span data-testid="modal-experiment">{metadata.experimentName}</span>}
+      {metadata?.projectName && <span data-testid="modal-project">{metadata.projectName}</span>}
+      {metadata?.pipelineRunName && <span data-testid="modal-pipeline">{metadata.pipelineRunName}</span>}
+      {metadata?.sourceType && <span data-testid="modal-source">{metadata.sourceType}</span>}
       <button onClick={onClose}>Close</button>
     </div>
   ),
@@ -40,8 +45,13 @@ const mockPlots = {
       title: "fastqc_heatmap.png",
       file: { id: 10, filename: "fastqc_heatmap.png", gcs_uri: "gs://bucket/heatmap.png", size_bytes: 1024, md5_checksum: null, file_type: "png", tags: [], uploader: null, upload_timestamp: "2026-03-19T00:00:00Z", created_at: "2026-03-19T00:00:00Z" },
       experiment_id: 1,
+      experiment_name: "RNA-seq Batch 1",
+      project_name: "Cancer Genomics",
       pipeline_run_id: 5,
+      pipeline_run_name: "nf-core/rnaseq",
       notebook_session_id: null,
+      notebook_session_type: null,
+      source_type: "pipeline",
       tags: ["fastqc", "qc"],
       thumbnail_url: null,
       indexed_at: "2026-03-19T00:00:00Z",
@@ -51,8 +61,13 @@ const mockPlots = {
       title: "adapter_content.png",
       file: { id: 11, filename: "adapter_content.png", gcs_uri: "gs://bucket/adapter.png", size_bytes: 2048, md5_checksum: null, file_type: "png", tags: [], uploader: null, upload_timestamp: "2026-03-19T00:00:00Z", created_at: "2026-03-19T00:00:00Z" },
       experiment_id: 2,
+      experiment_name: "ATAC-seq Run",
+      project_name: null,
       pipeline_run_id: null,
+      pipeline_run_name: null,
       notebook_session_id: null,
+      notebook_session_type: null,
+      source_type: null,
       tags: [],
       thumbnail_url: null,
       indexed_at: "2026-03-18T00:00:00Z",
@@ -218,6 +233,54 @@ test("opens plot modal when thumbnail is clicked", async () => {
 
   const images = screen.getAllByRole("img");
   fireEvent.click(images[0]);
+
+  await waitFor(() => {
+    expect(screen.getByTestId("plot-modal")).toBeInTheDocument();
+  });
+});
+
+test("plot modal receives metadata when thumbnail is clicked", async () => {
+  render(<PlotArchivePage />);
+
+  await waitFor(() => {
+    const images = screen.getAllByRole("img");
+    expect(images.length).toBeGreaterThan(0);
+  });
+
+  const images = screen.getAllByRole("img");
+  fireEvent.click(images[0]);
+
+  await waitFor(() => {
+    expect(screen.getByTestId("plot-modal")).toBeInTheDocument();
+  });
+
+  expect(screen.getByTestId("modal-experiment")).toHaveTextContent("RNA-seq Batch 1");
+  expect(screen.getByTestId("modal-project")).toHaveTextContent("Cancer Genomics");
+  expect(screen.getByTestId("modal-pipeline")).toHaveTextContent("nf-core/rnaseq");
+  expect(screen.getByTestId("modal-source")).toHaveTextContent("pipeline");
+});
+
+test("opens plot modal when failed-to-load thumbnail is clicked", async () => {
+  render(<PlotArchivePage />);
+
+  await waitFor(() => {
+    expect(screen.getByText("fastqc_heatmap.png")).toBeInTheDocument();
+  });
+
+  await waitFor(() => {
+    const images = screen.getAllByRole("img");
+    expect(images.length).toBeGreaterThan(0);
+  });
+
+  // Simulate image load failure on the first thumbnail
+  const images = screen.getAllByRole("img");
+  fireEvent.error(images[0]);
+
+  // The fallback should appear and be clickable
+  const fallbacks = screen.getAllByText("No preview available");
+  expect(fallbacks.length).toBeGreaterThan(0);
+
+  fireEvent.click(fallbacks[0]);
 
   await waitFor(() => {
     expect(screen.getByTestId("plot-modal")).toBeInTheDocument();

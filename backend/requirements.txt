@@ -40,3 +40,5 @@ PyJWT[crypto]>=2.8
 # Provenance report generation
 weasyprint>=60
 markdown>=3.5
+# PDF thumbnail generation for plot archive
+PyMuPDF>=1.24

@@ -27,11 +27,12 @@ PUBLIC_PATHS = {
 
 
 _FILE_CONTENT_RE = re.compile(r"^/api/files/\d+/content$")
+_PLOT_THUMBNAIL_CONTENT_RE = re.compile(r"^/api/plots/\d+/thumbnail/content$")
 
 
 def _is_file_content_path(path: str) -> bool:
     """Return True for paths that legitimately need query-param token auth."""
-    return _FILE_CONTENT_RE.match(path) is not None
+    return _FILE_CONTENT_RE.match(path) is not None or _PLOT_THUMBNAIL_CONTENT_RE.match(path) is not None
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
