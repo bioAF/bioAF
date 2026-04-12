@@ -28,6 +28,10 @@ build/
 node_modules/
 *.tsbuildinfo
 
+# Update system
+update-status/
+update-requests/
+
 # Terraform
 *.tfvars
 !terraform.tfvars.template

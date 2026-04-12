@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     backup_postgres_retention_days: int = 14
     backup_config_retention_days: int = 30
 
+    # Update system
+    update_requests_dir: str = "/app/update-requests"
+    update_status_dir: str = "/app/update-status"
+
     # Bcrypt
     bcrypt_rounds: int = 12
 

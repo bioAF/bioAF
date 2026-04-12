@@ -143,6 +143,16 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("Built-in role permission sync failed: %s", e)
 
+    # Resolve any pending upgrades from before the restart
+    from app.services.upgrade_service import UpgradeService
+
+    try:
+        async with notif_session_factory() as upgrade_session:
+            await UpgradeService.resolve_pending_upgrades(upgrade_session)
+            await upgrade_session.commit()
+    except Exception as e:
+        logger.warning("Could not resolve pending upgrades: %s", e)
+
     logger.info("bioAF backend started successfully")
 
     # Start background tasks
