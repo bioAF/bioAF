@@ -61,7 +61,18 @@ class OrphanedResourceService:
         gcp_zone: str | None = None,
         terraform_run_id: int | None = None,
     ) -> OrphanedResource:
-        """Record a detected orphaned resource."""
+        """Record a detected orphaned resource (skips if already tracked)."""
+        result = await session.execute(
+            select(OrphanedResource).where(
+                OrphanedResource.resource_type == resource_type,
+                OrphanedResource.resource_name == resource_name,
+                OrphanedResource.status.in_({"detected", "failed", "cleaning"}),
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            return existing
+
         resource = OrphanedResource(
             resource_type=resource_type,
             resource_name=resource_name,
@@ -125,6 +136,8 @@ class OrphanedResourceService:
                 await OrphanedResourceService._cleanup_gke_cluster(session, resource)
             elif resource.resource_type == "gcs_bucket":
                 await OrphanedResourceService._cleanup_gcs_bucket(session, resource)
+            elif resource.resource_type == "service_account":
+                await OrphanedResourceService._cleanup_service_account(session, resource)
             else:
                 raise ValueError(f"Unknown resource type: {resource.resource_type}")
 
@@ -177,6 +190,19 @@ class OrphanedResourceService:
         bucket.delete(force=True)
 
     @staticmethod
+    async def _cleanup_service_account(
+        session: AsyncSession,
+        resource: OrphanedResource,
+    ) -> None:
+        """Delete a GCP service account using the SA credentials."""
+        from google.cloud import iam_admin_v1
+
+        credentials = await _get_gke_credentials(session)
+        client = iam_admin_v1.IAMClient(credentials=credentials) if credentials else iam_admin_v1.IAMClient()
+        sa_name = f"projects/{resource.gcp_project_id}/serviceAccounts/{resource.resource_name}@{resource.gcp_project_id}.iam.gserviceaccount.com"
+        client.delete_service_account(name=sa_name)
+
+    @staticmethod
     async def dismiss_resource(
         session: AsyncSession,
         resource_id: int,
@@ -222,16 +248,117 @@ class OrphanedResourceService:
             return "NOT_FOUND", None
 
     @staticmethod
+    async def scan_for_orphans(session: AsyncSession) -> int:
+        """Scan GCP for bioaf-* resources not tracked by the platform.
+
+        Checks GKE clusters and IAM service accounts against
+        platform_config and existing orphan records. Returns the number
+        of newly detected orphans.
+        """
+        config_result = await session.execute(
+            text(
+                "SELECT key, value FROM platform_config WHERE key IN ('gcp_project_id', 'gcp_zone', 'gke_cluster_name')"
+            )
+        )
+        config = {r[0]: r[1] for r in config_result.fetchall()}
+
+        project_id = config.get("gcp_project_id", "")
+        zone = config.get("gcp_zone", "")
+        active_cluster = config.get("gke_cluster_name", "")
+        if active_cluster == "null":
+            active_cluster = ""
+
+        if not project_id or not zone:
+            return 0
+
+        # Get existing orphan names so we don't duplicate
+        existing_result = await session.execute(
+            select(OrphanedResource.resource_name, OrphanedResource.resource_type).where(
+                OrphanedResource.status.in_({"detected", "failed", "cleaning"}),
+            )
+        )
+        known = {(r[0], r[1]) for r in existing_result.fetchall()}
+
+        credentials = await _get_gke_credentials(session)
+        detected = 0
+
+        # Scan GKE clusters
+        try:
+            client = _get_gke_client(credentials)
+            parent = f"projects/{project_id}/locations/{zone}"
+            response = client.list_clusters(parent=parent)
+            live_clusters = list(response.clusters) if response.clusters else []
+        except Exception as exc:
+            logger.warning("Failed to scan GKE clusters: %s", exc)
+            live_clusters = []
+
+        for cluster in live_clusters:
+            name = cluster.name
+            if not name.startswith("bioaf-"):
+                continue
+            if name == active_cluster:
+                continue
+            if (name, "gke_cluster") in known:
+                continue
+
+            await OrphanedResourceService.log_resource(
+                session,
+                resource_type="gke_cluster",
+                resource_name=name,
+                gcp_project_id=project_id,
+                gcp_zone=zone,
+                stack_uid=name,
+            )
+            detected += 1
+            logger.info("Detected untracked GKE cluster: %s", name)
+
+        # Scan IAM service accounts created by the compute module
+        _COMPUTE_SA_IDS = {"bioaf-notebook-runner"}
+        try:
+            from google.cloud import iam_admin_v1
+
+            iam_client = iam_admin_v1.IAMClient(credentials=credentials) if credentials else iam_admin_v1.IAMClient()
+            sa_list = iam_client.list_service_accounts(name=f"projects/{project_id}")
+            for sa in sa_list:
+                sa_id = sa.email.split("@")[0]
+                if sa_id not in _COMPUTE_SA_IDS:
+                    continue
+                # Only orphaned if no compute stack is deployed
+                if active_cluster:
+                    continue
+                if (sa_id, "service_account") in known:
+                    continue
+
+                await OrphanedResourceService.log_resource(
+                    session,
+                    resource_type="service_account",
+                    resource_name=sa_id,
+                    gcp_project_id=project_id,
+                    stack_uid=sa_id,
+                )
+                detected += 1
+                logger.info("Detected untracked service account: %s", sa_id)
+        except Exception as exc:
+            logger.warning("Failed to scan service accounts: %s", exc)
+
+        if detected:
+            await session.flush()
+        return detected
+
+    @staticmethod
     async def recovery_check(
         session: AsyncSession,
     ) -> dict[str, list[dict]]:
-        """Check all unresolved orphaned GKE clusters and classify them.
+        """Scan for new orphans, then classify all unresolved GKE clusters.
 
         Returns a dict with three lists:
         - recoverable: clusters in RUNNING/RECONCILING state (can be adopted)
         - provisioning: clusters still being created
         - dead: clusters in ERROR state or not found in GCP
         """
+        # Scan GKE API for clusters the platform doesn't know about
+        await OrphanedResourceService.scan_for_orphans(session)
+
         unresolved = {"detected", "failed"}
         stmt = (
             select(OrphanedResource)
@@ -357,17 +484,16 @@ class OrphanedResourceService:
         session: AsyncSession,
         user_id: int,
     ) -> dict[str, int]:
-        """Clean up all orphaned GKE clusters that are dead (ERROR or NOT_FOUND).
+        """Clean up all orphaned resources that are dead or no longer needed.
 
-        Skips clusters that are RUNNING (should be adopted) or PROVISIONING
-        (still starting). For NOT_FOUND clusters, just marks them dismissed.
-        For ERROR clusters, attempts to delete then marks cleaned.
+        For GKE clusters: skips RUNNING (should be adopted) or PROVISIONING.
+        For service accounts: deletes directly.
+        For NOT_FOUND resources: marks cleaned (already gone).
 
         Returns counts: {"cleaned": N, "skipped": N, "failed": N}.
         """
         unresolved = {"detected", "failed"}
         stmt = select(OrphanedResource).where(
-            OrphanedResource.resource_type == "gke_cluster",
             OrphanedResource.status.in_(unresolved),
         )
         result = await session.execute(stmt)
@@ -378,43 +504,64 @@ class OrphanedResourceService:
         failed = 0
 
         for resource in resources:
-            gke_status, _cluster = await OrphanedResourceService._query_gke_status(session, resource)
+            if resource.resource_type == "gke_cluster":
+                gke_status, _cluster = await OrphanedResourceService._query_gke_status(session, resource)
 
-            if gke_status in _RECOVERABLE_STATUSES or gke_status in _PROVISIONING_STATUSES:
-                skipped += 1
-                continue
+                if gke_status in _RECOVERABLE_STATUSES or gke_status in _PROVISIONING_STATUSES:
+                    skipped += 1
+                    continue
 
-            if gke_status == "NOT_FOUND":
-                # Cluster is already gone, just dismiss the record
-                resource.status = "cleaned"
-                resource.resolved_at = datetime.now(timezone.utc)
-                resource.resolved_by_user_id = user_id
-                cleaned += 1
-                continue
+                if gke_status == "NOT_FOUND":
+                    resource.status = "cleaned"
+                    resource.resolved_at = datetime.now(timezone.utc)
+                    resource.resolved_by_user_id = user_id
+                    cleaned += 1
+                    continue
 
-            # Cluster exists but is in a bad state -- try to delete it
-            try:
-                credentials = await _get_gke_credentials(session)
-                client = _get_gke_client(credentials)
-                cluster_path = (
-                    f"projects/{resource.gcp_project_id}"
-                    f"/locations/{resource.gcp_zone}"
-                    f"/clusters/{resource.resource_name}"
-                )
-                client.delete_cluster(name=cluster_path)
-                resource.status = "cleaned"
-                resource.resolved_at = datetime.now(timezone.utc)
-                resource.resolved_by_user_id = user_id
-                cleaned += 1
-            except Exception as exc:
-                resource.status = "failed"
-                resource.error_message = str(exc)
-                failed += 1
-                logger.warning(
-                    "Failed to delete orphaned cluster %s: %s",
-                    resource.resource_name,
-                    exc,
-                )
+                try:
+                    credentials = await _get_gke_credentials(session)
+                    client = _get_gke_client(credentials)
+                    cluster_path = (
+                        f"projects/{resource.gcp_project_id}"
+                        f"/locations/{resource.gcp_zone}"
+                        f"/clusters/{resource.resource_name}"
+                    )
+                    client.delete_cluster(name=cluster_path)
+                    resource.status = "cleaned"
+                    resource.resolved_at = datetime.now(timezone.utc)
+                    resource.resolved_by_user_id = user_id
+                    cleaned += 1
+                except Exception as exc:
+                    resource.status = "failed"
+                    resource.error_message = str(exc)
+                    failed += 1
+                    logger.warning("Failed to delete orphaned cluster %s: %s", resource.resource_name, exc)
+
+            elif resource.resource_type == "service_account":
+                try:
+                    await OrphanedResourceService._cleanup_service_account(session, resource)
+                    resource.status = "cleaned"
+                    resource.resolved_at = datetime.now(timezone.utc)
+                    resource.resolved_by_user_id = user_id
+                    cleaned += 1
+                except Exception as exc:
+                    if "NOT_FOUND" in str(exc) or "does not exist" in str(exc):
+                        resource.status = "cleaned"
+                        resource.resolved_at = datetime.now(timezone.utc)
+                        resource.resolved_by_user_id = user_id
+                        cleaned += 1
+                    else:
+                        resource.status = "failed"
+                        resource.error_message = str(exc)
+                        failed += 1
+                        logger.warning("Failed to delete orphaned SA %s: %s", resource.resource_name, exc)
+
+            else:
+                try:
+                    await OrphanedResourceService.cleanup_resource(session, resource.id, user_id)
+                    cleaned += 1
+                except Exception:
+                    failed += 1
 
         await session.flush()
         return {"cleaned": cleaned, "skipped": skipped, "failed": failed}

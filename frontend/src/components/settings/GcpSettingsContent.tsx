@@ -244,7 +244,7 @@ ${RECOMMENDED_ROLES.map(({ role }) => `gcloud projects add-iam-policy-binding $P
 
             {/* Region */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Region</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Default Region</label>
               <select
                 data-testid="gcp-region-select"
                 value={region}
@@ -262,7 +262,7 @@ ${RECOMMENDED_ROLES.map(({ role }) => `gcloud projects add-iam-policy-binding $P
 
             {/* Zone */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Zone</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Default Zone</label>
               <select
                 data-testid="gcp-zone-select"
                 value={zone}

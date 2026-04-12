@@ -10,6 +10,7 @@ interface TerraformEvent {
   resources_completed?: number;
   resources_total?: number;
   log_line?: string;
+  extra?: { addresses?: string[]; outputs?: Record<string, unknown> };
 }
 
 interface TerraformProgressModalProps {
@@ -295,6 +296,22 @@ export function TerraformProgressModal({
               setPhase((prev) => (prev === "compute" ? "compute" : "storage"));
             }
 
+            // Populate full resource list from the plan
+            if (event.event_type === "planned_resources" && event.extra?.addresses) {
+              const addresses = event.extra.addresses;
+              setResources((prev) => {
+                const existing = new Set(prev.map((r) => r.address));
+                const newResources = addresses
+                  .filter((addr) => !existing.has(addr))
+                  .map((addr) => ({
+                    address: addr,
+                    label: friendlyLabel(addr),
+                    status: "pending" as const,
+                  }));
+                return [...prev, ...newResources];
+              });
+            }
+
             // Track individual resources by address
             if (event.resource_address && event.event_type === "resource_complete") {
               const addr = event.resource_address;
@@ -532,12 +549,20 @@ export function TerraformProgressModal({
             </button>
           )}
           {(status === "connecting" || status === "running") && (
-            <button
-              onClick={onClose}
-              className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300"
-            >
-              Cancel
-            </button>
+            <>
+              <button
+                onClick={onClose}
+                className="px-4 py-2 border border-red-300 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50"
+              >
+                Abort {mode === "teardown" ? "Teardown" : "Deployment"}
+              </button>
+              <button
+                onClick={onClose}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300"
+              >
+                Minimize
+              </button>
+            </>
           )}
         </div>
       </div>
