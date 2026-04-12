@@ -70,9 +70,9 @@ Navigate to **Infrastructure > Backup & Recovery**:
 
 ## Notifications
 
-### Slack Integration (Settings)
+### Slack Integration
 
-1. Go to **Settings > Slack Integration**
+1. Go to **Settings > Integrations > Slack**
 2. Click **Generate Slack App Manifest** and copy the JSON
 3. Go to [api.slack.com/apps](https://api.slack.com/apps), click **Create New App > From a manifest**, paste the JSON
 4. Copy the Client ID, Client Secret, and Signing Secret from the app's Basic Information page
@@ -90,21 +90,23 @@ Configure which events trigger notifications and through which channels:
 - Backup failures
 - Component health issues
 
-### SMTP (Settings)
+### SMTP
 
-Configure SMTP for email notifications:
+Configure SMTP in **Settings > Integrations > SMTP**:
 
 - Host, port, credentials, from address
 - Required for email invitations and email notifications
 
 ## Platform Upgrades
 
-In **Settings** under Platform Version:
+In **Settings > Information**:
 
 - View current version and check for updates
 - Review changelog before upgrading
+- Click **Install Update** to update directly from the UI
 - Upgrade history with status tracking
 - bioAF checks for updates daily and shows a notification when available
+- Updates can also be run from the CLI: `./bioaf update [version]`
 
 ## Audit Log
 
@@ -116,12 +118,13 @@ Navigate to **Settings > Audit Log**:
 
 ## Settings Overview
 
-The **Settings** page centralizes:
+The **Settings** section includes:
 
-- SMTP configuration
-- Slack integration (OAuth setup, channel mappings)
-- Platform version and upgrades
-- Test notification delivery
+- **Users** -- user management and invitations
+- **Roles & Permissions** -- built-in and custom roles
+- **Audit Log** -- immutable activity trail
+- **Integrations** -- SMTP, Slack, GCP, and Seqera configuration
+- **Information** -- platform version, updates, and upgrade history
 
 ## Tips
 

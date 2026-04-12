@@ -1,9 +1,12 @@
 """Upgrade service with GitHub-based version checking and upgrade management."""
 
 import asyncio
+import json
 import logging
+import os
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 
 import httpx
 from sqlalchemy import func, select
@@ -192,6 +195,113 @@ class UpgradeService:
         upgrade.completed_at = datetime.now(timezone.utc)
         await session.flush()
         return upgrade
+
+    @staticmethod
+    async def execute_upgrade(
+        session: AsyncSession,
+        org_id: int,
+        target_version: str,
+        user_id: int,
+    ) -> UpgradeHistory:
+        """Trigger an upgrade by writing a trigger file for the host update agent."""
+        current = settings.app_version
+
+        # Validate version format
+        if not re.match(r"^\d+\.\d+\.\d+$", target_version):
+            raise ValueError(f"Invalid version format: {target_version}")
+
+        if target_version == current:
+            raise ValueError(f"Already running version {current}")
+
+        # Create upgrade history record
+        upgrade = UpgradeHistory(
+            organization_id=org_id,
+            from_version=current,
+            to_version=target_version,
+            status="started",
+            started_by_user_id=user_id,
+            terraform_plan_json=None,
+        )
+        session.add(upgrade)
+        await session.flush()
+
+        # Write trigger file for the host update agent
+        requests_dir = Path(settings.update_requests_dir)
+        requests_dir.mkdir(parents=True, exist_ok=True)
+        trigger_file = requests_dir / f"update_{upgrade.id}.json"
+        trigger_data = {
+            "version": target_version,
+            "upgrade_id": upgrade.id,
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+        }
+        trigger_file.write_text(json.dumps(trigger_data))
+
+        logger.info(
+            "Upgrade %d triggered: %s -> %s (trigger: %s)",
+            upgrade.id,
+            current,
+            target_version,
+            trigger_file,
+        )
+        return upgrade
+
+    @staticmethod
+    async def get_update_status() -> dict:
+        """Read the current update status from the status file written by the host agent."""
+        status_file = Path(settings.update_status_dir) / "current.json"
+
+        if not status_file.exists():
+            return {"status": "idle"}
+
+        try:
+            data = json.loads(status_file.read_text())
+            return data
+        except (json.JSONDecodeError, OSError):
+            return {"status": "idle"}
+
+    @staticmethod
+    async def resolve_pending_upgrades(session: AsyncSession) -> None:
+        """Check for 'started' upgrades and resolve them based on current version.
+
+        Called on application startup to handle the case where the app was
+        restarted after an update completed.
+        """
+        current = settings.app_version
+
+        result = await session.execute(select(UpgradeHistory).where(UpgradeHistory.status == "started"))
+        pending = result.scalars().all()
+
+        for upgrade in pending:
+            if upgrade.to_version == current:
+                upgrade.status = "completed"
+                upgrade.completed_at = datetime.now(timezone.utc)
+                logger.info(
+                    "Resolved pending upgrade %d: %s -> %s (completed)",
+                    upgrade.id,
+                    upgrade.from_version,
+                    upgrade.to_version,
+                )
+            else:
+                # Version didn't change -- mark as failed
+                upgrade.status = "failed"
+                upgrade.completed_at = datetime.now(timezone.utc)
+                upgrade.notes = f"Expected version {upgrade.to_version} after restart, but running {current}"
+                logger.warning(
+                    "Resolved pending upgrade %d: expected %s but running %s (failed)",
+                    upgrade.id,
+                    upgrade.to_version,
+                    current,
+                )
+
+        await session.flush()
+
+        # Clear the status file after resolving
+        status_file = Path(settings.update_status_dir) / "current.json"
+        if status_file.exists():
+            try:
+                os.remove(status_file)
+            except OSError:
+                pass
 
     @staticmethod
     async def background_version_check(org_id: int) -> None:

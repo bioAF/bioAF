@@ -14,6 +14,9 @@ from app.schemas.upgrade import (
     StartUpgradeResponse,
     ConfirmUpgradeResponse,
     RollbackResponse,
+    ExecuteUpgradeRequest,
+    ExecuteUpgradeResponse,
+    UpdateStatusResponse,
 )
 from app.services.upgrade_service import UpgradeService
 
@@ -69,6 +72,36 @@ async def start_upgrade(
         to_version=upgrade.to_version,
         terraform_plan=upgrade.terraform_plan_json,
     )
+
+
+@router.post("/execute", response_model=ExecuteUpgradeResponse)
+async def execute_upgrade(
+    body: ExecuteUpgradeRequest,
+    current_user: dict = require_permission("infrastructure", "deploy"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Trigger an update to a specific version via the host update agent."""
+    org_id = current_user["org_id"]
+    user_id = int(current_user["sub"])
+    try:
+        upgrade = await UpgradeService.execute_upgrade(session, org_id, body.target_version, user_id)
+        await session.commit()
+        return ExecuteUpgradeResponse(
+            upgrade_id=upgrade.id,
+            status=upgrade.status,
+            from_version=upgrade.from_version,
+            to_version=upgrade.to_version,
+        )
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
+
+
+@router.get("/status", response_model=UpdateStatusResponse)
+async def get_update_status(
+    current_user: dict = require_permission("infrastructure", "view"),
+):
+    """Read the current update status from the host update agent."""
+    return await UpgradeService.get_update_status()
 
 
 @router.post("/{upgrade_id}/confirm", response_model=ConfirmUpgradeResponse)

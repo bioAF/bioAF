@@ -47,9 +47,19 @@ slugify() {
 
 get_access_url() {
     # Try to detect the best URL for accessing the web UI.
-    # Prefer the machine's public/private IP; fall back to localhost.
-    local host
-    host=$(hostname -I 2>/dev/null | awk '{print $1}') || true
+    # On GCE, the external IP is NAT'd and not visible to the OS,
+    # so we query the metadata server for it.
+    local host=""
+
+    if is_gce; then
+        host=$(curl -sf -m 2 -H "Metadata-Flavor: Google" \
+            "http://169.254.169.254/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip" \
+            2>/dev/null) || true
+    fi
+
+    if [ -z "$host" ]; then
+        host=$(hostname -I 2>/dev/null | awk '{print $1}') || true
+    fi
     if [ -z "$host" ]; then
         host=$(ipconfig getifaddr en0 2>/dev/null) || true
     fi
@@ -91,6 +101,46 @@ ensure_cloud_logging() {
     fi
 }
 
+ensure_update_agent() {
+    # Install the update agent systemd service so the backend can trigger
+    # host-level updates via a trigger file. Idempotent.
+
+    # Skip on non-systemd systems and non-Linux
+    if ! command -v systemctl &>/dev/null; then
+        return 0
+    fi
+
+    # Create directories
+    mkdir -p "$SCRIPT_DIR/update-requests" "$SCRIPT_DIR/update-status"
+
+    local service_name="bioaf-update-agent"
+    local service_file="/etc/systemd/system/${service_name}.service"
+    local current_user
+    current_user=$(whoami)
+    local current_group
+    current_group=$(id -gn)
+
+    # Check if already installed with correct paths
+    if [ -f "$service_file" ] && grep -q "$SCRIPT_DIR" "$service_file" 2>/dev/null; then
+        # Ensure it's running
+        if ! systemctl is-active --quiet "$service_name" 2>/dev/null; then
+            sudo systemctl start "$service_name"
+        fi
+        return 0
+    fi
+
+    bold "Installing update agent service..."
+    sed -e "s|__BIOAF_DIR__|$SCRIPT_DIR|g" \
+        -e "s|__BIOAF_USER__|$current_user|g" \
+        -e "s|__BIOAF_GROUP__|$current_group|g" \
+        "$SCRIPT_DIR/docker/bioaf-update-agent.service" | sudo tee "$service_file" > /dev/null
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable "$service_name"
+    sudo systemctl start "$service_name"
+    green "Update agent installed and running."
+}
+
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
@@ -122,6 +172,16 @@ cmd_setup() {
             exit 1
             ;;
     esac
+
+    # If Docker is installed but the socket is inaccessible, the user was likely
+    # added to the docker group by the VM startup script but hasn't re-logged in.
+    # Re-exec this script under `sg docker` to activate the group inline.
+    if command -v docker &>/dev/null && ! docker info &>/dev/null; then
+        if id -nG 2>/dev/null | grep -qw docker || grep -q "docker.*$(whoami)\|$(whoami).*docker" /etc/group 2>/dev/null; then
+            yellow "Activating docker group for this session..."
+            exec sg docker -c "'$0' setup"
+        fi
+    fi
 
     bold "=== bioAF First-Run Setup ==="
     echo ""
@@ -157,6 +217,9 @@ for v in cfg.get('volumes', {}).values():
 
     # Cloud Logging (GCE only, idempotent)
     ensure_cloud_logging
+
+    # Update agent (idempotent)
+    ensure_update_agent
 
     # Build and start
     bold "Building and starting containers..."
@@ -340,25 +403,162 @@ cmd_backup() {
     green "Backup saved to: $backup_file"
 }
 
-cmd_update() {
-    bold "=== Updating bioAF ==="
+get_current_version() {
+    # Read version from backend/pyproject.toml (single source of truth)
+    python3 -c "
+import tomllib, pathlib
+data = tomllib.loads(pathlib.Path('$SCRIPT_DIR/backend/pyproject.toml').read_text())
+print(data['project']['version'])
+" 2>/dev/null || echo "unknown"
+}
 
-    echo "Pulling latest code..."
-    git -C "$SCRIPT_DIR" pull
+get_latest_github_version() {
+    # Query GitHub Releases API for the latest release tag
+    local response
+    response=$(curl -sf --max-time 10 \
+        -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/not-that-guy-again/bioAF/releases/latest" 2>/dev/null) || {
+        red "ERROR: Could not reach GitHub to check for the latest version."
+        echo "Provide a specific version instead: ./bioaf update <version>"
+        exit 1
+    }
+
+    local tag
+    tag=$(echo "$response" | python3 -c "import sys, json; print(json.load(sys.stdin).get('tag_name', ''))" 2>/dev/null)
+
+    if [ -z "$tag" ]; then
+        red "ERROR: Could not determine the latest version from GitHub."
+        exit 1
+    fi
+
+    # Strip leading 'v' if present
+    echo "${tag#v}"
+}
+
+cmd_update() {
+    local target_version="${1:-}"
+    local current_version
+    current_version=$(get_current_version)
+
+    # If no version specified, fetch the latest from GitHub
+    if [ -z "$target_version" ]; then
+        echo "Checking GitHub for the latest release..."
+        target_version=$(get_latest_github_version)
+    fi
+
+    # Strip leading 'v' if the user passed one
+    target_version="${target_version#v}"
+
+    # Validate version format (semver: X.Y.Z)
+    if ! echo "$target_version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+        red "ERROR: Invalid version format '$target_version'. Expected format: X.Y.Z"
+        exit 1
+    fi
+
+    # Check if already on the target version
+    if [ "$current_version" = "$target_version" ]; then
+        green "Already running version $current_version. Nothing to update."
+        exit 0
+    fi
+
+    bold "=== bioAF Update ==="
+    echo ""
+    echo "  Current version:  $current_version"
+    echo "  Target version:   $target_version"
+    echo ""
+
+    # Confirmation prompt (skipped when called with --yes flag for automation)
+    local auto_confirm=false
+    if [ "${2:-}" = "--yes" ] || [ "${BIOAF_AUTO_CONFIRM:-}" = "1" ]; then
+        auto_confirm=true
+    fi
+
+    if [ "$auto_confirm" = false ]; then
+        read -rp "Proceed with update? [y/N] " confirm
+        if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+            echo "Update cancelled."
+            exit 0
+        fi
+    fi
+
+    # Write status file for the backend to track progress
+    local status_dir="$SCRIPT_DIR/update-status"
+    mkdir -p "$status_dir"
+    cat > "$status_dir/current.json" <<STATUSEOF
+{"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "backup", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+STATUSEOF
+
+    # Back up the database before updating
+    echo ""
+    bold "Backing up database..."
+    local timestamp
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    local backup_file="$SCRIPT_DIR/backups/bioaf_pre_update_${current_version}_to_${target_version}_${timestamp}.sql.gz"
+    mkdir -p "$SCRIPT_DIR/backups"
+    if $DC exec -T db pg_dump -U bioaf bioaf 2>/dev/null | gzip > "$backup_file"; then
+        green "Backup saved: $backup_file"
+    else
+        red "WARNING: Database backup failed. Continuing without backup."
+        rm -f "$backup_file"
+    fi
+
+    # Fetch and checkout the target version
+    cat > "$status_dir/current.json" <<STATUSEOF
+{"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "checkout", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+STATUSEOF
+
+    echo ""
+    bold "Fetching version $target_version..."
+    git -C "$SCRIPT_DIR" fetch --tags --force
+    if ! git -C "$SCRIPT_DIR" rev-parse "v${target_version}" >/dev/null 2>&1; then
+        red "ERROR: Tag v${target_version} not found in the repository."
+        cat > "$status_dir/current.json" <<STATUSEOF
+{"status": "failed", "from_version": "$current_version", "to_version": "$target_version", "step": "checkout", "error": "Tag not found"}
+STATUSEOF
+        exit 1
+    fi
+    git -C "$SCRIPT_DIR" checkout "v${target_version}"
 
     # Cloud Logging (GCE only, idempotent)
     ensure_cloud_logging
 
-    echo "Rebuilding containers..."
-    $DC_BUILD
-    $DC up -d
+    # Rebuild containers
+    cat > "$status_dir/current.json" <<STATUSEOF
+{"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "build", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+STATUSEOF
 
+    echo ""
+    bold "Rebuilding containers..."
+    $DC_BUILD
+
+    # Restart services
+    cat > "$status_dir/current.json" <<STATUSEOF
+{"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "restart", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+STATUSEOF
+
+    $DC up -d
     wait_for_db
 
-    echo "Running migrations..."
+    # Run migrations
+    cat > "$status_dir/current.json" <<STATUSEOF
+{"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "migrate", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+STATUSEOF
+
+    echo ""
+    bold "Running migrations..."
     $DC exec -T backend alembic -c alembic/alembic.ini upgrade head
 
-    green "Update complete."
+    # Write success status
+    local new_version
+    new_version=$(get_current_version)
+    cat > "$status_dir/current.json" <<STATUSEOF
+{"status": "completed", "from_version": "$current_version", "to_version": "$new_version", "completed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+STATUSEOF
+
+    echo ""
+    green "=================================================="
+    green "  Update complete: $current_version -> $new_version"
+    green "=================================================="
 }
 
 cmd_build() {
@@ -497,7 +697,7 @@ cmd_help() {
     echo "                      Register pipeline output files from GCS into the database"
     echo ""
     bold "Maintenance:"
-    echo "  update              Pull latest code, rebuild containers, and run migrations"
+    echo "  update [version]    Update to a specific version (or latest if omitted)"
     echo "  help                Show this help message"
     echo ""
     bold "Examples:"
@@ -511,6 +711,8 @@ cmd_help() {
     echo "  ./bioaf shell backend       # Open shell in backend"
     echo "  ./bioaf dbshell             # Open psql session"
     echo "  ./bioaf backup              # Create database backup"
+    echo "  ./bioaf update              # Update to the latest version"
+    echo "  ./bioaf update 0.7.0        # Update to a specific version"
     echo ""
 }
 
@@ -535,7 +737,7 @@ case "$command" in
     backup)   cmd_backup ;;
     shell)    cmd_shell "$@" ;;
     dbshell)  cmd_dbshell ;;
-    update)   cmd_update ;;
+    update)   cmd_update "$@" ;;
     reset-db) cmd_reset_db ;;
     register-outputs) cmd_register_outputs "$@" ;;
     help|-h|--help) cmd_help ;;

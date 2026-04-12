@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
+import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 
 interface UpdateCheck {
@@ -22,10 +23,67 @@ interface UpgradeHistoryItem {
   completed_at: string | null;
 }
 
+interface UpdateStatus {
+  status: string;
+  from_version?: string;
+  to_version?: string;
+  step?: string;
+  error?: string;
+}
+
+const STEP_LABELS: Record<string, string> = {
+  backup: "Backing up database",
+  checkout: "Fetching new version",
+  build: "Rebuilding containers",
+  restart: "Restarting services",
+  migrate: "Running database migrations",
+};
+
 export default function SettingsInfoPage() {
+  const { canAccess } = usePermissions();
   const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null);
   const [upgradeHistory, setUpgradeHistory] = useState<UpgradeHistoryItem[]>([]);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [updateError, setUpdateError] = useState("");
+  const pollRef = useRef<NodeJS.Timeout | null>(null);
+
+  const canDeploy = canAccess("infrastructure", "deploy");
+
+  const pollUpdateStatus = useCallback(async () => {
+    try {
+      const status = await api.get<UpdateStatus>("/api/upgrades/status");
+      setUpdateStatus(status);
+
+      if (status.status === "completed" || status.status === "failed") {
+        // Stop polling
+        if (pollRef.current) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
+        setUpdating(false);
+
+        if (status.status === "failed") {
+          setUpdateError(status.error || "Update failed");
+        }
+
+        // Refresh version info and history
+        try {
+          const [version, history] = await Promise.all([
+            api.get<UpdateCheck>("/api/upgrades/check"),
+            api.get<{ upgrades: UpgradeHistoryItem[] }>("/api/upgrades/history"),
+          ]);
+          setUpdateCheck(version);
+          setUpgradeHistory(history.upgrades);
+        } catch {
+          // Backend may still be restarting
+        }
+      }
+    } catch {
+      // Backend may be down during update -- keep polling
+    }
+  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -41,6 +99,12 @@ export default function SettingsInfoPage() {
       }
     };
     load();
+
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+      }
+    };
   }, []);
 
   const handleCheckUpdate = async () => {
@@ -52,6 +116,27 @@ export default function SettingsInfoPage() {
       // ignore
     } finally {
       setCheckingUpdate(false);
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    if (!updateCheck?.latest_version) return;
+
+    setUpdating(true);
+    setUpdateError("");
+    setUpdateStatus({ status: "in_progress", step: "starting" });
+
+    try {
+      await api.post("/api/upgrades/execute", {
+        target_version: updateCheck.latest_version,
+      });
+
+      // Start polling for status
+      pollRef.current = setInterval(pollUpdateStatus, 3000);
+    } catch (e) {
+      setUpdating(false);
+      setUpdateError(e instanceof Error ? e.message : "Failed to start update");
+      setUpdateStatus(null);
     }
   };
 
@@ -77,14 +162,53 @@ export default function SettingsInfoPage() {
                   <span className="font-mono">{updateCheck.latest_version}</span>
                 </div>
 
-                {updateCheck.update_available && (
+                {updateCheck.update_available && !updating && (
                   <div className="p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-700">
-                    A new version ({updateCheck.latest_version}) is available!
-                    {updateCheck.release_url && (
-                      <a href={updateCheck.release_url} target="_blank" rel="noopener noreferrer" className="ml-2 underline">
-                        View release
-                      </a>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        A new version ({updateCheck.latest_version}) is available!
+                        {updateCheck.release_url && (
+                          <a href={updateCheck.release_url} target="_blank" rel="noopener noreferrer" className="ml-2 underline">
+                            View release
+                          </a>
+                        )}
+                      </div>
+                      {canDeploy && (
+                        <button
+                          onClick={handleInstallUpdate}
+                          className="ml-4 px-4 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 whitespace-nowrap"
+                        >
+                          Install Update
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Update progress */}
+                {updating && updateStatus && (
+                  <div className="p-4 bg-amber-50 border border-amber-200 rounded">
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="h-4 w-4 border-2 border-amber-600 border-t-transparent rounded-full animate-spin" />
+                      <span className="text-sm font-medium text-amber-800">
+                        Updating to {updateCheck.latest_version}
+                      </span>
+                    </div>
+                    {updateStatus.step && (
+                      <p className="text-sm text-amber-700 ml-7">
+                        {STEP_LABELS[updateStatus.step] || updateStatus.step}...
+                      </p>
                     )}
+                    <p className="text-xs text-amber-600 ml-7 mt-1">
+                      The application will restart during this process.
+                    </p>
+                  </div>
+                )}
+
+                {/* Update error */}
+                {updateError && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+                    Update failed: {updateError}
                   </div>
                 )}
 
@@ -97,7 +221,7 @@ export default function SettingsInfoPage() {
 
                 <button
                   onClick={handleCheckUpdate}
-                  disabled={checkingUpdate}
+                  disabled={checkingUpdate || updating}
                   className="text-sm text-bioaf-600 hover:text-bioaf-700 disabled:opacity-50"
                 >
                   {checkingUpdate ? "Checking..." : "Check for updates"}

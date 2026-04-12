@@ -18,7 +18,7 @@ When a file arrives in the auto-ingest bucket, bioAF tries each active naming pr
 
 ### Step 1: Navigate to Naming Profiles
 
-Go to **Settings > Data Management > Naming Profiles** and click "Create Profile."
+Go to **Data & Files > Naming Profiles** and click "Create Profile."
 
 ### Step 2: Define Basic Information
 
@@ -118,7 +118,7 @@ If any fields are incorrect, adjust the profile configuration and re-run the tes
 
 When working with multiple CROs simultaneously, each CRO gets its own profile. Profiles are tried in priority order during auto-ingest. If the first profile fails to parse a filename (missing required fields or unresolved codes), bioAF tries the next profile.
 
-To reorder priorities, go to **Settings > Data Management > Naming Profiles** and drag profiles into the desired order, or edit the priority number directly.
+To reorder priorities, go to **Data & Files > Naming Profiles** and drag profiles into the desired order, or edit the priority number directly.
 
 ## Tips
 

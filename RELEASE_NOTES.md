@@ -1,5 +1,37 @@
 # Release Notes
 
+## v0.6.5
+
+Installability improvements: one-command GCP setup, versioned updates from CLI and UI.
+
+### GCP Installer
+
+- Add `install-gcp.sh` for one-command GCP provisioning (VM, firewall, service account)
+- Script installs gcloud CLI if needed, creates an e2-medium VM with Docker pre-installed
+- Waits for SSH and Docker readiness before presenting next steps
+- Optionally creates a service account and prints the JSON key for the setup wizard
+
+### Update System
+
+- `./bioaf update` now accepts an optional version argument (e.g., `./bioaf update 0.7.0`)
+- Backs up the database before every update
+- Fetches and checks out the target git tag instead of following a branch
+- Writes progress status for the UI to track
+- Add host-side update agent (systemd service) that watches for trigger files from the backend
+- Add "Install Update" button on Settings > Information page with real-time progress display
+- Backend resolves pending upgrades on startup (marks completed or failed)
+
+### Fixes
+
+- Fix `get_access_url` on GCE to query metadata server for external IP instead of showing internal 10.x address
+- Auto-activate docker group via `sg docker` instead of requiring re-login after VM setup
+- Fix bash 3.2 compatibility in installer (macOS ships bash 3.2)
+
+### Housekeeping
+
+- Remove orphaned `frontend/src/app/admin/` pages (all had permanent redirects)
+- Update deployment guide, ADR-005, README, and user guides for accuracy
+
 ## v0.6.4
 
 Plot archive bug fixes, PDF thumbnail generation, and detail modal improvements.
