@@ -70,6 +70,7 @@ ALL_REQUIRED_PERMISSIONS = [
     "bigquery.jobs.create",
     "artifactregistry.repositories.create",
     "cloudbuild.builds.create",
+    "logging.logEntries.create",
 ]
 
 

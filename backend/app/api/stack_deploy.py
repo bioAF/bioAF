@@ -54,6 +54,8 @@ router = APIRouter(tags=["stack_deploy"])
 
 class StackDeployRequest(BaseModel):
     stack_type: str = "kubernetes"
+    compute_region: str | None = None
+    compute_zone: str | None = None
 
 
 class StackTeardownRequest(BaseModel):
@@ -111,6 +113,7 @@ class DeployProgressResponse(BaseModel):
     resources_completed: int = 0
     resources_total: int = 0
     completed_resources: list[str] = []
+    planned_resources: list[str] = []
     error_message: str | None = None
     run_id: int | None = None
 
@@ -211,16 +214,16 @@ async def stack_deploy_endpoint(
     async def event_generator():
         try:
             async for event in deploy_stack(session, stack_type, user_id, org_id=org_id):
-                data = json.dumps(
-                    {
-                        "event_type": event.event_type,
-                        "message": event.message,
-                        "resource_address": event.resource_address,
-                        "resources_completed": event.resources_completed,
-                        "resources_total": event.resources_total,
-                    }
-                )
-                yield f"data: {data}\n\n"
+                payload: dict = {
+                    "event_type": event.event_type,
+                    "message": event.message,
+                    "resource_address": event.resource_address,
+                    "resources_completed": event.resources_completed,
+                    "resources_total": event.resources_total,
+                }
+                if event.extra:
+                    payload["extra"] = event.extra
+                yield f"data: {json.dumps(payload)}\n\n"
         except ValueError as exc:
             error_data = json.dumps({"event_type": "stack_error", "message": str(exc)})
             yield f"data: {error_data}\n\n"
@@ -249,6 +252,8 @@ async def stack_deploy_background_endpoint(
     user_id = int(current_user["sub"])
     org_id = int(current_user["org_id"]) if current_user.get("org_id") else None
     stack_type = body.stack_type if body else "kubernetes"
+    compute_region = body.compute_region if body else None
+    compute_zone = body.compute_zone if body else None
 
     # Validate preconditions synchronously so we can return a clear error.
     gcp_configured = await session.execute(
@@ -266,16 +271,17 @@ async def stack_deploy_background_endpoint(
         raise HTTPException(status_code=400, detail="Terraform has not been initialized")
 
     async def _run_deploy():
-        """Drain the deploy_stack generator in the background with its own session.
-
-        Commits after each event so the progress polling endpoint can see
-        intermediate state (resource counts, phase, completed_resources).
-        Without per-event commits, all flush() calls stay invisible to
-        other sessions under PostgreSQL READ COMMITTED isolation.
-        """
+        """Drain the deploy_stack generator in the background with its own session."""
         async with async_session_factory() as bg_session:
             try:
-                async for _event in deploy_stack(bg_session, stack_type, user_id, org_id=org_id):
+                async for _event in deploy_stack(
+                    bg_session,
+                    stack_type,
+                    user_id,
+                    org_id=org_id,
+                    compute_region=compute_region,
+                    compute_zone=compute_zone,
+                ):
                     await bg_session.commit()
                 await bg_session.commit()
             except Exception:
@@ -285,6 +291,76 @@ async def stack_deploy_background_endpoint(
     asyncio.get_event_loop().create_task(_run_deploy())
 
     return {"message": "Deployment started"}
+
+
+@router.post("/api/v1/infrastructure/stack/teardown-background")
+async def stack_teardown_background_endpoint(
+    body: StackTeardownRequest | None = None,
+    current_user: dict = require_permission("infrastructure", "configure"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Start a stack teardown in the background and return immediately."""
+    if body and not body.confirm:
+        raise HTTPException(status_code=400, detail="Confirmation required. Set confirm=true.")
+
+    user_id = int(current_user["sub"])
+    org_id = int(current_user["org_id"]) if current_user.get("org_id") else None
+
+    # Validate compute is deployed
+    compute_deployed = await session.execute(text("SELECT value FROM platform_config WHERE key = 'compute_deployed'"))
+    if compute_deployed.scalar_one_or_none() != "true":
+        raise HTTPException(status_code=400, detail="Compute stack is not deployed")
+
+    async def _run_teardown():
+        async with async_session_factory() as bg_session:
+            try:
+                async for _event in teardown_stack(bg_session, user_id, org_id=org_id):
+                    await bg_session.commit()
+                await bg_session.commit()
+            except Exception:
+                logger.exception("Background teardown failed")
+                await bg_session.rollback()
+
+    asyncio.get_event_loop().create_task(_run_teardown())
+
+    return {"message": "Teardown started"}
+
+
+@router.post("/api/v1/infrastructure/stack/destroy-storage-background")
+async def stack_destroy_storage_background_endpoint(
+    body: StorageDestroyRequest | None = None,
+    current_user: dict = require_permission("infrastructure", "configure"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Start storage destruction in the background and return immediately."""
+    if body is not None and not body.confirm:
+        raise HTTPException(status_code=400, detail="Confirmation required. Set confirm=true.")
+
+    user_id = int(current_user["sub"])
+    org_id = int(current_user["org_id"]) if current_user.get("org_id") else None
+
+    # Validate storage is deployed and compute is not
+    compute_deployed = await session.execute(text("SELECT value FROM platform_config WHERE key = 'compute_deployed'"))
+    if compute_deployed.scalar_one_or_none() == "true":
+        raise HTTPException(status_code=400, detail="Teardown compute stack before destroying storage")
+
+    storage_deployed = await session.execute(text("SELECT value FROM platform_config WHERE key = 'storage_deployed'"))
+    if storage_deployed.scalar_one_or_none() != "true":
+        raise HTTPException(status_code=400, detail="Storage is not deployed")
+
+    async def _run_destroy_storage():
+        async with async_session_factory() as bg_session:
+            try:
+                async for _event in destroy_storage(bg_session, user_id, org_id=org_id):
+                    await bg_session.commit()
+                await bg_session.commit()
+            except Exception:
+                logger.exception("Background storage destroy failed")
+                await bg_session.rollback()
+
+    asyncio.get_event_loop().create_task(_run_destroy_storage())
+
+    return {"message": "Storage destruction started"}
 
 
 @router.get(
@@ -326,13 +402,23 @@ async def stack_deploy_progress(
 
     is_active = run.status in ("planning", "applying", "awaiting_confirmation")
 
+    # Only include planned/completed resource lists for active runs.
+    # Stale data from previous runs confuses the frontend.
+    planned = []
+    completed = []
+    if is_active:
+        if run.plan_json and run.plan_json.get("resources"):
+            planned = [r["address"] for r in run.plan_json["resources"] if not r["address"].startswith("data.")]
+        completed = run.completed_resources or []
+
     return DeployProgressResponse(
         active=is_active,
         status=run.status,
         phase=run.deploy_phase,
-        resources_completed=run.resources_completed,
-        resources_total=run.resources_planned or 0,
-        completed_resources=run.completed_resources or [],
+        resources_completed=run.resources_completed if is_active else 0,
+        resources_total=(run.resources_planned or 0) if is_active else 0,
+        completed_resources=completed,
+        planned_resources=planned,
         error_message=run.error_message,
         run_id=run.id,
     )
@@ -354,13 +440,16 @@ async def stack_teardown_endpoint(
     async def event_generator():
         try:
             async for event in teardown_stack(session, user_id, org_id=org_id):
-                data = json.dumps(
-                    {
-                        "event_type": event.event_type,
-                        "message": event.message,
-                    }
-                )
-                yield f"data: {data}\n\n"
+                payload: dict = {
+                    "event_type": event.event_type,
+                    "message": event.message,
+                    "resource_address": event.resource_address,
+                    "resources_completed": event.resources_completed,
+                    "resources_total": event.resources_total,
+                }
+                if event.extra:
+                    payload["extra"] = event.extra
+                yield f"data: {json.dumps(payload)}\n\n"
         except ValueError as exc:
             error_data = json.dumps({"event_type": "stack_error", "message": str(exc)})
             yield f"data: {error_data}\n\n"
@@ -396,16 +485,16 @@ async def stack_destroy_storage_endpoint(
     async def event_generator():
         try:
             async for event in destroy_storage(session, user_id, org_id=org_id):
-                data = json.dumps(
-                    {
-                        "event_type": event.event_type,
-                        "message": event.message,
-                        "resource_address": event.resource_address,
-                        "resources_completed": event.resources_completed,
-                        "resources_total": event.resources_total,
-                    }
-                )
-                yield f"data: {data}\n\n"
+                payload: dict = {
+                    "event_type": event.event_type,
+                    "message": event.message,
+                    "resource_address": event.resource_address,
+                    "resources_completed": event.resources_completed,
+                    "resources_total": event.resources_total,
+                }
+                if event.extra:
+                    payload["extra"] = event.extra
+                yield f"data: {json.dumps(payload)}\n\n"
         except ValueError as exc:
             error_data = json.dumps({"event_type": "stack_error", "message": str(exc)})
             yield f"data: {error_data}\n\n"

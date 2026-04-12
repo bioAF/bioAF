@@ -44,6 +44,7 @@ _PERMISSION_ROLE_MAP: dict[str, str] = {
     "bigquery.jobs.create": "roles/bigquery.dataEditor",
     "artifactregistry.repositories.create": "roles/artifactregistry.admin",
     "cloudbuild.builds.create": "roles/cloudbuild.builds.editor",
+    "logging.logEntries.create": "roles/logging.logWriter",
 }
 
 # Deduplicated, stable-order list of recommended roles.

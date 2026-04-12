@@ -57,6 +57,40 @@ get_access_url() {
     echo "https://${host}"
 }
 
+is_gce() {
+    curl -sf -m 1 -H "Metadata-Flavor: Google" \
+        "http://169.254.169.254/computeMetadata/v1/project/project-id" \
+        >/dev/null 2>&1
+}
+
+ensure_cloud_logging() {
+    # Install and configure the Google Cloud Ops Agent on GCE so that
+    # all Docker container logs are forwarded to Cloud Logging.
+    # Idempotent -- safe to call on every start.
+
+    if ! is_gce; then
+        return 0
+    fi
+
+    # Install the Ops Agent if the binary is not present
+    if ! command -v google_cloud_ops_agent_engine &>/dev/null; then
+        bold "Installing Google Cloud Ops Agent..."
+        curl -sSO https://dl.google.com/cloudagents/add-google-cloud-ops-agent-repo.sh
+        sudo bash add-google-cloud-ops-agent-repo.sh --also-install
+        rm -f add-google-cloud-ops-agent-repo.sh
+    fi
+
+    # Deploy the Docker log collection config if not already present
+    local ops_config="/etc/google-cloud-ops-agent/config.yaml"
+    if [ ! -f "$ops_config" ] || ! grep -q "docker_logs" "$ops_config" 2>/dev/null; then
+        bold "Configuring Ops Agent for Docker log collection..."
+        sudo mkdir -p /etc/google-cloud-ops-agent
+        sudo cp "$SCRIPT_DIR/docker/ops-agent-config.yaml" "$ops_config"
+        sudo systemctl restart google-cloud-ops-agent
+        green "Cloud Logging configured -- logs will appear in Google Cloud Console."
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
@@ -120,6 +154,9 @@ for v in cfg.get('volumes', {}).values():
         yellow "Removing existing database volume ($vol_name) to avoid password mismatch..."
         $DC down -v 2>/dev/null || true
     fi
+
+    # Cloud Logging (GCE only, idempotent)
+    ensure_cloud_logging
 
     # Build and start
     bold "Building and starting containers..."
@@ -190,6 +227,9 @@ print(json.dumps(result))
 
 cmd_start() {
     bold "=== Starting Services ==="
+
+    # Cloud Logging (GCE only, idempotent)
+    ensure_cloud_logging
 
     for svc in db backend frontend nginx; do
         echo "Starting $svc..."
@@ -305,6 +345,9 @@ cmd_update() {
 
     echo "Pulling latest code..."
     git -C "$SCRIPT_DIR" pull
+
+    # Cloud Logging (GCE only, idempotent)
+    ensure_cloud_logging
 
     echo "Rebuilding containers..."
     $DC_BUILD

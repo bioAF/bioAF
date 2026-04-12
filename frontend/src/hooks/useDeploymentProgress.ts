@@ -10,6 +10,7 @@ export interface DeploymentProgress {
   resources_completed: number;
   resources_total: number;
   completed_resources: string[];
+  planned_resources: string[];
   error_message: string | null;
   run_id: number | null;
 }
@@ -21,6 +22,7 @@ const EMPTY: DeploymentProgress = {
   resources_completed: 0,
   resources_total: 0,
   completed_resources: [],
+  planned_resources: [],
   error_message: null,
   run_id: null,
 };
