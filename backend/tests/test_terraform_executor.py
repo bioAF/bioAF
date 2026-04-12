@@ -376,20 +376,32 @@ async def test_run_apply_handles_failure(session):
 @pytest.mark.asyncio
 async def test_concurrent_run_prevention(session):
     """run_plan raises ValueError if another run is in progress."""
+    from app.services.terraform_executor import _active_processes
+
     user_id = await _seed_user(session)
     await _seed_gcp_config(session, configured=True, initialized=True)
 
     # Insert an active run manually
-    await session.execute(
+    result = await session.execute(
         text("""
         INSERT INTO terraform_runs (triggered_by_user_id, action, status)
         VALUES (:uid, 'plan', 'planning')
+        RETURNING id
         """).bindparams(uid=user_id)
     )
+    run_id = result.fetchone()[0]
     await session.commit()
 
-    with pytest.raises(ValueError, match="in progress"):
-        await TerraformExecutor.run_plan(session=session, user_id=user_id, module_name="foundation")
+    # Register a mock process so stale recovery doesn't clean it up
+    mock_process = MagicMock()
+    mock_process.returncode = None
+    _active_processes[run_id] = mock_process
+
+    try:
+        with pytest.raises(ValueError, match="in progress"):
+            await TerraformExecutor.run_plan(session=session, user_id=user_id, module_name="foundation")
+    finally:
+        _active_processes.pop(run_id, None)
 
 
 # ---------------------------------------------------------------------------
@@ -1232,23 +1244,26 @@ async def test_run_destroy_failure_deletes_lock(session):
 
 
 @pytest.mark.asyncio
-async def test_recover_stale_runs_deletes_locks(session):
-    """_recover_stale_runs deletes lock files for recovered runs."""
+async def test_recover_stale_runs_no_process_marks_failed(session):
+    """Runs with no live process in the registry are marked failed."""
     user_id = await _seed_user(session)
     await _seed_gcp_config(session, configured=True, initialized=True)
 
-    # Insert a stale run (started 60 minutes ago)
+    # Insert a run that has no corresponding process (simulates container restart)
     await session.execute(
         text("""
         INSERT INTO terraform_runs
             (triggered_by_user_id, action, status, module_name, started_at)
-        VALUES (:uid, 'apply', 'applying', 'compute', now() - interval '60 minutes')
+        VALUES (:uid, 'apply', 'applying', 'compute', now() - interval '5 minutes')
         """).bindparams(uid=user_id)
     )
     await session.commit()
 
     mock_delete = AsyncMock()
-    with patch.object(TerraformExecutor, "_delete_gcs_lock_file", new=mock_delete):
+    with (
+        patch.object(TerraformExecutor, "_delete_gcs_lock_file", new=mock_delete),
+        patch.object(TerraformExecutor, "_load_gcs_credentials", new=AsyncMock(return_value=None)),
+    ):
         await TerraformExecutor._recover_stale_runs(session)
 
     mock_delete.assert_called_once()
@@ -1256,6 +1271,47 @@ async def test_recover_stale_runs_deletes_locks(session):
     assert call_args[0][0] == "bioaf-tfstate-test"
     assert "compute/default.tflock" in call_args[0][1]
 
-    # Verify the run was marked failed
     row = (await session.execute(text("SELECT status FROM terraform_runs LIMIT 1"))).fetchone()
     assert row[0] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_recover_stale_runs_skips_live_process(session):
+    """Runs with a live process in the registry are left alone."""
+    from app.services.terraform_executor import _active_processes
+
+    user_id = await _seed_user(session)
+    await _seed_gcp_config(session, configured=True, initialized=True)
+
+    result = await session.execute(
+        text("""
+        INSERT INTO terraform_runs
+            (triggered_by_user_id, action, status, module_name, started_at)
+        VALUES (:uid, 'apply', 'applying', 'compute', now() - interval '10 minutes')
+        RETURNING id
+        """).bindparams(uid=user_id)
+    )
+    run_id = result.fetchone()[0]
+    await session.commit()
+
+    # Register a mock process as alive
+    mock_process = MagicMock()
+    mock_process.returncode = None  # Still running
+    _active_processes[run_id] = mock_process
+
+    try:
+        mock_delete = AsyncMock()
+        with (
+            patch.object(TerraformExecutor, "_delete_gcs_lock_file", new=mock_delete),
+            patch.object(TerraformExecutor, "_load_gcs_credentials", new=AsyncMock(return_value=None)),
+        ):
+            await TerraformExecutor._recover_stale_runs(session)
+
+        mock_delete.assert_not_called()
+
+        row = (
+            await session.execute(text("SELECT status FROM terraform_runs WHERE id = :id").bindparams(id=run_id))
+        ).fetchone()
+        assert row[0] == "applying"  # Still applying, not failed
+    finally:
+        _active_processes.pop(run_id, None)

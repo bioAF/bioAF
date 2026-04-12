@@ -42,6 +42,7 @@ class TerraformRun(Base):
     completed_resources: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     apply_log: Mapped[str | None] = mapped_column(Text, nullable=True)
     terraform_state_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    tfvars_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
 
 class VerificationCode(Base):

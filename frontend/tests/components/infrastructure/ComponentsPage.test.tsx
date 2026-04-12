@@ -188,6 +188,7 @@ describe("InfraComponentsPage", () => {
       resources_completed: 0,
       resources_total: 0,
       completed_resources: [],
+      planned_resources: [],
       error_message: null,
       run_id: null,
     };
@@ -199,6 +200,8 @@ describe("InfraComponentsPage", () => {
       if (url.includes("stack/status")) return Promise.resolve(mockStackStatus());
       if (url.includes("stack/components"))
         return Promise.resolve({ compute_stack: null, compute_deployed: false, storage_deployed: false, components: [] });
+      if (url.includes("settings/gcp"))
+        return Promise.resolve({ gcp_region: "us-central1", gcp_zone: "us-central1-a" });
       return Promise.reject(new Error("Not found"));
     });
     mockApiPost.mockResolvedValue({ message: "Deployment started" });
@@ -211,9 +214,20 @@ describe("InfraComponentsPage", () => {
       expect(screen.getByText(/Kubernetes \+ GCS/)).toBeInTheDocument();
     });
 
+    // Click Deploy to open confirmation modal
     const deployButton = screen.getByRole("button", { name: /^Deploy$/i });
     await act(async () => {
       fireEvent.click(deployButton);
+    });
+
+    // Confirm in the region/zone selection modal
+    await waitFor(() => {
+      expect(screen.getByText(/Deploy Compute Infrastructure/)).toBeInTheDocument();
+    });
+    const deployButtons = screen.getAllByRole("button", { name: /^Deploy$/i });
+    const confirmButton = deployButtons[deployButtons.length - 1];
+    await act(async () => {
+      fireEvent.click(confirmButton);
     });
 
     await waitFor(() => {

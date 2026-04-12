@@ -1,5 +1,34 @@
 # Release Notes
 
+## v0.6.3
+
+Infrastructure lifecycle stability, Cloud Logging, and deploy UX improvements.
+
+### Cloud Logging
+
+- Auto-detect GCE and attach Cloud Logging using the app's configured service account
+- Install Ops Agent via `./bioaf start` for Docker container log collection
+- Add `logging.logEntries.create` to GCP validation permission checks
+
+### Infrastructure Lifecycle
+
+- Replace 30-minute hard timeout with in-memory process registry so GKE deploys run to completion
+- Fix lock file deletion to use app credentials instead of ADC
+- Fix orphaned resource cleanup returning 404 for valid resources
+- Expand orphan detection and cleanup to cover IAM service accounts
+- Deduplicate orphaned resource entries across repeated failures
+- Add GKE cluster and service account scanning via GKE/IAM APIs
+- Persist tfvars on each TerraformRun for audit and reproducibility (migration 064)
+
+### Deploy UX
+
+- Show full planned resource list in deploy modal from the start (Queued/Setting up/Done states)
+- Move teardown and storage destroy to background endpoints with polling
+- Add region/zone selection at deploy time with cross-region cost warning
+- Fix empty modal when no active run (idle state with "Starting operation...")
+- Fix modal stuck after operation completes (terminal status persistence)
+- Visible scrollbar on resource list
+
 ## v0.6.2
 
 Audit log coverage gaps and activity feed event fixes.

@@ -116,8 +116,11 @@ async def cleanup_orphaned_resource(
         resource = await OrphanedResourceService.cleanup_resource(session, resource_id, user_id)
         await session.commit()
     except ValueError as exc:
-        logger.warning("Orphaned resource cleanup failed for %d: %s", resource_id, exc)
-        raise HTTPException(status_code=404, detail="Resource not found")
+        msg = str(exc)
+        logger.warning("Orphaned resource cleanup failed for %d: %s", resource_id, msg)
+        if "not found" in msg:
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
     return OrphanedResourceResponse.model_validate(resource)
 
 

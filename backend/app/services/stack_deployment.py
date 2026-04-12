@@ -288,11 +288,17 @@ async def deploy_stack(
     stack_type: str,
     user_id: int,
     org_id: int | None = None,
+    compute_region: str | None = None,
+    compute_zone: str | None = None,
 ) -> AsyncGenerator[TerraformProgressEvent, None]:
     """Deploy a full compute stack (storage + compute).
 
     Validates pre-conditions, runs storage (if needed), then compute.
     Yields progress events throughout.
+
+    When *compute_region* or *compute_zone* are provided, the compute
+    module uses those values instead of the defaults from platform_config.
+    Storage always uses the default region.
     """
     # Validate pre-conditions
     gcp_configured = await _read_config(session, "gcp_credentials_configured")
@@ -403,6 +409,20 @@ async def deploy_stack(
             return
 
     # Step 2: Deploy compute
+    # If the user chose a different region/zone for compute, temporarily
+    # override the config so _write_tfvars picks up the override values.
+    # Restore defaults after deploy completes (success or failure).
+    original_region = None
+    original_zone = None
+    if compute_region:
+        original_region = await _read_config(session, "gcp_region")
+        await _set_config(session, "gcp_region", compute_region)
+        if not compute_zone:
+            compute_zone = f"{compute_region}-a"
+    if compute_zone:
+        original_zone = await _read_config(session, "gcp_zone")
+        await _set_config(session, "gcp_zone", compute_zone)
+
     await _set_config(session, "deploy_suffix", secrets.token_hex(3))
     await session.flush()
     yield TerraformProgressEvent(
@@ -493,20 +513,35 @@ async def deploy_stack(
                 extra=event.extra,
             )
 
+    # Restore default region/zone if we overrode them for compute
+    if original_region is not None:
+        await _set_config(session, "gcp_region", original_region)
+    if original_zone is not None:
+        await _set_config(session, "gcp_zone", original_zone)
+
     if compute_failed:
-        # Log the expected cluster as an orphaned resource
+        # Log the expected cluster and its service accounts as orphaned
         project_id = await _read_config(session, "gcp_project_id")
         region = await _read_config(session, "gcp_region") or "us-central1"
         org_slug = await _read_config(session, "org_slug")
         suffix = await _read_config(session, "deploy_suffix")
         if suffix and suffix != "null" and org_slug and org_slug != "null":
             cluster_name = f"bioaf-{org_slug}-{suffix}"
+            pid = project_id if project_id != "null" else ""
             await OrphanedResourceService.log_resource(
                 session,
                 resource_type="gke_cluster",
                 resource_name=cluster_name,
-                gcp_project_id=project_id if project_id != "null" else "",
+                gcp_project_id=pid,
                 gcp_zone=region,
+                stack_uid=suffix,
+            )
+            # The compute module also creates a service account
+            await OrphanedResourceService.log_resource(
+                session,
+                resource_type="service_account",
+                resource_name="bioaf-notebook-runner",
+                gcp_project_id=pid,
                 stack_uid=suffix,
             )
             await session.flush()
@@ -550,18 +585,27 @@ async def teardown_stack(
             teardown_failed = True
 
     if teardown_failed:
-        # Log the cluster as orphaned for later cleanup
+        # Log the cluster and its service accounts as orphaned
         project_id = await _read_config(session, "gcp_project_id")
         region = await _read_config(session, "gcp_region") or "us-central1"
         cluster_name = await _read_config(session, "gke_cluster_name")
         if cluster_name and cluster_name != "null":
+            pid = project_id if project_id != "null" else ""
+            uid = cluster_name.rsplit("-", 1)[-1]
             await OrphanedResourceService.log_resource(
                 session,
                 resource_type="gke_cluster",
                 resource_name=cluster_name,
-                gcp_project_id=project_id if project_id != "null" else "",
+                gcp_project_id=pid,
                 gcp_zone=region,
-                stack_uid=cluster_name.rsplit("-", 1)[-1],
+                stack_uid=uid,
+            )
+            await OrphanedResourceService.log_resource(
+                session,
+                resource_type="service_account",
+                resource_name="bioaf-notebook-runner",
+                gcp_project_id=pid,
+                stack_uid=uid,
             )
             await session.flush()
 

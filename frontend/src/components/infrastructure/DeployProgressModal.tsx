@@ -107,13 +107,15 @@ interface DeployProgressModalProps {
   resourcesCompleted: number;
   resourcesTotal: number;
   completedResources: string[];
+  plannedResources: string[];
   errorMessage: string | null;
   onDismiss: () => void;
   onAbort: () => void;
   onDone: () => void;
+  mode?: "deploy" | "teardown";
 }
 
-type ResourceStatus = "pending" | "complete";
+type ResourceStatus = "pending" | "in_progress" | "complete";
 
 interface TrackedResource {
   address: string;
@@ -134,11 +136,19 @@ function friendlyLabel(address: string): string {
   return address;
 }
 
-function StatusBadge({ status }: { status: ResourceStatus }) {
+function StatusBadge({ status, mode }: { status: ResourceStatus; mode: "deploy" | "teardown" }) {
   if (status === "complete") {
     return (
       <span className="text-xs font-medium text-green-600 uppercase tracking-wide">
         Done
+      </span>
+    );
+  }
+  if (status === "in_progress") {
+    return (
+      <span className="text-xs font-medium text-blue-600 uppercase tracking-wide flex items-center gap-1.5">
+        <span className="inline-block h-1.5 w-1.5 bg-blue-600 rounded-full animate-pulse" />
+        {mode === "teardown" ? "Removing" : "Setting up"}
       </span>
     );
   }
@@ -149,7 +159,12 @@ function StatusBadge({ status }: { status: ResourceStatus }) {
   );
 }
 
-function phaseTitle(phase: string | null, status: string | null): string {
+function phaseTitle(phase: string | null, status: string | null, mode: "deploy" | "teardown"): string {
+  if (mode === "teardown") {
+    if (status === null || status === "planning" || status === "awaiting_confirmation")
+      return "Preparing teardown";
+    return "Tearing down infrastructure";
+  }
   if (status === null || status === "planning" || status === "awaiting_confirmation")
     return "Preparing deployment";
   if (phase === "storage") return "Deploying storage infrastructure";
@@ -167,17 +182,20 @@ export function DeployProgressModal({
   resourcesCompleted,
   resourcesTotal,
   completedResources,
+  plannedResources,
   errorMessage,
   onDismiss,
   onAbort,
   onDone,
+  mode = "deploy",
 }: DeployProgressModalProps) {
   const listRef = useRef<HTMLUListElement | null>(null);
   const [patienceIndex, setPatienceIndex] = useState(0);
 
-  const isRunning = status === null || status === "planning" || status === "applying" || status === "awaiting_confirmation";
+  const isRunning = status === "planning" || status === "applying" || status === "awaiting_confirmation";
   const isComplete = status === "completed";
   const isError = status === "failed";
+  const isIdle = status === null;
   const showTimingWarning = phase === "compute";
 
   // Rotate patience messages every 10 seconds while running
@@ -189,12 +207,27 @@ export function DeployProgressModal({
     return () => clearInterval(interval);
   }, [isRunning]);
 
-  // Build resource list from completedResources
-  const resources: TrackedResource[] = completedResources.map((addr) => ({
-    address: addr,
-    label: friendlyLabel(addr),
-    status: "complete" as const,
-  }));
+  // Build the full resource list from plannedResources, marking completed ones
+  // and the first non-completed resource as in_progress.
+  const completedSet = new Set(completedResources);
+  let foundInProgress = false;
+  const resources: TrackedResource[] =
+    (plannedResources?.length ?? 0) > 0
+      ? plannedResources.map((addr) => {
+          if (completedSet.has(addr)) {
+            return { address: addr, label: friendlyLabel(addr), status: "complete" as const };
+          }
+          if (!foundInProgress && isRunning) {
+            foundInProgress = true;
+            return { address: addr, label: friendlyLabel(addr), status: "in_progress" as const };
+          }
+          return { address: addr, label: friendlyLabel(addr), status: "pending" as const };
+        })
+      : completedResources.map((addr) => ({
+          address: addr,
+          label: friendlyLabel(addr),
+          status: "complete" as const,
+        }));
 
   // Auto-scroll resource list
   useEffect(() => {
@@ -212,17 +245,27 @@ export function DeployProgressModal({
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 p-6">
         <h2 className="text-lg font-semibold mb-1">
-          {isComplete ? "Deployment complete" : isError ? "Deployment failed" : phaseTitle(phase, status)}
+          {isComplete
+            ? (mode === "teardown" ? "Teardown complete" : "Deployment complete")
+            : isError
+              ? (mode === "teardown" ? "Teardown failed" : "Deployment failed")
+              : phaseTitle(phase, status, mode)}
         </h2>
 
         <div data-testid="deploy-modal-status" className="mb-4">
+          {isIdle && (
+            <p className="text-sm text-gray-500 flex items-center gap-2">
+              <span className="inline-block h-3 w-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+              Starting operation...
+            </p>
+          )}
           {isRunning && (
             <div>
               <p className="text-sm text-blue-600 flex items-center gap-2">
                 <span className="inline-block h-3 w-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                {status === null || status === "planning" || status === "awaiting_confirmation"
+                {status === "planning" || status === "awaiting_confirmation"
                   ? "Planning resources..."
-                  : "Applying changes..."}
+                  : mode === "teardown" ? "Removing resources..." : "Applying changes..."}
               </p>
               <div className="mt-2">
                 {showTimingWarning && (
@@ -238,7 +281,7 @@ export function DeployProgressModal({
           )}
           {isComplete && (
             <p className="text-sm text-green-600 font-medium">
-              All systems ready
+              {mode === "teardown" ? "Teardown complete" : "All systems ready"}
             </p>
           )}
           {isError && (
@@ -246,7 +289,7 @@ export function DeployProgressModal({
               data-testid="deploy-modal-error"
               className="text-sm text-red-600 font-medium"
             >
-              Setup failed: {errorMessage}
+              {mode === "teardown" ? "Teardown failed" : "Setup failed"}: {errorMessage}
             </p>
           )}
         </div>
@@ -268,7 +311,7 @@ export function DeployProgressModal({
         {resources.length > 0 && (
           <ul
             ref={listRef}
-            className="space-y-0.5 mb-4 max-h-52 overflow-y-auto"
+            className="space-y-0.5 mb-4 max-h-52 overflow-y-scroll border-b border-gray-100"
           >
             {resources.map((r) => (
               <li
@@ -276,7 +319,7 @@ export function DeployProgressModal({
                 className="flex items-center justify-between py-1.5 px-2 rounded text-sm"
               >
                 <span className="text-gray-700">{r.label}</span>
-                <StatusBadge status={r.status} />
+                <StatusBadge status={r.status} mode={mode} />
               </li>
             ))}
           </ul>
@@ -300,13 +343,13 @@ export function DeployProgressModal({
               Close
             </button>
           )}
-          {isRunning && (
+          {(isRunning || isIdle) && (
             <>
               <button
                 onClick={onAbort}
                 className="px-4 py-2 bg-red-50 text-red-600 rounded-lg text-sm font-medium hover:bg-red-100"
               >
-                Abort Deployment
+                Abort {mode === "teardown" ? "Teardown" : "Deployment"}
               </button>
               <button
                 onClick={onDismiss}
