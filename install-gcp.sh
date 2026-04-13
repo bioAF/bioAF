@@ -51,17 +51,38 @@ SA_DISPLAY_NAME="bioAF Application"
 # Regions that tend to have lower costs and good availability
 SUGGESTED_REGIONS=("us-central1" "us-east1" "us-west1" "europe-west1" "asia-east1")
 
-# GCP APIs required for the Docker Compose deployment
+# GCP APIs required by bioAF
 REQUIRED_APIS=(
     "compute.googleapis.com"
     "storage.googleapis.com"
     "iam.googleapis.com"
+    "cloudresourcemanager.googleapis.com"
+    "pubsub.googleapis.com"
+    "container.googleapis.com"
+    "bigquery.googleapis.com"
+    "artifactregistry.googleapis.com"
+    "cloudbuild.googleapis.com"
+    "secretmanager.googleapis.com"
+    "serviceusage.googleapis.com"
+    "logging.googleapis.com"
 )
 
-# Service account roles for bioAF application access
+# Service account roles required by the bioAF setup wizard.
+# Must match RECOMMENDED_ROLES in backend/app/services/gcp_config.py.
 SA_ROLES=(
-    "roles/storage.objectAdmin"
+    "roles/storage.admin"
+    "roles/pubsub.admin"
+    "roles/container.admin"
+    "roles/iam.serviceAccountUser"
+    "roles/iam.serviceAccountAdmin"
+    "roles/compute.admin"
+    "roles/resourcemanager.projectIamAdmin"
+    "roles/bigquery.dataEditor"
+    "roles/artifactregistry.admin"
+    "roles/cloudbuild.builds.editor"
     "roles/logging.logWriter"
+    "roles/serviceusage.serviceUsageViewer"
+    "roles/viewer"
 )
 
 # ---------------------------------------------------------------------------
@@ -78,7 +99,7 @@ echo ""
 echo "  1. Verify or install the Google Cloud CLI (gcloud)"
 echo "  2. Authenticate your Google account"
 echo "  3. Select your GCP project"
-echo "  4. Enable required APIs (Compute, Storage, IAM)"
+echo "  4. Enable required GCP APIs"
 echo "  5. Create a firewall rule for web traffic (ports 80, 443)"
 echo "  6. Create an e2-medium VM with Ubuntu 22.04 (30GB disk)"
 echo "  7. Optionally create a service account for bioAF"
@@ -420,7 +441,7 @@ if [ "$create_sa" != "n" ] && [ "$create_sa" != "N" ]; then
             --role="$role" \
             --quiet >/dev/null 2>&1 || true
     done
-    green "  Permissions granted (Storage Object Admin, Logging Writer)."
+    green "  Permissions granted."
 
     # Generate key
     SA_KEY_PATH="$HOME/Desktop/bioaf-sa-key.json"
