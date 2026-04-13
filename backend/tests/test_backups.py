@@ -152,6 +152,14 @@ async def test_get_backup_settings(client: AsyncClient, admin_token: str):
     assert "postgres_schedule_hours" in data
     assert "config_retention_days" in data
     assert "config_schedule_hours" in data
+    # New schedule fields
+    assert "postgres_schedule_enabled" in data
+    assert "config_schedule_enabled" in data
+    assert "postgres_next_run" in data
+    assert "config_next_run" in data
+    # Defaults to disabled
+    assert data["postgres_schedule_enabled"] is False
+    assert data["config_schedule_enabled"] is False
 
 
 @pytest.mark.asyncio
@@ -166,6 +174,97 @@ async def test_update_backup_settings_returns_updated_values(client: AsyncClient
     data = response.json()
     assert data["settings"]["postgres_retention_days"] == 21
     assert data["settings"]["config_schedule_hours"] == 12
+
+
+@pytest.mark.asyncio
+async def test_enable_postgres_schedule_with_first_run_now(client: AsyncClient, admin_token: str):
+    """Enabling schedule with first_run='now' sets next_run to approximately now."""
+    response = await client.put(
+        "/api/backups/settings",
+        json={
+            "postgres_schedule_enabled": True,
+            "postgres_first_run": "now",
+            "postgres_schedule_hours": 24,
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()["settings"]
+    assert data["postgres_schedule_enabled"] is True
+    assert data["postgres_next_run"] is not None
+    # next_run should be within the last 60 seconds (approximately now)
+    next_run = datetime.fromisoformat(data["postgres_next_run"])
+    now = datetime.now(timezone.utc)
+    assert abs((now - next_run).total_seconds()) < 60
+
+
+@pytest.mark.asyncio
+async def test_enable_postgres_schedule_with_future_time(client: AsyncClient, admin_token: str):
+    """Enabling schedule with a future ISO datetime sets next_run to that time."""
+    future = datetime.now(timezone.utc) + timedelta(hours=6)
+    future_iso = future.isoformat()
+    response = await client.put(
+        "/api/backups/settings",
+        json={
+            "postgres_schedule_enabled": True,
+            "postgres_first_run": future_iso,
+            "postgres_schedule_hours": 12,
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()["settings"]
+    assert data["postgres_schedule_enabled"] is True
+    next_run = datetime.fromisoformat(data["postgres_next_run"])
+    assert abs((next_run - future).total_seconds()) < 2
+
+
+@pytest.mark.asyncio
+async def test_disable_postgres_schedule(client: AsyncClient, admin_token: str):
+    """Disabling schedule clears next_run."""
+    # Enable first
+    await client.put(
+        "/api/backups/settings",
+        json={"postgres_schedule_enabled": True, "postgres_first_run": "now"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    # Disable
+    response = await client.put(
+        "/api/backups/settings",
+        json={"postgres_schedule_enabled": False},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()["settings"]
+    assert data["postgres_schedule_enabled"] is False
+    assert data["postgres_next_run"] is None
+
+
+@pytest.mark.asyncio
+async def test_advance_next_run_after_backup(session):
+    """After a backup completes, next_run advances by cadence hours."""
+    from app.services.backup_service import BackupService
+
+    # Set up schedule: enabled, next_run = now, cadence = 12h
+    now = datetime.now(timezone.utc)
+    await BackupService.update_backup_settings(
+        session,
+        {
+            "postgres_schedule_enabled": True,
+            "postgres_first_run": "now",
+            "postgres_schedule_hours": 12,
+        },
+    )
+    await session.commit()
+
+    # Advance next_run
+    await BackupService.advance_next_run(session, "postgres")
+    await session.commit()
+
+    settings_after = await BackupService.get_backup_settings(session)
+    next_run = datetime.fromisoformat(settings_after["postgres_next_run"])
+    expected = now + timedelta(hours=12)
+    assert abs((next_run - expected).total_seconds()) < 5
 
 
 @pytest.mark.asyncio

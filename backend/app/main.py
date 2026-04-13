@@ -167,6 +167,7 @@ async def lifespan(app: FastAPI):
     background_tasks.append(asyncio.create_task(_notification_cleanup_loop()))
     background_tasks.append(asyncio.create_task(_backup_health_check_loop()))
     background_tasks.append(asyncio.create_task(_postgres_backup_loop()))
+    background_tasks.append(asyncio.create_task(_config_backup_loop()))
     background_tasks.append(asyncio.create_task(_cost_billing_sync_loop()))
     background_tasks.append(asyncio.create_task(_version_check_loop()))
     background_tasks.append(asyncio.create_task(_review_reminder_loop()))
@@ -364,25 +365,53 @@ async def _backup_health_check_loop():
 
 
 async def _postgres_backup_loop():
-    """Run pg_dump backups on the configured interval."""
-    from app.config import settings
+    """Check every 60s whether a scheduled postgres backup is due and run it."""
     from app.database import async_session_factory
     from app.services.backup_service import BackupService
 
-    interval = settings.backup_postgres_interval_hours * 3600
     while True:
         try:
-            await asyncio.sleep(interval)
+            await asyncio.sleep(60)
             async with async_session_factory() as session:
+                due = await BackupService.is_backup_due(session, "postgres")
+                if not due:
+                    continue
                 result = await BackupService.run_postgres_backup(session, org_id=1)
-            if result["status"] == "completed":
-                logger.info("Scheduled pg_dump completed: %s", result.get("filename"))
-            else:
-                logger.error("Scheduled pg_dump failed: %s", result.get("message"))
+                if result["status"] == "completed":
+                    await BackupService.advance_next_run(session, "postgres")
+                    await session.commit()
+                    logger.info("Scheduled pg_dump completed: %s", result.get("filename"))
+                else:
+                    logger.error("Scheduled pg_dump failed: %s", result.get("message"))
         except asyncio.CancelledError:
             break
         except Exception as e:
             logger.error("Postgres backup loop error: %s", e)
+
+
+async def _config_backup_loop():
+    """Check every 60s whether a scheduled config backup is due and run it."""
+    from app.database import async_session_factory
+    from app.services.backup_service import BackupService
+
+    while True:
+        try:
+            await asyncio.sleep(60)
+            async with async_session_factory() as session:
+                due = await BackupService.is_backup_due(session, "config")
+                if not due:
+                    continue
+                result = await BackupService.run_config_backup(session, org_id=1)
+                if result["status"] == "completed":
+                    await BackupService.advance_next_run(session, "config")
+                    await session.commit()
+                    logger.info("Scheduled config backup completed: %s", result.get("filename"))
+                else:
+                    logger.error("Scheduled config backup failed: %s", result.get("message"))
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error("Config backup loop error: %s", e)
 
 
 async def _cost_billing_sync_loop():

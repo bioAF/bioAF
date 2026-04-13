@@ -77,12 +77,20 @@ class RestoreStatusResponse(BaseModel):
 class BackupSettingsResponse(BaseModel):
     postgres_retention_days: int
     postgres_schedule_hours: int
+    postgres_schedule_enabled: bool
+    postgres_next_run: datetime | None = None
     config_retention_days: int
     config_schedule_hours: int
+    config_schedule_enabled: bool
+    config_next_run: datetime | None = None
 
 
 class BackupSettingsUpdate(BaseModel):
     postgres_retention_days: int | None = None
     postgres_schedule_hours: int | None = None
+    postgres_schedule_enabled: bool | None = None
+    postgres_first_run: str | None = None  # "now" or ISO datetime
     config_retention_days: int | None = None
     config_schedule_hours: int | None = None
+    config_schedule_enabled: bool | None = None
+    config_first_run: str | None = None  # "now" or ISO datetime

@@ -330,7 +330,7 @@ class BackupService:
         page_files = files[start : start + page_size]
         snapshots = [
             {
-                "date": f["timestamp"].strftime("%Y-%m-%d"),
+                "date": f["timestamp"].isoformat(),
                 "size_bytes": f["size_bytes"],
                 "tier": "nightly",
             }
@@ -374,7 +374,7 @@ class BackupService:
         snapshots = [
             {
                 "filename": f["filename"],
-                "date": f["timestamp"].strftime("%Y-%m-%d %H:%M:%S"),
+                "date": f["timestamp"].isoformat(),
                 "size_bytes": f["size_bytes"],
             }
             for f in files
@@ -446,10 +446,9 @@ class BackupService:
             # Remove local temp file
             os.remove(output_path)
 
-            # Rotate old backups in GCS
-            deleted = _rotate_gcs_blobs(
-                client, bucket_name, "postgres/", _PG_FILENAME_RE, settings.backup_postgres_retention_days
-            )
+            # Rotate old backups in GCS (use DB-stored retention, not config default)
+            retention = await BackupService._get_setting(session, "postgres_retention_days")
+            deleted = _rotate_gcs_blobs(client, bucket_name, "postgres/", _PG_FILENAME_RE, retention)
             if deleted:
                 logger.info("Rotated %d old postgres backups", deleted)
 
@@ -630,13 +629,20 @@ class BackupService:
         keys = [
             "backup_postgres_retention_days",
             "backup_postgres_schedule_hours",
+            "backup_postgres_schedule_enabled",
+            "backup_postgres_next_run",
             "backup_config_retention_days",
             "backup_config_schedule_hours",
+            "backup_config_schedule_enabled",
+            "backup_config_next_run",
         ]
         result = await session.execute(
             text("SELECT key, value FROM platform_config WHERE key = ANY(:keys)").bindparams(keys=keys)
         )
         stored = {r[0]: r[1] for r in result.fetchall()}
+
+        pg_next_raw = stored.get("backup_postgres_next_run", "")
+        cfg_next_raw = stored.get("backup_config_next_run", "")
 
         return {
             "postgres_retention_days": int(
@@ -645,15 +651,25 @@ class BackupService:
             "postgres_schedule_hours": int(
                 stored.get("backup_postgres_schedule_hours", settings.backup_postgres_interval_hours)
             ),
+            "postgres_schedule_enabled": stored.get("backup_postgres_schedule_enabled", "false") == "true",
+            "postgres_next_run": pg_next_raw if pg_next_raw else None,
             "config_retention_days": int(
                 stored.get("backup_config_retention_days", settings.backup_config_retention_days)
             ),
             "config_schedule_hours": int(stored.get("backup_config_schedule_hours", "24")),
+            "config_schedule_enabled": stored.get("backup_config_schedule_enabled", "false") == "true",
+            "config_next_run": cfg_next_raw if cfg_next_raw else None,
         }
 
     @staticmethod
     async def update_backup_settings(session: AsyncSession, updates: dict) -> dict:
-        """Persist backup settings to platform_config."""
+        """Persist backup settings to platform_config.
+
+        Handles schedule enable/disable and first_run -> next_run conversion.
+        When a schedule is enabled with first_run="now", next_run is set to
+        the current time. When first_run is an ISO datetime string, next_run
+        is set to that time. When a schedule is disabled, next_run is cleared.
+        """
         key_map = {
             "postgres_retention_days": "backup_postgres_retention_days",
             "postgres_schedule_hours": "backup_postgres_schedule_hours",
@@ -668,8 +684,128 @@ class BackupService:
                         "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
                     ).bindparams(k=config_key, v=str(updates[field]))
                 )
+
+        # Handle postgres schedule enable/disable
+        await BackupService._apply_schedule_toggle(
+            session,
+            updates,
+            "postgres",
+            "backup_postgres_schedule_enabled",
+            "backup_postgres_next_run",
+        )
+        # Handle config schedule enable/disable
+        await BackupService._apply_schedule_toggle(
+            session,
+            updates,
+            "config",
+            "backup_config_schedule_enabled",
+            "backup_config_next_run",
+        )
+
         await session.flush()
         return await BackupService.get_backup_settings(session)
+
+    @staticmethod
+    async def _apply_schedule_toggle(
+        session: AsyncSession,
+        updates: dict,
+        prefix: str,
+        enabled_key: str,
+        next_run_key: str,
+    ) -> None:
+        """Handle enable/disable and first_run for a schedule tier."""
+        enabled_field = f"{prefix}_schedule_enabled"
+        first_run_field = f"{prefix}_first_run"
+
+        if enabled_field in updates and updates[enabled_field] is not None:
+            enabled = updates[enabled_field]
+            await session.execute(
+                text(
+                    "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
+                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
+                ).bindparams(k=enabled_key, v="true" if enabled else "false")
+            )
+
+            if not enabled:
+                # Disable: clear next_run
+                await session.execute(
+                    text(
+                        "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
+                        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
+                    ).bindparams(k=next_run_key, v="")
+                )
+                return
+
+        # Handle first_run -> next_run (only when enabling or updating)
+        if first_run_field in updates and updates[first_run_field] is not None:
+            first_run = updates[first_run_field]
+            if first_run == "now":
+                next_run = datetime.now(timezone.utc)
+            else:
+                next_run = datetime.fromisoformat(first_run)
+                if next_run.tzinfo is None:
+                    next_run = next_run.replace(tzinfo=timezone.utc)
+
+            await session.execute(
+                text(
+                    "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
+                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
+                ).bindparams(k=next_run_key, v=next_run.isoformat())
+            )
+
+    @staticmethod
+    async def advance_next_run(session: AsyncSession, tier: str) -> None:
+        """Advance next_run by the tier's cadence hours after a backup completes."""
+        s = await BackupService.get_backup_settings(session)
+        if tier == "postgres":
+            enabled = s["postgres_schedule_enabled"]
+            hours = s["postgres_schedule_hours"]
+            current_next = s["postgres_next_run"]
+            key = "backup_postgres_next_run"
+        elif tier == "config":
+            enabled = s["config_schedule_enabled"]
+            hours = s["config_schedule_hours"]
+            current_next = s["config_next_run"]
+            key = "backup_config_next_run"
+        else:
+            return
+
+        if not enabled or not current_next:
+            return
+
+        base = datetime.fromisoformat(current_next)
+        if base.tzinfo is None:
+            base = base.replace(tzinfo=timezone.utc)
+        new_next = base + timedelta(hours=hours)
+
+        await session.execute(
+            text(
+                "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
+            ).bindparams(k=key, v=new_next.isoformat())
+        )
+
+    @staticmethod
+    async def is_backup_due(session: AsyncSession, tier: str) -> bool:
+        """Check whether a scheduled backup is due for the given tier."""
+        s = await BackupService.get_backup_settings(session)
+        if tier == "postgres":
+            enabled = s["postgres_schedule_enabled"]
+            next_run_raw = s["postgres_next_run"]
+        elif tier == "config":
+            enabled = s["config_schedule_enabled"]
+            next_run_raw = s["config_next_run"]
+        else:
+            return False
+
+        if not enabled or not next_run_raw:
+            return False
+
+        next_run = datetime.fromisoformat(next_run_raw)
+        if next_run.tzinfo is None:
+            next_run = next_run.replace(tzinfo=timezone.utc)
+
+        return datetime.now(timezone.utc) >= next_run
 
     @staticmethod
     async def _get_setting(session: AsyncSession, key: str) -> int:

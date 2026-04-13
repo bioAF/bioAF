@@ -69,7 +69,7 @@ export function ProvenanceReportPanel({ entityType, entityId, entityName }: Prov
       lines.push("");
       lines.push(`**Type:** ${report.report_type}`);
       lines.push(`**Schema Version:** ${report.schema_version}`);
-      lines.push(`**Generated:** ${report.generated_at}`);
+      lines.push(`**Generated:** ${new Date(report.generated_at as string).toLocaleString()}`);
       lines.push("");
 
       const entity = report.entity as Record<string, unknown> | undefined;
@@ -126,8 +126,8 @@ export function ProvenanceReportPanel({ entityType, entityId, entityName }: Prov
             lines.push(`- **Session Type:** ${ns.session_type}`);
             lines.push(`- **Status:** ${ns.status}`);
             lines.push(`- **Resources:** ${ns.cpu_cores} CPU, ${ns.memory_gb} GB`);
-            if (ns.started_at) lines.push(`- **Started:** ${ns.started_at}`);
-            if (ns.stopped_at) lines.push(`- **Stopped:** ${ns.stopped_at}`);
+            if (ns.started_at) lines.push(`- **Started:** ${new Date(ns.started_at as string).toLocaleString()}`);
+            if (ns.stopped_at) lines.push(`- **Stopped:** ${new Date(ns.stopped_at as string).toLocaleString()}`);
             if (ns.git_branch_name) lines.push(`- **Git Branch:** ${ns.git_branch_name}`);
             if (ns.git_commit_hash) lines.push(`- **Git Commit:** ${ns.git_commit_hash}`);
 
