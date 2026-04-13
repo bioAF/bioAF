@@ -1,5 +1,14 @@
 # Release Notes
 
+## v0.7.1
+
+Fix validation error display in setup wizard and all API error surfaces.
+
+### Fixes
+
+- Pydantic 422 validation errors (e.g. invalid org slug) now display the actual error message instead of "[object Object]"
+- Applies to all API calls: fetchApi, uploadFile, and downloadFile
+
 ## v0.7.0
 
 Security hardening and deployment reliability improvements from external pentest findings.
