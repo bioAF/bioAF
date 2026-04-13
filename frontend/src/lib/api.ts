@@ -13,6 +13,16 @@ class ApiError extends Error {
   }
 }
 
+function extractErrorMessage(body: { detail?: unknown }): string {
+  if (typeof body.detail === "string") return body.detail;
+  if (Array.isArray(body.detail)) {
+    return body.detail
+      .map((e: { msg?: string }) => e.msg ?? "Validation error")
+      .join("; ");
+  }
+  return "Request failed";
+}
+
 async function fetchApi<T>(
   path: string,
   options: RequestInit = {},
@@ -47,7 +57,7 @@ async function fetchApi<T>(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Unknown error" }));
-    throw new ApiError(response.status, error.detail || "Request failed");
+    throw new ApiError(response.status, extractErrorMessage(error));
   }
 
   if (response.status === 204) {
@@ -89,7 +99,7 @@ async function uploadFile<T>(path: string, file: File, extraFields?: Record<stri
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Unknown error" }));
-    throw new ApiError(response.status, error.detail || "Request failed");
+    throw new ApiError(response.status, extractErrorMessage(error));
   }
 
   return response.json();
@@ -215,7 +225,7 @@ async function downloadFile(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Download failed" }));
-    throw new ApiError(response.status, error.detail || "Download failed");
+    throw new ApiError(response.status, extractErrorMessage(error));
   }
 
   const blob = await response.blob();
