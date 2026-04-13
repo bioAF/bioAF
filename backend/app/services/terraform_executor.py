@@ -851,7 +851,9 @@ class TerraformExecutor:
         """
         project_id = config.get("gcp_project_id") or ""
         region = config.get("gcp_region") or "us-central1"
-        zone = config.get("gcp_zone") or f"{region}-a"
+        from app.gcp_zones import default_zone
+
+        zone = config.get("gcp_zone") or default_zone(region)
         org_slug = config.get("org_slug") or "bioaf"
         # The deploy suffix is stored in platform_config for the
         # duration of a deployment. On destroy, the variable is omitted
@@ -883,7 +885,9 @@ class TerraformExecutor:
             # Multi-zone node placement: derive all zones in the region so
             # the autoscaler can fall back when a machine type is unavailable
             # in the primary zone (e.g. GCE capacity exhaustion).
-            tfvars["k8s_node_zones"] = [f"{region}-a", f"{region}-b", f"{region}-c"]
+            from app.gcp_zones import zones_for_region
+
+            tfvars["k8s_node_zones"] = zones_for_region(region)
             # Cluster configuration from platform_config
             if config.get("k8s_pipeline_machine_type"):
                 tfvars["k8s_pipeline_machine_type"] = config["k8s_pipeline_machine_type"]

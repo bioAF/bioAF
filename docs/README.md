@@ -22,4 +22,4 @@ Welcome to the bioAF documentation. bioAF is a turnkey computational biology pla
 
 ## API Reference
 
-The FastAPI backend auto-generates an OpenAPI specification at `/docs` when running. Access it at `http://localhost:8000/docs` during development.
+The FastAPI backend auto-generates an OpenAPI specification at `/docs` in development mode (`BIOAF_ENVIRONMENT=development`). Access it at `http://localhost:8000/docs` during local development. The docs endpoint is disabled in production.
