@@ -1,5 +1,25 @@
 # Release Notes
 
+## v0.6.6
+
+Automated backup scheduling and timezone fixes across the platform.
+
+### Backup Scheduling
+
+- Backups now run automatically on a user-configured schedule instead of requiring manual triggers
+- Enable/disable toggle per tier (PostgreSQL and platform config)
+- Set first backup to "now" or a specific future date/time
+- Configurable cadence (hours between backups) and retention (days to keep)
+- Background loops poll every 60 seconds and execute when a backup is due
+- Backups older than the retention period are automatically deleted from GCS
+- Add config backup background loop (was previously missing)
+
+### Fixes
+
+- Fix backup settings not persisting across page refreshes (missing transaction commit)
+- Fix scheduled backup time shifted by timezone offset (naive local datetime treated as UTC)
+- Standardize all date/time display to user's local timezone across the platform
+
 ## v0.6.5
 
 Installability improvements: one-command GCP setup, versioned updates from CLI and UI.
