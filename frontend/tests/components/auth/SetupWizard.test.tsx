@@ -171,7 +171,7 @@ describe("SetupWizard", () => {
     await advanceToGcpStep(user);
 
     mockApiPut.mockResolvedValueOnce({});
-    mockApiPost.mockResolvedValueOnce({});
+    mockApiPost.mockResolvedValueOnce({ passed: true, checks: [], permission_details: [] });
     await user.type(screen.getByLabelText("GCP Project ID"), "proj");
     await user.click(screen.getByRole("button", { name: "Save & Validate" }));
     await screen.findByRole("heading", { name: "SMTP Settings" });

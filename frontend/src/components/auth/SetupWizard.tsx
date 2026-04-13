@@ -32,7 +32,7 @@ const GCP_ZONES: Record<string, string[]> = {
 };
 
 function zonesForRegion(region: string): string[] {
-  return GCP_ZONES[region] ?? [`${region}-a`, `${region}-b`, `${region}-c`];
+  return GCP_ZONES[region] ?? [`${region}-b`, `${region}-c`, `${region}-d`];
 }
 
 const SETUP_RECOMMENDED_ROLES = [
@@ -97,6 +97,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [gcpServiceAccountEmail, setGcpServiceAccountEmail] = useState("");
   const [gcpSaving, setGcpSaving] = useState(false);
   const [gcpConfigured, setGcpConfigured] = useState(false);
+  const [gcpValidation, setGcpValidation] = useState<{
+    passed: boolean;
+    checks: { name: string; passed: boolean; message: string }[];
+    permission_details: { permission: string; granted: boolean; recommended_role: string }[];
+  } | null>(null);
 
   // Step 4: SMTP
   const [smtpHost, setSmtpHost] = useState("");
@@ -174,6 +179,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   const handleSaveGcp = async () => {
     setError("");
+    setGcpValidation(null);
     setGcpSaving(true);
     try {
       await api.put("/api/v1/settings/gcp", {
@@ -188,9 +194,14 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             : undefined,
         gcp_service_account_email: gcpServiceAccountEmail || undefined,
       });
-      await api.post("/api/v1/settings/gcp/validate");
-      setGcpConfigured(true);
-      setStep(4);
+      const result = await api.post<typeof gcpValidation>("/api/v1/settings/gcp/validate");
+      setGcpValidation(result);
+      if (result?.passed) {
+        setGcpConfigured(true);
+        setStep(4);
+      } else {
+        setError("Validation failed. Fix the issues below and try again.");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save GCP configuration");
     } finally {
@@ -470,8 +481,45 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
           <button onClick={handleSaveGcp} disabled={gcpSaving}
             className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50">
-            {gcpSaving ? "Saving..." : "Save & Validate"}
+            {gcpSaving ? "Validating..." : "Save & Validate"}
           </button>
+
+          {gcpValidation && !gcpValidation.passed && (
+            <div className="border rounded divide-y text-sm">
+              <div className="p-3 bg-red-50">
+                <h4 className="font-semibold text-red-800">Validation Failed</h4>
+              </div>
+              <div className="p-3 space-y-1.5">
+                <p className="text-xs font-medium text-gray-600">System Checks</p>
+                {gcpValidation.checks.map((c) => (
+                  <div key={c.name} className="flex items-start gap-2 text-xs">
+                    <span className={c.passed ? "text-green-600" : "text-red-600"}>
+                      {c.passed ? "\u2713" : "\u2717"}
+                    </span>
+                    <span>
+                      <span className="font-medium">{c.name}</span>{" "}
+                      <span className="text-gray-500">{c.message}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {gcpValidation.permission_details.some((p) => !p.granted) && (
+                <div className="p-3 space-y-1.5">
+                  <p className="text-xs font-medium text-gray-600">Missing Permissions</p>
+                  {gcpValidation.permission_details
+                    .filter((p) => !p.granted)
+                    .map((p) => (
+                      <div key={p.permission} className="flex items-center gap-2 text-xs">
+                        <span className="text-red-600">{"\u2717"}</span>
+                        <code className="bg-red-50 px-1 rounded">{p.permission}</code>
+                        <span className="text-gray-400">(needs {p.recommended_role})</span>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+          )}
+
           <button onClick={() => setStep(4)} className="w-full text-gray-500 text-sm hover:text-gray-700">
             Do this later
           </button>

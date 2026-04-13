@@ -418,7 +418,9 @@ async def deploy_stack(
         original_region = await _read_config(session, "gcp_region")
         await _set_config(session, "gcp_region", compute_region)
         if not compute_zone:
-            compute_zone = f"{compute_region}-a"
+            from app.gcp_zones import default_zone
+
+            compute_zone = default_zone(compute_region)
     if compute_zone:
         original_zone = await _read_config(session, "gcp_zone")
         await _set_config(session, "gcp_zone", compute_zone)

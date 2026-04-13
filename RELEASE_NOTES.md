@@ -1,5 +1,25 @@
 # Release Notes
 
+## v0.7.0
+
+Security hardening and deployment reliability improvements from external pentest findings.
+
+### Security
+
+- Reject known-insecure JWT secret keys at startup (prevents running with default/public secrets)
+- Disable OpenAPI docs and Swagger UI in production (404 instead of serving 376-endpoint schema)
+- Remove smtp_configured from unauthenticated bootstrap status response
+- Require authentication for /api/health/services and /api/health/status endpoints
+- Replace full session JWTs in file/plot content URLs with short-lived, resource-scoped tokens (60s TTL)
+- New POST /api/content-tokens endpoint for issuing scoped content access tokens
+
+### Deployment Fixes
+
+- Fix GCP zone fallback for regions without a "-a" zone (us-east1, europe-west1)
+- Add backend region-to-zone mapping with correct zones for all 17 supported regions
+- Setup wizard now blocks on GCP validation failure and displays missing permissions inline
+- Fix zone fallback in frontend settings and setup wizard
+
 ## v0.6.6
 
 Automated backup scheduling and timezone fixes across the platform.

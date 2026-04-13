@@ -60,7 +60,7 @@ const GCP_ZONES: Record<string, string[]> = {
 };
 
 function zonesForRegion(region: string): string[] {
-  return GCP_ZONES[region] ?? [`${region}-a`, `${region}-b`, `${region}-c`];
+  return GCP_ZONES[region] ?? [`${region}-b`, `${region}-c`, `${region}-d`];
 }
 
 const RECOMMENDED_ROLES = [
