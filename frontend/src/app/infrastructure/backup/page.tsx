@@ -42,8 +42,12 @@ interface TfstateFile {
 interface BackupSettings {
   postgres_retention_days: number;
   postgres_schedule_hours: number;
+  postgres_schedule_enabled: boolean;
+  postgres_next_run: string | null;
   config_retention_days: number;
   config_schedule_hours: number;
+  config_schedule_enabled: boolean;
+  config_next_run: string | null;
 }
 
 interface RestoreStatus {
@@ -90,6 +94,8 @@ export default function InfraBackupPage() {
   const [actionMessage, setActionMessage] = useState("");
   const [runningAction, setRunningAction] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
+  const [pgFirstRun, setPgFirstRun] = useState<string>("now");
+  const [cfgFirstRun, setCfgFirstRun] = useState<string>("now");
   const [restoringFile, setRestoringFile] = useState("");
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean;
@@ -269,7 +275,29 @@ export default function InfraBackupPage() {
     setSavingSettings(true);
     setActionMessage("");
     try {
-      await api.put("/api/backups/settings", settings);
+      const payload: Record<string, unknown> = {
+        postgres_retention_days: settings.postgres_retention_days,
+        postgres_schedule_hours: settings.postgres_schedule_hours,
+        postgres_schedule_enabled: settings.postgres_schedule_enabled,
+        config_retention_days: settings.config_retention_days,
+        config_schedule_hours: settings.config_schedule_hours,
+        config_schedule_enabled: settings.config_schedule_enabled,
+      };
+      // Only send first_run when enabling a schedule that has no next_run yet
+      if (settings.postgres_schedule_enabled && !settings.postgres_next_run) {
+        payload.postgres_first_run = pgFirstRun === "now"
+          ? "now"
+          : new Date(pgFirstRun).toISOString();
+      }
+      if (settings.config_schedule_enabled && !settings.config_next_run) {
+        payload.config_first_run = cfgFirstRun === "now"
+          ? "now"
+          : new Date(cfgFirstRun).toISOString();
+      }
+      const result = await api.put<{ status: string; settings: BackupSettings }>(
+        "/api/backups/settings", payload
+      );
+      setSettings(result.settings);
       setActionMessage("Settings saved");
     } catch (e) {
       setActionMessage(e instanceof Error ? e.message : "Failed to save settings");
@@ -416,61 +444,168 @@ export default function InfraBackupPage() {
                 ))}
               </div>
 
-              {/* Backup Settings */}
+              {/* Backup Schedule */}
               {settings && canAccess("backups", "create") && (
                 <>
-                  <h2 className="text-lg font-semibold text-gray-900 mb-4">Backup Settings</h2>
+                  <h2 className="text-lg font-semibold text-gray-900 mb-4">Backup Schedule</h2>
                   <div className="bg-white rounded-lg border border-gray-200 p-4 mb-8">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* PostgreSQL Schedule */}
                       <div>
-                        <h3 className="text-sm font-medium text-gray-900 mb-3">PostgreSQL</h3>
-                        <div className="space-y-3">
-                          <div>
-                            <label className="block text-xs text-gray-500 mb-1">Schedule (hours)</label>
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="text-sm font-medium text-gray-900">PostgreSQL</h3>
+                          <label className="relative inline-flex items-center cursor-pointer">
                             <input
-                              type="number"
-                              min={1}
-                              value={settings.postgres_schedule_hours}
-                              onChange={(e) => setSettings({ ...settings, postgres_schedule_hours: parseInt(e.target.value) || 1 })}
-                              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+                              type="checkbox"
+                              checked={settings.postgres_schedule_enabled}
+                              onChange={(e) => setSettings({ ...settings, postgres_schedule_enabled: e.target.checked })}
+                              className="sr-only peer"
                             />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-gray-500 mb-1">Retention (days)</label>
-                            <input
-                              type="number"
-                              min={1}
-                              value={settings.postgres_retention_days}
-                              onChange={(e) => setSettings({ ...settings, postgres_retention_days: parseInt(e.target.value) || 1 })}
-                              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
-                            />
-                          </div>
+                            <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                          </label>
                         </div>
+                        {settings.postgres_schedule_enabled && (
+                          <div className="space-y-3">
+                            {!settings.postgres_next_run && (
+                              <div>
+                                <label className="block text-xs text-gray-500 mb-1">First backup</label>
+                                <div className="flex gap-2">
+                                  <select
+                                    value={pgFirstRun === "now" ? "now" : "scheduled"}
+                                    onChange={(e) => {
+                                      if (e.target.value === "now") {
+                                        setPgFirstRun("now");
+                                      } else {
+                                        const d = new Date();
+                                        d.setHours(d.getHours() + 1, 0, 0, 0);
+                                        setPgFirstRun(d.toISOString().slice(0, 16));
+                                      }
+                                    }}
+                                    className="border border-gray-300 rounded px-2 py-1.5 text-sm"
+                                  >
+                                    <option value="now">Now</option>
+                                    <option value="scheduled">Pick a time</option>
+                                  </select>
+                                  {pgFirstRun !== "now" && (
+                                    <input
+                                      type="datetime-local"
+                                      value={pgFirstRun}
+                                      onChange={(e) => setPgFirstRun(e.target.value)}
+                                      className="flex-1 border border-gray-300 rounded px-2 py-1.5 text-sm"
+                                    />
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            {settings.postgres_next_run && (
+                              <div className="text-xs text-gray-600 bg-blue-50 rounded p-2">
+                                Next backup: {new Date(settings.postgres_next_run).toLocaleString()}
+                              </div>
+                            )}
+                            <div>
+                              <label className="block text-xs text-gray-500 mb-1">Run every (hours)</label>
+                              <input
+                                type="number"
+                                min={1}
+                                value={settings.postgres_schedule_hours}
+                                onChange={(e) => setSettings({ ...settings, postgres_schedule_hours: parseInt(e.target.value) || 1 })}
+                                className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-gray-500 mb-1">Keep backups for (days)</label>
+                              <input
+                                type="number"
+                                min={1}
+                                value={settings.postgres_retention_days}
+                                onChange={(e) => setSettings({ ...settings, postgres_retention_days: parseInt(e.target.value) || 1 })}
+                                className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+                              />
+                            </div>
+                          </div>
+                        )}
+                        {!settings.postgres_schedule_enabled && (
+                          <p className="text-xs text-gray-500">Automatic backups disabled. Use &quot;Run Backup Now&quot; for manual backups.</p>
+                        )}
                       </div>
+
+                      {/* Config Schedule */}
                       <div>
-                        <h3 className="text-sm font-medium text-gray-900 mb-3">Platform Config</h3>
-                        <div className="space-y-3">
-                          <div>
-                            <label className="block text-xs text-gray-500 mb-1">Schedule (hours)</label>
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="text-sm font-medium text-gray-900">Platform Config</h3>
+                          <label className="relative inline-flex items-center cursor-pointer">
                             <input
-                              type="number"
-                              min={1}
-                              value={settings.config_schedule_hours}
-                              onChange={(e) => setSettings({ ...settings, config_schedule_hours: parseInt(e.target.value) || 1 })}
-                              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+                              type="checkbox"
+                              checked={settings.config_schedule_enabled}
+                              onChange={(e) => setSettings({ ...settings, config_schedule_enabled: e.target.checked })}
+                              className="sr-only peer"
                             />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-gray-500 mb-1">Retention (days)</label>
-                            <input
-                              type="number"
-                              min={1}
-                              value={settings.config_retention_days}
-                              onChange={(e) => setSettings({ ...settings, config_retention_days: parseInt(e.target.value) || 1 })}
-                              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
-                            />
-                          </div>
+                            <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                          </label>
                         </div>
+                        {settings.config_schedule_enabled && (
+                          <div className="space-y-3">
+                            {!settings.config_next_run && (
+                              <div>
+                                <label className="block text-xs text-gray-500 mb-1">First backup</label>
+                                <div className="flex gap-2">
+                                  <select
+                                    value={cfgFirstRun === "now" ? "now" : "scheduled"}
+                                    onChange={(e) => {
+                                      if (e.target.value === "now") {
+                                        setCfgFirstRun("now");
+                                      } else {
+                                        const d = new Date();
+                                        d.setHours(d.getHours() + 1, 0, 0, 0);
+                                        setCfgFirstRun(d.toISOString().slice(0, 16));
+                                      }
+                                    }}
+                                    className="border border-gray-300 rounded px-2 py-1.5 text-sm"
+                                  >
+                                    <option value="now">Now</option>
+                                    <option value="scheduled">Pick a time</option>
+                                  </select>
+                                  {cfgFirstRun !== "now" && (
+                                    <input
+                                      type="datetime-local"
+                                      value={cfgFirstRun}
+                                      onChange={(e) => setCfgFirstRun(e.target.value)}
+                                      className="flex-1 border border-gray-300 rounded px-2 py-1.5 text-sm"
+                                    />
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            {settings.config_next_run && (
+                              <div className="text-xs text-gray-600 bg-blue-50 rounded p-2">
+                                Next backup: {new Date(settings.config_next_run).toLocaleString()}
+                              </div>
+                            )}
+                            <div>
+                              <label className="block text-xs text-gray-500 mb-1">Run every (hours)</label>
+                              <input
+                                type="number"
+                                min={1}
+                                value={settings.config_schedule_hours}
+                                onChange={(e) => setSettings({ ...settings, config_schedule_hours: parseInt(e.target.value) || 1 })}
+                                className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-gray-500 mb-1">Keep backups for (days)</label>
+                              <input
+                                type="number"
+                                min={1}
+                                value={settings.config_retention_days}
+                                onChange={(e) => setSettings({ ...settings, config_retention_days: parseInt(e.target.value) || 1 })}
+                                className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+                              />
+                            </div>
+                          </div>
+                        )}
+                        {!settings.config_schedule_enabled && (
+                          <p className="text-xs text-gray-500">Automatic backups disabled. Use &quot;Run Backup Now&quot; for manual backups.</p>
+                        )}
                       </div>
                     </div>
                     <button
@@ -508,7 +643,7 @@ export default function InfraBackupPage() {
                       pgSnapshots.map((s) => (
                         <tr key={s.filename} className="border-b hover:bg-gray-50">
                           <td className="px-4 py-2.5 text-gray-900 font-mono text-xs">{s.filename}</td>
-                          <td className="px-4 py-2.5 text-gray-600">{s.date}</td>
+                          <td className="px-4 py-2.5 text-gray-600">{new Date(s.date).toLocaleString()}</td>
                           <td className="px-4 py-2.5 text-gray-600">{formatBytes(s.size_bytes)}</td>
                           {canAccess("backups", "restore") && (
                             <td className="px-4 py-2.5">
@@ -548,7 +683,7 @@ export default function InfraBackupPage() {
                     ) : (
                       snapshots.map((s) => (
                         <tr key={s.date} className="border-b hover:bg-gray-50">
-                          <td className="px-4 py-2.5 text-gray-900">{s.date}</td>
+                          <td className="px-4 py-2.5 text-gray-900">{new Date(s.date).toLocaleString()}</td>
                           <td className="px-4 py-2.5 text-gray-600">{formatBytes(s.size_bytes)}</td>
                           <td className="px-4 py-2.5 text-gray-600">{s.tier}</td>
                         </tr>

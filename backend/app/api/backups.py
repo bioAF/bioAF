@@ -170,6 +170,7 @@ async def update_backup_settings(
         raise HTTPException(400, detail="; ".join(errors))
 
     updated = await BackupService.update_backup_settings(session, body.model_dump(exclude_unset=True))
+    await session.commit()
     return {"status": "updated", "settings": updated}
 
 
