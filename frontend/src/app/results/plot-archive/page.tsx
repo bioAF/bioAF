@@ -6,6 +6,7 @@ import { Header } from "@/components/layout/Header";
 import { PlotModal } from "@/components/shared/PlotModal";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api, fileContentUrl, plotThumbnailContentUrl } from "@/lib/api";
+import { useFileContentUrl, usePlotThumbnailContentUrl } from "@/hooks/useContentUrl";
 import type {
   PlotArchiveResponse,
   PlotArchiveListResponse,
@@ -25,6 +26,11 @@ function PlotThumbnail({
   const isPdf = fileType === "pdf";
   const hasThumbnail = !!plot.thumbnail_url;
 
+  // Hooks must be called unconditionally (before any early returns)
+  const thumbnailUrl = usePlotThumbnailContentUrl(isPdf && hasThumbnail ? plot.id : null);
+  const fileUrl = useFileContentUrl(!isPdf || !hasThumbnail ? (plot.file?.id ?? null) : null);
+  const imgUrl = (isPdf && hasThumbnail ? thumbnailUrl : fileUrl) ?? "";
+
   // For PDFs without a generated thumbnail, show file-type icon
   if (isPdf && !hasThumbnail) {
     return (
@@ -40,13 +46,6 @@ function PlotThumbnail({
       </button>
     );
   }
-
-  // Determine the image source: thumbnail for PDFs, content for images
-  const imgUrl = isPdf && hasThumbnail
-    ? plotThumbnailContentUrl(plot.id)
-    : plot.file
-      ? fileContentUrl(plot.file.id)
-      : "";
 
   if (error) {
     return (
@@ -173,12 +172,12 @@ export default function PlotArchivePage() {
 
   const resetPage = () => setPage(1);
 
-  const handleExpand = (plot: PlotArchiveResponse) => {
+  const handleExpand = async (plot: PlotArchiveResponse) => {
     const isPdf = plot.file?.file_type?.toLowerCase() === "pdf";
     const url = isPdf && plot.thumbnail_url
-      ? plotThumbnailContentUrl(plot.id)
+      ? await plotThumbnailContentUrl(plot.id)
       : plot.file
-        ? fileContentUrl(plot.file.id)
+        ? await fileContentUrl(plot.file.id)
         : "";
     setExpandedUrl(url);
     setExpandedTitle(plot.title ?? "Plot");

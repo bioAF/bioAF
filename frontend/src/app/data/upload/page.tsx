@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { api } from "@/lib/api";
-import { suggestFilename, todayDateStr } from "@/lib/fileNaming";
+import { suggestFilename, splitExtension, todayDateStr } from "@/lib/fileNaming";
 import type {
   ExperimentListResponse,
   FileResponse,
@@ -111,19 +111,37 @@ export default function DataUploadPage() {
 
     const dateStr = todayDateStr();
 
-    setItems((prev) =>
-      prev.map((item) => {
+    setItems((prev) => {
+      const suggestOpts = {
+        projectCode: proj?.code ?? null,
+        experimentCode: exp?.code ?? null,
+        sampleId: smp?.label ?? null,
+        dateStr,
+      };
+
+      // First pass: generate suggested names
+      const updated = prev.map((item) => {
         if (item.status !== "queued") return item;
-        const suggested = suggestFilename(item.file.name, {
-          projectCode: proj?.code ?? null,
-          experimentCode: exp?.code ?? null,
-          sampleId: smp?.label ?? null,
-          dateStr,
-        });
-        // Reset decision when association changes (but only if not already uploaded)
+        const suggested = suggestFilename(item.file.name, suggestOpts);
         return { ...item, suggestedName: suggested, nameAccepted: null };
-      }),
-    );
+      });
+
+      // Second pass: deduplicate -- append sequence number when names collide
+      const nameCounts = new Map<string, number>();
+      for (const item of updated) {
+        if (item.suggestedName) {
+          nameCounts.set(item.suggestedName, (nameCounts.get(item.suggestedName) ?? 0) + 1);
+        }
+      }
+      const nameCounters = new Map<string, number>();
+      return updated.map((item) => {
+        if (!item.suggestedName || (nameCounts.get(item.suggestedName) ?? 0) <= 1) return item;
+        const [stem, ext] = splitExtension(item.suggestedName);
+        const seq = (nameCounters.get(item.suggestedName) ?? 0) + 1;
+        nameCounters.set(item.suggestedName, seq);
+        return { ...item, suggestedName: `${stem}_${String(seq).padStart(3, "0")}${ext}` };
+      });
+    });
   }, [projectId, experimentId, sampleId, projects, experiments, samples]);
 
   const addFiles = (incoming: File[]) => {
@@ -143,24 +161,39 @@ export default function DataUploadPage() {
     const smp = sampleId ? samples.find((s) => String(s.id) === sampleId) : null;
     const dateStr = todayDateStr();
 
-    setItems((prev) => [
-      ...prev,
-      ...accepted.map((f) => {
-        const suggested = suggestFilename(f.name, {
-          projectCode: proj?.code ?? null,
-          experimentCode: exp?.code ?? null,
-          sampleId: smp?.label ?? null,
-          dateStr,
-        });
-        return {
-          file: f,
-          status: "queued" as FileStatus,
-          progress: 0,
-          suggestedName: suggested,
-          nameAccepted: null as boolean | null,
-        };
-      }),
-    ]);
+    setItems((prev) => {
+      const suggestOpts = {
+        projectCode: proj?.code ?? null,
+        experimentCode: exp?.code ?? null,
+        sampleId: smp?.label ?? null,
+        dateStr,
+      };
+
+      const newItems = accepted.map((f) => ({
+        file: f,
+        status: "queued" as FileStatus,
+        progress: 0,
+        suggestedName: suggestFilename(f.name, suggestOpts),
+        nameAccepted: null as boolean | null,
+      }));
+
+      // Deduplicate across existing + new items
+      const all = [...prev, ...newItems];
+      const nameCounts = new Map<string, number>();
+      for (const item of all) {
+        if (item.suggestedName) {
+          nameCounts.set(item.suggestedName, (nameCounts.get(item.suggestedName) ?? 0) + 1);
+        }
+      }
+      const nameCounters = new Map<string, number>();
+      return all.map((item) => {
+        if (!item.suggestedName || (nameCounts.get(item.suggestedName) ?? 0) <= 1) return item;
+        const [stem, ext] = splitExtension(item.suggestedName);
+        const seq = (nameCounters.get(item.suggestedName) ?? 0) + 1;
+        nameCounters.set(item.suggestedName, seq);
+        return { ...item, suggestedName: `${stem}_${String(seq).padStart(3, "0")}${ext}` };
+      });
+    });
   };
 
   const handleDrop = useCallback((e: React.DragEvent) => {

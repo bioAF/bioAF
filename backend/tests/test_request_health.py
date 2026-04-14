@@ -87,7 +87,7 @@ async def test_service_health_endpoint(client: AsyncClient, admin_token: str):
     # Generate some traffic first
     await client.get("/api/experiments", headers={"Authorization": f"Bearer {admin_token}"})
 
-    response = await client.get("/api/health/services")
+    response = await client.get("/api/health/services", headers={"Authorization": f"Bearer {admin_token}"})
     assert response.status_code == 200
     data = response.json()
     assert "services" in data

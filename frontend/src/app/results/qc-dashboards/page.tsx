@@ -6,7 +6,8 @@ import { Header } from "@/components/layout/Header";
 import { PlotModal } from "@/components/shared/PlotModal";
 import { ExportPdfButton } from "@/components/shared/ExportPdfButton";
 import { ContentLoading } from "@/components/shared/ContentLoading";
-import { api, fileContentUrl } from "@/lib/api";
+import { api } from "@/lib/api";
+import { useFileContentUrl } from "@/hooks/useContentUrl";
 import type { QCDashboardSummary, QCDashboardResponse, QCMetrics } from "@/lib/types";
 import {
   BarcodeRankChart,
@@ -119,13 +120,8 @@ function rateGC(val: number | null): MetricStatus {
 }
 
 function PlotImage({ fileId, title, onExpand }: { fileId: number; title: string; onExpand: (url: string) => void }) {
-  const [url, setUrl] = useState<string | null>(null);
+  const url = useFileContentUrl(fileId);
   const [error, setError] = useState(false);
-
-  useEffect(() => {
-    // Built client-side only (useEffect) to avoid hydration mismatch.
-    setUrl(fileContentUrl(fileId));
-  }, [fileId]);
 
   return (
     <div className="relative bg-gray-100 rounded min-h-[12rem] flex items-center justify-center group">

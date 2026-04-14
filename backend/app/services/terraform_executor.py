@@ -499,8 +499,24 @@ class TerraformExecutor:
 
             if bootstrap_rc != 0:
                 run.status = "failed"
-                run.error_message = bootstrap_stderr or "Apply failed"
                 run.completed_at = datetime.now(timezone.utc)
+
+                # Terraform in JSON mode writes diagnostic errors to stdout,
+                # not stderr. Extract them so callers see the real error.
+                diagnostics: list[str] = []
+                for log_line in bootstrap_log_lines:
+                    try:
+                        entry = json.loads(log_line)
+                        if entry.get("type") == "diagnostic":
+                            diag = entry.get("diagnostic", {})
+                            detail = diag.get("detail") or diag.get("summary", "")
+                            if detail:
+                                diagnostics.append(detail)
+                    except (json.JSONDecodeError, AttributeError):
+                        pass
+
+                run.error_message = "; ".join(diagnostics) or bootstrap_stderr or "Apply failed"
+                logger.error("Foundation bootstrap failed for run %s: %s", run.id, run.error_message)
                 await session.flush()
                 yield TerraformProgressEvent(
                     event_type="apply_error",

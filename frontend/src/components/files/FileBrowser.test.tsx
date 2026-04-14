@@ -23,7 +23,12 @@ jest.mock("@/lib/api", () => ({
     post: jest.fn(),
     delete: jest.fn(),
   },
-  fileContentUrl: (id: number) => `/api/files/${id}/content`,
+  fileContentUrl: (id: number) => Promise.resolve(`/api/files/${id}/content`),
+}));
+
+jest.mock("@/hooks/useContentUrl", () => ({
+  useFileContentUrl: (id: number | null) =>
+    id != null ? `/api/files/${id}/content` : null,
 }));
 
 import { api } from "@/lib/api";

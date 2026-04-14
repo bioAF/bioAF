@@ -347,33 +347,20 @@ async def file_content(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ):
-    """Serve file bytes directly (same-origin proxy for cross-origin GCS content)."""
+    """Serve file bytes directly (same-origin proxy for cross-origin GCS content).
+
+    Accepts either a Bearer session JWT (Authorization header) or a
+    short-lived content token (query param). Content tokens carry org_id
+    but no user identity.
+    """
     current_user = request.state.current_user
     org_id = int(current_user["org_id"])
-    user_id = int(current_user["sub"])
 
     file = await FileService.get_file(session, file_id, org_id)
     if not file:
         raise HTTPException(404, "File not found")
     if file.storage_deleted:
         raise HTTPException(410, "File storage has been deleted")
-
-    from app.services.audit_service import log_action
-
-    await log_action(
-        session,
-        user_id=user_id,
-        entity_type="file",
-        entity_id=file.id,
-        action="download",
-        details={
-            "filename": file.filename,
-            "file_type": file.file_type,
-            "size_bytes": file.size_bytes,
-            "method": "content",
-        },
-    )
-    await session.commit()
 
     try:
         from google.cloud import storage as gcs_storage

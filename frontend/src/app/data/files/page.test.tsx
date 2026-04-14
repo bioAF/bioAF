@@ -26,7 +26,13 @@ jest.mock("@/lib/api", () => ({
     post: jest.fn(),
     delete: jest.fn(),
   },
-  fileContentUrl: (fileId: number) => `http://localhost:8000/api/files/${fileId}/content?token=fake`,
+  fileContentUrl: (fileId: number) =>
+    Promise.resolve(`http://localhost:8000/api/files/${fileId}/content?token=fake`),
+}));
+
+jest.mock("@/hooks/useContentUrl", () => ({
+  useFileContentUrl: (id: number | null) =>
+    id != null ? `http://localhost:8000/api/files/${id}/content?token=fake` : null,
 }));
 
 jest.mock("@/lib/auth", () => ({
