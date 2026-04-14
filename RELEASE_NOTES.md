@@ -1,5 +1,32 @@
 # Release Notes
 
+## v0.7.3
+
+OOM detection, preemption classification, and cluster configuration UX improvements.
+
+### Pipeline monitoring
+
+- Detect OOM-killed pipelines from K8s container termination reasons and set failure_reason to "oom" with actionable guidance
+- Detect Spot preemption exhaustion from failed process exit codes (143/137/247) and set failure_reason to "preemption_exhausted"
+- Emit PIPELINE_OOM event (critical severity) for notification routing
+- Store exit_code on PipelineProcess records from adapter progress data
+
+### Infrastructure UI
+
+- Reorganize cluster config panel into "Pipeline Nodes" and "Interactive Nodes" columns
+- Add Spot instance info tooltip explaining cost savings and auto-retry behavior
+- Remove pt-5 alignment hack on the Spot toggle
+
+### Pipeline run UI
+
+- Show amber OOM banner with "Update node size" link on run detail page
+- Show blue preemption banner with "Re-run" and "Disable Spot" actions on run detail page
+- Add orange "OOM" and blue "Preempted" badges on the pipeline runs table
+
+### Database
+
+- Add nullable failure_reason column to pipeline_runs (migration 066)
+
 ## v0.7.2
 
 Security hardening from external pentest, deployment and setup reliability fixes.

@@ -227,7 +227,44 @@ export default function PipelineRunDetailPage() {
                   {run.progress.completed + run.progress.cached}/{run.progress.total_processes} processes
                 </span>
               </div>
-              {run.error_message && <p className="text-sm text-red-600 mt-2">{run.error_message}</p>}
+              {run.failure_reason === "oom" && (
+                <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
+                  <span className="text-amber-600 text-lg" title="Memory">&#x1F4BE;</span>
+                  <div className="flex-1">
+                    <p className="text-sm text-amber-800 font-medium">This pipeline ran out of memory.</p>
+                    <p className="text-sm text-amber-700 mt-1">The current pipeline node size does not have enough RAM for this workload.</p>
+                    <button
+                      onClick={() => router.push("/infrastructure/components")}
+                      className="mt-2 px-3 py-1 text-sm bg-amber-600 text-white rounded hover:bg-amber-700"
+                    >
+                      Update node size
+                    </button>
+                  </div>
+                </div>
+              )}
+              {run.failure_reason === "preemption_exhausted" && (
+                <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="text-sm text-blue-800 font-medium">This pipeline was interrupted multiple times by Spot instance reclamation.</p>
+                  <p className="text-sm text-blue-700 mt-1">This is unusual and typically resolves on its own.</p>
+                  <div className="flex gap-2 mt-2">
+                    <button
+                      onClick={handleReproduce}
+                      className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                    >
+                      Re-run pipeline
+                    </button>
+                    <button
+                      onClick={() => router.push("/infrastructure/components")}
+                      className="px-3 py-1 text-sm border border-blue-300 text-blue-700 rounded hover:bg-blue-50"
+                    >
+                      Disable Spot instances
+                    </button>
+                  </div>
+                </div>
+              )}
+              {run.error_message && run.failure_reason !== "oom" && run.failure_reason !== "preemption_exhausted" && (
+                <p className="text-sm text-red-600 mt-2">{run.error_message}</p>
+              )}
             </div>
           )}
 

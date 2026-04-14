@@ -127,6 +127,12 @@ export default function PipelineRunsPage() {
                     <td className="px-4 py-3 text-sm">{r.experiment?.name || "—"}</td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-0.5 text-xs rounded-full ${STATUS_COLORS[r.status]}`}>{r.status}</span>
+                      {r.status === "failed" && r.failure_reason === "oom" && (
+                        <span className="ml-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-orange-100 text-orange-700">OOM</span>
+                      )}
+                      {r.status === "failed" && r.failure_reason === "preemption_exhausted" && (
+                        <span className="ml-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-100 text-blue-700">Preempted</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       {r.review_verdict ? <ReviewBadge verdict={r.review_verdict} /> : <span className="text-xs text-gray-400">—</span>}
