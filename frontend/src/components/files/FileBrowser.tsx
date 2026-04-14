@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportPanel";
 import { usePermissions } from "@/hooks/usePermissions";
-import { api, fileContentUrl } from "@/lib/api";
+import { api } from "@/lib/api";
+import { useFileContentUrl } from "@/hooks/useContentUrl";
 import { getCurrentUser } from "@/lib/auth";
 import type {
   FileResponse,
@@ -42,6 +43,7 @@ export function FileBrowser({ experimentId, projectId }: Props) {
   const [samples, setSamples] = useState<{ id: number; label: string }[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [viewingFile, setViewingFile] = useState<FileResponse | null>(null);
+  const contentUrl = useFileContentUrl(viewingFile?.id ?? null);
   const [showProvenance, setShowProvenance] = useState(false);
   const [page, setPage] = useState(1);
   const [totalFiles, setTotalFiles] = useState(0);
@@ -600,11 +602,15 @@ export function FileBrowser({ experimentId, projectId }: Props) {
             {isImageFile(viewingFile.file_type) ? (
               <div className="p-4 flex justify-center bg-gray-50">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={fileContentUrl(viewingFile.id)}
-                  alt={viewingFile.filename}
-                  className="max-h-64 object-contain rounded"
-                />
+                {contentUrl ? (
+                  <img
+                    src={contentUrl}
+                    alt={viewingFile.filename}
+                    className="max-h-64 object-contain rounded"
+                  />
+                ) : (
+                  <span className="text-gray-400 text-sm">Loading preview...</span>
+                )}
               </div>
             ) : (
               <div className="p-4 flex justify-center bg-gray-50">

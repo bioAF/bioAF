@@ -277,20 +277,52 @@ export const api = {
 };
 
 /**
- * Build a direct URL for inline file content (images, previews).
- * Uses the /content endpoint which proxies bytes without audit logging,
- * unlike /download which creates an audit entry per call.
+ * Fetch a short-lived content token for inline resource display.
+ * These tokens expire in 60 seconds, are scoped to a single resource,
+ * and carry no user identity -- safe to put in URL query params.
  */
-export function fileContentUrl(fileId: number): string {
-  const token = getToken();
-  const base = `${API_URL}/api/files/${fileId}/content`;
-  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+async function fetchContentToken(
+  resourceType: "file" | "plot_thumbnail",
+  resourceId: number,
+): Promise<string> {
+  const data = await fetchApi<{ token: string; expires_in: number }>(
+    "/api/content-tokens",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        resource_type: resourceType,
+        resource_id: resourceId,
+      }),
+    },
+  );
+  return data.token;
 }
 
-export function plotThumbnailContentUrl(plotId: number): string {
-  const token = getToken();
+/**
+ * Build a direct URL for inline file content (images, previews).
+ * Fetches a short-lived content token instead of embedding the
+ * session JWT in the URL.
+ */
+export async function fileContentUrl(fileId: number): Promise<string> {
+  const base = `${API_URL}/api/files/${fileId}/content`;
+  try {
+    const token = await fetchContentToken("file", fileId);
+    return `${base}?token=${encodeURIComponent(token)}`;
+  } catch {
+    return base;
+  }
+}
+
+export async function plotThumbnailContentUrl(
+  plotId: number,
+): Promise<string> {
   const base = `${API_URL}/api/plots/${plotId}/thumbnail/content`;
-  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+  try {
+    const token = await fetchContentToken("plot_thumbnail", plotId);
+    return `${base}?token=${encodeURIComponent(token)}`;
+  } catch {
+    return base;
+  }
 }
 
 export { ApiError };

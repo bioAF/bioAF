@@ -397,11 +397,16 @@ class PipelineRunService:
 
         old_status = run.status
 
-        # Cancel via the compute adapter
+        # Persist logs before killing the pod -- once deleted they're gone
         job_id = run.k8s_job_name or run.slurm_job_id
         if job_id:
             try:
                 compute_adapter = get_compute_adapter()
+                await compute_adapter.persist_job_logs(job_id)
+            except Exception as e:
+                logger.warning("Failed to persist logs before cancel for run %d: %s", run_id, e)
+
+            try:
                 await compute_adapter.cancel_job(job_id)
             except Exception as e:
                 logger.warning("Failed to cancel run %d: %s", run_id, e)

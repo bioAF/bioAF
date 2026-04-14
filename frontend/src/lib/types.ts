@@ -39,7 +39,7 @@ export interface LoginResponse {
 
 export interface BootstrapStatus {
   setup_complete: boolean;
-  smtp_configured: boolean;
+  smtp_configured?: boolean; // only present for authenticated callers
   has_setup_code: boolean;
   has_admin: boolean;
 }

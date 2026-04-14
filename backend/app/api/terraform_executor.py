@@ -190,9 +190,13 @@ async def terraform_init(
 
     # Consume the SSE generator to completion
     last_error = None
-    async for event in TerraformExecutor.bootstrap_foundation(session=session, user_id=user_id, org_id=org_id):
-        if event.event_type == "apply_error":
-            last_error = event.message
+    try:
+        async for event in TerraformExecutor.bootstrap_foundation(session=session, user_id=user_id, org_id=org_id):
+            if event.event_type == "apply_error":
+                last_error = event.message
+    except Exception as exc:
+        logger.error("Terraform init failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     await session.commit()
 

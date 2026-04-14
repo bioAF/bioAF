@@ -45,11 +45,37 @@ IMAGE_FAMILY="ubuntu-2204-lts"
 IMAGE_PROJECT="ubuntu-os-cloud"
 FIREWALL_RULE_NAME="bioaf-allow-web"
 NETWORK_TAG="bioaf"
-SA_NAME="bioaf-app"
+SA_NAME_PREFIX="bioaf-app"
 SA_DISPLAY_NAME="bioAF Application"
 
 # Regions that tend to have lower costs and good availability
 SUGGESTED_REGIONS=("us-central1" "us-east1" "us-west1" "europe-west1" "asia-east1")
+
+# Zone lookup -- not every region has a "-a" zone (e.g. us-east1, europe-west1).
+# Must stay in sync with backend/app/gcp_zones.py.
+zones_for_region() {
+    local region="$1"
+    case "$region" in
+        us-central1)    echo "us-central1-a us-central1-b us-central1-c us-central1-f" ;;
+        us-east1)       echo "us-east1-b us-east1-c us-east1-d" ;;
+        us-east4)       echo "us-east4-a us-east4-b us-east4-c" ;;
+        us-west1)       echo "us-west1-a us-west1-b us-west1-c" ;;
+        us-west2)       echo "us-west2-a us-west2-b us-west2-c" ;;
+        us-west3)       echo "us-west3-a us-west3-b us-west3-c" ;;
+        us-west4)       echo "us-west4-a us-west4-b us-west4-c" ;;
+        europe-west1)   echo "europe-west1-b europe-west1-c europe-west1-d" ;;
+        europe-west2)   echo "europe-west2-a europe-west2-b europe-west2-c" ;;
+        europe-west3)   echo "europe-west3-a europe-west3-b europe-west3-c" ;;
+        europe-west4)   echo "europe-west4-a europe-west4-b europe-west4-c" ;;
+        europe-west6)   echo "europe-west6-a europe-west6-b europe-west6-c" ;;
+        asia-east1)     echo "asia-east1-a asia-east1-b asia-east1-c" ;;
+        asia-east2)     echo "asia-east2-a asia-east2-b asia-east2-c" ;;
+        asia-northeast1) echo "asia-northeast1-a asia-northeast1-b asia-northeast1-c" ;;
+        asia-south1)    echo "asia-south1-a asia-south1-b asia-south1-c" ;;
+        asia-southeast1) echo "asia-southeast1-a asia-southeast1-b asia-southeast1-c" ;;
+        *)              echo "${region}-b ${region}-c ${region}-d" ;;
+    esac
+}
 
 # GCP APIs required by bioAF
 REQUIRED_APIS=(
@@ -274,9 +300,12 @@ if [[ "$region_input" =~ ^[0-9]+$ ]] && [ "$region_input" -ge 1 ] && [ "$region_
 else
     REGION="${region_input:-us-central1}"
 fi
-ZONE="${REGION}-a"
 
-green "  Using region: $REGION (zone: $ZONE)"
+# Read the zone list for this region into an array
+read -ra REGION_ZONES <<< "$(zones_for_region "$REGION")"
+ZONE="${REGION_ZONES[0]}"
+
+green "  Using region: $REGION"
 
 # ---------------------------------------------------------------------------
 # Step 6: Create firewall rule
@@ -334,7 +363,7 @@ echo "    Name:         $VM_NAME"
 echo "    Machine type: $MACHINE_TYPE (~\$25/month)"
 echo "    Disk:         $BOOT_DISK_SIZE SSD (~\$2/month)"
 echo "    OS:           Ubuntu 22.04 LTS"
-echo "    Zone:         $ZONE"
+echo "    Region:       $REGION"
 if [ "$USE_PUBLIC_IP" = true ]; then
     echo "    Network:      Public IP (internet-accessible)"
 else
@@ -342,7 +371,16 @@ else
 fi
 echo ""
 
-existing_vm=$(gcloud compute instances describe "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID" --format="value(name)" 2>/dev/null || echo "")
+# Check if VM already exists in any zone for this region
+existing_vm=""
+for z in "${REGION_ZONES[@]}"; do
+    existing_vm=$(gcloud compute instances describe "$VM_NAME" --zone="$z" --project="$PROJECT_ID" --format="value(name)" 2>/dev/null || echo "")
+    if [ -n "$existing_vm" ]; then
+        ZONE="$z"
+        break
+    fi
+done
+
 if [ -n "$existing_vm" ]; then
     yellow "  VM '$VM_NAME' already exists in $ZONE."
     echo "  Skipping VM creation."
@@ -351,28 +389,30 @@ else
     if [ "$create_vm" = "n" ] || [ "$create_vm" = "N" ]; then
         echo "  Skipping VM creation."
     else
-        echo "  Creating VM (this takes about 30 seconds)..."
+        # Try each zone in the region until one succeeds
+        vm_created=false
+        for try_zone in "${REGION_ZONES[@]}"; do
+            echo "  Creating VM in $try_zone (this takes about 30 seconds)..."
 
-        # Build the gcloud command with or without a public IP
-        create_args=(
-            --project="$PROJECT_ID"
-            --zone="$ZONE"
-            --machine-type="$MACHINE_TYPE"
-            --image-family="$IMAGE_FAMILY"
-            --image-project="$IMAGE_PROJECT"
-            --boot-disk-size="$BOOT_DISK_SIZE"
-            --boot-disk-type=pd-ssd
-            --tags="$NETWORK_TAG"
-            --scopes=cloud-platform
-        )
+            create_args=(
+                --project="$PROJECT_ID"
+                --zone="$try_zone"
+                --machine-type="$MACHINE_TYPE"
+                --image-family="$IMAGE_FAMILY"
+                --image-project="$IMAGE_PROJECT"
+                --boot-disk-size="$BOOT_DISK_SIZE"
+                --boot-disk-type=pd-ssd
+                --tags="$NETWORK_TAG"
+                --scopes=cloud-platform
+            )
 
-        if [ "$USE_PUBLIC_IP" = false ]; then
-            create_args+=(--no-address)
-        fi
+            if [ "$USE_PUBLIC_IP" = false ]; then
+                create_args+=(--no-address)
+            fi
 
-        gcloud compute instances create "$VM_NAME" \
-            "${create_args[@]}" \
-            --metadata=startup-script='#!/bin/bash
+            if gcloud compute instances create "$VM_NAME" \
+                "${create_args[@]}" \
+                --metadata=startup-script='#!/bin/bash
 # Install Docker on first boot
 if ! command -v docker &>/dev/null; then
     apt-get update -qq
@@ -385,9 +425,30 @@ if ! command -v docker &>/dev/null; then
     apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     usermod -aG docker $(ls /home/ | head -1)
 fi' \
-            --quiet
+                --quiet 2>&1; then
+                ZONE="$try_zone"
+                vm_created=true
+                green "  VM created in $ZONE."
+                break
+            else
+                yellow "  Could not create VM in $try_zone. Trying next zone..."
+            fi
+        done
 
-        green "  VM created."
+        if [ "$vm_created" = false ]; then
+            echo ""
+            red "  Could not create the VM in any zone in $REGION."
+            echo ""
+            echo "  Google Cloud does not have enough capacity for $MACHINE_TYPE VMs"
+            echo "  in this region right now. This is a temporary GCP limitation,"
+            echo "  not a bioAF issue."
+            echo ""
+            echo "  You can:"
+            echo "    1. Wait a few minutes and try again"
+            echo "    2. Re-run this script and select a different region"
+            echo ""
+            exit 1
+        fi
     fi
 fi
 
@@ -418,30 +479,37 @@ read -rp "  Create a service account for bioAF? [Y/n] " create_sa
 
 SA_KEY_PATH=""
 if [ "$create_sa" != "n" ] && [ "$create_sa" != "N" ]; then
+    SA_SUFFIX=$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c 6)
+    SA_NAME="${SA_NAME_PREFIX}-${SA_SUFFIX}"
     SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
-    existing_sa=$(gcloud iam service-accounts describe "$SA_EMAIL" --project="$PROJECT_ID" --format="value(email)" 2>/dev/null || echo "")
-    if [ -n "$existing_sa" ]; then
-        yellow "  Service account '$SA_EMAIL' already exists."
-    else
-        echo "  Creating service account..."
-        gcloud iam service-accounts create "$SA_NAME" \
-            --project="$PROJECT_ID" \
-            --display-name="$SA_DISPLAY_NAME" \
-            --description="Service account for bioAF application" \
-            --quiet
-        green "  Service account created: $SA_EMAIL"
-    fi
+    echo "  Creating service account..."
+    gcloud iam service-accounts create "$SA_NAME" \
+        --project="$PROJECT_ID" \
+        --display-name="$SA_DISPLAY_NAME" \
+        --description="Service account for bioAF application" \
+        --quiet
+    green "  Service account created: $SA_EMAIL"
 
-    # Grant roles
+    # Grant roles and verify each one took effect
     echo "  Granting permissions..."
+    grant_failures=0
     for role in "${SA_ROLES[@]}"; do
-        gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+        if ! gcloud projects add-iam-policy-binding "$PROJECT_ID" \
             --member="serviceAccount:$SA_EMAIL" \
             --role="$role" \
-            --quiet >/dev/null 2>&1 || true
+            --quiet >/dev/null 2>&1; then
+            red "  Failed to grant $role"
+            grant_failures=$((grant_failures + 1))
+        fi
     done
-    green "  Permissions granted."
+
+    if [ "$grant_failures" -gt 0 ]; then
+        red "  $grant_failures role(s) failed to grant. The service account may not"
+        red "  have all required permissions. Check the GCP console."
+    else
+        green "  All permissions granted."
+    fi
 
     # Generate key
     SA_KEY_PATH="$HOME/Desktop/bioaf-sa-key.json"

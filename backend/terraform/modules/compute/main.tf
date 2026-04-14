@@ -21,6 +21,14 @@ resource "google_container_cluster" "bioaf" {
   remove_default_node_pool = true
   initial_node_count       = 1
 
+  # Minimal default node pool config -- this pool is deleted immediately
+  # after cluster creation. 30GB disk keeps the regional bootstrap
+  # (3 zones x 30GB = 90GB) well within the default 250GB SSD quota.
+  node_config {
+    disk_size_gb = 30
+    disk_type    = "pd-ssd"
+  }
+
   # Workload Identity for pod-level GCP auth
   workload_identity_config {
     workload_pool = "${var.project_id}.svc.id.goog"

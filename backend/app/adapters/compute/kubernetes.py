@@ -301,7 +301,7 @@ class KubernetesComputeProvider(ComputeProvider):
                     "  'gke_cluster_endpoint', 'gke_cluster_ca_cert',"
                     "  'gcp_credential_source', 'gcp_service_account_key',"
                     "  'gke_cluster_name', 'gcp_project_id', 'gcp_region',"
-                    "  'raw_bucket_name'"
+                    "  'raw_bucket_name', 'k8s_pipeline_machine_type'"
                     ")"
                 )
             )
@@ -572,11 +572,29 @@ class KubernetesComputeProvider(ComputeProvider):
 
         return ["/bin/sh", "-c", " ".join(parts)]
 
+    # Allocatable resources per GCP machine type (after system reservations).
+    # Used to set Nextflow resourceLimits so retry escalation never exceeds
+    # what a single node can provide.  See ADR-042.
+    _MACHINE_ALLOCATABLE: dict[str, tuple[int, int]] = {
+        # (cpus, memory_gb)
+        "n2-highmem-16": (14, 110),
+        "n2-highmem-32": (30, 220),
+        "n2-highmem-8": (7, 55),
+        "n2-standard-16": (14, 55),
+        "n2-standard-8": (7, 27),
+        "n2-standard-4": (3, 13),
+        "e2-standard-16": (14, 55),
+        "e2-standard-8": (7, 27),
+        "e2-highmem-16": (14, 110),
+        "e2-highmem-8": (7, 55),
+    }
+
     @staticmethod
     def _build_nextflow_k8s_config(
         namespace: str,
         has_gcs_secret: bool,
         gcs_work_dir: str | None = None,
+        pipeline_machine_type: str | None = None,
     ) -> str:
         """Build a nextflow.config for K8s executor mode.
 
@@ -599,6 +617,23 @@ class KubernetesComputeProvider(ComputeProvider):
             lines.append("wave.enabled = true")
             lines.append("fusion.enabled = true")
             lines.append("fusion.exportStorageCredentials = true")
+
+        # Resource limits and preemption-aware retry strategy (ADR-042).
+        # Prevents retry escalation from requesting more than a single
+        # node can provide, and retries Spot preemptions without
+        # escalating resources.
+        machine = pipeline_machine_type or "n2-highmem-16"
+        cpus, mem_gb = KubernetesComputeProvider._MACHINE_ALLOCATABLE.get(machine, (14, 110))
+        lines.append(f"process.resourceLimits = [cpus: {cpus}, memory: '{mem_gb}.GB']")
+        lines.append("process.maxRetries = 3")
+        # Exit 143 (SIGTERM) and 137 (SIGKILL) from Spot preemption: retry
+        # without escalating. Other failures: escalate then finish.
+        lines.append(
+            "process.errorStrategy = { "
+            "task.exitStatus in [143, 137, 247] "
+            "? (task.attempt <= 3 ? 'retry' : 'finish') "
+            ": (task.attempt <= 2 ? 'retry' : 'finish') }"
+        )
 
         # Build k8s.pod directives for secrets/env (Nextflow doesn't
         # support tolerations in k8s.pod, so node placement is left to
@@ -738,7 +773,8 @@ class KubernetesComputeProvider(ComputeProvider):
             nf_cfg = self._cluster_config or {}
             raw_bucket = nf_cfg.get("raw_bucket_name", "")
             gcs_work_dir = f"gs://{raw_bucket}/nextflow-work" if raw_bucket else None
-            nf_config = self._build_nextflow_k8s_config(namespace, has_gcs_secret, gcs_work_dir)
+            pipeline_machine = nf_cfg.get("k8s_pipeline_machine_type")
+            nf_config = self._build_nextflow_k8s_config(namespace, has_gcs_secret, gcs_work_dir, pipeline_machine)
             # Use heredoc to avoid shell escaping issues with single quotes
             # in Nextflow config values (e.g., 'k8s', 'bioaf-pipelines')
             init_containers.append(

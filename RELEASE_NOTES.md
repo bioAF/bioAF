@@ -1,5 +1,39 @@
 # Release Notes
 
+## v0.7.2
+
+Security hardening from external pentest, deployment and setup reliability fixes.
+
+### Security
+
+- Reject known-insecure JWT secret keys at startup
+- Disable OpenAPI docs and Swagger UI in production
+- Remove smtp_configured from unauthenticated bootstrap status response
+- Require authentication for /api/health/services and /api/health/status
+- Replace session JWTs in file/plot content URLs with short-lived scoped tokens (60s TTL)
+
+### Deployment
+
+- Fix GCP zone fallback for regions without a "-a" zone (us-east1, europe-west1)
+- Reduce GKE default node pool disk to 30GB to stay within default SSD quota
+- Zone fallback in install-gcp.sh retries all zones before failing
+- Unique service account name per install to avoid stale IAM bindings
+- Role grant errors are now reported instead of silently swallowed
+- User-friendly error message for GCP quota failures during deploy
+- Add missing google-cloud-iam dependency for orphaned resource cleanup
+
+### Setup Wizard
+
+- Block advancement when GCP validation fails, show results inline
+- Surface terraform error details instead of generic "Apply failed"
+- Log terraform init exceptions with full traceback
+
+### Fixes
+
+- Fix filename collision when uploading multiple files to same sample
+- Fix React hooks violation in PlotThumbnail component
+- Run history table shows error messages for failed operations
+
 ## v0.7.1
 
 Fix validation error display in setup wizard and all API error surfaces.

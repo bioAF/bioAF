@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.config import settings
+from app.config import settings, validate_jwt_secret
 from app.database import engine
 from app.logging_config import attach_cloud_logging, configure_logging
 from app.middleware.auth_middleware import AuthMiddleware
@@ -47,6 +47,9 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error("Failed to fetch secrets from Secret Manager: %s", e)
             raise RuntimeError(f"Secret Manager unreachable: {e}") from e
+
+    # Block startup if the JWT secret is a known insecure default
+    validate_jwt_secret(settings.jwt_secret_key)
 
     # Verify database connection
     from sqlalchemy import text
@@ -644,19 +647,33 @@ async def _export_cleanup_loop():
             logger.error("Export cleanup error: %s", e)
 
 
-app = FastAPI(
-    title="bioAF API",
-    version=settings.app_version,
-    lifespan=lifespan,
-)
+def create_app() -> FastAPI:
+    """Build the FastAPI application.
 
-# Middleware (applied in reverse order -- last added is outermost)
-app.add_middleware(AuthMiddleware)
-app.add_middleware(LoggingMiddleware)
-app.add_middleware(RateLimitMiddleware)
-app.add_middleware(SecurityHeadersMiddleware)
+    Docs/OpenAPI endpoints are only enabled when BIOAF_ENVIRONMENT is
+    "development".  Production deployments return 404 for /docs and
+    /openapi.json (pentest finding #2).
+    """
+    is_dev = settings.environment == "development"
 
-# Include routers
-from app.api.router import api_router  # noqa: E402
+    application = FastAPI(
+        title="bioAF API",
+        version=settings.app_version,
+        lifespan=lifespan,
+        docs_url="/docs" if is_dev else None,
+        openapi_url="/openapi.json" if is_dev else None,
+    )
 
-app.include_router(api_router)
+    # Middleware (applied in reverse order -- last added is outermost)
+    application.add_middleware(AuthMiddleware)
+    application.add_middleware(LoggingMiddleware)
+    application.add_middleware(RateLimitMiddleware)
+    application.add_middleware(SecurityHeadersMiddleware)
+
+    from app.api.router import api_router
+
+    application.include_router(api_router)
+    return application
+
+
+app = create_app()

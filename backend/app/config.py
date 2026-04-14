@@ -1,7 +1,48 @@
+import logging
+import sys
 import tomllib
 from pathlib import Path
 
 from pydantic_settings import BaseSettings
+
+logger = logging.getLogger("bioaf")
+
+# Secrets that ship in the public repo or docker-compose defaults.
+# Compared case-insensitively against the configured JWT secret at startup.
+INSECURE_JWT_SECRETS = frozenset(
+    {
+        "dev-secret-key-change-in-production",
+        "change_me_to_random_string",
+        "change_me",
+    }
+)
+
+MIN_JWT_SECRET_LENGTH = 32
+
+
+def validate_jwt_secret(secret: str) -> None:
+    """Refuse to start if the JWT signing key is a known default or too short.
+
+    Calls sys.exit(1) on failure so the container stops immediately with a
+    clear error message rather than silently serving traffic with a compromised
+    secret.
+    """
+    if not secret or secret.lower() in INSECURE_JWT_SECRETS:
+        logger.critical(
+            "FATAL: JWT secret key is a known insecure default. "
+            "Set BIOAF_JWT_SECRET_KEY to a random value (e.g. `openssl rand -hex 32`). "
+            "Run `./install.sh generate-env --force` to regenerate secrets."
+        )
+        sys.exit(1)
+
+    if len(secret) < MIN_JWT_SECRET_LENGTH:
+        logger.critical(
+            "FATAL: JWT secret key is too short (%d chars, minimum %d). "
+            "Set BIOAF_JWT_SECRET_KEY to a random value (e.g. `openssl rand -hex 32`).",
+            len(secret),
+            MIN_JWT_SECRET_LENGTH,
+        )
+        sys.exit(1)
 
 
 def _read_pyproject_version() -> str:

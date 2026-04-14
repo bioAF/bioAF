@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { PlotModal } from "@/components/shared/PlotModal";
-import { api, fileContentUrl } from "@/lib/api";
+import { api } from "@/lib/api";
+import { useFileContentUrl } from "@/hooks/useContentUrl";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import type {
   QCDashboardSummary,
@@ -396,9 +397,10 @@ function PlotThumbnail({
   onClick: (url: string) => void;
 }) {
   const [error, setError] = useState(false);
-  const url = fileContentUrl(fileId);
+  const url = useFileContentUrl(fileId);
 
   if (error) return <span className="text-gray-400 text-xs">Failed to load</span>;
+  if (!url) return <span className="text-gray-400 text-xs">Loading...</span>;
   return (
     <img
       src={url}
