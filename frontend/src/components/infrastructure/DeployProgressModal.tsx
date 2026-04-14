@@ -173,6 +173,60 @@ function phaseTitle(phase: string | null, status: string | null, mode: "deploy" 
 }
 
 // ---------------------------------------------------------------------------
+// User-friendly error messages for known GCP failures
+// ---------------------------------------------------------------------------
+
+const QUOTA_RE = /Quota '([^']+)' exceeded\.\s*Limit: ([\d.]+) in region (\S+)/i;
+const QUOTA_URL = "https://cloud.google.com/docs/quotas/view-manage#requesting_higher_quota";
+
+function DeployErrorMessage({
+  mode,
+  errorMessage,
+}: {
+  mode: "deploy" | "teardown";
+  errorMessage: string | null;
+}) {
+  if (mode === "teardown") {
+    return (
+      <p data-testid="deploy-modal-error" className="text-sm text-red-600 font-medium">
+        Teardown failed: {errorMessage}
+      </p>
+    );
+  }
+
+  const quotaMatch = errorMessage?.match(QUOTA_RE);
+
+  if (quotaMatch) {
+    const [, resource, limit, region] = quotaMatch;
+    return (
+      <div data-testid="deploy-modal-error" className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-2">
+        <p className="text-sm font-semibold text-red-800">Deployment failed due to a Google Cloud quota limit</p>
+        <p className="text-sm text-gray-700">
+          This is not a bioAF issue. Your GCP project does not have enough <strong>{resource}</strong> quota
+          in <strong>{region}</strong> (current limit: {limit}).
+        </p>
+        <p className="text-sm text-gray-700">You can fix this by:</p>
+        <ul className="text-sm text-gray-700 list-disc ml-5 space-y-1">
+          <li>Re-deploying in a different region with available capacity</li>
+          <li>
+            Requesting a quota increase from Google Cloud:{" "}
+            <a href={QUOTA_URL} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+              Managing quotas
+            </a>
+          </li>
+        </ul>
+      </div>
+    );
+  }
+
+  return (
+    <p data-testid="deploy-modal-error" className="text-sm text-red-600 font-medium">
+      Setup failed: {errorMessage}
+    </p>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -285,12 +339,10 @@ export function DeployProgressModal({
             </p>
           )}
           {isError && (
-            <p
-              data-testid="deploy-modal-error"
-              className="text-sm text-red-600 font-medium"
-            >
-              {mode === "teardown" ? "Teardown failed" : "Setup failed"}: {errorMessage}
-            </p>
+            <DeployErrorMessage
+              mode={mode}
+              errorMessage={errorMessage}
+            />
           )}
         </div>
 

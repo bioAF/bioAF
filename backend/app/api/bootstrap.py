@@ -11,7 +11,6 @@ from app.database import get_session
 from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.bootstrap import (
-    BootstrapStatus,
     ConfigureOrgRequest,
     ConfigureSmtpRequest,
     CreateAdminRequest,
@@ -65,17 +64,24 @@ def _validate_setup_token(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Invalid or expired setup token")
 
 
-@router.get("/status", response_model=BootstrapStatus)
-async def get_bootstrap_status(session: AsyncSession = Depends(get_session)):
+@router.get("/status")
+async def get_bootstrap_status(request: Request, session: AsyncSession = Depends(get_session)):
     org = await _get_org(session)
     has_admin_user = await _has_admin(session) if org else False
     has_code = bool(org and org.setup_code_hash is not None) if org else False
-    return BootstrapStatus(
-        setup_complete=org.setup_complete if org else False,
-        smtp_configured=org.smtp_configured if org else False,
-        has_setup_code=has_code,
-        has_admin=has_admin_user,
-    )
+
+    result: dict = {
+        "setup_complete": org.setup_complete if org else False,
+        "has_setup_code": has_code,
+        "has_admin": has_admin_user,
+    }
+
+    # Only include smtp_configured for authenticated callers to avoid
+    # leaking deployment state to unauthenticated users (pentest #3).
+    if getattr(request.state, "current_user", None) is not None:
+        result["smtp_configured"] = org.smtp_configured if org else False
+
+    return result
 
 
 @router.post("/generate-setup-code", response_model=GenerateSetupCodeResponse)

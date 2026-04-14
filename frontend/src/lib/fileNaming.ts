@@ -62,18 +62,31 @@ export interface SuggestOptions {
  * Suggest a standardised filename for upload.
  * Returns null when no association is provided (nothing to suggest).
  */
+/** Extract Illumina read (R1, R2, I1, I2) and lane (L001) from a filename. */
+function extractReadAndLane(filename: string): { read: string | null; lane: string | null } {
+  const readMatch = filename.match(/_(R[12]|I[12])(?:_|\b)/);
+  const laneMatch = filename.match(/_L(\d{3})_/);
+  return {
+    read: readMatch ? readMatch[1] : null,
+    lane: laneMatch ? `L${laneMatch[1]}` : null,
+  };
+}
+
 export function suggestFilename(original: string, opts: SuggestOptions): string | null {
   const { projectCode, experimentCode, sampleId } = opts;
   if (!projectCode && !experimentCode && !sampleId) return null;
 
   const [, ext] = splitExtension(original);
   const effectiveType = opts.dataType ?? inferDataType(original);
+  const { read, lane } = extractReadAndLane(original);
 
   const segments: string[] = [];
   if (projectCode) segments.push(projectCode);
   if (experimentCode) segments.push(experimentCode);
   if (sampleId) segments.push(sampleId);
   if (effectiveType) segments.push(effectiveType);
+  if (lane) segments.push(lane);
+  if (read) segments.push(read);
   segments.push(opts.dateStr);
 
   return segments.join("_") + ext;

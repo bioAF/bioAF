@@ -13,8 +13,17 @@ jest.mock("@/lib/api", () => ({
   api: {
     get: (...args: unknown[]) => mockApiGet(...args),
   },
-  fileContentUrl: (fileId: number) => `http://localhost:8000/api/files/${fileId}/content?token=fake`,
-  plotThumbnailContentUrl: (plotId: number) => `http://localhost:8000/api/plots/${plotId}/thumbnail/content?token=fake`,
+  fileContentUrl: (fileId: number) =>
+    Promise.resolve(`http://localhost:8000/api/files/${fileId}/content?token=fake`),
+  plotThumbnailContentUrl: (plotId: number) =>
+    Promise.resolve(`http://localhost:8000/api/plots/${plotId}/thumbnail/content?token=fake`),
+}));
+
+jest.mock("@/hooks/useContentUrl", () => ({
+  useFileContentUrl: (id: number | null) =>
+    id != null ? `http://localhost:8000/api/files/${id}/content?token=fake` : null,
+  usePlotThumbnailContentUrl: (id: number | null) =>
+    id != null ? `http://localhost:8000/api/plots/${id}/thumbnail/content?token=fake` : null,
 }));
 
 jest.mock("@/components/layout/Sidebar", () => ({

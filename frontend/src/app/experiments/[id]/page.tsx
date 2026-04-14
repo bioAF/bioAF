@@ -20,7 +20,8 @@ import { CsvUploadModal } from "@/components/experiments/CsvUploadModal";
 import { AutoRunConfigSection } from "@/components/experiments/AutoRunConfigSection";
 import { ExtensibleVocabularySelect } from "@/components/shared/ExtensibleVocabularySelect";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
-import { api, fileContentUrl } from "@/lib/api";
+import { api } from "@/lib/api";
+import { useFileContentUrl } from "@/hooks/useContentUrl";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
 import type {
   ExperimentDetail,
@@ -1356,12 +1357,14 @@ export default function ExperimentDetailPage() {
 
 function ResultsPlotImage({ fileId, title, onExpand }: { fileId: number; title: string; onExpand: (url: string) => void }) {
   const [error, setError] = useState(false);
-  const url = fileContentUrl(fileId);
+  const url = useFileContentUrl(fileId);
 
   return (
     <div className="relative bg-gray-100 rounded min-h-[10rem] flex items-center justify-center group">
       {error ? (
         <span className="text-gray-400 text-sm">Failed to load plot</span>
+      ) : !url ? (
+        <span className="text-gray-400 text-sm">Loading...</span>
       ) : (
         <>
           <img src={url} alt={title} className="w-full rounded" onError={() => setError(true)} />
@@ -1390,9 +1393,10 @@ function ExperimentPlotThumbnail({
   onExpand: (url: string) => void;
 }) {
   const [error, setError] = useState(false);
-  const url = fileContentUrl(fileId);
+  const url = useFileContentUrl(fileId);
 
   if (error) return <span className="text-gray-400 text-xs">Failed to load</span>;
+  if (!url) return <span className="text-gray-400 text-xs">Loading...</span>;
   return (
     <img
       src={url}
