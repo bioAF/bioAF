@@ -70,6 +70,7 @@ class PipelineRunResponse(BaseModel):
     progress: PipelineProgress | None = None
     cost_estimate: float | None = None
     error_message: str | None = None
+    failure_reason: str | None = None
     work_dir: str | None = None
     slurm_job_id: str | None = None
     k8s_job_name: str | None = None

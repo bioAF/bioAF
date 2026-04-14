@@ -14,7 +14,7 @@ from app.models.pipeline_process import PipelineProcess
 from app.models.pipeline_run import PipelineRun
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
-from app.services.event_types import PIPELINE_COMPLETED, PIPELINE_FAILED
+from app.services.event_types import PIPELINE_COMPLETED, PIPELINE_FAILED, PIPELINE_OOM
 from app.adapters.registry import get_compute_adapter, get_storage_adapter
 
 if TYPE_CHECKING:
@@ -180,7 +180,104 @@ class PipelineMonitorService:
             except Exception:
                 run.error_message = "Job failed (could not retrieve logs)"
 
+            # Classify failure reason from K8s termination info and trace data
+            await PipelineMonitorService._classify_failure(session, run, status_result)
+
             await PipelineMonitorService._handle_completion(session, run)
+
+    @staticmethod
+    async def _classify_failure(session: AsyncSession, run: PipelineRun, status_result: dict) -> None:
+        """Set failure_reason based on K8s termination info and trace data.
+
+        Priority:
+        1. OOMKilled in container termination reasons -> 'oom'
+        2. Preemption exit codes (143/137/247) in failed processes -> 'preemption_exhausted'
+        3. Otherwise -> 'task_error'
+        """
+        PREEMPTION_EXIT_CODES = {143, 137, 247}
+
+        termination_reasons = status_result.get("termination_reasons", [])
+        oom_detected = any(r.get("reason") == "OOMKilled" for r in termination_reasons)
+
+        if oom_detected:
+            machine_type = await PipelineMonitorService._get_pipeline_machine_type(session)
+            run.failure_reason = "oom"
+            run.error_message = (
+                f"Pipeline failed: out of memory. The pipeline's memory requirements "
+                f"exceeded the capacity of the current node size ({machine_type}). "
+                f"Go to Infrastructure > Components and select a larger pipeline machine size, "
+                f"then re-run the pipeline."
+            )
+
+            # Emit OOM event for notifications
+            import asyncio
+
+            experiment_name = ""
+            if run.experiment_id:
+                from app.models.experiment import Experiment
+
+                exp_result = await session.execute(select(Experiment.name).where(Experiment.id == run.experiment_id))
+                experiment_name = exp_result.scalar_one_or_none() or ""
+
+            asyncio.create_task(
+                event_bus.emit(
+                    PIPELINE_OOM,
+                    {
+                        "event_type": PIPELINE_OOM,
+                        "org_id": run.organization_id,
+                        "user_id": run.submitted_by_user_id,
+                        "target_user_id": run.submitted_by_user_id,
+                        "entity_type": "pipeline_run",
+                        "entity_id": run.id,
+                        "run_id": run.id,
+                        "pipeline_name": run.pipeline_name,
+                        "experiment_name": experiment_name,
+                        "machine_type": machine_type,
+                        "title": "Pipeline failed: out of memory",
+                        "message": (
+                            f"{run.pipeline_name} on experiment {experiment_name} failed because "
+                            f"a process exceeded the memory capacity of the current node size "
+                            f"({machine_type})."
+                        ),
+                        "severity": "critical",
+                        "summary": (f"Pipeline '{run.pipeline_name}' run {run.id} failed: out of memory"),
+                    },
+                )
+            )
+            return
+
+        # Check process records for preemption exit codes.
+        # Query the session directly since _populate_progress may have added
+        # new PipelineProcess records that aren't in the relationship yet.
+        proc_result = await session.execute(
+            select(PipelineProcess).where(
+                PipelineProcess.pipeline_run_id == run.id,
+                PipelineProcess.status == "failed",
+            )
+        )
+        failed_processes = list(proc_result.scalars().all())
+        preemption_detected = any(p.exit_code in PREEMPTION_EXIT_CODES for p in failed_processes)
+
+        if preemption_detected:
+            run.failure_reason = "preemption_exhausted"
+            run.error_message = (
+                "Pipeline failed after repeated interruptions from Spot instance "
+                "reclamation. This can happen during periods of high cloud demand. "
+                "Re-run the pipeline to try again, or disable Spot instances in "
+                "Infrastructure > Components for guaranteed availability."
+            )
+            return
+
+        run.failure_reason = "task_error"
+
+    @staticmethod
+    async def _get_pipeline_machine_type(session: AsyncSession) -> str:
+        """Read the pipeline machine type from platform_config."""
+        result = await session.execute(
+            text("SELECT value FROM platform_config WHERE key = 'k8s_pipeline_machine_type'")
+        )
+        row = result.first()
+        return row[0] if row else "unknown"
 
     @staticmethod
     async def _populate_progress(
@@ -229,6 +326,9 @@ class PipelineMonitorService:
                 session.add(proc)
 
             proc.status = status
+            exit_val = proc_data.get("exit_code")
+            if exit_val is not None:
+                proc.exit_code = exit_val
             cpu_val = proc_data.get("cpu")
             if cpu_val is not None:
                 proc.cpu_usage = cpu_val
