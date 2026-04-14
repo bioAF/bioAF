@@ -142,6 +142,7 @@ export default function InfraComponentsPage() {
   const [destroyStorageChecked, setDestroyStorageChecked] = useState(false);
   const [destroyStoragePhrase, setDestroyStoragePhrase] = useState("");
   const [showConfigPanel, setShowConfigPanel] = useState(false);
+  const [showSpotTooltip, setShowSpotTooltip] = useState(false);
   const [configEdits, setConfigEdits] = useState<Partial<ClusterConfig>>({});
   const [configSaving, setConfigSaving] = useState(false);
   const [configError, setConfigError] = useState("");
@@ -735,83 +736,113 @@ export default function InfraComponentsPage() {
                         </div>
                       )}
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="text-xs text-gray-500">Pipeline Machine Size</label>
-                          <select
-                            value={configEdits.k8s_pipeline_machine_type ?? clusterConfig.k8s_pipeline_machine_type}
-                            onChange={(e) => setConfigEdits({ ...configEdits, k8s_pipeline_machine_type: e.target.value })}
-                            className="w-full border rounded px-2 py-1 text-sm mt-1 bg-white"
-                            disabled={configSaving}
-                          >
-                            {PIPELINE_MACHINE_OPTIONS.map((opt) => (
-                              <option key={opt.value} value={opt.value}>
-                                {opt.label} - {opt.description}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="text-xs text-gray-500">Pipeline Max Nodes</label>
-                          <input
-                            type="number"
-                            value={configEdits.k8s_pipeline_max_nodes ?? clusterConfig.k8s_pipeline_max_nodes}
-                            onChange={(e) => setConfigEdits({ ...configEdits, k8s_pipeline_max_nodes: Number(e.target.value) })}
-                            className="w-full border rounded px-2 py-1 text-sm mt-1"
-                            disabled={configSaving}
-                          />
-                        </div>
-                        <div className="flex items-center gap-2 pt-5">
-                          <label className="text-xs text-gray-500">Pipeline Spot Instances</label>
-                          <button
-                            type="button"
-                            disabled={configSaving}
-                            onClick={() => {
-                              const current = configEdits.k8s_pipeline_use_spot ?? clusterConfig.k8s_pipeline_use_spot;
-                              setConfigEdits({ ...configEdits, k8s_pipeline_use_spot: !current });
-                            }}
-                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                              (configEdits.k8s_pipeline_use_spot ?? clusterConfig.k8s_pipeline_use_spot)
-                                ? "bg-blue-600"
-                                : "bg-gray-300"
-                            }`}
-                          >
-                            <span
-                              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                                (configEdits.k8s_pipeline_use_spot ?? clusterConfig.k8s_pipeline_use_spot)
-                                  ? "translate-x-4.5"
-                                  : "translate-x-0.5"
-                              }`}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Pipeline Nodes column */}
+                        <div className="space-y-3">
+                          <h5 className="text-sm font-medium text-gray-700">Pipeline Nodes</h5>
+                          <div>
+                            <label className="text-xs text-gray-500">Machine Size</label>
+                            <select
+                              value={configEdits.k8s_pipeline_machine_type ?? clusterConfig.k8s_pipeline_machine_type}
+                              onChange={(e) => setConfigEdits({ ...configEdits, k8s_pipeline_machine_type: e.target.value })}
+                              className="w-full border rounded px-2 py-1 text-sm mt-1 bg-white"
+                              disabled={configSaving}
+                            >
+                              {PIPELINE_MACHINE_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label} - {opt.description}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-xs text-gray-500">Max Nodes</label>
+                            <input
+                              type="number"
+                              value={configEdits.k8s_pipeline_max_nodes ?? clusterConfig.k8s_pipeline_max_nodes}
+                              onChange={(e) => setConfigEdits({ ...configEdits, k8s_pipeline_max_nodes: Number(e.target.value) })}
+                              className="w-full border rounded px-2 py-1 text-sm mt-1"
+                              disabled={configSaving}
                             />
-                          </button>
-                          <span className="text-xs text-gray-600">
-                            {(configEdits.k8s_pipeline_use_spot ?? clusterConfig.k8s_pipeline_use_spot) ? "On" : "Off"}
-                          </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <label className="text-xs text-gray-500">Spot Instances</label>
+                            <div className="relative">
+                              <button
+                                type="button"
+                                onClick={() => setShowSpotTooltip(!showSpotTooltip)}
+                                className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-gray-400 text-gray-400 text-[10px] leading-none hover:border-gray-600 hover:text-gray-600"
+                              >
+                                i
+                              </button>
+                              {showSpotTooltip && (
+                                <div className="absolute left-6 top-1/2 -translate-y-1/2 z-10 w-72 p-3 bg-gray-800 text-white text-xs rounded-lg shadow-lg">
+                                  Spot instances cost 60-70% less than standard VMs but can be reclaimed by Google Cloud with 30 seconds notice. bioAF automatically retries interrupted pipeline tasks without re-requesting additional resources. Recommended for most workloads. Disable only if your pipelines cannot tolerate any interruption.
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); setShowSpotTooltip(false); }}
+                                    className="absolute top-1 right-2 text-gray-400 hover:text-white"
+                                  >
+                                    x
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              disabled={configSaving}
+                              onClick={() => {
+                                const current = configEdits.k8s_pipeline_use_spot ?? clusterConfig.k8s_pipeline_use_spot;
+                                setConfigEdits({ ...configEdits, k8s_pipeline_use_spot: !current });
+                              }}
+                              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                                (configEdits.k8s_pipeline_use_spot ?? clusterConfig.k8s_pipeline_use_spot)
+                                  ? "bg-blue-600"
+                                  : "bg-gray-300"
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                                  (configEdits.k8s_pipeline_use_spot ?? clusterConfig.k8s_pipeline_use_spot)
+                                    ? "translate-x-4.5"
+                                    : "translate-x-0.5"
+                                }`}
+                              />
+                            </button>
+                            <span className="text-xs text-gray-600">
+                              {(configEdits.k8s_pipeline_use_spot ?? clusterConfig.k8s_pipeline_use_spot) ? "On" : "Off"}
+                            </span>
+                          </div>
                         </div>
-                        <div>
-                          <label className="text-xs text-gray-500">Interactive Machine Size</label>
-                          <select
-                            value={configEdits.k8s_interactive_machine_type ?? clusterConfig.k8s_interactive_machine_type}
-                            onChange={(e) => setConfigEdits({ ...configEdits, k8s_interactive_machine_type: e.target.value })}
-                            className="w-full border rounded px-2 py-1 text-sm mt-1 bg-white"
-                            disabled={configSaving}
-                          >
-                            {INTERACTIVE_MACHINE_OPTIONS.map((opt) => (
-                              <option key={opt.value} value={opt.value}>
-                                {opt.label} - {opt.description}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="text-xs text-gray-500">Interactive Max Nodes</label>
-                          <input
-                            type="number"
-                            value={configEdits.k8s_interactive_max_nodes ?? clusterConfig.k8s_interactive_max_nodes}
-                            onChange={(e) => setConfigEdits({ ...configEdits, k8s_interactive_max_nodes: Number(e.target.value) })}
-                            className="w-full border rounded px-2 py-1 text-sm mt-1"
-                            disabled={configSaving}
-                          />
+
+                        {/* Interactive Nodes column */}
+                        <div className="space-y-3">
+                          <h5 className="text-sm font-medium text-gray-700">Interactive Nodes</h5>
+                          <div>
+                            <label className="text-xs text-gray-500">Machine Size</label>
+                            <select
+                              value={configEdits.k8s_interactive_machine_type ?? clusterConfig.k8s_interactive_machine_type}
+                              onChange={(e) => setConfigEdits({ ...configEdits, k8s_interactive_machine_type: e.target.value })}
+                              className="w-full border rounded px-2 py-1 text-sm mt-1 bg-white"
+                              disabled={configSaving}
+                            >
+                              {INTERACTIVE_MACHINE_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label} - {opt.description}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-xs text-gray-500">Max Nodes</label>
+                            <input
+                              type="number"
+                              value={configEdits.k8s_interactive_max_nodes ?? clusterConfig.k8s_interactive_max_nodes}
+                              onChange={(e) => setConfigEdits({ ...configEdits, k8s_interactive_max_nodes: Number(e.target.value) })}
+                              className="w-full border rounded px-2 py-1 text-sm mt-1"
+                              disabled={configSaving}
+                            />
+                          </div>
                         </div>
                       </div>
                       <div className="flex gap-2 mt-4">

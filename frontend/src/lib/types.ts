@@ -752,6 +752,7 @@ export interface PipelineRun {
   progress: PipelineProgress | null;
   cost_estimate: number | null;
   error_message: string | null;
+  failure_reason: "oom" | "preemption_exhausted" | "task_error" | null;
   work_dir: string | null;
   slurm_job_id: string | null;
   k8s_job_name: string | null;

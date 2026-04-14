@@ -913,12 +913,30 @@ class KubernetesComputeProvider(ComputeProvider):
         elif job.status.active and job.status.active > 0:
             status = "running"
 
-        return {
+        result = {
             "job_id": job_id,
             "status": status,
             "pod_name": pod_name,
             "node_name": node_name,
         }
+
+        # Include container termination details when job has failed
+        if status == "failed" and pod_list.items:
+            termination_reasons = []
+            pod = pod_list.items[0]
+            for cs in pod.status.container_statuses or []:
+                terminated = getattr(cs.state, "terminated", None)
+                if terminated:
+                    termination_reasons.append(
+                        {
+                            "container": cs.name,
+                            "exit_code": terminated.exit_code,
+                            "reason": terminated.reason or "",
+                        }
+                    )
+            result["termination_reasons"] = termination_reasons
+
+        return result
 
     async def _k8s_list_jobs(self, filters: dict | None = None) -> list[dict]:
         """List K8s Jobs in the pipeline namespace."""

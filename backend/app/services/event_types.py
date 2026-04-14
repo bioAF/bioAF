@@ -5,6 +5,7 @@ PIPELINE_STARTED = "pipeline.started"
 PIPELINE_COMPLETED = "pipeline.completed"
 PIPELINE_FAILED = "pipeline.failed"
 PIPELINE_STAGE_ERROR = "pipeline.stage_error"
+PIPELINE_OOM = "pipeline.oom"
 PIPELINE_RUN_REVIEWED = "pipeline_run.reviewed"
 PIPELINE_RUN_REVIEW_REMINDER = "pipeline_run.review_reminder"
 
@@ -93,6 +94,7 @@ ALL_EVENT_TYPES = [
     PIPELINE_COMPLETED,
     PIPELINE_FAILED,
     PIPELINE_STAGE_ERROR,
+    PIPELINE_OOM,
     QC_RESULTS_READY,
     EXPERIMENT_STATUS_CHANGED,
     BUDGET_THRESHOLD_50,
@@ -143,6 +145,7 @@ EVENT_SEVERITY = {
     PIPELINE_COMPLETED: "info",
     PIPELINE_FAILED: "critical",
     PIPELINE_STAGE_ERROR: "warning",
+    PIPELINE_OOM: "critical",
     QC_RESULTS_READY: "info",
     EXPERIMENT_STATUS_CHANGED: "info",
     BUDGET_THRESHOLD_50: "info",

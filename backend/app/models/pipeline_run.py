@@ -26,6 +26,7 @@ class PipelineRun(Base):
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
     cost_estimate: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(String(50), nullable=True)
     work_dir: Mapped[str | None] = mapped_column(String(500), nullable=True)
     slurm_job_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     k8s_job_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
