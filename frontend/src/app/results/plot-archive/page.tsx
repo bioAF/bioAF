@@ -62,6 +62,12 @@ function PlotThumbnail({
     );
   }
 
+  // Content-token fetch is still in flight. Don't render <img src=""> because
+  // that fires onError immediately and leaves us stuck in the error state.
+  if (!imgUrl) {
+    return <div className="w-full h-full bg-gray-100 animate-pulse" />;
+  }
+
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
