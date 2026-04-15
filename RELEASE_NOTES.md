@@ -1,5 +1,15 @@
 # Release Notes
 
+## v0.7.4
+
+In-app update UX improvements.
+
+### Platform updates
+
+- Add a 60-second "restart warning" step between build and restart, giving users a visible countdown before the backend briefly goes offline during an update
+- Settings > Platform Info re-attaches to an in-progress update on page mount, so navigating away and back shows live status instead of an empty banner
+- Countdown duration is configurable via BIOAF_RESTART_WARN_SECONDS and skippable with BIOAF_SKIP_RESTART_WARN=1 for development
+
 ## v0.7.3
 
 OOM detection, preemption classification, and cluster configuration UX improvements.
