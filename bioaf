@@ -531,6 +531,17 @@ STATUSEOF
     bold "Rebuilding containers..."
     $DC_BUILD
 
+    # Warning window before restart: give the UI time to show a countdown
+    # so users know the app is about to go offline briefly. Skipped when
+    # BIOAF_SKIP_RESTART_WARN=1 (useful for tests and dev overrides).
+    local warn_seconds="${BIOAF_RESTART_WARN_SECONDS:-60}"
+    if [ "${BIOAF_SKIP_RESTART_WARN:-0}" != "1" ] && [ "$warn_seconds" -gt 0 ]; then
+        cat > "$status_dir/current.json" <<STATUSEOF
+{"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "warn", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+STATUSEOF
+        sleep "$warn_seconds"
+    fi
+
     # Restart services
     cat > "$status_dir/current.json" <<STATUSEOF
 {"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "restart", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}

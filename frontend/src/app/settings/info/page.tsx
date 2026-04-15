@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -28,6 +28,7 @@ interface UpdateStatus {
   from_version?: string;
   to_version?: string;
   step?: string;
+  started_at?: string;
   error?: string;
 }
 
@@ -35,9 +36,12 @@ const STEP_LABELS: Record<string, string> = {
   backup: "Backing up database",
   checkout: "Fetching new version",
   build: "Rebuilding containers",
+  warn: "Preparing to restart",
   restart: "Restarting services",
   migrate: "Running database migrations",
 };
+
+const WARN_DURATION_SECONDS = 60;
 
 export default function SettingsInfoPage() {
   const { canAccess } = usePermissions();
@@ -47,6 +51,7 @@ export default function SettingsInfoPage() {
   const [updating, setUpdating] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [updateError, setUpdateError] = useState("");
+  const [now, setNow] = useState(() => Date.now());
   const pollRef = useRef<NodeJS.Timeout | null>(null);
 
   const canDeploy = canAccess("infrastructure", "deploy");
@@ -88,12 +93,21 @@ export default function SettingsInfoPage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const [version, history] = await Promise.all([
+        const [version, history, status] = await Promise.all([
           api.get<UpdateCheck>("/api/upgrades/check"),
           api.get<{ upgrades: UpgradeHistoryItem[] }>("/api/upgrades/history"),
+          api.get<UpdateStatus>("/api/upgrades/status"),
         ]);
         setUpdateCheck(version);
         setUpgradeHistory(history.upgrades);
+
+        if (status.status === "in_progress") {
+          setUpdateStatus(status);
+          setUpdating(true);
+          if (!pollRef.current) {
+            pollRef.current = setInterval(pollUpdateStatus, 3000);
+          }
+        }
       } catch {
         // ignore
       }
@@ -105,7 +119,22 @@ export default function SettingsInfoPage() {
         clearInterval(pollRef.current);
       }
     };
-  }, []);
+  }, [pollUpdateStatus]);
+
+  // Tick once per second while showing the reboot countdown
+  useEffect(() => {
+    if (updateStatus?.step !== "warn") return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [updateStatus?.step]);
+
+  const rebootCountdown = useMemo(() => {
+    if (updateStatus?.step !== "warn" || !updateStatus.started_at) return null;
+    const started = new Date(updateStatus.started_at).getTime();
+    const elapsed = Math.floor((now - started) / 1000);
+    return Math.max(0, WARN_DURATION_SECONDS - elapsed);
+  }, [updateStatus?.step, updateStatus?.started_at, now]);
 
   const handleCheckUpdate = async () => {
     setCheckingUpdate(true);
@@ -191,7 +220,7 @@ export default function SettingsInfoPage() {
                     <div className="flex items-center gap-3 mb-2">
                       <div className="h-4 w-4 border-2 border-amber-600 border-t-transparent rounded-full animate-spin" />
                       <span className="text-sm font-medium text-amber-800">
-                        Updating to {updateCheck.latest_version}
+                        Updating to {updateStatus.to_version || updateCheck.latest_version}
                       </span>
                     </div>
                     {updateStatus.step && (
@@ -199,9 +228,15 @@ export default function SettingsInfoPage() {
                         {STEP_LABELS[updateStatus.step] || updateStatus.step}...
                       </p>
                     )}
-                    <p className="text-xs text-amber-600 ml-7 mt-1">
-                      The application will restart during this process.
-                    </p>
+                    {updateStatus.step === "warn" && rebootCountdown !== null ? (
+                      <p className="text-sm font-semibold text-amber-900 ml-7 mt-1">
+                        {`Restarting in ${rebootCountdown}s -- the application will be briefly unavailable.`}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-amber-600 ml-7 mt-1">
+                        The application will restart during this process.
+                      </p>
+                    )}
                   </div>
                 )}
 
