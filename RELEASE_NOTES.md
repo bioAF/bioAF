@@ -1,5 +1,13 @@
 # Release Notes
 
+## v0.7.5
+
+Plot Archive thumbnail bug fix.
+
+### Bug fixes
+
+- Restore Plot Archive previews that broke after the content-token JWT rework. Thumbnails rendered an empty `<img src="">` while the content token was still being fetched, which fired `onError` and latched the card into the "No preview available" fallback. The grid now shows a skeleton until the short-lived content URL is ready.
+
 ## v0.7.4
 
 In-app update UX improvements.
