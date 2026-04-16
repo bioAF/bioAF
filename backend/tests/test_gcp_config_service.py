@@ -63,6 +63,7 @@ ALL_REQUIRED_PERMISSIONS = [
     "iam.serviceAccounts.actAs",
     "iam.serviceAccounts.create",
     "iam.serviceAccounts.setIamPolicy",
+    "iam.serviceAccountKeys.create",
     "compute.instances.create",
     "resourcemanager.projects.getIamPolicy",
     "resourcemanager.projects.setIamPolicy",

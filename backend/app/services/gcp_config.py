@@ -37,6 +37,7 @@ _PERMISSION_ROLE_MAP: dict[str, str] = {
     "iam.serviceAccounts.actAs": "roles/iam.serviceAccountUser",
     "iam.serviceAccounts.create": "roles/iam.serviceAccountAdmin",
     "iam.serviceAccounts.setIamPolicy": "roles/iam.serviceAccountAdmin",
+    "iam.serviceAccountKeys.create": "roles/iam.serviceAccountKeyAdmin",
     "compute.instances.create": "roles/compute.admin",
     "resourcemanager.projects.getIamPolicy": "roles/resourcemanager.projectIamAdmin",
     "resourcemanager.projects.setIamPolicy": "roles/resourcemanager.projectIamAdmin",

@@ -101,6 +101,7 @@ SA_ROLES=(
     "roles/container.admin"
     "roles/iam.serviceAccountUser"
     "roles/iam.serviceAccountAdmin"
+    "roles/iam.serviceAccountKeyAdmin"
     "roles/compute.admin"
     "roles/resourcemanager.projectIamAdmin"
     "roles/bigquery.dataEditor"
