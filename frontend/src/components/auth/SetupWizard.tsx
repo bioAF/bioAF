@@ -46,7 +46,7 @@ const SETUP_RECOMMENDED_ROLES = [
   { role: "roles/bigquery.dataEditor", description: "BigQuery Data Editor" },
   { role: "roles/artifactregistry.admin", description: "Artifact Registry Admin" },
   { role: "roles/cloudbuild.builds.editor", description: "Cloud Build Editor" },
-  { role: "roles/serviceusage.serviceUsageViewer", description: "Service Usage Viewer" },
+  { role: "roles/serviceusage.serviceUsageAdmin", description: "Service Usage Admin" },
   { role: "roles/viewer", description: "Viewer" },
 ];
 
