@@ -1635,3 +1635,29 @@ export interface DataMount {
   label: string;
   description: string;
 }
+
+// Google Sheets import
+export interface SheetRecognizedColumn {
+  header: string;
+  mapped_to: string;
+  defaultable: boolean;
+}
+
+export interface SheetPreviewResponse {
+  spreadsheet_id: string;
+  sheet_name: string;
+  columns: string[];
+  recognized_columns: SheetRecognizedColumn[];
+  unknown_columns: string[];
+}
+
+export interface ReaderSAStatus {
+  exists: boolean;
+  email: string | null;
+}
+
+export interface ReaderSACreateResponse {
+  email: string;
+  message: string;
+  warning: string | null;
+}

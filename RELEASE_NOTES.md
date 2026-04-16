@@ -1,5 +1,28 @@
 # Release Notes
 
+## v0.8.0
+
+Google Sheets integration for experiment field setup and sample import.
+
+### New features
+
+- Import column headers from a Google Sheet during experiment creation to populate sample field defaults and custom fields, with a column mapping UI that lets users map sheet columns to existing fields or create new custom fields
+- Import sample data directly from a Google Sheet using the same preview, column mapping, and confirm flow as CSV import
+- Dedicated reader service account provisioned automatically via the IAM API, managed from Settings > Integrations > GCP
+- Auto-match unknown columns to existing custom fields when names match, so repeat imports pre-select the right mapping
+- All 19 user-facing sample fields are now recognized during import (not just the 10 defaultable ones), with visual indicators distinguishing fields that support defaults from per-sample fields
+
+### Platform updates
+
+- Add `iam.serviceAccountKeys.create` permission and `roles/iam.serviceAccountKeyAdmin` role to the GCP setup checklist, install script, settings UI, and setup wizard
+- Add `google-api-python-client` dependency for Sheets API v4 and IAM Admin API access
+
+### Bug fixes
+
+- Fix IAM propagation race condition when creating the reader service account key immediately after SA creation
+- Fix dropdown collision where "Add as new custom field" and "Map to existing custom field" had identical select values when the column name matched an existing field name
+- Distinguish "Sheets API not enabled" from "sheet not shared" errors so users get actionable guidance
+
 ## v0.7.5
 
 Plot Archive thumbnail bug fix.

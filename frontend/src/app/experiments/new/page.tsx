@@ -8,6 +8,7 @@ import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { VocabularySelect } from "@/components/shared/VocabularySelect";
 import { ExtensibleVocabularySelect } from "@/components/shared/ExtensibleVocabularySelect";
+import { SheetImportModal } from "@/components/experiments/SheetImportModal";
 import type {
   Experiment,
   ExperimentCreateRequest,
@@ -40,6 +41,7 @@ export default function NewExperimentPage() {
   const [showFieldDefaults, setShowFieldDefaults] = useState(false);
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, string>>({});
   const [extraCustomFields, setExtraCustomFields] = useState<{ name: string; value: string; required: boolean }[]>([]);
+  const [showSheetImport, setShowSheetImport] = useState(false);
 
   const DEFAULTABLE_FIELDS = [
     { name: "organism", label: "Organism", type: "text" as const },
@@ -68,6 +70,28 @@ export default function NewExperimentPage() {
       }
       return prev;
     });
+  }
+
+  function handleSheetImportApply(result: {
+    fieldDefaults: FieldDefaultValue[];
+    customFields: { name: string; value: string; required: boolean }[];
+  }) {
+    // Merge imported field defaults (only add fields not already configured)
+    setFieldDefaults((prev) => {
+      const existing = new Set(prev.map((d) => d.field_name));
+      const newDefaults = result.fieldDefaults.filter((d) => !existing.has(d.field_name));
+      return [...prev, ...newDefaults];
+    });
+
+    // Append imported custom fields (only add fields not already present)
+    setExtraCustomFields((prev) => {
+      const existing = new Set(prev.map((f) => f.name));
+      const newFields = result.customFields.filter((f) => !existing.has(f.name));
+      return [...prev, ...newFields];
+    });
+
+    // Auto-expand the field defaults section
+    setShowFieldDefaults(true);
   }
 
   useEffect(() => {
@@ -250,13 +274,22 @@ export default function NewExperimentPage() {
                     Set default values applied to all samples in this experiment. Per-sample values still override these.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowFieldDefaults(!showFieldDefaults)}
-                  className="text-sm text-bioaf-600 hover:underline"
-                >
-                  {showFieldDefaults ? "Hide" : "Configure"}
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowSheetImport(true)}
+                    className="text-sm text-bioaf-600 hover:underline"
+                  >
+                    Import from Google Sheet
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowFieldDefaults(!showFieldDefaults)}
+                    className="text-sm text-bioaf-600 hover:underline"
+                  >
+                    {showFieldDefaults ? "Hide" : "Configure"}
+                  </button>
+                </div>
               </div>
 
               {showFieldDefaults && (
@@ -401,6 +434,15 @@ export default function NewExperimentPage() {
               </button>
             </div>
           </form>
+
+          {showSheetImport && (
+            <SheetImportModal
+              onClose={() => setShowSheetImport(false)}
+              onApply={handleSheetImportApply}
+              existingFieldDefaults={fieldDefaults}
+              existingCustomFields={extraCustomFields}
+            />
+          )}
         </main>
       </div>
     </div>

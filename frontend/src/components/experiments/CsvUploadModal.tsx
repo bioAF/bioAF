@@ -74,14 +74,39 @@ interface Props {
 
 type Step = "select" | "preview" | "confirm" | "done";
 
+type Source = "csv" | "gsheet";
+
 export function CsvUploadModal({ experimentId, existingCustomFields = [], onClose, onSuccess }: Props) {
   const [step, setStep] = useState<Step>("select");
+  const [source, setSource] = useState<Source>("csv");
   const [file, setFile] = useState<File | null>(null);
+  const [sheetUrl, setSheetUrl] = useState("");
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [columnMappings, setColumnMappings] = useState<Record<string, string>>({});
   const [result, setResult] = useState<ConfirmResponse | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Build a lookup of existing custom field names (lowercased) for auto-matching
+  const existingCustomFieldsLower = new Map(
+    existingCustomFields.map((name) => [name.toLowerCase().replace(/\s+/g, "_"), name])
+  );
+
+  function buildInitialMappings(unknownColumns: string[]): Record<string, string> {
+    const initial: Record<string, string> = {};
+    for (const col of unknownColumns) {
+      const normalized = col.toLowerCase().replace(/\s+/g, "_");
+      const match = existingCustomFieldsLower.get(normalized);
+      if (match) {
+        // Auto-map to the existing custom field
+        initial[col] = `existing:${match}`;
+      } else {
+        // Default to creating as a new custom field
+        initial[col] = `custom:${col}`;
+      }
+    }
+    return initial;
+  }
 
   async function handleFileSelect(selectedFile: File) {
     setFile(selectedFile);
@@ -96,12 +121,7 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
       setPreview(data);
 
       if (data.unknown_columns.length > 0) {
-        // Initialize mappings: default to "skip" for unknown columns
-        const initial: Record<string, string> = {};
-        for (const col of data.unknown_columns) {
-          initial[col] = "skip";
-        }
-        setColumnMappings(initial);
+        setColumnMappings(buildInitialMappings(data.unknown_columns));
         setStep("preview");
       } else if (data.errors.length > 0 && data.total_rows === 0) {
         setError(data.errors.join("; "));
@@ -116,17 +136,71 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
     }
   }
 
+  async function handleSheetPreview() {
+    if (!sheetUrl.trim()) return;
+    setError("");
+    setLoading(true);
+
+    try {
+      const data = await api.post<PreviewResponse>(
+        `/api/v1/sheets/${experimentId}/samples/preview`,
+        { sheet_url: sheetUrl.trim() },
+      );
+      setPreview(data);
+
+      if (data.unknown_columns.length > 0) {
+        setColumnMappings(buildInitialMappings(data.unknown_columns));
+        setStep("preview");
+      } else if (data.errors.length > 0 && data.total_rows === 0) {
+        setError(data.errors.join("; "));
+      } else {
+        await submitSheetConfirm({});
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to read spreadsheet");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function submitSheetConfirm(mappings: Record<string, string>) {
+    setLoading(true);
+    setError("");
+
+    const activeMappings = resolveActiveMappings(mappings);
+
+    try {
+      const data = await api.post<ConfirmResponse>(
+        `/api/v1/sheets/${experimentId}/samples/confirm`,
+        { sheet_url: sheetUrl.trim(), column_mappings: activeMappings },
+      );
+      setResult(data);
+      setStep("done");
+      if (data.created_count > 0) {
+        onSuccess();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create samples");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function resolveActiveMappings(mappings: Record<string, string>): Record<string, string> {
+    const active: Record<string, string> = {};
+    for (const [col, target] of Object.entries(mappings)) {
+      if (target === "skip") continue;
+      // Normalize "existing:X" to "custom:X" -- the backend treats both the same
+      active[col] = target.startsWith("existing:") ? `custom:${target.slice("existing:".length)}` : target;
+    }
+    return active;
+  }
+
   async function submitConfirm(confirmFile: File, mappings: Record<string, string>) {
     setLoading(true);
     setError("");
 
-    // Filter out "skip" mappings
-    const activeMappings: Record<string, string> = {};
-    for (const [col, target] of Object.entries(mappings)) {
-      if (target !== "skip") {
-        activeMappings[col] = target;
-      }
-    }
+    const activeMappings = resolveActiveMappings(mappings);
 
     try {
       const data = await api.upload<ConfirmResponse>(
@@ -153,7 +227,7 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
   // Fields already claimed by recognized columns or other mappings
   const usedFields = new Set<string>([
     ...(preview?.recognized_columns.map((c) => c.mapped_to) ?? []),
-    ...Object.values(columnMappings).filter((v) => v !== "skip" && !v.startsWith("custom:")),
+    ...Object.values(columnMappings).filter((v) => v !== "skip" && !v.startsWith("custom:") && !v.startsWith("existing:")),
   ]);
 
   return (
@@ -161,9 +235,9 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
       <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] overflow-hidden flex flex-col">
         <div className="px-6 py-4 border-b flex justify-between items-center">
           <h2 className="text-lg font-semibold">
-            {step === "select" && "Upload Sample CSV"}
+            {step === "select" && "Import Samples"}
             {step === "preview" && "Map Unknown Columns"}
-            {step === "done" && "Upload Complete"}
+            {step === "done" && "Import Complete"}
           </h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">
             &times;
@@ -171,76 +245,148 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
         </div>
 
         <div className="flex-1 overflow-y-auto p-6">
-          {/* Step 1: File selection */}
+          {/* Step 1: Source selection */}
           {step === "select" && (
             <div className="space-y-4">
-              <p className="text-sm text-gray-600">
-                Upload a CSV or TSV file to bulk-create samples. Your CSV should include a
-                header row with column names matching the fields below.
-              </p>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-medium text-gray-700">Expected CSV Format</h3>
-                  <button
-                    onClick={() => api.download(`/api/experiments/${experimentId}/samples/csv-template`)}
-                    className="text-xs text-bioaf-600 hover:underline"
-                  >
-                    Download template CSV
-                  </button>
-                </div>
-                <div className="overflow-x-auto border rounded-md">
-                  <table className="min-w-full text-xs">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        {SAMPLE_FIELDS.map((f) => (
-                          <th key={f.value} className="px-2 py-1.5 text-left font-medium text-gray-600 whitespace-nowrap">
-                            {f.value}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr className="text-gray-400 italic">
-                        {SAMPLE_FIELDS.map((f) => (
-                          <td key={f.value} className="px-2 py-1 whitespace-nowrap">
-                            {EXAMPLE_VALUES[f.value] ?? ""}
-                          </td>
-                        ))}
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  All columns are optional. Unrecognized columns will prompt you to map or skip them.
-                </p>
+              {/* Source toggle */}
+              <div className="flex border-b">
+                <button
+                  type="button"
+                  onClick={() => { setSource("csv"); setError(""); }}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+                    source === "csv"
+                      ? "border-bioaf-600 text-bioaf-600"
+                      : "border-transparent text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  CSV File
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSource("gsheet"); setError(""); }}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+                    source === "gsheet"
+                      ? "border-bioaf-600 text-bioaf-600"
+                      : "border-transparent text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  Google Sheet
+                </button>
               </div>
 
-              <label className="flex items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-bioaf-400 hover:bg-gray-50 transition-colors">
-                <div className="text-center">
-                  {loading ? (
-                    <p className="text-sm text-gray-500">Analyzing file...</p>
-                  ) : (
-                    <>
-                      <p className="text-sm font-medium text-gray-700">
-                        Click to select a CSV file
-                      </p>
-                      <p className="text-xs text-gray-500 mt-1">
-                        Supports .csv, .tsv, and .txt
-                      </p>
-                    </>
-                  )}
-                </div>
-                <input
-                  type="file"
-                  accept=".csv,.tsv,.txt"
-                  className="hidden"
-                  onChange={(e) => {
-                    if (e.target.files?.[0]) handleFileSelect(e.target.files[0]);
-                  }}
-                  disabled={loading}
-                />
-              </label>
+              {source === "csv" && (
+                <>
+                  <p className="text-sm text-gray-600">
+                    Upload a CSV or TSV file to bulk-create samples. Your CSV should include a
+                    header row with column names matching the fields below.
+                  </p>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-medium text-gray-700">Expected CSV Format</h3>
+                      <button
+                        onClick={() => api.download(`/api/experiments/${experimentId}/samples/csv-template`)}
+                        className="text-xs text-bioaf-600 hover:underline"
+                      >
+                        Download template CSV
+                      </button>
+                    </div>
+                    <div className="overflow-x-auto border rounded-md">
+                      <table className="min-w-full text-xs">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            {SAMPLE_FIELDS.map((f) => (
+                              <th key={f.value} className="px-2 py-1.5 text-left font-medium text-gray-600 whitespace-nowrap">
+                                {f.value}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr className="text-gray-400 italic">
+                            {SAMPLE_FIELDS.map((f) => (
+                              <td key={f.value} className="px-2 py-1 whitespace-nowrap">
+                                {EXAMPLE_VALUES[f.value] ?? ""}
+                              </td>
+                            ))}
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      All columns are optional. Unrecognized columns will prompt you to map or skip them.
+                    </p>
+                  </div>
+
+                  <label className="flex items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-bioaf-400 hover:bg-gray-50 transition-colors">
+                    <div className="text-center">
+                      {loading ? (
+                        <p className="text-sm text-gray-500">Analyzing file...</p>
+                      ) : (
+                        <>
+                          <p className="text-sm font-medium text-gray-700">
+                            Click to select a CSV file
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            Supports .csv, .tsv, and .txt
+                          </p>
+                        </>
+                      )}
+                    </div>
+                    <input
+                      type="file"
+                      accept=".csv,.tsv,.txt"
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files?.[0]) handleFileSelect(e.target.files[0]);
+                      }}
+                      disabled={loading}
+                    />
+                  </label>
+                </>
+              )}
+
+              {source === "gsheet" && (
+                <>
+                  <p className="text-sm text-gray-600">
+                    Import samples directly from a Google Sheet. The sheet must be shared with
+                    the bioAF reader account (see Settings &gt; Integrations &gt; GCP).
+                  </p>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Google Sheets URL
+                    </label>
+                    <input
+                      type="url"
+                      value={sheetUrl}
+                      onChange={(e) => setSheetUrl(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleSheetPreview();
+                        }
+                      }}
+                      placeholder="https://docs.google.com/spreadsheets/d/..."
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-bioaf-500 focus:border-bioaf-500"
+                      autoFocus
+                    />
+                  </div>
+
+                  <p className="text-xs text-gray-500">
+                    The first row should contain column headers. Data rows start from row 2.
+                    Unrecognized columns will prompt you to map or skip them.
+                  </p>
+
+                  <button
+                    onClick={handleSheetPreview}
+                    disabled={loading || !sheetUrl.trim()}
+                    className="px-4 py-2 text-sm bg-bioaf-600 text-white rounded-md hover:bg-bioaf-700 disabled:opacity-50"
+                  >
+                    {loading ? "Reading sheet..." : "Import from Sheet"}
+                  </button>
+                </>
+              )}
 
               {error && (
                 <div className="bg-red-50 border border-red-200 rounded-md p-3">
@@ -300,7 +446,7 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
                         {existingCustomFields.length > 0 && (
                           <optgroup label="Map to existing custom field">
                             {existingCustomFields.map((cf) => (
-                              <option key={`cf:${cf}`} value={`custom:${cf}`}>
+                              <option key={`cf:${cf}`} value={`existing:${cf}`}>
                                 {cf}
                               </option>
                             ))}
@@ -415,7 +561,13 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
                 Back
               </button>
               <button
-                onClick={() => file && submitConfirm(file, columnMappings)}
+                onClick={() => {
+                  if (source === "gsheet") {
+                    submitSheetConfirm(columnMappings);
+                  } else if (file) {
+                    submitConfirm(file, columnMappings);
+                  }
+                }}
                 className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded-md hover:bg-bioaf-700 disabled:opacity-50"
                 disabled={loading}
               >

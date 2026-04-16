@@ -732,7 +732,7 @@ export default function ExperimentDetailPage() {
                   onClick={() => setShowCsvUpload(true)}
                   className="bg-white border border-gray-300 px-4 py-2 rounded-md text-sm hover:bg-gray-50"
                 >
-                  Upload CSV
+                  Import Samples
                 </button>
                 {selectedSampleIds.size > 0 && (
                   <>
