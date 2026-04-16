@@ -108,7 +108,7 @@ SA_ROLES=(
     "roles/artifactregistry.admin"
     "roles/cloudbuild.builds.editor"
     "roles/logging.logWriter"
-    "roles/serviceusage.serviceUsageViewer"
+    "roles/serviceusage.serviceUsageAdmin"
     "roles/viewer"
 )
 

@@ -46,15 +46,14 @@ _PERMISSION_ROLE_MAP: dict[str, str] = {
     "artifactregistry.repositories.create": "roles/artifactregistry.admin",
     "cloudbuild.builds.create": "roles/cloudbuild.builds.editor",
     "logging.logEntries.create": "roles/logging.logWriter",
+    "serviceusage.services.enable": "roles/serviceusage.serviceUsageAdmin",
 }
 
 # Deduplicated, stable-order list of recommended roles.
 # Start with roles derived from the permission map, then append roles that
 # are needed for validation probes (project access, API listing) but are not
 # tied to a specific testIamPermissions entry.
-RECOMMENDED_ROLES: list[str] = list(
-    dict.fromkeys([*_PERMISSION_ROLE_MAP.values(), "roles/serviceusage.serviceUsageViewer", "roles/viewer"])
-)
+RECOMMENDED_ROLES: list[str] = list(dict.fromkeys([*_PERMISSION_ROLE_MAP.values(), "roles/viewer"]))
 
 _SKIP_CREDS = "Skipped: credentials failed to load"
 _SKIP_PROJECT = "Skipped: project not accessible"
