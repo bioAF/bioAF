@@ -1,5 +1,19 @@
 # Release Notes
 
+## v0.8.3
+
+Fixes fresh install failure and improves the GCP installer experience.
+
+### Bug fixes
+
+- Fix setup failing on fresh VMs with "vunknown" image tag by adding a grep/sed fallback for Python < 3.11 (Ubuntu 22.04 ships Python 3.10 without tomllib)
+- Setup now queries GitHub releases for the latest version with available images, walks back through recent releases if needed, and falls back to building from source as a last resort
+
+### New features
+
+- Add `--version` flag to `./bioaf setup` for installing a specific version (e.g., `./bioaf setup --version 0.8.1`)
+- Add a Setup Worksheet section to the GCP installer output with the project ID, region, and service account JSON key highlighted in green for easy copy-paste
+
 ## v0.8.2
 
 Update flow improvements for faster updates with less downtime.

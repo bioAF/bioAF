@@ -619,13 +619,25 @@ else
     green "     ./bioaf setup"
 fi
 
+echo ""
+bold "  Setup Worksheet"
+bold "  ----------------"
+echo ""
+echo "  1. Your GCP Project ID:"
+echo ""
+green "     $PROJECT_ID"
+echo ""
+echo "  2. GCP Region:"
+echo ""
+green "     $REGION"
+
 if [ -n "$SA_KEY_PATH" ] && [ -f "$SA_KEY_PATH" ]; then
     echo ""
-    echo "  During setup, the wizard will ask for your service account key."
-    echo "  Select the JSON option and paste this:"
+    echo "  3. Your Service Account JSON key:"
+    echo "     During setup, the wizard will ask for this."
+    echo "     Select the JSON option and paste everything in green."
     echo ""
-    cat "$SA_KEY_PATH"
-    echo ""
+    green "$(cat "$SA_KEY_PATH")"
     echo ""
     dim "  (This key is also saved at $SA_KEY_PATH)"
 fi
