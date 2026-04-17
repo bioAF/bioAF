@@ -17,6 +17,7 @@ DC="docker compose -f $COMPOSE_FILE --env-file $ENV_FILE"
 # Use the fancy TTY display when stdout is a real terminal, plain text otherwise.
 [ -t 1 ] && _progress="auto" || _progress="plain"
 DC_BUILD="docker compose --progress=$_progress -f $COMPOSE_FILE --env-file $ENV_FILE build"
+DC_PULL="docker compose -f $COMPOSE_FILE --env-file $ENV_FILE pull"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -221,9 +222,10 @@ for v in cfg.get('volumes', {}).values():
     # Update agent (idempotent)
     ensure_update_agent
 
-    # Build and start
-    bold "Building and starting containers..."
-    $DC_BUILD
+    # Pull pre-built images and start
+    bold "Pulling pre-built images..."
+    set_image_tag
+    $DC_PULL backend frontend
     $DC up -d
 
     # Wait for DB
@@ -290,9 +292,7 @@ print(json.dumps(result))
 
 cmd_start() {
     bold "=== Starting Services ==="
-
-    # Cloud Logging (GCE only, idempotent)
-    ensure_cloud_logging
+    set_image_tag
 
     for svc in db backend frontend nginx; do
         echo "Starting $svc..."
@@ -412,6 +412,11 @@ print(data['project']['version'])
 " 2>/dev/null || echo "unknown"
 }
 
+set_image_tag() {
+    # Export the image tag so docker-compose.yml resolves ghcr.io image references.
+    export BIOAF_IMAGE_TAG="v$(get_current_version)"
+}
+
 get_latest_github_version() {
     # Query GitHub Releases API for the latest release tag
     local response
@@ -522,14 +527,15 @@ STATUSEOF
     # Cloud Logging (GCE only, idempotent)
     ensure_cloud_logging
 
-    # Rebuild containers
+    # Pull pre-built images
     cat > "$status_dir/current.json" <<STATUSEOF
-{"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "build", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+{"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "pull", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
 STATUSEOF
 
     echo ""
-    bold "Rebuilding containers..."
-    $DC_BUILD
+    export BIOAF_IMAGE_TAG="v${target_version}"
+    bold "Pulling pre-built images..."
+    $DC_PULL backend frontend
 
     # Warning window before restart: give the UI time to show a countdown
     # so users know the app is about to go offline briefly. Skipped when
@@ -573,6 +579,7 @@ STATUSEOF
 }
 
 cmd_build() {
+    set_image_tag
     local service="${1:-}"
     if [ -n "$service" ]; then
         bold "=== Building $service ==="
@@ -690,7 +697,7 @@ cmd_help() {
     echo "  restart             Restart all services"
     echo "  status              Show status of all services"
     echo "  logs [service] [-n N]  Tail logs (default 100 lines, use -n to change)"
-    echo "  build [service]     Build (or rebuild) container images"
+    echo "  build [service]     Build container images locally (development only)"
     echo ""
     bold "Database:"
     echo "  migrate             Run alembic database migrations"
