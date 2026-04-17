@@ -524,10 +524,8 @@ STATUSEOF
     fi
     git -C "$SCRIPT_DIR" checkout "v${target_version}"
 
-    # Cloud Logging (GCE only, idempotent)
-    ensure_cloud_logging
-
-    # Pull pre-built images
+    # Pull pre-built images while old containers are still running,
+    # so the only downtime is the restart + migrate window.
     cat > "$status_dir/current.json" <<STATUSEOF
 {"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "pull", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
 STATUSEOF
@@ -545,16 +543,22 @@ STATUSEOF
         cat > "$status_dir/current.json" <<STATUSEOF
 {"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "warn", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
 STATUSEOF
+        echo ""
+        yellow "Restarting in ${warn_seconds}s (notifying active users)..."
         sleep "$warn_seconds"
     fi
 
-    # Restart services
+    # Restart services with new images
     cat > "$status_dir/current.json" <<STATUSEOF
 {"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "restart", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
 STATUSEOF
 
     $DC up -d
     wait_for_db
+
+    # Cloud Logging (GCE only, idempotent) -- run after restart so it
+    # does not block the update while containers are down.
+    ensure_cloud_logging
 
     # Run migrations
     cat > "$status_dir/current.json" <<STATUSEOF
