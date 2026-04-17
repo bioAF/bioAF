@@ -146,6 +146,26 @@ ensure_update_agent() {
 # Commands
 # ---------------------------------------------------------------------------
 cmd_setup() {
+    # Parse flags
+    local setup_version=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --version)
+                setup_version="${2:-}"
+                if [ -z "$setup_version" ]; then
+                    red "ERROR: --version requires a value (e.g., --version 0.8.1)"
+                    exit 1
+                fi
+                setup_version="${setup_version#v}"
+                shift 2
+                ;;
+            *)
+                red "Unknown option: $1"
+                exit 1
+                ;;
+        esac
+    done
+
     # OS gate -- catch macOS/Windows before anything else
     local os
     os="$(uname -s)"
@@ -180,7 +200,11 @@ cmd_setup() {
     if command -v docker &>/dev/null && ! docker info &>/dev/null; then
         if id -nG 2>/dev/null | grep -qw docker || grep -q "docker.*$(whoami)\|$(whoami).*docker" /etc/group 2>/dev/null; then
             yellow "Activating docker group for this session..."
-            exec sg docker -c "'$0' setup"
+            if [ -n "$setup_version" ]; then
+                exec sg docker -c "'$0' setup --version $setup_version"
+            else
+                exec sg docker -c "'$0' setup"
+            fi
         fi
     fi
 
@@ -222,10 +246,19 @@ for v in cfg.get('volumes', {}).values():
     # Update agent (idempotent)
     ensure_update_agent
 
-    # Pull pre-built images and start
-    bold "Pulling pre-built images..."
-    set_image_tag
-    $DC_PULL backend frontend
+    # If a specific version was requested, checkout that tag
+    if [ -n "$setup_version" ]; then
+        bold "Checking out version ${setup_version}..."
+        git -C "$SCRIPT_DIR" fetch --tags --force
+        if ! git -C "$SCRIPT_DIR" rev-parse "v${setup_version}" >/dev/null 2>&1; then
+            red "ERROR: Version ${setup_version} not found."
+            exit 1
+        fi
+        git -C "$SCRIPT_DIR" checkout "v${setup_version}"
+    fi
+
+    # Resolve and pull pre-built images (falls back to building from source)
+    resolve_and_pull_images "$setup_version"
     $DC up -d
 
     # Wait for DB
@@ -404,17 +437,85 @@ cmd_backup() {
 }
 
 get_current_version() {
-    # Read version from backend/pyproject.toml (single source of truth)
-    python3 -c "
+    # Read version from backend/pyproject.toml (single source of truth).
+    # Try tomllib (Python 3.11+) first, fall back to grep for older Python.
+    local version
+    version=$(python3 -c "
 import tomllib, pathlib
 data = tomllib.loads(pathlib.Path('$SCRIPT_DIR/backend/pyproject.toml').read_text())
 print(data['project']['version'])
-" 2>/dev/null || echo "unknown"
+" 2>/dev/null) || version=""
+
+    if [ -z "$version" ]; then
+        version=$(grep '^version' "$SCRIPT_DIR/backend/pyproject.toml" 2>/dev/null \
+            | head -1 | sed 's/version = "\(.*\)"/\1/')
+    fi
+
+    echo "${version:-unknown}"
 }
 
 set_image_tag() {
     # Export the image tag so docker-compose.yml resolves ghcr.io image references.
     export BIOAF_IMAGE_TAG="v$(get_current_version)"
+}
+
+resolve_and_pull_images() {
+    # Resolve a version with available pre-built images and pull them.
+    # Falls back to building from source if no images are found.
+    #
+    # Usage:
+    #   resolve_and_pull_images              # auto-detect from latest release
+    #   resolve_and_pull_images "0.7.5"      # try a specific version
+    local explicit_version="${1:-}"
+
+    if [ -n "$explicit_version" ]; then
+        export BIOAF_IMAGE_TAG="v${explicit_version}"
+        bold "Pulling images for v${explicit_version}..."
+        if $DC_PULL backend frontend 2>/dev/null; then
+            green "Images pulled (v${explicit_version})."
+            return 0
+        fi
+        yellow "Pre-built images not available for v${explicit_version}, building from source..."
+        $DC_BUILD
+        return 0
+    fi
+
+    # No explicit version: try recent releases in order, then build
+    local releases
+    releases=$(curl -sf --max-time 10 \
+        -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/not-that-guy-again/bioAF/releases?per_page=5" 2>/dev/null) || {
+        yellow "Could not reach GitHub to check for images, building from source..."
+        $DC_BUILD
+        return 0
+    }
+
+    local versions
+    versions=$(echo "$releases" | python3 -c "
+import sys, json
+for r in json.load(sys.stdin):
+    tag = r.get('tag_name', '')
+    if tag.startswith('v'):
+        print(tag)
+" 2>/dev/null)
+
+    if [ -z "$versions" ]; then
+        yellow "No releases found, building from source..."
+        $DC_BUILD
+        return 0
+    fi
+
+    for tag in $versions; do
+        export BIOAF_IMAGE_TAG="$tag"
+        bold "Trying images for ${tag}..."
+        if $DC_PULL backend frontend 2>/dev/null; then
+            green "Images pulled (${tag})."
+            return 0
+        fi
+    done
+
+    yellow "No pre-built images available, building from source..."
+    $DC_BUILD
 }
 
 get_latest_github_version() {
@@ -693,7 +794,7 @@ cmd_help() {
     echo "Usage: ./bioaf <command> [args]"
     echo ""
     bold "First-Run:"
-    echo "  setup               Start services and generate a setup code for the web wizard"
+    echo "  setup [--version X.Y.Z]  Pull images and generate a setup code for the web wizard"
     echo ""
     bold "Service Management:"
     echo "  start               Start all services"
@@ -723,7 +824,8 @@ cmd_help() {
     echo "  help                Show this help message"
     echo ""
     bold "Examples:"
-    echo "  ./bioaf setup               # First-time setup"
+    echo "  ./bioaf setup               # First-time setup (latest version)"
+    echo "  ./bioaf setup --version 0.8.1  # Install a specific version"
     echo "  ./bioaf build               # Build all container images"
     echo "  ./bioaf start               # Start services"
     echo "  ./bioaf logs backend        # Tail backend logs (last 100 lines)"
@@ -745,7 +847,7 @@ command="${1:-help}"
 shift || true
 
 case "$command" in
-    setup)        cmd_setup ;;
+    setup)        cmd_setup "$@" ;;
     create-admin) cmd_create_admin ;;
     start)        cmd_start ;;
     stop)     cmd_stop ;;
