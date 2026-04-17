@@ -1,5 +1,15 @@
 # Release Notes
 
+## v0.8.2
+
+Update flow improvements for faster updates with less downtime.
+
+### Bug fixes
+
+- Pull pre-built images before restarting containers so the app stays online during the download, reducing downtime to just the restart + migrate window
+- Move Cloud Logging agent setup to after restart so it does not block the update while the app is down
+- Show restart countdown message in the CLI so users know why the update pauses before restarting
+
 ## v0.8.1
 
 Pre-built Docker images published to GitHub Container Registry on each release. This is the first version to ship remote artifacts -- setup and updates now pull pre-built images instead of building on the VM, reducing install and update time from 15+ minutes to seconds. Users who encounter issues can install from source using v0.8.0 and below as they have to this point.
