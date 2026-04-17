@@ -1,5 +1,21 @@
 # Release Notes
 
+## v0.8.1
+
+Pre-built Docker images published to GitHub Container Registry on each release. This is the first version to ship remote artifacts -- setup and updates now pull pre-built images instead of building on the VM, reducing install and update time from 15+ minutes to seconds. Users who encounter issues can install from source using v0.8.0 and below as they have to this point.
+
+### New features
+
+- Publish backend, frontend, and cellxgene Docker images to ghcr.io on each release, with GHA build cache for fast CI builds
+- Setup and update commands pull pre-built images from ghcr.io instead of building locally on the VM
+- Frontend image build validation added to PR CI pipeline
+
+### Platform updates
+
+- Add OCI source labels to Dockerfiles for automatic ghcr.io repository linking
+- Add `image:` directives to docker-compose.yml alongside `build:` directives, supporting both pull (production) and build (development) flows
+- Move Cloud Logging agent setup from start to setup/update only, eliminating a 5+ minute apt-get delay on every restart
+
 ## v0.8.0
 
 Google Sheets integration for experiment field setup and sample import.

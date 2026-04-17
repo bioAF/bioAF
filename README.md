@@ -76,21 +76,21 @@ cd bioAF
 ```
 
 The `setup` command handles everything: checks prerequisites, generates
-secrets and TLS certs, builds containers, runs migrations, and prints a
-one-time setup code. Open the URL it shows in your browser and enter the
+secrets and TLS certs, pulls pre-built images, runs migrations, and prints
+a one-time setup code. Open the URL it shows in your browser and enter the
 code to create your admin account and configure the platform.
 
 ### Management Commands
 
 | Command | Description |
 | ------- | ----------- |
-| `./bioaf setup` | First-run setup (installs, builds, prints setup code) |
+| `./bioaf setup` | First-run setup (pulls images, generates secrets, prints setup code) |
 | `./bioaf start` | Start all services in dependency order |
 | `./bioaf stop` | Stop all services |
 | `./bioaf restart` | Restart all services |
 | `./bioaf status` | Show service status |
 | `./bioaf logs [service]` | Tail logs (all or one service) |
-| `./bioaf build [service]` | Build (or rebuild) container images |
+| `./bioaf build [service]` | Build container images locally (development only) |
 | `./bioaf migrate` | Run database migrations |
 | `./bioaf migrate-down <rev>` | Downgrade database to a specific revision |
 | `./bioaf seed <script.py>` | Run a seed/data script in the backend container |

@@ -56,7 +56,7 @@ cd bioAF
 2. Generates `docker/.env` with secure random credentials
 3. Generates self-signed TLS certificates
 4. Removes any stale database volumes from a previous install
-5. Builds all container images
+5. Pulls pre-built images from GitHub Container Registry
 6. Starts services in dependency order (db, backend, frontend, nginx)
 7. Runs database migrations
 8. Prints a one-time setup code and the access URL
@@ -139,7 +139,7 @@ From the CLI:
 ```
 
 This backs up the database, fetches the target version tag from GitHub,
-rebuilds container images, restarts services, and runs any new migrations.
+pulls pre-built images, restarts services, and runs any new migrations.
 
 From the UI, admins can click the **Install Update** button on the
 **Settings > Information** page when a new version is available. This

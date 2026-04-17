@@ -6,12 +6,12 @@ on:
     paths:
       - "backend/**"
       - "frontend/**"
-      - "Dockerfile*"
-      - "docker-compose*"
+      - "docker/Dockerfile*"
+      - "docker/docker-compose*"
 
 jobs:
-  build-control-plane:
-    name: Build Control Plane Image
+  build-backend:
+    name: Build Backend Image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -25,6 +25,26 @@ jobs:
           context: ./backend
           file: docker/Dockerfile.backend
           push: false
-          tags: bioaf/bioaf:pr-${{ github.event.pull_request.number }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: bioaf/bioaf-backend:pr-${{ github.event.pull_request.number }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+  build-frontend:
+    name: Build Frontend Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: docker/Dockerfile.frontend
+          push: false
+          build-args: NEXT_PUBLIC_API_URL=
+          tags: bioaf/bioaf-frontend:pr-${{ github.event.pull_request.number }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend

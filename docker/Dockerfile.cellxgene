@@ -9,6 +9,8 @@
 
 FROM python:3.11-slim
 
+LABEL org.opencontainers.image.source=https://github.com/not-that-guy-again/bioAF
+
 RUN pip install --no-cache-dir cellxgene gcsfs
 
 EXPOSE 5005

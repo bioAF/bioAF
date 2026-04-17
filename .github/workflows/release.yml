@@ -5,13 +5,15 @@ on:
     branches:
       - main
 
-permissions:
-  contents: write
-
 jobs:
   release:
     name: Tag & Release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.version.outputs.TAG }}
+      new_release: ${{ steps.check_tag.outputs.new_release }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -29,14 +31,14 @@ jobs:
         id: check_tag
         run: |
           if git rev-parse "v${{ steps.version.outputs.VERSION }}" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "new_release=false" >> "$GITHUB_OUTPUT"
             echo "Tag v${{ steps.version.outputs.VERSION }} already exists, skipping release"
           else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "new_release=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Extract release notes
-        if: steps.check_tag.outputs.exists == 'false'
+        if: steps.check_tag.outputs.new_release == 'true'
         id: notes
         run: |
           TAG="${{ steps.version.outputs.TAG }}"
@@ -50,7 +52,7 @@ jobs:
           echo "Found release notes for $TAG"
 
       - name: Create tag and release
-        if: steps.check_tag.outputs.exists == 'false'
+        if: steps.check_tag.outputs.new_release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -60,3 +62,61 @@ jobs:
           gh release create "$TAG" \
             --title "$TAG" \
             --notes-file /tmp/release_notes.txt
+
+  publish-images:
+    name: Publish Docker Images
+    needs: release
+    if: needs.release.outputs.new_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: docker/Dockerfile.backend
+          push: true
+          tags: |
+            ghcr.io/not-that-guy-again/bioaf-backend:${{ needs.release.outputs.tag }}
+            ghcr.io/not-that-guy-again/bioaf-backend:latest
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: docker/Dockerfile.frontend
+          push: true
+          build-args: NEXT_PUBLIC_API_URL=
+          tags: |
+            ghcr.io/not-that-guy-again/bioaf-frontend:${{ needs.release.outputs.tag }}
+            ghcr.io/not-that-guy-again/bioaf-frontend:latest
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+      - name: Build and push cellxgene
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.cellxgene
+          push: true
+          tags: |
+            ghcr.io/not-that-guy-again/bioaf-cellxgene:${{ needs.release.outputs.tag }}
+            ghcr.io/not-that-guy-again/bioaf-cellxgene:latest
+          cache-from: type=gha,scope=cellxgene
+          cache-to: type=gha,mode=max,scope=cellxgene
