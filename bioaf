@@ -194,17 +194,24 @@ cmd_setup() {
             ;;
     esac
 
-    # If Docker is installed but the socket is inaccessible, the user was likely
-    # added to the docker group by the VM startup script but hasn't re-logged in.
-    # Re-exec this script under `sg docker` to activate the group inline.
+    # If Docker is installed but the socket is inaccessible, try to auto-recover.
+    # Two cases:
+    #   1. User is in the docker group but the current shell session predates
+    #      that change -- re-exec under `sg docker` to activate it inline.
+    #   2. User is not in the docker group at all (e.g. fresh GCE VM where the
+    #      startup script could not add them because /home was empty at boot) --
+    #      add them via sudo, then re-exec under `sg docker`.
     if command -v docker &>/dev/null && ! docker info &>/dev/null; then
+        local reexec_cmd="'$0' setup"
+        [ -n "$setup_version" ] && reexec_cmd="'$0' setup --version $setup_version"
+
         if id -nG 2>/dev/null | grep -qw docker || grep -q "docker.*$(whoami)\|$(whoami).*docker" /etc/group 2>/dev/null; then
             yellow "Activating docker group for this session..."
-            if [ -n "$setup_version" ]; then
-                exec sg docker -c "'$0' setup --version $setup_version"
-            else
-                exec sg docker -c "'$0' setup"
-            fi
+            exec sg docker -c "$reexec_cmd"
+        elif getent group docker &>/dev/null && sudo -n true 2>/dev/null; then
+            yellow "Adding $(whoami) to the docker group..."
+            sudo usermod -aG docker "$(whoami)"
+            exec sg docker -c "$reexec_cmd"
         fi
     fi
 
