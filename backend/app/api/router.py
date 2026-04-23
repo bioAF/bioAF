@@ -64,6 +64,7 @@ from app.api.slack_oauth import router as slack_oauth_router
 from app.api.experiment_auto_runs import router as experiment_auto_runs_router
 from app.api.content_tokens import router as content_tokens_router
 from app.api.sheets_import import router as sheets_import_router
+from app.api.github_repos import router as github_repos_router
 
 api_router = APIRouter()
 
@@ -131,3 +132,4 @@ api_router.include_router(slack_oauth_router)
 api_router.include_router(experiment_auto_runs_router)
 api_router.include_router(content_tokens_router)
 api_router.include_router(sheets_import_router)
+api_router.include_router(github_repos_router)

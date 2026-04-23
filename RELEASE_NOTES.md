@@ -1,5 +1,37 @@
 # Release Notes
 
+## v0.9.0
+
+Work Nodes overhaul: GCE VMs with conda environments, GitHub repo cloning, and a redesigned file picker.
+
+### New features
+
+- **Work Nodes on GCE VMs** -- work nodes now launch as full Linux VMs on Google Compute Engine instead of GKE Pods, with SSH access via session credentials (ADR-043)
+- **Packer-built VM images** -- work node environments build as GCE VM images via Cloud Build + Packer with conda environments pre-installed for fast startup
+- **Independent environment types** -- environments are now tagged as "Notebook" or "Work Node" with separate image pipelines; work node environments are conda-only
+- **GitHub repo cloning** -- users manage a list of GitHub repos on the Work Nodes page; selected repos are automatically cloned into `~/repos/` when a work node boots
+- **MOTD** -- work nodes display a message of the day on SSH login showing paths to input data, repos, outputs, and scratch space
+- **File picker for work nodes** -- the launch wizard now uses the same FileTreeSelector as notebooks, with project -> experiment -> file selection and sample grouping
+- **Default Work Node environment** -- a base conda environment (Python 3.11, numpy, pandas, scipy, matplotlib, etc.) is automatically seeded on first boot
+- **Files page search and filters** -- added filename search, project filter, experiment filter, and source type filter to the Data & Files page
+- **Work node output tracking** -- outputs from work nodes are registered as `work_node_output` source type, distinct from notebook outputs
+
+### Improvements
+
+- **Zone retry on capacity exhaustion** -- VM creation tries zones b, c, f, a in order if GCE returns ZONE_RESOURCE_POOL_EXHAUSTED
+- **E2 machine types** -- added e2-standard-4, e2-standard-8, and e2-highmem-8 with better availability than N2 in constrained regions
+- **Resource failure UX** -- failed launches due to GCP capacity show "Resource Failure" status with a "GCP Resources Unavailable" detail banner instead of generic "failed"
+- **Stop persistence** -- stopping a work node immediately commits a "stopping" status so navigating away no longer shows stale "running" state
+- **Project file filter** -- the project filter on the Files page now includes files associated via experiment, not just direct project_id
+
+### Bug fixes
+
+- Fix Packer template syntax (double braces, missing packer init, universe repo, miniconda TOS)
+- Fix SSH access (password auth via sshd drop-in config, username in SSH command)
+- Fix output sync (SSH into VM before stopping instead of unreliable shutdown hooks)
+- Fix environment rebuild for work node type (was hardcoded to Dockerfile format)
+- Add google-cloud-compute dependency for GCE adapter
+
 ## v0.8.3
 
 Fixes fresh install failure and improves the GCP installer experience.

@@ -313,9 +313,15 @@ class NotebookService:
         query = (
             select(NotebookSession)
             .options(selectinload(NotebookSession.user), selectinload(NotebookSession.experiment))
-            .where(NotebookSession.organization_id == org_id)
+            .where(
+                NotebookSession.organization_id == org_id,
+                NotebookSession.session_type != "ssh",
+            )
         )
-        count_query = select(func.count(NotebookSession.id)).where(NotebookSession.organization_id == org_id)
+        count_query = select(func.count(NotebookSession.id)).where(
+            NotebookSession.organization_id == org_id,
+            NotebookSession.session_type != "ssh",
+        )
 
         if user_id:
             query = query.where(NotebookSession.user_id == user_id)

@@ -61,6 +61,7 @@ from app.models.role import Role, RolePermission
 from app.models.sample_custom_field import SampleCustomField
 from app.models.experiment_auto_run import ExperimentAutoRun
 from app.models.pending_auto_run import PendingAutoRun
+from app.models.github_repo import GitHubRepo
 
 __all__ = [
     "User",
@@ -132,4 +133,5 @@ __all__ = [
     "SampleCustomField",
     "ExperimentAutoRun",
     "PendingAutoRun",
+    "GitHubRepo",
 ]

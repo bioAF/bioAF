@@ -146,6 +146,16 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("Built-in role permission sync failed: %s", e)
 
+    # Seed default work node environment if none exists (ADR-043)
+    from app.services.environment_service import ensure_default_work_node_environment
+
+    try:
+        async with notif_session_factory() as env_seed_session:
+            await ensure_default_work_node_environment(env_seed_session)
+            await env_seed_session.commit()
+    except Exception as e:
+        logger.warning("Default work node environment seed failed: %s", e)
+
     # Resolve any pending upgrades from before the restart
     from app.services.upgrade_service import UpgradeService
 

@@ -39,6 +39,11 @@ export default function DataFilesPage() {
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
   const [experiments, setExperiments] = useState<{ id: number; name: string }[]>([]);
   const [filterType, setFilterType] = useState("");
+  const [filterProjectId, setFilterProjectId] = useState("");
+  const [filterExperimentId, setFilterExperimentId] = useState("");
+  const [filterSourceType, setFilterSourceType] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchInput, setSearchInput] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [reconciling, setReconciling] = useState(false);
   const [reconcileResult, setReconcileResult] = useState<{
@@ -74,6 +79,10 @@ export default function DataFilesPage() {
     try {
       const params = new URLSearchParams();
       if (filterType) params.set("file_type", filterType);
+      if (filterProjectId) params.set("project_id", filterProjectId);
+      if (filterExperimentId) params.set("experiment_id", filterExperimentId);
+      if (filterSourceType) params.set("source_type", filterSourceType);
+      if (searchQuery) params.set("search", searchQuery);
       params.set("page", String(page));
       params.set("page_size", String(pageSize));
       const qs = params.toString();
@@ -86,7 +95,7 @@ export default function DataFilesPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterType, page]);
+  }, [filterType, filterProjectId, filterExperimentId, filterSourceType, searchQuery, page]);
 
   const fetchMeta = useCallback(async () => {
     try {
@@ -283,6 +292,9 @@ export default function DataFilesPage() {
   const sourceLabel = (file: FileResponse): string => {
     switch (file.source_type) {
       case "upload": return file.uploader ? `Uploaded by ${file.uploader.name ?? file.uploader.email}` : "Uploaded";
+      case "pipeline_output": return `Pipeline${file.source_pipeline_run_id ? ` (run #${file.source_pipeline_run_id})` : ""}`;
+      case "notebook_output": return `Notebook${file.source_notebook_session_id ? ` (session #${file.source_notebook_session_id})` : ""}`;
+      case "work_node_output": return `Work Node${file.source_notebook_session_id ? ` (session #${file.source_notebook_session_id})` : ""}`;
       case "qc_dashboard": return `QC Dashboard${file.source_pipeline_run_id ? ` (run #${file.source_pipeline_run_id})` : ""}`;
       case "plot_archive": return `Plot Archive${file.source_pipeline_run_id ? ` (run #${file.source_pipeline_run_id})` : ""}`;
       default: return file.source_type;
@@ -321,7 +333,52 @@ export default function DataFilesPage() {
           <h1 className="text-2xl font-bold mb-6">Files</h1>
 
           <div className="space-y-4">
-            <div className="flex gap-4 items-center">
+            {/* Search and filters */}
+            <div className="flex flex-wrap gap-3 items-center">
+              <form
+                onSubmit={(e) => { e.preventDefault(); setSearchQuery(searchInput); setPage(1); }}
+                className="flex gap-1"
+              >
+                <input
+                  type="text"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  placeholder="Search by filename..."
+                  className="px-3 py-2 border border-gray-300 rounded-md text-sm w-56"
+                />
+                <button type="submit" className="px-3 py-2 bg-gray-100 border border-gray-300 rounded-md text-sm hover:bg-gray-200">
+                  Search
+                </button>
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => { setSearchInput(""); setSearchQuery(""); setPage(1); }}
+                    className="px-2 py-2 text-gray-400 hover:text-gray-600 text-sm"
+                  >
+                    Clear
+                  </button>
+                )}
+              </form>
+              <select
+                value={filterProjectId}
+                onChange={(e) => { setFilterProjectId(e.target.value); setFilterExperimentId(""); setPage(1); }}
+                className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+              >
+                <option value="">All projects</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              <select
+                value={filterExperimentId}
+                onChange={(e) => { setFilterExperimentId(e.target.value); setPage(1); }}
+                className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+              >
+                <option value="">All experiments</option>
+                {experiments.map((e) => (
+                  <option key={e.id} value={e.id}>{e.name}</option>
+                ))}
+              </select>
               <select
                 value={filterType}
                 onChange={(e) => { setFilterType(e.target.value); setPage(1); }}
@@ -329,10 +386,19 @@ export default function DataFilesPage() {
               >
                 <option value="">All types</option>
                 {fileTypes.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
+                  <option key={t} value={t}>{t}</option>
                 ))}
+              </select>
+              <select
+                value={filterSourceType}
+                onChange={(e) => { setFilterSourceType(e.target.value); setPage(1); }}
+                className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+              >
+                <option value="">All sources</option>
+                <option value="upload">Upload</option>
+                <option value="pipeline_output">Pipeline</option>
+                <option value="notebook_output">Notebook</option>
+                <option value="work_node_output">Work Node</option>
               </select>
 
               {selectedIds.size > 0 && (

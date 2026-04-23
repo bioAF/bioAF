@@ -63,6 +63,7 @@ def _env_response(env) -> EnvironmentResponse:
         name=env.name,
         description=env.description,
         visibility=env.visibility,
+        environment_type=env.environment_type,
         version_count=len(versions),
         latest_version=latest,
         created_by=UserSummary(
@@ -79,11 +80,12 @@ def _env_response(env) -> EnvironmentResponse:
 
 @router.get("", response_model=EnvironmentListResponse)
 async def list_environments(
+    type: str | None = None,
     current_user: dict = require_permission("environments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
-    envs = await EnvironmentService.list_environments(session, org_id)
+    envs = await EnvironmentService.list_environments(session, org_id, environment_type=type)
     return EnvironmentListResponse(
         environments=[_env_response(e) for e in envs],
         total=len(envs),
@@ -107,6 +109,7 @@ async def create_environment(
             name=data.name,
             description=data.description,
             visibility=data.visibility,
+            environment_type=data.environment_type,
         )
         await session.commit()
         # Re-fetch to load relationships
@@ -135,6 +138,7 @@ async def get_environment(
         name=env.name,
         description=env.description,
         visibility=env.visibility,
+        environment_type=env.environment_type,
         versions=[
             EnvironmentVersionSummary(
                 id=v.id,
