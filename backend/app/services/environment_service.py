@@ -1,6 +1,6 @@
 import logging
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.environment import Environment
@@ -9,17 +9,44 @@ from app.services.audit_service import log_action
 
 logger = logging.getLogger("bioaf.environment")
 
+# Default conda environment.yml for work nodes.  Provides a practical
+# starting point that scientists can extend with their own packages.
+DEFAULT_WORK_NODE_CONDA_YML = """\
+name: bioaf
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  - seaborn
+  - jupyter
+  - ipython
+  - scikit-learn
+  - pip
+"""
+
 VALID_VISIBILITIES = ("team", "organization")
 VALID_DEFINITION_FORMATS = ("dockerfile", "conda")
+VALID_ENVIRONMENT_TYPES = ("notebook", "work_node")
 
 
 class EnvironmentService:
     @staticmethod
-    async def list_environments(session: AsyncSession, org_id: int) -> list[Environment]:
-        """List environments within an organization."""
-        result = await session.execute(
-            select(Environment).where(Environment.organization_id == org_id).order_by(Environment.created_at.desc())
-        )
+    async def list_environments(
+        session: AsyncSession,
+        org_id: int,
+        environment_type: str | None = None,
+    ) -> list[Environment]:
+        """List environments within an organization, optionally filtered by type."""
+        query = select(Environment).where(Environment.organization_id == org_id)
+        if environment_type:
+            query = query.where(Environment.environment_type == environment_type)
+        query = query.order_by(Environment.created_at.desc())
+        result = await session.execute(query)
         return list(result.scalars().all())
 
     @staticmethod
@@ -40,9 +67,12 @@ class EnvironmentService:
         name: str,
         description: str | None = None,
         visibility: str = "team",
+        environment_type: str = "notebook",
     ) -> Environment:
         if visibility not in VALID_VISIBILITIES:
             raise ValueError(f"Invalid visibility: {visibility}")
+        if environment_type not in VALID_ENVIRONMENT_TYPES:
+            raise ValueError(f"Invalid environment_type: {environment_type}")
 
         # Check for duplicate name within org
         existing = await session.execute(
@@ -60,6 +90,7 @@ class EnvironmentService:
             organization_id=org_id,
             created_by_user_id=user_id,
             visibility=visibility,
+            environment_type=environment_type,
         )
         session.add(env)
         await session.flush()
@@ -152,6 +183,10 @@ class EnvironmentService:
 
         if definition_format not in VALID_DEFINITION_FORMATS:
             raise ValueError(f"Invalid definition_format: {definition_format}")
+
+        # Work node environments only support conda (ADR-043)
+        if env.environment_type == "work_node" and definition_format != "conda":
+            raise ValueError("Work node environments only support conda definition format")
 
         # Auto-increment version number
         result = await session.execute(
@@ -281,3 +316,67 @@ class EnvironmentService:
         """Get all versions currently in 'building' status."""
         result = await session.execute(select(EnvironmentVersion).where(EnvironmentVersion.status == "building"))
         return list(result.scalars().all())
+
+
+async def ensure_default_work_node_environment(session: AsyncSession) -> None:
+    """Create a default work node environment if none exists yet.
+
+    Called at startup so users always have a base conda environment to
+    build on for work nodes.  The version is created in 'draft' status --
+    the user must trigger a build before it can be used.
+    """
+    # Get the org (single-tenant)
+    row = (await session.execute(text("SELECT id FROM organizations LIMIT 1"))).fetchone()
+    if not row:
+        return
+    org_id = row[0]
+
+    # Skip if a work_node environment already exists
+    existing = (
+        await session.execute(
+            text(
+                "SELECT id FROM environments WHERE organization_id = :org_id AND environment_type = 'work_node' LIMIT 1"
+            ).bindparams(org_id=org_id)
+        )
+    ).fetchone()
+    if existing:
+        return
+
+    # Get the first admin user to attribute creation to
+    admin_row = (
+        await session.execute(
+            text(
+                "SELECT u.id FROM users u "
+                "JOIN roles r ON u.role_id = r.id "
+                "WHERE u.organization_id = :org_id AND r.name = 'admin' "
+                "ORDER BY u.id LIMIT 1"
+            ).bindparams(org_id=org_id)
+        )
+    ).fetchone()
+    if not admin_row:
+        return
+    user_id = admin_row[0]
+
+    env = Environment(
+        name="Default Work Node",
+        description="Base Python environment for work nodes. Build this environment, then customize with your own packages.",
+        organization_id=org_id,
+        created_by_user_id=user_id,
+        visibility="organization",
+        environment_type="work_node",
+    )
+    session.add(env)
+    await session.flush()
+
+    version = EnvironmentVersion(
+        environment_id=env.id,
+        version_number=1,
+        status="draft",
+        definition_format="conda",
+        definition_content=DEFAULT_WORK_NODE_CONDA_YML,
+        created_by_user_id=user_id,
+    )
+    session.add(version)
+    await session.flush()
+
+    logger.info("Created default work node environment '%s' (id=%d)", env.name, env.id)

@@ -43,6 +43,12 @@ class ComputeSession(Base):
     git_commit_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     gcs_output_prefix: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
+    # GCE VM columns (ADR-043)
+    gce_instance_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    gce_zone: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    gce_project_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    github_repo_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
     user = relationship("User")
     organization = relationship("Organization")
     experiment = relationship("Experiment")

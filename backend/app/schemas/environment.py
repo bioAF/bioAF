@@ -16,6 +16,7 @@ class EnvironmentCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
     visibility: str = "team"
+    environment_type: str = "notebook"
 
 
 class EnvironmentUpdateRequest(BaseModel):
@@ -41,6 +42,7 @@ class EnvironmentResponse(BaseModel):
     name: str
     description: str | None = None
     visibility: str
+    environment_type: str = "notebook"
     version_count: int = 0
     latest_version: EnvironmentVersionSummary | None = None
     created_by: UserSummary | None = None
@@ -60,6 +62,7 @@ class EnvironmentDetailResponse(BaseModel):
     name: str
     description: str | None = None
     visibility: str
+    environment_type: str = "notebook"
     versions: list[EnvironmentVersionSummary]
     created_by: UserSummary | None = None
     created_at: datetime
