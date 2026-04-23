@@ -140,7 +140,9 @@ test("shows experiment name when file is linked", async () => {
   render(<DataFilesPage />);
 
   await waitFor(() => {
-    expect(screen.getByText("RNA-seq Batch 1")).toBeInTheDocument();
+    // Experiment name appears in both the filter dropdown and the association column
+    const matches = screen.getAllByText("RNA-seq Batch 1");
+    expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 });
 

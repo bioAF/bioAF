@@ -17,7 +17,8 @@ class WorkNodeLaunchRequest(BaseModel):
     project_id: int
     environment_version_id: int
     machine_type: str
-    data_mount_paths: list[str] | None = None
+    input_file_ids: list[int] | None = None
+    github_repo_ids: list[int] | None = None
 
 
 class WorkNodeResponse(BaseModel):
@@ -27,12 +28,15 @@ class WorkNodeResponse(BaseModel):
     project_id: int | None = None
     environment_version_id: int | None = None
     machine_type: str | None = None
-    data_mount_paths: list[str] | None = None
+    input_file_ids: list[int] | None = None
     resource_profile: str
     cpu_cores: int
     memory_gb: int
     status: str
     access_url: str | None = None
+    gce_instance_name: str | None = None
+    gce_zone: str | None = None
+    github_repo_ids: list[int] | None = None
     heartbeat_at: datetime | None = None
     started_at: datetime | None = None
     stopped_at: datetime | None = None

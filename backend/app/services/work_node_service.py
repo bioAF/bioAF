@@ -1,4 +1,8 @@
-"""Work node service for SSH-accessible compute sessions (ADR-034)."""
+"""Work node service for GCE VM compute sessions (ADR-043).
+
+Manages the lifecycle of SSH-accessible work nodes running as GCE VMs
+with Packer-built images and conda environments.
+"""
 
 import asyncio
 import logging
@@ -17,8 +21,8 @@ from app.services.event_types import (
     WORK_NODE_STOPPED,
     WORK_NODE_HEARTBEAT_TIMEOUT,
 )
-from app.services.machine_types import MACHINE_TYPE_NAMES, get_machine_type
-from app.adapters.registry import get_notebook_adapter
+from app.services.machine_types import MACHINE_TYPES, get_machine_type
+from app.adapters.registry import get_work_node_adapter
 
 logger = logging.getLogger("bioaf.work_nodes")
 
@@ -35,20 +39,22 @@ class WorkNodeService:
         project_id: int,
         environment_version_id: int,
         machine_type: str,
-        data_mount_paths: list[str] | None = None,
+        input_file_ids: list[int] | None = None,
+        github_repo_ids: list[int] | None = None,
     ) -> ComputeSession:
         # Validate machine type
         mt = get_machine_type(machine_type)
         if not mt:
-            raise ValueError(
-                f"Invalid machine type: {machine_type}. Valid types: {', '.join(sorted(MACHINE_TYPE_NAMES))}"
-            )
+            valid_names = sorted(m["name"] for m in MACHINE_TYPES)
+            raise ValueError(f"Invalid machine type: {machine_type}. Valid types: {', '.join(valid_names)}")
 
-        # Validate environment version is ready
+        # Validate environment version is ready and is a work_node environment
         from app.models.environment_version import EnvironmentVersion
 
         ev_result = await session.execute(
-            select(EnvironmentVersion).where(EnvironmentVersion.id == environment_version_id)
+            select(EnvironmentVersion)
+            .options(selectinload(EnvironmentVersion.environment))
+            .where(EnvironmentVersion.id == environment_version_id)
         )
         env_version = ev_result.scalar_one_or_none()
         if not env_version:
@@ -57,6 +63,10 @@ class WorkNodeService:
             raise ValueError(
                 f"Environment version must be in ready status (current: {env_version.status}). "
                 "Build the environment first."
+            )
+        if env_version.environment.environment_type != "work_node":
+            raise ValueError(
+                "Only work node environments can be used for work nodes. This environment is configured for notebooks."
             )
 
         # Require session credentials for SSH
@@ -68,6 +78,24 @@ class WorkNodeService:
                 "Session credentials are required for work nodes. "
                 "Please set up your session credentials in your profile settings."
             )
+
+        # Validate and fetch GitHub repos
+        github_repos_data: list[dict] = []
+        if github_repo_ids:
+            from app.models.github_repo import GitHubRepo
+
+            repo_result = await session.execute(
+                select(GitHubRepo).where(
+                    GitHubRepo.id.in_(github_repo_ids),
+                    GitHubRepo.user_id == user_id,
+                )
+            )
+            repos = list(repo_result.scalars().all())
+            found_ids = {r.id for r in repos}
+            missing = set(github_repo_ids) - found_ids
+            if missing:
+                raise ValueError(f"GitHub repos not found: {missing}")
+            github_repos_data = [{"git_ssh_url": r.git_ssh_url, "display_name": r.display_name} for r in repos]
 
         # Check concurrent work node quota
         max_nodes = await WorkNodeService._get_max_nodes_per_user(session)
@@ -88,6 +116,30 @@ class WorkNodeService:
         # Generate heartbeat token
         heartbeat_token = secrets.token_urlsafe(32)
 
+        # Validate and resolve input files
+        input_files_spec: list[dict] = []
+        if input_file_ids:
+            from app.models.file import File
+            from app.services.notebook_service import _resolve_input_file_context, _build_relative_path
+
+            file_results = await session.execute(select(File).where(File.id.in_(input_file_ids)))
+            found_files = {f.id: f for f in file_results.scalars().all()}
+
+            name_cache = await _resolve_input_file_context(session, found_files)
+
+            for fid in input_file_ids:
+                f = found_files.get(fid)
+                if not f or f.organization_id != org_id:
+                    raise ValueError(f"File {fid} not found or not accessible")
+                rel_path = _build_relative_path(f, name_cache)
+                input_files_spec.append(
+                    {
+                        "file_id": f.id,
+                        "gcs_uri": f.gcs_uri,
+                        "relative_path": rel_path,
+                    }
+                )
+
         # Create session record
         compute_session = ComputeSession(
             user_id=user_id,
@@ -96,7 +148,8 @@ class WorkNodeService:
             project_id=project_id,
             environment_version_id=environment_version_id,
             machine_type=machine_type,
-            data_mount_paths=data_mount_paths or [],
+            data_mount_paths=input_file_ids or [],
+            github_repo_ids=github_repo_ids or [],
             resource_profile="custom",
             cpu_cores=mt["cpu"],
             memory_gb=mt["memory_gb"],
@@ -112,48 +165,75 @@ class WorkNodeService:
         config_rows = await session.execute(
             text(
                 "SELECT key, value FROM platform_config "
-                "WHERE key IN ('working_bucket_name', 'notebook_runner_sa_email')"
+                "WHERE key IN ('working_bucket_name', 'notebook_runner_sa_email', "
+                "'gcp_project_id', 'gcp_zone')"
             )
         )
         config_map = {row[0]: row[1] for row in config_rows.all()}
 
-        # Launch via adapter
+        # Extract conda env name from definition
+        conda_env_name = "bioaf"
+        if env_version.definition_format == "conda":
+            try:
+                import yaml
+
+                data = yaml.safe_load(env_version.definition_content)
+                conda_env_name = data.get("name", "bioaf") if data else "bioaf"
+            except Exception:
+                pass
+
+        # Build environment label for MOTD
+        env_label = f"{env_version.environment.name} v{env_version.version_number}.{env_version.build_number}"
+
+        # Launch via GCE adapter
         try:
-            adapter = get_notebook_adapter()
-            spec: dict = {
-                "session_type": "ssh",
-                "resource_profile": "custom",
-                "cpu_cores": mt["cpu"],
-                "memory_gb": mt["memory_gb"],
-                "user_id": user_id,
+            adapter = get_work_node_adapter()
+            vm_spec: dict = {
                 "session_id": compute_session.id,
-                "image": env_version.image_uri,
+                "user_id": user_id,
                 "machine_type": machine_type,
-                "data_mount_paths": data_mount_paths or [],
-                "node_pool": mt["node_pool"],
-                "gpu": mt["gpu"],
+                "gce_machine_type": mt.get("gce_machine_type", machine_type),
+                "image_uri": env_version.image_uri,
+                "input_files": input_files_spec,
                 "heartbeat_token": heartbeat_token,
                 "session_credentials": {
                     "username": cred.username,
                     "password_hash": cred.password_hash,
                 },
+                "ssh_public_key": cred.ssh_public_key,
+                "ssh_private_key": cred.ssh_private_key,
+                "github_repos": github_repos_data,
+                "conda_env_name": conda_env_name,
+                "environment_label": env_label,
             }
 
             bucket_name = (config_map.get("working_bucket_name") or "").strip()
             if bucket_name and bucket_name != "null":
-                spec["working_bucket"] = bucket_name
+                vm_spec["working_bucket"] = bucket_name
 
             sa_email = (config_map.get("notebook_runner_sa_email") or "").strip()
             if sa_email and sa_email != "null":
-                spec["notebook_runner_sa_email"] = sa_email
+                vm_spec["service_account_email"] = sa_email
 
-            result = await adapter.launch_session(spec)
+            gcp_project = (config_map.get("gcp_project_id") or "").strip()
+            if gcp_project and gcp_project != "null":
+                vm_spec["gcp_project_id"] = gcp_project
 
-            compute_session.slurm_job_id = str(result.get("session_id", ""))
-            compute_session.k8s_pod_name = result.get("pod_name")
-            compute_session.k8s_namespace = result.get("namespace")
+            gcp_zone = (config_map.get("gcp_zone") or "").strip()
+            if gcp_zone and gcp_zone != "null":
+                vm_spec["gcp_zone"] = gcp_zone
+
+            # GPU accelerator info
+            if mt.get("accelerator_type"):
+                vm_spec["accelerator_type"] = mt["accelerator_type"]
+                vm_spec["accelerator_count"] = mt.get("accelerator_count", 1)
+
+            result = await adapter.launch_vm(vm_spec)
+
+            compute_session.gce_instance_name = result.get("instance_name")
+            compute_session.gce_zone = result.get("zone")
+            compute_session.gce_project_id = result.get("gcp_project_id")
             compute_session.access_url = result.get("access_url")
-            compute_session.gcs_home_prefix = result.get("gcs_home_prefix")
             adapter_status = result.get("status", "starting")
             if adapter_status == "error":
                 compute_session.status = "failed"
@@ -177,6 +257,7 @@ class WorkNodeService:
                 "machine_type": machine_type,
                 "environment_version_id": environment_version_id,
                 "project_id": project_id,
+                "github_repo_ids": github_repo_ids or [],
                 "status": compute_session.status,
             },
         )
@@ -212,6 +293,12 @@ class WorkNodeService:
 
         old_status = compute_session.status
 
+        # Set status to "stopping" and commit immediately so the UI
+        # reflects the in-progress state even if the request times out.
+        compute_session.status = "stopping"
+        await session.flush()
+        await session.commit()
+
         # Look up working bucket for output sync
         working_bucket_row = await session.execute(
             text("SELECT value FROM platform_config WHERE key = 'working_bucket_name'")
@@ -224,16 +311,15 @@ class WorkNodeService:
                 working_bucket = val
 
         terminate_result: dict = {}
-        if compute_session.k8s_pod_name:
+        if compute_session.gce_instance_name:
             try:
-                adapter = get_notebook_adapter()
-                terminate_result = await adapter.terminate_session(
-                    compute_session.slurm_job_id or "",
-                    pod_name=compute_session.k8s_pod_name or "",
-                    namespace=compute_session.k8s_namespace or "bioaf-notebooks",
-                    gcs_home_prefix=compute_session.gcs_home_prefix or "",
+                adapter = get_work_node_adapter()
+                terminate_result = await adapter.terminate_vm(
+                    compute_session.gce_instance_name,
+                    compute_session.gce_zone or "",
+                    gcp_project_id=compute_session.gce_project_id or "",
+                    session_id=compute_session.id,
                     working_bucket=working_bucket,
-                    session_type="ssh",
                 )
             except Exception as e:
                 logger.warning("Failed to terminate work node %d: %s", session_id, e)
@@ -252,6 +338,7 @@ class WorkNodeService:
                     experiment_id=compute_session.experiment_id,
                     user_id=compute_session.user_id,
                     gcs_files=output_files,
+                    source_type="work_node_output",
                 )
             except Exception as e:
                 logger.warning("Output registration failed for work node %d: %s", session_id, e)
@@ -393,10 +480,7 @@ class WorkNodeService:
         session: AsyncSession,
         idle_timeout_hours: int | None = None,
     ) -> None:
-        """Terminate SSH sessions with stale heartbeats.
-
-        Reads idle_timeout_hours from platform_config if not provided.
-        """
+        """Terminate SSH sessions with stale heartbeats."""
         try:
             if idle_timeout_hours is None:
                 idle_timeout_hours = await WorkNodeService._get_idle_timeout(session)
@@ -423,14 +507,14 @@ class WorkNodeService:
                         idle_hours,
                     )
 
-                    if node.k8s_pod_name:
+                    if node.gce_instance_name:
                         try:
-                            adapter = get_notebook_adapter()
-                            await adapter.terminate_session(
-                                node.slurm_job_id or "",
-                                pod_name=node.k8s_pod_name or "",
-                                namespace=node.k8s_namespace or "bioaf-notebooks",
-                                gcs_home_prefix=node.gcs_home_prefix or "",
+                            adapter = get_work_node_adapter()
+                            await adapter.terminate_vm(
+                                node.gce_instance_name,
+                                node.gce_zone or "",
+                                gcp_project_id=node.gce_project_id or "",
+                                session_id=node.id,
                             )
                         except Exception as e:
                             logger.warning("Failed to terminate stale work node %d: %s", node.id, e)

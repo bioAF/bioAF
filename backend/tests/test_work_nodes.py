@@ -79,6 +79,7 @@ async def seed_environment(session, admin_user):
         description="Test environment",
         organization_id=admin_user.organization_id,
         created_by_user_id=admin_user.id,
+        environment_type="work_node",
     )
     session.add(env)
     await session.flush()
@@ -87,9 +88,9 @@ async def seed_environment(session, admin_user):
         environment_id=env.id,
         version_number=1,
         status="ready",
-        definition_format="dockerfile",
-        definition_content="FROM ubuntu:22.04",
-        image_uri="us-central1-docker.pkg.dev/test/repo/test-env:v1",
+        definition_format="conda",
+        definition_content="name: test\nchannels:\n  - conda-forge\ndependencies:\n  - python=3.11\n",
+        image_uri="projects/test-project/global/images/bioaf-worknode-test-v1-1",
         created_by_user_id=admin_user.id,
     )
     session.add(version)
@@ -99,8 +100,8 @@ async def seed_environment(session, admin_user):
         environment_id=env.id,
         version_number=2,
         status="draft",
-        definition_format="dockerfile",
-        definition_content="FROM ubuntu:22.04\nRUN apt-get update",
+        definition_format="conda",
+        definition_content="name: test\nchannels:\n  - conda-forge\ndependencies:\n  - python=3.11\n  - numpy\n",
         created_by_user_id=admin_user.id,
     )
     session.add(draft_version)
@@ -453,7 +454,6 @@ async def test_get_work_node_detail(
             "project_id": seed_project.id,
             "environment_version_id": seed_environment["ready_version"].id,
             "machine_type": "n2-standard-4",
-            "data_mount_paths": ["/uploads/data1"],
         },
         headers={"Authorization": f"Bearer {comp_bio_token}"},
     )
@@ -469,7 +469,6 @@ async def test_get_work_node_detail(
     assert data["id"] == node_id
     assert data["session_type"] == "ssh"
     assert data["machine_type"] == "n2-standard-4"
-    assert data["data_mount_paths"] == ["/uploads/data1"]
 
 
 # -- Stop work node --

@@ -116,6 +116,26 @@ class NotebookProvider(ABC):
         """Get SSH/exec command for direct access to the session."""
 
 
+class WorkNodeProvider(ABC):
+    """Abstract interface for work node VM backends (GCE)."""
+
+    @abstractmethod
+    async def launch_vm(self, vm_spec: dict) -> dict:
+        """Create and start a GCE VM. Returns dict with instance_name, zone, status, external_ip."""
+
+    @abstractmethod
+    async def terminate_vm(self, instance_name: str, zone: str, **kwargs) -> dict:
+        """Sync outputs, then stop and delete a VM. Returns output_files and gcs_output_prefix."""
+
+    @abstractmethod
+    async def get_vm_status(self, instance_name: str, zone: str) -> dict:
+        """Get VM status and external IP."""
+
+    @abstractmethod
+    async def list_vms(self, filters: dict | None = None) -> list[dict]:
+        """List active work node VMs."""
+
+
 class CellxgeneProvider(ABC):
     """Abstract interface for cellxgene visualization backends."""
 

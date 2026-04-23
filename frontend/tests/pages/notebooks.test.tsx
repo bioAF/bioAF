@@ -159,7 +159,7 @@ describe("NotebooksPage", () => {
   });
 
   // Test 33: Active sessions table
-  it("renders active sessions table with Open, Stop, Sync buttons", async () => {
+  it("renders active sessions table with Open, Stop, Details buttons", async () => {
     mockApiGet.mockImplementation((url: string) => {
       if (url.includes("sessions")) return Promise.resolve(mockSessions);
       if (url.includes("experiments")) return Promise.resolve(mockExperiments);
@@ -173,7 +173,7 @@ describe("NotebooksPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Open")).toBeInTheDocument();
       expect(screen.getByText("Stop")).toBeInTheDocument();
-      expect(screen.getByText("Sync")).toBeInTheDocument();
+      expect(screen.getByText("Details")).toBeInTheDocument();
     });
   });
 

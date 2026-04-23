@@ -40,6 +40,7 @@ function gcsSubpath(gcsUri: string): string {
 const SOURCE_LABELS: Record<string, string> = {
   pipeline_output: "Pipeline",
   notebook_output: "Notebook",
+  work_node_output: "Work Node",
   upload: "Upload",
 };
 
@@ -50,6 +51,7 @@ function sourceLabel(sourceType: string): string {
 const SOURCE_COLORS: Record<string, string> = {
   pipeline_output: "bg-purple-100 text-purple-700",
   notebook_output: "bg-teal-100 text-teal-700",
+  work_node_output: "bg-orange-100 text-orange-700",
   upload: "bg-gray-100 text-gray-600",
 };
 

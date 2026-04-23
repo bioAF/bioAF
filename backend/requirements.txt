@@ -38,6 +38,8 @@ google-cloud-bigquery>=3.20
 google-api-python-client>=2.130
 # Cloud Logging fallback for pipeline log persistence
 google-cloud-logging>=3.10
+# GCE VM management for work nodes (ADR-043)
+google-cloud-compute>=1.19
 # GitHub App JWT authentication
 PyJWT[crypto]>=2.8
 # Provenance report generation

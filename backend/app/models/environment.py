@@ -15,6 +15,7 @@ class Environment(Base):
     organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False)
     created_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     visibility: Mapped[str] = mapped_column(String(50), nullable=False, server_default="team")
+    environment_type: Mapped[str] = mapped_column(String(50), nullable=False, server_default="notebook")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

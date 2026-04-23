@@ -32,8 +32,11 @@ export default function EnvironmentsPage() {
   const [selectedEnv, setSelectedEnv] = useState<EnvironmentDetailResponse | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("versions");
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createForm, setCreateForm] = useState({ name: "", description: "" });
+  const [createForm, setCreateForm] = useState({ name: "", description: "", environment_type: "notebook" as "notebook" | "work_node" });
   const [creating, setCreating] = useState(false);
+
+  // Type filter state
+  const [typeFilter, setTypeFilter] = useState<"all" | "notebook" | "work_node">("all");
 
   // Version creation state
   const [newVersionFormat, setNewVersionFormat] = useState<"dockerfile" | "conda">("dockerfile");
@@ -60,9 +63,11 @@ export default function EnvironmentsPage() {
     loadEnvironments();
   }, [router]);
 
-  async function loadEnvironments() {
+  async function loadEnvironments(type?: string) {
     try {
-      const data = await api.get<EnvironmentListResponse>("/api/v1/environments");
+      const filterType = type ?? typeFilter;
+      const query = filterType !== "all" ? `?type=${filterType}` : "";
+      const data = await api.get<EnvironmentListResponse>(`/api/v1/environments${query}`);
       setEnvironments(data.environments);
       setLoadError(null);
     } catch (err) {
@@ -76,6 +81,10 @@ export default function EnvironmentsPage() {
       setSelectedEnv(detail);
       setActiveTab("versions");
       setSelectedVersion(null);
+      // Work node environments only support conda
+      if (detail.environment_type === "work_node") {
+        setNewVersionFormat("conda");
+      }
     } catch {}
   }
 
@@ -85,9 +94,10 @@ export default function EnvironmentsPage() {
       await api.post("/api/v1/environments", {
         name: createForm.name,
         description: createForm.description || undefined,
+        environment_type: createForm.environment_type,
       });
       setShowCreateModal(false);
-      setCreateForm({ name: "", description: "" });
+      setCreateForm({ name: "", description: "", environment_type: "notebook" });
       loadEnvironments();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to create environment");
@@ -192,7 +202,7 @@ export default function EnvironmentsPage() {
       const newVersion = await api.post<EnvironmentVersionResponse>(
         `/api/v1/environments/${selectedEnv.id}/versions`,
         {
-          definition_format: "dockerfile",
+          definition_format: selectedEnv.environment_type === "work_node" ? "conda" : "dockerfile",
           definition_content: rebuildTemplateContent,
         }
       );
@@ -249,7 +259,7 @@ export default function EnvironmentsPage() {
           {loadError && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">
               {loadError}
-              <button onClick={loadEnvironments} className="ml-2 underline">Retry</button>
+              <button onClick={() => loadEnvironments()} className="ml-2 underline">Retry</button>
             </div>
           )}
           <div className="flex items-center justify-between mb-6">
@@ -266,6 +276,19 @@ export default function EnvironmentsPage() {
 
           {!selectedEnv ? (
             /* Environment Cards */
+            <>
+            {/* Type filter tabs */}
+            <div className="flex gap-1 mb-4 bg-gray-100 rounded-lg p-1 w-fit">
+              {([["all", "All"], ["notebook", "Notebook"], ["work_node", "Work Node"]] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => { setTypeFilter(value); loadEnvironments(value); }}
+                  className={`px-3 py-1.5 text-sm rounded-md transition-colors ${typeFilter === value ? "bg-white shadow font-medium text-gray-900" : "text-gray-500 hover:text-gray-700"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {environments.map((env) => (
                 <div
@@ -273,8 +296,11 @@ export default function EnvironmentsPage() {
                   onClick={() => selectEnvironment(env.id)}
                   className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow cursor-pointer"
                 >
-                  <div className="mb-3">
+                  <div className="mb-3 flex items-center gap-2">
                     <h3 className="font-semibold text-lg">{env.name}</h3>
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full ${env.environment_type === "work_node" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}`}>
+                      {env.environment_type === "work_node" ? "Work Node" : "Notebook"}
+                    </span>
                   </div>
                   <p className="text-sm text-gray-500 mb-4 line-clamp-2">{env.description || "No description"}</p>
                   <div className="flex items-center justify-between">
@@ -298,6 +324,7 @@ export default function EnvironmentsPage() {
                 </div>
               )}
             </div>
+            </>
           ) : selectedVersion ? (
             /* Version Detail View */
             <div>
@@ -374,7 +401,12 @@ export default function EnvironmentsPage() {
                 <div className="p-6 border-b">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h2 className="text-xl font-bold">{selectedEnv.name}</h2>
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-xl font-bold">{selectedEnv.name}</h2>
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full ${selectedEnv.environment_type === "work_node" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}`}>
+                          {selectedEnv.environment_type === "work_node" ? "Work Node" : "Notebook"}
+                        </span>
+                      </div>
                       <p className="text-sm text-gray-500">{selectedEnv.description}</p>
                     </div>
                     <div className="flex items-center gap-3">
@@ -467,14 +499,18 @@ export default function EnvironmentsPage() {
                     <div className="space-y-4">
                       <div>
                         <label className="text-sm text-gray-500 block mb-1">Format</label>
-                        <select
-                          value={newVersionFormat}
-                          onChange={(e) => setNewVersionFormat(e.target.value as "dockerfile" | "conda")}
-                          className="border rounded px-3 py-2 text-sm"
-                        >
-                          <option value="dockerfile">Dockerfile</option>
-                          <option value="conda">Conda (environment.yml)</option>
-                        </select>
+                        {selectedEnv.environment_type === "work_node" ? (
+                          <span className="text-sm text-gray-700">Conda (environment.yml)</span>
+                        ) : (
+                          <select
+                            value={newVersionFormat}
+                            onChange={(e) => setNewVersionFormat(e.target.value as "dockerfile" | "conda")}
+                            className="border rounded px-3 py-2 text-sm"
+                          >
+                            <option value="dockerfile">Dockerfile</option>
+                            <option value="conda">Conda (environment.yml)</option>
+                          </select>
+                        )}
                       </div>
                       <div>
                         <label className="text-sm text-gray-500 block mb-1">
@@ -511,6 +547,22 @@ export default function EnvironmentsPage() {
               <div className="bg-white rounded-lg shadow-xl p-6 w-96">
                 <h3 className="font-semibold text-lg mb-4">New Environment</h3>
                 <div className="space-y-3">
+                  <div>
+                    <label className="text-sm text-gray-500 block mb-1">Type</label>
+                    <select
+                      value={createForm.environment_type}
+                      onChange={(e) => setCreateForm({ ...createForm, environment_type: e.target.value as "notebook" | "work_node" })}
+                      className="w-full border rounded px-3 py-2 text-sm"
+                    >
+                      <option value="notebook">Notebook</option>
+                      <option value="work_node">Work Node</option>
+                    </select>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {createForm.environment_type === "work_node"
+                        ? "Work node environments use conda and build as GCE VM images."
+                        : "Notebook environments use Dockerfile or conda and build as container images."}
+                    </p>
+                  </div>
                   <div>
                     <label className="text-sm text-gray-500 block mb-1">Name</label>
                     <input

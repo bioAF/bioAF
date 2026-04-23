@@ -28,6 +28,139 @@ from app.services.notebook_image_service import (
 
 logger = logging.getLogger("bioaf.environment_build")
 
+# Packer template for building GCE VM images with conda environments (ADR-043).
+# Stored as a string constant; written to the build context at build time.
+PACKER_VM_TEMPLATE = """\
+packer {
+  required_plugins {
+    googlecompute = {
+      version = ">= 1.1.0"
+      source  = "github.com/hashicorp/googlecompute"
+    }
+  }
+}
+
+variable "project_id" {
+  type = string
+}
+
+variable "zone" {
+  type = string
+}
+
+variable "image_name" {
+  type = string
+}
+
+variable "environment_yml_gcs" {
+  type = string
+}
+
+variable "conda_env_name" {
+  type    = string
+  default = "bioaf"
+}
+
+source "googlecompute" "work_node" {
+  project_id   = var.project_id
+  zone         = var.zone
+  machine_type = "e2-standard-4"
+
+  source_image_family = "ubuntu-2204-lts"
+  source_image_project_id = ["ubuntu-os-cloud"]
+
+  image_name        = var.image_name
+  image_description = "bioAF work node environment"
+  image_family      = "bioaf-worknode"
+  image_labels = {
+    bioaf-managed = "true"
+  }
+
+  disk_size = 50
+  disk_type = "pd-ssd"
+
+  ssh_username = "packer"
+}
+
+build {
+  sources = ["source.googlecompute.work_node"]
+
+  # System packages
+  provisioner "shell" {
+    inline = [
+      "sudo add-apt-repository -y universe",
+      "sudo apt-get update",
+      "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server git tmux htop curl fail2ban",
+      "sudo systemctl enable ssh",
+      "sudo sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config",
+      "sudo sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config.d/*.conf 2>/dev/null || true",
+      "echo 'PasswordAuthentication yes' | sudo tee /etc/ssh/sshd_config.d/99-bioaf-password-auth.conf",
+    ]
+  }
+
+  # Install gcsfuse
+  provisioner "shell" {
+    inline = [
+      "export GCSFUSE_REPO=gcsfuse-$(lsb_release -c -s)",
+      "echo \\"deb https://packages.cloud.google.com/apt $GCSFUSE_REPO main\\" | sudo tee /etc/apt/sources.list.d/gcsfuse.list",
+      "curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -",
+      "sudo apt-get update && sudo apt-get install -y gcsfuse",
+    ]
+  }
+
+  # Install miniforge (conda-forge only, no Anaconda TOS)
+  provisioner "shell" {
+    inline = [
+      "wget -q https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O /tmp/miniforge.sh",
+      "sudo bash /tmp/miniforge.sh -b -p /opt/conda",
+      "sudo chmod -R a+rx /opt/conda",
+      "rm /tmp/miniforge.sh",
+      "echo 'export PATH=/opt/conda/bin:$PATH' | sudo tee /etc/profile.d/conda.sh",
+    ]
+  }
+
+  # Download environment.yml from GCS and create conda env
+  provisioner "shell" {
+    inline = [
+      "export PATH=/opt/conda/bin:$PATH",
+      "gsutil cp ${var.environment_yml_gcs} /tmp/environment.yml",
+      "conda env create -f /tmp/environment.yml",
+      "conda clean -afy",
+      "rm /tmp/environment.yml",
+    ]
+  }
+
+  # Install bioaf heartbeat agent
+  provisioner "shell" {
+    inline = [
+      "sudo mkdir -p /etc/bioaf",
+      "sudo mkdir -p /outputs /scratch",
+    ]
+  }
+
+  # Cleanup
+  provisioner "shell" {
+    inline = [
+      "sudo apt-get clean",
+      "sudo rm -rf /var/lib/apt/lists/*",
+    ]
+  }
+}
+"""
+
+
+def _get_vm_image_name(env_name: str, version_number: int, build_number: int) -> str:
+    """Construct GCE image name for a work node environment."""
+    safe_name = env_name.lower().replace(" ", "-").replace("_", "-")
+    return f"bioaf-worknode-{safe_name}-v{version_number}-{build_number}"
+
+
+def _get_vm_image_uri(project_id: str, env_name: str, version_number: int, build_number: int) -> str:
+    """Construct GCE image self-link URI."""
+    name = _get_vm_image_name(env_name, version_number, build_number)
+    return f"projects/{project_id}/global/images/{name}"
+
+
 # Template for wrapping a conda environment.yml in a Dockerfile
 CONDA_DOCKERFILE_TEMPLATE = """\
 FROM continuumio/miniconda3:latest
@@ -149,6 +282,22 @@ class EnvironmentBuildService:
         if version.status not in ("draft", "failed"):
             raise ValueError(f"Cannot build version in '{version.status}' status")
 
+        # Route to the correct build pipeline based on environment type (ADR-043)
+        if env.environment_type == "work_node":
+            return await EnvironmentBuildService._build_vm_image(session, env, version, org_id, user_id, environment_id)
+
+        return await EnvironmentBuildService._build_docker_image(session, env, version, org_id, user_id, environment_id)
+
+    @staticmethod
+    async def _build_docker_image(
+        session: AsyncSession,
+        env: Environment,
+        version: EnvironmentVersion,
+        org_id: int,
+        user_id: int,
+        environment_id: int,
+    ) -> str:
+        """Build a Docker container image via Cloud Build (notebook environments)."""
         project_id = await _read_config(session, "gcp_project_id")
         region = await _read_config(session, "gcp_region")
         working_bucket = await _read_config(session, "working_bucket_name")
@@ -222,6 +371,132 @@ class EnvironmentBuildService:
 
         logger.info(
             "Submitted Cloud Build %s for %s v%d",
+            build_id,
+            env.name,
+            version.version_number,
+        )
+        return build_id
+
+    @staticmethod
+    async def _build_vm_image(
+        session: AsyncSession,
+        env: Environment,
+        version: EnvironmentVersion,
+        org_id: int,
+        user_id: int,
+        environment_id: int,
+    ) -> str:
+        """Build a GCE VM image via Cloud Build + Packer (work node environments, ADR-043)."""
+        import yaml
+
+        if version.definition_format != "conda":
+            raise ValueError("Work node environments only support conda definition format")
+
+        project_id = await _read_config(session, "gcp_project_id")
+        region = await _read_config(session, "gcp_region")
+        working_bucket = await _read_config(session, "working_bucket_name")
+
+        if not project_id or project_id == "null":
+            raise ValueError("GCP project not configured")
+        if not region or region == "null":
+            raise ValueError("GCP region not configured")
+        if not working_bucket or working_bucket == "null":
+            raise ValueError("Working bucket not configured")
+
+        # Pick a zone for the Packer build VM, avoiding -a which is
+        # often capacity-constrained.  The image itself is regional.
+        import random
+
+        zone_suffix = random.choice(["b", "c", "f"])
+        build_zone = f"{region}-{zone_suffix}"
+
+        # Extract conda env name from the YAML
+        data = yaml.safe_load(version.definition_content)
+        conda_env_name = data.get("name", "bioaf") if data else "bioaf"
+
+        # Upload environment.yml to GCS
+        from google.cloud import storage
+
+        credentials = await _get_credentials(session)
+        storage_client = storage.Client(project=project_id, credentials=credentials)
+        bucket = storage_client.bucket(working_bucket)
+
+        safe_name = env.name.lower().replace(" ", "-").replace("_", "-")
+        env_yml_path = f"builds/{safe_name}/v{version.version_number}/environment.yml"
+        blob = bucket.blob(env_yml_path)
+        blob.upload_from_string(version.definition_content, content_type="text/yaml")
+        env_yml_gcs = f"gs://{working_bucket}/{env_yml_path}"
+
+        # Upload Packer template
+        packer_path = f"builds/{safe_name}/v{version.version_number}/work_node.pkr.hcl"
+        packer_blob = bucket.blob(packer_path)
+        packer_blob.upload_from_string(PACKER_VM_TEMPLATE, content_type="text/plain")
+
+        # Build image name and URI
+        image_name = _get_vm_image_name(env.name, version.version_number, version.build_number)
+        image_uri = _get_vm_image_uri(project_id, env.name, version.version_number, version.build_number)
+
+        # Submit Cloud Build with Packer
+        sa_email = await _read_config(session, "gcp_service_account_email")
+        if not sa_email or sa_email == "null":
+            sa_email = getattr(credentials, "service_account_email", None)
+
+        build_url = f"https://cloudbuild.googleapis.com/v1/projects/{project_id}/builds"
+        build_body: dict = {
+            "steps": [
+                {
+                    "name": "gcr.io/cloud-builders/gsutil",
+                    "args": ["cp", f"gs://{working_bucket}/{packer_path}", "/workspace/work_node.pkr.hcl"],
+                },
+                {
+                    "name": "hashicorp/packer",
+                    "args": ["init", "/workspace/work_node.pkr.hcl"],
+                },
+                {
+                    "name": "hashicorp/packer",
+                    "args": [
+                        "build",
+                        f"-var=project_id={project_id}",
+                        f"-var=zone={build_zone}",
+                        f"-var=image_name={image_name}",
+                        f"-var=environment_yml_gcs={env_yml_gcs}",
+                        f"-var=conda_env_name={conda_env_name}",
+                        "/workspace/work_node.pkr.hcl",
+                    ],
+                },
+            ],
+            "options": {"machineType": "E2_HIGHCPU_8"},
+            "timeout": "3600s",
+        }
+        if sa_email and sa_email != "null":
+            build_body["serviceAccount"] = f"projects/{project_id}/serviceAccounts/{sa_email}"
+            build_body["options"]["defaultLogsBucketBehavior"] = "REGIONAL_USER_OWNED_BUCKET"
+
+        result = _authorized_request(credentials, "POST", build_url, build_body)
+        build_id = result.get("metadata", {}).get("build", {}).get("id", "")
+
+        # Update version record
+        version.status = "building"
+        version.build_id = build_id
+        version.image_uri = image_uri
+        await session.flush()
+
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="environment_version",
+            entity_id=version.id,
+            action="build_vm_image",
+            details={
+                "environment_id": environment_id,
+                "version_number": version.version_number,
+                "build_id": build_id,
+                "image_name": image_name,
+            },
+        )
+
+        logger.info(
+            "Submitted Packer VM build %s for %s v%d",
             build_id,
             env.name,
             version.version_number,

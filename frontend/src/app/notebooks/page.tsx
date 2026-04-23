@@ -268,13 +268,6 @@ export default function NotebooksPage() {
     }
   }
 
-  async function handleSync(sessionId: number) {
-    try {
-      await api.post(`/api/v1/notebooks/sessions/${sessionId}/sync`);
-      alert("Sync triggered successfully");
-    } catch {}
-  }
-
   return (
     <div className="flex h-screen">
       <Sidebar />
@@ -365,11 +358,10 @@ export default function NotebooksPage() {
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Profile</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Resources</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start Time</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Access URL</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Experiment</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                   </tr>
                 </thead>
@@ -378,9 +370,7 @@ export default function NotebooksPage() {
                     <tr key={s.id} className={`cursor-pointer ${s.status === "idle" ? "bg-yellow-50 hover:bg-yellow-100" : "hover:bg-gray-50"}`} onClick={() => setViewingSession(s)}>
                       <td className="px-4 py-3 text-sm capitalize font-medium">{s.session_type}</td>
                       <td className="px-4 py-3 text-sm">{s.user?.name || s.user?.email || "\u2014"}</td>
-                      <td className="px-4 py-3 text-sm capitalize">
-                        {s.resource_profile} ({s.cpu_cores} CPU, {s.memory_gb}GB)
-                      </td>
+                      <td className="px-4 py-3 text-sm">{s.cpu_cores} CPU / {s.memory_gb} GB</td>
                       <td className="px-4 py-3">
                         {stoppingSessions.has(s.id) ? (
                           <span className="flex items-center gap-1 text-xs text-orange-700">
@@ -408,13 +398,6 @@ export default function NotebooksPage() {
                           </a>
                         ) : "\u2014"}
                       </td>
-                      <td className="px-4 py-3 text-sm" onClick={(e) => e.stopPropagation()}>
-                        {s.experiment ? (
-                          <Link href={`/experiments/${s.experiment.id}`} className="text-bioaf-600 hover:underline">
-                            {s.experiment.name}
-                          </Link>
-                        ) : "\u2014"}
-                      </td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex gap-2">
                           {s.proxy_url && s.status === "running" && (
@@ -422,22 +405,23 @@ export default function NotebooksPage() {
                               Open
                             </a>
                           )}
-                          {s.status === "running" && (
-                            <button onClick={() => handleSync(s.id)} className="text-xs px-2 py-1 border border-green-600 text-green-600 rounded hover:bg-green-50">
-                              Sync
-                            </button>
-                          )}
                           {["pending", "starting", "running", "idle"].includes(s.status) && (
                             <button onClick={() => handleStop(s.id)} className="text-xs px-2 py-1 border border-red-600 text-red-600 rounded hover:bg-red-50">
                               Stop
                             </button>
                           )}
+                          <button
+                            onClick={() => setViewingSession(s)}
+                            className="text-xs px-2 py-1 border border-bioaf-600 text-bioaf-600 rounded hover:bg-bioaf-50"
+                          >
+                            Details
+                          </button>
                         </div>
                       </td>
                     </tr>
                   ))}
                   {sessions.length === 0 && (
-                    <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No active sessions</td></tr>
+                    <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No active sessions</td></tr>
                   )}
                 </tbody>
               </table>
@@ -470,16 +454,23 @@ export default function NotebooksPage() {
                         envLabel = `Version ID ${viewingSession.environment_version_id}`;
                       }
                     }
+                    // Compute uptime
+                    let uptimeLabel: string | null = null;
+                    if (viewingSession.started_at && viewingSession.status === "running") {
+                      const diff = Date.now() - new Date(viewingSession.started_at).getTime();
+                      const hours = Math.floor(diff / 3600000);
+                      const minutes = Math.floor((diff % 3600000) / 60000);
+                      uptimeLabel = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+                    }
                     return [
                       { label: "Type", value: viewingSession.session_type },
                       { label: "Status", value: viewingSession.status },
                       { label: "User", value: viewingSession.user?.name || viewingSession.user?.email },
                       { label: "Environment", value: envLabel },
-                      { label: "Resource Profile", value: viewingSession.resource_profile },
-                      { label: "CPU Cores", value: viewingSession.cpu_cores },
-                      { label: "Memory (GB)", value: viewingSession.memory_gb },
+                      { label: "Resources", value: `${viewingSession.cpu_cores} CPU / ${viewingSession.memory_gb} GB RAM` },
                       { label: "Experiment", value: viewingSession.experiment?.name },
                       { label: "Started", value: viewingSession.started_at ? new Date(viewingSession.started_at).toLocaleString() : null },
+                      { label: "Uptime", value: uptimeLabel },
                       { label: "Access URL", value: viewingSession.proxy_url || null },
                       { label: "Idle Since", value: viewingSession.idle_since ? new Date(viewingSession.idle_since).toLocaleString() : null },
                       { label: "Git Branch", value: viewingSession.git_branch_name || null },
@@ -552,11 +543,6 @@ export default function NotebooksPage() {
                     <a href={viewingSession.proxy_url} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 border border-bioaf-600 text-bioaf-600 rounded text-sm hover:bg-bioaf-50">
                       Open
                     </a>
-                  )}
-                  {viewingSession.status === "running" && (
-                    <button onClick={() => handleSync(viewingSession.id)} className="px-3 py-1.5 border border-green-600 text-green-600 rounded text-sm hover:bg-green-50">
-                      Sync
-                    </button>
                   )}
                   {["pending", "starting", "running", "idle"].includes(viewingSession.status) && (
                     <button onClick={() => { handleStop(viewingSession.id); setViewingSession(null); setProvenance(null); }} className="px-3 py-1.5 border border-red-600 text-red-600 rounded text-sm hover:bg-red-50">

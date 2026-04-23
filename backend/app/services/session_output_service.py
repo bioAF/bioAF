@@ -74,11 +74,12 @@ class SessionOutputService:
         experiment_id: int | None,
         user_id: int,
         gcs_files: list[dict],
+        source_type: str = "notebook_output",
     ) -> int:
         """Register output files from a completed session.
 
-        Creates File records with source_type=notebook_output and
-        NotebookSessionFile records with access_type=output.
+        Creates File records and NotebookSessionFile records with
+        access_type=output.
 
         Returns the number of files registered.
         """
@@ -106,7 +107,7 @@ class SessionOutputService:
                 file_type=_file_type_from_extension(filename),
                 experiment_id=experiment_id,
                 project_id=project_id,
-                source_type="notebook_output",
+                source_type=source_type,
                 source_notebook_session_id=session_id,
                 uploader_user_id=user_id,
             )
