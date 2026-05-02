@@ -39,11 +39,17 @@ class PipelineOutputService:
         if not collected_files:
             return []
 
-        # Find samples linked to this run
-        result = await session.execute(
-            select(PipelineRunSample.sample_id).where(PipelineRunSample.pipeline_run_id == run.id)
-        )
-        sample_ids = [row[0] for row in result.all()]
+        # Project-scoped runs (project_id set, experiment_id null) register files
+        # against the project with no sample links. Experiment-scoped runs link
+        # files to all samples in the run.
+        is_project_scoped = run.experiment_id is None and run.project_id is not None
+
+        sample_ids: list[int] = []
+        if not is_project_scoped:
+            result = await session.execute(
+                select(PipelineRunSample.sample_id).where(PipelineRunSample.pipeline_run_id == run.id)
+            )
+            sample_ids = [row[0] for row in result.all()]
 
         # Collect existing gcs_uris to skip duplicates
         uris = [f["gcs_uri"] for f in collected_files]
@@ -71,6 +77,7 @@ class PipelineOutputService:
                 size_bytes=file_dict.get("size_bytes"),
                 md5_checksum=file_dict.get("md5_hash"),
                 file_type=file_type,
+                project_id=run.project_id if is_project_scoped else None,
                 experiment_id=run.experiment_id,
                 source_type="pipeline_output",
                 source_pipeline_run_id=run.id,
@@ -135,6 +142,7 @@ class PipelineOutputService:
             if gcs_uri not in existing_blobs:
                 continue
 
+            is_project_scoped = run.experiment_id is None and run.project_id is not None
             file_record = await FileService.create_file_record(
                 session,
                 org_id=run.organization_id,
@@ -144,6 +152,7 @@ class PipelineOutputService:
                 size_bytes=existing_blobs[gcs_uri],
                 md5_checksum=None,
                 file_type=meta["file_type"],
+                project_id=run.project_id if is_project_scoped else None,
                 experiment_id=run.experiment_id,
                 source_type="pipeline_output",
                 source_pipeline_run_id=run.id,

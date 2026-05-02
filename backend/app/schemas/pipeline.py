@@ -13,6 +13,9 @@ class PipelineCatalogResponse(BaseModel):
     default_params: dict | None = None
     is_builtin: bool
     enabled: bool
+    custom_pipeline_id: int | None = None
+    created_by_username: str | None = None
+    latest_version_number: int | None = None
 
     model_config = {"from_attributes": True}
 

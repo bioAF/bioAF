@@ -1,5 +1,35 @@
 # Release Notes
 
+## v0.10.0
+
+Custom pipelines: define and run user-authored pipelines (bash, Python, Perl, R, etc.) against tracked input data with full provenance, versioned definitions, and Conda-based environments.
+
+### New features
+
+- **Custom Pipelines** -- author pipelines in any language by combining a script, command, and pipeline environment; runs execute as K8s Jobs with input mounts, output collection, and report detection (ADR-044)
+- **Pipeline Environments** -- new "Pipeline" environment type with conda-only Docker build routing, separate from Notebook and Work Node environments; managed from a new Pipelines > Environments page (ADR-045)
+- **Versioned pipeline definitions** -- each save creates a new pipeline version with its own script, command, variables, and pinned environment version; runs always reference the version they launched against
+- **Pipeline variables** -- declare typed variables (string, number, file, sample) on a pipeline; values are validated and delivered as environment variables and a `params.json` manifest at runtime
+- **Version cascade** -- rebuilding a pipeline environment automatically creates new minor versions of any pipelines that pin it, via an event-bus-driven cascade handler (ADR-046)
+- **Custom pipeline catalog integration** -- the pipeline catalog now lists custom pipelines alongside nf-core entries, with creator and latest-version metadata surfaced on each card
+- **Custom pipeline launch dialog** -- type-aware launch flow that renders variable inputs (including file/sample pickers) and submits to the custom-pipeline endpoint
+- **Run detail for custom pipelines** -- run detail page renders the pipeline-supplied report (HTML or markdown) and the captured log file, with project/experiment links pulled from launch context
+- **Project-scoped outputs** -- custom pipeline outputs register against the launching project (and experiment when applicable) with `pipeline_output` source type and full provenance back to the pipeline version
+
+### Backend
+
+- New models: `CustomPipeline`, `CustomPipelineVersion`, `CustomPipelineVariable`; pipeline_runs gains `custom_pipeline_version_id` and `output_files_json` columns (migration 068)
+- `CustomPipelineService` covers CRUD, version management, launch orchestration, manifest building, and output sync
+- Kubernetes compute adapter learns to launch custom-pipeline jobs with conda activation, input staging, output collection to GCS, and report artifact detection
+- Pipeline monitor handles custom-pipeline run lifecycle: status transitions, log/report retrieval, and output registration via `_handle_completion`
+- New API router `app/api/custom_pipelines.py` with permissions `custom_pipelines:create|read|update|delete|launch`, seeded into the four built-in roles
+
+### Frontend
+
+- New pages: Pipelines > Custom (list), Pipelines > Custom > [id] (detail with versions, variables, runs), Pipelines > Environments
+- `CustomPipelineLaunchDialog` reuses `FileTreeSelector` for file/sample variable inputs
+- Run detail page renders the report and log produced by the pipeline; navigation gains a Pipelines > Environments entry
+
 ## v0.9.0
 
 Work Nodes overhaul: GCE VMs with conda environments, GitHub repo cloning, and a redesigned file picker.

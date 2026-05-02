@@ -652,8 +652,34 @@ class KubernetesComputeProvider(ComputeProvider):
 
         return "\n".join(lines)
 
-    def _ensure_gcs_secret(self, namespace: str) -> bool:
+    async def _read_gcp_credentials(self) -> tuple[str, str]:
+        """Read gcp_credential_source and gcp_service_account_key fresh from platform_config.
+
+        Cluster endpoint/CA can be cached in _cluster_config because they rarely
+        change, but credentials need a per-launch read so that keys saved or
+        rotated through the Settings UI take effect without a backend restart.
+        """
+        from sqlalchemy import text as sa_text
+
+        if not self._session_factory:
+            return "vm_default", ""
+
+        async with self._session_factory() as session:
+            result = await session.execute(
+                sa_text(
+                    "SELECT key, value FROM platform_config "
+                    "WHERE key IN ('gcp_credential_source', 'gcp_service_account_key')"
+                )
+            )
+            rows = {r[0]: (r[1] or "") for r in result.fetchall()}
+
+        return rows.get("gcp_credential_source", "vm_default") or "vm_default", rows.get("gcp_service_account_key", "")
+
+    def _ensure_gcs_secret(self, namespace: str, credential_source: str, sa_key: str) -> bool:
         """Create a K8s Secret with the GCP SA key for GCS access.
+
+        Only mounts a key file when ``credential_source == "service_account_key"``
+        -- in ``vm_default`` mode, gsutil falls back to ADC on the node.
 
         Returns True if the secret exists (created or already present).
         """
@@ -661,9 +687,7 @@ class KubernetesComputeProvider(ComputeProvider):
 
         from kubernetes.client.rest import ApiException
 
-        cfg = self._cluster_config or {}
-        sa_key = cfg.get("gcp_service_account_key", "")
-        if not sa_key:
+        if credential_source != "service_account_key" or not sa_key:
             return False
 
         core_client = self._get_k8s_core_client()
@@ -690,6 +714,39 @@ class KubernetesComputeProvider(ComputeProvider):
         logger.info("Created GCS SA key secret in %s", namespace)
         return True
 
+    def _ensure_ssh_key_secret(self, namespace: str, run_id: int | str, ssh_private_key: str) -> str:
+        """Create a per-run K8s Secret with an SSH private key for git clone access.
+
+        Returns the secret name so callers can mount it.
+        """
+        import base64
+
+        from kubernetes.client.rest import ApiException
+
+        core_client = self._get_k8s_core_client()
+        secret_name = f"bioaf-ssh-key-{run_id}"
+
+        try:
+            core_client.read_namespaced_secret(name=secret_name, namespace=namespace)
+            return secret_name
+        except ApiException as e:
+            if e.status != 404:
+                logger.warning("Error checking SSH key secret: %s", e)
+                raise
+
+        core_client.create_namespaced_secret(
+            namespace=namespace,
+            body={
+                "apiVersion": "v1",
+                "kind": "Secret",
+                "metadata": {"name": secret_name, "labels": {"bioaf.io/managed": "true"}},
+                "type": "Opaque",
+                "data": {"id_rsa": base64.b64encode(ssh_private_key.encode()).decode()},
+            },
+        )
+        logger.info("Created SSH key secret %s in %s", secret_name, namespace)
+        return secret_name
+
     async def _k8s_submit_job(self, job_spec: dict) -> dict:
         """Submit a real Kubernetes Job to the GKE cluster."""
         run_id = job_spec.get("run_id", 0)
@@ -705,8 +762,11 @@ class KubernetesComputeProvider(ComputeProvider):
         if not self._namespace_ready:
             await self.ensure_pipeline_namespace(namespace)
 
-        # Ensure GCS credentials secret exists for bucket access
-        has_gcs_secret = self._ensure_gcs_secret(namespace)
+        # Ensure GCS credentials secret exists for bucket access. Read the
+        # SA key fresh from platform_config so a key saved or rotated through
+        # the Settings UI takes effect without a backend restart.
+        credential_source, sa_key = await self._read_gcp_credentials()
+        has_gcs_secret = self._ensure_gcs_secret(namespace, credential_source, sa_key)
 
         job_name = f"bioaf-pipeline-{run_id}"
 
@@ -754,6 +814,11 @@ class KubernetesComputeProvider(ComputeProvider):
                 }
             )
 
+        # Custom pipeline: extra init containers (e.g., git clone, build).
+        # Appended after stage-inputs so input data is available if needed.
+        extra_init_containers = list(job_spec.get("extra_init_containers") or [])
+        init_containers.extend(extra_init_containers)
+
         # Write sample sheet to the data volume via init container
         if sample_sheet and pipeline_source and not job_spec.get("command"):
             # Strip carriage returns that browsers/forms sometimes inject
@@ -799,6 +864,14 @@ class KubernetesComputeProvider(ComputeProvider):
                 ic.setdefault("volumeMounts", []).append(gcs_volume_mount)
                 ic.setdefault("env", []).append(gcs_env)
 
+        # Custom pipeline: SSH key secret for extra init containers (e.g., git clone).
+        ssh_private_key = job_spec.get("ssh_private_key")
+        if ssh_private_key:
+            self._ensure_ssh_key_secret(namespace, run_id, ssh_private_key)
+            ssh_volume_mount = {"name": "ssh-key", "mountPath": "/root/.ssh", "readOnly": True}
+            for ic in extra_init_containers:
+                ic.setdefault("volumeMounts", []).append(ssh_volume_mount)
+
         # Build main container
         main_container = {
             "name": "pipeline",
@@ -811,6 +884,38 @@ class KubernetesComputeProvider(ComputeProvider):
             main_container["env"] = [gcs_env]
         if command:
             main_container["command"] = command
+
+        # Custom pipeline: extra volume mounts on main container
+        has_outputs_dir = bool(job_spec.get("has_outputs_dir"))
+        has_code_dir = bool(job_spec.get("has_code_dir"))
+        if has_outputs_dir:
+            main_container["volumeMounts"].append({"name": "outputs", "mountPath": "/outputs"})
+        if has_code_dir:
+            main_container["volumeMounts"].append({"name": "code", "mountPath": "/code"})
+
+        # Custom pipeline: resource requests/limits (guaranteed QoS).
+        cpu_request = job_spec.get("cpu_request")
+        memory_request = job_spec.get("memory_request")
+        if cpu_request or memory_request:
+            requests: dict[str, str] = {}
+            limits: dict[str, str] = {}
+            if cpu_request:
+                requests["cpu"] = str(cpu_request)
+                limits["cpu"] = str(cpu_request)
+            if memory_request:
+                requests["memory"] = str(memory_request)
+                limits["memory"] = str(memory_request)
+            main_container["resources"] = {"requests": requests, "limits": limits}
+
+        # Custom pipeline: extra environment variables on main container.
+        extra_env = list(job_spec.get("extra_env") or [])
+        if extra_env:
+            main_container.setdefault("env", []).extend(extra_env)
+
+        # Custom pipeline: working directory on main container.
+        working_dir = job_spec.get("working_dir")
+        if working_dir:
+            main_container["workingDir"] = working_dir
 
         # Build job manifest
         job_manifest = {
@@ -846,6 +951,21 @@ class KubernetesComputeProvider(ComputeProvider):
                         + (
                             [{"name": "gcp-sa-key", "secret": {"secretName": "bioaf-gcs-sa-key"}}]
                             if has_gcs_secret
+                            else []
+                        )
+                        + ([{"name": "outputs", "emptyDir": {"sizeLimit": "50Gi"}}] if has_outputs_dir else [])
+                        + ([{"name": "code", "emptyDir": {"sizeLimit": "10Gi"}}] if has_code_dir else [])
+                        + (
+                            [
+                                {
+                                    "name": "ssh-key",
+                                    "secret": {
+                                        "secretName": f"bioaf-ssh-key-{run_id}",
+                                        "defaultMode": 0o400,
+                                    },
+                                }
+                            ]
+                            if ssh_private_key
                             else []
                         ),
                         "restartPolicy": "Never",

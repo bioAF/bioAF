@@ -89,6 +89,9 @@ AUTO_RUN_CANCELLED = "auto_run.cancelled"
 # Terraform events
 TERRAFORM_APPLY_FAILURE = "terraform.apply_failure"
 
+# Environment build events
+ENVIRONMENT_BUILD_COMPLETED = "environment.build.completed"
+
 ALL_EVENT_TYPES = [
     PIPELINE_STARTED,
     PIPELINE_COMPLETED,
@@ -188,4 +191,5 @@ EVENT_SEVERITY = {
     AUTO_RUN_BUDGET_DISABLED: "critical",
     AUTO_RUN_LAUNCHED: "info",
     AUTO_RUN_CANCELLED: "warning",
+    ENVIRONMENT_BUILD_COMPLETED: "info",
 }
