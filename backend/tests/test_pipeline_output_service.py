@@ -10,6 +10,7 @@ from sqlalchemy import select, text
 from app.models.experiment import Experiment
 from app.models.file import File
 from app.models.pipeline_run import PipelineRun, PipelineRunSample
+from app.models.project import Project
 from app.models.sample import Sample
 from app.services.pipeline_output_service import PipelineOutputService
 
@@ -177,6 +178,115 @@ async def test_register_outputs_handles_empty_list(session, pipeline_run):
     """Empty collected list returns empty result without errors."""
     files = await PipelineOutputService.register_outputs(session, pipeline_run, [])
     assert files == []
+
+
+@pytest_asyncio.fixture
+async def project(session, admin_user):
+    p = Project(
+        organization_id=admin_user.organization_id,
+        name="Output Project",
+        owner_user_id=admin_user.id,
+    )
+    session.add(p)
+    await session.flush()
+    await session.commit()
+    return p
+
+
+@pytest_asyncio.fixture
+async def project_scoped_run(session, admin_user, project):
+    """Create a pipeline run scoped to a project only (no experiment, no samples)."""
+    run = PipelineRun(
+        organization_id=admin_user.organization_id,
+        experiment_id=None,
+        project_id=project.id,
+        submitted_by_user_id=admin_user.id,
+        pipeline_name="custom/project-pipeline",
+        pipeline_version="1",
+        status="completed",
+        k8s_job_name="custom-projscope-xyz",
+    )
+    session.add(run)
+    await session.flush()
+    await session.commit()
+    return run
+
+
+def _make_project_collected(run_id: int, project_id: int) -> list[dict]:
+    base = f"gs://bioaf-results-testorg/projects/{project_id}/pipeline-runs/{run_id}"
+    return [
+        {
+            "filename": "summary.tsv",
+            "gcs_uri": f"{base}/summary.tsv",
+            "size_bytes": 1234,
+            "md5_hash": "aaa111",
+        },
+        {
+            "filename": "result.h5ad",
+            "gcs_uri": f"{base}/result.h5ad",
+            "size_bytes": 5_000_000,
+            "md5_hash": "bbb222",
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_register_outputs_project_scoped(session, project_scoped_run, project):
+    """Project-scoped runs register files with project_id and no sample/experiment links."""
+    collected = _make_project_collected(project_scoped_run.id, project.id)
+
+    files = await PipelineOutputService.register_outputs(session, project_scoped_run, collected)
+    await session.commit()
+
+    assert len(files) == 2
+    for f in files:
+        assert f.project_id == project.id
+        assert f.experiment_id is None
+        assert f.source_type == "pipeline_output"
+        assert f.source_pipeline_run_id == project_scoped_run.id
+
+        # No sample links should exist
+        rows = await session.execute(
+            text("SELECT sample_id FROM sample_files WHERE file_id = :fid"),
+            {"fid": f.id},
+        )
+        assert rows.all() == []
+
+
+@pytest.mark.asyncio
+async def test_register_outputs_experiment_scoped_does_not_set_project_id(session, pipeline_run, experiment):
+    """Experiment-scoped runs should not set File.project_id (project is derived via experiment)."""
+    collected = _make_collected(pipeline_run.id, experiment.id)
+
+    files = await PipelineOutputService.register_outputs(session, pipeline_run, collected)
+    await session.commit()
+
+    assert len(files) == 3
+    for f in files:
+        assert f.experiment_id == experiment.id
+        assert f.project_id is None
+
+
+@pytest.mark.asyncio
+async def test_register_nextflow_metadata_project_scoped(session, project_scoped_run, project):
+    """Nextflow metadata for project-scoped runs is registered with project_id, not experiment_id."""
+    mock_bucket = MagicMock()
+    mock_bucket.blob.return_value = _mock_blob(exists=True, size=8000)
+
+    mock_client = MagicMock()
+    mock_client.bucket.return_value = mock_bucket
+
+    with patch("app.services.pipeline_output_service.gcs_storage") as mock_gcs:
+        mock_gcs.Client.return_value = mock_client
+
+        files = await PipelineOutputService.register_nextflow_metadata(session, project_scoped_run, "bioaf-raw-testorg")
+        await session.commit()
+
+    assert len(files) == 2
+    for f in files:
+        assert f.project_id == project.id
+        assert f.experiment_id is None
+        assert f.source_pipeline_run_id == project_scoped_run.id
 
 
 @pytest.mark.asyncio

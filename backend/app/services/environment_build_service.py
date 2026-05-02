@@ -18,6 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.environment import Environment
 from app.models.environment_version import EnvironmentVersion
 from app.services.audit_service import log_action
+from app.services.event_bus import event_bus
+from app.services.event_types import ENVIRONMENT_BUILD_COMPLETED
 from app.services.notebook_image_service import (
     AR_REPO_ID,
     _authorized_request,
@@ -161,9 +163,25 @@ def _get_vm_image_uri(project_id: str, env_name: str, version_number: int, build
     return f"projects/{project_id}/global/images/{name}"
 
 
-# Template for wrapping a conda environment.yml in a Dockerfile
+# Template for wrapping a conda environment.yml in a Dockerfile.
+#
+# Google Cloud SDK is installed at the OS layer (parallel to how GCE work-node
+# base images already carry it) so the pipeline entrypoint trap can sync
+# /outputs/ to GCS without depending on whatever the user puts in their conda
+# env. Without this, `gsutil`/`gcloud storage` are missing from the container
+# and the output-sync trap silently no-ops.
 CONDA_DOCKERFILE_TEMPLATE = """\
 FROM continuumio/miniconda3:latest
+
+RUN apt-get update && \\
+    apt-get install -y --no-install-recommends curl gnupg ca-certificates apt-transport-https && \\
+    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \\
+      | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && \\
+    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \\
+      > /etc/apt/sources.list.d/google-cloud-sdk.list && \\
+    apt-get update && \\
+    apt-get install -y --no-install-recommends google-cloud-cli && \\
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY environment.yml /tmp/environment.yml
 RUN conda env create -f /tmp/environment.yml && \\
@@ -282,7 +300,9 @@ class EnvironmentBuildService:
         if version.status not in ("draft", "failed"):
             raise ValueError(f"Cannot build version in '{version.status}' status")
 
-        # Route to the correct build pipeline based on environment type (ADR-043)
+        # Route to the correct build pipeline based on environment type (ADR-043, ADR-045)
+        # Notebooks and pipelines build Docker images via Cloud Build.
+        # Work nodes build GCE VM images via Packer.
         if env.environment_type == "work_node":
             return await EnvironmentBuildService._build_vm_image(session, env, version, org_id, user_id, environment_id)
 
@@ -522,6 +542,7 @@ class EnvironmentBuildService:
             return 0
 
         changed = 0
+        completed_versions: list[EnvironmentVersion] = []
         for version in building_versions:
             if not version.build_id:
                 continue
@@ -531,6 +552,7 @@ class EnvironmentBuildService:
             if status == "SUCCESS":
                 version.status = "ready"
                 changed += 1
+                completed_versions.append(version)
                 logger.info(
                     "Build %s succeeded for environment version %d",
                     version.build_id,
@@ -571,6 +593,21 @@ class EnvironmentBuildService:
 
         if changed:
             await session.flush()
+
+        for version in completed_versions:
+            env_result = await session.execute(select(Environment).where(Environment.id == version.environment_id))
+            env = env_result.scalar_one_or_none()
+            if env is None:
+                continue
+            await event_bus.emit(
+                ENVIRONMENT_BUILD_COMPLETED,
+                {
+                    "environment_id": env.id,
+                    "environment_version_id": version.id,
+                    "environment_type": env.environment_type,
+                    "organization_id": env.organization_id,
+                },
+            )
 
         return changed
 

@@ -10,8 +10,8 @@ A turnkey computational biology platform for small biotech companies (5-50 resea
 ## Features
 
 - **Experiment Tracking** - MINSEQE-compliant metadata, sample management, batch processing, project organization
-- **Compute Orchestration** - Kubernetes (GKE) or SLURM compute via the BioAF Adapter Layer, JupyterHub/RStudio notebooks, versioned compute environments, auto-scaling, Cloud Build image pipeline
-- **Pipeline Engine** - Nextflow and Snakemake integration, pipeline catalog, run monitoring, parameter management
+- **Compute Orchestration** - Kubernetes (GKE) compute via the BioAF Adapter Layer, JupyterHub/RStudio notebooks, versioned compute environments, auto-scaling, Cloud Build image pipeline
+- **Pipeline Engine** - Nextflow integration, custom pipelines, pipeline catalog, run monitoring, parameter management
 - **Data Management** - File upload/download, dataset browser, GCS storage integration, GEO export, SuperSeries cross-experiment packaging
 - **Results & Visualization** - QC dashboards, cellxgene single-cell viewer, plot archive, search
 - **SSH Access** - One-click kubectl exec into running pipeline jobs and notebook sessions
@@ -34,7 +34,7 @@ A turnkey computational biology platform for small biotech companies (5-50 resea
 
 A computational biologist registers an experiment, links FASTQ files (uploaded or auto-ingested from a sequencer drop), selects a pipeline from the catalog (nf-core/scrnaseq, rnaseq, or custom), and launches a run. The **BioAF Adapter Layer** handles everything below that: staging inputs from GCS, submitting Kubernetes Jobs to GKE Autopilot, monitoring execution via Nextflow trace parsing, collecting outputs back to GCS, and transitioning the experiment through its status lifecycle (`registered` -> `library_prep` -> `sequencing` -> `fastq_uploaded` -> `processing` -> `pipeline_complete` -> [`reviewed` ->] `analysis` -> `complete`). Pipeline completion triggers event-driven notifications (in-app, email, Slack), and results are browsable through the plot archive, cellxgene viewer, and GEO export tools. Jupyter and RStudio sessions run as Kubernetes Pods with GCS-backed home directories and SSH access. RStudio sessions use per-user PAM authentication ([ADR-030](decisions/ADR-030-session-credentials-pam-auth.md)), and notebook container images are managed as versioned environments ([ADR-033](decisions/ADR-033-versioned-compute-environments.md)), built automatically via Cloud Build ([ADR-031](decisions/ADR-031-notebook-image-build-pipeline.md)).
 
-The adapter layer ([ADR-020](decisions/ADR-020-bioaf-adapter-layer.md)) abstracts compute, storage, and notebook providers behind clean interfaces, so all application logic is decoupled from infrastructure specifics. Today that means GKE + GCS ([ADR-021](decisions/ADR-021-kubernetes-compute-backend.md), [ADR-022](decisions/ADR-022-gcs-storage-backend.md)); SLURM + NFS is stubbed for teams that need traditional HPC.
+The adapter layer ([ADR-020](decisions/ADR-020-bioaf-adapter-layer.md)) abstracts compute, storage, and notebook providers behind clean interfaces, so all application logic is decoupled from infrastructure specifics. Today that means GKE + GCS ([ADR-021](decisions/ADR-021-kubernetes-compute-backend.md), [ADR-022](decisions/ADR-022-gcs-storage-backend.md)).
 
 Infrastructure is provisioned through UI-driven Terraform ([ADR-007](decisions/ADR-007-ui-driven-terraform.md)) -- researchers never touch HCL. All secrets live in Secret Manager ([ADR-008](decisions/ADR-008-secret-manager.md)), all actions are recorded in an immutable audit log ([ADR-009](decisions/ADR-009-immutable-audit-log.md)), and data portability is guaranteed ([ADR-012](decisions/ADR-012-data-portability.md)).
 
@@ -116,7 +116,7 @@ See the full [Deployment Guide](docs/deployment-guide.md) for detailed instructi
 - [SSH Access Guide](docs/guides/ssh-access.md) - Connecting to running workloads
 - [GEO Export Guide](docs/guides/geo-export.md) - Exporting to NCBI GEO
 - [Reference Data Guide](docs/guides/reference-data.md) - Managing reference genomes and annotations
-- [Compute Stack Setup](docs/guides/compute-stack-setup.md) - Kubernetes and SLURM configuration
+- [Compute Stack Setup](docs/guides/compute-stack-setup.md) - Kubernetes configuration
 
 ## Development Setup
 
@@ -169,15 +169,11 @@ bioAF manages these infrastructure components through its UI:
 | --------- | -------- | ------------- | ----------- |
 | GKE Cluster | Compute | Kubernetes | None |
 | GCS Buckets | Storage | Kubernetes | GKE |
-| SLURM HPC Cluster | Compute | SLURM (coming soon) | None |
-| Filestore NFS | Storage | SLURM (coming soon) | SLURM |
-| JupyterHub | Notebooks | Both | Compute, Storage |
-| RStudio Server | Notebooks | Both | Compute, Storage |
-| Nextflow | Pipelines | Both | Compute |
-| Snakemake | Pipelines | Both | Compute |
+| JupyterHub | Notebooks | Kubernetes | Compute, Storage |
+| RStudio Server | Notebooks | Kubernetes | Compute, Storage |
+| Nextflow | Pipelines | Kubernetes | Compute |
 | cellxgene | Visualization | Any | None |
 | QC Dashboard | Visualization | Any | None |
-| Meilisearch | Search | Any | None |
 
 ## Project Structure
 

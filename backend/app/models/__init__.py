@@ -62,6 +62,9 @@ from app.models.sample_custom_field import SampleCustomField
 from app.models.experiment_auto_run import ExperimentAutoRun
 from app.models.pending_auto_run import PendingAutoRun
 from app.models.github_repo import GitHubRepo
+from app.models.custom_pipeline import CustomPipeline
+from app.models.custom_pipeline_version import CustomPipelineVersion
+from app.models.custom_pipeline_variable import CustomPipelineVariable
 
 __all__ = [
     "User",
@@ -134,4 +137,7 @@ __all__ = [
     "ExperimentAutoRun",
     "PendingAutoRun",
     "GitHubRepo",
+    "CustomPipeline",
+    "CustomPipelineVersion",
+    "CustomPipelineVariable",
 ]

@@ -14,7 +14,11 @@ from app.services.pipeline_catalog_service import PipelineCatalogService
 router = APIRouter(prefix="/api/pipelines", tags=["pipelines"])
 
 
-def _catalog_response(entry) -> PipelineCatalogResponse:
+def _catalog_response(
+    entry,
+    created_by_username: str | None = None,
+    latest_version_number: int | None = None,
+) -> PipelineCatalogResponse:
     return PipelineCatalogResponse(
         id=entry.id,
         pipeline_key=entry.pipeline_key,
@@ -27,6 +31,9 @@ def _catalog_response(entry) -> PipelineCatalogResponse:
         default_params=entry.default_params_json,
         is_builtin=entry.is_builtin,
         enabled=entry.enabled,
+        custom_pipeline_id=entry.custom_pipeline_id,
+        created_by_username=created_by_username,
+        latest_version_number=latest_version_number,
     )
 
 
@@ -41,10 +48,10 @@ async def list_pipelines(
     await PipelineCatalogService.initialize_builtin_pipelines(session, org_id)
     await session.commit()
 
-    pipelines = await PipelineCatalogService.list_pipelines(session, org_id)
+    enriched = await PipelineCatalogService.list_pipelines(session, org_id)
     return PipelineCatalogListResponse(
-        pipelines=[_catalog_response(p) for p in pipelines],
-        total=len(pipelines),
+        pipelines=[_catalog_response(entry, username, latest) for entry, username, latest in enriched],
+        total=len(enriched),
     )
 
 

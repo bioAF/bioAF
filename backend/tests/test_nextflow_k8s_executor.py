@@ -17,10 +17,16 @@ def adapter(monkeypatch):
     monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
     provider = KubernetesComputeProvider()
     provider._namespace_ready = True
+    sa_key = '{"type": "service_account", "project_id": "test"}'
     provider._cluster_config = {
-        "gcp_service_account_key": '{"type": "service_account", "project_id": "test"}',
+        "gcp_service_account_key": sa_key,
         "raw_bucket_name": "bioaf-raw-test-abc123",
     }
+
+    async def _fake_read_creds() -> tuple[str, str]:
+        return "service_account_key", sa_key
+
+    monkeypatch.setattr(provider, "_read_gcp_credentials", _fake_read_creds)
     return provider
 
 

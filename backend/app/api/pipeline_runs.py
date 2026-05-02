@@ -57,6 +57,8 @@ def _run_response(run) -> PipelineRunResponse:
         reference_genome=run.reference_genome,
         alignment_algorithm=run.alignment_algorithm,
         resume_from_run_id=run.resume_from_run_id,
+        custom_pipeline_version_id=run.custom_pipeline_version_id,
+        failure_reason=run.failure_reason,
         started_at=run.started_at,
         completed_at=run.completed_at,
         created_at=run.created_at,
@@ -236,11 +238,16 @@ async def get_provenance(
 @router.get("/{run_id}/logs")
 async def get_run_logs(
     run_id: int,
+    source: str | None = None,
     current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
-    """Get logs for a K8s pipeline run (no process selection needed)."""
-    logs = await PipelineMonitorService.get_run_logs(session, run_id, "")
+    """Get logs for a K8s pipeline run (no process selection needed).
+
+    `source=pod` forces pod stdout/stderr even when a custom log file is
+    configured, so the run detail page can offer a "System Logs" toggle.
+    """
+    logs = await PipelineMonitorService.get_run_logs(session, run_id, "", force_pod_logs=source == "pod")
     return logs
 
 

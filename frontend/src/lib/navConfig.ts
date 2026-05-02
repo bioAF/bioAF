@@ -44,7 +44,9 @@ export const navConfig: NavSection[] = [
     componentGate: { category: "pipeline_orchestration" },
     children: [
       { label: "Pipeline Catalog", path: "/pipelines/catalog", permission: { resource: "pipelines", action: "view" } },
+      { label: "Custom Pipelines", path: "/pipelines/custom", permission: { resource: "custom_pipelines", action: "view" } },
       { label: "Pipeline Runs", path: "/pipelines/runs", permission: { resource: "pipelines", action: "view" } },
+      { label: "Environments", path: "/pipelines/environments", permission: { resource: "environments", action: "view" } },
     ],
   },
   {

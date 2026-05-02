@@ -43,6 +43,11 @@
 | [ADR-039](ADR-039-notebook-output-provenance.md) | Notebook Output Provenance | Accepted | 2026-03-25 |
 | [ADR-040](ADR-040-notebook-file-lifecycle.md) | Notebook Session File Lifecycle | Accepted | 2026-04-04 |
 | [ADR-041](ADR-041-environment-build-versioning.md) | Environment Build Versioning | Accepted | 2026-04-04 |
+| [ADR-042](ADR-042-spot-preemption-retry-strategy.md) | Spot Preemption-Aware Retry Strategy for Pipeline Execution | Accepted | 2026-04-14 |
+| [ADR-043](ADR-043-work-nodes-gce-migration.md) | Work Nodes Migration from GKE to GCE VMs | Accepted | 2026-04-19 |
+| [ADR-044](ADR-044-custom-pipelines.md) | Custom Pipelines | Accepted | 2026-04-26 |
+| [ADR-045](ADR-045-pipeline-environments.md) | Pipeline Environments | Accepted | 2026-04-26 |
+| [ADR-046](ADR-046-pipeline-version-cascade.md) | Pipeline Version Cascade via Event Bus | Accepted | 2026-04-26 |
 
 ## How to Use This Directory
 

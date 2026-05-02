@@ -81,6 +81,7 @@ class PipelineRunResponse(BaseModel):
     alignment_algorithm: str | None = None
     resume_from_run_id: int | None = None
     review_verdict: str | None = None
+    custom_pipeline_version_id: int | None = None
     retry_count: int = 0
     reviewed_by_user_id: int | None = None
     reviewed_at: datetime | None = None

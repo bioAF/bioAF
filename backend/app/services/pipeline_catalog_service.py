@@ -2,10 +2,13 @@ import json
 import logging
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.custom_pipeline import CustomPipeline
+from app.models.custom_pipeline_version import CustomPipelineVersion
 from app.models.pipeline_catalog_entry import PipelineCatalogEntry
+from app.models.user import User
 from app.services.audit_service import log_action
 
 logger = logging.getLogger("bioaf.pipeline_catalog")
@@ -120,16 +123,48 @@ class PipelineCatalogService:
             return {}
 
     @staticmethod
-    async def list_pipelines(session: AsyncSession, org_id: int) -> list[PipelineCatalogEntry]:
-        result = await session.execute(
-            select(PipelineCatalogEntry)
+    async def list_pipelines(
+        session: AsyncSession, org_id: int
+    ) -> list[tuple[PipelineCatalogEntry, str | None, int | None]]:
+        """Return enabled catalog entries with creator username and latest version
+        number for custom pipelines (None for non-custom entries)."""
+        latest_version_subq = (
+            select(
+                CustomPipelineVersion.custom_pipeline_id.label("custom_pipeline_id"),
+                func.max(CustomPipelineVersion.version_number).label("latest_version_number"),
+            )
+            .where(CustomPipelineVersion.status == "active")
+            .group_by(CustomPipelineVersion.custom_pipeline_id)
+            .subquery()
+        )
+        stmt = (
+            select(
+                PipelineCatalogEntry,
+                User.email,
+                latest_version_subq.c.latest_version_number,
+            )
+            .outerjoin(CustomPipeline, PipelineCatalogEntry.custom_pipeline_id == CustomPipeline.id)
+            .outerjoin(User, CustomPipeline.created_by_user_id == User.id)
+            .outerjoin(
+                latest_version_subq,
+                CustomPipeline.id == latest_version_subq.c.custom_pipeline_id,
+            )
             .where(
                 PipelineCatalogEntry.organization_id == org_id,
                 PipelineCatalogEntry.enabled == True,  # noqa: E712
             )
             .order_by(PipelineCatalogEntry.name)
         )
-        return list(result.scalars().all())
+        result = await session.execute(stmt)
+        rows = result.all()
+        enriched: list[tuple[PipelineCatalogEntry, str | None, int | None]] = []
+        for entry, email, latest_version in rows:
+            if entry.source_type == "custom":
+                username = email.split("@")[0] if email else None
+                enriched.append((entry, username, latest_version))
+            else:
+                enriched.append((entry, None, None))
+        return enriched
 
     @staticmethod
     async def get_pipeline(session: AsyncSession, org_id: int, pipeline_key: str) -> PipelineCatalogEntry | None:

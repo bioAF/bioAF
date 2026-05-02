@@ -146,13 +146,14 @@ class PipelineMonitorService:
         if pod_name:
             run.k8s_pod_name = pod_name
 
+        is_custom = run.custom_pipeline_version_id is not None
+
         if k8s_status == "completed" and run.status != "completed":
             run.status = "completed"
             run.completed_at = datetime.now(timezone.utc)
 
-            # Fetch final progress from the adapter (trace uploaded at exit)
-            await PipelineMonitorService._populate_progress(session, run, compute_adapter, job_id)
-            if not run.progress_json:
+            if is_custom:
+                # Custom pipelines have no Nextflow trace file
                 run.progress_json = {
                     "total_processes": 1,
                     "completed": 1,
@@ -161,14 +162,34 @@ class PipelineMonitorService:
                     "cached": 0,
                     "percent_complete": 100.0,
                 }
+            else:
+                await PipelineMonitorService._populate_progress(session, run, compute_adapter, job_id)
+                if not run.progress_json:
+                    run.progress_json = {
+                        "total_processes": 1,
+                        "completed": 1,
+                        "running": 0,
+                        "failed": 0,
+                        "cached": 0,
+                        "percent_complete": 100.0,
+                    }
             await PipelineMonitorService._handle_completion(session, run)
 
         elif k8s_status == "failed" and run.status != "failed":
             run.status = "failed"
             run.completed_at = datetime.now(timezone.utc)
 
-            # Fetch final progress (trace may or may not exist for failures)
-            await PipelineMonitorService._populate_progress(session, run, compute_adapter, job_id)
+            if is_custom:
+                run.progress_json = {
+                    "total_processes": 1,
+                    "completed": 0,
+                    "running": 0,
+                    "failed": 1,
+                    "cached": 0,
+                    "percent_complete": 0.0,
+                }
+            else:
+                await PipelineMonitorService._populate_progress(session, run, compute_adapter, job_id)
 
             # Try to get error info from logs
             try:
@@ -386,6 +407,8 @@ class PipelineMonitorService:
             except Exception as e:
                 logger.warning("Failed to persist logs for run %d: %s", run.id, e)
 
+        is_custom = run.custom_pipeline_version_id is not None
+
         # Collect output files via storage adapter
         try:
             storage_adapter = get_storage_adapter()
@@ -404,7 +427,22 @@ class PipelineMonitorService:
                 {"id": run.id, "experiment_id": run.experiment_id},
             )
             if collected:
-                run.output_files_json = {"files": [f["filename"] for f in collected]}
+                output_meta: dict = {"files": [f["filename"] for f in collected]}
+
+                if is_custom:
+                    report_uri, report_format = _find_custom_report(collected)
+                    if report_uri:
+                        output_meta["report_path"] = report_uri
+                        output_meta["report_format"] = report_format
+
+                    version = run.custom_pipeline_version
+                    log_path_setting = version.log_file_path if version else None
+                    if log_path_setting:
+                        log_uri = _find_custom_log(collected, log_path_setting)
+                        if log_uri:
+                            output_meta["custom_log_path"] = log_uri
+
+                run.output_files_json = output_meta
                 try:
                     from app.services.pipeline_output_service import PipelineOutputService
 
@@ -415,8 +453,8 @@ class PipelineMonitorService:
         except Exception as e:
             logger.warning("Failed to collect output files for run %d: %s", run.id, e)
 
-        # Register Nextflow report and trace from the raw bucket
-        if run.k8s_job_name:
+        # Register Nextflow report and trace from the raw bucket (Nextflow only)
+        if run.k8s_job_name and not is_custom:
             try:
                 from app.services.pipeline_output_service import PipelineOutputService
 
@@ -509,17 +547,24 @@ class PipelineMonitorService:
         return mapping.get(nf_status.upper(), nf_status.lower())
 
     @staticmethod
-    async def get_run_logs(session: AsyncSession, run_id: int, process_name: str) -> dict:
+    async def get_run_logs(
+        session: AsyncSession,
+        run_id: int,
+        process_name: str,
+        force_pod_logs: bool = False,
+    ) -> dict:
         """Get stdout/stderr for a specific process or K8s job."""
-        # Check if this is a K8s run - use k8s_job_name for direct log retrieval
-        run_result = await session.execute(select(PipelineRun.k8s_job_name).where(PipelineRun.id == run_id))
-        k8s_job_name = run_result.scalar_one_or_none()
+        run_result = await session.execute(select(PipelineRun).where(PipelineRun.id == run_id))
+        run = run_result.scalar_one_or_none()
 
-        if k8s_job_name:
+        if run is not None and run.k8s_job_name:
+            if run.custom_pipeline_version_id is not None:
+                return await PipelineMonitorService._get_custom_run_logs(run, force_pod_logs=force_pod_logs)
+
             stdout = ""
             try:
                 compute_adapter = get_compute_adapter()
-                stdout = await compute_adapter.get_job_logs(k8s_job_name)
+                stdout = await compute_adapter.get_job_logs(run.k8s_job_name)
             except Exception as e:
                 logger.warning("Failed to read K8s logs for run %d: %s", run_id, e)
             return {"stdout": stdout, "stderr": ""}
@@ -547,20 +592,156 @@ class PipelineMonitorService:
         return {"stdout": stdout, "stderr": stderr}
 
     @staticmethod
-    async def get_run_report(session: AsyncSession, run_id: int) -> str:
-        """Read the Nextflow HTML report from GCS."""
-        k8s_result = await session.execute(select(PipelineRun.k8s_job_name).where(PipelineRun.id == run_id))
-        k8s_job_name = k8s_result.scalar_one_or_none()
+    async def _get_custom_run_logs(run: PipelineRun, force_pod_logs: bool = False) -> dict:
+        """Log retrieval for custom pipeline runs.
 
-        if not k8s_job_name:
+        Returns pod logs when no log_file_path is configured. Otherwise returns
+        pod logs with a `custom_log_pending` flag while running, and the custom
+        log file (with `pod_logs_available` flag) once the run has completed.
+        `force_pod_logs=True` overrides the custom file selection so callers can
+        explicitly request the system pod logs.
+        """
+        version = run.custom_pipeline_version
+        log_file_path = version.log_file_path if version else None
+
+        if not log_file_path:
+            return {"stdout": await _safe_pod_logs(run.k8s_job_name, run.id), "stderr": ""}
+
+        if force_pod_logs:
+            return {
+                "stdout": await _safe_pod_logs(run.k8s_job_name, run.id),
+                "stderr": "",
+                "log_source": "pod",
+            }
+
+        if run.status in ("running", "pending"):
+            return {
+                "stdout": await _safe_pod_logs(run.k8s_job_name, run.id),
+                "stderr": "",
+                "log_source": "pod",
+                "custom_log_pending": True,
+            }
+
+        custom_log_uri = (run.output_files_json or {}).get("custom_log_path")
+        if custom_log_uri:
+            content = await _read_gcs_text(custom_log_uri)
+            if content is not None:
+                return {
+                    "stdout": content,
+                    "stderr": "",
+                    "log_source": "custom_file",
+                    "pod_logs_available": True,
+                }
+
+        return {
+            "stdout": await _safe_pod_logs(run.k8s_job_name, run.id),
+            "stderr": "",
+            "log_source": "pod",
+            "custom_log_missing": True,
+        }
+
+    @staticmethod
+    async def get_run_report(session: AsyncSession, run_id: int) -> str:
+        """Read the report from GCS.
+
+        For Nextflow runs this returns the HTML report from the compute
+        adapter. For custom pipeline runs this returns the report artifact
+        (HTML or markdown) registered during output collection.
+        """
+        run_result = await session.execute(select(PipelineRun).where(PipelineRun.id == run_id))
+        run = run_result.scalar_one_or_none()
+
+        if run is None or not run.k8s_job_name:
             return ""
+
+        if run.custom_pipeline_version_id is not None:
+            report_uri = (run.output_files_json or {}).get("report_path")
+            if not report_uri:
+                return ""
+            content = await _read_gcs_text(report_uri)
+            return content or ""
 
         try:
             compute_adapter = get_compute_adapter()
-            return await compute_adapter.get_job_report(k8s_job_name)
+            return await compute_adapter.get_job_report(run.k8s_job_name)
         except Exception as e:
             logger.warning("Failed to read report for run %d: %s", run_id, e)
             return ""
+
+
+def _find_custom_report(collected: list[dict]) -> tuple[str | None, str | None]:
+    """Detect a `report/report.html` or `report/report.md` artifact in collected outputs.
+
+    HTML is preferred when both are present.
+    """
+    html_uri: str | None = None
+    md_uri: str | None = None
+    for f in collected:
+        uri = f.get("gcs_uri") or ""
+        if uri.endswith("/report/report.html"):
+            html_uri = uri
+        elif uri.endswith("/report/report.md"):
+            md_uri = uri
+    if html_uri:
+        return html_uri, "html"
+    if md_uri:
+        return md_uri, "md"
+    return None, None
+
+
+def _find_custom_log(collected: list[dict], log_file_path: str) -> str | None:
+    """Find a custom log artifact whose GCS URI ends with the configured log path.
+
+    `log_file_path` is the path inside the pod (e.g. `/outputs/analysis.log`);
+    collected GCS URIs end with the same suffix relative to the outputs root.
+    """
+    relative = log_file_path
+    if relative.startswith("/outputs/"):
+        relative = relative[len("/outputs/") :]
+    relative = relative.lstrip("/")
+    if not relative:
+        return None
+    needle = "/" + relative
+    for f in collected:
+        uri = f.get("gcs_uri") or ""
+        if uri.endswith(needle):
+            return uri
+    return None
+
+
+async def _read_gcs_text(gcs_uri: str) -> str | None:
+    """Download a GCS object as text. Returns None if the object is missing or unreadable."""
+    if not gcs_uri.startswith("gs://"):
+        return None
+    try:
+        from google.cloud import storage as gcs_storage
+    except ImportError:
+        return None
+    try:
+        bucket_name, _, blob_path = gcs_uri[len("gs://") :].partition("/")
+        if not bucket_name or not blob_path:
+            return None
+        client = gcs_storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_path)
+        if not blob.exists():
+            return None
+        return blob.download_as_text()
+    except Exception as e:
+        logger.warning("Failed to read GCS object %s: %s", gcs_uri, e)
+        return None
+
+
+async def _safe_pod_logs(k8s_job_name: str | None, run_id: int) -> str:
+    """Fetch pod logs via the compute adapter, returning empty string on error."""
+    if not k8s_job_name:
+        return ""
+    try:
+        compute_adapter = get_compute_adapter()
+        return await compute_adapter.get_job_logs(k8s_job_name)
+    except Exception as e:
+        logger.warning("Failed to read K8s logs for run %d: %s", run_id, e)
+        return ""
 
 
 def _safe_int(val) -> int | None:
