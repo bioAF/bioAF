@@ -42,6 +42,9 @@ class PipelineRun(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    custom_pipeline_version_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("custom_pipeline_versions.id"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     organization = relationship("Organization")
@@ -54,6 +57,7 @@ class PipelineRun(Base):
     samples = relationship("Sample", secondary="pipeline_run_samples", viewonly=True)
     references = relationship("ReferenceDataset", secondary="pipeline_run_references", viewonly=True)
     input_file_records = relationship("PipelineRunInputFile", cascade="all, delete-orphan", passive_deletes=True)
+    custom_pipeline_version = relationship("CustomPipelineVersion", lazy="selectin")
 
 
 class PipelineRunSample(Base):

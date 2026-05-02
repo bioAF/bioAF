@@ -106,6 +106,17 @@ async def lifespan(app: FastAPI):
     notification_router.register()
     logger.info("Notification system initialized")
 
+    # Subscribe custom pipeline cascade handler to environment build completions (ADR-046)
+    from app.services.custom_pipeline_service import CustomPipelineService
+    from app.services.event_bus import event_bus
+    from app.services.event_types import ENVIRONMENT_BUILD_COMPLETED
+
+    event_bus.subscribe(
+        ENVIRONMENT_BUILD_COMPLETED,
+        CustomPipelineService.handle_environment_build_completed,
+    )
+    logger.info("Custom pipeline cascade handler subscribed")
+
     # Initialize BioAF Adapter Layer (BAL)
     from app.adapters.registry import initialize_adapters
 
@@ -155,6 +166,16 @@ async def lifespan(app: FastAPI):
             await env_seed_session.commit()
     except Exception as e:
         logger.warning("Default work node environment seed failed: %s", e)
+
+    # Seed default pipeline environment if none exists (ADR-045)
+    from app.services.environment_service import ensure_default_pipeline_environment
+
+    try:
+        async with notif_session_factory() as pipe_seed_session:
+            await ensure_default_pipeline_environment(pipe_seed_session)
+            await pipe_seed_session.commit()
+    except Exception as e:
+        logger.warning("Default pipeline environment seed failed: %s", e)
 
     # Resolve any pending upgrades from before the restart
     from app.services.upgrade_service import UpgradeService

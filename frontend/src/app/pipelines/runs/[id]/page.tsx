@@ -12,7 +12,13 @@ import { isAuthenticated } from "@/lib/auth";
 import { getToken } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
-import type { PipelineRunDetail, PipelineRunStatus, PipelineProcessStatus, ReferenceDataset } from "@/lib/types";
+import type {
+  CustomPipelineRunOverview,
+  PipelineRunDetail,
+  PipelineRunStatus,
+  PipelineProcessStatus,
+  ReferenceDataset,
+} from "@/lib/types";
 
 const STATUS_COLORS: Record<PipelineRunStatus | PipelineProcessStatus, string> = {
   pending: "bg-gray-100 text-gray-700",
@@ -24,6 +30,112 @@ const STATUS_COLORS: Record<PipelineRunStatus | PipelineProcessStatus, string> =
 };
 
 type Tab = "logs" | "report" | "parameters" | "provenance" | "review";
+
+interface LogResponse {
+  stdout: string;
+  stderr: string;
+  log_source?: "pod" | "custom_file";
+  custom_log_pending?: boolean;
+  pod_logs_available?: boolean;
+  custom_log_missing?: boolean;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function inlineFormat(s: string): string {
+  return s
+    .replace(/`([^`]+)`/g, '<code class="bg-gray-100 px-1 rounded">$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+    .replace(
+      /\[([^\]]+)\]\(([^)]+)\)/g,
+      '<a href="$2" class="text-bioaf-600 hover:underline" target="_blank" rel="noreferrer">$1</a>',
+    );
+}
+
+// Minimal markdown -> HTML renderer for custom pipeline `report.md` artifacts.
+// Handles headings, paragraphs, fenced code blocks, unordered lists, links,
+// inline code and bold/italic. Anything fancier should be a real renderer.
+function renderMarkdown(md: string): string {
+  const lines = md.split("\n");
+  let html = "";
+  let inCode = false;
+  let codeBuf: string[] = [];
+  let inList = false;
+  let paragraph: string[] = [];
+
+  const flushParagraph = () => {
+    if (paragraph.length > 0) {
+      html += `<p class="my-2">${inlineFormat(escapeHtml(paragraph.join(" ")))}</p>\n`;
+      paragraph = [];
+    }
+  };
+  const flushList = () => {
+    if (inList) {
+      html += "</ul>\n";
+      inList = false;
+    }
+  };
+
+  for (const line of lines) {
+    if (line.trim().startsWith("```")) {
+      if (inCode) {
+        html += `<pre class="bg-gray-50 border rounded p-3 text-xs font-mono overflow-x-auto my-2">${escapeHtml(codeBuf.join("\n"))}</pre>\n`;
+        codeBuf = [];
+        inCode = false;
+      } else {
+        flushParagraph();
+        flushList();
+        inCode = true;
+      }
+      continue;
+    }
+    if (inCode) {
+      codeBuf.push(line);
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      flushParagraph();
+      flushList();
+      const level = heading[1].length;
+      const sizes = ["text-2xl", "text-xl", "text-lg", "text-base", "text-sm", "text-xs"];
+      html += `<h${level} class="font-semibold mt-4 mb-2 ${sizes[level - 1]}">${inlineFormat(escapeHtml(heading[2]))}</h${level}>\n`;
+      continue;
+    }
+
+    const list = line.match(/^[-*]\s+(.+)$/);
+    if (list) {
+      flushParagraph();
+      if (!inList) {
+        html += '<ul class="list-disc pl-6 my-2">';
+        inList = true;
+      }
+      html += `<li>${inlineFormat(escapeHtml(list[1]))}</li>`;
+      continue;
+    }
+
+    if (line.trim() === "") {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+
+    flushList();
+    paragraph.push(line);
+  }
+
+  flushParagraph();
+  flushList();
+  if (inCode && codeBuf.length > 0) {
+    html += `<pre class="bg-gray-50 border rounded p-3 text-xs font-mono overflow-x-auto my-2">${escapeHtml(codeBuf.join("\n"))}</pre>\n`;
+  }
+
+  return html;
+}
 
 function getUserRole(): string {
   try {
@@ -46,11 +158,15 @@ export default function PipelineRunDetailPage() {
   const [activeTab, setActiveTab] = useState<Tab>("logs");
   const [report, setReport] = useState<string>("");
   const [reportLoading, setReportLoading] = useState(false);
-  const [logs, setLogs] = useState<{ stdout: string; stderr: string }>({ stdout: "", stderr: "" });
+  const [logs, setLogs] = useState<LogResponse>({ stdout: "", stderr: "" });
   const [logsLoading, setLogsLoading] = useState(false);
   const [selectedProcess, setSelectedProcess] = useState<string>("");
   const [provenance, setProvenance] = useState<Record<string, unknown> | null>(null);
   const [references, setReferences] = useState<ReferenceDataset[]>([]);
+  const [customOverview, setCustomOverview] = useState<CustomPipelineRunOverview | null>(null);
+  const [showSystemLogs, setShowSystemLogs] = useState(false);
+  const [systemLogs, setSystemLogs] = useState<LogResponse | null>(null);
+  const [systemLogsLoading, setSystemLogsLoading] = useState(false);
 
   const loadRun = useCallback(async () => {
     try {
@@ -58,6 +174,26 @@ export default function PipelineRunDetailPage() {
       setRun(data);
     } catch {} finally { setLoading(false); }
   }, [runId]);
+
+  const isCustomRun = run?.custom_pipeline_version_id != null;
+
+  // Load the custom pipeline overview once for custom runs.
+  useEffect(() => {
+    if (run?.custom_pipeline_version_id == null) {
+      setCustomOverview(null);
+      return;
+    }
+    void (async () => {
+      try {
+        const data = await api.get<CustomPipelineRunOverview>(
+          `/api/v1/custom-pipelines/versions/${run.custom_pipeline_version_id}/overview`,
+        );
+        setCustomOverview(data);
+      } catch {
+        setCustomOverview(null);
+      }
+    })();
+  }, [run?.custom_pipeline_version_id]);
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/login"); return; }
@@ -109,9 +245,21 @@ export default function PipelineRunDetailPage() {
       const url = processName
         ? `/api/pipeline-runs/${runId}/logs/${encodeURIComponent(processName)}`
         : `/api/pipeline-runs/${runId}/logs`;
-      const data = await api.get<{ stdout: string; stderr: string }>(url);
+      const data = await api.get<LogResponse>(url);
       setLogs(data);
     } catch {} finally { setLogsLoading(false); }
+  }
+
+  async function loadSystemLogs() {
+    setSystemLogsLoading(true);
+    try {
+      const data = await api.get<LogResponse>(`/api/pipeline-runs/${runId}/logs?source=pod`);
+      setSystemLogs(data);
+    } catch {
+      setSystemLogs(null);
+    } finally {
+      setSystemLogsLoading(false);
+    }
   }
 
   async function loadProvenance() {
@@ -174,9 +322,23 @@ export default function PipelineRunDetailPage() {
   }
 
   const isActive = ["running", "pending"].includes(run?.status ?? "");
+  const customReportPath =
+    isCustomRun
+      ? typeof (run?.output_files as Record<string, unknown> | null)?.report_path === "string"
+        ? ((run!.output_files as Record<string, unknown>).report_path as string)
+        : null
+      : null;
+  const customReportFormat =
+    isCustomRun
+      ? typeof (run?.output_files as Record<string, unknown> | null)?.report_format === "string"
+        ? ((run!.output_files as Record<string, unknown>).report_format as string)
+        : null
+      : null;
+  const showReportTab = isCustomRun ? customReportPath != null : true;
+
   const tabs: { key: Tab; label: string }[] = [
     { key: "logs", label: "Logs" },
-    { key: "report", label: "Report" },
+    ...(showReportTab ? [{ key: "report" as Tab, label: "Report" }] : []),
     { key: "parameters", label: "Parameters" },
     { key: "provenance", label: "Provenance" },
     { key: "review", label: "Review" },
@@ -223,9 +385,11 @@ export default function PipelineRunDetailPage() {
                   </div>
                 </div>
                 <span className="text-sm font-medium">{Math.round(run.progress.percent_complete)}%</span>
-                <span className="text-xs text-gray-500">
-                  {run.progress.completed + run.progress.cached}/{run.progress.total_processes} processes
-                </span>
+                {!isCustomRun && (
+                  <span className="text-xs text-gray-500">
+                    {run.progress.completed + run.progress.cached}/{run.progress.total_processes} processes
+                  </span>
+                )}
               </div>
               {run.failure_reason === "oom" && (
                 <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
@@ -268,14 +432,92 @@ export default function PipelineRunDetailPage() {
             </div>
           )}
 
-          {/* MINSEQE metadata */}
-          {(run.reference_genome || run.alignment_algorithm) && (
+          {/* MINSEQE metadata (NF-Core only) */}
+          {!isCustomRun && (run.reference_genome || run.alignment_algorithm) && (
             <div className="bg-white rounded-lg shadow p-4 mb-6 flex gap-6">
               {run.reference_genome && (
                 <div><span className="text-xs text-gray-500">Reference Genome</span><p className="text-sm font-medium">{run.reference_genome}</p></div>
               )}
               {run.alignment_algorithm && (
                 <div><span className="text-xs text-gray-500">Alignment Algorithm</span><p className="text-sm font-medium">{run.alignment_algorithm}</p></div>
+              )}
+            </div>
+          )}
+
+          {/* Custom pipeline overview */}
+          {isCustomRun && customOverview && (
+            <div className="bg-white rounded-lg shadow p-4 mb-6 space-y-3">
+              <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                <div>
+                  <span className="text-xs text-gray-500 block">Pipeline</span>
+                  <a
+                    href={`/pipelines/custom/${customOverview.pipeline_id}`}
+                    className="text-bioaf-600 hover:underline font-medium"
+                  >
+                    {customOverview.pipeline_name}
+                  </a>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500 block">Version</span>
+                  <span className="font-mono">v{customOverview.version_number}</span>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500 block">Code source</span>
+                  <span>
+                    {customOverview.code_source_type === "github_repo"
+                      ? "GitHub repo"
+                      : customOverview.code_source_type === "code_blob"
+                        ? "Code blob"
+                        : "Inline command"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500 block">Entrypoint</span>
+                  <code className="font-mono text-xs bg-gray-100 px-2 py-0.5 rounded">
+                    {customOverview.entrypoint_command}
+                  </code>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500 block">Environment</span>
+                  {customOverview.environment ? (
+                    <span>
+                      {customOverview.environment.environment_name} v
+                      {customOverview.environment.version_number}.
+                      {customOverview.environment.build_number}
+                    </span>
+                  ) : (
+                    <span className="text-gray-500">—</span>
+                  )}
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500 block">Resources</span>
+                  <span className="font-mono">
+                    CPU {customOverview.cpu_request} / Memory {customOverview.memory_request}
+                  </span>
+                </div>
+              </div>
+              {run.parameters && Object.keys(run.parameters).length > 0 && (
+                <div>
+                  <span className="text-xs text-gray-500 block mb-1">Variables used</span>
+                  <table className="text-xs border w-full">
+                    <thead className="bg-gray-50 text-gray-500 uppercase">
+                      <tr>
+                        <th className="px-2 py-1 text-left">Name</th>
+                        <th className="px-2 py-1 text-left">Value</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(run.parameters).map(([key, value]) => (
+                        <tr key={key} className="border-t">
+                          <td className="px-2 py-1 font-mono">{key}</td>
+                          <td className="px-2 py-1 font-mono">
+                            {typeof value === "string" ? value : JSON.stringify(value)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           )}
@@ -375,11 +617,24 @@ export default function PipelineRunDetailPage() {
           )}
 
           {/* Report tab */}
-          {activeTab === "report" && (
+          {activeTab === "report" && showReportTab && (
             <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-lg font-semibold mb-4">Nextflow Report</h2>
+              <h2 className="text-lg font-semibold mb-4">
+                {isCustomRun ? "Pipeline Report" : "Nextflow Report"}
+              </h2>
               {report ? (
-                <iframe srcDoc={report} className="w-full h-[600px] border rounded" title="Nextflow Report" />
+                isCustomRun && customReportFormat === "md" ? (
+                  <div
+                    className="prose prose-sm max-w-none"
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(report) }}
+                  />
+                ) : (
+                  <iframe
+                    srcDoc={report}
+                    className="w-full h-[600px] border rounded"
+                    title={isCustomRun ? "Pipeline Report" : "Nextflow Report"}
+                  />
+                )
               ) : isActive ? (
                 <p className="text-gray-400">Reports are available after the pipeline run completes.</p>
               ) : reportLoading ? (
@@ -401,7 +656,38 @@ export default function PipelineRunDetailPage() {
                     {run.processes.map((p) => <option key={p.id} value={p.process_name}>{p.process_name}</option>)}
                   </select>
                 )}
+                {isCustomRun && logs.pod_logs_available && (
+                  <button
+                    onClick={() => {
+                      const next = !showSystemLogs;
+                      setShowSystemLogs(next);
+                      if (next && systemLogs == null) {
+                        void loadSystemLogs();
+                      }
+                    }}
+                    className={`ml-auto text-xs px-3 py-1 rounded border ${
+                      showSystemLogs
+                        ? "bg-bioaf-600 text-white border-bioaf-600"
+                        : "border-gray-300 text-gray-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    {showSystemLogs ? "Hide System Logs" : "Show System Logs"}
+                  </button>
+                )}
               </div>
+
+              {isCustomRun && logs.custom_log_pending && customOverview?.log_file_path && (
+                <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
+                  Custom log file ({customOverview.log_file_path}) will be available after
+                  completion. Showing terminal output.
+                </div>
+              )}
+              {isCustomRun && logs.custom_log_missing && (
+                <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded text-sm text-amber-800">
+                  Custom log file not available. Showing terminal output.
+                </div>
+              )}
+
               {(run.k8s_job_name || selectedProcess) ? (
                 logsLoading ? (
                   <div className="flex items-center gap-2 text-gray-400"><LoadingSpinner size="sm" /><span>Loading logs...</span></div>
@@ -414,6 +700,21 @@ export default function PipelineRunDetailPage() {
                       <div>
                         <h3 className="text-sm font-medium mb-1">stderr</h3>
                         <pre className="text-xs bg-gray-900 text-red-400 p-4 rounded overflow-auto max-h-64 whitespace-pre-wrap">{logs.stderr || "(empty)"}</pre>
+                      </div>
+                    )}
+
+                    {isCustomRun && showSystemLogs && (
+                      <div className="border-t pt-4">
+                        <h3 className="text-sm font-medium mb-2">System Logs (pod stdout/stderr)</h3>
+                        {systemLogsLoading ? (
+                          <div className="flex items-center gap-2 text-gray-400">
+                            <LoadingSpinner size="sm" /><span>Loading system logs...</span>
+                          </div>
+                        ) : (
+                          <pre className="text-xs bg-gray-900 text-green-400 p-4 rounded overflow-auto max-h-96 whitespace-pre-wrap">
+                            {systemLogs?.stdout || "(empty)"}
+                          </pre>
+                        )}
                       </div>
                     )}
                   </div>

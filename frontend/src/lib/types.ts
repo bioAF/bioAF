@@ -709,6 +709,9 @@ export interface PipelineCatalog {
   default_params: Record<string, unknown> | null;
   is_builtin: boolean;
   enabled: boolean;
+  custom_pipeline_id: number | null;
+  created_by_username: string | null;
+  latest_version_number: number | null;
 }
 
 export interface PipelineCatalogListResponse {
@@ -763,6 +766,7 @@ export interface PipelineRun {
   alignment_algorithm: string | null;
   resume_from_run_id: number | null;
   review_verdict: ReviewVerdict | null;
+  custom_pipeline_version_id: number | null;
   started_at: string | null;
   completed_at: string | null;
   created_at: string | null;
@@ -804,6 +808,107 @@ export interface PipelineAddRequest {
   source_url: string;
   version?: string | null;
   description?: string | null;
+}
+
+// Custom Pipelines
+
+export type CustomPipelineCodeSource = "github_repo" | "code_blob" | "inline";
+export type CustomPipelineVariableType = "string" | "number" | "boolean";
+export type CustomPipelineVersionStatus = "active" | "deprecated";
+export type CustomPipelineVersionTrigger = "user" | "environment_cascade";
+
+export interface CustomPipelineVariable {
+  id: number;
+  variable_name: string;
+  default_value: string | null;
+  variable_type: CustomPipelineVariableType;
+  is_required: boolean;
+}
+
+export interface CustomPipelineVariableDefinition {
+  variable_name: string;
+  default_value: string | null;
+  variable_type: CustomPipelineVariableType;
+  is_required: boolean;
+}
+
+export interface CustomPipelineVersion {
+  id: number;
+  version_number: number;
+  code_source_type: CustomPipelineCodeSource;
+  github_repo_id: number | null;
+  code_content: string | null;
+  entrypoint_command: string;
+  environment_version_id: number;
+  cpu_request: string;
+  memory_request: string;
+  log_file_path: string | null;
+  version_trigger: CustomPipelineVersionTrigger;
+  status: CustomPipelineVersionStatus;
+  created_by_user_id: number;
+  created_at: string;
+  variables: CustomPipelineVariable[];
+}
+
+export interface CustomPipeline {
+  id: number;
+  name: string;
+  description: string | null;
+  pipeline_key: string;
+  created_by_user_id: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomPipelineDetail extends CustomPipeline {
+  versions: CustomPipelineVersion[];
+}
+
+export interface CustomPipelineCreateRequest {
+  name: string;
+  description?: string | null;
+}
+
+export interface CustomPipelineUpdateRequest {
+  name?: string | null;
+  description?: string | null;
+}
+
+export interface CustomPipelineEnvironmentSummary {
+  environment_id: number;
+  environment_name: string;
+  version_id: number;
+  version_number: number;
+  build_number: number;
+  image_uri: string | null;
+}
+
+export interface CustomPipelineRunOverview {
+  pipeline_id: number;
+  pipeline_name: string;
+  pipeline_key: string;
+  version_id: number;
+  version_number: number;
+  code_source_type: CustomPipelineCodeSource;
+  github_repo_id: number | null;
+  entrypoint_command: string;
+  cpu_request: string;
+  memory_request: string;
+  log_file_path: string | null;
+  environment: CustomPipelineEnvironmentSummary | null;
+  variables: CustomPipelineVariable[];
+}
+
+export interface CustomPipelineVersionCreateRequest {
+  code_source_type: CustomPipelineCodeSource;
+  code_content?: string | null;
+  github_repo_id?: number | null;
+  entrypoint_command: string;
+  environment_version_id: number;
+  cpu_request?: string;
+  memory_request?: string;
+  log_file_path?: string | null;
+  variables: CustomPipelineVariableDefinition[];
 }
 
 // Phase 5 — Data Management + Visualization
@@ -1156,7 +1261,7 @@ export interface EnvironmentResponse {
   name: string;
   description: string | null;
   visibility: "team" | "organization";
-  environment_type: "notebook" | "work_node";
+  environment_type: "notebook" | "work_node" | "pipeline";
   version_count: number;
   latest_version: EnvironmentVersionSummary | null;
   created_by: UserSummary | null;
@@ -1174,7 +1279,7 @@ export interface EnvironmentDetailResponse {
   name: string;
   description: string | null;
   visibility: "team" | "organization";
-  environment_type: "notebook" | "work_node";
+  environment_type: "notebook" | "work_node" | "pipeline";
   versions: EnvironmentVersionSummary[];
   created_by: UserSummary | null;
   created_at: string;
@@ -1204,6 +1309,7 @@ export interface EnvironmentCreateRequest {
   name: string;
   description?: string;
   visibility?: "team" | "organization";
+  environment_type?: "notebook" | "work_node" | "pipeline";
 }
 
 export interface VersionCreateRequest {
