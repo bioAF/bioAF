@@ -100,6 +100,34 @@ resource "google_storage_bucket" "results" {
   }
 }
 
+# Reference data bucket — backing store for ReferenceDataset rows. Per
+# spec-reference-data-ingest §1, browsers PUT chunks directly via GCS
+# resumable session URLs returned by ReferenceDataService.init_upload.
+resource "google_storage_bucket" "references" {
+  name          = "${local.bucket_prefix}-references-${var.org_slug}-${var.stack_uid}"
+  project       = var.project_id
+  location      = var.region
+  storage_class = "STANDARD"
+
+  uniform_bucket_level_access = true
+  versioning { enabled = true }
+  force_destroy = false
+
+  cors {
+    # POST allowed so the browser can initiate the resumable session URL
+    # via XHR even though the actual byte uploads use PUT.
+    origin          = ["*"] # tighten to bioAF frontend origins post-MVP
+    method          = ["PUT", "POST", "OPTIONS"]
+    response_header = ["Content-Type", "Content-Length", "Authorization", "x-goog-*"]
+    max_age_seconds = 3600
+  }
+
+  labels = {
+    managed_by = "bioaf"
+    purpose    = "references"
+  }
+}
+
 # DEPRECATED: Backups now go to the persistent backups bucket in the
 # foundation module (bioaf-backups-{project_id}). This bucket is kept for
 # backward compatibility with existing deployments but will be removed in
@@ -137,6 +165,7 @@ locals {
     raw            = google_storage_bucket.raw.name
     working        = google_storage_bucket.working.name
     results        = google_storage_bucket.results.name
+    references     = google_storage_bucket.references.name
     config_backups = google_storage_bucket.config_backups.name
   }
 }

@@ -16,7 +16,7 @@ pipeline_run_references = Table(
 
 REFERENCE_CATEGORIES = ["genome", "annotation", "index", "atlas", "markers", "other"]
 REFERENCE_SCOPES = ["public", "internal"]
-REFERENCE_STATUSES = ["active", "deprecated", "pending_approval"]
+REFERENCE_STATUSES = ["active", "deprecated", "pending_approval", "uploading", "failed"]
 
 
 class ReferenceDataset(Base):

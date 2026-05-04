@@ -42,9 +42,20 @@ function emptyVariableDraft(): VariableDraft {
     variable_name: "",
     default_value: "",
     variable_type: "string",
+    reference_category: null,
     is_required: false,
   };
 }
+
+const REFERENCE_CATEGORY_OPTIONS = [
+  "any",
+  "genome",
+  "annotation",
+  "index",
+  "atlas",
+  "markers",
+  "other",
+] as const;
 
 function changeLabel(
   current: CustomPipelineVersion,
@@ -216,6 +227,7 @@ export default function CustomPipelineDetailPage() {
         variable_name: v.variable_name,
         default_value: v.default_value,
         variable_type: v.variable_type,
+        reference_category: v.reference_category ?? null,
         is_required: v.is_required,
       })),
       qc_template: latest.qc_template ?? "",
@@ -390,6 +402,8 @@ export default function CustomPipelineDetailPage() {
         variable_name: v.variable_name,
         default_value: v.default_value || null,
         variable_type: v.variable_type,
+        reference_category:
+          v.variable_type === "reference" ? (v.reference_category ?? null) : null,
         is_required: v.is_required,
       })),
       qc_template: versionForm.qc_template.trim() || null,
@@ -1030,6 +1044,13 @@ function NewVersionForm({
                 onChange={(e) =>
                   updateVariable(idx, {
                     variable_type: e.target.value as VariableDraft["variable_type"],
+                    // When switching to reference, default to 'any' so the
+                    // schema-required field is non-empty; clear it on switch
+                    // back to a primitive type.
+                    reference_category:
+                      e.target.value === "reference"
+                        ? (v.reference_category ?? "any")
+                        : null,
                   })
                 }
                 className="border rounded px-2 py-1.5 text-sm bg-white"
@@ -1037,13 +1058,33 @@ function NewVersionForm({
                 <option value="string">string</option>
                 <option value="number">number</option>
                 <option value="boolean">boolean</option>
+                <option value="reference">reference</option>
               </select>
-              <input
-                value={v.default_value ?? ""}
-                onChange={(e) => updateVariable(idx, { default_value: e.target.value })}
-                placeholder="Default value"
-                className="border rounded px-2 py-1.5 text-sm"
-              />
+              {v.variable_type === "reference" ? (
+                <select
+                  value={v.reference_category ?? "any"}
+                  onChange={(e) =>
+                    updateVariable(idx, {
+                      reference_category: e.target.value as VariableDraft["reference_category"],
+                    })
+                  }
+                  className="border rounded px-2 py-1.5 text-sm bg-white"
+                  aria-label="Reference category"
+                >
+                  {REFERENCE_CATEGORY_OPTIONS.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={v.default_value ?? ""}
+                  onChange={(e) => updateVariable(idx, { default_value: e.target.value })}
+                  placeholder="Default value"
+                  className="border rounded px-2 py-1.5 text-sm"
+                />
+              )}
               <label className="flex items-center gap-1 text-xs text-gray-600 px-1">
                 <input
                   type="checkbox"

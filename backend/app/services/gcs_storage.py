@@ -35,6 +35,7 @@ _BUCKET_CONFIG_KEYS = {
     "raw_bucket_name": "raw",
     "working_bucket_name": "working",
     "results_bucket_name": "results",
+    "references_bucket_name": "references",
     "config_backups_bucket_name": "config_backups",
 }
 
