@@ -1,5 +1,30 @@
 # Release Notes
 
+## v0.10.2
+
+Point release adding per-pipeline QC dashboard configuration. Existing scRNA-seq dashboards render identically; new templates plug in by shipping a config + extractor instead of forking the dashboard page.
+
+### New features
+
+- **Per-pipeline QC templates** -- pipelines now declare a `qc_template` (`scrnaseq`, `bulk_rnaseq`, or `custom`) and may carry a `qc_config_json` override. The QC dashboard reads sections, metric labels, formats, thresholds, and chart specs from that config instead of hardcoded scRNA-seq logic
+- **Custom-pipeline QC dashboards** -- custom pipelines that emit `/outputs/qc_metrics.json` get a real QC dashboard rendered from the version's `qc_config_json`. Both fields are versioned with the pipeline (per ADR-033 immutability) so editing the layout produces a new version
+- **QC dashboard config in the pipeline editor** -- new collapsible "QC dashboard config" panel on the custom-pipeline version form: template select + JSON textarea with client-side parse + object-shape validation
+- **Generic QC dashboard renderer** -- the QC dashboards page replaces its hardcoded scRNA-seq body with a config-driven `<GenericQCDashboard/>`. Sections, metric cards, formats, threshold colors, and charts all dispatch off `qc_config`
+- **Reproducibility snapshot** -- each generated dashboard row stores the resolved render config, so old runs always render the way they were generated even after a pipeline's config changes later
+
+### New documentation
+
+- **`docs/guides/custom-pipelines.md`** -- end-to-end guide to authoring custom pipelines: prerequisites, runtime contract, variables, version cascade, permissions
+- **`docs/guides/custom-qc-config.md`** -- reference for the QC config schema (sections, metrics, formats, thresholds), how to emit `qc_metrics.json`, and a hello-world example
+
+### Backend
+
+- New columns on `pipeline_catalog`, `custom_pipeline_versions`, and `qc_dashboards` (additive migration 070) for `qc_template` + `qc_config_json`
+- New `app/services/qc/` package: per-template extractors + render configs (`scrnaseq`, `bulk_rnaseq`, `custom`), a resolver that walks run -> custom-pipeline-version -> catalog-entry -> default fallback, and a shared GCS helpers module
+- `QCDashboardService` is now a thin orchestrator that dispatches via the template registry; existing `_read_*` helpers remain on the class as backwards-compat shims
+- `QCDashboardResponse` gains `qc_config` and `raw_metrics` fields. Pre-snapshot rows substitute the resolved template default on read so legacy dashboards still render
+- `CustomPipelineVersionCreateRequest` + `Response` carry `qc_template` + `qc_config_json`; Pydantic enforces the JSON-object shape
+
 ## v0.10.1
 
 Point release tightening file upload, association, and provenance display.

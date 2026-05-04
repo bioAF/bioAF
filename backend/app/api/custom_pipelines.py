@@ -49,6 +49,8 @@ def _version_response(version: CustomPipelineVersion) -> CustomPipelineVersionRe
         created_by_user_id=version.created_by_user_id,
         created_at=version.created_at,
         variables=[CustomPipelineVariableResponse.model_validate(v) for v in (version.variables or [])],
+        qc_template=version.qc_template,
+        qc_config_json=version.qc_config_json,
     )
 
 

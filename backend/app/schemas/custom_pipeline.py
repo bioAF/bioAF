@@ -38,6 +38,8 @@ class CustomPipelineVersionCreateRequest(BaseModel):
     memory_request: str = "8Gi"
     log_file_path: str | None = None
     variables: list[CustomPipelineVariableDefinition] = []
+    qc_template: str | None = None
+    qc_config_json: dict | None = None
 
 
 class CustomPipelineLaunchRequest(BaseModel):
@@ -77,6 +79,8 @@ class CustomPipelineVersionResponse(BaseModel):
     created_by_user_id: int
     created_at: datetime
     variables: list[CustomPipelineVariableResponse] = []
+    qc_template: str | None = None
+    qc_config_json: dict | None = None
 
     model_config = {"from_attributes": True}
 
