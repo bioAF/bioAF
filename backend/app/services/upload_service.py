@@ -100,6 +100,7 @@ class UploadService:
         experiment_id: int | None,
         sample_ids: list[int] | None = None,
         project_id: int | None = None,
+        is_global: bool = False,
     ) -> dict:
         """Initiate an upload, returning upload_id and signed URL."""
         upload_id = str(uuid.uuid4())
@@ -121,6 +122,7 @@ class UploadService:
             "project_id": project_id,
             "experiment_id": experiment_id,
             "sample_ids": sample_ids or [],
+            "is_global": is_global,
         }
 
         return {
@@ -170,6 +172,7 @@ class UploadService:
             tags=tags,
             project_id=pending.get("project_id"),
             experiment_id=pending["experiment_id"],
+            is_global=pending.get("is_global", False),
         )
 
         # Link to samples

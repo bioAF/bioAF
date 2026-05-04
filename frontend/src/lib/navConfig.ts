@@ -74,7 +74,6 @@ export const navConfig: NavSection[] = [
     children: [
       { label: "Upload", path: "/data/upload", permission: { resource: "files", action: "upload" } },
       { label: "Files", path: "/data/files", permission: { resource: "files", action: "view" } },
-      { label: "Documents", path: "/data/documents", permission: { resource: "files", action: "view" } },
       { label: "Reference Data", path: "/data/references", permission: { resource: "files", action: "view" } },
       { label: "Naming Profiles", path: "/settings/naming-profiles", permission: { resource: "infrastructure", action: "configure" } },
     ],

@@ -51,9 +51,33 @@ export default function DataUploadPage() {
   const [experiments, setExperiments] = useState<ExperimentOption[]>([]);
   const [samples, setSamples] = useState<SampleOption[]>([]);
 
+  type Scope = "global" | "project" | "experiment" | "sample";
+  const [scope, setScope] = useState<Scope>("experiment");
   const [projectId, setProjectId] = useState("");
   const [experimentId, setExperimentId] = useState("");
   const [sampleId, setSampleId] = useState("");
+
+  // Clear lower-level selections when scope narrows
+  useEffect(() => {
+    if (scope === "global") {
+      setProjectId("");
+      setExperimentId("");
+      setSampleId("");
+    } else if (scope === "project") {
+      setExperimentId("");
+      setSampleId("");
+    } else if (scope === "experiment") {
+      setSampleId("");
+    }
+  }, [scope]);
+
+  const scopeReady = (() => {
+    if (scope === "global") return true;
+    if (scope === "project") return !!projectId;
+    if (scope === "experiment") return !!experimentId;
+    if (scope === "sample") return !!sampleId;
+    return false;
+  })();
 
   // Load projects on mount
   useEffect(() => {
@@ -145,16 +169,7 @@ export default function DataUploadPage() {
   }, [projectId, experimentId, sampleId, projects, experiments, samples]);
 
   const addFiles = (incoming: File[]) => {
-    const accepted = incoming.filter(
-      (f) =>
-        f.name.endsWith(".fastq") ||
-        f.name.endsWith(".fastq.gz") ||
-        f.name.endsWith(".fq") ||
-        f.name.endsWith(".fq.gz") ||
-        f.name.endsWith(".h5ad") ||
-        f.name.endsWith(".csv") ||
-        f.name.endsWith(".tsv"),
-    );
+    const accepted = incoming;
 
     const proj = projects.find((p) => String(p.id) === projectId);
     const exp = experiments.find((e) => String(e.id) === experimentId);
@@ -219,9 +234,10 @@ export default function DataUploadPage() {
   const uploadAll = async () => {
     setUploading(true);
     const opts = {
-      projectId: projectId ? parseInt(projectId, 10) : undefined,
-      experimentId: experimentId ? parseInt(experimentId, 10) : undefined,
-      sampleId: sampleId ? parseInt(sampleId, 10) : undefined,
+      projectId: scope === "global" ? undefined : projectId ? parseInt(projectId, 10) : undefined,
+      experimentId: scope === "global" || scope === "project" ? undefined : experimentId ? parseInt(experimentId, 10) : undefined,
+      sampleId: scope === "sample" && sampleId ? parseInt(sampleId, 10) : undefined,
+      isGlobal: scope === "global",
     };
 
     for (let i = 0; i < items.length; i++) {
@@ -257,16 +273,17 @@ export default function DataUploadPage() {
   const pendingCount = items.filter((i) => i.status !== "complete").length;
 
   const associationSummary = () => {
-    if (sampleId) {
+    if (scope === "global") return "Global (visible to anyone in your organization)";
+    if (scope === "sample" && sampleId) {
       const s = samples.find((s) => String(s.id) === sampleId);
       const e = experiments.find((e) => String(e.id) === experimentId);
       return `Sample: ${s?.label ?? sampleId} (${e?.name ?? experimentId})`;
     }
-    if (experimentId) {
+    if (scope === "experiment" && experimentId) {
       const e = experiments.find((e) => String(e.id) === experimentId);
       return `Experiment: ${e?.name ?? experimentId}`;
     }
-    if (projectId) {
+    if (scope === "project" && projectId) {
       const p = projects.find((p) => String(p.id) === projectId);
       return `Project: ${p?.name ?? projectId}`;
     }
@@ -290,14 +307,13 @@ export default function DataUploadPage() {
               className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center cursor-pointer hover:border-blue-400 transition-colors"
             >
               <p className="text-gray-500 mb-2">
-                Drag & drop FASTQ, h5ad, CSV, or TSV files here
+                Drag & drop any files here
               </p>
               <p className="text-sm text-gray-400">or click to browse</p>
               <input
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept=".fastq,.fastq.gz,.fq,.fq.gz,.gz,.h5ad,.csv,.tsv"
                 onChange={handleFileSelect}
                 className="hidden"
               />
@@ -305,25 +321,43 @@ export default function DataUploadPage() {
 
             {/* Association selectors */}
             <div className="bg-white rounded-lg shadow p-4 space-y-4">
-              <h3 className="font-medium text-gray-700">Association (optional)</h3>
+              <h3 className="font-medium text-gray-700">Association</h3>
               <p className="text-xs text-gray-500">
-                Link files to a project, experiment, or specific sample. Select the most
-                specific level that applies.
+                Choose where these files belong. Global files are visible to anyone in
+                your organization but are not tied to any project, experiment, or sample.
               </p>
+
+              <div>
+                <label htmlFor="upload-scope-select" className="block text-xs font-medium text-gray-600 mb-1">
+                  Scope
+                </label>
+                <select
+                  id="upload-scope-select"
+                  value={scope}
+                  onChange={(e) => setScope(e.target.value as Scope)}
+                  className="w-full sm:w-64 px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                >
+                  <option value="global">Global</option>
+                  <option value="project">Project</option>
+                  <option value="experiment">Experiment</option>
+                  <option value="sample">Sample</option>
+                </select>
+              </div>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 {/* Project */}
                 <div>
                   <label htmlFor="upload-project-select" className="block text-xs font-medium text-gray-600 mb-1">
-                    Project
+                    Project {scope === "project" && <span className="text-red-500">*</span>}
                   </label>
                   <select
                     id="upload-project-select"
                     value={projectId}
                     onChange={(e) => setProjectId(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                    disabled={scope === "global"}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white disabled:bg-gray-50 disabled:text-gray-400"
                   >
-                    <option value="">No project</option>
+                    <option value="">{scope === "global" ? "N/A (global)" : "Select project"}</option>
                     {projects.map((p) => (
                       <option key={p.id} value={String(p.id)}>
                         {p.name}
@@ -335,15 +369,18 @@ export default function DataUploadPage() {
                 {/* Experiment */}
                 <div>
                   <label htmlFor="upload-experiment-select" className="block text-xs font-medium text-gray-600 mb-1">
-                    Experiment
+                    Experiment {scope === "experiment" && <span className="text-red-500">*</span>}
                   </label>
                   <select
                     id="upload-experiment-select"
                     value={experimentId}
                     onChange={(e) => setExperimentId(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                    disabled={scope === "global" || scope === "project"}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white disabled:bg-gray-50 disabled:text-gray-400"
                   >
-                    <option value="">No experiment</option>
+                    <option value="">
+                      {scope === "global" || scope === "project" ? "N/A" : "Select experiment"}
+                    </option>
                     {experiments.map((exp) => (
                       <option key={exp.id} value={String(exp.id)}>
                         {exp.name}
@@ -355,31 +392,35 @@ export default function DataUploadPage() {
                 {/* Sample */}
                 <div>
                   <label htmlFor="upload-sample-select" className="block text-xs font-medium text-gray-600 mb-1">
-                    Sample
+                    Sample {scope === "sample" && <span className="text-red-500">*</span>}
                   </label>
                   <select
                     id="upload-sample-select"
                     value={sampleId}
                     onChange={(e) => setSampleId(e.target.value)}
-                    disabled={!experimentId}
+                    disabled={scope !== "sample" || !experimentId}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white disabled:bg-gray-50 disabled:text-gray-400"
                   >
-                    <option value="">No sample</option>
+                    <option value="">{scope === "sample" ? "Select sample" : "N/A"}</option>
                     {samples.map((s) => (
                       <option key={s.id} value={String(s.id)}>
                         {s.label}
                       </option>
                     ))}
                   </select>
-                  {!experimentId && (
+                  {scope === "sample" && !experimentId && (
                     <p className="text-xs text-gray-400 mt-1">Select an experiment first</p>
                   )}
                 </div>
               </div>
 
-              {associationSummary() && (
+              {associationSummary() ? (
                 <p className="text-xs text-blue-700 bg-blue-50 rounded px-3 py-1.5">
                   Files will be associated with: {associationSummary()}
+                </p>
+              ) : (
+                <p className="text-xs text-amber-700 bg-amber-50 rounded px-3 py-1.5">
+                  Pick a {scope} below before uploading.
                 </p>
               )}
             </div>
@@ -460,7 +501,8 @@ export default function DataUploadPage() {
                 {pendingCount > 0 && (
                   <button
                     onClick={uploadAll}
-                    disabled={uploading}
+                    disabled={uploading || !scopeReady}
+                    title={!scopeReady ? `Pick a ${scope} first` : undefined}
                     className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
                   >
                     {uploading ? "Uploading..." : `Upload ${pendingCount} file${pendingCount !== 1 ? "s" : ""}`}

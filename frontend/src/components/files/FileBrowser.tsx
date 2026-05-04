@@ -10,6 +10,7 @@ import { getCurrentUser } from "@/lib/auth";
 import type {
   FileResponse,
   FileListResponse,
+  FileProvenance,
   ExperimentListResponse,
   ProjectListResponse,
   SampleBrief,
@@ -30,9 +31,20 @@ function isImageFile(ft: string) {
 interface Props {
   experimentId?: number;
   projectId?: number;
+  showSearch?: boolean;
+  showProjectFilter?: boolean;
+  showExperimentFilter?: boolean;
+  showReconcile?: boolean;
 }
 
-export function FileBrowser({ experimentId, projectId }: Props) {
+export function FileBrowser({
+  experimentId,
+  projectId,
+  showSearch = false,
+  showProjectFilter = false,
+  showExperimentFilter = false,
+  showReconcile = false,
+}: Props) {
   const [files, setFiles] = useState<FileResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
@@ -40,6 +52,12 @@ export function FileBrowser({ experimentId, projectId }: Props) {
   const [filterType, setFilterType] = useState("");
   const [filterSource, setFilterSource] = useState("");
   const [filterSampleId, setFilterSampleId] = useState("");
+  const [filterProjectId, setFilterProjectId] = useState("");
+  const [filterExperimentId, setFilterExperimentId] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [reconciling, setReconciling] = useState(false);
+  const [reconcileResult, setReconcileResult] = useState<{ reconciled: number; failed: number } | null>(null);
   const [samples, setSamples] = useState<{ id: number; label: string }[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [viewingFile, setViewingFile] = useState<FileResponse | null>(null);
@@ -72,8 +90,11 @@ export function FileBrowser({ experimentId, projectId }: Props) {
       if (filterType) params.set("file_type", filterType);
       if (filterSource) params.set("source_type", filterSource);
       if (filterSampleId) params.set("sample_id", filterSampleId);
-      if (experimentId != null) params.set("experiment_id", String(experimentId));
-      if (projectId != null) params.set("project_id", String(projectId));
+      const effectiveExperimentId = experimentId != null ? String(experimentId) : filterExperimentId;
+      const effectiveProjectId = projectId != null ? String(projectId) : filterProjectId;
+      if (effectiveExperimentId) params.set("experiment_id", effectiveExperimentId);
+      if (effectiveProjectId) params.set("project_id", effectiveProjectId);
+      if (searchQuery) params.set("search", searchQuery);
       params.set("page", String(page));
       params.set("page_size", String(pageSize));
       const data = await api.get<FileListResponse>(`/api/files?${params.toString()}`);
@@ -85,7 +106,17 @@ export function FileBrowser({ experimentId, projectId }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [experimentId, projectId, filterType, filterSource, filterSampleId, page]);
+  }, [
+    experimentId,
+    projectId,
+    filterType,
+    filterSource,
+    filterSampleId,
+    filterProjectId,
+    filterExperimentId,
+    searchQuery,
+    page,
+  ]);
 
   const fetchMeta = useCallback(async () => {
     try {
@@ -237,6 +268,22 @@ export function FileBrowser({ experimentId, projectId }: Props) {
     }
   };
 
+  const stuckCount = files.filter((f) => f.experiment_id != null && f.gcs_uri.includes("/uploads/")).length;
+
+  const handleReconcile = async () => {
+    setReconciling(true);
+    setReconcileResult(null);
+    try {
+      const result = await api.post<{ reconciled: number; failed: number; skipped: number }>("/api/files/reconcile");
+      setReconcileResult({ reconciled: result.reconciled, failed: result.failed });
+      fetchFiles();
+    } catch {
+      setReconcileResult({ reconciled: 0, failed: -1 });
+    } finally {
+      setReconciling(false);
+    }
+  };
+
   const handleDownloadSelected = async () => {
     if (selectedIds.size === 0) return;
     setDownloading(true);
@@ -278,37 +325,46 @@ export function FileBrowser({ experimentId, projectId }: Props) {
   const sourceLabel = (file: FileResponse): string => {
     switch (file.source_type) {
       case "upload":
-        return file.uploader
-          ? `Uploaded by ${file.uploader.name ?? file.uploader.email}`
-          : "Uploaded";
+        return "Upload";
       case "pipeline_output":
-        return `Nextflow${file.source_pipeline_run_id ? ` (run #${file.source_pipeline_run_id})` : ""}`;
+        return "Pipeline output";
       case "notebook_output":
-        return `RStudio${file.source_notebook_session_id ? ` (session #${file.source_notebook_session_id})` : ""}`;
+        return "Notebook output";
       case "qc_dashboard":
-        return `QC Dashboard${file.source_pipeline_run_id ? ` (run #${file.source_pipeline_run_id})` : ""}`;
+        return "QC Dashboard";
       case "plot_archive":
-        return `Plot Archive${file.source_pipeline_run_id ? ` (run #${file.source_pipeline_run_id})` : ""}`;
+        return "Plot archive";
       default:
         return file.source_type;
     }
   };
 
-  const associationLabel = (file: FileResponse) => {
-    if (file.experiment_id != null) return experimentName(file.experiment_id);
-    if (file.project_id != null) return projectName(file.project_id);
-    return null;
+  const computeSessionLabel = (cs: NonNullable<FileProvenance["compute_session"]>): string => {
+    if (cs.kind === "work_node") return "Work Node";
+    if (cs.notebook_type === "rstudio") return "RStudio Notebook";
+    if (cs.notebook_type === "jupyter") return "Jupyter Notebook";
+    return "Notebook";
   };
 
-  const associationBadge = (file: FileResponse) => {
-    if (file.experiment_id != null) return null;
-    if (file.project_id != null) return "project";
-    return null;
+  const breadcrumbSegments = (file: FileResponse): string[] => {
+    const prov = file.provenance;
+    const segments: string[] = [];
+    if (!prov) return segments;
+    if (prov.project_name) segments.push(prov.project_name);
+    if (prov.experiment_name) segments.push(prov.experiment_name);
+    if (prov.sample_labels.length > 0) segments.push(prov.sample_labels.join(", "));
+    if (prov.pipeline_run) {
+      segments.push(`${prov.pipeline_run.pipeline_name} Run #${prov.pipeline_run.id}`);
+    } else if (prov.compute_session) {
+      segments.push(computeSessionLabel(prov.compute_session));
+    }
+    return segments;
   };
 
-  const sampleLabel = (file: FileResponse) => {
-    if (!file.sample_ids || file.sample_ids.length === 0) return null;
-    return file.sample_ids.length === 1 ? `1 sample` : `${file.sample_ids.length} samples`;
+  const creatorLabel = (file: FileResponse): string | null => {
+    const u = file.provenance?.creator ?? file.uploader;
+    if (!u) return null;
+    return u.name ?? u.email;
   };
 
   const fileTypes = Array.from(new Set(files.map((f) => f.file_type))).sort();
@@ -323,7 +379,82 @@ export function FileBrowser({ experimentId, projectId }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-4 items-center flex-wrap">
+      <div className="flex gap-3 items-center flex-wrap">
+        {showSearch && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              setSearchQuery(searchInput);
+              setPage(1);
+            }}
+            className="flex gap-1"
+          >
+            <input
+              type="text"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search by filename..."
+              className="px-3 py-2 border border-gray-300 rounded-md text-sm w-56"
+            />
+            <button
+              type="submit"
+              className="px-3 py-2 bg-gray-100 border border-gray-300 rounded-md text-sm hover:bg-gray-200"
+            >
+              Search
+            </button>
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchInput("");
+                  setSearchQuery("");
+                  setPage(1);
+                }}
+                className="px-2 py-2 text-gray-400 hover:text-gray-600 text-sm"
+              >
+                Clear
+              </button>
+            )}
+          </form>
+        )}
+
+        {showProjectFilter && (
+          <select
+            value={filterProjectId}
+            onChange={(e) => {
+              setFilterProjectId(e.target.value);
+              setFilterExperimentId("");
+              setPage(1);
+            }}
+            className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+          >
+            <option value="">All projects</option>
+            {projects.map((p) => (
+              <option key={p.id} value={String(p.id)}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        )}
+
+        {showExperimentFilter && (
+          <select
+            value={filterExperimentId}
+            onChange={(e) => {
+              setFilterExperimentId(e.target.value);
+              setPage(1);
+            }}
+            className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+          >
+            <option value="">All experiments</option>
+            {experiments.map((e) => (
+              <option key={e.id} value={String(e.id)}>
+                {e.name}
+              </option>
+            ))}
+          </select>
+        )}
+
         {samples.length > 0 && (
           <select
             value={filterSampleId}
@@ -404,6 +535,44 @@ export function FileBrowser({ experimentId, projectId }: Props) {
         )}
       </div>
 
+      {showReconcile && isAdmin && stuckCount > 0 && !reconcileResult && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-amber-800">
+              {stuckCount} {stuckCount === 1 ? "file needs" : "files need"} to be synced to storage
+            </p>
+            <p className="text-xs text-amber-600 mt-1">
+              These files are linked to an experiment but haven&apos;t been moved to long-term storage yet.
+            </p>
+          </div>
+          <button
+            onClick={handleReconcile}
+            disabled={reconciling}
+            className="px-4 py-2 bg-amber-600 text-white rounded-md text-sm font-medium hover:bg-amber-700 disabled:opacity-50 whitespace-nowrap ml-4"
+          >
+            {reconciling ? "Syncing..." : "Fix Now"}
+          </button>
+        </div>
+      )}
+
+      {showReconcile && reconcileResult && (
+        <div
+          className={`rounded-lg p-4 text-sm ${
+            reconcileResult.failed === -1
+              ? "bg-red-50 border border-red-200 text-red-800"
+              : reconcileResult.failed > 0
+                ? "bg-amber-50 border border-amber-200 text-amber-800"
+                : "bg-green-50 border border-green-200 text-green-800"
+          }`}
+        >
+          {reconcileResult.failed === -1
+            ? "Something went wrong. Please try again or contact support."
+            : reconcileResult.failed > 0
+              ? `Synced ${reconcileResult.reconciled} files, but ${reconcileResult.failed} failed. Try again or contact support.`
+              : `Done! ${reconcileResult.reconciled} ${reconcileResult.reconciled === 1 ? "file" : "files"} synced to storage.`}
+        </div>
+      )}
+
       {downloadError && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-800 flex items-center justify-between">
           <span>{downloadError}</span>
@@ -442,13 +611,10 @@ export function FileBrowser({ experimentId, projectId }: Props) {
                   Uploaded
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Uploader
+                  Creator
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                   Source
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Association
                 </th>
                 {canDownload && (
                   <th className="px-4 py-3 w-10">
@@ -471,21 +637,47 @@ export function FileBrowser({ experimentId, projectId }: Props) {
                       onChange={() => toggleSelect(file.id)}
                     />
                   </td>
-                  <td className="px-4 py-3 text-sm font-medium flex items-center gap-1.5">
-                    {file.storage_deleted && (
-                      <span title="Storage deleted" className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-red-100 text-red-600 flex-shrink-0">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                        </svg>
+                  <td className="px-4 py-3 text-sm font-medium align-top">
+                    <div className="flex items-center gap-1.5">
+                      {file.storage_deleted && (
+                        <span title="Storage deleted" className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-red-100 text-red-600 flex-shrink-0">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                          </svg>
+                        </span>
+                      )}
+                      <span className={file.storage_deleted ? "text-gray-400" : "text-blue-600"}>
+                        {file.filename}
                       </span>
+                    </div>
+                    {breadcrumbSegments(file).length > 0 ? (
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        {breadcrumbSegments(file).join(" › ")}
+                      </div>
+                    ) : file.is_global ? (
+                      <div className="text-xs mt-0.5">
+                        <span className="text-purple-700 font-medium bg-purple-50 px-1.5 py-0.5 rounded">
+                          Global
+                        </span>
+                      </div>
+                    ) : (
+                      <div
+                        className="text-xs mt-0.5 flex items-center gap-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <span className="text-amber-600 font-medium">Unlinked</span>
+                        <button
+                          onClick={() => openLinkModal([file.id])}
+                          className="text-blue-600 hover:underline"
+                        >
+                          Associate
+                        </button>
+                      </div>
                     )}
-                    <span className={file.storage_deleted ? "text-gray-400" : "text-blue-600"}>
-                      {file.filename}
-                    </span>
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-500">{file.file_type}</td>
-                  <td className="px-4 py-3 text-sm text-gray-500">{formatBytes(file.size_bytes)}</td>
-                  <td className="px-4 py-3 text-sm text-gray-500">
+                  <td className="px-4 py-3 text-sm text-gray-500 align-top">{file.file_type}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500 align-top">{formatBytes(file.size_bytes)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500 align-top">
                     {new Date(file.upload_timestamp).toLocaleString(undefined, {
                       month: "short",
                       day: "numeric",
@@ -494,40 +686,11 @@ export function FileBrowser({ experimentId, projectId }: Props) {
                       minute: "2-digit",
                     })}
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-500">
-                    {file.uploader?.name ?? file.uploader?.email ?? "-"}
+                  <td className="px-4 py-3 text-sm text-gray-500 align-top">
+                    {creatorLabel(file) ?? "-"}
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-500">
+                  <td className="px-4 py-3 text-sm text-gray-500 align-top">
                     {sourceLabel(file)}
-                  </td>
-                  <td className="px-4 py-3 text-sm" onClick={(e) => e.stopPropagation()}>
-                    {associationLabel(file) ? (
-                      <span className="text-gray-700 flex flex-col gap-0.5">
-                        <span className="flex items-center gap-1.5">
-                          {associationBadge(file) === "project" && (
-                            <span className="text-xs text-purple-600 font-medium bg-purple-50 px-1.5 py-0.5 rounded">
-                              Project
-                            </span>
-                          )}
-                          {associationLabel(file)}
-                        </span>
-                        {sampleLabel(file) && (
-                          <span className="text-xs text-teal-700 font-medium bg-teal-50 px-1.5 py-0.5 rounded w-fit">
-                            {sampleLabel(file)}
-                          </span>
-                        )}
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-2">
-                        <span className="text-amber-600 text-xs font-medium">Unlinked</span>
-                        <button
-                          onClick={() => openLinkModal([file.id])}
-                          className="text-blue-600 text-xs hover:underline"
-                        >
-                          Associate
-                        </button>
-                      </span>
-                    )}
                   </td>
                   {canDownload && (
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>

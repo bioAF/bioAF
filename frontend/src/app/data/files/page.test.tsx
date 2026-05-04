@@ -146,13 +146,13 @@ test("shows experiment name when file is linked", async () => {
   });
 });
 
-test("shows unlinked label for files without experiment", async () => {
+test("shows unlinked label for files without provenance", async () => {
   mockGet.mockImplementation(makeGetMock());
 
   render(<DataFilesPage />);
 
   await waitFor(() => {
-    expect(screen.getByText("Unlinked")).toBeInTheDocument();
+    expect(screen.getAllByText("Unlinked").length).toBeGreaterThan(0);
   });
 });
 

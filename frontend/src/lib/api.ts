@@ -109,6 +109,7 @@ interface SignedUploadOptions {
   projectId?: number;
   experimentId?: number;
   sampleId?: number;
+  isGlobal?: boolean;
   filename?: string;
   onProgress?: (pct: number) => void;
 }
@@ -133,6 +134,9 @@ async function uploadFileSigned<T>(
   }
   if (options.sampleId != null) {
     initiateBody.sample_ids = [options.sampleId];
+  }
+  if (options.isGlobal) {
+    initiateBody.is_global = true;
   }
   const { upload_id, signed_url } = await fetchApi<{
     upload_id: string;
