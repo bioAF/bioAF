@@ -116,6 +116,9 @@ class Settings(BaseSettings):
     # Bcrypt
     bcrypt_rounds: int = 12
 
+    # Internal callbacks (importer container -> bioAF API)
+    internal_token: str = ""
+
     model_config = {"env_prefix": "BIOAF_", "env_file": ".env", "extra": "ignore"}
 
 

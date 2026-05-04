@@ -320,6 +320,7 @@ class CustomPipelineService:
                     variable_name=var.variable_name,
                     default_value=var.default_value,
                     variable_type=var.variable_type,
+                    reference_category=var.reference_category,
                     is_required=var.is_required,
                 )
             )

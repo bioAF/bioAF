@@ -95,6 +95,50 @@ const mockRunWithK8s = {
   samples: [],
 };
 
+describe("Pipeline Run Detail - References Used", () => {
+  test("renders linked references with name, version, and category", async () => {
+    const refs = [
+      {
+        id: 7,
+        organization_id: 1,
+        name: "GRCh38 GENCODE",
+        category: "genome",
+        scope: "public",
+        version: "v45",
+        source_url: null,
+        gcs_prefix: "genome/grch38-gencode/v45/",
+        total_size_bytes: null,
+        file_count: 2,
+        status: "active",
+        deprecation_note: null,
+        superseded_by_id: null,
+        created_at: "2026-05-01T00:00:00Z",
+      },
+    ];
+    mockApiGet.mockImplementation((url: string) => {
+      if (url.includes("/api/pipeline-runs/42/references")) {
+        return Promise.resolve(refs);
+      }
+      return Promise.resolve(mockRunWithK8s);
+    });
+
+    const PipelineRunDetailPage =
+      require("@/app/pipelines/runs/[id]/page").default;
+    render(<PipelineRunDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("References Used")).toBeInTheDocument();
+    });
+    expect(screen.getByText("GRCh38 GENCODE")).toBeInTheDocument();
+    expect(screen.getByText("v45")).toBeInTheDocument();
+    // Category column rendered (capitalized via CSS, raw "genome" in DOM)
+    expect(screen.getByText("genome")).toBeInTheDocument();
+    // Name links to detail page
+    const link = screen.getByRole("link", { name: "GRCh38 GENCODE" });
+    expect(link).toHaveAttribute("href", "/data/references/7");
+  });
+});
+
 describe("Pipeline Run Detail - K8s Fields (Test 28)", () => {
   test("shows k8s_job_name when present", async () => {
     // Mock API calls

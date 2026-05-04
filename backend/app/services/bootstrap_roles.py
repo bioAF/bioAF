@@ -21,6 +21,7 @@ ALL_RESOURCES_ACTIONS: dict[str, list[str]] = {
     "roles": ["view", "create", "edit", "delete"],
     "quotas": ["view", "configure"],
     "settings": ["view", "configure"],
+    "references": ["view", "upload"],
 }
 
 BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
@@ -44,6 +45,7 @@ BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
             "infrastructure": ["view"],
             "audit_log": ["view"],
             "cost_center": ["view"],
+            "references": ["view", "upload"],
         },
     ),
     "bench": (
@@ -57,6 +59,7 @@ BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
             "environments": ["view"],
             "files": ["view", "upload"],
             "projects": ["view"],
+            "references": ["view"],
         },
     ),
     "viewer": (
@@ -68,6 +71,7 @@ BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
             "environments": ["view"],
             "files": ["view"],
             "projects": ["view"],
+            "references": ["view"],
         },
     ),
 }

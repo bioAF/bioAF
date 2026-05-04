@@ -739,6 +739,7 @@ export default function PipelineRunDetailPage() {
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Version</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
                   </tr>
@@ -746,8 +747,16 @@ export default function PipelineRunDetailPage() {
                 <tbody className="divide-y divide-gray-200">
                   {references.map((ref) => (
                     <tr key={ref.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-sm font-medium">{ref.name}</td>
+                      <td className="px-4 py-3 text-sm font-medium">
+                        <a
+                          href={`/data/references/${ref.id}`}
+                          className="text-bioaf-700 hover:underline"
+                        >
+                          {ref.name}
+                        </a>
+                      </td>
                       <td className="px-4 py-3 text-sm">{ref.version}</td>
+                      <td className="px-4 py-3 text-sm capitalize text-gray-700">{ref.category}</td>
                       <td className="px-4 py-3">
                         <ReferenceStatusBadge status={ref.status} />
                       </td>

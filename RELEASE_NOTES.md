@@ -1,5 +1,49 @@
 # Release Notes
 
+## v0.10.3
+
+Reference Data Ingest — completes the four user-facing capabilities of ADR-017 / ADR-047 (upload, import-from-URL, versioning, and pipeline linkage). Existing reference data CRUD is unchanged; this release adds everything around getting bytes into the registry and using them in pipelines.
+
+### New features
+
+- **Reference upload** -- drag-drop multi-file upload page at `/data/references/new`. Bytes go directly to GCS via resumable session URLs (8 MiB chunks; 64 MiB for files > 1 GiB) so 30+ GB CellRanger references survive flaky lab Wi-Fi
+- **Import from URL** -- separate page at `/data/references/import` for pulling references from public sources (GENCODE, 10x, etc.). A per-import GKE Job streams the source into GCS, supports `none`/`gzip`/`tar`/`tar.gz` extraction modes, and reports progress via a polling endpoint
+- **Versioning UX** -- reference detail page gets a Versions tab listing every `(name, category)` sibling, with the current row highlighted and deprecated rows dimmed. New "Upload new version" button pre-fills name + category + scope and locks them so only version + files differ
+- **Reference parameter type for custom pipelines** -- custom pipelines can declare a parameter as `variable_type='reference'` with a `reference_category` (`genome`/`annotation`/`index`/`atlas`/`markers`/`other`/`any`). At launch, those parameters render a searchable dropdown of active references in that category; the selected dataset's path is stored in run parameters so the existing auto-linker picks it up
+- **Linked references on run detail** -- the "References Used" table on `/pipelines/runs/[id]` adds a Category column and turns each reference name into a link back to its detail page
+
+### New endpoints
+
+- `POST /api/references/upload-init` -- create a reference in `status='uploading'` and return per-file GCS resumable session URLs
+- `POST /api/references/{id}/upload-complete` -- list the GCS prefix, verify every declared file arrived, persist md5 + size, flip status (`internal -> active`, `public -> pending_approval`, mismatch -> `failed` with prefix purge)
+- `POST /api/references/{id}/abort` -- purge GCS objects and delete the reference row (idempotent)
+- `POST /api/references/import` -- launch the importer GKE Job
+- `GET /api/references/{id}/import-status` -- read progress (`pending`/`downloading`/`verifying`/`extracting`/`finalizing`/`active`/`failed`)
+- `POST /api/references/{id}/import-cancel` -- terminate the GKE Job and abort the reference
+- `GET /api/references/by-name?name=...&category=...` -- return every version for a `(name, category)` tuple in one round-trip
+- `POST /api/internal/references/{id}/import-progress` -- importer-container callback authenticated by `X-Internal-Token` (settings.internal_token); the auth middleware exempts `/api/internal/*` so the container can reach it without a user JWT
+
+### Roles & permissions
+
+- New `references` resource with `view` and `upload` actions. Migration 071 backfills both for `admin`/`comp_bio` and `view` for `bench`/`viewer` on existing system roles. Existing endpoints unchanged; new endpoints use `references:upload`
+
+### Database (additive only)
+
+- Migration 071: backfill `references:view`/`upload` permissions
+- Migration 072: `reference_import_progress` table tracking GKE-job-driven imports (PK `reference_id`, cascade delete)
+- Migration 073: `custom_pipeline_variables.reference_category` column
+- `REFERENCE_STATUSES` extended with `uploading` and `failed`
+
+### Infrastructure
+
+- Terraform `storage` module gains a `bioaf-references-{org_slug}-{stack_uid}` bucket with versioning + CORS for browser PUT/POST
+- New platform_config key `references_bucket_name`, populated by the storage stack on apply
+- New env var `BIOAF_INTERNAL_TOKEN` for the importer-callback secret
+
+### Spec
+
+- `documentation/spec-reference-data-ingest.md` is the source of truth for this release
+
 ## v0.10.2
 
 Point release adding per-pipeline QC dashboard configuration. Existing scRNA-seq dashboards render identically; new templates plug in by shipping a config + extractor instead of forking the dashboard page.

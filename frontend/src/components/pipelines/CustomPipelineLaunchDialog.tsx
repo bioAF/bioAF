@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
+import { ReferencePicker } from "@/components/references/ReferencePicker";
 import type {
   CustomPipelineDetail,
   CustomPipelineVariable,
@@ -508,6 +509,12 @@ function VariableInput({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className="w-full border rounded px-3 py-2 text-sm font-mono"
+        />
+      ) : variable.variable_type === "reference" ? (
+        <ReferencePicker
+          category={variable.reference_category ?? "any"}
+          value={value}
+          onChange={onChange}
         />
       ) : (
         <input

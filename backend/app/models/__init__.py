@@ -44,6 +44,7 @@ from app.models.cost_record import CostRecord
 from app.models.controlled_vocabulary import ControlledVocabulary
 from app.models.pipeline_run_review import PipelineRunReview
 from app.models.reference_dataset import ReferenceDataset, ReferenceDatasetFile, pipeline_run_references
+from app.models.reference_import_progress import ReferenceImportProgress
 from app.models.naming_profile import NamingProfile
 from app.models.file_parse_result import FileParseResult
 from app.models.ingest_event import IngestEvent
@@ -117,6 +118,7 @@ __all__ = [
     "PipelineRunReview",
     "ReferenceDataset",
     "ReferenceDatasetFile",
+    "ReferenceImportProgress",
     "pipeline_run_references",
     "NamingProfile",
     "FileParseResult",

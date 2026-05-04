@@ -1,6 +1,18 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+# Match REFERENCE_CATEGORIES from app.models.reference_dataset, plus 'any'
+# meaning "match any category".
+VALID_REFERENCE_CATEGORIES = {
+    "genome",
+    "annotation",
+    "index",
+    "atlas",
+    "markers",
+    "other",
+    "any",
+}
 
 
 # --- Request schemas ---
@@ -19,8 +31,22 @@ class CustomPipelineUpdateRequest(BaseModel):
 class CustomPipelineVariableDefinition(BaseModel):
     variable_name: str = Field(..., min_length=1, max_length=255)
     default_value: str | None = None
-    variable_type: str = Field("string", pattern="^(string|number|boolean)$")
+    variable_type: str = Field("string", pattern="^(string|number|boolean|reference)$")
+    reference_category: str | None = None
     is_required: bool = False
+
+    @model_validator(mode="after")
+    def _validate_reference_category(self) -> "CustomPipelineVariableDefinition":
+        if self.variable_type == "reference":
+            if not self.reference_category:
+                raise ValueError("reference_category is required when variable_type='reference'")
+            if self.reference_category not in VALID_REFERENCE_CATEGORIES:
+                raise ValueError(f"reference_category must be one of: {', '.join(sorted(VALID_REFERENCE_CATEGORIES))}")
+        elif self.reference_category is not None:
+            # Silently drop reference_category for non-reference types so we
+            # never persist nonsense.
+            self.reference_category = None
+        return self
 
 
 class CustomPipelineVariableValue(BaseModel):
@@ -58,6 +84,7 @@ class CustomPipelineVariableResponse(BaseModel):
     variable_name: str
     default_value: str | None = None
     variable_type: str
+    reference_category: str | None = None
     is_required: bool
 
     model_config = {"from_attributes": True}
