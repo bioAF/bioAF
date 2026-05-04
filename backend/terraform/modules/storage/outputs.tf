@@ -18,6 +18,11 @@ output "results_bucket_name" {
   value       = google_storage_bucket.results.name
 }
 
+output "references_bucket_name" {
+  description = "Name of the reference-data GCS bucket"
+  value       = google_storage_bucket.references.name
+}
+
 output "config_backups_bucket_name" {
   description = "Name of the config backups GCS bucket"
   value       = google_storage_bucket.config_backups.name

@@ -23,7 +23,7 @@ function formatBytes(bytes: number | null): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-type Tab = "files" | "impact" | "details";
+type Tab = "files" | "impact" | "details" | "versions";
 
 export default function DataReferenceDetailPage() {
   const router = useRouter();
@@ -47,6 +47,9 @@ export default function DataReferenceDetailPage() {
   const [activeRefs, setActiveRefs] = useState<ReferenceDataset[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
+  const [versions, setVersions] = useState<ReferenceDataset[] | null>(null);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+
   useEffect(() => {
     if (!isAuthenticated()) {
       router.push("/login");
@@ -58,8 +61,28 @@ export default function DataReferenceDetailPage() {
 
   useEffect(() => {
     if (activeTab === "impact") loadImpact();
+    if (activeTab === "versions") loadVersions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, id]);
+
+  async function loadVersions() {
+    if (!reference) return;
+    setVersionsLoading(true);
+    try {
+      const params = new URLSearchParams({
+        name: reference.name,
+        category: reference.category,
+      });
+      const data = await api.get<ReferenceDatasetListResponse>(
+        `/api/references/by-name?${params}`,
+      );
+      setVersions(data.references);
+    } catch {
+      setVersions([]);
+    } finally {
+      setVersionsLoading(false);
+    }
+  }
 
   async function loadReference() {
     try {
@@ -149,6 +172,7 @@ export default function DataReferenceDetailPage() {
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "files", label: `Files (${reference.files.length})` },
+    { key: "versions", label: "Versions" },
     { key: "impact", label: "Impact" },
     { key: "details", label: "Details" },
   ];
@@ -172,13 +196,30 @@ export default function DataReferenceDetailPage() {
             <span className="capitalize">{reference.category}</span>
             <span>&middot;</span>
             <span className="capitalize">{reference.scope}</span>
-            {canDeprecate && reference.status === "active" && (
-              <button
-                onClick={openDeprecateModal}
-                className="ml-auto bg-red-50 text-red-700 border border-red-200 px-3 py-1.5 rounded-md text-sm hover:bg-red-100 transition-colors"
-              >
-                Deprecate
-              </button>
+            {canDeprecate && (
+              <div className="ml-auto flex gap-2">
+                <button
+                  onClick={() => {
+                    const params = new URLSearchParams({
+                      name: reference.name,
+                      category: reference.category,
+                      scope: reference.scope,
+                    });
+                    router.push(`/data/references/new?${params}`);
+                  }}
+                  className="bg-bioaf-50 text-bioaf-700 border border-bioaf-200 px-3 py-1.5 rounded-md text-sm hover:bg-bioaf-100 transition-colors"
+                >
+                  Upload new version
+                </button>
+                {reference.status === "active" && (
+                  <button
+                    onClick={openDeprecateModal}
+                    className="bg-red-50 text-red-700 border border-red-200 px-3 py-1.5 rounded-md text-sm hover:bg-red-100 transition-colors"
+                  >
+                    Deprecate
+                  </button>
+                )}
+              </div>
             )}
           </div>
 
@@ -270,6 +311,80 @@ export default function DataReferenceDetailPage() {
                   )}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {activeTab === "versions" && (
+            <div className="bg-white rounded-lg shadow overflow-hidden">
+              {versionsLoading && (
+                <div className="flex justify-center py-12">
+                  <LoadingSpinner size="lg" />
+                </div>
+              )}
+              {!versionsLoading && versions && versions.length > 0 && (
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Version</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {versions.map((v) => {
+                      const isCurrent = v.id === Number(id);
+                      return (
+                        <tr
+                          key={v.id}
+                          className={
+                            isCurrent
+                              ? "bg-bioaf-50"
+                              : v.status === "deprecated"
+                                ? "text-gray-400 hover:bg-gray-50"
+                                : "hover:bg-gray-50"
+                          }
+                        >
+                          <td className="px-6 py-4 text-sm font-medium">
+                            {isCurrent ? (
+                              <span>
+                                {v.version}{" "}
+                                <span className="ml-2 text-xs uppercase tracking-wide text-bioaf-600">
+                                  current
+                                </span>
+                              </span>
+                            ) : (
+                              <a
+                                href={`/data/references/${v.id}`}
+                                className="text-bioaf-700 hover:underline"
+                              >
+                                {v.version}
+                              </a>
+                            )}
+                          </td>
+                          <td className="px-6 py-4">
+                            <ReferenceStatusBadge status={v.status} />
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-500">
+                            {new Date(v.created_at).toLocaleDateString()}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-500">
+                            {v.deprecation_note ?? "—"}
+                            {v.superseded_by_id && (
+                              <span> (superseded by #{v.superseded_by_id})</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+              {!versionsLoading && versions && versions.length === 0 && (
+                <div className="px-6 py-12 text-center text-gray-400">
+                  No other versions of this reference exist.
+                </div>
+              )}
             </div>
           )}
 

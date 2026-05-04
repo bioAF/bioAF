@@ -30,6 +30,10 @@ PUBLIC_PATHS = {
 _FILE_CONTENT_RE = re.compile(r"^/api/files/\d+/content$")
 _PLOT_THUMBNAIL_CONTENT_RE = re.compile(r"^/api/plots/\d+/thumbnail/content$")
 
+# Internal callback endpoints authenticate via X-Internal-Token, not user JWT.
+# The handler validates the header itself; the middleware just lets it through.
+_INTERNAL_CALLBACK_RE = re.compile(r"^/api/internal/")
+
 
 def _is_file_content_path(path: str) -> bool:
     """Return True for paths that accept content-token query-param auth."""
@@ -49,8 +53,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        is_public = path in PUBLIC_PATHS or (
-            path.startswith("/api/v1/work-nodes/sessions/") and path.endswith("/heartbeat")
+        is_public = (
+            path in PUBLIC_PATHS
+            or (path.startswith("/api/v1/work-nodes/sessions/") and path.endswith("/heartbeat"))
+            or _INTERNAL_CALLBACK_RE.match(path) is not None
         )
 
         # For public endpoints, still attempt to populate current_user if a

@@ -813,7 +813,15 @@ export interface PipelineAddRequest {
 // Custom Pipelines
 
 export type CustomPipelineCodeSource = "github_repo" | "code_blob" | "inline";
-export type CustomPipelineVariableType = "string" | "number" | "boolean";
+export type CustomPipelineVariableType = "string" | "number" | "boolean" | "reference";
+export type ReferenceParameterCategory =
+  | "genome"
+  | "annotation"
+  | "index"
+  | "atlas"
+  | "markers"
+  | "other"
+  | "any";
 export type CustomPipelineVersionStatus = "active" | "deprecated";
 export type CustomPipelineVersionTrigger = "user" | "environment_cascade";
 
@@ -822,6 +830,7 @@ export interface CustomPipelineVariable {
   variable_name: string;
   default_value: string | null;
   variable_type: CustomPipelineVariableType;
+  reference_category?: ReferenceParameterCategory | null;
   is_required: boolean;
 }
 
@@ -829,6 +838,7 @@ export interface CustomPipelineVariableDefinition {
   variable_name: string;
   default_value: string | null;
   variable_type: CustomPipelineVariableType;
+  reference_category?: ReferenceParameterCategory | null;
   is_required: boolean;
 }
 
@@ -1501,6 +1511,65 @@ export interface ImpactSummary {
   total_pipeline_runs: number;
   total_experiments: number;
   pipeline_runs: ImpactPipelineRun[];
+}
+
+export interface ReferenceUploadFileSpec {
+  filename: string;
+  size_bytes: number;
+  content_type?: string;
+  md5_checksum?: string;
+}
+
+export interface ReferenceUploadInitRequest {
+  name: string;
+  category: string;
+  scope: string;
+  version: string;
+  source_url?: string;
+  description?: string;
+  files: ReferenceUploadFileSpec[];
+}
+
+export interface ReferenceUploadSlot {
+  filename: string;
+  session_url: string;
+  expires_at: string;
+}
+
+export interface ReferenceUploadInitResponse {
+  reference_id: number;
+  gcs_prefix: string;
+  uploads: ReferenceUploadSlot[];
+}
+
+export interface ReferenceImportRequest {
+  name: string;
+  category: string;
+  scope: string;
+  version: string;
+  source_url: string;
+  source_md5_url?: string;
+  auth_header?: string;
+  extract: "none" | "gzip" | "tar" | "tar.gz";
+  expected_files?: string[];
+  description?: string;
+}
+
+export interface ReferenceImportStartResponse {
+  reference_id: number;
+  import_job_id: string;
+  status: string;
+}
+
+export interface ReferenceImportStatusResponse {
+  reference_id: number;
+  status: string;
+  progress_pct: number | null;
+  bytes_downloaded: number | null;
+  total_bytes: number | null;
+  error_message: string | null;
+  import_job_id: string | null;
+  updated_at: string | null;
 }
 
 export interface GeoValidationField {
