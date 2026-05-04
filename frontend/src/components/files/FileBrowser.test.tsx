@@ -135,7 +135,7 @@ test("shows Unlinked badge for files with no association", async () => {
   });
 });
 
-test("shows sample badge when file has sample_ids", async () => {
+test("renders provenance breadcrumb when API returns provenance", async () => {
   mockGet.mockImplementation((url: string) => {
     if (url.includes("/api/projects")) return Promise.resolve({ projects: [] });
     if (url.includes("/api/experiments"))
@@ -143,7 +143,22 @@ test("shows sample badge when file has sample_ids", async () => {
         experiments: [{ id: 5, name: "Exp Alpha" }],
       });
     return Promise.resolve({
-      files: [makeFile({ experiment_id: 5, sample_ids: [10, 11] })],
+      files: [
+        makeFile({
+          experiment_id: 5,
+          sample_ids: [10, 11],
+          provenance: {
+            project_id: null,
+            project_name: null,
+            experiment_id: 5,
+            experiment_name: "Exp Alpha",
+            sample_labels: ["S010", "S011"],
+            pipeline_run: null,
+            compute_session: null,
+            creator: { id: 1, name: "Maria", email: "maria@test.com" },
+          },
+        }),
+      ],
       total: 1,
       page: 1,
       page_size: 25,
@@ -153,6 +168,6 @@ test("shows sample badge when file has sample_ids", async () => {
   render(<FileBrowser />);
 
   await waitFor(() => {
-    expect(screen.getByText("2 samples")).toBeInTheDocument();
+    expect(screen.getByText("Exp Alpha › S010, S011")).toBeInTheDocument();
   });
 });

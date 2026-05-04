@@ -1,5 +1,24 @@
 # Release Notes
 
+## v0.10.1
+
+Point release tightening file upload, association, and provenance display.
+
+### Fixes
+
+- **Drag-and-drop uploader accepts any file type** -- the FASTQ/h5ad/CSV/TSV allowlist silently dropped legitimate files (protocols, READMEs, analysis exports)
+- **File search inherits through samples** -- searching by experiment now returns files attached to that experiment OR to any of its samples; searching by project pulls in files at every level beneath. Sample-level pipeline outputs no longer hide from the experiment view.
+- **File tiles show full provenance** -- each row renders a `Project > Experiment > Sample > Pipeline Run #N` (or `... > Notebook` / `... > Work Node`) breadcrumb under the filename, with the resolved creator (uploader or pipeline/session launcher) in its own column
+- **Explicit Global scope on upload** -- the upload page now requires picking Global / Project / Experiment / Sample; Global files render a distinct badge so they are not confused with truly unassociated files
+- **Files page matches Experiment > Files** -- the Data & Files > Files page now uses the same FileBrowser layout as the experiment-scoped Files tab
+- **Documents page removed from Data & Files menu** -- file handling is consolidated under Files
+
+### Backend
+
+- New `is_global` column on `files` (additive migration 069)
+- `FileService.list_files` cascades inheritance through `sample_files` for both experiment and project filters
+- `FileService.get_provenance_for_files` returns batched project/experiment/sample/pipeline-run/compute-session/creator data per page
+
 ## v0.10.0
 
 Custom pipelines: define and run user-authored pipelines (bash, Python, Perl, R, etc.) against tracked input data with full provenance, versioned definitions, and Conda-based environments.

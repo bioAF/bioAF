@@ -51,6 +51,10 @@ describe("DataUploadPage", () => {
   it("calls uploadSigned when uploading a file", async () => {
     render(<DataUploadPage />);
 
+    fireEvent.change(screen.getByRole("combobox", { name: /scope/i }), {
+      target: { value: "global" },
+    });
+
     const file = new File(["data"], "sample.fastq.gz", { type: "application/gzip" });
     const input = document.querySelector("input[type='file']") as HTMLInputElement;
     fireEvent.change(input, { target: { files: [file] } });
@@ -62,6 +66,7 @@ describe("DataUploadPage", () => {
     const [calledFile, calledOptions] = mockUploadSigned.mock.calls[0];
     expect(calledFile).toBe(file);
     expect(calledOptions.experimentId).toBeUndefined();
+    expect(calledOptions.isGlobal).toBe(true);
   });
 
   it("fetches experiments and displays them in a dropdown", async () => {
