@@ -6,118 +6,10 @@ import { Header } from "@/components/layout/Header";
 import { PlotModal } from "@/components/shared/PlotModal";
 import { ExportPdfButton } from "@/components/shared/ExportPdfButton";
 import { ContentLoading } from "@/components/shared/ContentLoading";
+import { GenericQCDashboard } from "@/components/qc/GenericQCDashboard";
 import { api } from "@/lib/api";
 import { useFileContentUrl } from "@/hooks/useContentUrl";
-import type { QCDashboardSummary, QCDashboardResponse, QCMetrics } from "@/lib/types";
-import {
-  BarcodeRankChart,
-  StarAlignmentChart,
-  BaseQualityChart,
-  GCContentChart,
-  DuplicationChart,
-} from "@/components/shared/QCCharts";
-
-type MetricStatus = "good" | "warn" | "bad" | "neutral";
-
-function metricColor(status: MetricStatus): string {
-  switch (status) {
-    case "good": return "bg-green-50 border-green-200";
-    case "warn": return "bg-yellow-50 border-yellow-200";
-    case "bad": return "bg-red-50 border-red-200";
-    default: return "bg-gray-50 border-gray-200";
-  }
-}
-
-function metricTextColor(status: MetricStatus): string {
-  switch (status) {
-    case "good": return "text-green-700";
-    case "warn": return "text-yellow-700";
-    case "bad": return "text-red-700";
-    default: return "text-gray-900";
-  }
-}
-
-function MetricCard({ label, value, status = "neutral" }: { label: string; value: string; status?: MetricStatus }) {
-  return (
-    <div className={`rounded-lg border p-3 ${metricColor(status)}`}>
-      <p className="text-xs text-gray-500">{label}</p>
-      <p className={`text-lg font-semibold ${metricTextColor(status)}`}>{value}</p>
-    </div>
-  );
-}
-
-function HeroMetric({ label, value, status = "neutral" }: { label: string; value: string; status?: MetricStatus }) {
-  return (
-    <div className="text-center">
-      <p className="text-sm text-gray-500 mb-1">{label}</p>
-      <p className={`text-3xl font-bold ${metricTextColor(status)}`}>{value}</p>
-    </div>
-  );
-}
-
-function SectionHeader({ title }: { title: string }) {
-  return <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mt-6 mb-3">{title}</h3>;
-}
-
-function pctStr(val: number): string {
-  return `${(val * 100).toFixed(1)}%`;
-}
-
-function rateSaturation(val: number | null): MetricStatus {
-  if (val == null) return "neutral";
-  if (val >= 0.8) return "good";
-  if (val >= 0.5) return "warn";
-  return "bad";
-}
-
-function rateQ30(val: number | null): MetricStatus {
-  if (val == null) return "neutral";
-  if (val >= 0.9) return "good";
-  if (val >= 0.8) return "warn";
-  return "bad";
-}
-
-function rateBarcodes(val: number | null): MetricStatus {
-  if (val == null) return "neutral";
-  if (val >= 0.95) return "good";
-  if (val >= 0.9) return "warn";
-  return "bad";
-}
-
-function rateMapping(val: number | null): MetricStatus {
-  if (val == null) return "neutral";
-  if (val >= 0.9) return "good";
-  if (val >= 0.7) return "warn";
-  return "bad";
-}
-
-function rateGenes(val: number | null): MetricStatus {
-  if (val == null) return "neutral";
-  if (val > 1000) return "good";
-  if (val > 500) return "warn";
-  return "bad";
-}
-
-function rateMito(val: number | null): MetricStatus {
-  if (val == null) return "neutral";
-  if (val < 5) return "good";
-  if (val < 10) return "warn";
-  return "bad";
-}
-
-function rateDuplication(val: number | null): MetricStatus {
-  if (val == null) return "neutral";
-  if (val < 30) return "good";
-  if (val < 50) return "warn";
-  return "bad";
-}
-
-function rateGC(val: number | null): MetricStatus {
-  if (val == null) return "neutral";
-  if (val >= 35 && val <= 65) return "good";
-  if (val >= 25 && val <= 75) return "warn";
-  return "bad";
-}
+import type { QCDashboardSummary, QCDashboardResponse } from "@/lib/types";
 
 function PlotImage({ fileId, title, onExpand }: { fileId: number; title: string; onExpand: (url: string) => void }) {
   const url = useFileContentUrl(fileId);
@@ -159,7 +51,7 @@ function DashboardDetail({ dashboard, onBack, onRegenerate, regenerating, onExpa
   regenerating: boolean;
   onExpandPlot: (url: string, title: string) => void;
 }) {
-  const m = dashboard.metrics;
+  const rating = dashboard.metrics.quality_rating;
 
   return (
     <div className="space-y-6">
@@ -185,164 +77,15 @@ function DashboardDetail({ dashboard, onBack, onRegenerate, regenerating, onExpa
             >
               {regenerating ? "Regenerating..." : "Regenerate"}
             </button>
-            <QualityBadge rating={m.quality_rating} />
+            <QualityBadge rating={rating} />
           </div>
         </div>
 
-        {dashboard.summary_text && (
-          <p className="text-sm text-gray-600 mb-6" dangerouslySetInnerHTML={{ __html: dashboard.summary_text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>") }} />
-        )}
+        <GenericQCDashboard dashboard={dashboard} />
 
-        {/* Hero metrics */}
-        <div className="bg-gray-50 rounded-lg p-6 mb-6">
-          <div className="flex justify-around items-center">
-            {m.cell_count != null && (
-              <HeroMetric label="Estimated Number of Cells" value={m.cell_count.toLocaleString()} />
-            )}
-            {m.median_reads_per_cell != null && (
-              <HeroMetric label="Mean Reads per Cell" value={m.mean_reads_per_cell != null ? m.mean_reads_per_cell.toLocaleString() : m.median_reads_per_cell.toLocaleString()} />
-            )}
-            {m.median_genes_per_cell != null && (
-              <HeroMetric label="Median Genes per Cell" value={m.median_genes_per_cell.toLocaleString()} status={rateGenes(m.median_genes_per_cell)} />
-            )}
-          </div>
-        </div>
-
-        {/* Cells section */}
-        {(m.cell_count != null || m.total_genes_detected != null || m.median_umi_per_cell != null || m.umis_in_cells != null) && (
-          <>
-            <SectionHeader title="Cells" />
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {m.cell_count != null && (
-                <MetricCard label="Estimated Number of Cells" value={m.cell_count.toLocaleString()} />
-              )}
-              {m.total_genes_detected != null && (
-                <MetricCard label="Total Genes Detected" value={m.total_genes_detected.toLocaleString()} />
-              )}
-              {m.median_genes_per_cell != null && (
-                <MetricCard label="Median Genes/Cell" value={m.median_genes_per_cell.toLocaleString()} status={rateGenes(m.median_genes_per_cell)} />
-              )}
-              {m.mean_genes_per_cell != null && (
-                <MetricCard label="Mean Genes/Cell" value={m.mean_genes_per_cell.toLocaleString()} />
-              )}
-              {m.median_umi_per_cell != null && (
-                <MetricCard label="Median UMI/Cell" value={m.median_umi_per_cell.toLocaleString()} />
-              )}
-              {m.mean_umi_per_cell != null && (
-                <MetricCard label="Mean UMI/Cell" value={m.mean_umi_per_cell.toLocaleString()} />
-              )}
-              {m.median_reads_per_cell != null && (
-                <MetricCard label="Median Reads/Cell" value={m.median_reads_per_cell.toLocaleString()} />
-              )}
-              {m.mean_reads_per_cell != null && (
-                <MetricCard label="Mean Reads/Cell" value={m.mean_reads_per_cell.toLocaleString()} />
-              )}
-              {m.umis_in_cells != null && (
-                <MetricCard label="UMIs in Cells" value={m.umis_in_cells.toLocaleString()} />
-              )}
-              {m.mito_pct_median != null && (
-                <MetricCard label="Mito % Median" value={`${m.mito_pct_median.toFixed(1)}%`} status={rateMito(m.mito_pct_median)} />
-              )}
-              {m.doublet_score_median != null && (
-                <MetricCard label="Doublet Score" value={m.doublet_score_median.toFixed(3)} />
-              )}
-            </div>
-          </>
-        )}
-
-        {/* Sequencing section */}
-        {(m.number_of_reads != null || m.saturation != null || m.valid_barcodes != null || m.q30_bases_barcode != null) && (
-          <>
-            <SectionHeader title="Sequencing" />
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {m.number_of_reads != null && (
-                <MetricCard label="Number of Reads" value={m.number_of_reads.toLocaleString()} />
-              )}
-              {m.valid_barcodes != null && (
-                <MetricCard label="Valid Barcodes" value={pctStr(m.valid_barcodes)} status={rateBarcodes(m.valid_barcodes)} />
-              )}
-              {m.saturation != null && (
-                <MetricCard label="Sequencing Saturation" value={pctStr(m.saturation)} status={rateSaturation(m.saturation)} />
-              )}
-              {m.q30_bases_barcode != null && (
-                <MetricCard label="Q30 Bases in Barcode+UMI" value={pctStr(m.q30_bases_barcode)} status={rateQ30(m.q30_bases_barcode)} />
-              )}
-              {m.q30_bases_rna_read != null && (
-                <MetricCard label="Q30 Bases in RNA Read" value={pctStr(m.q30_bases_rna_read)} status={rateQ30(m.q30_bases_rna_read)} />
-              )}
-            </div>
-          </>
-        )}
-
-        {/* Mapping section */}
-        {(m.reads_mapped_genome != null || m.reads_mapped_genome_unique != null) && (
-          <>
-            <SectionHeader title="Mapping" />
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {m.reads_mapped_genome != null && (
-                <MetricCard label="Reads Mapped to Genome" value={pctStr(m.reads_mapped_genome)} status={rateMapping(m.reads_mapped_genome)} />
-              )}
-              {m.reads_mapped_genome_unique != null && (
-                <MetricCard label="Reads Mapped (Unique)" value={pctStr(m.reads_mapped_genome_unique)} status={rateMapping(m.reads_mapped_genome_unique)} />
-              )}
-            </div>
-          </>
-        )}
-
-        {/* Bulk/FastQC section */}
-        {(m.total_sequences != null || m.percent_duplicates != null || m.percent_gc != null) && (
-          <>
-            <SectionHeader title="Read Quality" />
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {m.total_sequences != null && (
-                <MetricCard label="Total Sequences" value={m.total_sequences.toLocaleString()} />
-              )}
-              {m.total_samples != null && (
-                <MetricCard label="Samples" value={String(m.total_samples)} />
-              )}
-              {m.percent_duplicates != null && (
-                <MetricCard label="Duplication" value={`${m.percent_duplicates.toFixed(1)}%`} status={rateDuplication(m.percent_duplicates)} />
-              )}
-              {m.percent_gc != null && (
-                <MetricCard label="GC Content" value={`${m.percent_gc.toFixed(0)}%`} status={rateGC(m.percent_gc)} />
-              )}
-              {m.avg_sequence_length != null && (
-                <MetricCard label="Avg Read Length" value={`${m.avg_sequence_length.toFixed(0)} bp`} />
-              )}
-            </div>
-          </>
-        )}
-
-        {/* Interactive Charts */}
-        {(m.barcode_rank_data || m.chart_data) && (
-          <>
-            <SectionHeader title="Interactive Charts" />
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {m.barcode_rank_data && m.barcode_rank_data.length > 0 && (
-                <div className="lg:col-span-2">
-                  <BarcodeRankChart data={m.barcode_rank_data} />
-                </div>
-              )}
-              {m.chart_data?.star_alignment && (
-                <StarAlignmentChart data={m.chart_data.star_alignment} />
-              )}
-              {m.chart_data?.base_quality && (
-                <BaseQualityChart data={m.chart_data.base_quality} />
-              )}
-              {m.chart_data?.gc_content && (
-                <GCContentChart data={m.chart_data.gc_content} />
-              )}
-              {m.chart_data?.duplication && (
-                <DuplicationChart data={m.chart_data.duplication} />
-              )}
-            </div>
-          </>
-        )}
-
-        {/* Static Plots (PNG fallback) */}
         {dashboard.plots.length > 0 && (
           <>
-            <SectionHeader title="Plots" />
+            <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mt-6 mb-3">Plots</h3>
             <div className="grid grid-cols-2 gap-4">
               {dashboard.plots.map((plot, i) => (
                 <div key={i} className="border rounded-lg p-3">

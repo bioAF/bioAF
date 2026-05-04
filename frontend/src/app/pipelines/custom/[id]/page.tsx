@@ -107,6 +107,8 @@ export default function CustomPipelineDetailPage() {
     memory_request: string;
     log_file_path: string;
     variables: VariableDraft[];
+    qc_template: string;
+    qc_config_json_text: string;
   }>({
     code_source_type: "code_blob",
     github_repo_id: null,
@@ -117,6 +119,8 @@ export default function CustomPipelineDetailPage() {
     memory_request: DEFAULT_MEMORY,
     log_file_path: "",
     variables: [],
+    qc_template: "",
+    qc_config_json_text: "",
   });
   const [creatingVersion, setCreatingVersion] = useState(false);
   const [versionError, setVersionError] = useState<string | null>(null);
@@ -214,6 +218,10 @@ export default function CustomPipelineDetailPage() {
         variable_type: v.variable_type,
         is_required: v.is_required,
       })),
+      qc_template: latest.qc_template ?? "",
+      qc_config_json_text: latest.qc_config_json
+        ? JSON.stringify(latest.qc_config_json, null, 2)
+        : "",
     });
   }
 
@@ -343,6 +351,26 @@ export default function CustomPipelineDetailPage() {
       }
     }
 
+    let qcConfigParsed: Record<string, unknown> | null = null;
+    if (versionForm.qc_config_json_text.trim()) {
+      try {
+        const parsed = JSON.parse(versionForm.qc_config_json_text);
+        if (parsed === null) {
+          qcConfigParsed = null;
+        } else if (typeof parsed !== "object" || Array.isArray(parsed)) {
+          setVersionError("QC config JSON must be an object (e.g. { \"sections\": [...] }).");
+          return;
+        } else {
+          qcConfigParsed = parsed as Record<string, unknown>;
+        }
+      } catch (err) {
+        setVersionError(
+          `QC config JSON is not valid: ${err instanceof Error ? err.message : "parse error"}`,
+        );
+        return;
+      }
+    }
+
     const body: CustomPipelineVersionCreateRequest = {
       code_source_type: versionForm.code_source_type,
       code_content:
@@ -364,6 +392,8 @@ export default function CustomPipelineDetailPage() {
         variable_type: v.variable_type,
         is_required: v.is_required,
       })),
+      qc_template: versionForm.qc_template.trim() || null,
+      qc_config_json: qcConfigParsed,
     };
 
     setCreatingVersion(true);
@@ -787,6 +817,8 @@ function NewVersionForm({
     memory_request: string;
     log_file_path: string;
     variables: VariableDraft[];
+    qc_template: string;
+    qc_config_json_text: string;
   };
   setVersionForm: React.Dispatch<
     React.SetStateAction<{
@@ -799,6 +831,8 @@ function NewVersionForm({
       memory_request: string;
       log_file_path: string;
       variables: VariableDraft[];
+      qc_template: string;
+      qc_config_json_text: string;
     }>
   >;
   readyEnvOptions: EnvVersionOption[];
@@ -966,6 +1000,17 @@ function NewVersionForm({
         />
       </div>
 
+      <QcConfigPanel
+        qcTemplate={versionForm.qc_template}
+        qcConfigJsonText={versionForm.qc_config_json_text}
+        onChangeTemplate={(value) =>
+          setVersionForm((prev) => ({ ...prev, qc_template: value }))
+        }
+        onChangeConfig={(value) =>
+          setVersionForm((prev) => ({ ...prev, qc_config_json_text: value }))
+        }
+      />
+
       <div>
         <label className="text-sm text-gray-500 block mb-2">Variables</label>
         <div className="space-y-2">
@@ -1083,6 +1128,87 @@ function RuntimeContractPanel() {
             below runs from the working directory above. Use the same form you would in
             a shell — for example, <code className="bg-white/60 px-1 rounded">bash run.sh</code>{" "}
             or <code className="bg-white/60 px-1 rounded">python main.py</code>.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QcConfigPanel({
+  qcTemplate,
+  qcConfigJsonText,
+  onChangeTemplate,
+  onChangeConfig,
+}: {
+  qcTemplate: string;
+  qcConfigJsonText: string;
+  onChangeTemplate: (value: string) => void;
+  onChangeConfig: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  let parseError: string | null = null;
+  if (qcConfigJsonText.trim()) {
+    try {
+      const parsed = JSON.parse(qcConfigJsonText);
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        parseError = "Must be a JSON object";
+      }
+    } catch (err) {
+      parseError = err instanceof Error ? err.message : "Invalid JSON";
+    }
+  }
+
+  return (
+    <div className="border border-gray-200 rounded">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-gray-700"
+      >
+        <span>QC dashboard config (optional)</span>
+        <span className="text-xs">{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-3 space-y-3">
+          <p className="text-xs text-gray-500">
+            Pipelines that emit a <code className="bg-gray-100 px-1 rounded">qc_metrics.json</code>{" "}
+            into <code className="bg-gray-100 px-1 rounded">/outputs/</code> can drive a custom QC
+            dashboard. Choose a template (typically <code className="bg-gray-100 px-1 rounded">custom</code>)
+            and paste a JSON render config describing sections, metric labels, and thresholds. Both
+            fields are versioned with the pipeline -- changing them creates a new pipeline version.
+          </p>
+
+          <div>
+            <label className="text-sm text-gray-500 block mb-1">QC template</label>
+            <select
+              value={qcTemplate}
+              onChange={(e) => onChangeTemplate(e.target.value)}
+              className="w-full border rounded px-3 py-2 text-sm bg-white"
+            >
+              <option value="">(none -- skip QC dashboard)</option>
+              <option value="custom">custom</option>
+              <option value="scrnaseq">scrnaseq</option>
+              <option value="bulk_rnaseq">bulk_rnaseq</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="text-sm text-gray-500 block mb-1">
+              QC config JSON {qcTemplate === "custom" ? "(required for custom layouts)" : "(optional override)"}
+            </label>
+            <textarea
+              value={qcConfigJsonText}
+              onChange={(e) => onChangeConfig(e.target.value)}
+              rows={10}
+              spellCheck={false}
+              placeholder={`{\n  "template": "custom",\n  "sections": [{ "id": "main", "metrics": ["my_metric"] }],\n  "metrics": { "my_metric": { "label": "My Metric", "format": "decimal" } }\n}`}
+              className="w-full border rounded px-3 py-2 text-xs font-mono"
+            />
+            {parseError && (
+              <p className="text-xs text-red-600 mt-1">JSON: {parseError}</p>
+            )}
           </div>
         </div>
       )}
