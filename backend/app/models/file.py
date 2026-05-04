@@ -35,6 +35,7 @@ class File(Base):
     artifact_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     sequencing_batch_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("sequencing_batches.id"), nullable=True)
     storage_deleted: Mapped[bool] = mapped_column(Boolean, server_default="false", nullable=False)
+    is_global: Mapped[bool] = mapped_column(Boolean, server_default="false", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("idx_files_experiment_id", "experiment_id"),)
