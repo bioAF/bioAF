@@ -307,6 +307,8 @@ class CustomPipelineService:
             version_trigger="user",
             status="active",
             created_by_user_id=user_id,
+            qc_template=data.qc_template,
+            qc_config_json=data.qc_config_json,
         )
         session.add(version)
         await session.flush()

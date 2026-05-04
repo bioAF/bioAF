@@ -17,6 +17,7 @@ class QCDashboard(Base):
     metrics_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     summary_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     plots_json: Mapped[dict] = mapped_column(JSONB, server_default="[]", nullable=False)
+    qc_config_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="generating")
     generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

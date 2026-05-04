@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -44,13 +45,48 @@ class QCPlot(BaseModel):
     download_url: str | None = None
 
 
+class QCMetricSpec(BaseModel):
+    label: str
+    format: str = "raw"
+    thresholds: dict[str, str] | None = None
+
+
+class QCSection(BaseModel):
+    id: str
+    title: str | None = None
+    layout: str | None = None
+    metrics: list[str] = []
+
+
+class QCChartSpec(BaseModel):
+    type: str
+    metric_key: str | None = None
+    title: str | None = None
+
+
+class QCPlotSpec(BaseModel):
+    file_glob: str
+    title: str
+    type: str
+
+
+class QCDashboardConfig(BaseModel):
+    template: str
+    sections: list[QCSection] = []
+    metrics: dict[str, QCMetricSpec] = {}
+    charts: list[QCChartSpec] = []
+    plots: list[QCPlotSpec] = []
+
+
 class QCDashboardResponse(BaseModel):
     id: int
     pipeline_run_id: int
     experiment_id: int | None
     metrics: QCMetrics
+    raw_metrics: dict[str, Any] = {}
     summary_text: str
     plots: list[QCPlot] = []
+    qc_config: QCDashboardConfig
     status: str
     generated_at: datetime | None
     created_at: datetime
