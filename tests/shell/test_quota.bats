@@ -363,3 +363,35 @@ JSON
     grep -q "alpha quotas info describe SSD-TOTAL-GB-per-project-region" "$CALL_LOG"
     grep -q "alpha quotas info describe DISKS-TOTAL-GB-per-project-region" "$CALL_LOG"
 }
+
+# ---------------------------------------------------------------------------
+# install-gcp.sh wiring -- static checks that the integration is in place.
+# These do not execute install-gcp.sh end-to-end (which would require gcloud
+# auth and a real GCP project); they catch regressions where someone deletes
+# or moves the quota wiring without updating tests.
+# ---------------------------------------------------------------------------
+
+INSTALL_GCP="$BATS_TEST_DIRNAME/../../install-gcp.sh"
+
+@test "install-gcp.sh syntax is valid" {
+    [ -f "$INSTALL_GCP" ]
+    run bash -n "$INSTALL_GCP"
+    [ "$status" -eq 0 ]
+}
+
+@test "install-gcp.sh sources installer/quota.sh" {
+    # The source line may use a variable for the path; check that both the
+    # literal path string and a `source` invocation are present.
+    grep -q "installer/quota.sh" "$INSTALL_GCP"
+    grep -E -q '^[[:space:]]*(source|\.)[[:space:]]' "$INSTALL_GCP"
+}
+
+@test "install-gcp.sh invokes bioaf_quota_ensure_all" {
+    grep -q "bioaf_quota_ensure_all" "$INSTALL_GCP"
+}
+
+@test "install-gcp.sh enables the cloudquotas API" {
+    # cloudquotas.googleapis.com must appear in the REQUIRED_APIS list so it
+    # is enabled before bioaf_quota_ensure_all runs.
+    grep -q "cloudquotas.googleapis.com" "$INSTALL_GCP"
+}
