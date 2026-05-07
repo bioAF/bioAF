@@ -101,37 +101,30 @@ class GcsStorageService:
 
     @staticmethod
     async def get_credentials(session: AsyncSession):
-        """Return GCS credentials from platform_config, or None to use ADC.
+        """Return credentials capable of v4 signing for GCS operations.
 
-        When gcp_credential_source is 'service_account_key', parses the stored
-        JSON key and returns service_account.Credentials with full
-        cloud-platform scope so the GCS client bypasses the VM's OAuth scopes.
+        Routes through credential_injector so vm_default installs get
+        impersonated bootstrap credentials (which sign via the IAM
+        SignBlob API) and legacy service_account_key installs get
+        service_account.Credentials with full cloud-platform scope.
+        Returns None on failure -- caller falls back to ADC, which
+        works for non-signing operations only.
         """
-        import json as _json
+        from app.services import credential_injector
 
         result = await session.execute(
             text(
                 "SELECT key, value FROM platform_config "
-                "WHERE key IN ('gcp_credential_source', 'gcp_service_account_key')"
+                "WHERE key IN ("
+                "  'gcp_credential_source', 'gcp_service_account_key',"
+                "  'gcp_service_account_email', 'gcp_bootstrap_sa_email'"
+                ")"
             )
         )
         config = {r[0]: r[1] for r in result.fetchall()}
 
-        if config.get("gcp_credential_source") != "service_account_key":
-            return None
-
-        key_json = config.get("gcp_service_account_key")
-        if not key_json or key_json == "null":
-            return None
-
         try:
-            from google.oauth2 import service_account
-
-            key_data = _json.loads(key_json)
-            return service_account.Credentials.from_service_account_info(
-                key_data,
-                scopes=["https://www.googleapis.com/auth/cloud-platform"],
-            )
+            return credential_injector.load_gcp_credentials(config)
         except Exception as e:
             logger.warning("Failed to load GCS credentials from platform_config: %s", e)
             return None
