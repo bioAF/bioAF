@@ -1,5 +1,94 @@
 # Release Notes
 
+## v0.11.3
+
+Point release that automates the GCP quota-increase requests bioAF
+needs at install time, plus a small refresh of the shell test suite
+that had drifted away from the current `bioaf` and `install.sh`
+contracts. No schema changes; no migration required.
+
+### Auto-quota-request in `install-gcp.sh`
+
+Resolves the last open item from to-resolve.md issue #3 (CPUS) and
+its 2026-05-07 expansion (SSD / DISKS). Fresh GCP projects ship with
+quotas too tight for bioAF to schedule even one pipeline pod
+(12 vCPUs, 250 GB regional SSD). On v0.11.2 and earlier, the user
+had to discover this via `Pending` pods and `QUOTA_EXCEEDED` autoscaler
+events, then go to the console to file an increase manually.
+
+`install-gcp.sh` now adds a "Step 5b: GCP Quota Auto-Request" right
+after region selection. It checks each of the three quotas bioAF
+needs and, for any that are below target, files a `QuotaPreference`
+through the Cloud Quotas API:
+
+- `CPUS-ALL-REGIONS-per-project` &rarr; 64
+- `SSD-TOTAL-GB-per-project-region` &rarr; 1024
+- `DISKS-TOTAL-GB-per-project-region` &rarr; 2048
+
+On a paid billing account the API auto-approves these in seconds and
+the installer reports "granted automatically." On a free-trial
+billing account the request goes to human review (1-2 business days)
+and the installer surfaces a clear "Google needs to review and
+approve this -- this is normal" message before continuing. The
+install never aborts on a quota request; if a request was actually
+denied, the affected pipeline run will surface the underlying
+`QUOTA_EXCEEDED` reason in its log.
+
+The logic lives in `installer/quota.sh` (sourced by `install-gcp.sh`
+from a local clone, or fetched over HTTPS when the script is
+`curl|bash`'d). Cloud Quotas API errors are surfaced verbatim, so a
+4xx response shows the API's `code`/`status`/`message` rather than
+just an opaque "request failed."
+
+### Stale `bats` shell tests refreshed
+
+`tests/shell/test_bioaf.bats` and `tests/shell/test_install.bats`
+hadn't been touched since the original installer commit, but the
+underlying scripts had moved on across many releases. Three tests
+were checking for behavior that no longer exists:
+
+- `bioaf help` expected `create-admin`, but admin creation moved to
+  the web wizard; the test now checks the actually-current commands.
+- `install.sh check-prereqs` expected exit 0 on any host with docker
+  and git, but `install.sh` now refuses to run on macOS / Windows by
+  design (it is meant for the GCP Linux VM); the test now skips on
+  non-Linux hosts.
+- `install.sh generate-env` was tested as a "refuse to overwrite"
+  gate, but the current contract is "regenerate the file but
+  preserve known values (POSTGRES_PASSWORD, SECRET_KEY) unless
+  `--force` is passed"; the test now pins that contract.
+
+No production code changed -- this section is test-only cleanup.
+
+### Bug fix: install-gcp.sh exited silently on a Cloud Quotas 4xx
+
+The first version of the auto-quota-request flow (built earlier on
+this branch) used `curl -fsSL` and propagated curl's non-zero exit
+through the `pref_id=$(bioaf_quota_request_increase ...)` assignment
+in the orchestrator. Under `set -euo pipefail` (which `install-gcp.sh`
+uses) that aborted the entire installer mid-flow with no user-visible
+error, right after printing "Requesting an automatic quota increase
+from Google..." Two regression tests now pin this down; the helper
+always returns 0 and signals failure via empty stdout, matching the
+convention `bioaf_quota_poll` already used.
+
+### Bug fix: missing `contactEmail` rejected every QuotaPreference
+
+After the silent-abort fix surfaced the underlying API error, fresh
+projects revealed a second issue: the Cloud Quotas API requires a
+`contactEmail` field on every `QuotaPreference` body ("Contact email
+must be set in order to increase quota value") and the helper was
+not sending it. Long-lived projects can quietly accept submissions
+without it because of contacts retained from prior console activity,
+which masked the requirement during early testing.
+
+The orchestrator now resolves the gcloud-active account once
+(`gcloud config get-value account` -- same identity as the bearer
+token, so Google can email the right human if review or denial
+happens) and threads it into the body. `(unset)` is treated as empty
+so installs without a configured account degrade cleanly rather than
+sending a literal `(unset)` string as the contact.
+
 ## v0.11.2
 
 Bug-fix point release covering the environment-management gaps and a
