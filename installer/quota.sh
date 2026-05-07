@@ -90,25 +90,34 @@ _bioaf_quota_pref_id() {
 #   $3 project        GCP project id
 #   $4 preferred_value (integer string)
 #   $5 region (opt)   for regional quotas; omit for project-scoped
+#   $6 contact_email (opt) Cloud Quotas requires this on every QuotaPreference
+#                          submission ("Contact email must be set in order to
+#                          increase quota value"); pass empty string to omit
+#                          when not available, but expect the API to reject.
 # Prints the preference id (the last path segment of `name`) on success.
 # Always returns 0 -- a failure is signalled via empty stdout, so callers
 # under `set -euo pipefail` can use $(...) safely. The orchestrator uses
 # this empty-stdout convention to print the friendly "Could not submit"
 # message instead of letting set -e abort the whole installer.
 bioaf_quota_request_increase() {
-    local service="$1" quota_id="$2" project="$3" preferred="$4" region="${5:-}"
+    local service="$1" quota_id="$2" project="$3" preferred="$4"
+    local region="${5:-}" contact_email="${6:-}"
     local pref_id
     pref_id=$(_bioaf_quota_pref_id "$quota_id")
     local token
     token=$(gcloud auth print-access-token 2>/dev/null) || return 0
-    local body
+    # Build the JSON body piece by piece. Region and contactEmail are both
+    # optional fields; we drop them entirely (rather than emit empty values)
+    # when not provided, since the API has different validation rules per
+    # field shape.
+    local body='{"service":"'"$service"'","quotaId":"'"$quota_id"'","quotaConfig":{"preferredValue":"'"$preferred"'"}'
     if [ -n "$region" ]; then
-        body=$(printf '{"service":"%s","quotaId":"%s","quotaConfig":{"preferredValue":"%s"},"dimensions":{"region":"%s"}}' \
-            "$service" "$quota_id" "$preferred" "$region")
-    else
-        body=$(printf '{"service":"%s","quotaId":"%s","quotaConfig":{"preferredValue":"%s"}}' \
-            "$service" "$quota_id" "$preferred")
+        body+=',"dimensions":{"region":"'"$region"'"}'
     fi
+    if [ -n "$contact_email" ]; then
+        body+=',"contactEmail":"'"$contact_email"'"'
+    fi
+    body+='}'
     local url="https://cloudquotas.googleapis.com/v1/projects/${project}/locations/global/quotaPreferences?quotaPreferenceId=${pref_id}"
     # Drop -f so 4xx responses give us the error JSON body instead of an
     # opaque curl exit. We parse the body below: if it has top-level "error"
@@ -208,6 +217,17 @@ bioaf_quota_ensure_all() {
     local interval="${BIOAF_QUOTA_POLL_INTERVAL:-3}"
     local timeout="${BIOAF_QUOTA_POLL_TIMEOUT:-30}"
 
+    # Cloud Quotas API requires a contactEmail on every QuotaPreference
+    # submission. Use the gcloud-active account: same identity as the bearer
+    # token, so Google can email the right human if the request hits review
+    # or gets denied. "(unset)" is gclouds sentinel for "no account
+    # configured" -- treat it as empty.
+    local contact_email
+    contact_email=$(gcloud config get-value account 2>/dev/null || true)
+    if [ "$contact_email" = "(unset)" ]; then
+        contact_email=""
+    fi
+
     echo ""
     echo "  Checking GCP quotas needed by bioAF (CPUs and disk)..."
     echo ""
@@ -227,7 +247,7 @@ bioaf_quota_ensure_all() {
         echo "  ${quota_id}: current ${current}, target ${preferred}."
         echo "  Requesting an automatic quota increase from Google..."
         local pref_id
-        pref_id=$(bioaf_quota_request_increase "$service" "$quota_id" "$project" "$preferred" "$r")
+        pref_id=$(bioaf_quota_request_increase "$service" "$quota_id" "$project" "$preferred" "$r" "$contact_email")
         if [ -z "$pref_id" ]; then
             echo "  Could not submit the quota request. Continuing without auto-bump --"
             echo "  if the limit blocks pipeline runs later, you can request the bump"

@@ -26,6 +26,11 @@ case "$1 $2 $3" in
     "auth print-access-token "*)
         echo "ya29.fake-token"
         ;;
+    "config get-value account")
+        # Tests can override via $GCLOUD_ACCOUNT_FIXTURE; default is a
+        # syntactically-valid but obviously-fake address.
+        echo "${GCLOUD_ACCOUNT_FIXTURE:-tester@example.com}"
+        ;;
     "alpha quotas info")
         # `gcloud alpha quotas info describe <quota_id> --service=... --project=... --format=json`
         # The 4th positional arg is the quota id when subcommand is "describe".
@@ -413,6 +418,78 @@ JSON
     run bash -c "set -euo pipefail; source '$QUOTA_HELPER'; pref_id=\$(bioaf_quota_request_increase compute.googleapis.com BAD-ID my-proj 64 2>/dev/null); echo \"pref_id=[\$pref_id]\""
     [ "$status" -eq 0 ]
     [[ "$output" == *"pref_id=[]"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# contactEmail is required by Cloud Quotas: every QuotaPreference body
+# must carry one. We learned this the hard way after shipping the helper
+# without it -- the API returned "Contact email must be set in order to
+# increase quota value." Cover the field's presence and source-of-truth.
+# ---------------------------------------------------------------------------
+
+@test "request_increase includes contactEmail in the POST body when given" {
+    cat > "$FIXTURE_DIR/post_resp.json" <<'JSON'
+{ "name": "projects/123/locations/global/quotaPreferences/bioaf-x" }
+JSON
+    export CURL_POST_FIXTURE=post_resp.json
+    run bash -c "source '$QUOTA_HELPER'; bioaf_quota_request_increase compute.googleapis.com CPUS-ALL-REGIONS-per-project my-proj 64 '' 'someone@example.com'"
+    [ "$status" -eq 0 ]
+    grep -q '"contactEmail":"someone@example.com"' "$CALL_LOG"
+}
+
+@test "request_increase passes contactEmail alongside region for regional quotas" {
+    cat > "$FIXTURE_DIR/post_resp.json" <<'JSON'
+{ "name": "projects/123/locations/global/quotaPreferences/bioaf-x" }
+JSON
+    export CURL_POST_FIXTURE=post_resp.json
+    run bash -c "source '$QUOTA_HELPER'; bioaf_quota_request_increase compute.googleapis.com SSD-TOTAL-GB-per-project-region my-proj 1024 us-central1 'someone@example.com'"
+    [ "$status" -eq 0 ]
+    grep -q '"contactEmail":"someone@example.com"' "$CALL_LOG"
+    grep -q '"dimensions":{"region":"us-central1"}' "$CALL_LOG"
+}
+
+@test "request_increase omits contactEmail when empty arg given" {
+    cat > "$FIXTURE_DIR/post_resp.json" <<'JSON'
+{ "name": "projects/123/locations/global/quotaPreferences/bioaf-x" }
+JSON
+    export CURL_POST_FIXTURE=post_resp.json
+    run bash -c "source '$QUOTA_HELPER'; bioaf_quota_request_increase compute.googleapis.com CPUS-ALL-REGIONS-per-project my-proj 64"
+    [ "$status" -eq 0 ]
+    ! grep -q '"contactEmail"' "$CALL_LOG"
+}
+
+@test "ensure_all resolves contactEmail from gcloud and threads it through to request_increase" {
+    _stage_quota_limits 12 100 200
+    cat > "$FIXTURE_DIR/post_resp.json" <<'JSON'
+{ "name": "projects/123/locations/global/quotaPreferences/bioaf-x" }
+JSON
+    cat > "$FIXTURE_DIR/poll_approved.json" <<'JSON'
+{ "quotaConfig": { "preferredValue": "64", "grantedValue": "64" } }
+JSON
+    export CURL_POST_FIXTURE=post_resp.json
+    export CURL_GET_FIXTURE=poll_approved.json
+    export GCLOUD_ACCOUNT_FIXTURE='operator@example.com'
+    run bash -c "source '$QUOTA_HELPER'; BIOAF_QUOTA_POLL_INTERVAL=1 BIOAF_QUOTA_POLL_TIMEOUT=2 bioaf_quota_ensure_all my-proj us-central1"
+    [ "$status" -eq 0 ]
+    grep -q '"contactEmail":"operator@example.com"' "$CALL_LOG"
+}
+
+@test "ensure_all handles unset gcloud account by omitting contactEmail (api will then return its error)" {
+    _stage_quota_limits 12 100 200
+    cat > "$FIXTURE_DIR/post_resp.json" <<'JSON'
+{ "name": "projects/123/locations/global/quotaPreferences/bioaf-x" }
+JSON
+    cat > "$FIXTURE_DIR/poll_approved.json" <<'JSON'
+{ "quotaConfig": { "preferredValue": "64", "grantedValue": "64" } }
+JSON
+    export CURL_POST_FIXTURE=post_resp.json
+    export CURL_GET_FIXTURE=poll_approved.json
+    # gcloud emits "(unset)" when no account is configured; helper should
+    # treat that as empty, not as a literal contact email.
+    export GCLOUD_ACCOUNT_FIXTURE='(unset)'
+    run bash -c "source '$QUOTA_HELPER'; BIOAF_QUOTA_POLL_INTERVAL=1 BIOAF_QUOTA_POLL_TIMEOUT=2 bioaf_quota_ensure_all my-proj us-central1"
+    [ "$status" -eq 0 ]
+    ! grep -q '"contactEmail"' "$CALL_LOG"
 }
 
 # ---------------------------------------------------------------------------
