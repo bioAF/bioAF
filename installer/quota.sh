@@ -168,3 +168,75 @@ if preferred is not None and granted is not None and str(granted) == str(preferr
 print("pending")
 ' <<<"$resp"
 }
+
+# Walk every desired quota; for each one that is below its target, request
+# an increase and poll briefly for an automatic approval. Notifies the user
+# at every step. Never aborts on a single-quota failure -- the install
+# should still complete; pipeline launches will surface the exact reason
+# later if the quota was actually denied.
+#
+# Inputs:
+#   $1 project        GCP project id
+#   $2 region         GCE region used by bioAF (regional quotas only)
+# Knobs (env):
+#   BIOAF_QUOTA_POLL_INTERVAL  seconds between polls   (default 3)
+#   BIOAF_QUOTA_POLL_TIMEOUT   max wait per quota      (default 30)
+bioaf_quota_ensure_all() {
+    local project="$1" region="$2"
+    local interval="${BIOAF_QUOTA_POLL_INTERVAL:-3}"
+    local timeout="${BIOAF_QUOTA_POLL_TIMEOUT:-30}"
+
+    echo ""
+    echo "  Checking GCP quotas needed by bioAF (CPUs and disk)..."
+    echo ""
+
+    local row
+    while IFS=$'\t' read -r service quota_id scope preferred; do
+        local r=""
+        [ "$scope" = "region" ] && r="$region"
+        local current
+        current=$(bioaf_quota_get_current "$service" "$quota_id" "$project" "$r")
+        # Treat non-numeric as 0 so we always proceed to ask.
+        case "$current" in (''|*[!0-9]*) current=0 ;; esac
+        if [ "$current" -ge "$preferred" ]; then
+            echo "  ${quota_id}: current limit ${current} already meets target ${preferred}. Skipping."
+            continue
+        fi
+        echo ""
+        echo "  ${quota_id}: current ${current}, target ${preferred}."
+        echo "  Requesting an automatic quota increase from Google..."
+        local pref_id
+        pref_id=$(bioaf_quota_request_increase "$service" "$quota_id" "$project" "$preferred" "$r")
+        if [ -z "$pref_id" ]; then
+            echo "  Could not submit the quota request. Continuing without auto-bump --"
+            echo "  if the limit blocks pipeline runs later, you can request the bump"
+            echo "  in the Cloud Console: IAM & Admin -> Quotas."
+            continue
+        fi
+        echo "  Submitted (preference id: ${pref_id}). Waiting up to ${timeout}s for"
+        echo "  automatic approval..."
+        local elapsed=0
+        local status="pending"
+        while [ "$elapsed" -lt "$timeout" ]; do
+            status=$(bioaf_quota_poll "$project" "$pref_id")
+            [ "$status" = "approved" ] && break
+            sleep "$interval"
+            elapsed=$((elapsed + interval))
+        done
+        case "$status" in
+            approved)
+                echo "  ${quota_id}: granted automatically (now ${preferred})."
+                ;;
+            *)
+                echo "  ${quota_id}: not auto-approved within ${timeout}s."
+                echo "  Google needs to review and approve this quota increase."
+                echo "  This is normal -- approval typically takes 1-2 business days."
+                echo "  bioAF install will continue. Pipeline launches that depend on"
+                echo "  this quota will fail until approval; the run log will surface"
+                echo "  the underlying QUOTA_EXCEEDED reason when that happens."
+                ;;
+        esac
+    done < <(bioaf_quota_targets)
+
+    echo ""
+}
