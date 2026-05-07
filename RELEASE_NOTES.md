@@ -1,5 +1,236 @@
 # Release Notes
 
+## v0.11.1
+
+Bug-fix point release for the v0.11.0 SA hardening work. Resolves the
+issues found while testing v0.11.0 end-to-end on a fresh greenfield
+install. No new features; no schema changes; no migration required.
+Existing installs are unaffected (they continue to use the legacy
+`service_account_key` code path).
+
+### Sheets reader SA: now keyless
+
+The v0.11.0 plan filed Breakage 6 ("Sheets reader needs `keys.create`,
+which the org policy blocks") as a documented limitation. That
+limitation was unnecessary -- Google's permission check is
+identity-based, so a doc shared with `bioaf-reader@...` accepts an
+impersonated token authenticating as that principal exactly the same
+way it accepts a token from a stored JSON key.
+
+- `install-gcp.sh` creates the `bioaf-reader` SA, enables
+  `sheets.googleapis.com`, grants `bioaf-app`
+  `roles/iam.serviceAccountTokenCreator` on the reader SA, and
+  embeds the email in the prefill YAML.
+- `get_reader_credentials` returns
+  `impersonated_credentials.Credentials` in `vm_default` mode (signs
+  via the IAM `SignBlob` API). Legacy
+  `service_account_key` installs still use the stored JSON key.
+- `create_reader_sa` (in-app fallback) drops `keys.create` entirely
+  and writes a `tokenCreator` binding on the new SA.
+- `sheets_reader_sa_key` is no longer written to `platform_config`
+  on new installs.
+
+Works on policy-enforced projects (`iam.disableServiceAccountKeyCreation`)
+because that constraint only blocks `keys.create`, not
+`serviceAccounts.create` or `serviceAccounts.getAccessToken`.
+
+### K8s adapters and GCS clients routed through `credential_injector`
+
+The original audit missed three adapters (notebook, compute, cellxgene)
+and two GCS-client paths (upload signed URLs, storage stats) that had
+their own `_get_gcp_credentials`/`_get_gcs_credentials` helpers calling
+`json.loads` on `gcp_service_account_key`. Under SA hardening that row
+is empty, so they raised `JSONDecodeError` on first use, blocking
+notebook session launch and file upload, and 403'ing the storage stats
+query.
+
+- `adapters/{notebooks,compute,cellxgene}/kubernetes.py` now route
+  through `credential_injector.load_gcp_credentials(cfg)`.
+- `upload_service._get_gcs_credentials` and
+  `gcs_storage.GcsStorageService.get_credentials` route through the
+  same. v4 signed URLs work because impersonated credentials sign via
+  the IAM `SignBlob` API and `tokenCreator` includes `signBlob`.
+- `storage_service._query_gcs_buckets` /
+  `get_lifecycle_policies` use impersonated bootstrap credentials
+  (which have unconditioned `roles/storage.admin`) for project-level
+  list operations.
+
+### `gke_cluster_name = "null"` sentinel handling
+
+`stack_deployment.py` writes the literal string `"null"` to
+`platform_config` when a Terraform output is empty. The compute
+adapter's GKE-metrics call forwarded `"null"` to the GKE API
+verbatim and spammed Cloud Logging with `clusters/null`
+PERMISSION_DENIED entries. New `_resolve_cfg` helper in
+`compute/kubernetes.py` treats the sentinel as missing.
+`_k8s_get_cluster_status` raises a clear error;
+`_k8s_get_cluster_metrics` returns the safe-zero fallback.
+
+### Pipeline launch reload of cluster_config
+
+A backend that started before compute deploy completed could not
+launch pipelines after deploy finished -- it failed with "No GKE
+cluster endpoint in platform_config" because the sync K8s helpers
+used by `ensure_pipeline_namespace` did not reload config from
+`platform_config`. New `_ensure_cluster_config_fresh()` helper is
+awaited from every async public entry point in the compute adapter
+that uses sync K8s helpers downstream (`_k8s_submit_job`,
+`_k8s_cancel_job`, `_k8s_get_job_status`, `_k8s_list_jobs`,
+`_k8s_get_job_logs`, `_k8s_persist_job_logs`).
+
+### `roles/monitoring.metricWriter` for the Ops Agent
+
+Added to `bioaf-app`'s unconditioned project bindings in
+`install-gcp.sh`, `installer/roles_manifest.yaml`, the backend
+`APP_ROLES` fallback, and the frontend role-panel guidance. Same
+low-risk profile as `roles/logging.logWriter` (write-only,
+cost-only). Stops the Ops Agent's
+`MonApiPermissionErr: missing roles/monitoring.metricWriter`
+log spam.
+
+### Tests
+
+- 2086 backend tests pass (was 2067 in v0.11.0).
+- New `test_k8s_adapter_sa_hardening.py` (6 tests) covers
+  credential-injector routing across all three K8s adapters, the
+  `"null"` sentinel, and the cluster-config reload guard.
+- New `test_upload_credentials_sa_hardening.py` (5 tests) covers
+  signed-URL credentials, storage-stats credentials, and graceful
+  fallback when credentials are unavailable.
+- Existing tests that patched the removed `_get_gcp_credentials`
+  helper updated to patch `_load_gcp_credentials` instead.
+
+### Known follow-ups (not in this release)
+
+- Large-file upload UX: the v4 single-PUT signed-URL flow shows "0%"
+  for several minutes on large files before progress starts moving.
+  Root cause is browser-side `xhr.upload.onprogress` throttling on
+  large request bodies. Fix is to switch to chunked resumable
+  uploads (the protocol `resumableUpload.ts` already implements for
+  reference data).
+- Compute Terraform output capture: `gke_cluster_name = "null"` is
+  written to `platform_config` even though `outputs.tf` declares
+  the output. Read-side normalization stops the spammy errors but
+  the upstream capture path needs investigation.
+- Cellxgene Workload Identity: cellxgene pods can't authenticate to
+  GCS under SA hardening because `_ensure_gcp_secret` writes an
+  empty key into a K8s Secret. Proper fix is Workload Identity for
+  the cellxgene SA.
+- Quota-request UX: pipeline launches fail to schedule on
+  CPU-quota-constrained projects with no useful in-app message. The
+  pod sits Pending until the user manually requests a CPU quota
+  increase in the Cloud Console. Captured for a future feature.
+
+## v0.11.0
+
+Service-account hardening for greenfield installs. Eliminates the JSON
+service-account key, splits the broad single-SA into a scoped runtime SA
+(`bioaf-app`, attached to the VM) and an impersonated bootstrap SA
+(`bioaf-bootstrap`, used only for IAM/Terraform/Cloud Build), and bounds
+the runtime SA's blast radius to bioAF-managed resources only via IAM
+Conditions, Resource Manager tags, and per-resource bindings.
+
+Existing installs are not migrated -- they keep their JSON-key code path
+unchanged. The full design is in
+`documentation/sa-hardening/03-consolidated-plan.md`.
+
+### Architecture (greenfield only)
+
+- New `bioaf-bootstrap` SA holds the broad project-level roles formerly
+  given to the single SA, minus `roles/iam.serviceAccountKeyAdmin`.
+  Impersonated by Terraform, Sheets reader provisioning, and the
+  notebook/cellxgene/environment image-build services.
+- New `bioaf-app` SA is attached to the GCE VM and holds a small set of
+  scoped roles: `roles/storage.admin` (`bioaf-*` buckets only),
+  `compute.instanceAdmin.v1` (`bioaf-*` VMs only), `container.admin`
+  (resources tagged `bioaf-managed=true`), the project-scoped custom
+  role `bioafSaManager`, plus `roles/iam.serviceAccountTokenCreator`
+  resource-scoped to `bioaf-bootstrap` only.
+- Project-scoped Resource Manager tag `bioaf-managed=true` attached to
+  bioAF-managed GKE clusters; per-secret and per-subscription bindings
+  for `bioaf-app` rendered by Terraform.
+- New platform_config key `gcp_bootstrap_sa_email`, persisted at startup
+  from VM instance metadata (`bioaf_bootstrap_sa_email`). The
+  credential injector and image-build services prefer it over the
+  legacy `gcp_service_account_email` so existing keyed installs keep
+  working.
+
+### Installer
+
+- `install-gcp.sh` creates both SAs, the `bioaf-managed` tag, the
+  custom IAM role, the conditioned bindings, and the resource-scoped
+  tokenCreator binding. Attaches `bioaf-app` to the VM and writes the
+  bootstrap email into VM metadata.
+- The legacy "create SA + JSON key + paste worksheet" step is removed.
+- New file: `installer/roles_manifest.yaml` -- single source of truth
+  for both SAs' permissions, read by both the installer and the
+  backend validation probe.
+
+### Backend
+
+- `credential_injector.load_gcp_credentials` reads `gcp_bootstrap_sa_email`
+  first and falls back to the legacy email field.
+- `notebook_image_service`, `cellxgene_image_service`, and (transitively)
+  `environment_build_service` now obtain credentials via the injector
+  so impersonation reaches Cloud Build / Artifact Registry.
+- `terraform_executor` injects the bootstrap email into the env dict
+  before `build_env`. The Terraform tfvars writer plumbs
+  `bioaf_app_sa_email` and `bioaf_bootstrap_sa_email` through to the
+  storage and compute modules.
+- `gce.py` work-node adapter routes credentials through the injector
+  (no more "no JSON key" hard error on greenfield) and drops the
+  legacy `gcp_service_account_email` fallback for the VM-attached SA.
+- `gcp_config.validate_gcp_credentials` runs a dual-SA probe in
+  `vm_default` mode: bioaf-app via raw ADC, bioaf-bootstrap via
+  impersonation. Merged result requires both. New
+  `app_probe`/`bootstrap_probe` fields on `GCPValidationResult`.
+- `sheets_reader_sa_service` surfaces a clear error when `keys.create`
+  fails because the project enforces
+  `iam.disableServiceAccountKeyCreation`.
+- `main.py` lifespan reads `bioaf_bootstrap_sa_email` from VM metadata
+  and persists it on first startup (idempotent; skipped outside GCE).
+
+### Terraform
+
+- Per-secret `roles/secretmanager.secretAccessor` bindings for
+  bioaf-app (gated on `bioaf_app_sa_email`).
+- Per-subscription `roles/pubsub.subscriber` bindings for bioaf-app on
+  the ingest worker + dead-letter subscriptions.
+- `bioaf-managed=true` tag binding attached to the GKE cluster in both
+  the legacy top-level module and the backend `compute` module.
+
+### Frontend
+
+- Setup wizard and GCP settings page replace the hardcoded 14-role
+  list with two adjacent panels: bioaf-bootstrap roles (broad) and
+  bioaf-app roles (scoped). Validation result shows per-SA pass/fail
+  cards when the new probe fields are present; falls back to the
+  legacy single list for keyed installs.
+
+### Tests
+
+- `test_credential_injector` extended with three vm_default impersonation
+  cases (new key, legacy fallback, neither set).
+- `test_terraform_executor` extended to verify `_read_gcp_config`
+  selects `gcp_bootstrap_sa_email` and `run_plan` passes it through.
+- New: `test_sheets_reader_sa_service`,
+  `test_image_build_credentials`, `test_gce_adapter`,
+  `test_gcp_config_dual_probe`, `test_bootstrap_metadata`,
+  `test_roles_manifest`.
+- New CI invariants: `test_bucket_naming_invariant` (every
+  `google_storage_bucket` starts with `bioaf-`),
+  `test_compute_naming_invariant` (every Python `instance_name = '...'`
+  starts with `bioaf-`), `test_gke_tag_invariant` (every
+  `google_container_cluster` file declares a sibling
+  `google_tags_tag_binding`).
+
+### Documented limitation
+
+- Sheets integration cannot be enabled on projects that enforce
+  `iam.disableServiceAccountKeyCreation` because the Sheets reader SA
+  still requires `keys.create`. The setup wizard now surfaces a clear
+  message on enable rather than a stack trace.
+
 ## v0.10.3
 
 Reference Data Ingest — completes the four user-facing capabilities of ADR-017 / ADR-047 (upload, import-from-URL, versioning, and pipeline linkage). Existing reference data CRUD is unchanged; this release adds everything around getting bytes into the registry and using them in pipelines.

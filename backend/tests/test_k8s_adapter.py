@@ -15,6 +15,15 @@ async def test_k8s_adapter_get_cluster_status_with_mock():
 
     provider = KubernetesComputeProvider()
     provider._mode = "production"
+    # Seed cluster identity so _k8s_get_cluster_status passes its sanity check.
+    # Also seed an endpoint so load_cluster_config considers the cache valid
+    # (otherwise it overwrites with {} when no session_factory is configured).
+    provider._cluster_config = {
+        "gke_cluster_endpoint": "https://10.0.0.1",
+        "gke_cluster_name": "bioaf-test",
+        "gcp_project_id": "test-project",
+        "gcp_region": "us-central1",
+    }
 
     # Mock GKE cluster response
     mock_cluster = MagicMock()

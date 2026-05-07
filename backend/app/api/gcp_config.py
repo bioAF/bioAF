@@ -23,6 +23,7 @@ _GCP_KEYS = [
     "gcp_validation_status",
     "gcp_credential_source",
     "gcp_service_account_email",
+    "gcp_bootstrap_sa_email",
 ]
 
 _DEFAULTS: dict[str, str] = {
@@ -34,6 +35,7 @@ _DEFAULTS: dict[str, str] = {
     "gcp_validation_status": "",
     "gcp_credential_source": "vm_default",
     "gcp_service_account_email": "",
+    "gcp_bootstrap_sa_email": "",
 }
 
 
@@ -68,6 +70,7 @@ def _to_response(config: dict[str, str]) -> GCPConfigResponse:
         gcp_validation_status=config.get("gcp_validation_status") or None,
         gcp_credential_source=config.get("gcp_credential_source", "vm_default"),
         gcp_service_account_email=config.get("gcp_service_account_email") or None,
+        gcp_bootstrap_sa_email=config.get("gcp_bootstrap_sa_email") or None,
     )
 
 
@@ -139,7 +142,8 @@ async def validate_gcp_config(
         raise HTTPException(400, "gcp_project_id is not configured")
 
     credential_source = config.get("gcp_credential_source", "vm_default")
-    sa_email = config.get("gcp_service_account_email", "")
+    # Prefer the new bootstrap key; fall back to legacy email for backward compat.
+    impersonation_target = config.get("gcp_bootstrap_sa_email") or config.get("gcp_service_account_email") or ""
 
     sa_key_row = (
         await session.execute(text("SELECT value FROM platform_config WHERE key='gcp_service_account_key'"))
@@ -149,7 +153,7 @@ async def validate_gcp_config(
         project_id=project_id,
         credential_source=credential_source,
         service_account_key=sa_key_row,
-        service_account_email=sa_email or None,
+        service_account_email=impersonation_target or None,
     )
 
     # Persist validation outcome

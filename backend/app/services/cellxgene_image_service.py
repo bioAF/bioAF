@@ -16,9 +16,10 @@ import time
 import google.auth
 import google.auth.transport.requests
 from google.cloud import storage
-from google.oauth2 import service_account
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.services.notebook_image_service import _get_credentials
 
 logger = logging.getLogger("bioaf.cellxgene_image")
 
@@ -40,29 +41,6 @@ ENTRYPOINT ["cellxgene"]
 def get_image_uri(project_id: str, region: str) -> str:
     """Construct the full Artifact Registry image URI."""
     return f"{region}-docker.pkg.dev/{project_id}/{AR_REPO_ID}/{IMAGE_NAME}:{IMAGE_TAG}"
-
-
-async def _get_credentials(session: AsyncSession):
-    """Load GCP credentials from platform_config."""
-    result = await session.execute(
-        text("SELECT key, value FROM platform_config WHERE key IN ('gcp_credential_source', 'gcp_service_account_key')")
-    )
-    config = {r[0]: r[1] for r in result.fetchall()}
-
-    if config.get("gcp_credential_source") != "service_account_key":
-        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-        return creds
-
-    key_json = config.get("gcp_service_account_key")
-    if not key_json or key_json == "null":
-        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-        return creds
-
-    key_data = json.loads(key_json)
-    return service_account.Credentials.from_service_account_info(
-        key_data,
-        scopes=["https://www.googleapis.com/auth/cloud-platform"],
-    )
 
 
 def _authorized_request(credentials, method: str, url: str, body: dict | None = None) -> dict:

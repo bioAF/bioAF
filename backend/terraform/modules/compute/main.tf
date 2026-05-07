@@ -163,4 +163,23 @@ resource "google_service_account_iam_member" "notebook_runner_workload_identity"
   service_account_id = google_service_account.notebook_runner.name
   role               = "roles/iam.workloadIdentityUser"
   member             = "serviceAccount:${var.project_id}.svc.id.goog[bioaf-notebooks/bioaf-notebook-runner]"
+
+  # The Workload Identity pool (<PROJECT>.svc.id.goog) is registered
+  # asynchronously after the cluster's create call returns. Without an
+  # explicit depends_on Terraform may schedule this binding before the
+  # pool exists, producing 'Identity Pool does not exist' errors.
+  depends_on = [
+    google_container_cluster.bioaf,
+    google_container_node_pool.pipelines,
+    google_container_node_pool.interactive,
+  ]
 }
+
+# SA hardening note: bioaf-app's roles/container.admin binding is scoped via
+# IAM Condition on the cluster name prefix (resource.name.extract(...) starts
+# with "bioaf-") rather than via a Resource Manager tag. GKE clusters are
+# regional resources and google_tags_tag_binding (the global tag API) does
+# not accept them; google_tags_location_tag_binding works only with the
+# project number and has uneven support across GKE features. Name-prefix
+# scoping needs no Terraform-side wiring because cluster names are already
+# bioaf-*.

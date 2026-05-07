@@ -232,3 +232,24 @@ variable "gke_authorized_networks" {
   }))
   default = []
 }
+
+# =============================================================================
+# SA hardening: bioAF service account emails
+# =============================================================================
+# Both SAs are created by install-gcp.sh before this Terraform runs. The
+# emails are passed in so module bindings (per-secret, per-subscription,
+# per-tag) can reference the correct identity. bioaf-app is the runtime
+# data-plane SA attached to the GCE VM. bioaf-bootstrap is impersonated
+# only by services that need broad IAM/build/Cloud-Build permissions.
+
+variable "bioaf_app_sa_email" {
+  description = "Email of the bioaf-app service account (runtime data plane)."
+  type        = string
+  default     = ""
+}
+
+variable "bioaf_bootstrap_sa_email" {
+  description = "Email of the bioaf-bootstrap service account (impersonated for IAM/Cloud Build)."
+  type        = string
+  default     = ""
+}

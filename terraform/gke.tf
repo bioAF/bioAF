@@ -51,3 +51,10 @@ resource "google_container_cluster" "bioaf_cluster" {
   # Deletion protection
   deletion_protection = false
 }
+
+# SA hardening note: bioaf-app's roles/container.admin grant uses
+# resource.name.extract("/clusters/{name}").startsWith("bioaf-") instead of a
+# Resource Manager tag because GKE clusters are regional resources and
+# google_tags_tag_binding (global) does not accept them. Cluster names are
+# already bioaf-* so the name-prefix condition resolves at IAM-check time
+# without any Terraform-side tagging.

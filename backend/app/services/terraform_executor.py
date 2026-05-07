@@ -891,6 +891,9 @@ class TerraformExecutor:
             if deploy_suffix:
                 tfvars["stack_uid"] = deploy_suffix
             tfvars["backend_service_account_email"] = config.get("backend_service_account_email") or ""
+            # SA hardening: pass the bioaf-app SA email through so the module
+            # creates per-subscription roles/pubsub.subscriber bindings.
+            tfvars["bioaf_app_sa_email"] = config.get("bioaf_app_sa_email") or ""
         elif module_name == "billing_export":
             tfvars["backend_service_account_email"] = config.get("backend_service_account_email") or ""
         elif module_name == "compute":
@@ -904,6 +907,10 @@ class TerraformExecutor:
             from app.gcp_zones import zones_for_region
 
             tfvars["k8s_node_zones"] = zones_for_region(region)
+            # SA hardening: pass the bootstrap SA email so the module
+            # attaches the bioaf-managed Resource Manager tag to the GKE
+            # cluster (required for bioaf-app's tag-conditioned binding).
+            tfvars["bioaf_bootstrap_sa_email"] = config.get("gcp_bootstrap_sa_email") or ""
             # Cluster configuration from platform_config
             if config.get("k8s_pipeline_machine_type"):
                 tfvars["k8s_pipeline_machine_type"] = config["k8s_pipeline_machine_type"]
@@ -995,6 +1002,9 @@ class TerraformExecutor:
             "gcp_region",
             "gcp_zone",
             "gcp_service_account_key",
+            "gcp_service_account_email",
+            "gcp_bootstrap_sa_email",
+            "bioaf_app_sa_email",
             "org_slug",
             "deploy_suffix",
             "terraform_initialized",
@@ -1011,7 +1021,15 @@ class TerraformExecutor:
                 text("SELECT key, value FROM platform_config WHERE key = ANY(:keys)").bindparams(keys=keys)
             )
         ).fetchall()
-        return {r[0]: r[1] for r in rows}
+        config = {r[0]: r[1] for r in rows}
+        # vm_default mode: ensure the credential injector sees the bootstrap
+        # impersonation target. Falls back to the legacy email field for
+        # installs that pre-date SA hardening.
+        if config.get("gcp_credential_source", "vm_default") == "vm_default":
+            target = config.get("gcp_bootstrap_sa_email") or config.get("gcp_service_account_email")
+            if target:
+                config["gcp_bootstrap_sa_email"] = target
+        return config
 
     @staticmethod
     async def _auto_cleanup_lock(session: AsyncSession, module_name: str) -> None:

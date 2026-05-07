@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timezone
 
 from app.adapters.base import WorkNodeProvider
+from app.services.credential_injector import load_gcp_credentials
 
 logger = logging.getLogger("bioaf.adapters.work_nodes.gce")
 
@@ -257,7 +258,9 @@ class GCEWorkNodeProvider(WorkNodeProvider):
                     "SELECT key, value FROM platform_config "
                     "WHERE key IN ("
                     "  'gcp_project_id', 'gcp_zone', 'gcp_region',"
+                    "  'gcp_credential_source',"
                     "  'gcp_service_account_key', 'gcp_service_account_email',"
+                    "  'gcp_bootstrap_sa_email',"
                     "  'notebook_runner_sa_email', 'working_bucket_name'"
                     ")"
                 )
@@ -267,21 +270,14 @@ class GCEWorkNodeProvider(WorkNodeProvider):
         return self._gcp_config
 
     def _get_gcp_credentials(self):
-        """Build GCP credentials from service account key."""
-        import json as _json
+        """Build GCP credentials via the central credential_injector.
 
-        from google.oauth2 import service_account
-
+        Greenfield (vm_default) installs route through metadata-server ADC
+        with optional bioaf-bootstrap impersonation via gcp_bootstrap_sa_email.
+        Legacy installs (service_account_key) keep using the stored JSON key.
+        """
         cfg = self._gcp_config or {}
-        sa_key = cfg.get("gcp_service_account_key", "")
-        if not sa_key:
-            raise RuntimeError("No GCP service account key in platform_config")
-
-        key_data = _json.loads(sa_key)
-        return service_account.Credentials.from_service_account_info(
-            key_data,
-            scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        )
+        return load_gcp_credentials(cfg)
 
     async def launch_vm(self, vm_spec: dict) -> dict:
         if self.is_local:
@@ -349,12 +345,15 @@ class GCEWorkNodeProvider(WorkNodeProvider):
         # Build startup script
         startup_script = _build_startup_script(vm_spec)
 
-        # Service account
-        sa_email = (
-            vm_spec.get("service_account_email")
-            or cfg.get("notebook_runner_sa_email", "")
-            or cfg.get("gcp_service_account_email", "")
-        )
+        # Service account attached to the work-node VM. The legacy
+        # gcp_service_account_email field is now used for bioaf-bootstrap
+        # impersonation, NOT for VM identity, so it is intentionally not
+        # consulted here.
+        sa_email = vm_spec.get("service_account_email") or cfg.get("notebook_runner_sa_email", "")
+        if not sa_email:
+            raise ValueError(
+                "No service account configured for work node -- set notebook_runner_sa_email in admin settings"
+            )
 
         credentials = self._get_gcp_credentials()
         instances_client = compute_v1.InstancesClient(credentials=credentials)

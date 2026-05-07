@@ -35,7 +35,8 @@ async def _seed_reader_sa(session, email: str = "bioaf-reader-abc1@proj.iam.gser
         INSERT INTO platform_config (key, value) VALUES
             ('sheets_reader_sa_email', :email),
             ('sheets_reader_sa_key', :key),
-            ('sheets_reader_sa_created', 'true')
+            ('sheets_reader_sa_created', 'true'),
+            ('gcp_credential_source', 'service_account_key')
         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
         """).bindparams(email=email, key=sa_key)
     )
@@ -116,16 +117,17 @@ async def test_get_reader_sa_requires_auth(client, session):
 
 @pytest.mark.asyncio
 async def test_create_reader_sa_success(client, admin_token, session):
-    """POST /api/v1/sheets/reader-sa creates the SA and returns email."""
+    """POST /api/v1/sheets/reader-sa creates the SA keylessly and grants tokenCreator."""
+    from unittest.mock import AsyncMock as _AsyncMock
+
     await _seed_gcp_config(session)
 
     mock_iam = MagicMock()
     mock_iam.projects().serviceAccounts().create().execute.return_value = {
         "email": "bioaf-reader-1234@my-project.iam.gserviceaccount.com"
     }
-    mock_iam.projects().serviceAccounts().keys().create().execute.return_value = {
-        "privateKeyData": "eyJ0eXBlIjoic2VydmljZV9hY2NvdW50In0="  # base64 of {"type":"service_account"}
-    }
+    mock_iam.projects().serviceAccounts().getIamPolicy().execute.return_value = {"bindings": []}
+    mock_iam.projects().serviceAccounts().setIamPolicy().execute.return_value = {}
 
     mock_usage = MagicMock()
     mock_usage.services().enable().execute.return_value = {}
@@ -143,6 +145,10 @@ async def test_create_reader_sa_success(client, admin_token, session):
             "app.services.sheets_reader_sa_service.service_account.Credentials.from_service_account_info",
             return_value=MagicMock(),
         ),
+        patch(
+            "app.services.bootstrap_metadata.get_attached_sa_email",
+            new=_AsyncMock(return_value="bioaf-app@my-project.iam.gserviceaccount.com"),
+        ),
     ):
         response = await client.post(
             "/api/v1/sheets/reader-sa",
@@ -153,6 +159,8 @@ async def test_create_reader_sa_success(client, admin_token, session):
     data = response.json()
     assert "bioaf-reader" in data["email"]
     assert data["message"] == "Reader service account created successfully"
+    # No JSON key was minted -- only setIamPolicy is called for tokenCreator
+    mock_iam.projects().serviceAccounts().keys.assert_not_called()
 
 
 @pytest.mark.asyncio

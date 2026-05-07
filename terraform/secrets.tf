@@ -154,3 +154,57 @@ resource "google_secret_manager_secret_iam_member" "github_pat" {
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.secret_accessor.email}"
 }
+
+# =============================================================================
+# Per-secret bindings for the bioaf-app SA (SA hardening)
+# =============================================================================
+# bioaf-app holds project-level roles/secretmanager.viewer (list-only).
+# Per-secret roles/secretmanager.secretAccessor grants the runtime VM
+# read access to each bioaf-managed secret without project-wide accessor.
+# Bindings only render when bioaf_app_sa_email is set.
+
+locals {
+  bioaf_app_member = var.bioaf_app_sa_email != "" ? "serviceAccount:${var.bioaf_app_sa_email}" : null
+}
+
+resource "google_secret_manager_secret_iam_member" "app_db_app_password" {
+  count     = var.bioaf_app_sa_email != "" ? 1 : 0
+  secret_id = google_secret_manager_secret.db_app_password.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = local.bioaf_app_member
+}
+
+resource "google_secret_manager_secret_iam_member" "app_db_admin_password" {
+  count     = var.bioaf_app_sa_email != "" ? 1 : 0
+  secret_id = google_secret_manager_secret.db_admin_password.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = local.bioaf_app_member
+}
+
+resource "google_secret_manager_secret_iam_member" "app_jwt_signing_key" {
+  count     = var.bioaf_app_sa_email != "" ? 1 : 0
+  secret_id = google_secret_manager_secret.jwt_signing_key.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = local.bioaf_app_member
+}
+
+resource "google_secret_manager_secret_iam_member" "app_smtp_credentials" {
+  count     = var.bioaf_app_sa_email != "" ? 1 : 0
+  secret_id = google_secret_manager_secret.smtp_credentials.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = local.bioaf_app_member
+}
+
+resource "google_secret_manager_secret_iam_member" "app_slack_webhook" {
+  count     = var.bioaf_app_sa_email != "" ? 1 : 0
+  secret_id = google_secret_manager_secret.slack_webhook.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = local.bioaf_app_member
+}
+
+resource "google_secret_manager_secret_iam_member" "app_github_pat" {
+  count     = var.bioaf_app_sa_email != "" ? 1 : 0
+  secret_id = google_secret_manager_secret.github_pat.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = local.bioaf_app_member
+}

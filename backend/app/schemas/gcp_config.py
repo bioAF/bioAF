@@ -50,6 +50,10 @@ class GCPConfigResponse(BaseModel):
     gcp_validation_status: str | None
     gcp_credential_source: str
     gcp_service_account_email: str | None
+    # bioaf-bootstrap email under SA hardening (auto-detected from VM metadata
+    # or set by `bioaf setup --prefill`). Surfaced read-only so the wizard can
+    # show users that the impersonation target is already configured.
+    gcp_bootstrap_sa_email: str | None = None
     # service_account_key is intentionally omitted - never returned to clients
 
 
@@ -72,8 +76,25 @@ class PermissionDetail(BaseModel):
     recommended_role: str
 
 
+class SAProbeResult(BaseModel):
+    """Per-SA validation probe result for the dual-probe path.
+
+    Populated only in vm_default mode where the validation runs once as
+    bioaf-app (raw ADC) and once as bioaf-bootstrap (impersonated). The
+    legacy service_account_key code path leaves both probe fields None
+    and continues to populate the merged top-level fields directly.
+    """
+
+    sa_email: str | None
+    passed: bool
+    checks: list[GCPValidationCheck] = []
+    permission_details: list[PermissionDetail] = []
+
+
 class GCPValidationResult(BaseModel):
     passed: bool
     checks: list[GCPValidationCheck]
     recommended_roles: list[str] = []
     permission_details: list[PermissionDetail] = []
+    app_probe: SAProbeResult | None = None
+    bootstrap_probe: SAProbeResult | None = None

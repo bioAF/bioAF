@@ -36,5 +36,5 @@ async def get_lifecycle_policies(
 ):
     current_user = request.state.current_user
     org_id = int(current_user["org_id"])
-    policies = await StorageService.get_lifecycle_policies(org_id)
+    policies = await StorageService.get_lifecycle_policies(session, org_id)
     return {"policies": policies}

@@ -16,9 +16,10 @@ import time
 import google.auth
 import google.auth.transport.requests
 from google.cloud import storage
-from google.oauth2 import service_account
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.services.credential_injector import load_gcp_credentials
 
 logger = logging.getLogger("bioaf.notebook_image")
 
@@ -73,26 +74,33 @@ def get_image_uri(project_id: str, region: str) -> str:
 
 
 async def _get_credentials(session: AsyncSession):
-    """Load GCP credentials from platform_config (Pattern 1)."""
+    """Load GCP credentials via the central credential_injector.
+
+    Routes through `credential_injector.load_gcp_credentials` so that
+    `gcp_bootstrap_sa_email` impersonation is honored (bioaf-bootstrap holds
+    `roles/cloudbuild.builds.editor` and `roles/artifactregistry.admin`,
+    which bioaf-app does not).
+    """
     result = await session.execute(
-        text("SELECT key, value FROM platform_config WHERE key IN ('gcp_credential_source', 'gcp_service_account_key')")
+        text(
+            "SELECT key, value FROM platform_config "
+            "WHERE key IN ("
+            "  'gcp_credential_source', 'gcp_service_account_key',"
+            "  'gcp_service_account_email', 'gcp_bootstrap_sa_email'"
+            ")"
+        )
     )
     config = {r[0]: r[1] for r in result.fetchall()}
 
-    if config.get("gcp_credential_source") != "service_account_key":
-        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-        return creds
+    # An explicit "null" string sentinel from earlier code paths means
+    # "no key set"; let the injector see it as absent.
+    if config.get("gcp_service_account_key") in ("null", None, ""):
+        config.pop("gcp_service_account_key", None)
+        # Without a key, fall back to ADC even if the source claims keys.
+        if config.get("gcp_credential_source") == "service_account_key":
+            config["gcp_credential_source"] = "vm_default"
 
-    key_json = config.get("gcp_service_account_key")
-    if not key_json or key_json == "null":
-        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-        return creds
-
-    key_data = json.loads(key_json)
-    return service_account.Credentials.from_service_account_info(
-        key_data,
-        scopes=["https://www.googleapis.com/auth/cloud-platform"],
-    )
+    return load_gcp_credentials(config)
 
 
 def _authorized_request(credentials, method: str, url: str, body: dict | None = None) -> dict:

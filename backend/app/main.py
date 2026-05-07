@@ -58,6 +58,20 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("SELECT 1"))
     logger.info("Database connection verified")
 
+    # SA hardening: persist bioaf-bootstrap SA email from VM metadata.
+    # The installer attaches it to instance metadata
+    # (--metadata=bioaf_bootstrap_sa_email=...) so the backend can persist
+    # it to platform_config on first startup. No-op when not running on
+    # GCE or when the row already exists.
+    try:
+        from app.database import async_session_factory as _bootstrap_session_factory
+        from app.services.bootstrap_metadata import persist_bootstrap_sa_from_metadata
+
+        async with _bootstrap_session_factory() as _bootstrap_session:
+            await persist_bootstrap_sa_from_metadata(_bootstrap_session)
+    except Exception as e:
+        logger.info("Bootstrap SA metadata read skipped: %s", e)
+
     # Attach Cloud Logging using the app's configured GCP credentials
     try:
         from app.database import async_session_factory as cl_session_factory

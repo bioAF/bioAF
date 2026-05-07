@@ -202,8 +202,16 @@ async def test_cancel_import_deletes_job_and_purges_reference(session, comp_bio_
     assert deleted_jobs == [f"refimport-{dataset_id}-stub"]
     fresh = await session.get(ReferenceDataset, dataset_id)
     assert fresh is None
-    progress = await session.get(ReferenceImportProgress, dataset_id)
-    assert progress is None  # cascade delete
+    # Bypass the ORM identity map: cascade DELETE happens at the DB level via
+    # FK ON DELETE CASCADE, so SQLAlchemy may still return the cached instance
+    # via session.get(). Query directly to confirm the row is gone.
+    progress_row = (
+        await session.execute(
+            text("SELECT 1 FROM reference_import_progress WHERE reference_id = :id"),
+            {"id": dataset_id},
+        )
+    ).first()
+    assert progress_row is None  # cascade delete
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,110 @@
+# bioAF Service Account permissions manifest.
+#
+# Single source of truth for both bioaf-bootstrap and bioaf-app SA bindings.
+# Read by install-gcp.sh (via yq) and backend/app/services/gcp_config.py (PyYAML).
+# Both readers substitute <PROJECT_ID> with the active project ID.
+
+bootstrap:
+  # Project-level role grants on bioaf-bootstrap. No conditions.
+  - role: roles/storage.admin
+  - role: roles/pubsub.admin
+  - role: roles/container.admin
+  - role: roles/iam.serviceAccountUser
+  - role: roles/iam.serviceAccountAdmin
+  - role: roles/compute.admin
+  - role: roles/resourcemanager.projectIamAdmin
+  - role: roles/bigquery.dataEditor
+  - role: roles/artifactregistry.admin
+  - role: roles/cloudbuild.builds.editor
+  - role: roles/logging.logWriter
+  - role: roles/serviceusage.serviceUsageAdmin
+  - role: roles/viewer
+
+app:
+  # Each entry is one IAM binding on bioaf-app. Required keys: role, scope.
+  # Optional: condition, title.
+  # scope is one of:
+  #   project                 -> gcloud projects add-iam-policy-binding <PROJECT_ID>
+  #   service_account:<email> -> gcloud iam service-accounts add-iam-policy-binding <email>
+  # Per-secret and per-subscription bindings are NOT in this manifest --
+  # they are created by Terraform (terraform/secrets.tf, terraform/pipelines.tf).
+  - role: roles/storage.admin
+    scope: project
+    condition: 'resource.name.startsWith("projects/_/buckets/bioaf-")'
+    title: bioaf_buckets_only
+  - role: projects/<PROJECT_ID>/roles/bioafSaManager
+    scope: project
+    condition: 'resource.name.startsWith("projects/<PROJECT_ID>/serviceAccounts/bioaf-")'
+    title: bioaf_sas_only
+  - role: roles/compute.instanceAdmin.v1
+    scope: project
+    condition: 'resource.name.extract("/instances/{name}").startsWith("bioaf-")'
+    title: bioaf_worknodes_only
+  - role: roles/container.admin
+    scope: project
+    condition: 'resource.name.extract("/clusters/{name}").startsWith("bioaf-")'
+    title: bioaf_clusters_only
+  - role: roles/logging.logWriter
+    scope: project
+  - role: roles/monitoring.metricWriter
+    scope: project
+  - role: roles/browser
+    scope: project
+  - role: roles/serviceusage.serviceUsageViewer
+    scope: project
+  - role: roles/secretmanager.viewer
+    scope: project
+  - role: roles/bigquery.jobUser
+    scope: project
+  - role: roles/iam.serviceAccountTokenCreator
+    scope: service_account:bioaf-bootstrap@<PROJECT_ID>.iam.gserviceaccount.com
+
+custom_roles:
+  # Project-scoped custom IAM roles created by the installer.
+  - id: bioafSaManager
+    title: bioAF SA Manager
+    description: Lookup/list/delete bioAF-prefixed service accounts
+    stage: GA
+    permissions:
+      - iam.serviceAccounts.get
+      - iam.serviceAccounts.list
+      - iam.serviceAccounts.delete
+
+dropped:
+  # Permissions formerly required by the single-SA model that are not
+  # granted to any SA in this design. validate_gcp_credentials must NOT
+  # test these against either probe.
+  - iam.serviceAccountKeys.create   # not needed -- reader SA uses keyless impersonation
+  - bigquery.datasets.create        # cost queries are read-only
+
+probe_split:
+  # Permission ownership for the dual-SA validation probe.
+  #
+  # Important: testIamPermissions runs against the PROJECT resource. Conditioned
+  # bindings (storage.admin/bioaf-, compute.instanceAdmin.v1/bioaf-,
+  # container.admin/bioaf-managed) cannot match at the project level because
+  # the condition's `resource.name` is the project, not a bucket/instance/cluster.
+  # Per-SA bindings (iam.serviceAccountUser on notebook-runner) are likewise
+  # invisible to a project-level probe. So the bioaf-app probe tests ONLY
+  # bioaf-app's unconditioned project grants. Everything else moves to the
+  # bootstrap probe, which has the broad project-level grants and can answer
+  # all of the conditioned/per-SA permissions on the project resource.
+  app:
+    - bigquery.jobs.create
+    - logging.logEntries.create
+  bootstrap:
+    - storage.buckets.create
+    - pubsub.topics.create
+    - pubsub.topics.getIamPolicy
+    - pubsub.topics.setIamPolicy
+    - container.clusters.create
+    - iam.serviceAccounts.actAs
+    - iam.serviceAccounts.create
+    - iam.serviceAccounts.setIamPolicy
+    - compute.instances.create
+    - resourcemanager.projects.getIamPolicy
+    - resourcemanager.projects.setIamPolicy
+    - artifactregistry.repositories.create
+    - cloudbuild.builds.create
+    - serviceusage.services.enable
+  shared: []

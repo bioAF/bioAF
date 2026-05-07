@@ -329,7 +329,7 @@ class TestCloudLoggingFallback:
         with (
             patch("google.cloud.logging.Client", return_value=mock_client),
             patch(
-                "app.adapters.compute.kubernetes._get_gcp_credentials",
+                "app.adapters.compute.kubernetes._load_gcp_credentials",
                 return_value=MagicMock(),
             ),
         ):
@@ -368,7 +368,7 @@ class TestCloudLoggingFallback:
         with (
             patch("google.cloud.logging.Client", return_value=mock_client),
             patch(
-                "app.adapters.compute.kubernetes._get_gcp_credentials",
+                "app.adapters.compute.kubernetes._load_gcp_credentials",
                 return_value=MagicMock(),
             ),
         ):
@@ -394,7 +394,7 @@ class TestCloudLoggingFallback:
         with (
             patch("google.cloud.logging.Client", return_value=mock_client),
             patch(
-                "app.adapters.compute.kubernetes._get_gcp_credentials",
+                "app.adapters.compute.kubernetes._load_gcp_credentials",
                 return_value=MagicMock(),
             ),
         ):

@@ -8,7 +8,6 @@ GCP service account key).
 
 import asyncio
 import base64
-import json as _json
 import logging
 import tempfile
 import time
@@ -21,16 +20,17 @@ from app.adapters.base import CellxgeneProvider
 logger = logging.getLogger("bioaf.adapters.cellxgene.k8s")
 
 
-def _get_gcp_token(service_account_key_json: str) -> str:
-    """Exchange a GCP service account key for an access token."""
-    from google.oauth2 import service_account
+def _get_gcp_token(cfg: dict) -> str:
+    """Mint a GCP access token via credential_injector.
+
+    Routes through impersonated bootstrap credentials in vm_default mode
+    or the stored JSON key in legacy service_account_key mode.
+    """
     import google.auth.transport.requests
 
-    key_data = _json.loads(service_account_key_json)
-    credentials = service_account.Credentials.from_service_account_info(
-        key_data,
-        scopes=["https://www.googleapis.com/auth/cloud-platform"],
-    )
+    from app.services import credential_injector
+
+    credentials = credential_injector.load_gcp_credentials(cfg)
     credentials.refresh(google.auth.transport.requests.Request())
     return credentials.token
 
@@ -302,6 +302,7 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
                     "WHERE key IN ("
                     "  'gke_cluster_endpoint', 'gke_cluster_ca_cert',"
                     "  'gcp_credential_source', 'gcp_service_account_key',"
+                    "  'gcp_service_account_email', 'gcp_bootstrap_sa_email',"
                     "  'gke_cluster_name', 'gcp_project_id', 'gcp_zone'"
                     ")"
                 )
@@ -319,7 +320,6 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
 
         endpoint = cfg.get("gke_cluster_endpoint", "")
         ca_cert_b64 = cfg.get("gke_cluster_ca_cert", "")
-        sa_key = cfg.get("gcp_service_account_key", "")
 
         if not endpoint or endpoint == "null":
             raise RuntimeError("No GKE cluster endpoint in platform_config. Deploy the compute stack first.")
@@ -327,7 +327,7 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         if not endpoint.startswith("https://"):
             endpoint = f"https://{endpoint}"
 
-        token = _get_gcp_token(sa_key)
+        token = _get_gcp_token(cfg)
 
         ca_cert_bytes = base64.b64decode(ca_cert_b64)
         ca_file = tempfile.NamedTemporaryFile(delete=False, suffix=".crt")

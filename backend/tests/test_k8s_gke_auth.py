@@ -1,8 +1,9 @@
-"""Tests that the GKE client uses platform_config service account credentials.
+"""Tests that the GKE client uses platform_config-derived credentials.
 
 The GKE ClusterManager API requires proper auth. When running outside the
-cluster, _get_gke_client must use the service account key from platform_config,
-not default/ambient VM credentials (which lack the container.googleapis.com scope).
+cluster, _get_gke_client must use credentials returned by credential_injector
+(impersonated bootstrap on vm_default installs, JSON key in legacy mode),
+not default/ambient VM credentials.
 """
 
 import base64
@@ -34,7 +35,7 @@ class TestGkeClientAuth:
 
         with patch("google.cloud.container_v1.ClusterManagerClient") as mock_client_cls:
             with patch(
-                "app.adapters.compute.kubernetes._get_gcp_credentials",
+                "app.adapters.compute.kubernetes._load_gcp_credentials",
                 return_value=mock_creds,
             ):
                 adapter._get_gke_client()
@@ -42,11 +43,17 @@ class TestGkeClientAuth:
             # Must pass credentials explicitly, not rely on ambient/default
             mock_client_cls.assert_called_once_with(credentials=mock_creds)
 
-    def test_gke_client_falls_back_to_default_when_no_config(self, adapter):
-        """When no service account key in config, use default credentials."""
+    def test_gke_client_falls_back_to_default_when_credential_load_fails(self, adapter):
+        """When credential_injector raises (e.g. no GCP config), fall back to ADC."""
         adapter._cluster_config = {}
 
-        with patch("google.cloud.container_v1.ClusterManagerClient") as mock_client_cls:
+        with (
+            patch("google.cloud.container_v1.ClusterManagerClient") as mock_client_cls,
+            patch(
+                "app.adapters.compute.kubernetes._load_gcp_credentials",
+                side_effect=RuntimeError("no creds"),
+            ),
+        ):
             adapter._get_gke_client()
             # Called without explicit credentials
             mock_client_cls.assert_called_once_with()

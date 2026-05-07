@@ -28,11 +28,20 @@ interface PermissionDetail {
   recommended_role: string;
 }
 
+interface SAProbeResult {
+  sa_email: string | null;
+  passed: boolean;
+  checks: ValidationCheck[];
+  permission_details: PermissionDetail[];
+}
+
 interface ValidationResult {
   passed: boolean;
   checks: ValidationCheck[];
   recommended_roles: string[];
   permission_details: PermissionDetail[];
+  app_probe?: SAProbeResult | null;
+  bootstrap_probe?: SAProbeResult | null;
 }
 
 const ORG_SLUG_RE = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/;
@@ -64,20 +73,40 @@ function zonesForRegion(region: string): string[] {
   return GCP_ZONES[region] ?? [`${region}-b`, `${region}-c`, `${region}-d`];
 }
 
-const RECOMMENDED_ROLES = [
+// SA hardening: bioaf-bootstrap holds the broad project-level roles;
+// bioaf-app holds a small set of scoped roles. The installer applies all
+// of this automatically. These lists exist for transparency.
+const BOOTSTRAP_ROLES = [
   { role: "roles/storage.admin", description: "Storage Admin" },
   { role: "roles/pubsub.admin", description: "Pub/Sub Admin" },
   { role: "roles/container.admin", description: "Kubernetes Engine Admin" },
   { role: "roles/iam.serviceAccountUser", description: "Service Account User" },
-  { role: "roles/iam.serviceAccountKeyAdmin", description: "Service Account Key Admin" },
+  { role: "roles/iam.serviceAccountAdmin", description: "Service Account Admin" },
   { role: "roles/compute.admin", description: "Compute Admin" },
   { role: "roles/resourcemanager.projectIamAdmin", description: "Project IAM Admin" },
   { role: "roles/bigquery.dataEditor", description: "BigQuery Data Editor" },
   { role: "roles/artifactregistry.admin", description: "Artifact Registry Admin" },
   { role: "roles/cloudbuild.builds.editor", description: "Cloud Build Editor" },
+  { role: "roles/logging.logWriter", description: "Logs Writer" },
   { role: "roles/serviceusage.serviceUsageAdmin", description: "Service Usage Admin" },
   { role: "roles/viewer", description: "Viewer" },
 ];
+
+const APP_ROLES = [
+  { role: "roles/storage.admin", description: "Storage Admin (scoped to bioaf-* buckets)" },
+  { role: "projects/<PROJECT>/roles/bioafSaManager", description: "Custom: list/delete bioaf-* SAs" },
+  { role: "roles/compute.instanceAdmin.v1", description: "Compute (scoped to bioaf-* VMs)" },
+  { role: "roles/container.admin", description: "Kubernetes Engine (scoped to bioaf-* clusters)" },
+  { role: "roles/logging.logWriter", description: "Logs Writer" },
+  { role: "roles/monitoring.metricWriter", description: "Monitoring Metric Writer (Ops Agent)" },
+  { role: "roles/browser", description: "Project metadata read" },
+  { role: "roles/serviceusage.serviceUsageViewer", description: "Service Usage Viewer" },
+  { role: "roles/secretmanager.viewer", description: "Secret Manager metadata viewer" },
+  { role: "roles/bigquery.jobUser", description: "BigQuery Job User" },
+  { role: "roles/iam.serviceAccountTokenCreator", description: "Token Creator on bioaf-bootstrap only" },
+];
+
+const RECOMMENDED_ROLES = BOOTSTRAP_ROLES;
 
 const REQUIRED_APIS = [
   { name: "cloudresourcemanager.googleapis.com", description: "Cloud Resource Manager" },
@@ -96,6 +125,40 @@ const REQUIRED_APIS = [
   { name: "artifactregistry.googleapis.com", description: "Artifact Registry" },
   { name: "cloudbuild.googleapis.com", description: "Cloud Build" },
 ];
+
+function ProbePanel({ title, subtitle, probe }: { title: string; subtitle: string; probe: SAProbeResult }) {
+  const granted = probe.permission_details.filter(d => d.granted).length;
+  const total = probe.permission_details.length;
+  return (
+    <details className="border rounded">
+      <summary className="px-3 py-2 cursor-pointer text-sm font-semibold flex items-center gap-2">
+        <span className={probe.passed ? "text-green-600" : "text-red-600"}>
+          {probe.passed ? "✓" : "✗"}
+        </span>
+        <span>{title}</span>
+        {subtitle && <span className="text-xs text-gray-500 font-normal">({subtitle})</span>}
+        <span className="ml-auto text-xs text-gray-500 font-normal">
+          {granted}/{total} permissions
+        </span>
+      </summary>
+      <ul className="px-3 pb-3 pt-1 space-y-1">
+        {probe.permission_details.map((detail) => (
+          <li key={detail.permission} className="flex items-center gap-2 text-xs">
+            <span className={detail.granted ? "text-green-600" : "text-red-600"}>
+              {detail.granted ? "✓" : "✗"}
+            </span>
+            <code className={`px-1 py-0.5 rounded ${detail.granted ? "bg-green-50 text-green-800" : "bg-red-50 text-red-800"}`}>
+              {detail.permission}
+            </code>
+            {!detail.granted && (
+              <span className="text-gray-400">(needs {detail.recommended_role})</span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
 
 export function GcpSettingsContent() {
   const [projectId, setProjectId] = useState("");
@@ -195,37 +258,47 @@ export function GcpSettingsContent() {
             </div>
           )}
 
-          {/* Recommended Roles (collapsible) */}
+          {/* Recommended Roles (collapsible) -- bioaf-bootstrap + bioaf-app split */}
           <details data-testid="recommended-roles" className="bg-white rounded-lg shadow max-w-2xl mb-6">
             <summary className="px-6 py-4 cursor-pointer text-lg font-semibold select-none">
               Recommended IAM Roles
-              <span className="ml-2 text-sm font-normal text-gray-400">({RECOMMENDED_ROLES.length} roles)</span>
+              <span className="ml-2 text-sm font-normal text-gray-400">
+                (bioaf-bootstrap: {BOOTSTRAP_ROLES.length}, bioaf-app: {APP_ROLES.length})
+              </span>
             </summary>
-            <div className="px-6 pb-6">
-              <p className="text-sm text-gray-600 mb-3">
-                Assign these roles to your service account. They cover all permissions
-                bioAF needs. How you grant them is up to you, but these roles are the
-                simplest path.
+            <div className="px-6 pb-6 space-y-4">
+              <p className="text-sm text-gray-600">
+                The installer applies all of this automatically. Listed for transparency
+                and self-host overrides.
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 mb-3">
-                {RECOMMENDED_ROLES.map(({ role, description }) => (
-                  <div key={role} className="flex items-center gap-2 text-xs">
-                    <code className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-800">{role}</code>
-                    <span className="text-gray-400">{description}</span>
-                  </div>
-                ))}
-              </div>
-              <details className="text-xs">
-                <summary className="text-bioaf-600 cursor-pointer font-medium">gcloud command</summary>
-                <pre className="mt-2 bg-gray-50 border rounded p-3 overflow-x-auto">
-{`SA_EMAIL="your-sa@your-project.iam.gserviceaccount.com"
-PROJECT_ID="your-project-id"
 
-${RECOMMENDED_ROLES.map(({ role }) => `gcloud projects add-iam-policy-binding $PROJECT_ID \\
-  --member="serviceAccount:$SA_EMAIL" \\
-  --role="${role}"`).join("\n\n")}`}
-                </pre>
-              </details>
+              <div>
+                <p className="text-sm font-medium text-gray-700 mb-2">
+                  bioaf-bootstrap (impersonated for IAM/Terraform/Cloud Build):
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {BOOTSTRAP_ROLES.map(({ role, description }) => (
+                    <div key={role} className="flex items-center gap-2 text-xs">
+                      <code className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-800">{role}</code>
+                      <span className="text-gray-400">{description}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium text-gray-700 mb-2">
+                  bioaf-app (attached to the VM, scoped):
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {APP_ROLES.map(({ role, description }) => (
+                    <div key={role} className="flex items-center gap-2 text-xs">
+                      <code className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-800">{role}</code>
+                      <span className="text-gray-400">{description}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           </details>
 
@@ -411,8 +484,13 @@ ${RECOMMENDED_ROLES.map(({ role }) => `gcloud projects add-iam-policy-binding $P
                 ))}
               </ul>
 
-              {/* Per-permission details */}
-              {validationResult.permission_details && validationResult.permission_details.length > 0 && (
+              {/* Per-SA probe details (SA hardening, vm_default mode) */}
+              {validationResult.app_probe && validationResult.bootstrap_probe ? (
+                <div data-testid="permission-details" className="space-y-4">
+                  <ProbePanel title="App SA" subtitle={validationResult.app_probe.sa_email || "VM default"} probe={validationResult.app_probe} />
+                  <ProbePanel title="Bootstrap SA" subtitle={validationResult.bootstrap_probe.sa_email || ""} probe={validationResult.bootstrap_probe} />
+                </div>
+              ) : (validationResult.permission_details && validationResult.permission_details.length > 0 && (
                 <div data-testid="permission-details">
                   <h3 className="text-sm font-semibold text-gray-700 mb-2">
                     Permissions ({grantedCount}/{totalPermissions})
@@ -439,7 +517,7 @@ ${RECOMMENDED_ROLES.map(({ role }) => `gcloud projects add-iam-policy-binding $P
                     ))}
                   </ul>
                 </div>
-              )}
+              ))}
             </div>
           )}
 

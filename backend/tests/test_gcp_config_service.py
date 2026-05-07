@@ -507,13 +507,18 @@ def test_iam_permissions_check_handles_api_error(mock_sa, mock_rm, mock_storage,
 @patch("app.services.gcp_config.resourcemanager_v3")
 @patch("app.services.gcp_config.service_account")
 def test_result_includes_permission_details(mock_sa, mock_rm, mock_storage, mock_gke, mock_su):
-    """Validation result includes per-permission granted status and recommended role."""
+    """Validation result includes per-permission granted status and recommended role.
+
+    SA hardening dropped iam.serviceAccountKeys.create and bigquery.datasets.create
+    (the Sheets-only and read-only-cost permissions); bigquery.jobs.create is the
+    live cost-query permission.
+    """
     mock_creds = MagicMock()
     mock_sa.Credentials.from_service_account_info.return_value = mock_creds
     mock_rm.ProjectsClient.return_value.get_project.return_value = MagicMock()
 
-    # Grant all except bigquery permissions
-    granted = [p for p in ALL_REQUIRED_PERMISSIONS if not p.startswith("bigquery.")]
+    # Grant all except bigquery.jobs.create
+    granted = [p for p in ALL_REQUIRED_PERMISSIONS if p != "bigquery.jobs.create"]
     mock_rm.ProjectsClient.return_value.test_iam_permissions.return_value = _mock_iam_response(granted)
     mock_storage.Client.return_value.list_buckets.return_value = []
     mock_gke.ClusterManagerClient.return_value.list_clusters.return_value = MagicMock()
@@ -525,10 +530,13 @@ def test_result_includes_permission_details(mock_sa, mock_rm, mock_storage, mock
         service_account_key=VALID_SA_KEY,
     )
 
-    assert len(result.permission_details) == len(ALL_REQUIRED_PERMISSIONS)
-    bq_detail = next(d for d in result.permission_details if d.permission == "bigquery.datasets.create")
-    assert bq_detail.granted is False
-    assert "bigquery" in bq_detail.recommended_role
+    # Permission details cover the live (non-dropped) permissions only.
+    detail_perms = {d.permission for d in result.permission_details}
+    assert "bigquery.datasets.create" not in detail_perms
+    assert "iam.serviceAccountKeys.create" not in detail_perms
+
+    bq_jobs = next(d for d in result.permission_details if d.permission == "bigquery.jobs.create")
+    assert bq_jobs.granted is False
 
     storage_detail = next(d for d in result.permission_details if d.permission == "storage.buckets.create")
     assert storage_detail.granted is True
@@ -559,7 +567,10 @@ def test_result_includes_recommended_roles(mock_sa, mock_rm, mock_storage, mock_
     )
 
     assert len(result.recommended_roles) > 0
-    assert "roles/bigquery.dataEditor" in result.recommended_roles
+    # SA hardening: bioaf-app keeps roles/bigquery.jobUser; the broader
+    # dataEditor role lives only on bioaf-bootstrap and is no longer in
+    # the legacy single-list of recommended roles.
+    assert "roles/bigquery.jobUser" in result.recommended_roles
     assert "roles/storage.admin" in result.recommended_roles
     assert "roles/viewer" in result.recommended_roles
     assert "roles/serviceusage.serviceUsageAdmin" in result.recommended_roles

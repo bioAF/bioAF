@@ -59,3 +59,9 @@ variable "k8s_interactive_max_nodes" {
   default     = 5
   description = "Maximum number of nodes in the interactive autoscaler"
 }
+
+variable "bioaf_bootstrap_sa_email" {
+  type        = string
+  default     = ""
+  description = "Email of the bioaf-bootstrap SA. When set, attaches the bioaf-managed=true Resource Manager tag to the GKE cluster so bioaf-app's roles/container.admin tag-condition resolves."
+}
