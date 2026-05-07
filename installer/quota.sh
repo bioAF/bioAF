@@ -110,8 +110,12 @@ bioaf_quota_request_increase() {
             "$service" "$quota_id" "$preferred")
     fi
     local url="https://cloudquotas.googleapis.com/v1/projects/${project}/locations/global/quotaPreferences?quotaPreferenceId=${pref_id}"
+    # Drop -f so 4xx responses give us the error JSON body instead of an
+    # opaque curl exit. We parse the body below: if it has top-level "error"
+    # we surface the API message on stderr; if it has "name", we treat it as
+    # a successful preference creation.
     local resp
-    resp=$(curl -fsSL -X POST \
+    resp=$(curl -sSL -X POST \
         -H "Authorization: Bearer ${token}" \
         -H "Content-Type: application/json" \
         --data "$body" \
@@ -119,17 +123,32 @@ bioaf_quota_request_increase() {
     local py
     py=$(_bioaf_quota_python)
     if [ -z "$py" ]; then
-        # Without python we fall back to the id we generated -- the API uses
-        # exactly that as the last segment of `name`.
-        printf '%s\n' "$pref_id"
+        # Without python we cant reliably distinguish error bodies from
+        # success bodies. Conservatively echo nothing -- caller will print
+        # the friendly "Could not submit" branch.
         return 0
     fi
     "$py" -c '
 import json, sys
+raw = sys.stdin.read() or ""
 try:
-    data = json.loads(sys.stdin.read() or "{}")
+    data = json.loads(raw)
 except Exception:
-    print(""); sys.exit(0)
+    if raw.strip():
+        sys.stderr.write("  Quota API returned an unparseable response.\n")
+    print("")
+    sys.exit(0)
+err = data.get("error") if isinstance(data, dict) else None
+if err:
+    msg = err.get("message") or str(err)
+    code = err.get("code")
+    status = err.get("status")
+    prefix = "  Quota API error"
+    if code or status:
+        prefix += " ({}{}{})".format(code or "", " " if code and status else "", status or "")
+    sys.stderr.write(prefix + ": " + msg + "\n")
+    print("")
+    sys.exit(0)
 name = data.get("name") or ""
 print(name.rsplit("/", 1)[-1] if name else "")
 ' <<<"$resp"
