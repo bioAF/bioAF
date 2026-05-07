@@ -190,7 +190,6 @@ bioaf_quota_ensure_all() {
     echo "  Checking GCP quotas needed by bioAF (CPUs and disk)..."
     echo ""
 
-    local row
     while IFS=$'\t' read -r service quota_id scope preferred; do
         local r=""
         [ "$scope" = "region" ] && r="$region"
