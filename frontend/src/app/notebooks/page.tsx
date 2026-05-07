@@ -138,7 +138,7 @@ export default function NotebooksPage() {
 
   async function loadEnvironments() {
     try {
-      const data = await api.get<EnvironmentListResponse>("/api/v1/environments");
+      const data = await api.get<EnvironmentListResponse>("/api/v1/environments?type=notebook");
       setEnvironments(data.environments);
       const withReady = data.environments.find(
         (e) => e.latest_version?.status === "ready" && e.latest_version?.image_uri

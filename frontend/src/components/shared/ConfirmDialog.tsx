@@ -1,9 +1,11 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 interface ConfirmDialogProps {
   open: boolean;
   title: string;
-  message: string;
+  message: ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
   onConfirm: () => void;
@@ -27,7 +29,9 @@ export function ConfirmDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
         <h3 className="text-lg font-semibold mb-2">{title}</h3>
-        <p className="text-gray-600 mb-6">{message}</p>
+        <div className="text-gray-600 mb-6 space-y-3">
+          {typeof message === "string" ? <p>{message}</p> : message}
+        </div>
         <div className="flex justify-end gap-3">
           <button
             onClick={onCancel}
