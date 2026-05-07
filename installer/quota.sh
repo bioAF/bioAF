@@ -90,14 +90,17 @@ _bioaf_quota_pref_id() {
 #   $3 project        GCP project id
 #   $4 preferred_value (integer string)
 #   $5 region (opt)   for regional quotas; omit for project-scoped
-# Prints the preference id (the last path segment of `name`) on success,
-# empty string on failure.
+# Prints the preference id (the last path segment of `name`) on success.
+# Always returns 0 -- a failure is signalled via empty stdout, so callers
+# under `set -euo pipefail` can use $(...) safely. The orchestrator uses
+# this empty-stdout convention to print the friendly "Could not submit"
+# message instead of letting set -e abort the whole installer.
 bioaf_quota_request_increase() {
     local service="$1" quota_id="$2" project="$3" preferred="$4" region="${5:-}"
     local pref_id
     pref_id=$(_bioaf_quota_pref_id "$quota_id")
     local token
-    token=$(gcloud auth print-access-token 2>/dev/null) || return 1
+    token=$(gcloud auth print-access-token 2>/dev/null) || return 0
     local body
     if [ -n "$region" ]; then
         body=$(printf '{"service":"%s","quotaId":"%s","quotaConfig":{"preferredValue":"%s"},"dimensions":{"region":"%s"}}' \
@@ -112,7 +115,7 @@ bioaf_quota_request_increase() {
         -H "Authorization: Bearer ${token}" \
         -H "Content-Type: application/json" \
         --data "$body" \
-        "$url" 2>/dev/null) || return 1
+        "$url" 2>/dev/null) || return 0
     local py
     py=$(_bioaf_quota_python)
     if [ -z "$py" ]; then
