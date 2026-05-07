@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { ContentLoading } from "@/components/shared/ContentLoading";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type {
@@ -87,6 +88,11 @@ export default function PipelineEnvironmentsPage() {
   const [showDeleteVersionModal, setShowDeleteVersionModal] =
     useState<EnvironmentVersionSummary | null>(null);
   const [deletingVersion, setDeletingVersion] = useState(false);
+
+  // Build / rebuild confirmation modal state
+  const [buildConfirm, setBuildConfirm] = useState<
+    { kind: "build" | "rebuild"; envId: number; versionId: number } | null
+  >(null);
 
   const selectedEnvIdRef = useRef<number | null>(null);
   const selectedVersionIdRef = useRef<number | null>(null);
@@ -236,25 +242,26 @@ export default function PipelineEnvironmentsPage() {
     }
   }
 
-  async function handleBuild(envId: number, versionId: number) {
-    if (!confirm("Start building this version? This submits a Cloud Build job.")) return;
-    try {
-      await api.post(`/api/v1/environments/${envId}/versions/${versionId}/build`);
-      await selectEnvironment(envId);
-      await loadEnvironments(true);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Build failed to start");
-    }
+  function handleBuild(envId: number, versionId: number) {
+    setBuildConfirm({ kind: "build", envId, versionId });
   }
 
-  async function handleRebuild(envId: number, versionId: number) {
-    if (!confirm("Rebuild this version? A new build will be created with the same definition.")) return;
+  function handleRebuild(envId: number, versionId: number) {
+    setBuildConfirm({ kind: "rebuild", envId, versionId });
+  }
+
+  async function confirmBuildOrRebuild() {
+    if (!buildConfirm) return;
+    const { kind, envId, versionId } = buildConfirm;
+    setBuildConfirm(null);
+    const path = kind === "rebuild" ? "rebuild" : "build";
     try {
-      await api.post(`/api/v1/environments/${envId}/versions/${versionId}/rebuild`);
+      await api.post(`/api/v1/environments/${envId}/versions/${versionId}/${path}`);
       await selectEnvironment(envId);
       await loadEnvironments(true);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Rebuild failed to start");
+      const fallback = kind === "rebuild" ? "Rebuild failed to start" : "Build failed to start";
+      alert(err instanceof Error ? err.message : fallback);
     }
   }
 
@@ -727,6 +734,26 @@ export default function PipelineEnvironmentsPage() {
           )}
         </main>
       </div>
+      <ConfirmDialog
+        open={buildConfirm !== null}
+        title={buildConfirm?.kind === "rebuild" ? "Start rebuild?" : "Start build?"}
+        message={
+          <>
+            <p>
+              The image will be built in the background. This usually takes a
+              few minutes, sometimes longer for larger environments.
+            </p>
+            <p>
+              You can continue using bioAF while it builds -- we will update the
+              status here when it finishes.
+            </p>
+          </>
+        }
+        confirmLabel={buildConfirm?.kind === "rebuild" ? "Start rebuild" : "Start build"}
+        cancelLabel="Cancel"
+        onConfirm={confirmBuildOrRebuild}
+        onCancel={() => setBuildConfirm(null)}
+      />
     </div>
   );
 }

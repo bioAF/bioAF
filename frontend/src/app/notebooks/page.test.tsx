@@ -201,6 +201,21 @@ describe("NotebooksPage launch modal", () => {
   });
 });
 
+describe("NotebooksPage env picker filter", () => {
+  test("requests environments filtered by type=notebook", async () => {
+    setupMocks({ build_id: null, build_status: null, image_uri: null });
+
+    render(<NotebooksPage />);
+
+    await waitFor(() => {
+      expect(mockGet).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/api\/v1\/environments\?type=notebook$/)
+      );
+    });
+    expect(mockGet).not.toHaveBeenCalledWith("/api/v1/environments");
+  });
+});
+
 describe("NotebooksPage launch button component gating", () => {
   test("hides Launch RStudio when rstudio is not enabled", async () => {
     mockComponents.mockReturnValue({
