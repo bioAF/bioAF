@@ -46,16 +46,20 @@ STUB
     chmod +x "$STUBS_DIR/gcloud"
 
     # curl stub: logs each arg on its own line so tests can grep for body
-    # substrings, and serves a fixture body keyed by $CURL_FIXTURE. If a
-    # `--data @<path>` arg is present, the file contents are appended to the
-    # call log so the test can assert on the request body.
+    # substrings, captures request bodies, and dispatches to either
+    # CURL_POST_FIXTURE / CURL_GET_FIXTURE / CURL_FIXTURE based on the HTTP
+    # method seen in -X. Tests targeting just one method-shape can set the
+    # generic CURL_FIXTURE; tests exercising the full POST-then-GET flow set
+    # both method-specific variables.
     cat > "$STUBS_DIR/curl" <<'STUB'
 #!/usr/bin/env bash
 echo "curl-call:" >> "$CALL_LOG"
 prev=""
+method="GET"
 for a in "$@"; do
     printf 'arg: %s\n' "$a" >> "$CALL_LOG"
     case "$prev" in
+        -X|--request) method="$a" ;;
         --data|-d|--data-binary|--data-raw)
             if [[ "$a" == @* ]]; then
                 body_path="${a#@}"
@@ -72,8 +76,15 @@ for a in "$@"; do
     esac
     prev="$a"
 done
-if [ -n "${CURL_FIXTURE:-}" ] && [ -f "$FIXTURE_DIR/$CURL_FIXTURE" ]; then
-    cat "$FIXTURE_DIR/$CURL_FIXTURE"
+echo "method: $method" >> "$CALL_LOG"
+fixture=""
+if [ "$method" = "POST" ]; then
+    fixture="${CURL_POST_FIXTURE:-${CURL_FIXTURE:-}}"
+else
+    fixture="${CURL_GET_FIXTURE:-${CURL_FIXTURE:-}}"
+fi
+if [ -n "$fixture" ] && [ -f "$FIXTURE_DIR/$fixture" ]; then
+    cat "$FIXTURE_DIR/$fixture"
 fi
 exit "${CURL_EXIT:-0}"
 STUB
@@ -276,4 +287,79 @@ JSON
     run bash -c "source '$QUOTA_HELPER'; bioaf_quota_poll my-proj bioaf-cpus-q"
     [ "$status" -eq 0 ]
     [ "$output" = "error" ]
+}
+
+# ---------------------------------------------------------------------------
+# bioaf_quota_ensure_all -- end-to-end orchestration
+# ---------------------------------------------------------------------------
+
+# Stage gcloud quota_info fixtures with the given current limits so each of
+# the three targets either meets or falls under its target.
+_stage_quota_limits() {
+    local cpus="$1" ssd="$2" disks="$3"
+    cat > "$FIXTURE_DIR/quota_info_CPUS-ALL-REGIONS-per-project.json" <<JSON
+{ "dimensionsInfos": [ { "dimensions": {}, "details": { "value": "$cpus" } } ] }
+JSON
+    cat > "$FIXTURE_DIR/quota_info_SSD-TOTAL-GB-per-project-region.json" <<JSON
+{ "dimensionsInfos": [ { "dimensions": {"region": "us-central1"}, "details": { "value": "$ssd" } } ] }
+JSON
+    cat > "$FIXTURE_DIR/quota_info_DISKS-TOTAL-GB-per-project-region.json" <<JSON
+{ "dimensionsInfos": [ { "dimensions": {"region": "us-central1"}, "details": { "value": "$disks" } } ] }
+JSON
+}
+
+@test "ensure_all skips quotas already at or above target and posts nothing" {
+    _stage_quota_limits 64 1024 2048
+    run bash -c "source '$QUOTA_HELPER'; BIOAF_QUOTA_POLL_INTERVAL=1 BIOAF_QUOTA_POLL_TIMEOUT=2 bioaf_quota_ensure_all my-proj us-central1"
+    [ "$status" -eq 0 ]
+    # No POST should have been issued.
+    ! grep -q "method: POST" "$CALL_LOG"
+    # Friendly message present for each.
+    [[ "$output" == *"already meets"* ]]
+}
+
+@test "ensure_all reports auto-granted when poll returns approved" {
+    _stage_quota_limits 12 100 200
+    cat > "$FIXTURE_DIR/post_resp.json" <<'JSON'
+{ "name": "projects/123/locations/global/quotaPreferences/bioaf-x" }
+JSON
+    cat > "$FIXTURE_DIR/poll_approved.json" <<'JSON'
+{ "quotaConfig": { "preferredValue": "64", "grantedValue": "64" } }
+JSON
+    # Both POST and GET responses use the same body for simplicity. The
+    # POST one is required to extract a preference id; the GET one is what
+    # poll() classifies. We let the POST response also satisfy the granted
+    # check (any GET-shaped JSON is fine because grantedValue == preferredValue).
+    export CURL_POST_FIXTURE=post_resp.json
+    export CURL_GET_FIXTURE=poll_approved.json
+    run bash -c "source '$QUOTA_HELPER'; BIOAF_QUOTA_POLL_INTERVAL=1 BIOAF_QUOTA_POLL_TIMEOUT=2 bioaf_quota_ensure_all my-proj us-central1"
+    [ "$status" -eq 0 ]
+    grep -q "method: POST" "$CALL_LOG"
+    [[ "$output" == *"granted automatically"* ]]
+}
+
+@test "ensure_all reports pending review when poll never returns approved" {
+    _stage_quota_limits 12 100 200
+    cat > "$FIXTURE_DIR/post_resp.json" <<'JSON'
+{ "name": "projects/123/locations/global/quotaPreferences/bioaf-x" }
+JSON
+    # Always-pending poll body (no grantedValue, reconciling true).
+    cat > "$FIXTURE_DIR/poll_pending.json" <<'JSON'
+{ "quotaConfig": { "preferredValue": "64" }, "reconciling": true }
+JSON
+    export CURL_POST_FIXTURE=post_resp.json
+    export CURL_GET_FIXTURE=poll_pending.json
+    run bash -c "source '$QUOTA_HELPER'; BIOAF_QUOTA_POLL_INTERVAL=1 BIOAF_QUOTA_POLL_TIMEOUT=2 bioaf_quota_ensure_all my-proj us-central1"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Google needs to review"* ]]
+    [[ "$output" == *"This is normal"* ]]
+}
+
+@test "ensure_all visits all three target quotas" {
+    _stage_quota_limits 64 1024 2048
+    run bash -c "source '$QUOTA_HELPER'; BIOAF_QUOTA_POLL_INTERVAL=1 BIOAF_QUOTA_POLL_TIMEOUT=2 bioaf_quota_ensure_all my-proj us-central1"
+    [ "$status" -eq 0 ]
+    grep -q "alpha quotas info describe CPUS-ALL-REGIONS-per-project" "$CALL_LOG"
+    grep -q "alpha quotas info describe SSD-TOTAL-GB-per-project-region" "$CALL_LOG"
+    grep -q "alpha quotas info describe DISKS-TOTAL-GB-per-project-region" "$CALL_LOG"
 }
