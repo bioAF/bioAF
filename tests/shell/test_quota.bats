@@ -45,11 +45,33 @@ exit 0
 STUB
     chmod +x "$STUBS_DIR/gcloud"
 
-    # curl stub: logs the invocation and serves a fixture body keyed by a
-    # marker the test sets via $CURL_FIXTURE.
+    # curl stub: logs each arg on its own line so tests can grep for body
+    # substrings, and serves a fixture body keyed by $CURL_FIXTURE. If a
+    # `--data @<path>` arg is present, the file contents are appended to the
+    # call log so the test can assert on the request body.
     cat > "$STUBS_DIR/curl" <<'STUB'
 #!/usr/bin/env bash
-printf 'curl %s\n' "$*" >> "$CALL_LOG"
+echo "curl-call:" >> "$CALL_LOG"
+prev=""
+for a in "$@"; do
+    printf 'arg: %s\n' "$a" >> "$CALL_LOG"
+    case "$prev" in
+        --data|-d|--data-binary|--data-raw)
+            if [[ "$a" == @* ]]; then
+                body_path="${a#@}"
+                if [ -f "$body_path" ]; then
+                    echo "body-from-file:" >> "$CALL_LOG"
+                    cat "$body_path" >> "$CALL_LOG"
+                    echo >> "$CALL_LOG"
+                fi
+            else
+                echo "body:" >> "$CALL_LOG"
+                printf '%s\n' "$a" >> "$CALL_LOG"
+            fi
+            ;;
+    esac
+    prev="$a"
+done
 if [ -n "${CURL_FIXTURE:-}" ] && [ -f "$FIXTURE_DIR/$CURL_FIXTURE" ]; then
     cat "$FIXTURE_DIR/$CURL_FIXTURE"
 fi
@@ -145,4 +167,60 @@ JSON
     grep -q -- "--service=compute.googleapis.com" "$CALL_LOG"
     grep -q -- "--project=my-proj" "$CALL_LOG"
     grep -q -- "--format=json" "$CALL_LOG"
+}
+
+# ---------------------------------------------------------------------------
+# bioaf_quota_request_increase
+# ---------------------------------------------------------------------------
+
+@test "request_increase POSTs a quota preference and returns the preference id (project-scoped)" {
+    cat > "$FIXTURE_DIR/post_resp.json" <<'JSON'
+{
+  "name": "projects/123/locations/global/quotaPreferences/bioaf-cpus-abc123",
+  "quotaConfig": { "preferredValue": "64" },
+  "reconciling": true
+}
+JSON
+    export CURL_FIXTURE=post_resp.json
+    run bash -c "source '$QUOTA_HELPER'; bioaf_quota_request_increase compute.googleapis.com CPUS-ALL-REGIONS-per-project my-proj 64"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"bioaf-cpus-abc123"* ]]
+    # URL includes the right project and endpoint
+    grep -q "cloudquotas.googleapis.com/v1/projects/my-proj/locations/global/quotaPreferences" "$CALL_LOG"
+    # Body asserts
+    grep -q '"service":"compute.googleapis.com"' "$CALL_LOG"
+    grep -q '"quotaId":"CPUS-ALL-REGIONS-per-project"' "$CALL_LOG"
+    grep -q '"preferredValue":"64"' "$CALL_LOG"
+}
+
+@test "request_increase includes region dimension for regional quotas" {
+    cat > "$FIXTURE_DIR/post_resp.json" <<'JSON'
+{ "name": "projects/123/locations/global/quotaPreferences/bioaf-ssd-zzz" }
+JSON
+    export CURL_FIXTURE=post_resp.json
+    run bash -c "source '$QUOTA_HELPER'; bioaf_quota_request_increase compute.googleapis.com SSD-TOTAL-GB-per-project-region my-proj 1024 us-central1"
+    [ "$status" -eq 0 ]
+    grep -q '"dimensions":{"region":"us-central1"}' "$CALL_LOG"
+    grep -q '"preferredValue":"1024"' "$CALL_LOG"
+}
+
+@test "request_increase omits dimensions block for project-scoped quotas" {
+    cat > "$FIXTURE_DIR/post_resp.json" <<'JSON'
+{ "name": "projects/123/locations/global/quotaPreferences/bioaf-cpus-q" }
+JSON
+    export CURL_FIXTURE=post_resp.json
+    run bash -c "source '$QUOTA_HELPER'; bioaf_quota_request_increase compute.googleapis.com CPUS-ALL-REGIONS-per-project my-proj 64"
+    [ "$status" -eq 0 ]
+    # The body should NOT contain a dimensions key when no region is given.
+    ! grep -q '"dimensions"' "$CALL_LOG"
+}
+
+@test "request_increase sends an Authorization bearer header" {
+    cat > "$FIXTURE_DIR/post_resp.json" <<'JSON'
+{ "name": "projects/123/locations/global/quotaPreferences/bioaf-cpus-q" }
+JSON
+    export CURL_FIXTURE=post_resp.json
+    run bash -c "source '$QUOTA_HELPER'; bioaf_quota_request_increase compute.googleapis.com CPUS-ALL-REGIONS-per-project my-proj 64"
+    [ "$status" -eq 0 ]
+    grep -q "Authorization: Bearer ya29.fake-token" "$CALL_LOG"
 }
