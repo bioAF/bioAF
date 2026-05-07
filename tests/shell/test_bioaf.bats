@@ -23,6 +23,7 @@ BIOAF_SCRIPT="$BATS_TEST_DIRNAME/../../bioaf"
     [[ "$output" == *"status"* ]]
     [[ "$output" == *"logs"* ]]
     [[ "$output" == *"migrate"* ]]
+    [[ "$output" == *"migrate-down"* ]]
     [[ "$output" == *"backup"* ]]
     [[ "$output" == *"update"* ]]
     [[ "$output" == *"reset-db"* ]]
@@ -30,7 +31,7 @@ BIOAF_SCRIPT="$BATS_TEST_DIRNAME/../../bioaf"
     [[ "$output" == *"shell"* ]]
     [[ "$output" == *"dbshell"* ]]
     [[ "$output" == *"seed"* ]]
-    [[ "$output" == *"create-admin"* ]]
+    [[ "$output" == *"register-outputs"* ]]
 }
 
 @test "bioaf unknown command exits nonzero" {

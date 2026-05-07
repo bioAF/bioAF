@@ -46,7 +46,12 @@ teardown() {
 # ---------------------------------------------------------------------------
 
 @test "install.sh check-prereqs succeeds when docker and git are present" {
-    # This test only passes if the test runner has docker + git installed
+    # install.sh refuses to run on non-Linux hosts (macOS / Windows) by
+    # design -- it is meant to be executed on the GCP VM, not on the
+    # operator's laptop. Skip this contract test on those hosts.
+    if [ "$(uname -s)" != "Linux" ]; then
+        skip "install.sh requires Linux ($(uname -s) detected)"
+    fi
     if ! command -v docker &>/dev/null; then
         skip "docker not installed on test runner"
     fi
@@ -58,9 +63,10 @@ teardown() {
 }
 
 @test "install.sh check-prereqs fails when a required tool is missing" {
-    # Create a restricted PATH with no docker
+    # Create a restricted PATH with no docker. On non-Linux hosts the
+    # OS-guard fires first and we still expect a non-zero exit, just for
+    # a different reason -- both are valid "fail" outcomes for this test.
     run env PATH="/usr/bin" bash "$INSTALL_SCRIPT" check-prereqs
-    # Should fail because docker won't be found on the restricted PATH
     [ "$status" -ne 0 ] || [[ "$output" == *"docker"* ]]
 }
 
@@ -106,23 +112,40 @@ teardown() {
     [ -n "$secret" ]
 }
 
-@test "generate-env does not overwrite existing .env" {
+@test "generate-env preserves existing POSTGRES_PASSWORD and SECRET_KEY across re-runs" {
     cd "$BIOAF_ROOT"
-    echo "EXISTING=true" > "$BIOAF_ROOT/docker/.env"
+    cat > "$BIOAF_ROOT/docker/.env" <<'EOF'
+POSTGRES_USER=bioaf
+POSTGRES_PASSWORD=preserve_this_password_abc123
+POSTGRES_DB=bioaf
+DATABASE_URL=postgresql+asyncpg://bioaf:preserve_this_password_abc123@db:5432/bioaf
+SECRET_KEY=preserve_this_secret_key_xyz789
+BIOAF_ENVIRONMENT=production
+EOF
     run bash install.sh generate-env --non-interactive
     [ "$status" -eq 0 ]
-    [[ "$output" == *"already exists"* ]]
-    # Original content preserved
-    grep -q "EXISTING=true" "$BIOAF_ROOT/docker/.env"
+    # Existing secrets must survive a re-run -- regenerating them silently
+    # would orphan the database volume and break login sessions.
+    grep -q "^POSTGRES_PASSWORD=preserve_this_password_abc123$" "$BIOAF_ROOT/docker/.env"
+    grep -q "^SECRET_KEY=preserve_this_secret_key_xyz789$" "$BIOAF_ROOT/docker/.env"
 }
 
-@test "generate-env --force overwrites existing .env" {
+@test "generate-env --force regenerates secrets even when they already exist" {
     cd "$BIOAF_ROOT"
-    echo "EXISTING=true" > "$BIOAF_ROOT/docker/.env"
+    cat > "$BIOAF_ROOT/docker/.env" <<'EOF'
+POSTGRES_USER=bioaf
+POSTGRES_PASSWORD=will_be_regenerated
+POSTGRES_DB=bioaf
+DATABASE_URL=postgresql+asyncpg://bioaf:will_be_regenerated@db:5432/bioaf
+SECRET_KEY=will_also_be_regenerated
+BIOAF_ENVIRONMENT=production
+EOF
     run bash install.sh generate-env --non-interactive --force
     [ "$status" -eq 0 ]
-    # Should have new generated content, not the old line
-    ! grep -q "EXISTING=true" "$BIOAF_ROOT/docker/.env"
+    # --force is the explicit "yes, please rotate" path; the old values
+    # must be gone.
+    ! grep -q "will_be_regenerated" "$BIOAF_ROOT/docker/.env"
+    ! grep -q "will_also_be_regenerated" "$BIOAF_ROOT/docker/.env"
 }
 
 @test "generated .env does not contain NEXT_PUBLIC_API_URL" {
