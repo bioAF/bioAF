@@ -14,9 +14,10 @@
 #   3. Selects or creates a GCP project
 #   4. Enables required APIs
 #   5. Creates a firewall rule for web traffic (ports 80, 443)
-#   6. Creates a VM to host bioAF
-#   7. Optionally creates a service account and JSON key
-#   8. Prints the SSH command and next steps
+#   6. Creates the bioaf-managed Resource Manager tag and a custom IAM role
+#   7. Creates the bioaf-bootstrap and bioaf-app service accounts (no keys)
+#   8. Creates a VM with bioaf-app attached and the bootstrap email in metadata
+#   9. Prints the SSH command and next steps
 #
 # What this script does NOT do:
 #   - Store any passwords or credentials
@@ -93,15 +94,28 @@ REQUIRED_APIS=(
     "logging.googleapis.com"
 )
 
-# Service account roles required by the bioAF setup wizard.
-# Must match RECOMMENDED_ROLES in backend/app/services/gcp_config.py.
-SA_ROLES=(
+# SA hardening (see documentation/sa-hardening/03-consolidated-plan.md):
+# - bioaf-bootstrap holds the broad project-level roles. Impersonated by
+#   bioaf-app via roles/iam.serviceAccountTokenCreator on bioaf-bootstrap only.
+# - bioaf-app is attached to the GCE VM and holds a small set of scoped
+#   roles. Storage / SAs / compute scoping uses IAM Conditions on resource
+#   names; container.admin uses a Resource Manager tag; pubsub.subscriber
+#   and secretmanager.secretAccessor use per-resource bindings created by
+#   Terraform.
+# Must match installer/roles_manifest.yaml.
+BOOTSTRAP_SA_NAME="bioaf-bootstrap"
+APP_SA_NAME="bioaf-app"
+READER_SA_NAME="bioaf-reader"
+BIOAF_TAG_KEY="bioaf-managed"
+BIOAF_TAG_VALUE="true"
+BIOAFSAMANAGER_ROLE_ID="bioafSaManager"
+
+BOOTSTRAP_ROLES=(
     "roles/storage.admin"
     "roles/pubsub.admin"
     "roles/container.admin"
     "roles/iam.serviceAccountUser"
     "roles/iam.serviceAccountAdmin"
-    "roles/iam.serviceAccountKeyAdmin"
     "roles/compute.admin"
     "roles/resourcemanager.projectIamAdmin"
     "roles/bigquery.dataEditor"
@@ -110,6 +124,16 @@ SA_ROLES=(
     "roles/logging.logWriter"
     "roles/serviceusage.serviceUsageAdmin"
     "roles/viewer"
+)
+
+# bioaf-app: unconditioned bindings (low blast radius / read-only).
+APP_UNCONDITIONED_ROLES=(
+    "roles/logging.logWriter"
+    "roles/monitoring.metricWriter"
+    "roles/browser"
+    "roles/serviceusage.serviceUsageViewer"
+    "roles/secretmanager.viewer"
+    "roles/bigquery.jobUser"
 )
 
 # ---------------------------------------------------------------------------
@@ -128,8 +152,8 @@ echo "  2. Authenticate your Google account"
 echo "  3. Select your GCP project"
 echo "  4. Enable required GCP APIs"
 echo "  5. Create a firewall rule for web traffic (ports 80, 443)"
-echo "  6. Create an e2-medium VM with Ubuntu 22.04 (30GB disk)"
-echo "  7. Optionally create a service account for bioAF"
+echo "  6. Create two scoped service accounts (no JSON keys are downloaded)"
+echo "  7. Create an e2-medium VM with Ubuntu 22.04 (30GB disk)"
 echo ""
 echo "Estimated monthly cost: ~\$27/month for the VM + disk."
 echo "You can stop the VM at any time to pause billing."
@@ -199,6 +223,37 @@ else
         exit 1
     fi
     green "  gcloud CLI installed."
+
+    # Pre-generate the GCE SSH key so we control whether it has a
+    # passphrase. If we don't, gcloud creates one lazily on the first
+    # `gcloud compute ssh` call and prompts interactively, which the
+    # later VM-readiness wait can't influence. We only do this when we
+    # just installed gcloud -- existing installs keep their key untouched.
+    GCE_SSH_KEY="$HOME/.ssh/google_compute_engine"
+    if [ ! -f "$GCE_SSH_KEY" ]; then
+        echo ""
+        bold "  GCE SSH key"
+        echo ""
+        echo "  This key is used to SSH into your bioAF VM (and any other GCE"
+        echo "  VM). You can protect it with a passphrase or leave it unprotected:"
+        echo ""
+        echo "    With passphrase:    you'll be prompted on each SSH connection"
+        echo "                        unless ssh-agent caches it. Stronger"
+        echo "                        protection if your laptop is compromised."
+        echo "    Without passphrase: zero prompts, equivalent to your old laptop"
+        echo "                        if you never set one there."
+        echo ""
+        read -rp "  Protect the GCE SSH key with a passphrase? [y/N] " add_pass
+        mkdir -p "$HOME/.ssh"
+        chmod 700 "$HOME/.ssh"
+        sa_account="$(gcloud config get-value account 2>/dev/null || whoami)"
+        if [ "$add_pass" = "y" ] || [ "$add_pass" = "Y" ]; then
+            ssh-keygen -t rsa -b 4096 -f "$GCE_SSH_KEY" -C "$sa_account"
+        else
+            ssh-keygen -t rsa -b 4096 -f "$GCE_SSH_KEY" -N "" -C "$sa_account"
+        fi
+        green "  GCE SSH key generated at $GCE_SSH_KEY."
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -206,6 +261,24 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 bold "Step 2: Google Cloud Authentication"
+
+# A "current account" only means a row exists in the auth list; the access
+# and refresh tokens may still be expired. Verify both, and force a fresh
+# login on failure -- this is much friendlier than letting a downstream
+# gcloud command die with "Reauthentication failed".
+verify_credentials_or_relogin() {
+    local label="$1"
+    if gcloud auth print-access-token --quiet >/dev/null 2>&1; then
+        return 0
+    fi
+    yellow "  ${label} -- credentials appear expired."
+    echo "  Opening browser to re-authenticate..."
+    gcloud auth login
+    if ! gcloud auth print-access-token --quiet >/dev/null 2>&1; then
+        red "  Re-authentication did not produce a working token. Aborting."
+        exit 1
+    fi
+}
 
 # Check if already authenticated
 current_account=$(gcloud config get-value account 2>/dev/null || true)
@@ -220,6 +293,7 @@ else
     echo "  Opening browser for Google sign-in..."
     gcloud auth login
 fi
+verify_credentials_or_relogin "Cached login for $(gcloud config get-value account 2>/dev/null)"
 green "  Authenticated as: $(gcloud config get-value account 2>/dev/null)"
 
 # ---------------------------------------------------------------------------
@@ -230,7 +304,10 @@ bold "Step 3: Select GCP Project"
 echo ""
 echo "  Your available projects:"
 echo ""
-gcloud projects list --format="table(projectId, name)" 2>/dev/null || true
+if ! gcloud projects list --format="table(projectId, name)"; then
+    red "  Failed to list projects. The auth token may have expired."
+    exit 1
+fi
 echo ""
 
 current_project=$(gcloud config get-value project 2>/dev/null || true)
@@ -251,7 +328,10 @@ if [ -z "$PROJECT_ID" ]; then
     exit 1
 fi
 
-gcloud config set project "$PROJECT_ID" 2>/dev/null
+if ! gcloud config set project "$PROJECT_ID"; then
+    red "  Failed to set project to $PROJECT_ID."
+    exit 1
+fi
 green "  Using project: $PROJECT_ID"
 
 # Verify billing is enabled
@@ -330,6 +410,212 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Step 7a: Service accounts (bioaf-bootstrap + bioaf-app) and tag
+# ---------------------------------------------------------------------------
+echo ""
+bold "Step 7a: Service accounts and tag"
+echo ""
+echo "  Creating two scoped SAs (no JSON keys are generated):"
+echo "    - bioaf-app:       attached to the VM as the runtime data plane"
+echo "    - bioaf-bootstrap: impersonated for IAM/Terraform/Cloud Build"
+echo ""
+
+BOOTSTRAP_SA_EMAIL="${BOOTSTRAP_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+APP_SA_EMAIL="${APP_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+
+# 1. Resource Manager tag (project-scoped). Idempotent.
+if ! gcloud resource-manager tags keys describe "${PROJECT_ID}/${BIOAF_TAG_KEY}" \
+        --quiet >/dev/null 2>&1; then
+    echo "  Creating tag key ${BIOAF_TAG_KEY}..."
+    gcloud resource-manager tags keys create "${BIOAF_TAG_KEY}" \
+        --parent="projects/${PROJECT_ID}" \
+        --description="Marks resources managed by bioAF" \
+        --quiet || yellow "  Tag key creation returned non-zero (may already exist)."
+fi
+
+if ! gcloud resource-manager tags values describe "${PROJECT_ID}/${BIOAF_TAG_KEY}/${BIOAF_TAG_VALUE}" \
+        --quiet >/dev/null 2>&1; then
+    echo "  Creating tag value ${BIOAF_TAG_VALUE}..."
+    gcloud resource-manager tags values create "${BIOAF_TAG_VALUE}" \
+        --parent="${PROJECT_ID}/${BIOAF_TAG_KEY}" \
+        --description="bioAF-owned resource" \
+        --quiet || yellow "  Tag value creation returned non-zero (may already exist)."
+fi
+
+# 2. Custom IAM role bioafSaManager (project-scoped). Idempotent.
+if gcloud iam roles describe "${BIOAFSAMANAGER_ROLE_ID}" --project="${PROJECT_ID}" \
+        --quiet >/dev/null 2>&1; then
+    echo "  Custom role ${BIOAFSAMANAGER_ROLE_ID} already exists."
+else
+    echo "  Creating custom role ${BIOAFSAMANAGER_ROLE_ID}..."
+    gcloud iam roles create "${BIOAFSAMANAGER_ROLE_ID}" \
+        --project="${PROJECT_ID}" \
+        --title="bioAF SA Manager" \
+        --description="Lookup/list/delete bioAF-prefixed service accounts" \
+        --permissions="iam.serviceAccounts.get,iam.serviceAccounts.list,iam.serviceAccounts.delete" \
+        --stage=GA \
+        --quiet
+fi
+
+# Wait for an SA to be globally visible to IAM before granting roles. Newly
+# created SAs can take 5-30 seconds to propagate; until then,
+# `add-iam-policy-binding` returns "Service account ... does not exist".
+wait_for_sa() {
+    local sa_email="$1"
+    local attempts=20
+    local delay=3
+    for ((i=1; i<=attempts; i++)); do
+        if gcloud iam service-accounts describe "${sa_email}" \
+                --project="${PROJECT_ID}" --quiet >/dev/null 2>&1; then
+            # Probe a getIamPolicy call -- describe sometimes succeeds before
+            # IAM policy operations on the SA do.
+            if gcloud iam service-accounts get-iam-policy "${sa_email}" \
+                    --project="${PROJECT_ID}" --quiet >/dev/null 2>&1; then
+                return 0
+            fi
+        fi
+        sleep "${delay}"
+    done
+    red "  Timed out waiting for ${sa_email} to propagate."
+    return 1
+}
+
+# 3. Create bioaf-bootstrap (idempotent).
+if gcloud iam service-accounts describe "${BOOTSTRAP_SA_EMAIL}" \
+        --project="${PROJECT_ID}" --quiet >/dev/null 2>&1; then
+    echo "  ${BOOTSTRAP_SA_NAME} already exists."
+else
+    gcloud iam service-accounts create "${BOOTSTRAP_SA_NAME}" \
+        --project="${PROJECT_ID}" \
+        --display-name="bioAF Bootstrap" \
+        --description="Impersonated by bioAF backend for IAM/Terraform/Cloud Build" \
+        --quiet
+    green "  Created ${BOOTSTRAP_SA_NAME}."
+fi
+wait_for_sa "${BOOTSTRAP_SA_EMAIL}"
+
+# 4. Create bioaf-app (idempotent).
+if gcloud iam service-accounts describe "${APP_SA_EMAIL}" \
+        --project="${PROJECT_ID}" --quiet >/dev/null 2>&1; then
+    echo "  ${APP_SA_NAME} already exists."
+else
+    gcloud iam service-accounts create "${APP_SA_NAME}" \
+        --project="${PROJECT_ID}" \
+        --display-name="bioAF Application" \
+        --description="Attached to the bioAF VM; runtime data-plane SA" \
+        --quiet
+    green "  Created ${APP_SA_NAME}."
+fi
+wait_for_sa "${APP_SA_EMAIL}"
+
+# 5. Grant the broad set to bioaf-bootstrap.
+echo "  Granting project roles to ${BOOTSTRAP_SA_NAME}..."
+for role in "${BOOTSTRAP_ROLES[@]}"; do
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        --member="serviceAccount:${BOOTSTRAP_SA_EMAIL}" \
+        --role="${role}" \
+        --condition=None \
+        --quiet >/dev/null
+done
+
+# 6. Grant the unconditioned bindings to bioaf-app.
+echo "  Granting unconditioned project roles to ${APP_SA_NAME}..."
+for role in "${APP_UNCONDITIONED_ROLES[@]}"; do
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        --member="serviceAccount:${APP_SA_EMAIL}" \
+        --role="${role}" \
+        --condition=None \
+        --quiet >/dev/null
+done
+
+# 7. Conditioned bindings for bioaf-app.
+echo "  Granting scoped (conditioned) project roles to ${APP_SA_NAME}..."
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    --member="serviceAccount:${APP_SA_EMAIL}" \
+    --role="roles/storage.admin" \
+    --condition='expression=resource.name.startsWith("projects/_/buckets/bioaf-"),title=bioaf_buckets_only,description=bioaf_buckets_only' \
+    --quiet >/dev/null
+
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    --member="serviceAccount:${APP_SA_EMAIL}" \
+    --role="projects/${PROJECT_ID}/roles/${BIOAFSAMANAGER_ROLE_ID}" \
+    --condition="expression=resource.name.startsWith(\"projects/${PROJECT_ID}/serviceAccounts/bioaf-\"),title=bioaf_sas_only,description=bioaf_sas_only" \
+    --quiet >/dev/null
+
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    --member="serviceAccount:${APP_SA_EMAIL}" \
+    --role="roles/compute.instanceAdmin.v1" \
+    --condition='expression=resource.name.extract("/instances/{name}").startsWith("bioaf-"),title=bioaf_worknodes_only,description=bioaf_worknodes_only' \
+    --quiet >/dev/null
+
+# container.admin: scope by GKE cluster name prefix. We previously tried a
+# matchTag() condition referencing a Resource Manager tag, but GKE clusters
+# are regional resources and google_tags_tag_binding (the global tag API)
+# does not accept them. The extract/startsWith pattern matches both
+# container.clusters.* (where resource.name ends in /clusters/<name>) and
+# container.nodePools.* (which IAM-checks against the parent cluster).
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    --member="serviceAccount:${APP_SA_EMAIL}" \
+    --role="roles/container.admin" \
+    --condition='expression=resource.name.extract("/clusters/{name}").startsWith("bioaf-"),title=bioaf_clusters_only,description=bioaf_clusters_only' \
+    --quiet >/dev/null
+
+# 8. Resource-scoped tokenCreator on bioaf-bootstrap only.
+gcloud iam service-accounts add-iam-policy-binding "${BOOTSTRAP_SA_EMAIL}" \
+    --project="${PROJECT_ID}" \
+    --member="serviceAccount:${APP_SA_EMAIL}" \
+    --role="roles/iam.serviceAccountTokenCreator" \
+    --quiet >/dev/null
+
+# 8a. Sheets reader SA (keyless). bioaf-app impersonates this SA to read
+#     Google Sheets the user has shared with READER_SA_EMAIL. No JSON key
+#     is created; the SA is reachable via short-lived impersonated tokens.
+READER_SA_EMAIL="${READER_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+SHEETS_READER_PROVISIONED=false
+
+if gcloud iam service-accounts describe "${READER_SA_EMAIL}" \
+        --project="${PROJECT_ID}" --quiet >/dev/null 2>&1; then
+    echo "  ${READER_SA_NAME} already exists."
+    SHEETS_READER_PROVISIONED=true
+else
+    gcloud iam service-accounts create "${READER_SA_NAME}" \
+        --project="${PROJECT_ID}" \
+        --display-name="bioAF Sheets Reader" \
+        --description="Read-only access to Google Sheets shared with this email" \
+        --quiet
+    green "  Created ${READER_SA_NAME}."
+    SHEETS_READER_PROVISIONED=true
+fi
+
+if [ "${SHEETS_READER_PROVISIONED}" = true ]; then
+    wait_for_sa "${READER_SA_EMAIL}"
+
+    # Grant bioaf-app tokenCreator on bioaf-reader so the runtime can mint
+    # impersonated tokens for it. Resource-scoped to this SA only.
+    gcloud iam service-accounts add-iam-policy-binding "${READER_SA_EMAIL}" \
+        --project="${PROJECT_ID}" \
+        --member="serviceAccount:${APP_SA_EMAIL}" \
+        --role="roles/iam.serviceAccountTokenCreator" \
+        --quiet >/dev/null
+
+    # Enable the Sheets API so impersonated calls succeed.
+    gcloud services enable sheets.googleapis.com \
+        --project="${PROJECT_ID}" \
+        --quiet >/dev/null 2>&1 || \
+        yellow "  Could not enable sheets.googleapis.com automatically; enable it later if needed."
+fi
+
+# 9. tagUser on the bioaf-managed tag VALUE for bioaf-bootstrap so Terraform
+#    can attach the tag to GKE resources it creates.
+gcloud resource-manager tags values add-iam-policy-binding \
+    "${PROJECT_ID}/${BIOAF_TAG_KEY}/${BIOAF_TAG_VALUE}" \
+    --member="serviceAccount:${BOOTSTRAP_SA_EMAIL}" \
+    --role="roles/resourcemanager.tagUser" \
+    --quiet >/dev/null
+
+green "  Service accounts, tag, and IAM bindings ready."
+
+# ---------------------------------------------------------------------------
 # Step 7: Create VM
 # ---------------------------------------------------------------------------
 echo ""
@@ -405,15 +691,21 @@ else
                 --boot-disk-type=pd-ssd
                 --tags="$NETWORK_TAG"
                 --scopes=cloud-platform
+                --service-account="${APP_SA_EMAIL}"
             )
 
             if [ "$USE_PUBLIC_IP" = false ]; then
                 create_args+=(--no-address)
             fi
 
-            if gcloud compute instances create "$VM_NAME" \
-                "${create_args[@]}" \
-                --metadata=startup-script='#!/bin/bash
+            # Two metadata attributes: the Docker startup script, and the
+            # bioaf-bootstrap SA email so the backend can persist it to
+            # platform_config on first startup. The startup script is
+            # multi-line so we materialise it to a temp file and pass via
+            # --metadata-from-file alongside the inline --metadata key.
+            STARTUP_TMP="$(mktemp -t bioaf-startup-XXXXXX)"
+            cat >"${STARTUP_TMP}" <<'BIOAF_STARTUP_EOF'
+#!/bin/bash
 # Install Docker on first boot
 if ! command -v docker &>/dev/null; then
     apt-get update -qq
@@ -425,13 +717,21 @@ if ! command -v docker &>/dev/null; then
     apt-get update -qq
     apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     usermod -aG docker $(ls /home/ | head -1)
-fi' \
+fi
+BIOAF_STARTUP_EOF
+
+            if gcloud compute instances create "$VM_NAME" \
+                "${create_args[@]}" \
+                --metadata="bioaf_bootstrap_sa_email=${BOOTSTRAP_SA_EMAIL}" \
+                --metadata-from-file="startup-script=${STARTUP_TMP}" \
                 --quiet 2>&1; then
+                rm -f "${STARTUP_TMP}"
                 ZONE="$try_zone"
                 vm_created=true
                 green "  VM created in $ZONE."
                 break
             else
+                rm -f "${STARTUP_TMP}"
                 yellow "  Could not create VM in $try_zone. Trying next zone..."
             fi
         done
@@ -467,141 +767,153 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 8: Service account (optional)
-# ---------------------------------------------------------------------------
-echo ""
-bold "Step 8: Service Account (optional)"
-echo ""
-echo "  bioAF can use a GCP service account to access Cloud Storage"
-echo "  and Cloud Logging. This creates a service account and downloads"
-echo "  a JSON key file that you will upload during bioAF setup."
-echo ""
-read -rp "  Create a service account for bioAF? [Y/n] " create_sa
-
-SA_KEY_PATH=""
-if [ "$create_sa" != "n" ] && [ "$create_sa" != "N" ]; then
-    SA_SUFFIX=$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c 6)
-    SA_NAME="${SA_NAME_PREFIX}-${SA_SUFFIX}"
-    SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
-
-    echo "  Creating service account..."
-    gcloud iam service-accounts create "$SA_NAME" \
-        --project="$PROJECT_ID" \
-        --display-name="$SA_DISPLAY_NAME" \
-        --description="Service account for bioAF application" \
-        --quiet
-    green "  Service account created: $SA_EMAIL"
-
-    # Grant roles and verify each one took effect
-    echo "  Granting permissions..."
-    grant_failures=0
-    for role in "${SA_ROLES[@]}"; do
-        if ! gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-            --member="serviceAccount:$SA_EMAIL" \
-            --role="$role" \
-            --quiet >/dev/null 2>&1; then
-            red "  Failed to grant $role"
-            grant_failures=$((grant_failures + 1))
-        fi
-    done
-
-    if [ "$grant_failures" -gt 0 ]; then
-        red "  $grant_failures role(s) failed to grant. The service account may not"
-        red "  have all required permissions. Check the GCP console."
-    else
-        green "  All permissions granted."
-    fi
-
-    # Generate key
-    SA_KEY_PATH="$HOME/Desktop/bioaf-sa-key.json"
-    echo "  Generating JSON key..."
-    gcloud iam service-accounts keys create "$SA_KEY_PATH" \
-        --iam-account="$SA_EMAIL" \
-        --project="$PROJECT_ID" \
-        --quiet
-    green "  Key saved to: $SA_KEY_PATH"
-    echo ""
-    yellow "  Keep this file safe. You will upload it during bioAF setup."
-    yellow "  Do not share it or commit it to version control."
-fi
-
-# ---------------------------------------------------------------------------
 # Wait for VM readiness
 # ---------------------------------------------------------------------------
 if [ -n "$VM_IP" ]; then
     echo ""
-    bold "Waiting for VM to be ready..."
+    bold "Waiting for VM to finish booting..."
     echo ""
-
-    # Phase 1: wait for SSH (port 22)
-    printf "  Waiting for SSH"
-    ssh_retries=30
-    while [ $ssh_retries -gt 0 ]; do
-        if gcloud compute ssh "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID" \
-            --command="echo ok" --quiet --ssh-flag="-o ConnectTimeout=5" \
-            --ssh-flag="-o StrictHostKeyChecking=no" 2>/dev/null | grep -q "ok"; then
-            break
-        fi
-        printf "."
-        sleep 5
-        ssh_retries=$((ssh_retries - 1))
-    done
-    echo ""
-
-    if [ $ssh_retries -eq 0 ]; then
-        yellow "  SSH did not become ready within the timeout."
-        yellow "  The VM may still be booting. Try connecting manually."
-    else
-        green "  SSH is ready."
-
-        # Phase 2: wait for Docker Compose to be installed by the startup script
-        printf "  Waiting for Docker"
-        docker_retries=30
-        while [ $docker_retries -gt 0 ]; do
-            if gcloud compute ssh "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID" \
-                --command="docker compose version" --quiet \
-                --ssh-flag="-o ConnectTimeout=5" \
-                --ssh-flag="-o StrictHostKeyChecking=no" 2>/dev/null | grep -q "Docker Compose"; then
-                break
-            fi
-            printf "."
-            sleep 5
-            docker_retries=$((docker_retries - 1))
-        done
-        echo ""
-
-        if [ $docker_retries -eq 0 ]; then
-            yellow "  Docker did not finish installing within the timeout."
-            yellow "  It may still be running. Check after connecting."
-        else
-            green "  Docker is ready."
-        fi
-    fi
+    # Fixed 2-minute wait. The previous SSH/Docker liveness probes each
+    # forked a fresh ssh process and prompted for the user's
+    # ~/.ssh/google_compute_engine passphrase up to three times. A flat
+    # sleep is generous enough for both sshd and the Docker startup-script
+    # to come up on an e2-medium and avoids the prompts entirely.
+    echo "  Sleeping 120s to let sshd start and the Docker startup script run."
+    echo "  (If you've already added your GCE SSH key to ssh-agent, you can"
+    echo "  Ctrl-C this wait and connect immediately.)"
+    sleep 120
+    green "  VM should be ready."
 fi
 
 # ---------------------------------------------------------------------------
-# Done -- print next steps
+# Build a prefill YAML so the setup wizard can pre-populate everything we
+# already know. Used by both the auto-handoff path and the worksheet path.
+# ---------------------------------------------------------------------------
+PREFILL_LOCAL="${HOME}/.bioaf/prefill.yaml"
+mkdir -p "${HOME}/.bioaf"
+cat >"${PREFILL_LOCAL}" <<EOF
+# bioAF setup prefill -- generated by install-gcp.sh on $(date -u +%Y-%m-%dT%H:%M:%SZ)
+gcp_project_id: ${PROJECT_ID}
+gcp_region: ${REGION}
+gcp_zone: ${ZONE}
+gcp_credential_source: vm_default
+gcp_bootstrap_sa_email: ${BOOTSTRAP_SA_EMAIL}
+EOF
+
+if [ "${SHEETS_READER_PROVISIONED}" = true ]; then
+    cat >>"${PREFILL_LOCAL}" <<EOF
+sheets_reader_sa_email: ${READER_SA_EMAIL}
+sheets_reader_sa_created: "true"
+EOF
+fi
+
+# ---------------------------------------------------------------------------
+# Offer to finish the setup automatically: SCP the prefill, SSH in, clone
+# bioAF, and run `./bioaf setup --prefill ...`. The user gets dropped into
+# the same setup wizard with values already populated.
 # ---------------------------------------------------------------------------
 echo ""
 bold "======================================"
-bold "  Setup Complete"
+bold "  GCP Infrastructure Ready"
 bold "======================================"
 echo ""
 
 if [ -n "$VM_IP" ]; then
     echo "  VM external IP: $VM_IP"
     echo ""
-    bold "  Next steps:"
+    bold "  How would you like to finish setup?"
     echo ""
+    echo "    1. Automatic -- I'll SSH in for you, clone bioAF, run setup,"
+    echo "       and pre-populate the wizard with the values from this run."
+    echo "    2. Manual    -- print a worksheet and you'll SSH in yourself."
+    echo ""
+    read -rp "  Choose (1 or 2): [1] " finish_choice
+    finish_choice="${finish_choice:-1}"
+fi
+
+REMOTE_SETUP_SUCCEEDED=false
+
+if [ "${finish_choice:-2}" = "1" ] && [ -n "$VM_IP" ]; then
+    echo ""
+    bold "Auto-handoff: copying prefill and starting setup on the VM"
+    echo ""
+    # Copy the prefill into the VM's user home. /tmp would be readable by
+    # other users on the same VM, so prefer ~/.bioaf-prefill.yaml.
+    if gcloud compute scp "${PREFILL_LOCAL}" \
+        "${VM_NAME}:~/.bioaf-prefill.yaml" \
+        --zone="${ZONE}" --project="${PROJECT_ID}" --quiet; then
+        green "  Prefill copied to VM."
+    else
+        red "  Failed to copy prefill to the VM. Falling back to the worksheet."
+        finish_choice=2
+    fi
+fi
+
+if [ "${finish_choice:-2}" = "1" ] && [ -n "$VM_IP" ] && [ -f "${PREFILL_LOCAL}" ]; then
+    echo ""
+    echo "  Cloning bioAF and running setup on the VM. This will take a few minutes."
+    echo "  You'll see the bioAF setup output stream below; the script ends with a"
+    echo "  one-time setup code and the wizard URL."
+    echo ""
+    # Run setup non-interactively. The remote command:
+    #   - clones bioAF (idempotent: skip if already there)
+    #   - runs ./bioaf setup --prefill ~/.bioaf-prefill.yaml
+    if gcloud compute ssh "${VM_NAME}" --zone="${ZONE}" --project="${PROJECT_ID}" --command='
+set -euo pipefail
+if [ ! -d "$HOME/bioAF/.git" ]; then
+    git clone https://github.com/not-that-guy-again/bioAF.git "$HOME/bioAF"
+fi
+cd "$HOME/bioAF"
+git pull --ff-only origin main 2>/dev/null || true
+./bioaf setup --prefill "$HOME/.bioaf-prefill.yaml"
+'; then
+        REMOTE_SETUP_SUCCEEDED=true
+    else
+        red "  Remote setup failed. Falling back to the worksheet so you can run it yourself."
+    fi
+fi
+
+if [ "$REMOTE_SETUP_SUCCEEDED" = true ]; then
+    echo ""
+    bold "======================================"
+    bold "  Done"
+    bold "======================================"
+    echo ""
+    echo "  Open bioAF in your browser:"
+    echo ""
+    green "     https://${VM_IP}"
+    echo ""
+    dim "     (Your browser will show a certificate warning for the self-signed cert."
+    dim "      This is expected. Click 'Advanced' then 'Proceed' to continue.)"
+    echo ""
+    echo "  Use the setup code printed above to finish in the wizard. The wizard"
+    echo "  will already have your project, region, and service account values"
+    echo "  pre-populated from this installer run."
+    echo ""
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Manual path: print the worksheet and walk the user through the steps.
+# ---------------------------------------------------------------------------
+echo ""
+bold "  Manual Next Steps"
+echo ""
+if [ -n "$VM_IP" ]; then
     echo "  1. SSH into your VM:"
     echo ""
     green "     gcloud compute ssh $VM_NAME --zone=$ZONE --project=$PROJECT_ID"
     echo ""
-    echo "  2. Clone bioAF and run setup:"
+    echo "  2. Copy the prefill file we generated locally to the VM, then run setup:"
+    echo ""
+    green "     gcloud compute scp ${PREFILL_LOCAL} ${VM_NAME}:~/.bioaf-prefill.yaml \\"
+    green "         --zone=${ZONE} --project=${PROJECT_ID}"
+    echo ""
+    echo "  Then on the VM:"
     echo ""
     green "     git clone https://github.com/not-that-guy-again/bioAF.git"
     green "     cd bioAF"
-    green "     ./bioaf setup"
+    green "     ./bioaf setup --prefill ~/.bioaf-prefill.yaml"
     echo ""
     echo "  3. Open bioAF in your browser:"
     echo ""
@@ -610,36 +922,26 @@ if [ -n "$VM_IP" ]; then
     dim "     (Your browser will show a certificate warning for the self-signed cert."
     dim "      This is expected. Click 'Advanced' then 'Proceed' to continue.)"
 else
-    bold "  Next steps:"
-    echo ""
     echo "  1. SSH into your VM and clone bioAF:"
     echo ""
     green "     git clone https://github.com/not-that-guy-again/bioAF.git"
     green "     cd bioAF"
-    green "     ./bioaf setup"
+    green "     ./bioaf setup --prefill ~/.bioaf-prefill.yaml"
 fi
 
 echo ""
 bold "  Setup Worksheet"
 bold "  ----------------"
 echo ""
-echo "  1. Your GCP Project ID:"
+echo "  Prefill file (also embedded above):"
 echo ""
-green "     $PROJECT_ID"
+green "     ${PREFILL_LOCAL}"
 echo ""
-echo "  2. GCP Region:"
+echo "  Contents:"
 echo ""
-green "     $REGION"
-
-if [ -n "$SA_KEY_PATH" ] && [ -f "$SA_KEY_PATH" ]; then
-    echo ""
-    echo "  3. Your Service Account JSON key:"
-    echo "     During setup, the wizard will ask for this."
-    echo "     Select the JSON option and paste everything in green."
-    echo ""
-    green "$(cat "$SA_KEY_PATH")"
-    echo ""
-    dim "  (This key is also saved at $SA_KEY_PATH)"
-fi
+sed 's/^/     /' "${PREFILL_LOCAL}"
+echo ""
+dim "  The setup wizard will detect the VM's attached identity and skip the"
+dim "  key-upload step. Pre-populated values come from the prefill file."
 
 echo ""

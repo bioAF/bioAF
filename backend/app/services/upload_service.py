@@ -45,37 +45,30 @@ class UploadService:
 
     @staticmethod
     async def _get_gcs_credentials(session: AsyncSession):
-        """Return GCS credentials from platform_config, or None to use ADC.
+        """Return GCS credentials capable of v4 signing.
 
-        When gcp_credential_source is 'service_account_key', parses the stored
-        JSON key and returns service_account.Credentials so the GCS client
-        bypasses the VM's OAuth scopes entirely. Returns None otherwise.
+        Routes through credential_injector so vm_default installs get
+        impersonated bootstrap credentials -- which sign via the IAM
+        SignBlob API (token-creator includes signBlob on the target SA).
+        Legacy service_account_key installs get a service_account.Credentials
+        that signs locally with its private key. Either way, the returned
+        credentials work for blob.generate_signed_url(version="v4").
         """
-        import json as _json
+        from app.services import credential_injector
 
         result = await session.execute(
             text(
                 "SELECT key, value FROM platform_config "
-                "WHERE key IN ('gcp_credential_source', 'gcp_service_account_key')"
+                "WHERE key IN ("
+                "  'gcp_credential_source', 'gcp_service_account_key',"
+                "  'gcp_service_account_email', 'gcp_bootstrap_sa_email'"
+                ")"
             )
         )
         config = {r[0]: r[1] for r in result.fetchall()}
 
-        if config.get("gcp_credential_source") != "service_account_key":
-            return None
-
-        key_json = config.get("gcp_service_account_key")
-        if not key_json or key_json == "null":
-            return None
-
         try:
-            from google.oauth2 import service_account
-
-            key_data = _json.loads(key_json)
-            return service_account.Credentials.from_service_account_info(
-                key_data,
-                scopes=["https://www.googleapis.com/auth/cloud-platform"],
-            )
+            return credential_injector.load_gcp_credentials(config)
         except Exception as e:
             logger.warning("Failed to load GCS credentials from platform_config: %s", e)
             return None
@@ -314,9 +307,12 @@ class UploadService:
     async def _generate_signed_upload_url(bucket_name: str, gcs_path: str, credentials=None) -> str:
         """Generate a signed URL for uploading to GCS.
 
-        Requires credentials with signing capability (service_account.Credentials).
-        ADC / VM default service account will not work here -- configure
-        gcp_credential_source=service_account_key in platform_config.
+        Requires credentials with signing capability. Acceptable shapes:
+        service_account.Credentials (legacy installs) or
+        impersonated_credentials.Credentials (vm_default installs, signs via
+        the IAM SignBlob API on the target principal). Raw ADC has no signer
+        and would raise -- _get_gcs_credentials always returns one of the two
+        above on a properly configured install.
         """
         from google.cloud import storage as gcs_storage
 

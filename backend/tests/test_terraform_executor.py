@@ -1315,3 +1315,83 @@ async def test_recover_stale_runs_skips_live_process(session):
         assert row[0] == "applying"  # Still applying, not failed
     finally:
         _active_processes.pop(run_id, None)
+
+
+# ---------------------------------------------------------------------------
+# SA hardening: _read_gcp_config returns gcp_bootstrap_sa_email
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_read_gcp_config_includes_bootstrap_sa_email(session):
+    """_read_gcp_config selects the new gcp_bootstrap_sa_email key."""
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        ).bindparams(
+            k="gcp_bootstrap_sa_email",
+            v="bioaf-bootstrap@my-project.iam.gserviceaccount.com",
+        )
+    )
+    await session.commit()
+
+    config = await TerraformExecutor._read_gcp_config(session)
+    assert config.get("gcp_bootstrap_sa_email") == "bioaf-bootstrap@my-project.iam.gserviceaccount.com"
+
+
+@pytest.mark.asyncio
+async def test_run_plan_passes_bootstrap_sa_email_to_build_env(session):
+    """In vm_default mode, run_plan injects the bootstrap impersonation field
+    into the config dict that build_env receives, so the credential injector
+    can target bioaf-bootstrap.
+    """
+    user_id = await _seed_user(session)
+    await _seed_gcp_config(session, configured=True, initialized=True)
+    # Seed the bootstrap SA email so injection has something to inject.
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        ).bindparams(
+            k="gcp_bootstrap_sa_email",
+            v="bioaf-bootstrap@test-project.iam.gserviceaccount.com",
+        )
+    )
+    await session.commit()
+
+    show_stdout = _make_show_json_output(1)
+
+    def mock_run(cmd, **kwargs):
+        if "show" in cmd:
+            return _mock_subprocess_run(show_stdout)
+        return _mock_subprocess_run(_make_plan_output(1))
+
+    captured_configs: list[dict] = []
+
+    async def spy_build_env(config):
+        captured_configs.append(dict(config))
+
+        async def cleanup():
+            return None
+
+        return ({"TF_VAR_project_id": config.get("gcp_project_id", "")}, cleanup)
+
+    with (
+        patch("app.services.terraform_executor.subprocess.run", side_effect=mock_run),
+        patch(
+            "app.services.terraform_executor.GCPCredentialInjector.build_env",
+            side_effect=spy_build_env,
+        ),
+        _patch_work_dir(),
+    ):
+        await TerraformExecutor.run_plan(
+            session=session,
+            user_id=user_id,
+            module_name="foundation",
+        )
+
+    assert captured_configs, "build_env should have been called at least once"
+    cfg = captured_configs[0]
+    assert cfg.get("gcp_credential_source") == "vm_default"
+    assert cfg.get("gcp_bootstrap_sa_email") == "bioaf-bootstrap@test-project.iam.gserviceaccount.com"

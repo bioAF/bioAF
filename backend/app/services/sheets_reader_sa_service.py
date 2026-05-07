@@ -4,15 +4,18 @@ The reader SA is a single-purpose service account with only Sheets API
 read access.  Users share their spreadsheets with this SA's email to
 allow bioAF to read column headers during experiment creation.
 
-Credentials for the reader SA are stored in the ``platform_config``
-table alongside other GCP configuration.
+Greenfield installs use keyless impersonation: bioaf-app holds
+``roles/iam.serviceAccountTokenCreator`` resource-scoped to the reader
+SA, and ``get_reader_credentials`` mints a short-lived impersonated
+token at request time. Only the SA email and a "created" flag live in
+``platform_config``. Legacy installs (``gcp_credential_source =
+service_account_key``) continue to use the stored JSON key.
 """
 
-import base64
 import json
 import secrets
-import time
 
+from google.auth import impersonated_credentials
 from google.oauth2 import service_account
 from googleapiclient import discovery as google_discovery
 from sqlalchemy import text
@@ -34,6 +37,7 @@ _GCP_KEYS = [
     "gcp_credential_source",
     "gcp_service_account_key",
     "gcp_service_account_email",
+    "gcp_bootstrap_sa_email",
 ]
 
 
@@ -84,7 +88,7 @@ def _load_primary_credentials(config: dict[str, str]) -> tuple[object, str]:
         import google.auth as _google_auth
 
         creds, _ = _google_auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-        sa_email = config.get("gcp_service_account_email")
+        sa_email = config.get("gcp_bootstrap_sa_email") or config.get("gcp_service_account_email")
         if sa_email:
             from google.auth import impersonated_credentials
 
@@ -108,21 +112,37 @@ async def get_reader_sa_status(session: AsyncSession) -> dict[str, object]:
 
 
 async def create_reader_sa(session: AsyncSession) -> dict[str, str]:
-    """Create a dedicated reader SA via the IAM Admin API.
+    """Create a keyless reader SA and grant bioaf-app token-creator on it.
 
-    Stores the SA email and JSON key in ``platform_config``.
-    Returns ``{email: str}``.
+    No JSON key is created — the runtime impersonates the reader SA via
+    short-lived tokens. Stores the SA email + ``sheets_reader_sa_created=true``
+    in ``platform_config``. Returns ``{email: str}``.
+
+    For ``service_account_key`` (legacy) installs, the SA still has no key —
+    the legacy install can't impersonate, so the in-app button is not the
+    right path there. Greenfield ``vm_default`` installs are the supported
+    target; the typical greenfield flow has the installer pre-provisioning
+    the reader SA so this function is a fallback.
     """
-    # Check if one already exists
     status = await get_reader_sa_status(session)
     if status["exists"]:
         return {"email": str(status["email"])}
 
-    # Load primary credentials
     gcp_config = await _read_keys(session, _GCP_KEYS)
     creds, project_id = _load_primary_credentials(gcp_config)
 
-    # Create the service account
+    # Identify the runtime SA so we can grant tokenCreator on the new
+    # reader SA. On GCE this is the VM's attached SA (bioaf-app).
+    from app.services.bootstrap_metadata import get_attached_sa_email
+
+    runtime_sa_email = await get_attached_sa_email()
+    if not runtime_sa_email:
+        raise RuntimeError(
+            "Cannot determine the runtime service account email "
+            "(VM metadata server unreachable). Run install-gcp.sh on a "
+            "fresh project to provision the reader SA automatically."
+        )
+
     iam_service = discovery_build("iam", "v1", credentials=creds, cache_discovery=False)
     account_id = f"bioaf-reader-{secrets.token_hex(4)}"
 
@@ -141,54 +161,49 @@ async def create_reader_sa(session: AsyncSession) -> dict[str, str]:
         )
         .execute()
     )
-
     sa_email = sa["email"]
 
-    # Create a JSON key for the new SA.
-    # IAM has a propagation delay after SA creation -- retry up to 5
-    # times with backoff before giving up on key creation.
-    key_response = None
-    for attempt in range(5):
+    # Grant the runtime SA roles/iam.serviceAccountTokenCreator on the
+    # newly created reader SA so impersonation works at request time.
+    sa_resource = f"projects/{project_id}/serviceAccounts/{sa_email}"
+    member = f"serviceAccount:{runtime_sa_email}"
+    try:
+        policy = iam_service.projects().serviceAccounts().getIamPolicy(resource=sa_resource).execute()
+        bindings = policy.get("bindings", [])
+        token_creator = next((b for b in bindings if b.get("role") == "roles/iam.serviceAccountTokenCreator"), None)
+        if token_creator is None:
+            bindings.append({"role": "roles/iam.serviceAccountTokenCreator", "members": [member]})
+        elif member not in token_creator.get("members", []):
+            token_creator.setdefault("members", []).append(member)
+        policy["bindings"] = bindings
+        iam_service.projects().serviceAccounts().setIamPolicy(
+            resource=sa_resource,
+            body={"policy": policy},
+        ).execute()
+    except Exception as exc:
+        # Roll back the SA we just created so a re-run can retry cleanly.
         try:
-            key_response = (
-                iam_service.projects()
-                .serviceAccounts()
-                .keys()
-                .create(
-                    name=f"projects/{project_id}/serviceAccounts/{sa_email}",
-                    body={"keyAlgorithm": "KEY_ALG_RSA_2048"},
-                )
-                .execute()
-            )
-            break
-        except Exception as exc:
-            if attempt < 4 and ("404" in str(exc) or "does not exist" in str(exc).lower()):
-                time.sleep(2 * (attempt + 1))
-                continue
-            raise
+            iam_service.projects().serviceAccounts().delete(name=sa_resource).execute()
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"Created reader SA {sa_email} but failed to grant tokenCreator to {runtime_sa_email}: {exc}"
+        ) from exc
 
-    if key_response is None:
-        raise RuntimeError(f"Failed to create key for {sa_email} after retries")
-
-    key_json = base64.b64decode(key_response["privateKeyData"]).decode("utf-8")
-
-    # Enable the Sheets API in the project
+    # Enable the Sheets API in the project (best-effort).
     sheets_api_enabled = False
     try:
         service_usage = discovery_build("serviceusage", "v1", credentials=creds, cache_discovery=False)
         service_usage.services().enable(name=f"projects/{project_id}/services/sheets.googleapis.com").execute()
         sheets_api_enabled = True
     except Exception:
-        # The API may already be enabled -- check before warning
         try:
             svc = service_usage.services().get(name=f"projects/{project_id}/services/sheets.googleapis.com").execute()
             sheets_api_enabled = svc.get("state") == "ENABLED"
         except Exception:
             pass
 
-    # Persist to platform_config
     await _upsert(session, "sheets_reader_sa_email", sa_email)
-    await _upsert(session, "sheets_reader_sa_key", key_json)
     await _upsert(session, "sheets_reader_sa_created", "true")
     await session.commit()
 
@@ -227,19 +242,41 @@ async def delete_reader_sa(session: AsyncSession) -> None:
     await session.commit()
 
 
-async def get_reader_credentials(session: AsyncSession) -> service_account.Credentials:
+async def get_reader_credentials(session: AsyncSession):
     """Load the reader SA's credentials scoped to Sheets readonly.
+
+    On ``vm_default`` installs, mint an impersonated token for the
+    reader SA using bioaf-app's metadata-server identity as the source
+    principal. On legacy ``service_account_key`` installs, build
+    credentials from the stored JSON key.
 
     Raises ``RuntimeError`` if the reader SA is not configured.
     """
-    config = await _read_keys(session, _READER_SA_KEYS)
+    config = await _read_keys(session, _READER_SA_KEYS + _GCP_KEYS)
     if config.get("sheets_reader_sa_created") != "true":
         raise RuntimeError(
             "Google Sheets reader service account is not configured. Set it up in Settings > Integrations > GCP."
         )
-    key_json = config.get("sheets_reader_sa_key", "")
-    if not key_json:
-        raise RuntimeError("Reader SA key is missing from configuration")
 
-    key_data = json.loads(key_json)
-    return service_account.Credentials.from_service_account_info(key_data, scopes=_SHEETS_SCOPE)
+    sa_email = config.get("sheets_reader_sa_email", "")
+    if not sa_email:
+        raise RuntimeError("Reader SA email is missing from configuration")
+
+    # Legacy installs still use the stored JSON key.
+    if config.get("gcp_credential_source") == "service_account_key":
+        key_json = config.get("sheets_reader_sa_key", "")
+        if not key_json:
+            raise RuntimeError("Reader SA key is missing from configuration")
+        key_data = json.loads(key_json)
+        return service_account.Credentials.from_service_account_info(key_data, scopes=_SHEETS_SCOPE)
+
+    # Greenfield: impersonate the reader SA using bioaf-app's ADC.
+    import google.auth as _google_auth
+
+    source_creds, _ = _google_auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    return impersonated_credentials.Credentials(
+        source_credentials=source_creds,
+        target_principal=sa_email,
+        target_scopes=_SHEETS_SCOPE,
+        lifetime=3600,
+    )

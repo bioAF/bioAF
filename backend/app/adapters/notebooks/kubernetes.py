@@ -5,12 +5,12 @@ Mode is controlled by the BIOAF_COMPUTE_MODE environment variable.
 
 When running outside the cluster (e.g., Docker Compose on a VM), the adapter
 builds a K8s client from platform_config credentials (gke_cluster_endpoint,
-gke_cluster_ca_cert, GCP service account key).
+gke_cluster_ca_cert) and a GCP access token from the credential injector
+(impersonated bootstrap on vm_default installs, JSON key on legacy installs).
 """
 
 import asyncio
 import base64
-import json as _json
 import logging
 import os
 import tempfile
@@ -29,22 +29,18 @@ from app.services.session_persistence import (
 logger = logging.getLogger("bioaf.adapters.notebooks.k8s")
 
 
-def _get_gcp_credentials(service_account_key_json: str):
-    """Build GCP credentials from a service account key JSON string."""
-    from google.oauth2 import service_account
+def _get_gcp_token(gcp_config: dict) -> str:
+    """Mint a GCP access token via credential_injector.
 
-    key_data = _json.loads(service_account_key_json)
-    return service_account.Credentials.from_service_account_info(
-        key_data,
-        scopes=["https://www.googleapis.com/auth/cloud-platform"],
-    )
-
-
-def _get_gcp_token(service_account_key_json: str) -> str:
-    """Exchange a GCP service account key for an access token."""
+    Returns a Bearer token suitable for the K8s API. In vm_default mode this
+    uses bioaf-app's metadata identity, optionally impersonating bioaf-bootstrap
+    when configured. In legacy service_account_key mode it uses the stored key.
+    """
     import google.auth.transport.requests
 
-    credentials = _get_gcp_credentials(service_account_key_json)
+    from app.services import credential_injector
+
+    credentials = credential_injector.load_gcp_credentials(gcp_config)
     credentials.refresh(google.auth.transport.requests.Request())
     return credentials.token
 
@@ -124,6 +120,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                     "WHERE key IN ("
                     "  'gke_cluster_endpoint', 'gke_cluster_ca_cert',"
                     "  'gcp_credential_source', 'gcp_service_account_key',"
+                    "  'gcp_service_account_email', 'gcp_bootstrap_sa_email',"
                     "  'gke_cluster_name', 'gcp_project_id', 'gcp_zone'"
                     ")"
                 )
@@ -144,7 +141,6 @@ class KubernetesNotebookProvider(NotebookProvider):
 
         endpoint = cfg.get("gke_cluster_endpoint", "")
         ca_cert_b64 = cfg.get("gke_cluster_ca_cert", "")
-        sa_key = cfg.get("gcp_service_account_key", "")
 
         if not endpoint or endpoint == "null":
             raise RuntimeError("No GKE cluster endpoint in platform_config. Deploy the compute stack first.")
@@ -152,7 +148,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         if not endpoint.startswith("https://"):
             endpoint = f"https://{endpoint}"
 
-        token = _get_gcp_token(sa_key)
+        token = _get_gcp_token(cfg)
 
         ca_cert_bytes = base64.b64decode(ca_cert_b64)
         ca_file = tempfile.NamedTemporaryFile(delete=False, suffix=".crt")

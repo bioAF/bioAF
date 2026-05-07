@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.storage_stats import StorageStatsCache
@@ -40,7 +40,7 @@ class StorageService:
     @staticmethod
     async def refresh_storage_stats(session: AsyncSession, org_id: int) -> dict:
         """Query GCS API for bucket stats and cache results."""
-        buckets_data = await StorageService._query_gcs_buckets(org_id)
+        buckets_data = await StorageService._query_gcs_buckets(session, org_id)
 
         total_bytes = 0
         total_cost = 0.0
@@ -84,12 +84,39 @@ class StorageService:
         return stats
 
     @staticmethod
-    async def get_lifecycle_policies(org_id: int) -> list[dict]:
+    async def _load_gcs_credentials(session: AsyncSession):
+        """Load credentials suitable for project-level GCS list operations.
+
+        Returns impersonated bootstrap credentials in vm_default mode (bootstrap
+        has unconditioned roles/storage.admin), service_account.Credentials in
+        legacy mode, or None on failure (caller falls back gracefully).
+        """
+        from app.services import credential_injector
+
+        rows = await session.execute(
+            text(
+                "SELECT key, value FROM platform_config "
+                "WHERE key IN ("
+                "  'gcp_credential_source', 'gcp_service_account_key',"
+                "  'gcp_service_account_email', 'gcp_bootstrap_sa_email'"
+                ")"
+            )
+        )
+        config = {r[0]: r[1] for r in rows.fetchall()}
+        try:
+            return credential_injector.load_gcp_credentials(config)
+        except Exception as exc:
+            logger.warning("Failed to load credentials for GCS bucket query: %s", exc)
+            return None
+
+    @staticmethod
+    async def get_lifecycle_policies(session: AsyncSession, org_id: int) -> list[dict]:
         """Get lifecycle policy status from GCS buckets."""
         try:
             from google.cloud import storage as gcs_storage
 
-            client = gcs_storage.Client()
+            credentials = await StorageService._load_gcs_credentials(session)
+            client = gcs_storage.Client(credentials=credentials) if credentials else gcs_storage.Client()
             prefix = f"bioaf-{org_id}-"
             policies = []
             for bucket in client.list_buckets(prefix=prefix):
@@ -110,12 +137,13 @@ class StorageService:
             return []
 
     @staticmethod
-    async def _query_gcs_buckets(org_id: int) -> list[dict]:
+    async def _query_gcs_buckets(session: AsyncSession, org_id: int) -> list[dict]:
         """Query GCS for bucket stats. Falls back to empty list on failure."""
         try:
             from google.cloud import storage as gcs_storage
 
-            client = gcs_storage.Client()
+            credentials = await StorageService._load_gcs_credentials(session)
+            client = gcs_storage.Client(credentials=credentials) if credentials else gcs_storage.Client()
             prefix = f"bioaf-{org_id}-"
             results = []
             for bucket in client.list_buckets(prefix=prefix):

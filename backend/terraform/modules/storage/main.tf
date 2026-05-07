@@ -242,3 +242,26 @@ resource "google_pubsub_topic_iam_member" "gcs_publisher" {
   member  = "serviceAccount:${data.google_storage_project_service_account.gcs_account.email_address}"
   project = var.project_id
 }
+
+# --- SA hardening: per-subscription bindings for bioaf-app ---
+# Pub/Sub does not honour IAM Conditions or tags. The runtime VM's
+# bioaf-app SA holds NO project-level Pub/Sub role; per-subscription
+# roles/pubsub.subscriber bindings keep the runtime scoped to bioAF-
+# managed subscriptions only. Bindings render only when bioaf_app_sa_email
+# is supplied (skip in dev plans against an uninitialised manifest).
+
+resource "google_pubsub_subscription_iam_member" "bioaf_app_ingest_worker" {
+  count        = var.bioaf_app_sa_email != "" ? 1 : 0
+  subscription = google_pubsub_subscription.ingest_worker.name
+  role         = "roles/pubsub.subscriber"
+  member       = "serviceAccount:${var.bioaf_app_sa_email}"
+  project      = var.project_id
+}
+
+resource "google_pubsub_subscription_iam_member" "bioaf_app_ingest_dead_letter" {
+  count        = var.bioaf_app_sa_email != "" ? 1 : 0
+  subscription = google_pubsub_subscription.ingest_dead_letter_sub.name
+  role         = "roles/pubsub.subscriber"
+  member       = "serviceAccount:${var.bioaf_app_sa_email}"
+  project      = var.project_id
+}

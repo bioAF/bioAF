@@ -148,6 +148,8 @@ ensure_update_agent() {
 cmd_setup() {
     # Parse flags
     local setup_version=""
+    local prefill_path=""
+    local local_build=false
     while [ $# -gt 0 ]; do
         case "$1" in
             --version)
@@ -158,6 +160,25 @@ cmd_setup() {
                 fi
                 setup_version="${setup_version#v}"
                 shift 2
+                ;;
+            --prefill)
+                prefill_path="${2:-}"
+                if [ -z "$prefill_path" ]; then
+                    red "ERROR: --prefill requires a YAML file path"
+                    exit 1
+                fi
+                if [ ! -f "$prefill_path" ]; then
+                    red "ERROR: prefill file not found: $prefill_path"
+                    exit 1
+                fi
+                shift 2
+                ;;
+            --local-build)
+                # Force build-from-source, skipping the GitHub Releases lookup
+                # and registry pulls. Use this when testing an unreleased branch
+                # so the running images match the local source tree.
+                local_build=true
+                shift
                 ;;
             *)
                 red "Unknown option: $1"
@@ -264,8 +285,16 @@ for v in cfg.get('volumes', {}).values():
         git -C "$SCRIPT_DIR" checkout "v${setup_version}"
     fi
 
-    # Resolve and pull pre-built images (falls back to building from source)
-    resolve_and_pull_images "$setup_version"
+    # Resolve and pull pre-built images (falls back to building from source).
+    # --local-build short-circuits the registry lookup entirely.
+    if [ "$local_build" = true ]; then
+        bold "Building images from local source (--local-build)..."
+        set_image_tag
+        $DC_BUILD
+        green "Local build complete."
+    else
+        resolve_and_pull_images "$setup_version"
+    fi
     $DC up -d
 
     # Wait for DB
@@ -276,6 +305,46 @@ for v in cfg.get('volumes', {}).values():
     $DC exec -T backend alembic -c alembic/alembic.ini upgrade head
     green "Migrations complete."
     echo ""
+
+    # Apply prefill values to platform_config if --prefill was supplied.
+    # The file is YAML with flat key/value pairs, e.g.:
+    #   gcp_project_id: my-project
+    #   gcp_region: us-central1
+    #   gcp_bootstrap_sa_email: bioaf-bootstrap@my-project.iam.gserviceaccount.com
+    # Each pair is upserted into the existing platform_config table; existing
+    # rows are overwritten so re-running setup with a fresh prefill always wins.
+    if [ -n "$prefill_path" ]; then
+        bold "Applying prefill values to platform_config..."
+        # Copy the file into the backend container so we don't have to volume-mount it.
+        $DC cp "$prefill_path" backend:/tmp/bioaf-prefill.yaml >/dev/null
+        $DC exec -T backend python -c "
+import asyncio, yaml
+from sqlalchemy import text
+from app.database import async_session_factory
+
+async def _apply():
+    with open('/tmp/bioaf-prefill.yaml') as f:
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        raise SystemExit('prefill YAML must be a flat mapping of key: value')
+    async with async_session_factory() as session:
+        for k, v in data.items():
+            if v is None:
+                continue
+            await session.execute(
+                text(
+                    'INSERT INTO platform_config (key, value) VALUES (:k, :v) '
+                    \"ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()\"
+                ).bindparams(k=str(k), v=str(v))
+            )
+        await session.commit()
+    print(f'Applied {sum(1 for v in data.values() if v is not None)} prefill rows.')
+
+asyncio.run(_apply())
+"
+        green "Prefill applied."
+        echo ""
+    fi
 
     # Generate setup code via the Python service
     bold "Generating setup code..."

@@ -25,3 +25,9 @@ variable "backend_service_account_email" {
   type        = string
   default     = ""
 }
+
+variable "bioaf_app_sa_email" {
+  description = "Email of the bioaf-app SA (SA hardening). When provided, per-subscription roles/pubsub.subscriber is granted on each bioAF-managed Pub/Sub subscription."
+  type        = string
+  default     = ""
+}
