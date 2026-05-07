@@ -364,6 +364,36 @@ JSON
     grep -q "alpha quotas info describe DISKS-TOTAL-GB-per-project-region" "$CALL_LOG"
 }
 
+# Regression: install-gcp.sh runs under `set -euo pipefail`, so any helper
+# that returns nonzero on a failure path will propagate through the
+# `pref_id=$(bioaf_quota_request_increase ...)` assignment and abort the
+# whole installer. The friendly "Could not submit" branch in ensure_all
+# would never be reached. Bug observed in the wild on a fresh project
+# where curl POST hit a 4xx; install exited silently after the
+# "Requesting an automatic quota increase from Google..." line.
+@test "ensure_all does not abort under set -e when curl POST fails" {
+    _stage_quota_limits 12 100 200
+    export CURL_EXIT=22  # curl exits 22 on any HTTP >=400 with -f
+    run bash -c "
+        set -euo pipefail
+        source '$QUOTA_HELPER'
+        BIOAF_QUOTA_POLL_INTERVAL=1 BIOAF_QUOTA_POLL_TIMEOUT=1 \
+            bioaf_quota_ensure_all my-proj us-central1
+        echo 'INSTALLER_CONTINUED'
+    "
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"INSTALLER_CONTINUED"* ]]
+    [[ "$output" == *"Could not submit"* ]]
+}
+
+@test "request_increase returns 0 with empty stdout when the POST fails" {
+    export CURL_EXIT=22
+    run bash -c "set -euo pipefail; source '$QUOTA_HELPER'; pref_id=\$(bioaf_quota_request_increase compute.googleapis.com CPUS-ALL-REGIONS-per-project my-proj 64); echo \"pref_id=[\$pref_id]\"; echo OK"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"pref_id=[]"* ]]
+    [[ "$output" == *"OK"* ]]
+}
+
 # ---------------------------------------------------------------------------
 # install-gcp.sh wiring -- static checks that the integration is in place.
 # These do not execute install-gcp.sh end-to-end (which would require gcloud
