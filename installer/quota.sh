@@ -131,3 +131,40 @@ name = data.get("name") or ""
 print(name.rsplit("/", 1)[-1] if name else "")
 ' <<<"$resp"
 }
+
+# Check the current state of a previously-submitted QuotaPreference.
+#   $1 project        GCP project id
+#   $2 pref_id        preference id returned by bioaf_quota_request_increase
+# Prints exactly one of:
+#   approved -- grantedValue matches preferredValue, change is live
+#   pending  -- reconciling, or awaiting Google review
+#   error    -- curl/parse failure (caller may retry)
+bioaf_quota_poll() {
+    local project="$1" pref_id="$2"
+    local token
+    token=$(gcloud auth print-access-token 2>/dev/null) || { echo error; return 0; }
+    local url="https://cloudquotas.googleapis.com/v1/projects/${project}/locations/global/quotaPreferences/${pref_id}"
+    local resp
+    resp=$(curl -fsSL \
+        -H "Authorization: Bearer ${token}" \
+        "$url" 2>/dev/null) || { echo error; return 0; }
+    local py
+    py=$(_bioaf_quota_python)
+    if [ -z "$py" ]; then echo error; return 0; fi
+    "$py" -c '
+import json, sys
+try:
+    data = json.loads(sys.stdin.read() or "{}")
+except Exception:
+    print("error"); sys.exit(0)
+qc = data.get("quotaConfig") or {}
+preferred = qc.get("preferredValue")
+granted = qc.get("grantedValue")
+if preferred is not None and granted is not None and str(granted) == str(preferred):
+    print("approved"); sys.exit(0)
+# Otherwise: either reconciling or sitting in human review queue. Both are
+# "pending" from the installers point of view -- we surface a single
+# "Google needs to approve this, this is normal" message to the user.
+print("pending")
+' <<<"$resp"
+}

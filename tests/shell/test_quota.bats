@@ -75,7 +75,7 @@ done
 if [ -n "${CURL_FIXTURE:-}" ] && [ -f "$FIXTURE_DIR/$CURL_FIXTURE" ]; then
     cat "$FIXTURE_DIR/$CURL_FIXTURE"
 fi
-exit 0
+exit "${CURL_EXIT:-0}"
 STUB
     chmod +x "$STUBS_DIR/curl"
 
@@ -223,4 +223,57 @@ JSON
     run bash -c "source '$QUOTA_HELPER'; bioaf_quota_request_increase compute.googleapis.com CPUS-ALL-REGIONS-per-project my-proj 64"
     [ "$status" -eq 0 ]
     grep -q "Authorization: Bearer ya29.fake-token" "$CALL_LOG"
+}
+
+# ---------------------------------------------------------------------------
+# bioaf_quota_poll
+# ---------------------------------------------------------------------------
+
+@test "poll returns approved when grantedValue equals preferredValue" {
+    cat > "$FIXTURE_DIR/poll_approved.json" <<'JSON'
+{
+  "name": "projects/123/locations/global/quotaPreferences/bioaf-cpus-q",
+  "quotaConfig": { "preferredValue": "64", "grantedValue": "64" },
+  "reconciling": false
+}
+JSON
+    export CURL_FIXTURE=poll_approved.json
+    run bash -c "source '$QUOTA_HELPER'; bioaf_quota_poll my-proj bioaf-cpus-q"
+    [ "$status" -eq 0 ]
+    [ "$output" = "approved" ]
+    grep -q "cloudquotas.googleapis.com/v1/projects/my-proj/locations/global/quotaPreferences/bioaf-cpus-q" "$CALL_LOG"
+}
+
+@test "poll returns pending when reconciling is true" {
+    cat > "$FIXTURE_DIR/poll_pending.json" <<'JSON'
+{
+  "name": "projects/123/locations/global/quotaPreferences/bioaf-cpus-q",
+  "quotaConfig": { "preferredValue": "64" },
+  "reconciling": true
+}
+JSON
+    export CURL_FIXTURE=poll_pending.json
+    run bash -c "source '$QUOTA_HELPER'; bioaf_quota_poll my-proj bioaf-cpus-q"
+    [ "$status" -eq 0 ]
+    [ "$output" = "pending" ]
+}
+
+@test "poll returns pending when neither approved nor reconciling (awaiting review)" {
+    cat > "$FIXTURE_DIR/poll_review.json" <<'JSON'
+{
+  "name": "projects/123/locations/global/quotaPreferences/bioaf-cpus-q",
+  "quotaConfig": { "preferredValue": "64" }
+}
+JSON
+    export CURL_FIXTURE=poll_review.json
+    run bash -c "source '$QUOTA_HELPER'; bioaf_quota_poll my-proj bioaf-cpus-q"
+    [ "$status" -eq 0 ]
+    [ "$output" = "pending" ]
+}
+
+@test "poll returns error when curl fails" {
+    export CURL_EXIT=22
+    run bash -c "source '$QUOTA_HELPER'; bioaf_quota_poll my-proj bioaf-cpus-q"
+    [ "$status" -eq 0 ]
+    [ "$output" = "error" ]
 }
