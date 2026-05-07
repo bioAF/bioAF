@@ -181,6 +181,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Default work node environment seed failed: %s", e)
 
+    # Seed built-in `bioaf-base` work-node env (to-resolve.md issue #1).
+    # No-op if BIOAF_BASE_WORK_NODE_IMAGE_URI is unset.
+    from app.services.bootstrap_environments import seed_builtin_environments
+
+    try:
+        async with notif_session_factory() as builtin_env_session:
+            await seed_builtin_environments(builtin_env_session)
+            await builtin_env_session.commit()
+    except Exception as e:
+        logger.warning("Built-in environment seed failed: %s", e)
+
     # Seed default pipeline environment if none exists (ADR-045)
     from app.services.environment_service import ensure_default_pipeline_environment
 
@@ -190,6 +201,16 @@ async def lifespan(app: FastAPI):
             await pipe_seed_session.commit()
     except Exception as e:
         logger.warning("Default pipeline environment seed failed: %s", e)
+
+    # Seed default notebook environment if none exists
+    from app.services.environment_service import ensure_default_notebook_environment
+
+    try:
+        async with notif_session_factory() as nb_seed_session:
+            await ensure_default_notebook_environment(nb_seed_session)
+            await nb_seed_session.commit()
+    except Exception as e:
+        logger.warning("Default notebook environment seed failed: %s", e)
 
     # Resolve any pending upgrades from before the restart
     from app.services.upgrade_service import UpgradeService

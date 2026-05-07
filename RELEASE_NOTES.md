@@ -1,5 +1,94 @@
 # Release Notes
 
+## v0.11.2
+
+Bug-fix point release covering the environment-management gaps and a
+work-node Packer-build quota issue surfaced while testing v0.11.1
+end-to-end on a fresh greenfield install. No schema changes; no
+migration required. The bioaf-base work-node seed is gated by
+`BIOAF_BASE_WORK_NODE_IMAGE_URI` and is a no-op until the public
+image is published, so existing installs are unaffected.
+
+### Environment pickers correctly filter by type
+
+The Notebooks page and the Workbench Environments "All" filter both
+showed environments of the wrong type -- pipeline envs leaked into
+notebook pickers and into the workbench list, where they could not
+actually be selected. Tracked as to-resolve.md issue #2.
+
+- `notebooks/page.tsx` now requests `/api/v1/environments?type=notebook`.
+- The Workbench Environments "All" filter fetches `notebook` and
+  `work_node` lists separately and merges them; pipeline envs are
+  excluded.
+
+### Default environments seeded at bootstrap
+
+Two related gaps blocked first-time users from launching anything
+without manual env creation:
+
+- A default notebook env seeder was missing alongside the existing
+  pipeline / work_node seeders; the notebooks picker came up empty.
+  Added `ensure_default_notebook_environment` mirroring the pipeline
+  seeder.
+- Seeders only ran from the lifespan startup hook, which skips when
+  org / admin do not yet exist. On a fresh install the user
+  completes bootstrap *after* startup, so the seeders never took
+  effect until the next backend restart. All three seeders now also
+  run from the `create_admin` bootstrap endpoint (idempotent).
+
+### Built-in `bioaf-base` work-node environment (opt-in)
+
+Resolves to-resolve.md issue #1 (backend portion). When
+`BIOAF_BASE_WORK_NODE_IMAGE_URI` is set, the backend seeds a
+system-managed `bioaf-base` work-node env whose single version is
+`status=ready` with `image_uri` pre-populated -- so first-launch is
+instant and users no longer have to wait through a ~10-15 min Packer
+build before they can pick anything from the work-node environment
+dropdown. If the env var is unset, the seed is a no-op and the
+existing draft fallback still runs (backward-compatible).
+
+The published Artifact Registry / GCE image itself is not yet built;
+once available, set `BIOAF_BASE_WORK_NODE_IMAGE_URI` in the deploy
+config to surface the seeded env.
+
+### Build trigger UX
+
+- The "build environment" trigger on `/environments` and
+  `/pipelines/environments` no longer uses the bare browser
+  `confirm()` dialog (which renders with the host IP in the title
+  bar and leaks "Cloud Build" terminology users do not recognize).
+  Replaced with the existing `ConfirmDialog` modal; copy now
+  explains the build runs in the background and the user can keep
+  using the app.
+- The build trigger endpoint previously caught only `ValueError`,
+  so any other failure (GCP API, credentials, packer step) bubbled
+  up as a bare 500 with no JSON body and the frontend rendered a
+  meaningless "Unknown error" alert. Now catches broad `Exception`,
+  logs the stack server-side, and returns a 500 whose detail is the
+  underlying error message so the user sees something actionable.
+
+### Work-node Packer build no longer eats SSD quota
+
+The Packer build VM (transient, runs once per work-node image
+build) used `pd-ssd` for its 50 GB boot disk. That 50 GB counts
+against the regional `SSD_TOTAL_GB` quota -- already pressured by
+the GKE pool nodes' `pd-balanced` boot disks (which also count
+toward SSD quota). On a fresh GCP project (default 250 GB
+ceiling), one running pipeline pool plus the bioaf control VM
+consume ~230 GB; the build's +50 GB tipped past 250 and failed
+immediately with `Quota 'SSD_TOTAL_GB' exceeded`.
+
+Switched to `pd-standard` for the build disk -- HDD vs SSD makes
+no material difference for a one-off conda env install, and the
+image artifact uploaded to GCE Image Service still works for
+`pd-ssd` work-node boot disks at launch. A regression test
+(`test_packer_template_disk.py`) guards `disk_type` and
+`disk_size` so future drift trips a clear failure message.
+
+This is a tactical mitigation; the proper fix (auto-request an
+`SSD_TOTAL_GB` quota bump alongside the CPU bump) is tracked in
+to-resolve.md issue #3.
+
 ## v0.11.1
 
 Bug-fix point release for the v0.11.0 SA hardening work. Resolves the

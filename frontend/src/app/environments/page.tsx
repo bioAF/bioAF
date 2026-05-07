@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { ContentLoading } from "@/components/shared/ContentLoading";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type {
@@ -58,6 +59,9 @@ export default function EnvironmentsPage() {
   const [showDeleteVersionModal, setShowDeleteVersionModal] = useState<EnvironmentVersionSummary | null>(null);
   const [deletingVersion, setDeletingVersion] = useState(false);
 
+  // Build-confirmation modal state
+  const [buildConfirm, setBuildConfirm] = useState<{ envId: number; versionId: number } | null>(null);
+
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/login"); return; }
     loadEnvironments();
@@ -66,9 +70,24 @@ export default function EnvironmentsPage() {
   async function loadEnvironments(type?: string) {
     try {
       const filterType = type ?? typeFilter;
-      const query = filterType !== "all" ? `?type=${filterType}` : "";
-      const data = await api.get<EnvironmentListResponse>(`/api/v1/environments${query}`);
-      setEnvironments(data.environments);
+      // The Workbench env page only manages notebook and work_node envs.
+      // Pipeline envs live under Pipelines > Environments and would be
+      // unusable here, so "all" must fetch both notebook and work_node
+      // explicitly rather than calling the unfiltered list endpoint.
+      let envs: EnvironmentResponse[];
+      if (filterType === "all") {
+        const [nb, wn] = await Promise.all([
+          api.get<EnvironmentListResponse>("/api/v1/environments?type=notebook"),
+          api.get<EnvironmentListResponse>("/api/v1/environments?type=work_node"),
+        ]);
+        envs = [...nb.environments, ...wn.environments].sort(
+          (a, b) => +new Date(b.created_at) - +new Date(a.created_at)
+        );
+      } else {
+        const data = await api.get<EnvironmentListResponse>(`/api/v1/environments?type=${filterType}`);
+        envs = data.environments;
+      }
+      setEnvironments(envs);
       setLoadError(null);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Failed to load environments");
@@ -132,8 +151,14 @@ export default function EnvironmentsPage() {
     } finally { setCreatingVersion(false); }
   }
 
-  async function handleBuild(envId: number, versionId: number) {
-    if (!confirm("Start building this version? This submits a Cloud Build job.")) return;
+  function handleBuild(envId: number, versionId: number) {
+    setBuildConfirm({ envId, versionId });
+  }
+
+  async function confirmBuild() {
+    if (!buildConfirm) return;
+    const { envId, versionId } = buildConfirm;
+    setBuildConfirm(null);
     try {
       await api.post<EnvironmentVersionResponse>(
         `/api/v1/environments/${envId}/versions/${versionId}/build`
@@ -718,6 +743,26 @@ export default function EnvironmentsPage() {
           )}
         </main>
       </div>
+      <ConfirmDialog
+        open={buildConfirm !== null}
+        title="Start build?"
+        message={
+          <>
+            <p>
+              The image will be built in the background. This usually takes a
+              few minutes, sometimes longer for larger environments.
+            </p>
+            <p>
+              You can continue using bioAF while it builds -- we will update the
+              status here when it finishes.
+            </p>
+          </>
+        }
+        confirmLabel="Start build"
+        cancelLabel="Cancel"
+        onConfirm={confirmBuild}
+        onCancel={() => setBuildConfirm(null)}
+      />
     </div>
   );
 }

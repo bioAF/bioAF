@@ -50,6 +50,26 @@ dependencies:
   - pip
 """
 
+# Default conda environment.yml for notebook environments.  Practical
+# starting point for Jupyter/RStudio sessions; user can extend.
+DEFAULT_NOTEBOOK_CONDA_YML = """\
+name: bioaf-notebook
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  - seaborn
+  - jupyter
+  - ipykernel
+  - scikit-learn
+  - pip
+"""
+
 
 class EnvironmentService:
     @staticmethod
@@ -466,3 +486,69 @@ async def ensure_default_pipeline_environment(session: AsyncSession) -> None:
     await session.flush()
 
     logger.info("Created default pipeline environment '%s' (id=%d)", env.name, env.id)
+
+
+async def ensure_default_notebook_environment(session: AsyncSession) -> None:
+    """Create a default notebook environment if none exists yet.
+
+    Mirrors the work_node and pipeline seeders so notebook users land
+    on a pre-populated template instead of an empty picker.  The
+    version is created in 'draft' status -- the user must trigger a
+    build before it can be used.
+    """
+    row = (await session.execute(text("SELECT id FROM organizations LIMIT 1"))).fetchone()
+    if not row:
+        return
+    org_id = row[0]
+
+    existing = (
+        await session.execute(
+            text(
+                "SELECT id FROM environments WHERE organization_id = :org_id AND environment_type = 'notebook' LIMIT 1"
+            ).bindparams(org_id=org_id)
+        )
+    ).fetchone()
+    if existing:
+        return
+
+    admin_row = (
+        await session.execute(
+            text(
+                "SELECT u.id FROM users u "
+                "JOIN roles r ON u.role_id = r.id "
+                "WHERE u.organization_id = :org_id AND r.name = 'admin' "
+                "ORDER BY u.id LIMIT 1"
+            ).bindparams(org_id=org_id)
+        )
+    ).fetchone()
+    if not admin_row:
+        return
+    user_id = admin_row[0]
+
+    env = Environment(
+        name="Default Notebook",
+        description=(
+            "Base Python environment for notebook sessions. Build this "
+            "environment, then customize with your own packages."
+        ),
+        organization_id=org_id,
+        created_by_user_id=user_id,
+        visibility="organization",
+        environment_type="notebook",
+    )
+    session.add(env)
+    await session.flush()
+
+    version = EnvironmentVersion(
+        environment_id=env.id,
+        version_number=1,
+        build_number=1,
+        status="draft",
+        definition_format="conda",
+        definition_content=DEFAULT_NOTEBOOK_CONDA_YML,
+        created_by_user_id=user_id,
+    )
+    session.add(version)
+    await session.flush()
+
+    logger.info("Created default notebook environment '%s' (id=%d)", env.name, env.id)

@@ -173,6 +173,23 @@ async def create_admin(body: CreateAdminRequest, request: Request, session: Asyn
     # Initialize component states
     await ComponentService.initialize_states(session)
 
+    # Seed default environments now that org + admin exist.  These are
+    # idempotent and run on each backend startup as well, but invoking
+    # them here means the user lands on a fully populated picker on
+    # first install without waiting for a restart.
+    from app.services.environment_service import (
+        ensure_default_notebook_environment,
+        ensure_default_pipeline_environment,
+        ensure_default_work_node_environment,
+    )
+
+    try:
+        await ensure_default_work_node_environment(session)
+        await ensure_default_pipeline_environment(session)
+        await ensure_default_notebook_environment(session)
+    except Exception as e:
+        logger.warning("Default environment seed during bootstrap failed: %s", e)
+
     await session.commit()
 
     # Issue JWT token

@@ -78,8 +78,15 @@ source "googlecompute" "work_node" {
     bioaf-managed = "true"
   }
 
+  # The build VM is transient (Packer creates it, runs the provisioner,
+  # destroys it). Use pd-standard so the 50 GB does not consume the
+  # regional SSD_TOTAL_GB quota -- which is already under pressure from
+  # the GKE pool nodes' pd-balanced boot disks (those count toward
+  # SSD_TOTAL_GB too). The image artifact uploaded to GCE Image Service
+  # is unaffected and still works for pd-ssd work-node boot disks at
+  # launch time. See documentation/to-resolve.md for the quota story.
   disk_size = 50
-  disk_type = "pd-ssd"
+  disk_type = "pd-standard"
 
   ssh_username = "packer"
 }

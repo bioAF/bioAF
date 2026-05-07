@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +18,8 @@ from app.schemas.environment import (
     VersionResponse,
 )
 from app.services.environment_service import EnvironmentService
+
+logger = logging.getLogger("bioaf.environments.api")
 
 router = APIRouter(prefix="/api/v1/environments", tags=["environments"])
 
@@ -253,6 +257,14 @@ async def trigger_build(
         await session.commit()
     except ValueError as e:
         raise HTTPException(400, str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Surface the real error to the client instead of letting it
+        # bubble up as a bare 500 (which the frontend renders as
+        # "Unknown error"). Log full stack server-side for debugging.
+        logger.exception("Build trigger failed for env=%d version=%d", environment_id, version_id)
+        raise HTTPException(500, f"Build failed to start: {e}")
 
     version = await EnvironmentService.get_version(session, org_id, environment_id, version_id)
     if not version:
