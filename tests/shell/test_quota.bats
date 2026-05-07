@@ -394,6 +394,27 @@ JSON
     [[ "$output" == *"OK"* ]]
 }
 
+@test "request_increase surfaces the API error message when the response is a Google error body" {
+    cat > "$FIXTURE_DIR/post_resp_err.json" <<'JSON'
+{"error":{"code":400,"message":"Quota id 'BAD-ID' is not valid for service 'compute.googleapis.com'","status":"INVALID_ARGUMENT"}}
+JSON
+    # No CURL_EXIT: curl returns 0 (no -f), body is the error JSON.
+    export CURL_POST_FIXTURE=post_resp_err.json
+    run bash -c "source '$QUOTA_HELPER'; bioaf_quota_request_increase compute.googleapis.com BAD-ID my-proj 64"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Quota id 'BAD-ID' is not valid"* ]]
+}
+
+@test "request_increase yields empty stdout (no false pref id) when API returns an error body" {
+    cat > "$FIXTURE_DIR/post_resp_err.json" <<'JSON'
+{"error":{"code":400,"message":"bad quota id"}}
+JSON
+    export CURL_POST_FIXTURE=post_resp_err.json
+    run bash -c "set -euo pipefail; source '$QUOTA_HELPER'; pref_id=\$(bioaf_quota_request_increase compute.googleapis.com BAD-ID my-proj 64 2>/dev/null); echo \"pref_id=[\$pref_id]\""
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"pref_id=[]"* ]]
+}
+
 # ---------------------------------------------------------------------------
 # install-gcp.sh wiring -- static checks that the integration is in place.
 # These do not execute install-gcp.sh end-to-end (which would require gcloud
