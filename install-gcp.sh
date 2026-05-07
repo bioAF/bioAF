@@ -92,6 +92,7 @@ REQUIRED_APIS=(
     "secretmanager.googleapis.com"
     "serviceusage.googleapis.com"
     "logging.googleapis.com"
+    "cloudquotas.googleapis.com"
 )
 
 # SA hardening (see documentation/sa-hardening/03-consolidated-plan.md):
@@ -387,6 +388,46 @@ read -ra REGION_ZONES <<< "$(zones_for_region "$REGION")"
 ZONE="${REGION_ZONES[0]}"
 
 green "  Using region: $REGION"
+
+# ---------------------------------------------------------------------------
+# Step 5b: Auto-request GCP quota increases
+#
+# Fresh GCP projects ship with very tight default quotas (12 vCPUs and
+# 250 GB regional SSD). Even one bioAF pipeline pod cannot be scheduled
+# under those defaults. The Cloud Quotas API accepts programmatic
+# QuotaPreference submissions and -- on paid billing accounts -- auto-
+# approves typical bumps in seconds. On free-trial billing accounts the
+# request goes to human review (1-2 business days).
+#
+# This step asks for the bumps bioAF needs and tells the user what is
+# happening at each phase. The install does not abort if a request is
+# denied or stuck pending: pipeline launches that depend on the quota
+# will surface the underlying QUOTA_EXCEEDED reason in the run logs.
+# ---------------------------------------------------------------------------
+echo ""
+bold "Step 5b: GCP Quota Auto-Request"
+
+# Source installer/quota.sh from a local clone if present (clone-then-run
+# install) or fetch it over HTTPS pinned to main (curl|bash install).
+QUOTA_HELPER_LOCAL="$(dirname "${BASH_SOURCE[0]:-$0}")/installer/quota.sh"
+QUOTA_HELPER_URL="https://raw.githubusercontent.com/not-that-guy-again/bioAF/main/installer/quota.sh"
+if [ -f "$QUOTA_HELPER_LOCAL" ]; then
+    # shellcheck source=installer/quota.sh
+    source "$QUOTA_HELPER_LOCAL"
+else
+    quota_helper_payload="$(curl -fsSL "$QUOTA_HELPER_URL" 2>/dev/null || true)"
+    if [ -z "$quota_helper_payload" ]; then
+        yellow "  Could not load the quota helper. Skipping auto-quota-request."
+        yellow "  If pipeline runs hit QUOTA_EXCEEDED later, request increases in"
+        yellow "  the Cloud Console: IAM & Admin -> Quotas."
+    else
+        eval "$quota_helper_payload"
+    fi
+fi
+
+if declare -F bioaf_quota_ensure_all >/dev/null 2>&1; then
+    bioaf_quota_ensure_all "$PROJECT_ID" "$REGION"
+fi
 
 # ---------------------------------------------------------------------------
 # Step 6: Create firewall rule
