@@ -69,3 +69,65 @@ for entry in (data.get("dimensionsInfos") or []):
 print("0")
 ' <<<"$out"
 }
+
+# Generate a stable-but-unique QuotaPreference id. The Cloud Quotas API
+# requires it to be lowercase alphanumeric + hyphens, max 63 chars. We
+# combine a `bioaf` prefix, the lowercased quota id, and a short epoch
+# suffix so re-running the installer creates a fresh preference instead of
+# colliding with a previous run.
+_bioaf_quota_pref_id() {
+    local quota_id="$1"
+    local lower
+    lower=$(printf '%s' "$quota_id" | tr '[:upper:]_' '[:lower:]-' | tr -cd 'a-z0-9-')
+    # Trim to leave room for prefix + suffix (63 char limit).
+    lower="${lower:0:40}"
+    printf 'bioaf-%s-%s' "$lower" "$(date +%s)"
+}
+
+# Submit a QuotaPreference to bump a quota.
+#   $1 service        e.g. compute.googleapis.com
+#   $2 quota_id       e.g. CPUS-ALL-REGIONS-per-project
+#   $3 project        GCP project id
+#   $4 preferred_value (integer string)
+#   $5 region (opt)   for regional quotas; omit for project-scoped
+# Prints the preference id (the last path segment of `name`) on success,
+# empty string on failure.
+bioaf_quota_request_increase() {
+    local service="$1" quota_id="$2" project="$3" preferred="$4" region="${5:-}"
+    local pref_id
+    pref_id=$(_bioaf_quota_pref_id "$quota_id")
+    local token
+    token=$(gcloud auth print-access-token 2>/dev/null) || return 1
+    local body
+    if [ -n "$region" ]; then
+        body=$(printf '{"service":"%s","quotaId":"%s","quotaConfig":{"preferredValue":"%s"},"dimensions":{"region":"%s"}}' \
+            "$service" "$quota_id" "$preferred" "$region")
+    else
+        body=$(printf '{"service":"%s","quotaId":"%s","quotaConfig":{"preferredValue":"%s"}}' \
+            "$service" "$quota_id" "$preferred")
+    fi
+    local url="https://cloudquotas.googleapis.com/v1/projects/${project}/locations/global/quotaPreferences?quotaPreferenceId=${pref_id}"
+    local resp
+    resp=$(curl -fsSL -X POST \
+        -H "Authorization: Bearer ${token}" \
+        -H "Content-Type: application/json" \
+        --data "$body" \
+        "$url" 2>/dev/null) || return 1
+    local py
+    py=$(_bioaf_quota_python)
+    if [ -z "$py" ]; then
+        # Without python we fall back to the id we generated -- the API uses
+        # exactly that as the last segment of `name`.
+        printf '%s\n' "$pref_id"
+        return 0
+    fi
+    "$py" -c '
+import json, sys
+try:
+    data = json.loads(sys.stdin.read() or "{}")
+except Exception:
+    print(""); sys.exit(0)
+name = data.get("name") or ""
+print(name.rsplit("/", 1)[-1] if name else "")
+' <<<"$resp"
+}
