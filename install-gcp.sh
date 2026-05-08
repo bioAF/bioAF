@@ -6,7 +6,7 @@
 # Designed to run on the user's local machine (macOS or Linux).
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/not-that-guy-again/bioAF/main/install-gcp.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/bioAF/bioAF/main/install-gcp.sh | bash
 #
 # What this script does:
 #   1. Checks for (or installs) the gcloud CLI
@@ -410,7 +410,7 @@ bold "Step 5b: GCP Quota Auto-Request"
 # Source installer/quota.sh from a local clone if present (clone-then-run
 # install) or fetch it over HTTPS pinned to main (curl|bash install).
 QUOTA_HELPER_LOCAL="$(dirname "${BASH_SOURCE[0]:-$0}")/installer/quota.sh"
-QUOTA_HELPER_URL="https://raw.githubusercontent.com/not-that-guy-again/bioAF/main/installer/quota.sh"
+QUOTA_HELPER_URL="https://raw.githubusercontent.com/bioAF/bioAF/main/installer/quota.sh"
 if [ -f "$QUOTA_HELPER_LOCAL" ]; then
     # shellcheck source=installer/quota.sh
     source "$QUOTA_HELPER_LOCAL"
@@ -902,7 +902,7 @@ if [ "${finish_choice:-2}" = "1" ] && [ -n "$VM_IP" ] && [ -f "${PREFILL_LOCAL}"
     if gcloud compute ssh "${VM_NAME}" --zone="${ZONE}" --project="${PROJECT_ID}" --command='
 set -euo pipefail
 if [ ! -d "$HOME/bioAF/.git" ]; then
-    git clone https://github.com/not-that-guy-again/bioAF.git "$HOME/bioAF"
+    git clone https://github.com/bioAF/bioAF.git "$HOME/bioAF"
 fi
 cd "$HOME/bioAF"
 git pull --ff-only origin main 2>/dev/null || true
@@ -952,7 +952,7 @@ if [ -n "$VM_IP" ]; then
     echo ""
     echo "  Then on the VM:"
     echo ""
-    green "     git clone https://github.com/not-that-guy-again/bioAF.git"
+    green "     git clone https://github.com/bioAF/bioAF.git"
     green "     cd bioAF"
     green "     ./bioaf setup --prefill ~/.bioaf-prefill.yaml"
     echo ""
@@ -965,7 +965,7 @@ if [ -n "$VM_IP" ]; then
 else
     echo "  1. SSH into your VM and clone bioAF:"
     echo ""
-    green "     git clone https://github.com/not-that-guy-again/bioAF.git"
+    green "     git clone https://github.com/bioAF/bioAF.git"
     green "     cd bioAF"
     green "     ./bioaf setup --prefill ~/.bioaf-prefill.yaml"
 fi
