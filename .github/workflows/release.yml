@@ -91,8 +91,8 @@ jobs:
           file: docker/Dockerfile.backend
           push: true
           tags: |
-            ghcr.io/not-that-guy-again/bioaf-backend:${{ needs.release.outputs.tag }}
-            ghcr.io/not-that-guy-again/bioaf-backend:latest
+            ghcr.io/bioaf/bioaf-backend:${{ needs.release.outputs.tag }}
+            ghcr.io/bioaf/bioaf-backend:latest
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
 
@@ -104,8 +104,8 @@ jobs:
           push: true
           build-args: NEXT_PUBLIC_API_URL=
           tags: |
-            ghcr.io/not-that-guy-again/bioaf-frontend:${{ needs.release.outputs.tag }}
-            ghcr.io/not-that-guy-again/bioaf-frontend:latest
+            ghcr.io/bioaf/bioaf-frontend:${{ needs.release.outputs.tag }}
+            ghcr.io/bioaf/bioaf-frontend:latest
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
 
@@ -116,7 +116,7 @@ jobs:
           file: docker/Dockerfile.cellxgene
           push: true
           tags: |
-            ghcr.io/not-that-guy-again/bioaf-cellxgene:${{ needs.release.outputs.tag }}
-            ghcr.io/not-that-guy-again/bioaf-cellxgene:latest
+            ghcr.io/bioaf/bioaf-cellxgene:${{ needs.release.outputs.tag }}
+            ghcr.io/bioaf/bioaf-cellxgene:latest
           cache-from: type=gha,scope=cellxgene
           cache-to: type=gha,mode=max,scope=cellxgene

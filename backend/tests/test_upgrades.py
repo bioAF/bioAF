@@ -169,7 +169,7 @@ async def test_check_for_updates_detects_newer_version():
     mock_response.json.return_value = {
         "tag_name": "v99.0.0",
         "body": "## What's new\n- Big improvements",
-        "html_url": "https://github.com/not-that-guy-again/bioAF/releases/tag/v99.0.0",
+        "html_url": "https://github.com/bioAF/bioAF/releases/tag/v99.0.0",
     }
 
     with patch("app.services.upgrade_service.httpx.AsyncClient") as mock_client_cls:
@@ -200,7 +200,7 @@ async def test_check_for_updates_no_update_when_current():
     mock_response.json.return_value = {
         "tag_name": f"v{settings.app_version}",
         "body": "Current release",
-        "html_url": f"https://github.com/not-that-guy-again/bioAF/releases/tag/v{settings.app_version}",
+        "html_url": f"https://github.com/bioAF/bioAF/releases/tag/v{settings.app_version}",
     }
 
     with patch("app.services.upgrade_service.httpx.AsyncClient") as mock_client_cls:
