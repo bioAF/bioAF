@@ -60,6 +60,18 @@ variable "k8s_interactive_max_nodes" {
   description = "Maximum number of nodes in the interactive autoscaler"
 }
 
+variable "k8s_system_machine_type" {
+  type        = string
+  default     = "e2-small"
+  description = "Machine type for the always-on system node pool that hosts GKE addons (calico-typha, fluentbit, gmp-operator, etc.). Sized so Nextflow process pods do not fit and fall back to the pipelines pool."
+}
+
+variable "k8s_system_max_nodes" {
+  type        = number
+  default     = 2
+  description = "Maximum number of nodes in the system pool autoscaler. Min is hardcoded at 1 -- the pool must always have a home for system addons."
+}
+
 variable "bioaf_bootstrap_sa_email" {
   type        = string
   default     = ""
