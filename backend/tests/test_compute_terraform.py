@@ -97,17 +97,20 @@ def test_system_pool_is_always_on_and_uses_pd_standard():
     assert '"bioaf.io/pool" = "system"' in system_block, "bioaf-system pool must carry the bioaf.io/pool=system label"
 
 
-def test_system_pool_default_machine_is_e2_medium():
-    """Default machine type for the system pool must be e2-medium.
+def test_system_pool_default_machine_is_e2_standard_2():
+    """Default machine type for the system pool must be e2-standard-2.
 
-    e2-small (940m CPU, 1.4 GiB allocatable) was tried first but system
-    DaemonSets (calico-node, fluentbit-gke, gke-metrics-agent, gmp-system
-    collectors, gke-metadata-server, netd, ip-masq-agent, pdcsi-node,
-    node-local-dns, kube-proxy) plus per-node container runtime overhead
-    pushed CPU requests to ~99% on a single node, forcing the autoscaler
-    to max=2 in every active zone. e2-medium (~1.9 vCPU, ~3.5 GiB) gives
-    enough headroom that one node per zone covers the addon set, so the
-    pool sits at its minimum (1 per zone) instead of its ceiling.
+    Both e2-small and e2-medium are shared-core burstable machine types:
+    they report 2 vCPU max but baseline-share only 0.5 / 1.0 vCPU
+    respectively. Kubernetes treats the burstable max as `allocatable`
+    and shows ~940m for both, so the autoscaler packs the same number
+    of pods per node at either size. We confirmed this empirically on
+    fresh deploys -- e2-medium pinned at 4 nodes (2 per zone, max=2)
+    just like e2-small did, with CPU at 75-94% per node.
+
+    e2-standard-2 has 2 *dedicated* vCPU and 8 GiB RAM (~1.9 CPU /
+    ~7 GiB allocatable), enough that one node per zone absorbs the full
+    addon DaemonSet set. Cost is roughly equal to 4 x e2-medium.
     """
     variables_tf = (COMPUTE_MODULE_DIR / "variables.tf").read_text()
 
@@ -120,8 +123,8 @@ def test_system_pool_default_machine_is_e2_medium():
         end = len(variables_tf)
     block = variables_tf[start:end]
 
-    assert 'default     = "e2-medium"' in block or 'default = "e2-medium"' in block, (
-        "k8s_system_machine_type default must be e2-medium"
+    assert 'default     = "e2-standard-2"' in block or 'default = "e2-standard-2"' in block, (
+        "k8s_system_machine_type default must be e2-standard-2"
     )
 
 
