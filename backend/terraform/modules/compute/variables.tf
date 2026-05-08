@@ -62,8 +62,8 @@ variable "k8s_interactive_max_nodes" {
 
 variable "k8s_system_machine_type" {
   type        = string
-  default     = "e2-small"
-  description = "Machine type for the always-on system node pool that hosts GKE addons (calico-typha, fluentbit, gmp-operator, etc.). Sized so Nextflow process pods do not fit and fall back to the pipelines pool."
+  default     = "e2-medium"
+  description = "Machine type for the always-on system node pool that hosts GKE addons (calico-typha, fluentbit, gmp-operator, gke-metadata-server, etc.). e2-medium (~1.9 vCPU, 3.5 GiB allocatable) gives one-node-per-zone headroom for the full addon DaemonSet set; e2-small was too tight and forced the autoscaler to max in every active zone. Still small enough that Nextflow process pods do not fit and fall back to the pipelines pool."
 }
 
 variable "k8s_system_max_nodes" {

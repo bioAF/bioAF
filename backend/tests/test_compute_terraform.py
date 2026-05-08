@@ -97,6 +97,34 @@ def test_system_pool_is_always_on_and_uses_pd_standard():
     assert '"bioaf.io/pool" = "system"' in system_block, "bioaf-system pool must carry the bioaf.io/pool=system label"
 
 
+def test_system_pool_default_machine_is_e2_medium():
+    """Default machine type for the system pool must be e2-medium.
+
+    e2-small (940m CPU, 1.4 GiB allocatable) was tried first but system
+    DaemonSets (calico-node, fluentbit-gke, gke-metrics-agent, gmp-system
+    collectors, gke-metadata-server, netd, ip-masq-agent, pdcsi-node,
+    node-local-dns, kube-proxy) plus per-node container runtime overhead
+    pushed CPU requests to ~99% on a single node, forcing the autoscaler
+    to max=2 in every active zone. e2-medium (~1.9 vCPU, ~3.5 GiB) gives
+    enough headroom that one node per zone covers the addon set, so the
+    pool sits at its minimum (1 per zone) instead of its ceiling.
+    """
+    variables_tf = (COMPUTE_MODULE_DIR / "variables.tf").read_text()
+
+    # Find the k8s_system_machine_type variable block
+    marker = 'variable "k8s_system_machine_type"'
+    assert marker in variables_tf, "k8s_system_machine_type variable must exist"
+    start = variables_tf.index(marker)
+    end = variables_tf.find("\nvariable ", start + 1)
+    if end == -1:
+        end = len(variables_tf)
+    block = variables_tf[start:end]
+
+    assert 'default     = "e2-medium"' in block or 'default = "e2-medium"' in block, (
+        "k8s_system_machine_type default must be e2-medium"
+    )
+
+
 def test_notebook_runner_workload_identity_depends_on_system_pool():
     """The notebook_runner_workload_identity binding's depends_on must include
     the system pool, mirroring the existing pattern for the other two pools.
