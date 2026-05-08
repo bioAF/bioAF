@@ -1,5 +1,88 @@
 # Release Notes
 
+## v0.11.4
+
+Point release that adds a dedicated `bioaf-system` GKE node pool to host
+the cluster's system addons (calico-typha, fluentbit, gmp-operator,
+gke-metadata-server, etc.) on its own infrastructure rather than
+piggy-backing on whichever user pool happens to be alive. Touches GKE
+topology only -- no schema changes, no migration required.
+
+### `bioaf-system` always-on pool
+
+Resolves the dedicated-system-pool follow-up flagged in to-resolve.md's
+second-round status. Before this release, calico-typha's 2-replica
+anti-affinity forced the `bioaf-pipelines` pool to spin up *two*
+`n2-highmem-16` nodes whenever any pipeline ran -- one for the pipeline
+pod, one purely for system addons sitting at ~10% disk utilization and
+otherwise wasted. Pipelines and interactive pools could not actually
+scale to zero between runs, because cluster-scoped Deployments
+(calico-typha, kube-dns, konnectivity-agent, etc.) needed a host.
+
+The new `bioaf-system` pool gives those addons a dedicated home:
+
+- 1 always-on `e2-standard-2` node (2 dedicated vCPU, 8 GiB RAM)
+- 30 GB `pd-standard` boot disk (does not consume `SSD_TOTAL_GB` quota
+  the way `pd-ssd` would)
+- On-demand, not spot -- system addons must not be evicted at random
+- `total_min_node_count = 1` / `total_max_node_count = 2` with
+  `location_policy = "ANY"`, so the autoscaler places the floor node
+  in whichever zone has `e2-standard-2` capacity at deploy time
+  (regional cluster, not multi-zone-redundant -- HA was never an
+  architected goal for cluster workloads, see commits `bde4d604` and
+  `c399ee21`)
+- No taint: GKE-managed DaemonSets do not reliably tolerate custom
+  taints. The pool is sized so Nextflow process pods do not fit and
+  fall back to the pipelines pool by resource constraint instead.
+
+With the system pool taking the addon load, both `bioaf-pipelines` and
+`bioaf-interactive` now genuinely scale to zero between workloads.
+Cost: ~$25/mo for the always-on system pool, replacing what was
+previously a ~$70-100/mo wasted node held by addons on the pipelines or
+interactive pool.
+
+Two new module variables (`k8s_system_machine_type`, `k8s_system_max_nodes`)
+expose machine-type and max-node tuning while keeping the always-on
+floor at 1. They are not yet wired into `platform_config` or the
+deploy wizard -- defaults take effect on every install. A future
+release may surface them as advanced options.
+
+### How sizing landed where it landed
+
+The right machine type took three iterations and is worth recording so
+the next person tuning this does not relearn it the hard way:
+
+- **e2-small** (first attempt): 940m CPU / 1.4 GiB allocatable. Pinned
+  the autoscaler at max=2 in every active zone -- one CPU-saturated
+  node could not host the full DaemonSet set, so a second came up.
+  Total: 4 nodes.
+- **e2-medium** (second attempt): same 940m CPU allocatable, just more
+  memory. Both `e2-small` and `e2-medium` are *shared-core* burstable
+  types: they advertise 2 vCPU max but baseline-share 0.5 / 1.0 vCPU
+  respectively, and Kubernetes treats only the burstable max as
+  `allocatable`. The autoscaler packs them identically. Same 4-node
+  outcome.
+- **e2-standard-2** (final): 2 *dedicated* vCPU, 8 GiB RAM, ~1.9 vCPU
+  allocatable. One node per zone fits the addon set. Combined with
+  `total_min_node_count`/`total_max_node_count` (global counts rather
+  than per-zone), drops to 1 node total.
+
+Use of `total_*_node_count` instead of `min_node_count`/`max_node_count`
+is what allows a regional pool to honor "1 node, anywhere with capacity"
+semantics. Per-zone counts would have multiplied the floor across every
+zone in `node_locations`.
+
+### What's still outstanding from to-resolve.md
+
+- **Issue #1 final mile**: the public `bioaf-base` GCE work-node image
+  still needs to be built and published. Backend seeder is in place
+  and gated on `BIOAF_BASE_WORK_NODE_IMAGE_URI`, so this is a one-time
+  operator task.
+- **Issue #3 bonus**: `_extract_pod_termination_info` does not yet
+  surface `Unschedulable: ...` reasons (e.g. `QUOTA_EXCEEDED`,
+  `pod didn't trigger scale-up`) in the run-log view. Will be a
+  separate follow-up branch.
+
 ## v0.11.3
 
 Point release that automates the GCP quota-increase requests bioAF
