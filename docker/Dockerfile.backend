@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-LABEL org.opencontainers.image.source=https://github.com/not-that-guy-again/bioAF
+LABEL org.opencontainers.image.source=https://github.com/bioAF/bioAF
 
 # Install system dependencies (Terraform + weasyprint rendering libs)
 RUN apt-get update && apt-get install -y --no-install-recommends \

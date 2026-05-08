@@ -560,7 +560,7 @@ resolve_and_pull_images() {
     local releases
     releases=$(curl -sf --max-time 10 \
         -H "Accept: application/vnd.github+json" \
-        "https://api.github.com/repos/not-that-guy-again/bioAF/releases?per_page=5" 2>/dev/null) || {
+        "https://api.github.com/repos/bioAF/bioAF/releases?per_page=5" 2>/dev/null) || {
         yellow "Could not reach GitHub to check for images, building from source..."
         $DC_BUILD
         return 0
@@ -599,7 +599,7 @@ get_latest_github_version() {
     local response
     response=$(curl -sf --max-time 10 \
         -H "Accept: application/vnd.github+json" \
-        "https://api.github.com/repos/not-that-guy-again/bioAF/releases/latest" 2>/dev/null) || {
+        "https://api.github.com/repos/bioAF/bioAF/releases/latest" 2>/dev/null) || {
         red "ERROR: Could not reach GitHub to check for the latest version."
         echo "Provide a specific version instead: ./bioaf update <version>"
         exit 1

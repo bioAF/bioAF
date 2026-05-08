@@ -19,7 +19,7 @@ from app.services.event_types import PLATFORM_UPDATE_AVAILABLE
 
 logger = logging.getLogger("bioaf.upgrade_service")
 
-GITHUB_REPO = "not-that-guy-again/bioAF"
+GITHUB_REPO = "bioAF/bioAF"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 # Cache for version check results

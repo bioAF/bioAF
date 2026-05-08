@@ -53,14 +53,14 @@ See all architecture decision records in [decisions/README.md](decisions/README.
 Run this on your local machine to provision a GCP VM and get started:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/not-that-guy-again/bioAF/main/install-gcp.sh | bash
+curl -fsSL https://raw.githubusercontent.com/bioAF/bioAF/main/install-gcp.sh | bash
 ```
 
 The script sets up gcloud, creates a VM with Docker, and walks you through
 the process. Once the VM is ready, SSH in and run:
 
 ```bash
-git clone https://github.com/not-that-guy-again/bioAF.git
+git clone https://github.com/bioAF/bioAF.git
 cd bioAF
 ./bioaf setup
 ```
@@ -70,7 +70,7 @@ cd bioAF
 If you already have a Linux server with Docker installed:
 
 ```bash
-git clone https://github.com/not-that-guy-again/bioAF.git
+git clone https://github.com/bioAF/bioAF.git
 cd bioAF
 ./bioaf setup
 ```
