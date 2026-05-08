@@ -4,6 +4,7 @@
 2. test_compute_module_creates_cluster_and_pools - Parse HCL and verify expected resources.
 """
 
+import re
 from pathlib import Path
 
 
@@ -63,6 +64,12 @@ def test_system_pool_is_always_on_and_uses_pd_standard():
     fluentbit, gmp-operator, etc.) always have a home, and must not consume
     SSD_TOTAL_GB quota -- that quota is already pressured by pipeline pool
     boot disks.
+
+    Uses total_min_node_count / total_max_node_count (global counts) rather
+    than min_node_count / max_node_count (per-zone). With ANY location
+    policy and a regional cluster, this lets the autoscaler place the
+    single floor node in whichever zone has e2-standard-2 capacity at
+    deploy time, rather than forcing one node per active zone.
     """
     main_tf = (COMPUTE_MODULE_DIR / "main.tf").read_text()
 
@@ -77,9 +84,26 @@ def test_system_pool_is_always_on_and_uses_pd_standard():
         end = len(main_tf)
     system_block = main_tf[start:end]
 
-    # Always-on: min_node_count must be >= 1 so addons never lose their home.
-    assert "min_node_count  = 1" in system_block or "min_node_count = 1" in system_block, (
-        "bioaf-system pool must have min_node_count = 1 (always-on)"
+    # Always-on, single-node global floor (not per-zone).
+    assert "total_min_node_count = 1" in system_block, (
+        "bioaf-system pool must use total_min_node_count = 1 (global, not per-zone)"
+    )
+    # The per-zone min_node_count knob must NOT be present -- it conflicts
+    # with total_min_node_count and would re-introduce per-zone semantics.
+    # Match it at line-start (with indent) so it doesn't false-positive on
+    # the "total_min_node_count" substring.
+    assert re.search(r"^\s+min_node_count\s*=", system_block, re.MULTILINE) is None, (
+        "bioaf-system pool must not set per-zone min_node_count; use total_min_node_count instead"
+    )
+    assert re.search(r"^\s+max_node_count\s*=", system_block, re.MULTILINE) is None, (
+        "bioaf-system pool must not set per-zone max_node_count; use total_max_node_count instead"
+    )
+
+    # Capacity-based zone selection. terraform fmt aligns `=` columns
+    # within a block, so the gap between `location_policy` and `=` is
+    # variable; match with regex.
+    assert re.search(r'location_policy\s*=\s*"ANY"', system_block), (
+        "bioaf-system pool must use location_policy=ANY so the autoscaler picks the zone with capacity"
     )
 
     # Disk type: pd-standard so we don't burn SSD_TOTAL_GB quota.
