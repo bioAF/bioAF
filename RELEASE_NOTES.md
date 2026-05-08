@@ -1,5 +1,37 @@
 # Release Notes
 
+## v0.11.5
+
+Repository move from the personal `not-that-guy-again/bioAF` namespace
+to the `bioAF` GitHub organization. Code-only point release: no schema
+changes, no migration required, no behavior changes for end users.
+
+### What changed
+
+- Updated all references in code, scripts, Dockerfiles, docs, and
+  workflows from `not-that-guy-again/bioAF` to `bioAF/bioAF` (HTTPS and
+  SSH clone URLs, raw content URLs, GitHub API URLs)
+- Updated container image references from
+  `ghcr.io/not-that-guy-again/bioaf-{backend,frontend,cellxgene}` to
+  `ghcr.io/bioaf/bioaf-{backend,frontend,cellxgene}`
+- Updated the in-app upgrade check (`backend/app/services/upgrade_service.py`)
+  to poll the new repo's releases endpoint
+- Updated OCI `org.opencontainers.image.source` labels in all three
+  Dockerfiles to point at the new repo
+
+### Notes for existing installs
+
+Existing installs continue to pull old images from
+`ghcr.io/not-that-guy-again/...` and will keep working. Once an install
+is upgraded to v0.11.5, subsequent `docker compose pull` operations
+will fetch from the new `ghcr.io/bioaf/...` namespace. Both image sets
+exist for the v0.8.x through v0.11.4 tag range; v0.11.5 and later are
+published only to the new namespace.
+
+The in-app updater begins checking the new repo's releases on first
+run after upgrade. GitHub redirects also keep the old endpoint working
+transparently for any installs that lag.
+
 ## v0.11.4
 
 Point release that adds a dedicated `bioaf-system` GKE node pool to host

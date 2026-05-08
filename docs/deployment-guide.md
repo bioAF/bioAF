@@ -15,7 +15,7 @@ The fastest path from zero to a running instance on Google Cloud. Run this
 on your local machine (macOS or Linux):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/not-that-guy-again/bioAF/main/install-gcp.sh | bash
+curl -fsSL https://raw.githubusercontent.com/bioAF/bioAF/main/install-gcp.sh | bash
 ```
 
 The script walks you through:
@@ -32,7 +32,7 @@ Once the VM is ready, SSH in and deploy:
 
 ```bash
 gcloud compute ssh bioaf --zone=<your-zone> --project=<your-project>
-git clone https://github.com/not-that-guy-again/bioAF.git
+git clone https://github.com/bioAF/bioAF.git
 cd bioAF
 ./bioaf setup
 ```
@@ -45,7 +45,7 @@ wizard to create your admin account and configure the platform.
 If you already have a Linux server with Docker installed:
 
 ```bash
-git clone https://github.com/not-that-guy-again/bioAF.git
+git clone https://github.com/bioAF/bioAF.git
 cd bioAF
 ./bioaf setup
 ```
@@ -197,7 +197,7 @@ If you prefer to set up the GCP infrastructure manually instead of using
 4. Clone and deploy:
 
    ```bash
-   git clone https://github.com/not-that-guy-again/bioAF.git
+   git clone https://github.com/bioAF/bioAF.git
    cd bioAF
    ./bioaf setup
    ```

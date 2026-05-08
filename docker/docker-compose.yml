@@ -19,7 +19,7 @@ services:
     restart: unless-stopped
 
   backend:
-    image: ghcr.io/not-that-guy-again/bioaf-backend:${BIOAF_IMAGE_TAG:-latest}
+    image: ghcr.io/bioaf/bioaf-backend:${BIOAF_IMAGE_TAG:-latest}
     build:
       context: ../backend
       dockerfile: ../docker/Dockerfile.backend
@@ -46,7 +46,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: ghcr.io/not-that-guy-again/bioaf-frontend:${BIOAF_IMAGE_TAG:-latest}
+    image: ghcr.io/bioaf/bioaf-frontend:${BIOAF_IMAGE_TAG:-latest}
     build:
       context: ../frontend
       dockerfile: ../docker/Dockerfile.frontend

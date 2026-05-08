@@ -1,6 +1,6 @@
 [Unit]
 Description=bioAF Update Agent
-Documentation=https://github.com/not-that-guy-again/bioAF
+Documentation=https://github.com/bioAF/bioAF
 After=docker.service
 Requires=docker.service
 
