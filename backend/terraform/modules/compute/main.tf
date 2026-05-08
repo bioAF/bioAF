@@ -82,20 +82,30 @@ resource "google_container_node_pool" "pipelines" {
 
 # --- System Node Pool ---
 #
-# Always-on (min=1) pool sized for GKE-managed addons only:
-# calico-typha, fluentbit, gmp-operator, gke-metadata-server, etc.
-# Without this pool, those DaemonSets piggy-back on whichever user pool
-# happens to have a node up; calico-typha's 2-replica anti-affinity then
-# pins the pipelines pool at 2 nodes whenever any pipeline runs, wasting
-# one full n2-highmem-16 node on system addons. With this pool, the
-# pipelines and interactive pools can genuinely scale to zero.
+# Always-on pool sized for GKE-managed addons only: calico-typha,
+# fluentbit, gmp-operator, gke-metadata-server, etc. Without this pool,
+# those DaemonSets piggy-back on whichever user pool happens to have a
+# node up; calico-typha's 2-replica anti-affinity then pins the pipelines
+# pool at 2 nodes whenever any pipeline runs, wasting one full
+# n2-highmem-16 node on system addons. With this pool, the pipelines and
+# interactive pools can genuinely scale to zero.
+#
+# Autoscaling uses total_min_node_count / total_max_node_count (global
+# counts across the regional cluster's zones), not min_node_count /
+# max_node_count (per-zone). Combined with location_policy=ANY and the
+# default empty node_locations (= all cluster zones), this lets the
+# autoscaler place the floor node in whichever zone has e2-standard-2
+# capacity at deploy time, instead of forcing one node per active zone.
+# total_min=1 keeps a single node always alive for the addons; HA was
+# never an architected goal for the cluster's workloads (see commits
+# bde4d604, c399ee21 -- multi-zone was for capacity fallback).
 #
 # Disk: pd-standard, not pd-ssd, so the always-on 30GB does not consume
 # SSD_TOTAL_GB regional quota (already pressured by pipeline pool boot
 # disks). On-demand, not spot -- system addons must not be evicted.
 # No taint: GKE-managed DaemonSets do not reliably tolerate custom
 # taints. Nextflow process pods are kept off this pool naturally by
-# its small size (e2-small allocatable < typical pipeline requests).
+# its small size (e2-standard-2 allocatable < typical pipeline requests).
 
 resource "google_container_node_pool" "system" {
   name           = "bioaf-system"
@@ -105,9 +115,9 @@ resource "google_container_node_pool" "system" {
   node_locations = var.k8s_node_zones
 
   autoscaling {
-    min_node_count  = 1
-    max_node_count  = var.k8s_system_max_nodes
-    location_policy = "ANY"
+    total_min_node_count = 1
+    total_max_node_count = var.k8s_system_max_nodes
+    location_policy      = "ANY"
   }
 
   node_config {
