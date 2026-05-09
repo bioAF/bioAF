@@ -428,6 +428,7 @@ export interface ExperimentCreateRequest {
   custom_fields?: CustomFieldValue[];
   field_defaults?: FieldDefaultValue[];
   design_type?: string | null;
+  column_aliases?: Record<string, string>;
 }
 
 export interface SampleCreateRequest {

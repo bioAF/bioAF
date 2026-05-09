@@ -67,6 +67,7 @@ class ExperimentCreate(BaseModel):
     design_type: str | None = None
     protocol_version: str | None = None
     variables_json: dict | None = None
+    column_aliases: dict[str, str] | None = None
 
 
 class ExperimentUpdate(BaseModel):
@@ -80,6 +81,7 @@ class ExperimentUpdate(BaseModel):
     design_type: str | None = None
     protocol_version: str | None = None
     variables_json: dict | None = None
+    column_aliases: dict[str, str] | None = None
 
 
 class ExperimentStatusUpdate(BaseModel):

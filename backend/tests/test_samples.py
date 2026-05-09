@@ -284,3 +284,55 @@ async def test_bulk_update_nonexistent_sample(client, admin_token, experiment_id
     assert response.status_code == 200
     assert response.json()["updated"] == 1
     assert len(response.json()["errors"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_sample_custom_fields_in_responses(client, admin_token, experiment_id):
+    # Create with custom fields
+    resp = await client.post(
+        f"/api/experiments/{experiment_id}/samples",
+        json={
+            "sample_id_unique": "CF001",
+            "organism": "Human",
+            "custom_fields": [
+                {"field_name": "Library", "field_value": "ICGL15422"},
+                {"field_name": "Barcode", "field_value": "ACGTTGC"},
+            ],
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    created = resp.json()
+    by_name = {cf["field_name"]: cf["field_value"] for cf in created["custom_fields"]}
+    assert by_name == {"Library": "ICGL15422", "Barcode": "ACGTTGC"}
+
+    sample_id = created["id"]
+
+    # GET /api/samples/{id}
+    resp = await client.get(
+        f"/api/samples/{sample_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    by_name = {cf["field_name"]: cf["field_value"] for cf in resp.json()["custom_fields"]}
+    assert by_name == {"Library": "ICGL15422", "Barcode": "ACGTTGC"}
+
+    # GET /api/experiments/{id}/samples
+    resp = await client.get(
+        f"/api/experiments/{experiment_id}/samples",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    [s] = [s for s in resp.json() if s["id"] == sample_id]
+    by_name = {cf["field_name"]: cf["field_value"] for cf in s["custom_fields"]}
+    assert by_name == {"Library": "ICGL15422", "Barcode": "ACGTTGC"}
+
+    # PATCH /api/samples/{id} -- response should still echo custom fields
+    resp = await client.patch(
+        f"/api/samples/{sample_id}",
+        json={"organism": "Mouse"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    by_name = {cf["field_name"]: cf["field_value"] for cf in resp.json()["custom_fields"]}
+    assert by_name == {"Library": "ICGL15422", "Barcode": "ACGTTGC"}
