@@ -42,6 +42,7 @@ export default function NewExperimentPage() {
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, string>>({});
   const [extraCustomFields, setExtraCustomFields] = useState<{ name: string; value: string; required: boolean }[]>([]);
   const [showSheetImport, setShowSheetImport] = useState(false);
+  const [columnAliases, setColumnAliases] = useState<Record<string, string>>({});
 
   const DEFAULTABLE_FIELDS = [
     { name: "organism", label: "Organism", type: "text" as const },
@@ -75,6 +76,7 @@ export default function NewExperimentPage() {
   function handleSheetImportApply(result: {
     fieldDefaults: FieldDefaultValue[];
     customFields: { name: string; value: string; required: boolean }[];
+    columnAliases: Record<string, string>;
   }) {
     // Merge imported field defaults (only add fields not already configured)
     setFieldDefaults((prev) => {
@@ -89,6 +91,10 @@ export default function NewExperimentPage() {
       const newFields = result.customFields.filter((f) => !existing.has(f.name));
       return [...prev, ...newFields];
     });
+
+    // Persist GSheet column aliases so sample imports can route matching
+    // columns without re-mapping. Latest mapping wins on duplicates.
+    setColumnAliases((prev) => ({ ...prev, ...result.columnAliases }));
 
     // Auto-expand the field defaults section
     setShowFieldDefaults(true);
@@ -140,6 +146,7 @@ export default function NewExperimentPage() {
         ...form,
         field_defaults: fieldDefaults.length > 0 ? fieldDefaults : undefined,
         custom_fields: allCustomFields.length > 0 ? allCustomFields : undefined,
+        column_aliases: Object.keys(columnAliases).length > 0 ? columnAliases : undefined,
       };
       const experiment = await api.post<Experiment>("/api/experiments", payload);
 

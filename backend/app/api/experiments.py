@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile, File
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.api.dependencies import require_permission
+from app.models.experiment import Experiment
 from app.schemas.audit import AuditLogEntry, AuditLogResponse
 from app.schemas.experiment import (
     CustomFieldResponse,
@@ -26,6 +28,13 @@ from app.services.sample_batch_service import SampleBatchService
 from app.services.csv_service import generate_sample_template, parse_sample_csv, preview_sample_csv
 
 router = APIRouter(prefix="/api/experiments", tags=["experiments"])
+
+
+async def _experiment_column_aliases(session: AsyncSession, experiment_id: int) -> dict[str, str] | None:
+    """Return the persisted GSheet header aliases for an experiment, if any."""
+    result = await session.execute(select(Experiment.column_aliases).where(Experiment.id == experiment_id))
+    row = result.first()
+    return row[0] if row else None
 
 
 def _user_summary(user) -> UserSummary | None:
@@ -170,6 +179,7 @@ async def get_experiment(
                 field_name=cf.field_name,
                 field_value=cf.field_value,
                 field_type=cf.field_type,
+                is_required=cf.is_required,
             )
             for cf in experiment.custom_fields
         ],
@@ -262,6 +272,7 @@ async def list_experiment_samples(
             status=s.status,
             created_at=s.created_at,
             updated_at=s.updated_at,
+            custom_fields=list(s.custom_fields or []),
         )
         for s in samples
     ]
@@ -306,6 +317,7 @@ async def create_sample(
         status=sample.status,
         created_at=sample.created_at,
         updated_at=sample.updated_at,
+        custom_fields=list(sample.custom_fields or []),
     )
 
 
@@ -345,7 +357,8 @@ async def preview_samples_csv(
     session: AsyncSession = Depends(get_session),
 ):
     content = await file.read()
-    return preview_sample_csv(content)
+    aliases = await _experiment_column_aliases(session, experiment_id)
+    return preview_sample_csv(content, aliases=aliases)
 
 
 @router.post("/{experiment_id}/samples/upload/confirm")
@@ -368,7 +381,10 @@ async def confirm_samples_csv(
         except (json_mod.JSONDecodeError, TypeError):
             raise HTTPException(400, detail="Invalid column_mappings JSON")
 
-    parsed_samples, parse_errors, custom_field_rows = parse_sample_csv(content, experiment_id, column_mappings=mappings)
+    aliases = await _experiment_column_aliases(session, experiment_id)
+    parsed_samples, parse_errors, custom_field_rows = parse_sample_csv(
+        content, experiment_id, column_mappings=mappings, aliases=aliases
+    )
 
     if not parsed_samples and parse_errors:
         raise HTTPException(400, detail={"errors": parse_errors})
@@ -416,9 +432,12 @@ async def upload_samples_csv(
     current_user: dict = require_permission("experiments", "upload"),
     session: AsyncSession = Depends(get_session),
 ):
+    from app.models.sample_custom_field import SampleCustomField
+
     user_id = int(current_user["sub"])
     content = await file.read()
-    parsed_samples, parse_errors, _ = parse_sample_csv(content, experiment_id)
+    aliases = await _experiment_column_aliases(session, experiment_id)
+    parsed_samples, parse_errors, custom_field_rows = parse_sample_csv(content, experiment_id, aliases=aliases)
 
     if not parsed_samples and parse_errors:
         raise HTTPException(400, detail={"errors": parse_errors})
@@ -429,6 +448,15 @@ async def upload_samples_csv(
         try:
             sample = await SampleService.create_sample(session, experiment_id, user_id, sample_data)
             created.append(sample)
+            if i < len(custom_field_rows) and custom_field_rows[i]:
+                for field_name, field_value in custom_field_rows[i].items():
+                    session.add(
+                        SampleCustomField(
+                            sample_id=sample.id,
+                            field_name=field_name,
+                            field_value=str(field_value),
+                        )
+                    )
         except HTTPException as e:
             create_errors.append(f"Sample {i + 1}: {e.detail}")
 

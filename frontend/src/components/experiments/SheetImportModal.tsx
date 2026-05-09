@@ -37,6 +37,7 @@ interface SheetImportModalProps {
   onApply: (result: {
     fieldDefaults: FieldDefaultValue[];
     customFields: { name: string; value: string; required: boolean }[];
+    columnAliases: Record<string, string>;
   }) => void;
   existingFieldDefaults: FieldDefaultValue[];
   existingCustomFields: { name: string; value: string; required: boolean }[];
@@ -113,6 +114,7 @@ export function SheetImportModal({
 
     const newFieldDefaults: FieldDefaultValue[] = [];
     const newCustomFields: { name: string; value: string; required: boolean }[] = [];
+    const columnAliases: Record<string, string> = {};
 
     // Add recognized defaultable columns as field defaults (if not already set)
     for (const col of preview.recognized_columns) {
@@ -127,9 +129,13 @@ export function SheetImportModal({
       // don't need any action -- they'll be handled during sample CSV import
     }
 
-    // Process user mappings for unknown columns
-    for (const [, mapping] of Object.entries(columnMappings)) {
+    // Process user mappings for unknown columns. Record each non-skip mapping
+    // as a column alias so subsequent sample imports from the same sheet can
+    // map the column without manual intervention.
+    for (const [column, mapping] of Object.entries(columnMappings)) {
       if (mapping === "skip") continue;
+
+      columnAliases[column] = mapping;
 
       if (mapping.startsWith("custom:")) {
         const fieldName = mapping.slice("custom:".length);
@@ -146,11 +152,11 @@ export function SheetImportModal({
           });
         }
       }
-      // Non-defaultable sample field mappings are informational --
-      // the user now knows the field exists and will be used on sample import
+      // Non-defaultable sample field mappings still get aliased above so the
+      // sample import knows where to route the column data.
     }
 
-    onApply({ fieldDefaults: newFieldDefaults, customFields: newCustomFields });
+    onApply({ fieldDefaults: newFieldDefaults, customFields: newCustomFields, columnAliases });
     onClose();
   }
 

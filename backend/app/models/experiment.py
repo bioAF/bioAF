@@ -57,6 +57,7 @@ class Experiment(Base):
     design_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     protocol_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     variables_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    column_aliases: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     organization = relationship("Organization")
     project = relationship("Project", back_populates="experiments")

@@ -114,22 +114,26 @@ def _normalize_header(raw: str) -> str:
 def _build_header_map(
     fieldnames: list[str],
     column_mappings: dict[str, str] | None = None,
+    aliases: dict[str, str] | None = None,
 ) -> tuple[dict[str, str], list[str]]:
-    """Build header-to-field mapping. Returns (header_map, unknown_columns)."""
+    """Build header-to-field mapping. Returns (header_map, unknown_columns).
+
+    Lookup priority for an unrecognized header: user-provided ``column_mappings``
+    win, then experiment-persisted ``aliases``, then the global ``COLUMN_MAP``.
+    Both ``column_mappings`` and ``aliases`` are keyed by the normalized header.
+    """
     header_map: dict[str, str] = {}
     unknown_columns: list[str] = []
 
     for raw_header in fieldnames:
         clean = _normalize_header(raw_header)
 
-        # Check user-provided mappings first
         if column_mappings and clean in column_mappings:
-            target = column_mappings[clean]
-            if target.startswith("custom:"):
-                # Custom field -- store as-is, handled by caller
-                header_map[raw_header] = target
-            else:
-                header_map[raw_header] = target
+            header_map[raw_header] = column_mappings[clean]
+            continue
+
+        if aliases and clean in aliases:
+            header_map[raw_header] = aliases[clean]
             continue
 
         if clean in COLUMN_MAP:
@@ -217,7 +221,10 @@ def generate_sample_template() -> bytes:
     return output.getvalue().encode("utf-8")
 
 
-def preview_sample_csv(file_content: bytes) -> dict[str, Any]:
+def preview_sample_csv(
+    file_content: bytes,
+    aliases: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Parse a CSV file and return a preview without creating any samples.
 
     Returns a dict with:
@@ -252,7 +259,7 @@ def preview_sample_csv(file_content: bytes) -> dict[str, Any]:
             "errors": ["No header row found"],
         }
 
-    header_map, unknown_columns = _build_header_map(list(reader.fieldnames))
+    header_map, unknown_columns = _build_header_map(list(reader.fieldnames), aliases=aliases)
 
     recognized_columns = [{"csv_header": raw, "mapped_to": field} for raw, field in header_map.items()]
 
@@ -276,6 +283,7 @@ def parse_sample_csv(
     file_content: bytes,
     experiment_id: int,
     column_mappings: dict[str, str] | None = None,
+    aliases: dict[str, str] | None = None,
 ) -> tuple[list[SampleCreate], list[str], list[dict[str, Any]]]:
     """Parse a CSV file into SampleCreate objects.
 
@@ -285,6 +293,8 @@ def parse_sample_csv(
         column_mappings: Optional user-provided mappings for unknown columns.
             Keys are normalized header names, values are either a sample field
             name (e.g. "prep_notes") or "custom:field_name" for custom fields.
+        aliases: Optional experiment-persisted header→target mappings, used as
+            a fallback when ``column_mappings`` does not cover a header.
 
     Returns:
         (samples, errors, custom_field_rows) where custom_field_rows is a list
@@ -303,7 +313,7 @@ def parse_sample_csv(
     if not reader.fieldnames:
         return [], ["No header row found"], []
 
-    header_map, _ = _build_header_map(list(reader.fieldnames), column_mappings)
+    header_map, _ = _build_header_map(list(reader.fieldnames), column_mappings, aliases=aliases)
 
     sample_dicts, custom_field_rows, errors, _ = _parse_rows(text, delimiter, header_map)
 
