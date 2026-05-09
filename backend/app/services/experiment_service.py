@@ -10,9 +10,10 @@ from app.models.sample_batch import SampleBatch
 from app.services.snapshot_utils import serialize_entity
 from app.models.experiment import Experiment, EXPERIMENT_STATUS_TRANSITIONS
 from app.models.experiment_custom_field import ExperimentCustomField
-from app.models.experiment_field_default import ExperimentFieldDefault
+from app.models.experiment_field_default import DEFAULTABLE_SAMPLE_FIELDS, ExperimentFieldDefault
+from app.models.experiment_template import ExperimentTemplate
 from app.models.sample import Sample
-from app.schemas.experiment import ExperimentCreate, ExperimentUpdate
+from app.schemas.experiment import CustomFieldValue, ExperimentCreate, ExperimentUpdate, FieldDefaultValue
 from app.services.audit_service import log_action
 from app.services.code_service import CodeService
 from app.services.event_bus import event_bus
@@ -44,27 +45,30 @@ class ExperimentService:
         session.add(experiment)
         await session.flush()
 
-        if data.custom_fields:
-            for cf in data.custom_fields:
-                custom_field = ExperimentCustomField(
+        merged_defaults, merged_customs = await ExperimentService._merge_template_config(
+            session, data
+        )
+
+        for fd in merged_defaults:
+            session.add(
+                ExperimentFieldDefault(
+                    experiment_id=experiment.id,
+                    field_name=fd.field_name,
+                    default_value=fd.default_value,
+                    is_required=fd.is_required,
+                )
+            )
+        for cf in merged_customs:
+            session.add(
+                ExperimentCustomField(
                     experiment_id=experiment.id,
                     field_name=cf.field_name,
                     field_value=cf.field_value,
                     field_type=cf.field_type,
                     is_required=cf.is_required,
                 )
-                session.add(custom_field)
-            await session.flush()
-
-        if data.field_defaults:
-            for fd in data.field_defaults:
-                field_default = ExperimentFieldDefault(
-                    experiment_id=experiment.id,
-                    field_name=fd.field_name,
-                    default_value=fd.default_value,
-                    is_required=fd.is_required,
-                )
-                session.add(field_default)
+            )
+        if merged_defaults or merged_customs:
             await session.flush()
 
         await log_action(
@@ -77,6 +81,48 @@ class ExperimentService:
             snapshot=serialize_entity(experiment),
         )
         return experiment
+
+    @staticmethod
+    async def _merge_template_config(
+        session: AsyncSession, data: ExperimentCreate
+    ) -> tuple[list[FieldDefaultValue], list[CustomFieldValue]]:
+        """Merge template-defined required/custom fields with user-supplied values.
+
+        User-supplied default_value/field_value wins; template's is_required and
+        field_type are layered on. Field names not in DEFAULTABLE_SAMPLE_FIELDS are
+        skipped for field_defaults (they cannot be persisted there).
+        """
+        user_defaults = {fd.field_name: fd for fd in (data.field_defaults or [])}
+        user_customs = {cf.field_name: cf for cf in (data.custom_fields or [])}
+
+        if data.template_id:
+            template = await session.get(ExperimentTemplate, data.template_id)
+            if template:
+                for field_name in (template.required_fields_json or {}).get("sample_fields", []) or []:
+                    if field_name not in DEFAULTABLE_SAMPLE_FIELDS:
+                        continue
+                    existing = user_defaults.get(field_name)
+                    user_defaults[field_name] = FieldDefaultValue(
+                        field_name=field_name,
+                        default_value=existing.default_value if existing else None,
+                        is_required=True,
+                    )
+
+                for tf in (template.custom_fields_schema_json or {}).get("fields", []) or []:
+                    name = tf.get("name")
+                    if not name:
+                        continue
+                    ftype = tf.get("type") or "string"
+                    required = bool(tf.get("required", False))
+                    existing = user_customs.get(name)
+                    user_customs[name] = CustomFieldValue(
+                        field_name=name,
+                        field_value=existing.field_value if existing else "",
+                        field_type=ftype,
+                        is_required=(existing.is_required if existing else False) or required,
+                    )
+
+        return list(user_defaults.values()), list(user_customs.values())
 
     @staticmethod
     async def update_experiment(

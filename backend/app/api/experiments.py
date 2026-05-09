@@ -170,6 +170,7 @@ async def get_experiment(
                 field_name=cf.field_name,
                 field_value=cf.field_value,
                 field_type=cf.field_type,
+                is_required=cf.is_required,
             )
             for cf in experiment.custom_fields
         ],
