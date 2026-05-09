@@ -41,6 +41,7 @@ class ExperimentService:
             design_type=data.design_type,
             protocol_version=data.protocol_version,
             variables_json=data.variables_json,
+            column_aliases=data.column_aliases,
         )
         session.add(experiment)
         await session.flush()
@@ -149,6 +150,7 @@ class ExperimentService:
             "design_type",
             "protocol_version",
             "variables_json",
+            "column_aliases",
         ]:
             new_val = getattr(data, field, None)
             if new_val is not None:
