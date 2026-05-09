@@ -262,6 +262,7 @@ async def list_experiment_samples(
             status=s.status,
             created_at=s.created_at,
             updated_at=s.updated_at,
+            custom_fields=list(s.custom_fields or []),
         )
         for s in samples
     ]
@@ -306,6 +307,7 @@ async def create_sample(
         status=sample.status,
         created_at=sample.created_at,
         updated_at=sample.updated_at,
+        custom_fields=list(sample.custom_fields or []),
     )
 
 
