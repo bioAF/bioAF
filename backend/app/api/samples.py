@@ -41,6 +41,7 @@ def _sample_response(s) -> SampleResponse:
         status=s.status,
         created_at=s.created_at,
         updated_at=s.updated_at,
+        custom_fields=list(s.custom_fields or []),
     )
 
 
