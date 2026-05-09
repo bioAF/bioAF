@@ -226,8 +226,11 @@ async def preview_sheet_samples(
     Returns the same format as the CSV preview endpoint so the frontend
     can reuse the same mapping UI.
     """
+    from app.api.experiments import _experiment_column_aliases
+
     csv_bytes, _ = await _read_sheet_as_csv(body, session)
-    return preview_sample_csv(csv_bytes)
+    aliases = await _experiment_column_aliases(session, experiment_id)
+    return preview_sample_csv(csv_bytes, aliases=aliases)
 
 
 @router.post("/{experiment_id}/samples/confirm")
@@ -241,14 +244,16 @@ async def confirm_sheet_samples(
 
     Uses the same parsing and creation logic as the CSV confirm endpoint.
     """
+    from app.api.experiments import _experiment_column_aliases
     from app.models.sample_custom_field import SampleCustomField
     from app.services.sample_service import SampleService
 
     user_id = int(current_user["sub"])
     csv_bytes, _ = await _read_sheet_as_csv(SheetPreviewRequest(sheet_url=body.sheet_url), session)
 
+    aliases = await _experiment_column_aliases(session, experiment_id)
     parsed_samples, parse_errors, custom_field_rows = parse_sample_csv(
-        csv_bytes, experiment_id, column_mappings=body.column_mappings or None
+        csv_bytes, experiment_id, column_mappings=body.column_mappings or None, aliases=aliases
     )
 
     if not parsed_samples and parse_errors:

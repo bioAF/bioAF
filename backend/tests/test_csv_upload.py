@@ -94,3 +94,71 @@ async def test_csv_upload_endpoint(client, admin_token):
     data = response.json()
     assert data["created_count"] == 2
     assert data["error_count"] == 0
+
+
+def test_parse_uses_aliases_for_unknown_headers():
+    # 'library' isn't in COLUMN_MAP, but the experiment has aliased it to library_prep_method
+    content = b"sample_id,Library\nS001,Chromium 3' v3\n"
+    aliases = {"library": "library_prep_method"}
+    samples, errors, _ = parse_sample_csv(content, experiment_id=1, aliases=aliases)
+    assert errors == []
+    assert len(samples) == 1
+    assert samples[0].library_prep_method == "Chromium 3' v3"
+
+
+def test_user_mappings_take_priority_over_aliases():
+    # User mapping 'library' -> custom:Library wins over alias to library_prep_method
+    content = b"sample_id,Library\nS001,LIB123\n"
+    samples, errors, custom_rows = parse_sample_csv(
+        content,
+        experiment_id=1,
+        column_mappings={"library": "custom:Library"},
+        aliases={"library": "library_prep_method"},
+    )
+    assert errors == []
+    assert samples[0].library_prep_method is None
+    assert custom_rows[0] == {"Library": "LIB123"}
+
+
+def test_alias_routes_to_custom_field():
+    content = b"sample_id,centrifuge_number\nS001,42\n"
+    samples, errors, custom_rows = parse_sample_csv(
+        content,
+        experiment_id=1,
+        aliases={"centrifuge_number": "custom:centrifuge_number"},
+    )
+    assert errors == []
+    assert custom_rows[0] == {"centrifuge_number": "42"}
+
+
+@pytest.mark.asyncio
+async def test_experiment_persists_column_aliases(client, admin_token):
+    resp = await client.post(
+        "/api/experiments",
+        json={
+            "name": "Aliased Experiment",
+            "column_aliases": {"library": "library_prep_method", "centrifuge_number": "custom:centrifuge_number"},
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    exp_id = resp.json()["id"]
+
+    csv_content = b"sample_id,Library,centrifuge_number\nS001,Chromium 3' v3,42\n"
+    response = await client.post(
+        f"/api/experiments/{exp_id}/samples/upload",
+        files={"file": ("samples.csv", io.BytesIO(csv_content), "text/csv")},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["created_count"] == 1
+
+    # The sample should have library_prep_method populated and a centrifuge_number custom field
+    samples_resp = await client.get(
+        f"/api/experiments/{exp_id}/samples",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    [s] = samples_resp.json()
+    assert s["library_prep_method"] == "Chromium 3' v3"
+    by_name = {cf["field_name"]: cf["field_value"] for cf in s["custom_fields"]}
+    assert by_name == {"centrifuge_number": "42"}

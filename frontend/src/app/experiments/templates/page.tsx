@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { TemplateSheetImportModal } from "@/components/experiments/TemplateSheetImportModal";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { ExperimentTemplate, TemplateCreateRequest } from "@/lib/types";
@@ -15,6 +16,11 @@ const STANDARD_SAMPLE_FIELDS = [
   "donor_source",
   "treatment_condition",
   "chemistry_version",
+  "sample_batch_code",
+  "sequencing_batch_code",
+  "molecule_type",
+  "library_prep_method",
+  "library_layout",
 ];
 
 export default function ExperimentTemplatesPage() {
@@ -23,6 +29,7 @@ export default function ExperimentTemplatesPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [showSheetImport, setShowSheetImport] = useState(false);
 
   const [form, setForm] = useState<TemplateCreateRequest>({
     name: "",
@@ -113,6 +120,18 @@ export default function ExperimentTemplatesPage() {
     setShowForm(true);
   }
 
+  function handleSheetImportApply(result: {
+    requiredSampleFields: string[];
+    customFields: { name: string; type: string; required: boolean }[];
+  }) {
+    const requiredFields = (form.required_fields_json as Record<string, string[]>) || { sample_fields: [] };
+    setForm({
+      ...form,
+      required_fields_json: { ...requiredFields, sample_fields: result.requiredSampleFields },
+      custom_fields_schema_json: { fields: result.customFields },
+    });
+  }
+
   const requiredSampleFields = ((form.required_fields_json as Record<string, string[]>)?.sample_fields) || [];
   const customFields = ((form.custom_fields_schema_json as { fields: Array<{ name: string; type: string; required: boolean }> })?.fields) || [];
 
@@ -157,7 +176,16 @@ export default function ExperimentTemplatesPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Required Sample Fields</label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-700">Required Sample Fields</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowSheetImport(true)}
+                    className="text-sm text-bioaf-600 hover:text-bioaf-700"
+                  >
+                    Import from Google Sheet
+                  </button>
+                </div>
                 <div className="flex flex-wrap gap-3">
                   {STANDARD_SAMPLE_FIELDS.map((field) => (
                     <label key={field} className="flex items-center gap-2 text-sm">
@@ -243,6 +271,15 @@ export default function ExperimentTemplatesPage() {
                 </div>
               ))}
             </div>
+          )}
+
+          {showSheetImport && (
+            <TemplateSheetImportModal
+              onClose={() => setShowSheetImport(false)}
+              onApply={handleSheetImportApply}
+              existingRequiredSampleFields={requiredSampleFields}
+              existingCustomFields={customFields}
+            />
           )}
         </main>
       </div>

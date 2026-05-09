@@ -1,5 +1,58 @@
 # Release Notes
 
+## v0.11.6
+
+Fixes a cluster of bugs in the experiment / template / sample creation
+flow and brings the experiment-template UI closer to parity with the
+experiment-creation form.
+
+### Bug fixes
+
+- **Sample detail modal now displays custom fields.** The
+  `/api/experiments/{id}/samples` and single-sample endpoints were
+  silently dropping the `custom_fields` list when constructing
+  `SampleResponse`, even though values were persisted in
+  `sample_custom_fields`.
+- **Experiments created from a template now inherit the template's
+  required and custom fields.** `ExperimentService.create_experiment`
+  previously stored `template_id` on the experiment but never read the
+  template's `required_fields_json` or `custom_fields_schema_json`.
+  Templates' required sample fields are now copied as
+  `experiment_field_defaults` rows with `is_required=true`, and custom
+  field schemas are copied as `experiment_custom_fields` rows with
+  `field_type` and `is_required` preserved. User-supplied
+  `default_value` / `field_value` still wins.
+- **The "Required" indicator now renders for custom fields on the
+  experiment Overview.** The detail-response builder was constructing
+  `CustomFieldResponse` without `is_required`, so the flag always read
+  `false` regardless of database state.
+
+### New features
+
+- **GSheet column aliases persist across sample imports.** When mapping
+  GSheet headers to sample fields or custom fields during experiment
+  creation, the mapping is now stored in `experiments.column_aliases`
+  (additive JSONB column, migration `074`). Subsequent sample-import
+  preview and confirm endpoints consult these aliases as a fallback
+  after user-supplied mappings, so re-importing the same sheet routes
+  columns correctly without re-mapping. User mappings still take
+  priority over aliases.
+- **Template form now exposes all defaultable sample fields.**
+  Previously only 5 of the 10 defaultable fields were available;
+  `sample_batch_code`, `sequencing_batch_code`, `molecule_type`,
+  `library_prep_method`, and `library_layout` are now selectable.
+- **GSheet import for templates.** A new "Import from Google Sheet"
+  flow on the template form reads sheet headers via
+  `/api/v1/sheets/preview` and lets the user mark recognized columns
+  as required, route unknown columns to existing sample fields, or add
+  them as typed custom fields with required toggles.
+
+### Migration
+
+- `074_add_column_aliases_to_experiments` adds a nullable
+  `column_aliases` JSONB column to the `experiments` table. Additive
+  only; safe to apply on existing installs.
+
 ## v0.11.5
 
 Repository move from the personal `not-that-guy-again/bioAF` namespace
