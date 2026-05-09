@@ -32,9 +32,7 @@ router = APIRouter(prefix="/api/experiments", tags=["experiments"])
 
 async def _experiment_column_aliases(session: AsyncSession, experiment_id: int) -> dict[str, str] | None:
     """Return the persisted GSheet header aliases for an experiment, if any."""
-    result = await session.execute(
-        select(Experiment.column_aliases).where(Experiment.id == experiment_id)
-    )
+    result = await session.execute(select(Experiment.column_aliases).where(Experiment.id == experiment_id))
     row = result.first()
     return row[0] if row else None
 
@@ -439,9 +437,7 @@ async def upload_samples_csv(
     user_id = int(current_user["sub"])
     content = await file.read()
     aliases = await _experiment_column_aliases(session, experiment_id)
-    parsed_samples, parse_errors, custom_field_rows = parse_sample_csv(
-        content, experiment_id, aliases=aliases
-    )
+    parsed_samples, parse_errors, custom_field_rows = parse_sample_csv(content, experiment_id, aliases=aliases)
 
     if not parsed_samples and parse_errors:
         raise HTTPException(400, detail={"errors": parse_errors})

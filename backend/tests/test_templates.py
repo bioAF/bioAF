@@ -182,9 +182,7 @@ async def test_user_provided_values_override_template(client, admin_token):
         json={
             "name": "Defaults Template",
             "required_fields_json": {"sample_fields": ["organism"]},
-            "custom_fields_schema_json": {
-                "fields": [{"name": "Notes", "type": "string", "required": True}]
-            },
+            "custom_fields_schema_json": {"fields": [{"name": "Notes", "type": "string", "required": True}]},
         },
         headers={"Authorization": f"Bearer {admin_token}"},
     )
@@ -207,10 +205,12 @@ async def test_user_provided_values_override_template(client, admin_token):
     )
     exp_id = exp_resp.json()["id"]
 
-    detail = (await client.get(
-        f"/api/experiments/{exp_id}",
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )).json()
+    detail = (
+        await client.get(
+            f"/api/experiments/{exp_id}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    ).json()
 
     by_field = {fd["field_name"]: fd for fd in detail["field_defaults"]}
     # Template wins on is_required even if user passed None; user value preserved

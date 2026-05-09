@@ -46,9 +46,7 @@ class ExperimentService:
         session.add(experiment)
         await session.flush()
 
-        merged_defaults, merged_customs = await ExperimentService._merge_template_config(
-            session, data
-        )
+        merged_defaults, merged_customs = await ExperimentService._merge_template_config(session, data)
 
         for fd in merged_defaults:
             session.add(
