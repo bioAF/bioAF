@@ -34,10 +34,11 @@ async def get_current_version(
 
 @router.get("/check", response_model=UpdateCheckResponse)
 async def check_for_updates(
+    force: bool = Query(False, description="Bypass the in-memory cache and query GitHub directly"),
     current_user: dict = require_permission("infrastructure", "view"),
 ):
     org_id = current_user["org_id"]
-    return await UpgradeService.check_for_updates(org_id)
+    return await UpgradeService.check_for_updates(org_id, force=force)
 
 
 @router.get("/history", response_model=UpgradeHistoryListResponse)
