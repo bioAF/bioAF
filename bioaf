@@ -8,8 +8,8 @@ set -euo pipefail
 # Paths
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-COMPOSE_FILE="$SCRIPT_DIR/docker/docker-compose.yml"
-ENV_FILE="$SCRIPT_DIR/docker/.env"
+COMPOSE_FILE="${BIOAF_COMPOSE_FILE:-$SCRIPT_DIR/docker/docker-compose.yml}"
+ENV_FILE="${BIOAF_ENV_FILE:-$SCRIPT_DIR/docker/.env}"
 
 DC="docker compose -f $COMPOSE_FILE --env-file $ENV_FILE"
 
@@ -289,12 +289,15 @@ for v in cfg.get('volumes', {}).values():
     # --local-build short-circuits the registry lookup entirely.
     if [ "$local_build" = true ]; then
         bold "Building images from local source (--local-build)..."
-        set_image_tag
+        export BIOAF_IMAGE_TAG="v$(get_current_version)"
         $DC_BUILD
         green "Local build complete."
     else
         resolve_and_pull_images "$setup_version"
     fi
+    # Pin whichever tag we ended up with so future start/restart commands
+    # always use this exact version, independent of the worktree.
+    pin_image_tag "${BIOAF_IMAGE_TAG:-v$(get_current_version)}"
     $DC up -d
 
     # Wait for DB
@@ -401,7 +404,11 @@ print(json.dumps(result))
 
 cmd_start() {
     bold "=== Starting Services ==="
-    set_image_tag
+    # Use whatever version is pinned in docker/.env. Never derive the image
+    # tag from the worktree -- a `git pull` followed by `bioaf restart` must
+    # not silently switch versions. Bootstrap the pin from the running
+    # container (or disk, as a last resort) for legacy installs.
+    ensure_pinned_image_tag
 
     for svc in db backend frontend nginx; do
         echo "Starting $svc..."
@@ -638,9 +645,49 @@ verify_release_images() {
     return 0
 }
 
-set_image_tag() {
-    # Export the image tag so docker-compose.yml resolves ghcr.io image references.
-    export BIOAF_IMAGE_TAG="v$(get_current_version)"
+pin_image_tag() {
+    # Persist BIOAF_IMAGE_TAG=<tag> in docker/.env so docker compose uses this
+    # image on every subsequent invocation -- regardless of what the worktree
+    # is on. This is the source of truth for which image is currently deployed.
+    # Only operations that intentionally change the deployed version (setup,
+    # update, build) should call this -- start/restart must NOT.
+    local tag="${1:-}"
+    if [ -z "$tag" ]; then
+        red "ERROR: pin_image_tag requires a tag argument"
+        return 1
+    fi
+
+    [ -f "$ENV_FILE" ] || touch "$ENV_FILE"
+
+    if grep -q '^BIOAF_IMAGE_TAG=' "$ENV_FILE" 2>/dev/null; then
+        local tmp
+        tmp=$(mktemp)
+        awk -v tag="$tag" '/^BIOAF_IMAGE_TAG=/ { print "BIOAF_IMAGE_TAG=" tag; next } { print }' "$ENV_FILE" > "$tmp"
+        mv "$tmp" "$ENV_FILE"
+    else
+        # Ensure trailing newline before appending so we don't merge with the prior line.
+        if [ -s "$ENV_FILE" ] && [ "$(tail -c 1 "$ENV_FILE" | wc -l)" -eq 0 ]; then
+            echo "" >> "$ENV_FILE"
+        fi
+        echo "BIOAF_IMAGE_TAG=$tag" >> "$ENV_FILE"
+    fi
+    # Also export so the current process (e.g. an immediately-following $DC up
+    # call within the same script) sees the new value without re-reading the file.
+    export BIOAF_IMAGE_TAG="$tag"
+}
+
+ensure_pinned_image_tag() {
+    # If docker/.env already pins BIOAF_IMAGE_TAG, do nothing -- that pin is
+    # the authoritative deployed version. Otherwise (legacy install upgrading
+    # to a script that uses pinning), bootstrap from the running container so
+    # we don't accidentally switch versions on the next start. Falls back to
+    # the on-disk version only if no container exists (fresh install).
+    if [ -f "$ENV_FILE" ] && grep -q '^BIOAF_IMAGE_TAG=' "$ENV_FILE" 2>/dev/null; then
+        return 0
+    fi
+    local version
+    version=$(get_running_version)
+    pin_image_tag "v${version}"
 }
 
 resolve_and_pull_images() {
@@ -846,7 +893,9 @@ STATUSEOF
 STATUSEOF
 
     echo ""
-    export BIOAF_IMAGE_TAG="v${target_version}"
+    # Pin the new tag in docker/.env so this version sticks for any future
+    # start/restart, not just this $DC up call.
+    pin_image_tag "v${target_version}"
     bold "Pulling pre-built images..."
     $DC_PULL backend frontend
 
@@ -899,7 +948,11 @@ STATUSEOF
 }
 
 cmd_build() {
-    set_image_tag
+    # `build` is the local-dev counterpart to `update` -- it produces a new
+    # image at the worktree's version and pins it as the deployed tag, so the
+    # next `start`/`restart` runs that build instead of whatever was there
+    # before.
+    pin_image_tag "v$(get_current_version)"
     local service="${1:-}"
     if [ -n "$service" ]; then
         bold "=== Building $service ==="
