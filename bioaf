@@ -513,8 +513,10 @@ cmd_backup() {
 }
 
 get_current_version() {
-    # Read version from backend/pyproject.toml (single source of truth).
-    # Try tomllib (Python 3.11+) first, fall back to grep for older Python.
+    # Read version from backend/pyproject.toml (single source of truth on disk).
+    # Use this for image-tag selection during build/start, NOT for "what is currently
+    # deployed" -- a partial update can leave the worktree at a newer tag than
+    # the running container. Use get_running_version for that.
     local version
     version=$(python3 -c "
 import tomllib, pathlib
@@ -528,6 +530,112 @@ print(data['project']['version'])
     fi
 
     echo "${version:-unknown}"
+}
+
+parse_version_from_image() {
+    # Extract the version (without leading 'v') from a docker image reference.
+    # Returns 1 if the input has no parseable version tag (no tag, "latest",
+    # or empty input).
+    #   "ghcr.io/bioaf/bioaf-backend:v0.11.5" -> "0.11.5"
+    #   "ghcr.io/bioaf/bioaf-backend:0.11.5"  -> "0.11.5"
+    #   "ghcr.io/bioaf/bioaf-backend:latest"  -> error (1)
+    #   "ghcr.io/bioaf/bioaf-backend"         -> error (1)
+    local image="${1:-}"
+    [ -z "$image" ] && return 1
+    case "$image" in
+        *:*) ;;
+        *) return 1 ;;
+    esac
+    local tag="${image##*:}"
+    [ -z "$tag" ] && return 1
+    [ "$tag" = "latest" ] && return 1
+    echo "${tag#v}"
+}
+
+get_running_version() {
+    # Returns the version of the currently running backend container, e.g. "0.11.5".
+    # Falls back to the on-disk version (get_current_version) if no container is
+    # running, the image cannot be inspected, or the image tag is unparseable
+    # (e.g. "latest"). Always prints something (never empty).
+    local cid image version
+    cid=$($DC ps -q backend 2>/dev/null | head -1)
+    if [ -n "$cid" ]; then
+        image=$(docker inspect "$cid" --format '{{.Config.Image}}' 2>/dev/null) || image=""
+        if [ -n "$image" ] && version=$(parse_version_from_image "$image"); then
+            echo "$version"
+            return 0
+        fi
+    fi
+    get_current_version
+}
+
+# Repos in the bioAF release bundle. Kept in sync with .github/workflows/release.yml
+# -- if a new image is added there, add it here so the update preflight checks it.
+RELEASE_IMAGE_REPOS=(
+    "bioaf/bioaf-backend"
+    "bioaf/bioaf-frontend"
+    "bioaf/bioaf-cellxgene"
+)
+
+verify_image_available() {
+    # Check whether <repo>:<tag> exists on ghcr.io.
+    # Exits:  0 = available, 1 = manifest missing, 2 = check itself failed (network/tooling).
+    local repo="$1"
+    local tag="$2"
+    local token status
+    token=$(curl -sf --max-time 10 \
+        "https://ghcr.io/token?service=ghcr.io&scope=repository:${repo}:pull" 2>/dev/null \
+        | python3 -c "import sys, json; print(json.load(sys.stdin).get('token', ''))" 2>/dev/null) || token=""
+    if [ -z "$token" ]; then
+        return 2
+    fi
+    status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+        -H "Authorization: Bearer $token" \
+        -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json" \
+        "https://ghcr.io/v2/${repo}/manifests/${tag}" 2>/dev/null) || status=""
+    case "$status" in
+        200) return 0 ;;
+        404) return 1 ;;
+        *)   return 2 ;;
+    esac
+}
+
+verify_release_images() {
+    # Verify all release images for the given version are pullable from ghcr.io.
+    # Returns 0 if all available, 1 if one or more is missing, 2 if the check
+    # itself failed for any image (network error, etc.).
+    # Prints a human-readable error to stderr-style output on failure.
+    local version="$1"
+    local tag="v${version}"
+    local missing=()
+    local check_failed=()
+    local repo status
+    for repo in "${RELEASE_IMAGE_REPOS[@]}"; do
+        status=0
+        verify_image_available "$repo" "$tag" || status=$?
+        case "$status" in
+            0) ;;
+            1) missing+=("ghcr.io/${repo}:${tag}") ;;
+            *) check_failed+=("ghcr.io/${repo}:${tag}") ;;
+        esac
+    done
+    if [ ${#check_failed[@]} -gt 0 ]; then
+        red "ERROR: Could not verify release image availability (network or registry error):"
+        for img in "${check_failed[@]}"; do
+            echo "  - $img"
+        done
+        return 2
+    fi
+    if [ ${#missing[@]} -gt 0 ]; then
+        red "ERROR: The update cannot be run right now -- the following release images are not yet published:"
+        for img in "${missing[@]}"; do
+            echo "  - $img"
+        done
+        echo ""
+        yellow "The release publish workflow may still be in progress. Please try again in a few minutes."
+        return 1
+    fi
+    return 0
 }
 
 set_image_tag() {
@@ -620,7 +728,11 @@ get_latest_github_version() {
 cmd_update() {
     local target_version="${1:-}"
     local current_version
-    current_version=$(get_current_version)
+    # Use the running container's image tag, NOT the on-disk pyproject.toml.
+    # A previously failed update can leave the worktree checked out at the new
+    # tag while the running containers are still on the old version, which
+    # caused this short-circuit to no-op silently before.
+    current_version=$(get_running_version)
 
     # If no version specified, fetch the latest from GitHub
     if [ -z "$target_version" ]; then
@@ -663,9 +775,35 @@ cmd_update() {
         fi
     fi
 
-    # Write status file for the backend to track progress
     local status_dir="$SCRIPT_DIR/update-status"
     mkdir -p "$status_dir"
+
+    # Pre-flight: verify all release images exist before doing anything destructive.
+    # Without this, an in-progress release-publish workflow lets us git-checkout
+    # the new tag and then fail at `docker compose pull`, leaving the worktree
+    # in an inconsistent state.
+    cat > "$status_dir/current.json" <<STATUSEOF
+{"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "verify_images", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+STATUSEOF
+    echo ""
+    bold "Verifying release images are published..."
+    local verify_status=0
+    verify_release_images "$target_version" || verify_status=$?
+    if [ $verify_status -ne 0 ]; then
+        local err_msg
+        if [ $verify_status -eq 1 ]; then
+            err_msg="Release images for v${target_version} are not yet published. The release publish workflow may still be in progress -- please try again in a few minutes."
+        else
+            err_msg="Could not verify release image availability (network or registry error)."
+        fi
+        cat > "$status_dir/current.json" <<STATUSEOF
+{"status": "failed", "from_version": "$current_version", "to_version": "$target_version", "step": "verify_images", "error": "$err_msg", "completed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+STATUSEOF
+        exit 1
+    fi
+    green "All release images are available."
+
+    # Back up the database before updating
     cat > "$status_dir/current.json" <<STATUSEOF
 {"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "backup", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
 STATUSEOF
@@ -746,9 +884,10 @@ STATUSEOF
     bold "Running migrations..."
     $DC exec -T backend alembic -c alembic/alembic.ini upgrade head
 
-    # Write success status
+    # Write success status -- read from the running container, which is now the
+    # source of truth (the worktree was already checked out before restart).
     local new_version
-    new_version=$(get_current_version)
+    new_version=$(get_running_version)
     cat > "$status_dir/current.json" <<STATUSEOF
 {"status": "completed", "from_version": "$current_version", "to_version": "$new_version", "completed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
 STATUSEOF
@@ -919,6 +1058,13 @@ cmd_help() {
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
+
+# Allow this script to be sourced by tests without triggering the dispatch.
+# When sourced, BASH_SOURCE[0] differs from $0; only run dispatch on direct exec.
+if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
+    return 0
+fi
+
 command="${1:-help}"
 shift || true
 
