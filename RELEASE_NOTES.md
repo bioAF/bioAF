@@ -1,5 +1,22 @@
 # Release Notes
 
+## v0.11.10
+
+Adds inline file upload to the experiment Files tab, so users no longer
+have to leave the experiment to attach files.
+
+### Enhancements
+
+- **Upload from the experiment Files tab.** A new Upload toggle next
+  to the Type/Source filters expands a drag-and-drop panel, scoped
+  to the current experiment. An optional sample selector lets the
+  user pin the upload to a specific sample within the experiment;
+  otherwise the file is associated with the whole experiment. The
+  rename-suggestion UX from Data & Files > Upload comes with it.
+- **Search-by-filename in the experiment Files tab.** The filter set
+  now matches the global Files page (minus Project and Experiment,
+  which are already implied by the experiment scope).
+
 ## v0.11.9
 
 Decouples the deployed image tag from the worktree version, so a stray
