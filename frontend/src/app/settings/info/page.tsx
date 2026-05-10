@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -250,7 +252,11 @@ export default function SettingsInfoPage() {
                 {updateCheck.changelog && (
                   <div className="p-3 bg-gray-50 rounded">
                     <h3 className="text-sm font-medium mb-1">Changelog</h3>
-                    <p className="text-sm text-gray-600 whitespace-pre-wrap">{updateCheck.changelog}</p>
+                    <div className="prose prose-sm max-w-none text-gray-700">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {updateCheck.changelog}
+                      </ReactMarkdown>
+                    </div>
                   </div>
                 )}
 
