@@ -152,3 +152,81 @@ BIOAF_SCRIPT="$BATS_TEST_DIRNAME/../../bioaf"
     [[ "$output" == *"not yet published"* ]]
     [[ "$output" == *"try again in a few minutes"* ]]
 }
+
+# ---------------------------------------------------------------------------
+# pin_image_tag / ensure_pinned_image_tag
+# ---------------------------------------------------------------------------
+
+@test "pin_image_tag appends BIOAF_IMAGE_TAG when missing" {
+    local env_file
+    env_file="$(mktemp)"
+    printf 'POSTGRES_USER=bioaf\nSECRET_KEY=x\n' > "$env_file"
+    BIOAF_ENV_FILE="$env_file" run bash -c "source '$BIOAF_SCRIPT' && pin_image_tag 'v1.2.3'"
+    [ "$status" -eq 0 ]
+    grep -q '^BIOAF_IMAGE_TAG=v1.2.3$' "$env_file"
+    # Other lines preserved.
+    grep -q '^POSTGRES_USER=bioaf$' "$env_file"
+    grep -q '^SECRET_KEY=x$' "$env_file"
+    rm -f "$env_file"
+}
+
+@test "pin_image_tag replaces existing BIOAF_IMAGE_TAG line in place" {
+    local env_file
+    env_file="$(mktemp)"
+    printf 'POSTGRES_USER=bioaf\nBIOAF_IMAGE_TAG=v1.0.0\nSECRET_KEY=x\n' > "$env_file"
+    BIOAF_ENV_FILE="$env_file" run bash -c "source '$BIOAF_SCRIPT' && pin_image_tag 'v9.9.9'"
+    [ "$status" -eq 0 ]
+    # Exactly one BIOAF_IMAGE_TAG line, with the new value.
+    [ "$(grep -c '^BIOAF_IMAGE_TAG=' "$env_file")" -eq 1 ]
+    grep -q '^BIOAF_IMAGE_TAG=v9.9.9$' "$env_file"
+    # Sibling lines preserved.
+    grep -q '^POSTGRES_USER=bioaf$' "$env_file"
+    grep -q '^SECRET_KEY=x$' "$env_file"
+    rm -f "$env_file"
+}
+
+@test "pin_image_tag is idempotent" {
+    local env_file
+    env_file="$(mktemp)"
+    : > "$env_file"
+    BIOAF_ENV_FILE="$env_file" bash -c "source '$BIOAF_SCRIPT' && pin_image_tag 'v0.11.9'"
+    BIOAF_ENV_FILE="$env_file" bash -c "source '$BIOAF_SCRIPT' && pin_image_tag 'v0.11.9'"
+    [ "$(grep -c '^BIOAF_IMAGE_TAG=' "$env_file")" -eq 1 ]
+    grep -q '^BIOAF_IMAGE_TAG=v0.11.9$' "$env_file"
+    rm -f "$env_file"
+}
+
+@test "pin_image_tag fails with empty tag argument" {
+    local env_file
+    env_file="$(mktemp)"
+    BIOAF_ENV_FILE="$env_file" run bash -c "source '$BIOAF_SCRIPT' && pin_image_tag ''"
+    [ "$status" -ne 0 ]
+    rm -f "$env_file"
+}
+
+@test "ensure_pinned_image_tag is a no-op when env already has BIOAF_IMAGE_TAG" {
+    local env_file
+    env_file="$(mktemp)"
+    printf 'BIOAF_IMAGE_TAG=v0.5.0\n' > "$env_file"
+    # If this called get_running_version, it would invoke `docker compose ps`
+    # against a non-existent compose file and fail. Use a missing compose file
+    # to prove ensure_pinned_image_tag short-circuits without touching docker.
+    BIOAF_ENV_FILE="$env_file" BIOAF_COMPOSE_FILE="/nonexistent/compose.yml" \
+        run bash -c "source '$BIOAF_SCRIPT' && ensure_pinned_image_tag"
+    [ "$status" -eq 0 ]
+    [ "$(grep -c '^BIOAF_IMAGE_TAG=' "$env_file")" -eq 1 ]
+    grep -q '^BIOAF_IMAGE_TAG=v0.5.0$' "$env_file"
+    rm -f "$env_file"
+}
+
+@test "ensure_pinned_image_tag falls back to disk version when no pin and no container" {
+    local env_file
+    env_file="$(mktemp)"
+    : > "$env_file"
+    # No backend container exists in this test environment -- get_running_version
+    # will fall back to get_current_version (reads backend/pyproject.toml).
+    BIOAF_ENV_FILE="$env_file" run bash -c "source '$BIOAF_SCRIPT' && ensure_pinned_image_tag"
+    [ "$status" -eq 0 ]
+    grep -q '^BIOAF_IMAGE_TAG=v[0-9]' "$env_file"
+    rm -f "$env_file"
+}
