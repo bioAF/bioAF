@@ -1,5 +1,41 @@
 # Release Notes
 
+## v0.11.7
+
+Hardens the in-app update flow against two failure modes that surfaced
+when v0.11.6 was published, and renders the changelog on the Platform
+Info page as actual markdown.
+
+### Bug fixes
+
+- **Update no longer no-ops after a partial failure.** `cmd_update` in
+  `bioaf` previously read the source version from `backend/pyproject.toml`
+  on disk. A failed pull (e.g. when release images are not yet
+  published) leaves the worktree checked out at the new tag while the
+  containers still run the old version, so the next attempt would
+  short-circuit with "Already running version <target>" and never
+  actually deploy. The script now reads the running backend
+  container's image tag via `docker inspect` and only falls back to
+  disk when no container is up.
+- **Update aborts cleanly when release images are still publishing.**
+  A pre-flight check now HEADs the manifest for `bioaf-backend`,
+  `bioaf-frontend`, and `bioaf-cellxgene` on `ghcr.io` before any
+  destructive step (backup, checkout, pull). If any image is missing,
+  the update writes a friendly status -- "Release images for v… are
+  not yet published. The release publish workflow may still be in
+  progress -- please try again in a few minutes." -- and exits without
+  touching the worktree.
+- **Platform Info changelog renders as markdown.** GitHub release
+  bodies (with `###` headings, `**bold**`, inline code, bullets) were
+  printed as raw text. Now rendered with `react-markdown` + GFM and
+  styled via Tailwind's typography plugin, which is added globally so
+  any future markdown surfaces can use the `prose` class without
+  reinstalling per-use.
+
+### Migration
+
+None. No schema changes.
+
 ## v0.11.6
 
 Fixes a cluster of bugs in the experiment / template / sample creation
