@@ -217,6 +217,79 @@ async def test_check_for_updates_no_update_when_current():
 
 
 @pytest.mark.asyncio
+async def test_check_for_updates_force_bypasses_cache():
+    """force=True must re-query GitHub even when a fresh cached value exists."""
+    from app.services.upgrade_service import UpgradeService, _clear_version_cache
+
+    _clear_version_cache()
+
+    first_response = MagicMock()
+    first_response.status_code = 200
+    first_response.json.return_value = {
+        "tag_name": "v1.0.0",
+        "body": "first",
+        "html_url": "https://example.invalid/v1.0.0",
+    }
+    second_response = MagicMock()
+    second_response.status_code = 200
+    second_response.json.return_value = {
+        "tag_name": "v2.0.0",
+        "body": "second",
+        "html_url": "https://example.invalid/v2.0.0",
+    }
+
+    with patch("app.services.upgrade_service.httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(side_effect=[first_response, second_response])
+        mock_client_cls.return_value = mock_client
+
+        cached = await UpgradeService.check_for_updates(1)
+        # Without force, the cache is honored -- second call returns the cached value.
+        cached_again = await UpgradeService.check_for_updates(1)
+        # With force, the cache is bypassed and GitHub is re-queried.
+        forced = await UpgradeService.check_for_updates(1, force=True)
+
+    assert cached["latest_version"] == "1.0.0"
+    assert cached_again["latest_version"] == "1.0.0"
+    assert forced["latest_version"] == "2.0.0"
+    assert mock_client.get.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_check_endpoint_passes_force_param(client: AsyncClient, admin_token: str):
+    """The /check endpoint must propagate ?force=true to the service."""
+    from app.services import upgrade_service as svc
+
+    with patch.object(
+        svc.UpgradeService,
+        "check_for_updates",
+        new=AsyncMock(
+            return_value={
+                "current_version": "0.0.0",
+                "latest_version": "0.0.0",
+                "update_available": False,
+                "changelog": None,
+                "release_url": None,
+            }
+        ),
+    ) as mock_check:
+        await client.get(
+            "/api/upgrades/check?force=true",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        await client.get(
+            "/api/upgrades/check",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+    # First call should pass force=True; second should default to force=False.
+    assert mock_check.await_args_list[0].kwargs.get("force") is True
+    assert mock_check.await_args_list[1].kwargs.get("force") is False
+
+
+@pytest.mark.asyncio
 async def test_check_for_updates_handles_github_failure():
     """When GitHub API fails, return no update available gracefully."""
     from app.services.upgrade_service import UpgradeService, _clear_version_cache

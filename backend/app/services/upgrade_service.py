@@ -54,12 +54,18 @@ class UpgradeService:
         }
 
     @staticmethod
-    async def check_for_updates(org_id: int) -> dict:
-        """Query GitHub Releases API for bioaf repo, compare against current version."""
+    async def check_for_updates(org_id: int, force: bool = False) -> dict:
+        """Query GitHub Releases API for bioaf repo, compare against current version.
+
+        Pass force=True to bypass the in-memory cache. Use this for explicit
+        user-initiated checks (e.g. a "Check for Updates" button); the daily
+        background poll and routine page loads should leave force=False so we
+        don't hammer the GitHub API.
+        """
         global _version_cache, _version_cache_time
 
         now = datetime.now(timezone.utc)
-        if _version_cache_time and (now - _version_cache_time).total_seconds() < CACHE_TTL_SECONDS:
+        if not force and _version_cache_time and (now - _version_cache_time).total_seconds() < CACHE_TTL_SECONDS:
             return _version_cache
 
         current = settings.app_version
