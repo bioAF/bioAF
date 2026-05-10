@@ -141,7 +141,10 @@ export default function SettingsInfoPage() {
   const handleCheckUpdate = async () => {
     setCheckingUpdate(true);
     try {
-      const data = await api.get<UpdateCheck>("/api/upgrades/check");
+      // force=true bypasses the backend's 1h in-memory cache so a user-initiated
+      // check always reflects the actual latest GitHub release. The initial page
+      // load and the daily background poll leave the cache in place.
+      const data = await api.get<UpdateCheck>("/api/upgrades/check?force=true");
       setUpdateCheck(data);
     } catch {
       // ignore
@@ -191,6 +194,13 @@ export default function SettingsInfoPage() {
                 <div className="flex items-center gap-4">
                   <span className="text-sm text-gray-600">Latest Version:</span>
                   <span className="font-mono">{updateCheck.latest_version}</span>
+                  <button
+                    onClick={handleCheckUpdate}
+                    disabled={checkingUpdate || updating}
+                    className="ml-auto px-3 py-1.5 text-sm border border-gray-300 rounded text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {checkingUpdate ? "Checking..." : "Check for updates"}
+                  </button>
                 </div>
 
                 {updateCheck.update_available && !updating && (
@@ -259,14 +269,6 @@ export default function SettingsInfoPage() {
                     </div>
                   </div>
                 )}
-
-                <button
-                  onClick={handleCheckUpdate}
-                  disabled={checkingUpdate || updating}
-                  className="text-sm text-bioaf-600 hover:text-bioaf-700 disabled:opacity-50"
-                >
-                  {checkingUpdate ? "Checking..." : "Check for updates"}
-                </button>
               </div>
             )}
 
