@@ -1119,7 +1119,7 @@ export default function ExperimentDetailPage() {
           {activeTab === "files" && (
             <div>
               <h2 className="text-lg font-semibold mb-4">Files</h2>
-              <FileBrowser experimentId={Number(id)} />
+              <FileBrowser experimentId={Number(id)} showSearch showUpload />
             </div>
           )}
 
