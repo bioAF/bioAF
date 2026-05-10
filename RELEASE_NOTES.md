@@ -1,5 +1,27 @@
 # Release Notes
 
+## v0.11.8
+
+Fixes the in-app "Check for updates" control on the Platform Info page.
+
+### Bug fixes
+
+- **"Check for updates" now actually re-queries GitHub.** The control
+  was a small text link at the bottom of the page that hit
+  `/api/upgrades/check`, but that endpoint serves a 1-hour in-memory
+  cache. A user supporting someone over the phone ("a new version is
+  out -- click the button") would see the same stale "latest version"
+  no matter how many times they clicked. The endpoint now accepts
+  `?force=true` and the button passes it; routine page loads and the
+  daily background poll continue to use the cached path.
+- **"Check for updates" is now a real button next to the version
+  display.** Previously it was small linkified text at the very bottom
+  of the card, easy to miss and not obviously interactive.
+
+### Migration
+
+None. No schema changes.
+
 ## v0.11.7
 
 Hardens the in-app update flow against two failure modes that surfaced
