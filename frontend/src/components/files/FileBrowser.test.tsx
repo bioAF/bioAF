@@ -135,6 +135,30 @@ test("shows Unlinked badge for files with no association", async () => {
   });
 });
 
+test("renders Upload toggle when showUpload + experimentId are set", async () => {
+  render(<FileBrowser experimentId={42} showUpload />);
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: /upload/i })).toBeInTheDocument();
+  });
+});
+
+test("does not render Upload toggle without experimentId", async () => {
+  render(<FileBrowser showUpload />);
+  await waitFor(() => {
+    expect(screen.getByText("No files found.")).toBeInTheDocument();
+  });
+  expect(screen.queryByRole("button", { name: /upload/i })).not.toBeInTheDocument();
+});
+
+test("renders search input when showSearch is set", async () => {
+  render(<FileBrowser experimentId={42} showSearch />);
+  await waitFor(() => {
+    expect(
+      screen.getByPlaceholderText(/search by filename/i),
+    ).toBeInTheDocument();
+  });
+});
+
 test("renders provenance breadcrumb when API returns provenance", async () => {
   mockGet.mockImplementation((url: string) => {
     if (url.includes("/api/projects")) return Promise.resolve({ projects: [] });

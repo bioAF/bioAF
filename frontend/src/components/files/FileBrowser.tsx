@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportPanel";
+import { ExperimentFileUploader } from "@/components/files/ExperimentFileUploader";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { useFileContentUrl } from "@/hooks/useContentUrl";
@@ -35,6 +36,7 @@ interface Props {
   showProjectFilter?: boolean;
   showExperimentFilter?: boolean;
   showReconcile?: boolean;
+  showUpload?: boolean;
 }
 
 export function FileBrowser({
@@ -44,6 +46,7 @@ export function FileBrowser({
   showProjectFilter = false,
   showExperimentFilter = false,
   showReconcile = false,
+  showUpload = false,
 }: Props) {
   const [files, setFiles] = useState<FileResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -504,6 +507,14 @@ export function FileBrowser({
             </option>
           ))}
         </select>
+
+        {showUpload && experimentId != null && (
+          <ExperimentFileUploader
+            experimentId={experimentId}
+            samples={samples}
+            onUploaded={fetchFiles}
+          />
+        )}
 
         {selectedIds.size > 0 && (
           <div className="flex items-center gap-3">
