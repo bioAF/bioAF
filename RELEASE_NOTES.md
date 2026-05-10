@@ -1,5 +1,30 @@
 # Release Notes
 
+## v0.11.9
+
+Decouples the deployed image tag from the worktree version, so a stray
+`git pull` followed by `bioaf restart` can no longer silently switch
+which version is running.
+
+### Bug fixes
+
+- **`bioaf start` / `bioaf restart` no longer change the running
+  version.** The `BIOAF_IMAGE_TAG` env var was previously recomputed at
+  every `start` from `backend/pyproject.toml`. After `git pull`, a
+  routine restart would pull and start the new image even though the
+  user had not asked to upgrade. The active tag is now persisted in
+  `docker/.env` (`BIOAF_IMAGE_TAG=v…`) and only the commands that
+  legitimately change the deployed version (`setup`, `update`, `build`)
+  may write to it. `start` and `restart` only consume it.
+
+### Migration
+
+Legacy installs that don't yet have `BIOAF_IMAGE_TAG=` in `docker/.env`
+get the pin auto-bootstrapped on first start: the script reads the
+running backend container's image tag and writes it to `docker/.env`,
+falling back to the on-disk version only if no container exists. This
+runs once; subsequent starts use the pinned value.
+
 ## v0.11.8
 
 Fixes the in-app "Check for updates" control on the Platform Info page.
