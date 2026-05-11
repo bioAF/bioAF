@@ -456,9 +456,7 @@ class KubernetesComputeProvider(ComputeProvider):
 
     _namespace_ready = False
 
-    async def ensure_pipeline_namespace(
-        self, namespace: str = "bioaf-pipelines", gcp_sa_email: str = ""
-    ) -> None:
+    async def ensure_pipeline_namespace(self, namespace: str = "bioaf-pipelines", gcp_sa_email: str = "") -> None:
         """Ensure the pipeline namespace, service account, and role binding exist.
 
         When gcp_sa_email is provided, the KSA carries the
@@ -545,9 +543,7 @@ class KubernetesComputeProvider(ComputeProvider):
         Workload Identity was wired (no annotation on the existing KSA).
         """
         try:
-            sa = core_v1.read_namespaced_service_account(
-                name="bioaf-pipeline-runner", namespace=namespace
-            )
+            sa = core_v1.read_namespaced_service_account(name="bioaf-pipeline-runner", namespace=namespace)
             current = (sa.metadata.annotations or {}).get("iam.gke.io/gcp-service-account", "")
             if current != gcp_sa_email:
                 core_v1.patch_namespaced_service_account(
@@ -833,9 +829,7 @@ class KubernetesComputeProvider(ComputeProvider):
         # iam.gke.io/gcp-service-account annotation for Workload Identity.
         cfg = self._cluster_config or {}
         project_id = cfg.get("gcp_project_id", "")
-        pipeline_runner_sa_email = (
-            f"bioaf-pipeline-runner@{project_id}.iam.gserviceaccount.com" if project_id else ""
-        )
+        pipeline_runner_sa_email = f"bioaf-pipeline-runner@{project_id}.iam.gserviceaccount.com" if project_id else ""
         if not self._namespace_ready:
             await self.ensure_pipeline_namespace(namespace, gcp_sa_email=pipeline_runner_sa_email)
 

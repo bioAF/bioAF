@@ -237,9 +237,10 @@ def test_pipeline_runner_workload_identity_binding_exists():
         end = len(main_tf)
     block = main_tf[start:end]
 
-    assert 'role               = "roles/iam.workloadIdentityUser"' in block or 'role = "roles/iam.workloadIdentityUser"' in block, (
-        "pipeline_runner WI binding must grant roles/iam.workloadIdentityUser"
-    )
+    assert (
+        'role               = "roles/iam.workloadIdentityUser"' in block
+        or 'role = "roles/iam.workloadIdentityUser"' in block
+    ), "pipeline_runner WI binding must grant roles/iam.workloadIdentityUser"
     assert "bioaf-pipelines/bioaf-pipeline-runner" in block, (
         "pipeline_runner WI binding must reference bioaf-pipelines/bioaf-pipeline-runner KSA"
     )
