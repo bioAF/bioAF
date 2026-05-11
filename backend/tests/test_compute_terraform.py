@@ -197,11 +197,14 @@ def test_pipeline_runner_service_account_exists():
     )
 
 
-def test_pipeline_runner_has_storage_object_admin():
-    """pipeline_runner needs object-level access on bioaf-* buckets to read
-    input fastqs, write Nextflow work/results, and emit reports/traces.
-    Scope to bioaf-* buckets via an IAM Condition, mirroring how bioaf-app
-    is scoped in install-gcp.sh."""
+def test_pipeline_runner_has_storage_admin():
+    """pipeline_runner needs bucket-level access (not just object-level) on
+    bioaf-* buckets. Fusion mounts buckets as a local filesystem inside task
+    pods, which requires storage.buckets.get -- present in roles/storage.admin
+    but NOT in roles/storage.objectAdmin. Without it, task pods fail with
+    'does not have storage.buckets.get access' and exit 126 before the
+    pipeline command runs. Matches how bioaf-app is scoped in install-gcp.sh.
+    """
     main_tf = (COMPUTE_MODULE_DIR / "main.tf").read_text()
 
     binding_marker = 'resource "google_project_iam_member" "pipeline_runner_storage"'
@@ -213,8 +216,8 @@ def test_pipeline_runner_has_storage_object_admin():
         end = len(main_tf)
     block = main_tf[start:end]
 
-    assert 'role    = "roles/storage.objectAdmin"' in block or 'role = "roles/storage.objectAdmin"' in block, (
-        "pipeline_runner must have roles/storage.objectAdmin"
+    assert re.search(r'role\s*=\s*"roles/storage\.admin"', block), (
+        "pipeline_runner must have roles/storage.admin (objectAdmin lacks storage.buckets.get needed by Fusion)"
     )
     # Scope to bioaf-* buckets so this SA can't read unrelated project data.
     assert 'resource.name.startsWith(\\"projects/_/buckets/bioaf-\\")' in block, (

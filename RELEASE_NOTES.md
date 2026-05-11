@@ -1,5 +1,30 @@
 # Release Notes
 
+## v0.11.12
+
+Fixes a follow-up to v0.11.11: pipeline task pods reached Fusion, but Fusion
+failed to mount the GCS work directory because `roles/storage.objectAdmin`
+doesn't include `storage.buckets.get`. Tasks exited 126 before
+`.command.sh` could run.
+
+### Bug fixes
+
+- **Pipeline-runner gets bucket-level access on bioaf-* buckets.** The
+  binding on `bioaf-pipeline-runner` now uses `roles/storage.admin`
+  (still scoped to bioaf-* buckets via IAM Condition, matching how
+  `bioaf-app` is scoped in `install-gcp.sh`). Fusion can now perform the
+  bucket lookup it needs to mount `gs://bioaf-raw-*` as a local
+  filesystem inside task pods.
+
+### Deploy
+
+Apply the compute Terraform module from Infrastructure -> Components
+(any trivial cluster-config save triggers `terraform plan + apply` on
+the compute module). The plan should show one in-place change to
+`google_project_iam_member.pipeline_runner_storage` (role
+`storage.objectAdmin` -> `storage.admin`), zero destroys. Resubmit any
+pipeline runs that failed under v0.11.11.
+
 ## v0.11.11
 
 Fixes a Workload Identity gap that left Nextflow pipeline pods with no GCP

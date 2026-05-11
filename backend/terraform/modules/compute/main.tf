@@ -251,8 +251,14 @@ resource "google_service_account" "pipeline_runner" {
 
 resource "google_project_iam_member" "pipeline_runner_storage" {
   project = var.project_id
-  role    = "roles/storage.objectAdmin"
-  member  = "serviceAccount:${google_service_account.pipeline_runner.email}"
+  # storage.admin (not objectAdmin) because Fusion mounts buckets as a
+  # filesystem and needs storage.buckets.get for bucket lookup. objectAdmin
+  # only covers object-level operations, so task pods would fail at mount
+  # time with 'does not have storage.buckets.get access' before .command.sh
+  # could even run (exit 126). Matches how bioaf-app is scoped in
+  # install-gcp.sh: storage.admin with an IAM Condition on bioaf-* buckets.
+  role   = "roles/storage.admin"
+  member = "serviceAccount:${google_service_account.pipeline_runner.email}"
   condition {
     title       = "bioaf_buckets_only"
     description = "bioaf_buckets_only"
