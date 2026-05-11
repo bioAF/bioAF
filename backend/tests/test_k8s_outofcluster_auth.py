@@ -109,7 +109,7 @@ class TestOutOfClusterAuth:
                 }
             )
 
-        assert result["job_id"] == "bioaf-pipeline-99"
+        assert result["job_id"].startswith("bioaf-pipeline-99-")
         mock_batch.create_namespaced_job.assert_called_once()
 
     @pytest.mark.asyncio
