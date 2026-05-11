@@ -170,6 +170,52 @@ resource "google_container_node_pool" "interactive" {
   }
 }
 
+# --- Pipeline Head Node Pool ---
+#
+# Dedicated on-demand pool for Nextflow head/coordinator pods. Task pods run
+# on the cheaper Spot bioaf-pipelines pool, but the head pod has to survive
+# the entire pipeline duration: Spot preemption mid-run kills the workflow
+# and any in-flight tasks. (cluster-autoscaler.kubernetes.io/safe-to-evict
+# only blocks voluntary scale-down; it does NOT protect against Spot
+# reclamation.) The taint enforces strict isolation so Nextflow's task
+# pods, which cannot carry custom tolerations, can never accidentally
+# land on this pool and burn its capacity.
+
+resource "google_container_node_pool" "pipeline_head" {
+  name           = "bioaf-pipeline-head"
+  cluster        = google_container_cluster.bioaf.id
+  project        = var.project_id
+  location       = var.region
+  node_locations = var.k8s_node_zones
+
+  autoscaling {
+    min_node_count  = 0
+    max_node_count  = var.k8s_pipeline_head_max_nodes
+    location_policy = "ANY"
+  }
+
+  node_config {
+    machine_type = var.k8s_pipeline_head_machine_type
+    disk_size_gb = 30
+    disk_type    = "pd-standard"
+    spot         = false # On-demand: survives Spot preemption that kills the orchestrator.
+
+    oauth_scopes = [
+      "https://www.googleapis.com/auth/cloud-platform"
+    ]
+
+    labels = {
+      "bioaf.io/pool" = "pipeline-head"
+    }
+
+    taint {
+      key    = "bioaf.io/pool"
+      value  = "pipeline-head"
+      effect = "NO_SCHEDULE"
+    }
+  }
+}
+
 # --- IAM binding for GCS access from GKE nodes ---
 
 data "google_project" "current" {
@@ -251,8 +297,14 @@ resource "google_service_account" "pipeline_runner" {
 
 resource "google_project_iam_member" "pipeline_runner_storage" {
   project = var.project_id
-  role    = "roles/storage.objectAdmin"
-  member  = "serviceAccount:${google_service_account.pipeline_runner.email}"
+  # storage.admin (not objectAdmin) because Fusion mounts buckets as a
+  # filesystem and needs storage.buckets.get for bucket lookup. objectAdmin
+  # only covers object-level operations, so task pods would fail at mount
+  # time with 'does not have storage.buckets.get access' before .command.sh
+  # could even run (exit 126). Matches how bioaf-app is scoped in
+  # install-gcp.sh: storage.admin with an IAM Condition on bioaf-* buckets.
+  role   = "roles/storage.admin"
+  member = "serviceAccount:${google_service_account.pipeline_runner.email}"
   condition {
     title       = "bioaf_buckets_only"
     description = "bioaf_buckets_only"

@@ -48,6 +48,18 @@ variable "k8s_pipeline_use_spot" {
   description = "Whether the pipeline pool uses spot instances"
 }
 
+variable "k8s_pipeline_head_machine_type" {
+  type        = string
+  default     = "e2-standard-2"
+  description = "Machine type for the bioaf-pipeline-head node pool. This pool runs Nextflow head/coordinator pods only -- they're cheap (low CPU/memory) but must survive Spot preemption for the full pipeline duration, so this pool is on-demand. e2-standard-2 has 2 dedicated vCPU / 8 GiB RAM, plenty for one head pod with room to scale."
+}
+
+variable "k8s_pipeline_head_max_nodes" {
+  type        = number
+  default     = 5
+  description = "Maximum number of nodes in the bioaf-pipeline-head autoscaler. Min is 0 -- nodes are provisioned on demand when a head pod is scheduled, then reclaimed via the autoscaler when no head pods remain."
+}
+
 variable "k8s_interactive_machine_type" {
   type        = string
   default     = "n2-standard-4"

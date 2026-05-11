@@ -697,14 +697,18 @@ class KubernetesComputeProvider(ComputeProvider):
         # Build k8s.pod directives for secrets/env (Nextflow doesn't
         # support tolerations in k8s.pod, so node placement is left to
         # the cluster autoscaler; the head Job already targets the
-        # pipeline pool via nodeSelector + toleration in the Job manifest)
-        pod_directives: list[str] = []
+        # pipeline pool via nodeSelector + toleration in the Job manifest).
+        # Pin every task pod with safe-to-evict=false so long-running
+        # steps (STAR_GENOMEGENERATE, alignment, etc.) don't get killed
+        # when the autoscaler decides their node is "underutilized".
+        pod_directives: list[str] = [
+            "[annotation: 'cluster-autoscaler.kubernetes.io/safe-to-evict', value: 'false']",
+        ]
         if has_gcs_secret:
             pod_directives.append("[secret: 'bioaf-gcs-sa-key', mountPath: '/secrets/gcp']")
             pod_directives.append("[env: 'GOOGLE_APPLICATION_CREDENTIALS', value: '/secrets/gcp/key.json']")
 
-        if pod_directives:
-            lines.append("k8s.pod = [" + ", ".join(pod_directives) + "]")
+        lines.append("k8s.pod = [" + ", ".join(pod_directives) + "]")
 
         # Docker is the default container engine for nf-core
         lines.append("docker.enabled = true")
@@ -839,7 +843,12 @@ class KubernetesComputeProvider(ComputeProvider):
         credential_source, sa_key = await self._read_gcp_credentials()
         has_gcs_secret = self._ensure_gcs_secret(namespace, credential_source, sa_key)
 
-        job_name = f"bioaf-pipeline-{run_id}"
+        # job_name embeds an epoch-second suffix so the K8s Job name and the
+        # derived GCS paths (-with-report, -with-trace, persisted log) are
+        # unique even when run_id is recycled (e.g., after a DB sequence
+        # reset). Reads use pipeline_runs.k8s_job_name as the authoritative
+        # key, so the suffix flows through transparently.
+        job_name = f"bioaf-pipeline-{run_id}-{int(time.time())}"
 
         # Auto-build Nextflow command when pipeline_source is set and no
         # explicit command was provided
@@ -1005,12 +1014,29 @@ class KubernetesComputeProvider(ComputeProvider):
                 "backoffLimit": 0,
                 "ttlSecondsAfterFinished": 3600,
                 "template": {
+                    "metadata": {
+                        # Pin the head pod to its node. Without this, the
+                        # cluster autoscaler treats Nextflow's coordinator pod
+                        # as "movable" (it requests no resources) and scales
+                        # down its node mid-pipeline, killing the workflow
+                        # and any task pods it's coordinating.
+                        "annotations": {
+                            "cluster-autoscaler.kubernetes.io/safe-to-evict": "false",
+                        },
+                    },
                     "spec": {
-                        "nodeSelector": {"bioaf.io/pool": "pipelines"},
+                        # Head pod runs on the dedicated on-demand pipeline-head
+                        # pool, NOT the Spot pipelines pool. Spot preemption of
+                        # the head pod kills the entire pipeline; on-demand keeps
+                        # the orchestrator alive while task pods (Spot, retried
+                        # by Nextflow's errorStrategy on exit 143/137/247) stay
+                        # cheap. The pool is tainted so Nextflow's task pods
+                        # (which can't carry custom tolerations) cannot land here.
+                        "nodeSelector": {"bioaf.io/pool": "pipeline-head"},
                         "tolerations": [
                             {
                                 "key": "bioaf.io/pool",
-                                "value": "pipelines",
+                                "value": "pipeline-head",
                                 "effect": "NoSchedule",
                             }
                         ],
@@ -1040,7 +1066,7 @@ class KubernetesComputeProvider(ComputeProvider):
                             else []
                         ),
                         "restartPolicy": "Never",
-                    }
+                    },
                 },
             },
         }

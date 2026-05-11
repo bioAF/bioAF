@@ -167,6 +167,7 @@ export default function PipelineRunDetailPage() {
   const [showSystemLogs, setShowSystemLogs] = useState(false);
   const [systemLogs, setSystemLogs] = useState<LogResponse | null>(null);
   const [systemLogsLoading, setSystemLogsLoading] = useState(false);
+  const [showRetriesModal, setShowRetriesModal] = useState(false);
 
   const loadRun = useCallback(async () => {
     try {
@@ -239,15 +240,18 @@ export default function PipelineRunDetailPage() {
     } catch {} finally { setReportLoading(false); }
   }
 
-  async function loadLogs(processName?: string) {
-    setLogsLoading(true);
+  // showSpinner=false suppresses the loading state on background polls so
+  // the <pre> stays mounted and the user's scroll position is preserved;
+  // we only flash the spinner on the user-visible initial load.
+  async function loadLogs(processName?: string, showSpinner: boolean = true) {
+    if (showSpinner) setLogsLoading(true);
     try {
       const url = processName
         ? `/api/pipeline-runs/${runId}/logs/${encodeURIComponent(processName)}`
         : `/api/pipeline-runs/${runId}/logs`;
       const data = await api.get<LogResponse>(url);
       setLogs(data);
-    } catch {} finally { setLogsLoading(false); }
+    } catch {} finally { if (showSpinner) setLogsLoading(false); }
   }
 
   async function loadSystemLogs() {
@@ -291,6 +295,27 @@ export default function PipelineRunDetailPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProcess, activeTab, run?.k8s_job_name]);
+
+  // Poll logs on a 5s interval while the run is active and the logs tab is
+  // open. The run-metadata poller above runs every 10s but is dep'd on
+  // run.k8s_job_name, so without this sibling interval logs only reload
+  // when that field changes (usually once, very early), leaving the user
+  // staring at stale output until they refresh the page. Polls suppress
+  // the spinner so the <pre> stays mounted and scroll position survives.
+  useEffect(() => {
+    if (activeTab !== "logs") return;
+    if (!run || !["running", "pending"].includes(run.status)) return;
+    if (!run.k8s_job_name && !selectedProcess) return;
+    const interval = setInterval(() => {
+      if (selectedProcess) {
+        loadLogs(selectedProcess, false);
+      } else if (run.k8s_job_name) {
+        loadLogs(undefined, false);
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, run?.status, run?.k8s_job_name, selectedProcess]);
 
   if (!loading && !run) {
     return (
@@ -373,6 +398,20 @@ export default function PipelineRunDetailPage() {
               <div><span className="text-xs text-gray-500">Completed</span><p className="text-sm font-medium">{formatDateTime(run.completed_at)}</p></div>
             )}
             <div><span className="text-xs text-gray-500">Duration</span><p className="text-sm font-medium">{formatDuration(run.started_at, run.completed_at)}</p></div>
+            {run.progress?.retries && run.progress.retries.length > 0 && (
+              <div>
+                <span className="text-xs text-gray-500">Step retries</span>
+                <p>
+                  <button
+                    onClick={() => setShowRetriesModal(true)}
+                    className="text-sm font-medium text-bioaf-600 hover:underline"
+                    data-testid="retries-pill"
+                  >
+                    {run.progress.retries.length}
+                  </button>
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Overall progress */}
@@ -779,6 +818,48 @@ export default function PipelineRunDetailPage() {
           )}
         </main>
       </div>
+
+      {showRetriesModal && run?.progress?.retries && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={() => setShowRetriesModal(false)}
+          data-testid="retries-modal"
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="border-b px-6 py-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Step retries</h2>
+              <button
+                onClick={() => setShowRetriesModal(false)}
+                className="text-gray-400 hover:text-gray-600 text-xl"
+                aria-label="Close"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="p-6">
+              <p className="text-sm text-gray-600 mb-4">
+                The following steps were retried during this run. Each ran more
+                than once before producing its output (typically because the
+                first attempt was interrupted by Spot preemption).
+              </p>
+              <ul className="space-y-2">
+                {run.progress.retries.map((r) => (
+                  <li
+                    key={r.name}
+                    className="flex items-center justify-between bg-gray-50 rounded px-3 py-2 text-sm"
+                  >
+                    <span className="font-mono text-gray-800">{r.name}</span>
+                    <span className="text-gray-500">{r.attempts} attempts</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
