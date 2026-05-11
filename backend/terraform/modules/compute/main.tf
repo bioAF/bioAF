@@ -16,6 +16,19 @@ resource "google_container_cluster" "bioaf" {
   project  = var.project_id
   location = var.region
 
+  # Cluster-level node_locations is the default placement for any pool
+  # that does not set its own. All real pools (system/pipelines/
+  # interactive/pipeline_head) DO set node_locations = var.k8s_node_zones,
+  # so this value only constrains the throwaway default pool created
+  # during cluster bootstrap. When gke_default_pool_zone is set (the
+  # pre-flight capacity probe picks a healthy zone), the default pool's
+  # per-zone IGM is provisioned in that one zone only, sidestepping the
+  # "regional default pool needs capacity in every zone simultaneously"
+  # failure mode that hangs CREATE_CLUSTER for 70 minutes on any
+  # per-zone e2-medium stockout. Empty list means "use all zones in the
+  # region" (today's behaviour).
+  node_locations = var.gke_default_pool_zone != "" ? [var.gke_default_pool_zone] : []
+
   # Terraform-managed lifecycle -- teardown handles deletion
   deletion_protection      = false
   remove_default_node_pool = true
