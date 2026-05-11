@@ -320,22 +320,37 @@ class PipelineMonitorService:
 
         existing_by_name = {p.process_name: p for p in run.processes}
 
+        # The Nextflow trace contains one row per task attempt, so a task that
+        # was preempted and retried shows up multiple times under the same name.
+        # Group by name and take the LAST attempt as the authoritative final
+        # status, so the UI sees pipeline shape (unique steps), not attempt
+        # count. Retries are surfaced separately so the user can see what
+        # had to retry without conflating it with task count.
+        attempts_by_name: dict[str, list[dict]] = {}
+        for proc_data in adapter_processes:
+            attempts_by_name.setdefault(proc_data.get("name", ""), []).append(proc_data)
+
         completed = 0
         running = 0
         failed = 0
         cached = 0
-        for proc_data in adapter_processes:
-            name = proc_data.get("name", "")
-            status = proc_data.get("status", "")
+        retries: list[dict] = []
 
-            if status == "completed":
+        for name, attempts in attempts_by_name.items():
+            final = attempts[-1]
+            final_status = final.get("status", "")
+
+            if final_status == "completed":
                 completed += 1
-            elif status == "running":
+            elif final_status == "running":
                 running += 1
-            elif status == "failed":
+            elif final_status == "failed":
                 failed += 1
-            elif status == "cached":
+            elif final_status == "cached":
                 cached += 1
+
+            if len(attempts) > 1:
+                retries.append({"name": name, "attempts": len(attempts)})
 
             if name in existing_by_name:
                 proc = existing_by_name[name]
@@ -346,29 +361,34 @@ class PipelineMonitorService:
                 )
                 session.add(proc)
 
-            proc.status = status
-            exit_val = proc_data.get("exit_code")
+            # Persist the final attempt's status + metrics.
+            proc.status = final_status
+            exit_val = final.get("exit_code")
             if exit_val is not None:
                 proc.exit_code = exit_val
-            cpu_val = proc_data.get("cpu")
+            cpu_val = final.get("cpu")
             if cpu_val is not None:
                 proc.cpu_usage = cpu_val
-            mem_val = proc_data.get("memory_gb")
+            mem_val = final.get("memory_gb")
             if mem_val is not None:
                 proc.memory_peak_gb = mem_val
-            dur_val = proc_data.get("duration_s")
+            dur_val = final.get("duration_s")
             if dur_val is not None:
                 proc.duration_seconds = dur_val
 
-        total = len(adapter_processes)
-        run.progress_json = {
+        total = len(attempts_by_name)
+        pct = round((completed + cached) / total * 100, 1) if total > 0 else 0.0
+        progress_payload: dict = {
             "total_processes": total,
             "completed": completed,
             "running": running,
             "failed": failed,
             "cached": cached,
-            "percent_complete": progress.get("percent_complete", 0.0),
+            "percent_complete": pct,
         }
+        if retries:
+            progress_payload["retries"] = retries
+        run.progress_json = progress_payload
 
     @staticmethod
     async def _handle_completion(session: AsyncSession, run: PipelineRun) -> None:

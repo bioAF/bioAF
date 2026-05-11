@@ -20,6 +20,11 @@ class SampleSummary(BaseModel):
     organism: str | None = None
 
 
+class PipelineProcessRetry(BaseModel):
+    name: str
+    attempts: int
+
+
 class PipelineProgress(BaseModel):
     total_processes: int
     completed: int
@@ -27,6 +32,7 @@ class PipelineProgress(BaseModel):
     failed: int
     cached: int
     percent_complete: float
+    retries: list[PipelineProcessRetry] | None = None
 
 
 class PipelineProcessResponse(BaseModel):
