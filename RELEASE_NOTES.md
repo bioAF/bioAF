@@ -5,7 +5,8 @@
 Fixes a follow-up to v0.11.11: pipeline task pods reached Fusion, but Fusion
 failed to mount the GCS work directory because `roles/storage.objectAdmin`
 doesn't include `storage.buckets.get`. Tasks exited 126 before
-`.command.sh` could run.
+`.command.sh` could run. Also fixes the pipeline-run page's log panel,
+which silently stopped auto-refreshing once the head pod was scheduled.
 
 ### Bug fixes
 
@@ -15,6 +16,12 @@ doesn't include `storage.buckets.get`. Tasks exited 126 before
   `bioaf-app` is scoped in `install-gcp.sh`). Fusion can now perform the
   bucket lookup it needs to mount `gs://bioaf-raw-*` as a local
   filesystem inside task pods.
+- **Pipeline-run logs auto-refresh every 5 seconds.** The pipeline-run
+  detail page already polled run metadata every 10s, but logs only
+  reloaded when `k8s_job_name` flipped (typically once per run), so
+  watching a live pipeline required manual page refreshes. A sibling
+  interval now reloads logs while the run is `running` or `pending`
+  and the logs tab is open, stopping automatically on terminal status.
 
 ### Deploy
 

@@ -292,6 +292,26 @@ export default function PipelineRunDetailPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProcess, activeTab, run?.k8s_job_name]);
 
+  // Poll logs on a 5s interval while the run is active and the logs tab is
+  // open. The run-metadata poller above runs every 10s but is dep'd on
+  // run.k8s_job_name, so without this sibling interval logs only reload
+  // when that field changes (usually once, very early), leaving the user
+  // staring at stale output until they refresh the page.
+  useEffect(() => {
+    if (activeTab !== "logs") return;
+    if (!run || !["running", "pending"].includes(run.status)) return;
+    if (!run.k8s_job_name && !selectedProcess) return;
+    const interval = setInterval(() => {
+      if (selectedProcess) {
+        loadLogs(selectedProcess);
+      } else if (run.k8s_job_name) {
+        loadLogs();
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, run?.status, run?.k8s_job_name, selectedProcess]);
+
   if (!loading && !run) {
     return (
       <div className="flex h-screen">
