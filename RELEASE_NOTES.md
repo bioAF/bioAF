@@ -34,6 +34,16 @@ which silently stopped auto-refreshing once the head pod was scheduled.
   `cluster-autoscaler.kubernetes.io/safe-to-evict: "false"` so the
   autoscaler leaves them in place for the run's duration. Nodes are
   still reclaimed normally after pods terminate.
+- **Per-submit GCS path uniqueness.** Nextflow reports, traces, and
+  persisted pipeline logs were keyed by `bioaf-pipeline-{run_id}`, so
+  if the `pipeline_runs.id` sequence was reset (e.g., during a clean
+  demo wipe), a new run could read or be confused by a stale
+  `report.html` left in GCS by an earlier run with the same recycled
+  ID. `job_name` now embeds a per-submit epoch suffix
+  (`bioaf-pipeline-{run_id}-{epoch}`) which becomes the K8s Job name,
+  the GCS report/trace/log prefix, and is stored in
+  `pipeline_runs.k8s_job_name` for read consistency. Two submits with
+  the same `run_id` no longer collide.
 
 ### Deploy
 

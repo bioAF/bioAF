@@ -843,7 +843,12 @@ class KubernetesComputeProvider(ComputeProvider):
         credential_source, sa_key = await self._read_gcp_credentials()
         has_gcs_secret = self._ensure_gcs_secret(namespace, credential_source, sa_key)
 
-        job_name = f"bioaf-pipeline-{run_id}"
+        # job_name embeds an epoch-second suffix so the K8s Job name and the
+        # derived GCS paths (-with-report, -with-trace, persisted log) are
+        # unique even when run_id is recycled (e.g., after a DB sequence
+        # reset). Reads use pipeline_runs.k8s_job_name as the authoritative
+        # key, so the suffix flows through transparently.
+        job_name = f"bioaf-pipeline-{run_id}-{int(time.time())}"
 
         # Auto-build Nextflow command when pipeline_source is set and no
         # explicit command was provided

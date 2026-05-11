@@ -74,12 +74,120 @@ class TestSubmitJobCreatesK8sJob:
         assert pod_spec["nodeSelector"]["bioaf.io/pool"] == "pipelines"
         assert any(t["key"] == "bioaf.io/pool" and t["value"] == "pipelines" for t in pod_spec["tolerations"])
 
-        # Check job name
-        assert body["metadata"]["name"] == "bioaf-pipeline-42"
+        # Check job name (includes per-submit suffix for GCS path uniqueness;
+        # see TestSubmitJobUniqueJobName for the format contract).
+        assert body["metadata"]["name"].startswith("bioaf-pipeline-42-")
 
         # Check result
-        assert result["job_id"] == "bioaf-pipeline-42"
+        assert result["job_id"].startswith("bioaf-pipeline-42-")
         assert result["namespace"] == "bioaf-pipelines"
+
+
+class TestSubmitJobUniqueJobName:
+    """Two pipeline runs with the same run_id (e.g., after a DB sequence
+    reset that recycles IDs) must NOT collide on K8s Job name or GCS
+    output paths. The job_name now embeds a per-submit suffix so reports,
+    traces, and persisted logs land in distinct prefixes."""
+
+    @pytest.mark.asyncio
+    async def test_job_name_has_unique_suffix_beyond_run_id(self, adapter):
+        mock_batch, mock_core = _mock_k8s_clients(adapter)
+        job_spec = {
+            "run_id": 42,
+            "pipeline_name": "nf-core/scrnaseq",
+            "container_image": "alpine:3.19",
+            "command": ["echo", "hello"],
+            "namespace": "bioaf-pipelines",
+            "input_files": [],
+            "parameters": {},
+        }
+
+        with patch.object(adapter, "_get_k8s_batch_client", return_value=mock_batch):
+            with patch.object(adapter, "_get_k8s_core_client", return_value=mock_core):
+                result = await adapter._k8s_submit_job(job_spec)
+
+        body = mock_batch.create_namespaced_job.call_args[1]["body"]
+        name = body["metadata"]["name"]
+        import re
+
+        assert re.match(r"^bioaf-pipeline-42-\d+$", name), f"job_name must be bioaf-pipeline-42-<suffix>, got {name!r}"
+        # K8s Job name length cap is 63 chars.
+        assert len(name) <= 63, f"job_name {name!r} exceeds K8s 63-char limit"
+        # Returned job_id must match the actual K8s Job name (so it gets
+        # persisted to pipeline_runs.k8s_job_name correctly).
+        assert result["job_id"] == name
+
+    @pytest.mark.asyncio
+    async def test_two_submits_with_same_run_id_produce_distinct_job_names(self, adapter):
+        mock_batch, mock_core = _mock_k8s_clients(adapter)
+        job_spec = {
+            "run_id": 42,
+            "pipeline_name": "nf-core/scrnaseq",
+            "container_image": "alpine:3.19",
+            "command": ["echo", "hello"],
+            "namespace": "bioaf-pipelines",
+            "input_files": [],
+            "parameters": {},
+        }
+
+        with patch.object(adapter, "_get_k8s_batch_client", return_value=mock_batch):
+            with patch.object(adapter, "_get_k8s_core_client", return_value=mock_core):
+                with patch("time.time", side_effect=[1700000000.0, 1700000001.0]):
+                    result_a = await adapter._k8s_submit_job(job_spec)
+                    adapter._namespace_ready = True  # avoid re-entry
+                    result_b = await adapter._k8s_submit_job(job_spec)
+
+        assert result_a["job_id"] != result_b["job_id"], (
+            "Two submits with the same run_id must produce distinct job_names "
+            "so their GCS report/trace paths don't collide"
+        )
+
+    @pytest.mark.asyncio
+    async def test_gcs_report_and_trace_paths_use_unique_job_name(self, adapter):
+        """The Nextflow command's -with-report and -with-trace paths must
+        embed the unique job_name suffix so a recycled run_id can't read
+        or overwrite a previous run's report."""
+        mock_batch, mock_core = _mock_k8s_clients(adapter)
+        adapter._cluster_config = {
+            "raw_bucket_name": "bioaf-raw-test-abc123",
+            "gcp_project_id": "test-proj",
+        }
+        job_spec = {
+            "run_id": 42,
+            "pipeline_name": "nf-core/scrnaseq",
+            "pipeline_source": "https://github.com/nf-core/scrnaseq",
+            "pipeline_version": "2.7.1",
+            "namespace": "bioaf-pipelines",
+            "input_files": [],
+            "parameters": {},
+            "sample_sheet": "sample,fastq_1\nS1,gs://bucket/R1.fastq.gz\n",
+        }
+
+        async def _fake_read_creds() -> tuple[str, str]:
+            return "service_account_key", "{}"
+
+        async def _fake_refresh() -> None:
+            return None
+
+        from unittest.mock import patch as _patch
+
+        with (
+            _patch.object(adapter, "_get_k8s_batch_client", return_value=mock_batch),
+            _patch.object(adapter, "_get_k8s_core_client", return_value=mock_core),
+            _patch.object(adapter, "_read_gcp_credentials", _fake_read_creds),
+            _patch.object(adapter, "_ensure_cluster_config_fresh", _fake_refresh),
+        ):
+            result = await adapter._k8s_submit_job(job_spec)
+
+        job_name = result["job_id"]
+        body = mock_batch.create_namespaced_job.call_args[1]["body"]
+        shell_cmd = body["spec"]["template"]["spec"]["containers"][0]["command"][-1]
+
+        # Both report and trace paths must include the unique job_name (not
+        # just the run_id), so two runs with the same run_id can never share
+        # output paths.
+        assert f"nextflow-reports/{job_name}/report.html" in shell_cmd
+        assert f"nextflow-traces/{job_name}/trace.tsv" in shell_cmd
 
 
 class TestSubmitJobAutoscalerAnnotation:
