@@ -239,15 +239,18 @@ export default function PipelineRunDetailPage() {
     } catch {} finally { setReportLoading(false); }
   }
 
-  async function loadLogs(processName?: string) {
-    setLogsLoading(true);
+  // showSpinner=false suppresses the loading state on background polls so
+  // the <pre> stays mounted and the user's scroll position is preserved;
+  // we only flash the spinner on the user-visible initial load.
+  async function loadLogs(processName?: string, showSpinner: boolean = true) {
+    if (showSpinner) setLogsLoading(true);
     try {
       const url = processName
         ? `/api/pipeline-runs/${runId}/logs/${encodeURIComponent(processName)}`
         : `/api/pipeline-runs/${runId}/logs`;
       const data = await api.get<LogResponse>(url);
       setLogs(data);
-    } catch {} finally { setLogsLoading(false); }
+    } catch {} finally { if (showSpinner) setLogsLoading(false); }
   }
 
   async function loadSystemLogs() {
@@ -296,16 +299,17 @@ export default function PipelineRunDetailPage() {
   // open. The run-metadata poller above runs every 10s but is dep'd on
   // run.k8s_job_name, so without this sibling interval logs only reload
   // when that field changes (usually once, very early), leaving the user
-  // staring at stale output until they refresh the page.
+  // staring at stale output until they refresh the page. Polls suppress
+  // the spinner so the <pre> stays mounted and scroll position survives.
   useEffect(() => {
     if (activeTab !== "logs") return;
     if (!run || !["running", "pending"].includes(run.status)) return;
     if (!run.k8s_job_name && !selectedProcess) return;
     const interval = setInterval(() => {
       if (selectedProcess) {
-        loadLogs(selectedProcess);
+        loadLogs(selectedProcess, false);
       } else if (run.k8s_job_name) {
-        loadLogs();
+        loadLogs(undefined, false);
       }
     }, 5000);
     return () => clearInterval(interval);

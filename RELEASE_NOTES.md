@@ -22,6 +22,9 @@ which silently stopped auto-refreshing once the head pod was scheduled.
   watching a live pipeline required manual page refreshes. A sibling
   interval now reloads logs while the run is `running` or `pending`
   and the logs tab is open, stopping automatically on terminal status.
+  Background polls suppress the loading spinner so the log `<pre>`
+  stays mounted and the user's scroll position survives each refresh
+  (the spinner only flashes on the user-visible initial load).
 - **Pipeline head + task pods pinned against autoscaler eviction.**
   Long pipelines (e.g. STAR_GENOMEGENERATE for human GRCh38, ~45 min)
   were occasionally killed mid-run when GKE's cluster autoscaler

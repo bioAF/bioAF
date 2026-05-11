@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 
 const mockRouter = { push: jest.fn() };
 const mockParams = { id: "1" };
@@ -78,6 +78,28 @@ describe("PipelineRunDetailPage logs auto-refresh", () => {
     await new Promise((r) => setTimeout(r, 5500));
 
     await waitFor(() => expect(logsCalls()).toBeGreaterThan(initial));
+  }, 15000);
+
+  test("polled refreshes do not flash the loading spinner", async () => {
+    // The loading spinner toggles `logsLoading`, which unmounts the <pre>
+    // and re-mounts it -- resetting the user's scroll position. Polled
+    // refreshes must suppress the spinner so the <pre> stays mounted and
+    // scroll position survives.
+    mockApiResponses("running");
+    render(<PipelineRunDetailPage />);
+
+    // Wait for the initial logs call so the spinner has had a chance to
+    // appear and disappear.
+    await waitFor(() => expect(logsCalls()).toBeGreaterThanOrEqual(1));
+    await waitFor(() => expect(screen.queryByText("Loading logs...")).toBeNull());
+
+    // Trigger a poll.
+    await new Promise((r) => setTimeout(r, 5500));
+    await waitFor(() => expect(logsCalls()).toBeGreaterThan(1));
+
+    // After the poll, the spinner must still be hidden -- otherwise the
+    // <pre> got unmounted and the user's scroll is gone.
+    expect(screen.queryByText("Loading logs...")).toBeNull();
   }, 15000);
 
   test("does not poll logs once the run reaches a terminal state", async () => {
