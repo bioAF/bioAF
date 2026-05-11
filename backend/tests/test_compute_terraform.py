@@ -172,3 +172,99 @@ def test_notebook_runner_workload_identity_depends_on_system_pool():
     assert "google_container_node_pool.system" in binding_block, (
         "notebook_runner_workload_identity must depend_on the system pool"
     )
+
+
+def test_pipeline_runner_service_account_exists():
+    """A dedicated bioaf-pipeline-runner GSA is required for Workload Identity:
+    the bioaf-pipelines node pool enforces GKE_METADATA, so Nextflow pods get
+    no GCP identity unless their KSA is bound to a GSA that can read/write the
+    bioaf-* buckets. Without this resource, Nextflow GCS access fails with
+    'storage.objects.get denied'.
+    """
+    main_tf = (COMPUTE_MODULE_DIR / "main.tf").read_text()
+
+    resource_marker = 'resource "google_service_account" "pipeline_runner"'
+    assert resource_marker in main_tf, "pipeline_runner GSA resource must exist"
+
+    start = main_tf.index(resource_marker)
+    end = main_tf.find('resource "', start + 1)
+    if end == -1:
+        end = len(main_tf)
+    block = main_tf[start:end]
+
+    assert 'account_id   = "bioaf-pipeline-runner"' in block or 'account_id = "bioaf-pipeline-runner"' in block, (
+        "pipeline_runner GSA account_id must be bioaf-pipeline-runner"
+    )
+
+
+def test_pipeline_runner_has_storage_object_admin():
+    """pipeline_runner needs object-level access on bioaf-* buckets to read
+    input fastqs, write Nextflow work/results, and emit reports/traces.
+    Scope to bioaf-* buckets via an IAM Condition, mirroring how bioaf-app
+    is scoped in install-gcp.sh."""
+    main_tf = (COMPUTE_MODULE_DIR / "main.tf").read_text()
+
+    binding_marker = 'resource "google_project_iam_member" "pipeline_runner_storage"'
+    assert binding_marker in main_tf, "pipeline_runner_storage binding must exist"
+
+    start = main_tf.index(binding_marker)
+    end = main_tf.find('resource "', start + 1)
+    if end == -1:
+        end = len(main_tf)
+    block = main_tf[start:end]
+
+    assert 'role    = "roles/storage.objectAdmin"' in block or 'role = "roles/storage.objectAdmin"' in block, (
+        "pipeline_runner must have roles/storage.objectAdmin"
+    )
+    # Scope to bioaf-* buckets so this SA can't read unrelated project data.
+    assert 'resource.name.startsWith(\\"projects/_/buckets/bioaf-\\")' in block, (
+        "pipeline_runner storage binding must be conditioned on bioaf-* buckets"
+    )
+
+
+def test_pipeline_runner_workload_identity_binding_exists():
+    """The Workload Identity binding maps the bioaf-pipelines/bioaf-pipeline-runner
+    KSA to the GSA. Without this binding, the KSA's iam.gke.io/gcp-service-account
+    annotation is inert."""
+    main_tf = (COMPUTE_MODULE_DIR / "main.tf").read_text()
+
+    binding_marker = 'resource "google_service_account_iam_member" "pipeline_runner_workload_identity"'
+    assert binding_marker in main_tf, "pipeline_runner_workload_identity binding must exist"
+
+    start = main_tf.index(binding_marker)
+    end = main_tf.find('resource "', start + 1)
+    if end == -1:
+        end = len(main_tf)
+    block = main_tf[start:end]
+
+    assert (
+        'role               = "roles/iam.workloadIdentityUser"' in block
+        or 'role = "roles/iam.workloadIdentityUser"' in block
+    ), "pipeline_runner WI binding must grant roles/iam.workloadIdentityUser"
+    assert "bioaf-pipelines/bioaf-pipeline-runner" in block, (
+        "pipeline_runner WI binding must reference bioaf-pipelines/bioaf-pipeline-runner KSA"
+    )
+
+
+def test_pipeline_runner_workload_identity_depends_on_node_pools():
+    """The WI binding must depend_on the cluster and all three node pools, so
+    Terraform waits for the Workload Identity pool to register before applying
+    the binding (otherwise 'Identity Pool does not exist' on first apply)."""
+    main_tf = (COMPUTE_MODULE_DIR / "main.tf").read_text()
+
+    binding_marker = 'resource "google_service_account_iam_member" "pipeline_runner_workload_identity"'
+    assert binding_marker in main_tf
+
+    start = main_tf.index(binding_marker)
+    end = main_tf.find('resource "', start + 1)
+    if end == -1:
+        end = len(main_tf)
+    block = main_tf[start:end]
+
+    for dep in (
+        "google_container_cluster.bioaf",
+        "google_container_node_pool.pipelines",
+        "google_container_node_pool.interactive",
+        "google_container_node_pool.system",
+    ):
+        assert dep in block, f"pipeline_runner_workload_identity must depend_on {dep}"

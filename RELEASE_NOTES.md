@@ -1,5 +1,37 @@
 # Release Notes
 
+## v0.11.11
+
+Fixes a Workload Identity gap that left Nextflow pipeline pods with no GCP
+identity, so launches against any pipeline (nf-core/scrnaseq, etc.) failed
+at the first GCS read with `storage.objects.get denied`.
+
+### Bug fixes
+
+- **Pipeline pods now get a real GCP identity.** The bioaf-pipelines node
+  pool enforces GKE_METADATA, so pods must bind a GCP service account via
+  Workload Identity to read or write GCS. A new `bioaf-pipeline-runner`
+  GSA is created by the compute Terraform module, granted
+  `roles/storage.objectAdmin` scoped to `bioaf-*` buckets (matching how
+  `bioaf-app` is scoped in the installer), and wired to the
+  `bioaf-pipelines/bioaf-pipeline-runner` KSA via
+  `roles/iam.workloadIdentityUser`. The backend now stamps the
+  `iam.gke.io/gcp-service-account` annotation on the KSA at namespace
+  setup and patches it on the upgrade path so existing deployments
+  recover without recreating the namespace.
+
+### Deploy
+
+Apply the compute Terraform module from the Infrastructure -> Components
+page (any trivial cluster-config save triggers `terraform plan + apply`
+on the compute module). The plan adds three additive resources
+(`google_service_account.pipeline_runner`,
+`google_project_iam_member.pipeline_runner_storage`,
+`google_service_account_iam_member.pipeline_runner_workload_identity`)
+with no destroys. After the apply finishes, wait a minute or two for the
+Workload Identity binding to propagate, then resubmit any pipeline runs
+that failed under the older version.
+
 ## v0.11.10
 
 Adds inline file upload to the experiment Files tab, so users no longer
