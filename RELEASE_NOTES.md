@@ -10,11 +10,11 @@ which silently stopped auto-refreshing once the head pod was scheduled.
 
 ### Bug fixes
 
-- **Pipeline-runner gets bucket-level access on bioaf-* buckets.** The
-  binding on `bioaf-pipeline-runner` now uses `roles/storage.admin`
-  (still scoped to bioaf-* buckets via IAM Condition, matching how
-  `bioaf-app` is scoped in `install-gcp.sh`). Fusion can now perform the
-  bucket lookup it needs to mount `gs://bioaf-raw-*` as a local
+- **Pipeline-runner gets bucket-level access on `bioaf-*` buckets.**
+  The binding on `bioaf-pipeline-runner` now uses `roles/storage.admin`
+  (still scoped to `bioaf-*` buckets via IAM Condition, matching how
+  `bioaf-app` is scoped in `install-gcp.sh`). Fusion can now perform
+  the bucket lookup it needs to mount `gs://bioaf-raw-*` as a local
   filesystem inside task pods.
 - **Pipeline-run logs auto-refresh every 5 seconds.** The pipeline-run
   detail page already polled run metadata every 10s, but logs only
