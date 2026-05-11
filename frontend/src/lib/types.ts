@@ -720,6 +720,11 @@ export interface PipelineCatalogListResponse {
   total: number;
 }
 
+export interface PipelineProcessRetry {
+  name: string;
+  attempts: number;
+}
+
 export interface PipelineProgress {
   total_processes: number;
   completed: number;
@@ -727,6 +732,7 @@ export interface PipelineProgress {
   failed: number;
   cached: number;
   percent_complete: number;
+  retries?: PipelineProcessRetry[];
 }
 
 export interface PipelineProcess {

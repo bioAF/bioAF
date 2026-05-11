@@ -197,6 +197,97 @@ async def test_k8s_monitor_creates_process_records_on_completion(session, k8s_ru
 
 
 @pytest.mark.asyncio
+async def test_progress_dedupes_retries_by_name(session, k8s_running_run):
+    """A task that fails and is retried by Nextflow appears multiple times in
+    the trace (one row per attempt). Progress should count unique processes,
+    not attempts, so the user sees the actual pipeline shape on the UI."""
+    mock_compute = AsyncMock()
+    mock_compute.get_job_status.return_value = {
+        "status": "completed",
+        "pod_name": "bioaf-pipeline-99-xyz",
+    }
+    # 17 unique tasks; 3 of them have an extra failed attempt before the
+    # final completed one. Total trace rows = 17 + 3 = 20.
+    failed = {"status": "failed", "cpu": 0.0, "memory_gb": 0.0, "duration_s": 60}
+    completed = {"status": "completed", "cpu": 50.0, "memory_gb": 1.0, "duration_s": 300}
+    processes = []
+    # 14 tasks that never failed
+    for i in range(14):
+        processes.append({"name": f"TASK_{i}", **completed})
+    # 3 retried tasks: failed attempt then completed attempt (trace order matters)
+    for name in ("STAR_ALIGN", "STAR_GENOMEGENERATE", "MTX_TO_H5AD"):
+        processes.append({"name": name, **failed})
+        processes.append({"name": name, **completed})
+
+    mock_compute.get_job_progress.return_value = {
+        "percent_complete": 85.0,  # adapter's raw count gets this wrong; we recompute
+        "processes": processes,
+    }
+
+    mock_storage = AsyncMock()
+    mock_storage.collect_outputs.return_value = []
+
+    with (
+        patch("app.services.pipeline_monitor_service.get_compute_adapter", return_value=mock_compute),
+        patch("app.services.pipeline_monitor_service.get_storage_adapter", return_value=mock_storage),
+        patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
+    ):
+        await PipelineMonitorService.sync_run_statuses(session)
+
+    from sqlalchemy import select
+
+    result = await session.execute(select(PipelineRun).where(PipelineRun.id == k8s_running_run.id))
+    run = result.scalar_one()
+    pj = run.progress_json
+    assert pj is not None
+    assert pj["total_processes"] == 17, f"expected 17 unique tasks, got {pj['total_processes']}"
+    assert pj["completed"] == 17, f"expected all 17 completed, got {pj['completed']}"
+    assert pj["failed"] == 0, "retried-and-succeeded tasks must not count as failed"
+    assert pj["percent_complete"] == 100.0, f"expected 100%, got {pj['percent_complete']}"
+
+    retries = pj.get("retries", [])
+    retry_names = {r["name"] for r in retries}
+    assert retry_names == {"STAR_ALIGN", "STAR_GENOMEGENERATE", "MTX_TO_H5AD"}
+    for r in retries:
+        assert r["attempts"] == 2, f"each retry should have 2 attempts, got {r}"
+
+
+@pytest.mark.asyncio
+async def test_progress_no_retries_omits_or_empties_list(session, k8s_running_run):
+    """A clean run with no retries should not surface a retries UI."""
+    mock_compute = AsyncMock()
+    mock_compute.get_job_status.return_value = {
+        "status": "completed",
+        "pod_name": "bioaf-pipeline-99-xyz",
+    }
+    mock_compute.get_job_progress.return_value = {
+        "percent_complete": 100.0,
+        "processes": [
+            {"name": "TASK_A", "status": "completed", "cpu": 50.0, "memory_gb": 1.0, "duration_s": 100},
+            {"name": "TASK_B", "status": "completed", "cpu": 50.0, "memory_gb": 1.0, "duration_s": 100},
+        ],
+    }
+    mock_storage = AsyncMock()
+    mock_storage.collect_outputs.return_value = []
+
+    with (
+        patch("app.services.pipeline_monitor_service.get_compute_adapter", return_value=mock_compute),
+        patch("app.services.pipeline_monitor_service.get_storage_adapter", return_value=mock_storage),
+        patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
+    ):
+        await PipelineMonitorService.sync_run_statuses(session)
+
+    from sqlalchemy import select
+
+    result = await session.execute(select(PipelineRun).where(PipelineRun.id == k8s_running_run.id))
+    run = result.scalar_one()
+    pj = run.progress_json
+    assert pj is not None
+    # Either absent or an empty list -- the UI shows the pill only when len > 0.
+    assert not pj.get("retries"), f"clean run should have no retries, got {pj.get('retries')!r}"
+
+
+@pytest.mark.asyncio
 async def test_k8s_monitor_keeps_running(session, k8s_running_run):
     """Monitor keeps running status when K8s reports running, does not fetch progress."""
     mock_compute = AsyncMock()
