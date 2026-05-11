@@ -34,6 +34,20 @@ which silently stopped auto-refreshing once the head pod was scheduled.
   `cluster-autoscaler.kubernetes.io/safe-to-evict: "false"` so the
   autoscaler leaves them in place for the run's duration. Nodes are
   still reclaimed normally after pods terminate.
+- **Nextflow head pod isolated from Spot preemption.** The
+  `bioaf-pipelines` node pool runs on Spot for cost; any VM in the
+  pool can be reclaimed by GCP with a 30-second SIGTERM regardless of
+  pod annotations (Spot preemption is not subject to
+  `cluster-autoscaler.kubernetes.io/safe-to-evict`). Long pipelines
+  whose head pod happened to land on a preempted VM were killed
+  mid-run -- verified empirically with the
+  `compute.instances.delete` -> immediate MIG-replacement pattern.
+  A new on-demand `bioaf-pipeline-head` pool now hosts the head Job
+  via `nodeSelector + toleration`. Task pods stay on the Spot
+  `bioaf-pipelines` pool (Nextflow already retries preempted tasks
+  via the existing errorStrategy on exit 143/137/247). The new pool
+  is tainted so Nextflow's task pods, which can't carry custom
+  tolerations, never accidentally land there.
 - **Per-submit GCS path uniqueness.** Nextflow reports, traces, and
   persisted pipeline logs were keyed by `bioaf-pipeline-{run_id}`, so
   if the `pipeline_runs.id` sequence was reset (e.g., during a clean

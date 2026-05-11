@@ -1025,11 +1025,18 @@ class KubernetesComputeProvider(ComputeProvider):
                         },
                     },
                     "spec": {
-                        "nodeSelector": {"bioaf.io/pool": "pipelines"},
+                        # Head pod runs on the dedicated on-demand pipeline-head
+                        # pool, NOT the Spot pipelines pool. Spot preemption of
+                        # the head pod kills the entire pipeline; on-demand keeps
+                        # the orchestrator alive while task pods (Spot, retried
+                        # by Nextflow's errorStrategy on exit 143/137/247) stay
+                        # cheap. The pool is tainted so Nextflow's task pods
+                        # (which can't carry custom tolerations) cannot land here.
+                        "nodeSelector": {"bioaf.io/pool": "pipeline-head"},
                         "tolerations": [
                             {
                                 "key": "bioaf.io/pool",
-                                "value": "pipelines",
+                                "value": "pipeline-head",
                                 "effect": "NoSchedule",
                             }
                         ],

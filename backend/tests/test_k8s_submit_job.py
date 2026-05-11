@@ -69,10 +69,12 @@ class TestSubmitJobCreatesK8sJob:
         assert body["metadata"]["labels"]["bioaf.io/pipeline"] == "nf-core-scrnaseq"
         assert body["metadata"]["labels"]["bioaf.io/pool"] == "pipelines"
 
-        # Check node selector and tolerations
+        # Check node selector and tolerations (head pod runs on the on-demand
+        # pipeline-head pool, not the Spot pipelines pool -- see
+        # TestSubmitJobHeadPoolTargeting for why).
         pod_spec = body["spec"]["template"]["spec"]
-        assert pod_spec["nodeSelector"]["bioaf.io/pool"] == "pipelines"
-        assert any(t["key"] == "bioaf.io/pool" and t["value"] == "pipelines" for t in pod_spec["tolerations"])
+        assert pod_spec["nodeSelector"]["bioaf.io/pool"] == "pipeline-head"
+        assert any(t["key"] == "bioaf.io/pool" and t["value"] == "pipeline-head" for t in pod_spec["tolerations"])
 
         # Check job name (includes per-submit suffix for GCS path uniqueness;
         # see TestSubmitJobUniqueJobName for the format contract).
@@ -188,6 +190,45 @@ class TestSubmitJobUniqueJobName:
         # output paths.
         assert f"nextflow-reports/{job_name}/report.html" in shell_cmd
         assert f"nextflow-traces/{job_name}/trace.tsv" in shell_cmd
+
+
+class TestSubmitJobHeadPoolTargeting:
+    """The Nextflow head pod runs on the dedicated on-demand bioaf-pipeline-head
+    pool to survive Spot preemption that would otherwise kill long pipelines.
+    Task pods stay on the cheaper Spot bioaf-pipelines pool (Nextflow's retry
+    strategy already handles their preemption via exit codes 143/137/247)."""
+
+    @pytest.mark.asyncio
+    async def test_head_job_targets_pipeline_head_pool(self, adapter):
+        mock_batch, mock_core = _mock_k8s_clients(adapter)
+        job_spec = {
+            "run_id": 42,
+            "pipeline_name": "nf-core/scrnaseq",
+            "container_image": "alpine:3.19",
+            "command": ["echo", "hello"],
+            "namespace": "bioaf-pipelines",
+            "input_files": [],
+            "parameters": {},
+        }
+
+        with patch.object(adapter, "_get_k8s_batch_client", return_value=mock_batch):
+            with patch.object(adapter, "_get_k8s_core_client", return_value=mock_core):
+                await adapter._k8s_submit_job(job_spec)
+
+        body = mock_batch.create_namespaced_job.call_args[1]["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+
+        assert pod_spec["nodeSelector"]["bioaf.io/pool"] == "pipeline-head", (
+            "Head Job must target the on-demand pipeline-head pool, not the Spot pipelines pool"
+        )
+
+        # And the head pod must tolerate that pool's NoSchedule taint, otherwise
+        # the scheduler rejects it.
+        tols = pod_spec.get("tolerations", [])
+        assert any(
+            t.get("key") == "bioaf.io/pool" and t.get("value") == "pipeline-head" and t.get("effect") == "NoSchedule"
+            for t in tols
+        ), f"Head Job must tolerate bioaf.io/pool=pipeline-head:NoSchedule, got {tols}"
 
 
 class TestSubmitJobAutoscalerAnnotation:

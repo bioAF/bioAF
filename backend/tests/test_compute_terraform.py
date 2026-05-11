@@ -249,6 +249,59 @@ def test_pipeline_runner_workload_identity_binding_exists():
     )
 
 
+def test_pipeline_head_node_pool_exists_and_is_on_demand():
+    """Nextflow head pods are killed by Spot preemption mid-pipeline. A dedicated
+    on-demand pool isolates the orchestrator from preemption while task pods
+    stay on the cheaper Spot pipelines pool. Confirmed empirically: a run on
+    2026-05-11 had its head pod killed at ~11 min by Spot reclamation despite
+    cluster-autoscaler.kubernetes.io/safe-to-evict=false (which only blocks
+    voluntary autoscaler scale-down, not Spot)."""
+    main_tf = (COMPUTE_MODULE_DIR / "main.tf").read_text()
+
+    resource_marker = 'resource "google_container_node_pool" "pipeline_head"'
+    assert resource_marker in main_tf, "bioaf-pipeline-head node pool must exist"
+
+    start = main_tf.index(resource_marker)
+    end = main_tf.find('resource "', start + 1)
+    if end == -1:
+        end = len(main_tf)
+    block = main_tf[start:end]
+
+    assert '"bioaf-pipeline-head"' in block, "pool name must be bioaf-pipeline-head"
+    # Must NOT be spot -- the whole point is to survive preemption.
+    assert "spot         = true" not in block and "spot = true" not in block, (
+        "pipeline-head pool must not use Spot instances"
+    )
+    # Label so the head Job's nodeSelector can target this pool.
+    assert '"bioaf.io/pool" = "pipeline-head"' in block, "pool must carry bioaf.io/pool=pipeline-head label"
+
+
+def test_pipeline_head_pool_is_tainted_for_strict_isolation():
+    """The head pool carries a NoSchedule taint so Nextflow's task pods
+    (which don't carry custom tolerations) can't accidentally land on it
+    and consume capacity reserved for orchestrators."""
+    main_tf = (COMPUTE_MODULE_DIR / "main.tf").read_text()
+
+    resource_marker = 'resource "google_container_node_pool" "pipeline_head"'
+    start = main_tf.index(resource_marker)
+    end = main_tf.find('resource "', start + 1)
+    if end == -1:
+        end = len(main_tf)
+    block = main_tf[start:end]
+
+    assert "taint" in block, "pipeline-head pool must declare a taint block"
+    assert 'key    = "bioaf.io/pool"' in block or 'key = "bioaf.io/pool"' in block
+    assert 'value  = "pipeline-head"' in block or 'value = "pipeline-head"' in block
+    assert 'effect = "NO_SCHEDULE"' in block
+
+
+def test_pipeline_head_pool_variables_defined():
+    """variables.tf must declare machine_type and max_nodes for the head pool."""
+    variables_tf = (COMPUTE_MODULE_DIR / "variables.tf").read_text()
+    for var_name in ("k8s_pipeline_head_machine_type", "k8s_pipeline_head_max_nodes"):
+        assert f'"{var_name}"' in variables_tf, f"variables.tf should define {var_name}"
+
+
 def test_pipeline_runner_workload_identity_depends_on_node_pools():
     """The WI binding must depend_on the cluster and all three node pools, so
     Terraform waits for the Workload Identity pool to register before applying
