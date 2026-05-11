@@ -49,7 +49,7 @@ class TestNamespaceEnsured:
                     }
                 )
 
-                mock_ensure.assert_called_once_with("bioaf-pipelines")
+                mock_ensure.assert_called_once_with("bioaf-pipelines", gcp_sa_email="")
 
     @pytest.mark.asyncio
     async def test_submit_job_skips_ensure_when_namespace_ready(self, adapter):
@@ -92,4 +92,4 @@ class TestNamespaceEnsured:
                     }
                 )
 
-                mock_ensure.assert_called_once_with("custom-ns")
+                mock_ensure.assert_called_once_with("custom-ns", gcp_sa_email="")
