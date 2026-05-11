@@ -1,5 +1,95 @@
 # Release Notes
 
+## v0.11.13
+
+Fixes a confusing progress count on the pipeline-run page. After a run
+with Spot preemptions, the bar would read "17/20 / 85%" on a fully
+successful pipeline because each preempted-then-retried task was being
+counted as a separate process.
+
+### Bug fixes
+
+- **Step retries no longer inflate the process total.** The progress
+  counter now dedupes the Nextflow trace by process name and reports
+  unique pipeline steps. A 17-step pipeline that had 3 task attempts
+  preempted and retried now reads "17 / 17 succeeded" with a full bar.
+
+### Enhancements
+
+- **Step retries surface in the run header.** When a run had retries,
+  the stats bar (Started · Completed · Duration) now includes a "Step
+  retries" counter. Clicking it opens a modal listing each step that
+  was retried and how many attempts it took. The counter is hidden when
+  a run had no retries, so clean runs stay clean.
+
+## v0.11.12
+
+Fixes a follow-up to v0.11.11: pipeline task pods reached Fusion, but Fusion
+failed to mount the GCS work directory because `roles/storage.objectAdmin`
+doesn't include `storage.buckets.get`. Tasks exited 126 before
+`.command.sh` could run. Also fixes the pipeline-run page's log panel,
+which silently stopped auto-refreshing once the head pod was scheduled.
+
+### Bug fixes
+
+- **Pipeline-runner gets bucket-level access on `bioaf-*` buckets.**
+  The binding on `bioaf-pipeline-runner` now uses `roles/storage.admin`
+  (still scoped to `bioaf-*` buckets via IAM Condition, matching how
+  `bioaf-app` is scoped in `install-gcp.sh`). Fusion can now perform
+  the bucket lookup it needs to mount `gs://bioaf-raw-*` as a local
+  filesystem inside task pods.
+- **Pipeline-run logs auto-refresh every 5 seconds.** The pipeline-run
+  detail page already polled run metadata every 10s, but logs only
+  reloaded when `k8s_job_name` flipped (typically once per run), so
+  watching a live pipeline required manual page refreshes. A sibling
+  interval now reloads logs while the run is `running` or `pending`
+  and the logs tab is open, stopping automatically on terminal status.
+  Background polls suppress the loading spinner so the log `<pre>`
+  stays mounted and the user's scroll position survives each refresh
+  (the spinner only flashes on the user-visible initial load).
+- **Pipeline head + task pods pinned against autoscaler eviction.**
+  Long pipelines (e.g. STAR_GENOMEGENERATE for human GRCh38, ~45 min)
+  were occasionally killed mid-run when GKE's cluster autoscaler
+  decided their node was underutilized and scaled it down. Both the
+  Nextflow head Job and the task pods spawned by Nextflow's K8s
+  executor now carry
+  `cluster-autoscaler.kubernetes.io/safe-to-evict: "false"` so the
+  autoscaler leaves them in place for the run's duration. Nodes are
+  still reclaimed normally after pods terminate.
+- **Nextflow head pod isolated from Spot preemption.** The
+  `bioaf-pipelines` node pool runs on Spot for cost; any VM in the
+  pool can be reclaimed by GCP with a 30-second SIGTERM regardless of
+  pod annotations (Spot preemption is not subject to
+  `cluster-autoscaler.kubernetes.io/safe-to-evict`). Long pipelines
+  whose head pod happened to land on a preempted VM were killed
+  mid-run -- verified empirically with the
+  `compute.instances.delete` -> immediate MIG-replacement pattern.
+  A new on-demand `bioaf-pipeline-head` pool now hosts the head Job
+  via `nodeSelector + toleration`. Task pods stay on the Spot
+  `bioaf-pipelines` pool (Nextflow already retries preempted tasks
+  via the existing errorStrategy on exit 143/137/247). The new pool
+  is tainted so Nextflow's task pods, which can't carry custom
+  tolerations, never accidentally land there.
+- **Per-submit GCS path uniqueness.** Nextflow reports, traces, and
+  persisted pipeline logs were keyed by `bioaf-pipeline-{run_id}`, so
+  if the `pipeline_runs.id` sequence was reset (e.g., during a clean
+  demo wipe), a new run could read or be confused by a stale
+  `report.html` left in GCS by an earlier run with the same recycled
+  ID. `job_name` now embeds a per-submit epoch suffix
+  (`bioaf-pipeline-{run_id}-{epoch}`) which becomes the K8s Job name,
+  the GCS report/trace/log prefix, and is stored in
+  `pipeline_runs.k8s_job_name` for read consistency. Two submits with
+  the same `run_id` no longer collide.
+
+### Deploy
+
+Apply the compute Terraform module from Infrastructure -> Components
+(any trivial cluster-config save triggers `terraform plan + apply` on
+the compute module). The plan should show one in-place change to
+`google_project_iam_member.pipeline_runner_storage` (role
+`storage.objectAdmin` -> `storage.admin`), zero destroys. Resubmit any
+pipeline runs that failed under v0.11.11.
+
 ## v0.11.11
 
 Fixes a Workload Identity gap that left Nextflow pipeline pods with no GCP

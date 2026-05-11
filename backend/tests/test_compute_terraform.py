@@ -197,11 +197,14 @@ def test_pipeline_runner_service_account_exists():
     )
 
 
-def test_pipeline_runner_has_storage_object_admin():
-    """pipeline_runner needs object-level access on bioaf-* buckets to read
-    input fastqs, write Nextflow work/results, and emit reports/traces.
-    Scope to bioaf-* buckets via an IAM Condition, mirroring how bioaf-app
-    is scoped in install-gcp.sh."""
+def test_pipeline_runner_has_storage_admin():
+    """pipeline_runner needs bucket-level access (not just object-level) on
+    bioaf-* buckets. Fusion mounts buckets as a local filesystem inside task
+    pods, which requires storage.buckets.get -- present in roles/storage.admin
+    but NOT in roles/storage.objectAdmin. Without it, task pods fail with
+    'does not have storage.buckets.get access' and exit 126 before the
+    pipeline command runs. Matches how bioaf-app is scoped in install-gcp.sh.
+    """
     main_tf = (COMPUTE_MODULE_DIR / "main.tf").read_text()
 
     binding_marker = 'resource "google_project_iam_member" "pipeline_runner_storage"'
@@ -213,8 +216,8 @@ def test_pipeline_runner_has_storage_object_admin():
         end = len(main_tf)
     block = main_tf[start:end]
 
-    assert 'role    = "roles/storage.objectAdmin"' in block or 'role = "roles/storage.objectAdmin"' in block, (
-        "pipeline_runner must have roles/storage.objectAdmin"
+    assert re.search(r'role\s*=\s*"roles/storage\.admin"', block), (
+        "pipeline_runner must have roles/storage.admin (objectAdmin lacks storage.buckets.get needed by Fusion)"
     )
     # Scope to bioaf-* buckets so this SA can't read unrelated project data.
     assert 'resource.name.startsWith(\\"projects/_/buckets/bioaf-\\")' in block, (
@@ -244,6 +247,59 @@ def test_pipeline_runner_workload_identity_binding_exists():
     assert "bioaf-pipelines/bioaf-pipeline-runner" in block, (
         "pipeline_runner WI binding must reference bioaf-pipelines/bioaf-pipeline-runner KSA"
     )
+
+
+def test_pipeline_head_node_pool_exists_and_is_on_demand():
+    """Nextflow head pods are killed by Spot preemption mid-pipeline. A dedicated
+    on-demand pool isolates the orchestrator from preemption while task pods
+    stay on the cheaper Spot pipelines pool. Confirmed empirically: a run on
+    2026-05-11 had its head pod killed at ~11 min by Spot reclamation despite
+    cluster-autoscaler.kubernetes.io/safe-to-evict=false (which only blocks
+    voluntary autoscaler scale-down, not Spot)."""
+    main_tf = (COMPUTE_MODULE_DIR / "main.tf").read_text()
+
+    resource_marker = 'resource "google_container_node_pool" "pipeline_head"'
+    assert resource_marker in main_tf, "bioaf-pipeline-head node pool must exist"
+
+    start = main_tf.index(resource_marker)
+    end = main_tf.find('resource "', start + 1)
+    if end == -1:
+        end = len(main_tf)
+    block = main_tf[start:end]
+
+    assert '"bioaf-pipeline-head"' in block, "pool name must be bioaf-pipeline-head"
+    # Must NOT be spot -- the whole point is to survive preemption.
+    assert "spot         = true" not in block and "spot = true" not in block, (
+        "pipeline-head pool must not use Spot instances"
+    )
+    # Label so the head Job's nodeSelector can target this pool.
+    assert '"bioaf.io/pool" = "pipeline-head"' in block, "pool must carry bioaf.io/pool=pipeline-head label"
+
+
+def test_pipeline_head_pool_is_tainted_for_strict_isolation():
+    """The head pool carries a NoSchedule taint so Nextflow's task pods
+    (which don't carry custom tolerations) can't accidentally land on it
+    and consume capacity reserved for orchestrators."""
+    main_tf = (COMPUTE_MODULE_DIR / "main.tf").read_text()
+
+    resource_marker = 'resource "google_container_node_pool" "pipeline_head"'
+    start = main_tf.index(resource_marker)
+    end = main_tf.find('resource "', start + 1)
+    if end == -1:
+        end = len(main_tf)
+    block = main_tf[start:end]
+
+    assert "taint" in block, "pipeline-head pool must declare a taint block"
+    assert 'key    = "bioaf.io/pool"' in block or 'key = "bioaf.io/pool"' in block
+    assert 'value  = "pipeline-head"' in block or 'value = "pipeline-head"' in block
+    assert 'effect = "NO_SCHEDULE"' in block
+
+
+def test_pipeline_head_pool_variables_defined():
+    """variables.tf must declare machine_type and max_nodes for the head pool."""
+    variables_tf = (COMPUTE_MODULE_DIR / "variables.tf").read_text()
+    for var_name in ("k8s_pipeline_head_machine_type", "k8s_pipeline_head_max_nodes"):
+        assert f'"{var_name}"' in variables_tf, f"variables.tf should define {var_name}"
 
 
 def test_pipeline_runner_workload_identity_depends_on_node_pools():
