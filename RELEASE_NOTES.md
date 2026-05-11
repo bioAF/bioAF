@@ -1,5 +1,27 @@
 # Release Notes
 
+## v0.11.13
+
+Fixes a confusing progress count on the pipeline-run page. After a run
+with Spot preemptions, the bar would read "17/20 / 85%" on a fully
+successful pipeline because each preempted-then-retried task was being
+counted as a separate process.
+
+### Bug fixes
+
+- **Step retries no longer inflate the process total.** The progress
+  counter now dedupes the Nextflow trace by process name and reports
+  unique pipeline steps. A 17-step pipeline that had 3 task attempts
+  preempted and retried now reads "17 / 17 succeeded" with a full bar.
+
+### Enhancements
+
+- **Step retries surface in the run header.** When a run had retries,
+  the stats bar (Started · Completed · Duration) now includes a "Step
+  retries" counter. Clicking it opens a modal listing each step that
+  was retried and how many attempts it took. The counter is hidden when
+  a run had no retries, so clean runs stay clean.
+
 ## v0.11.12
 
 Fixes a follow-up to v0.11.11: pipeline task pods reached Fusion, but Fusion

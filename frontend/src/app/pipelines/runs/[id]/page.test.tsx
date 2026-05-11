@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 
 const mockRouter = { push: jest.fn() };
 const mockParams = { id: "1" };
@@ -32,7 +32,7 @@ import { api } from "@/lib/api";
 
 const mockGet = api.get as jest.Mock;
 
-function mockApiResponses(runStatus: string) {
+function mockApiResponses(runStatus: string, extraRunFields: Record<string, unknown> = {}) {
   mockGet.mockImplementation((url: string) => {
     if (url === "/api/pipeline-runs/1") {
       return Promise.resolve({
@@ -43,6 +43,7 @@ function mockApiResponses(runStatus: string) {
         custom_pipeline_version_id: null,
         organization_id: 1,
         processes: [],
+        ...extraRunFields,
       });
     }
     if (url === "/api/pipeline-runs/1/references") {
@@ -114,4 +115,59 @@ describe("PipelineRunDetailPage logs auto-refresh", () => {
     // No interval should be running for a completed run.
     expect(logsCalls()).toBe(initial);
   }, 15000);
+});
+
+describe("PipelineRunDetailPage step retries surface", () => {
+  test("does not render a retries pill on a clean run", async () => {
+    mockApiResponses("completed", {
+      progress: {
+        total_processes: 17,
+        completed: 17,
+        running: 0,
+        failed: 0,
+        cached: 0,
+        percent_complete: 100,
+      },
+    });
+    render(<PipelineRunDetailPage />);
+    await waitFor(() => expect(screen.queryByText("Started")).toBeTruthy());
+    expect(screen.queryByTestId("retries-pill")).toBeNull();
+    expect(screen.queryByText("Step retries")).toBeNull();
+  });
+
+  test("renders the retries pill with count and opens a modal listing retried steps", async () => {
+    mockApiResponses("completed", {
+      progress: {
+        total_processes: 17,
+        completed: 17,
+        running: 0,
+        failed: 0,
+        cached: 0,
+        percent_complete: 100,
+        retries: [
+          { name: "NFCORE_SCRNASEQ:SCRNASEQ:STARSOLO:STAR_ALIGN", attempts: 2 },
+          { name: "NFCORE_SCRNASEQ:SCRNASEQ:STARSOLO:STAR_GENOMEGENERATE", attempts: 2 },
+          { name: "NFCORE_SCRNASEQ:SCRNASEQ:MTX_CONVERSION:MTX_TO_H5AD", attempts: 2 },
+        ],
+      },
+    });
+    render(<PipelineRunDetailPage />);
+
+    const pill = await waitFor(() => {
+      const el = screen.queryByTestId("retries-pill");
+      if (!el) throw new Error("retries pill not rendered yet");
+      return el;
+    });
+    expect(pill.textContent).toContain("3");
+    expect(screen.queryByTestId("retries-modal")).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(pill);
+    });
+
+    await waitFor(() => expect(screen.queryByTestId("retries-modal")).toBeTruthy());
+    expect(screen.queryByText("NFCORE_SCRNASEQ:SCRNASEQ:STARSOLO:STAR_ALIGN")).toBeTruthy();
+    expect(screen.queryByText("NFCORE_SCRNASEQ:SCRNASEQ:STARSOLO:STAR_GENOMEGENERATE")).toBeTruthy();
+    expect(screen.queryByText("NFCORE_SCRNASEQ:SCRNASEQ:MTX_CONVERSION:MTX_TO_H5AD")).toBeTruthy();
+  });
 });

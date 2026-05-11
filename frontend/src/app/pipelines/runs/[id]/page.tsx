@@ -167,6 +167,7 @@ export default function PipelineRunDetailPage() {
   const [showSystemLogs, setShowSystemLogs] = useState(false);
   const [systemLogs, setSystemLogs] = useState<LogResponse | null>(null);
   const [systemLogsLoading, setSystemLogsLoading] = useState(false);
+  const [showRetriesModal, setShowRetriesModal] = useState(false);
 
   const loadRun = useCallback(async () => {
     try {
@@ -397,6 +398,20 @@ export default function PipelineRunDetailPage() {
               <div><span className="text-xs text-gray-500">Completed</span><p className="text-sm font-medium">{formatDateTime(run.completed_at)}</p></div>
             )}
             <div><span className="text-xs text-gray-500">Duration</span><p className="text-sm font-medium">{formatDuration(run.started_at, run.completed_at)}</p></div>
+            {run.progress?.retries && run.progress.retries.length > 0 && (
+              <div>
+                <span className="text-xs text-gray-500">Step retries</span>
+                <p>
+                  <button
+                    onClick={() => setShowRetriesModal(true)}
+                    className="text-sm font-medium text-bioaf-600 hover:underline"
+                    data-testid="retries-pill"
+                  >
+                    {run.progress.retries.length}
+                  </button>
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Overall progress */}
@@ -803,6 +818,48 @@ export default function PipelineRunDetailPage() {
           )}
         </main>
       </div>
+
+      {showRetriesModal && run?.progress?.retries && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={() => setShowRetriesModal(false)}
+          data-testid="retries-modal"
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="border-b px-6 py-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Step retries</h2>
+              <button
+                onClick={() => setShowRetriesModal(false)}
+                className="text-gray-400 hover:text-gray-600 text-xl"
+                aria-label="Close"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="p-6">
+              <p className="text-sm text-gray-600 mb-4">
+                The following steps were retried during this run. Each ran more
+                than once before producing its output (typically because the
+                first attempt was interrupted by Spot preemption).
+              </p>
+              <ul className="space-y-2">
+                {run.progress.retries.map((r) => (
+                  <li
+                    key={r.name}
+                    className="flex items-center justify-between bg-gray-50 rounded px-3 py-2 text-sm"
+                  >
+                    <span className="font-mono text-gray-800">{r.name}</span>
+                    <span className="text-gray-500">{r.attempts} attempts</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
