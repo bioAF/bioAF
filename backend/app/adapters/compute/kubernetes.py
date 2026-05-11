@@ -828,9 +828,16 @@ class KubernetesComputeProvider(ComputeProvider):
         pipeline_source = job_spec.get("pipeline_source", "")
         sample_sheet = job_spec.get("sample_sheet", "")
 
-        # Ensure namespace, service account, and role binding exist on first use
+        # Ensure namespace, service account, and role binding exist on first use.
+        # Pass the bioaf-pipeline-runner GSA email so the KSA gets the
+        # iam.gke.io/gcp-service-account annotation for Workload Identity.
+        cfg = self._cluster_config or {}
+        project_id = cfg.get("gcp_project_id", "")
+        pipeline_runner_sa_email = (
+            f"bioaf-pipeline-runner@{project_id}.iam.gserviceaccount.com" if project_id else ""
+        )
         if not self._namespace_ready:
-            await self.ensure_pipeline_namespace(namespace)
+            await self.ensure_pipeline_namespace(namespace, gcp_sa_email=pipeline_runner_sa_email)
 
         # Ensure GCS credentials secret exists for bucket access. Read the
         # SA key fresh from platform_config so a key saved or rotated through

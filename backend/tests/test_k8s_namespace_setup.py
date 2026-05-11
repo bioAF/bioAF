@@ -163,3 +163,63 @@ class TestNamespaceSetupAnnotatesWorkloadIdentity:
                 await adapter.ensure_pipeline_namespace("bioaf-pipelines", gcp_sa_email=sa_email)
 
         mock_core_v1.patch_namespaced_service_account.assert_not_called()
+
+
+class TestSubmitJobBuildsPipelineRunnerEmail:
+    """The launch path must derive the bioaf-pipeline-runner GSA email from
+    platform_config and pass it to ensure_pipeline_namespace, so the KSA gets
+    annotated for Workload Identity on first deploy."""
+
+    @pytest.mark.asyncio
+    async def test_k8s_submit_job_passes_email_to_namespace_setup(self, adapter, monkeypatch):
+        """gcp_project_id from cluster_config -> bioaf-pipeline-runner@<project>.iam.gserviceaccount.com."""
+        sa_key = '{"type": "service_account", "project_id": "test"}'
+        adapter._cluster_config = {
+            "gcp_service_account_key": sa_key,
+            "gcp_project_id": "my-proj",
+            "raw_bucket_name": "bioaf-raw-test-abc123",
+        }
+        adapter._namespace_ready = False
+
+        async def _fake_read_creds() -> tuple[str, str]:
+            return "service_account_key", sa_key
+
+        async def _fake_refresh() -> None:
+            return None
+
+        monkeypatch.setattr(adapter, "_read_gcp_credentials", _fake_read_creds)
+        monkeypatch.setattr(adapter, "_ensure_cluster_config_fresh", _fake_refresh)
+
+        captured: dict[str, str] = {}
+
+        async def _fake_ensure(namespace: str = "bioaf-pipelines", gcp_sa_email: str = "") -> None:
+            captured["namespace"] = namespace
+            captured["gcp_sa_email"] = gcp_sa_email
+            adapter._namespace_ready = True
+
+        monkeypatch.setattr(adapter, "ensure_pipeline_namespace", _fake_ensure)
+
+        mock_batch = MagicMock()
+        mock_job = MagicMock()
+        mock_job.metadata.name = "bioaf-pipeline-1"
+        mock_batch.create_namespaced_job.return_value = mock_job
+
+        with (
+            patch.object(adapter, "_get_k8s_batch_client", return_value=mock_batch),
+            patch.object(adapter, "_get_k8s_core_client", return_value=MagicMock()),
+        ):
+            await adapter._k8s_submit_job(
+                {
+                    "run_id": 1,
+                    "pipeline_name": "test",
+                    "pipeline_source": "https://github.com/nf-core/scrnaseq",
+                    "pipeline_version": "2.7.1",
+                    "namespace": "bioaf-pipelines",
+                    "input_files": [],
+                    "parameters": {},
+                    "sample_sheet": "sample,fastq_1\nS1,gs://bucket/R1.fastq.gz\n",
+                }
+            )
+
+        assert captured.get("namespace") == "bioaf-pipelines"
+        assert captured.get("gcp_sa_email") == "bioaf-pipeline-runner@my-proj.iam.gserviceaccount.com"
