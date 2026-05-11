@@ -82,6 +82,39 @@ class TestSubmitJobCreatesK8sJob:
         assert result["namespace"] == "bioaf-pipelines"
 
 
+class TestSubmitJobAutoscalerAnnotation:
+    """Without cluster-autoscaler.kubernetes.io/safe-to-evict=false on the head
+    pod, GKE's autoscaler may scale down the node mid-pipeline. Nextflow's
+    head pod is the workflow coordinator -- if it gets evicted, every running
+    task is killed and the pipeline fails. This was the failure mode behind
+    the v0.11.12 STAR_GENOMEGENERATE eviction at 80% progress."""
+
+    @pytest.mark.asyncio
+    async def test_head_pod_template_has_safe_to_evict_false(self, adapter):
+        """Head Job's pod template must carry the safe-to-evict=false annotation."""
+        mock_batch, mock_core = _mock_k8s_clients(adapter)
+        job_spec = {
+            "run_id": 42,
+            "pipeline_name": "nf-core/scrnaseq",
+            "container_image": "alpine:3.19",
+            "command": ["echo", "hello"],
+            "namespace": "bioaf-pipelines",
+            "input_files": [],
+            "parameters": {},
+        }
+
+        with patch.object(adapter, "_get_k8s_batch_client", return_value=mock_batch):
+            with patch.object(adapter, "_get_k8s_core_client", return_value=mock_core):
+                await adapter._k8s_submit_job(job_spec)
+
+        body = mock_batch.create_namespaced_job.call_args[1]["body"]
+        pod_template_meta = body["spec"]["template"].get("metadata", {})
+        annotations = pod_template_meta.get("annotations", {})
+        assert annotations.get("cluster-autoscaler.kubernetes.io/safe-to-evict") == "false", (
+            "Head pod must be pinned with safe-to-evict=false to survive autoscaler scale-down"
+        )
+
+
 class TestSubmitJobInitContainer:
     @pytest.mark.asyncio
     async def test_includes_init_container_for_inputs(self, adapter):

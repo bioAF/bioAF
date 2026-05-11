@@ -697,14 +697,18 @@ class KubernetesComputeProvider(ComputeProvider):
         # Build k8s.pod directives for secrets/env (Nextflow doesn't
         # support tolerations in k8s.pod, so node placement is left to
         # the cluster autoscaler; the head Job already targets the
-        # pipeline pool via nodeSelector + toleration in the Job manifest)
-        pod_directives: list[str] = []
+        # pipeline pool via nodeSelector + toleration in the Job manifest).
+        # Pin every task pod with safe-to-evict=false so long-running
+        # steps (STAR_GENOMEGENERATE, alignment, etc.) don't get killed
+        # when the autoscaler decides their node is "underutilized".
+        pod_directives: list[str] = [
+            "[annotation: 'cluster-autoscaler.kubernetes.io/safe-to-evict', value: 'false']",
+        ]
         if has_gcs_secret:
             pod_directives.append("[secret: 'bioaf-gcs-sa-key', mountPath: '/secrets/gcp']")
             pod_directives.append("[env: 'GOOGLE_APPLICATION_CREDENTIALS', value: '/secrets/gcp/key.json']")
 
-        if pod_directives:
-            lines.append("k8s.pod = [" + ", ".join(pod_directives) + "]")
+        lines.append("k8s.pod = [" + ", ".join(pod_directives) + "]")
 
         # Docker is the default container engine for nf-core
         lines.append("docker.enabled = true")
@@ -1005,6 +1009,16 @@ class KubernetesComputeProvider(ComputeProvider):
                 "backoffLimit": 0,
                 "ttlSecondsAfterFinished": 3600,
                 "template": {
+                    "metadata": {
+                        # Pin the head pod to its node. Without this, the
+                        # cluster autoscaler treats Nextflow's coordinator pod
+                        # as "movable" (it requests no resources) and scales
+                        # down its node mid-pipeline, killing the workflow
+                        # and any task pods it's coordinating.
+                        "annotations": {
+                            "cluster-autoscaler.kubernetes.io/safe-to-evict": "false",
+                        },
+                    },
                     "spec": {
                         "nodeSelector": {"bioaf.io/pool": "pipelines"},
                         "tolerations": [
@@ -1040,7 +1054,7 @@ class KubernetesComputeProvider(ComputeProvider):
                             else []
                         ),
                         "restartPolicy": "Never",
-                    }
+                    },
                 },
             },
         }

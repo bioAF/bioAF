@@ -195,6 +195,25 @@ class TestK8sExecutor:
         assert "fusion.enabled = true" in config
         assert "fusion.exportStorageCredentials = true" in config
 
+    def test_k8s_config_pins_task_pods_against_autoscaler_eviction(self):
+        """Long-running task pods (STAR_GENOMEGENERATE, alignment, etc.) must
+        carry cluster-autoscaler.kubernetes.io/safe-to-evict=false so the
+        autoscaler doesn't scale down their node mid-task. Otherwise a 30-45
+        minute STAR run on its own node looks 'underutilized' to the
+        autoscaler and gets terminated."""
+        config = KubernetesComputeProvider._build_nextflow_k8s_config(
+            namespace="bioaf-pipelines",
+            has_gcs_secret=True,
+            gcs_work_dir="gs://bioaf-raw-test-abc123/nextflow-work",
+        )
+        # The annotation must appear inside the k8s.pod directive list.
+        assert "cluster-autoscaler.kubernetes.io/safe-to-evict" in config
+        assert "'false'" in config
+        # Sanity: it should be under k8s.pod, not loose in the file.
+        k8s_pod_line = [line for line in config.splitlines() if line.startswith("k8s.pod")]
+        assert k8s_pod_line, "k8s.pod directive must exist when annotation is present"
+        assert "safe-to-evict" in k8s_pod_line[0]
+
     def test_k8s_config_no_wave_fusion_without_gcs(self):
         """Wave/Fusion should not be enabled when no GCS work dir is set."""
         config = KubernetesComputeProvider._build_nextflow_k8s_config(

@@ -22,6 +22,15 @@ which silently stopped auto-refreshing once the head pod was scheduled.
   watching a live pipeline required manual page refreshes. A sibling
   interval now reloads logs while the run is `running` or `pending`
   and the logs tab is open, stopping automatically on terminal status.
+- **Pipeline head + task pods pinned against autoscaler eviction.**
+  Long pipelines (e.g. STAR_GENOMEGENERATE for human GRCh38, ~45 min)
+  were occasionally killed mid-run when GKE's cluster autoscaler
+  decided their node was underutilized and scaled it down. Both the
+  Nextflow head Job and the task pods spawned by Nextflow's K8s
+  executor now carry
+  `cluster-autoscaler.kubernetes.io/safe-to-evict: "false"` so the
+  autoscaler leaves them in place for the run's duration. Nodes are
+  still reclaimed normally after pods terminate.
 
 ### Deploy
 
