@@ -456,8 +456,17 @@ class KubernetesComputeProvider(ComputeProvider):
 
     _namespace_ready = False
 
-    async def ensure_pipeline_namespace(self, namespace: str = "bioaf-pipelines") -> None:
-        """Ensure the pipeline namespace, service account, and role binding exist."""
+    async def ensure_pipeline_namespace(
+        self, namespace: str = "bioaf-pipelines", gcp_sa_email: str = ""
+    ) -> None:
+        """Ensure the pipeline namespace, service account, and role binding exist.
+
+        When gcp_sa_email is provided, the KSA carries the
+        iam.gke.io/gcp-service-account annotation so pods get GCP credentials
+        via Workload Identity. Without it, Nextflow pods running on the
+        bioaf-pipelines node pool (workload_metadata=GKE_METADATA) have no
+        GCP identity and GCS reads fail with 'storage.objects.get denied'.
+        """
         from kubernetes.client.rest import ApiException
 
         core_v1 = self._get_k8s_core_client()
@@ -467,6 +476,8 @@ class KubernetesComputeProvider(ComputeProvider):
         try:
             core_v1.read_namespace(name=namespace)
             logger.info("Namespace %s already exists, skipping setup", namespace)
+            if gcp_sa_email:
+                self._patch_sa_annotation(core_v1, namespace, gcp_sa_email)
             self._namespace_ready = True
             return
         except ApiException as e:
@@ -484,6 +495,10 @@ class KubernetesComputeProvider(ComputeProvider):
         )
         logger.info("Created namespace %s", namespace)
 
+        sa_annotations: dict[str, str] = {}
+        if gcp_sa_email:
+            sa_annotations["iam.gke.io/gcp-service-account"] = gcp_sa_email
+
         # Create service account
         core_v1.create_namespaced_service_account(
             namespace=namespace,
@@ -491,6 +506,7 @@ class KubernetesComputeProvider(ComputeProvider):
                 metadata=client.V1ObjectMeta(
                     name="bioaf-pipeline-runner",
                     labels={"bioaf.io/managed": "true"},
+                    annotations=sa_annotations or None,
                 )
             ),
         )
@@ -520,6 +536,28 @@ class KubernetesComputeProvider(ComputeProvider):
         )
         logger.info("Created role binding in %s", namespace)
         self._namespace_ready = True
+
+    @staticmethod
+    def _patch_sa_annotation(core_v1, namespace: str, gcp_sa_email: str) -> None:
+        """Ensure the pipeline-runner SA has the Workload Identity annotation.
+
+        Used on the upgrade path where the namespace was created before
+        Workload Identity was wired (no annotation on the existing KSA).
+        """
+        try:
+            sa = core_v1.read_namespaced_service_account(
+                name="bioaf-pipeline-runner", namespace=namespace
+            )
+            current = (sa.metadata.annotations or {}).get("iam.gke.io/gcp-service-account", "")
+            if current != gcp_sa_email:
+                core_v1.patch_namespaced_service_account(
+                    name="bioaf-pipeline-runner",
+                    namespace=namespace,
+                    body={"metadata": {"annotations": {"iam.gke.io/gcp-service-account": gcp_sa_email}}},
+                )
+                logger.info("Patched Workload Identity annotation on bioaf-pipeline-runner")
+        except Exception:
+            logger.exception("Failed to patch Workload Identity annotation on bioaf-pipeline-runner")
 
     # -- K8s API implementations (production) --
 
