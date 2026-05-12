@@ -100,9 +100,7 @@ class NfCoreRegistryService:
                 continue
             seen_names.add(name)
             full_name = wf.get("full_name") or f"nf-core/{name}"
-            releases = NfCoreRegistryService._normalize_releases(
-                wf.get("releases") or [], wf.get("default_branch")
-            )
+            releases = NfCoreRegistryService._normalize_releases(wf.get("releases") or [], wf.get("default_branch"))
             latest = releases[0]["tag_name"] if releases else None
 
             row = existing_by_name.get(name)
@@ -150,8 +148,7 @@ class NfCoreRegistryService:
             select(NfCoreRegistryPipeline, PipelineCatalogEntry.version)
             .outerjoin(
                 PipelineCatalogEntry,
-                (PipelineCatalogEntry.pipeline_key == join_key)
-                & (PipelineCatalogEntry.organization_id == org_id),
+                (PipelineCatalogEntry.pipeline_key == join_key) & (PipelineCatalogEntry.organization_id == org_id),
             )
             .order_by(NfCoreRegistryPipeline.name)
         )
@@ -173,11 +170,7 @@ class NfCoreRegistryService:
         out: list[dict] = []
         for entry, installed_version in rows:
             installed = installed_version is not None
-            update_available = bool(
-                installed
-                and entry.latest_release
-                and installed_version != entry.latest_release
-            )
+            update_available = bool(installed and entry.latest_release and installed_version != entry.latest_release)
             if only_installed and not installed:
                 continue
             out.append(
@@ -200,9 +193,7 @@ class NfCoreRegistryService:
     async def get_pipeline_versions(session: AsyncSession, name: str) -> list[dict]:
         """Return the list of release tags for a pipeline (newest first, dev filtered)."""
         row = (
-            await session.execute(
-                select(NfCoreRegistryPipeline).where(NfCoreRegistryPipeline.name == name)
-            )
+            await session.execute(select(NfCoreRegistryPipeline).where(NfCoreRegistryPipeline.name == name))
         ).scalar_one_or_none()
         if row is None or not row.releases_json:
             return []
@@ -225,9 +216,7 @@ class NfCoreRegistryService:
     ) -> PipelineCatalogEntry:
         """Install an nf-core pipeline as a catalog entry for the given org."""
         registry_row = (
-            await session.execute(
-                select(NfCoreRegistryPipeline).where(NfCoreRegistryPipeline.name == name)
-            )
+            await session.execute(select(NfCoreRegistryPipeline).where(NfCoreRegistryPipeline.name == name))
         ).scalar_one_or_none()
         if registry_row is None:
             raise NfCoreRegistryService.PipelineNotInRegistryError(name)
