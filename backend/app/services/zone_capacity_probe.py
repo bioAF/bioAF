@@ -86,22 +86,68 @@ def _build_instance_resource(name: str, machine_type: str, zone: str) -> Any:
     )
 
 
-def _operation_outcome(op: Any) -> tuple[str | None, str | None]:
-    """Return (error_code, error_message) after waiting for the op.
+def _classify_operation(op: Any) -> tuple[str, str | None, str | None]:
+    """Categorise an insert/delete operation outcome.
 
-    Wraps the polling so the caller does not have to deal with the two
-    different ways the ExtendedOperation API surfaces errors (raising
-    from ``result()`` and exposing ``error_code()`` after).
+    Returns one of:
+        ("ok", None, None)                  -- operation completed cleanly
+        ("stockout", gce_code, message)     -- zone has no capacity
+        ("error", code_str, message)        -- non-stockout failure
+
+    The compute_v1 SDK exposes errors in two places:
+
+    * ``op.error_code`` / ``op.error_message`` are PROPERTIES (not
+      methods) that surface the HTTP-level status of the long-running
+      operation. For a stockout these typically come back as 503 with a
+      generic message: not specific enough to act on.
+    * ``op._extended_operation.error.errors[]`` is a list of GCE-specific
+      error structs with ``.code`` strings like
+      ``ZONE_RESOURCE_POOL_EXHAUSTED`` or ``GCE_STOCKOUT``. This is what
+      we branch on.
+
+    An earlier version of this function called ``op.error_code()`` (with
+    parens) which raises ``TypeError: 'int' object is not callable`` on
+    the real SDK -- caught in production after the first deploy. Tests
+    now use a fake that subclasses the real SDK's surface so this
+    failure mode is caught at unit-test time.
     """
     try:
         op.result(timeout=_OPERATION_TIMEOUT_SECONDS)
     except Exception:
-        # The exception is informative but the structured error_code is
-        # what we branch on, so swallow and read the fields below.
+        # ExtendedOperation.result() raises GoogleAPICallError on
+        # failure. The structured fields below tell us specifically why,
+        # so swallow and inspect.
         pass
-    code = op.error_code() if hasattr(op, "error_code") else None
-    message = op.error_message() if hasattr(op, "error_message") else None
-    return code, message
+
+    # Walk the GCE-specific error codes first.
+    extended = getattr(op, "_extended_operation", None)
+    if extended is not None:
+        error_struct = getattr(extended, "error", None)
+        if error_struct is not None:
+            for err in getattr(error_struct, "errors", None) or []:
+                gce_code = getattr(err, "code", None)
+                if gce_code in _STOCKOUT_CODES:
+                    return ("stockout", gce_code, getattr(err, "message", None))
+            # There were error entries but none were stockouts: surface
+            # the first one as a hard error so the caller does not retry
+            # blindly through other zones.
+            first = next(iter(error_struct.errors or []), None)
+            if first is not None:
+                return (
+                    "error",
+                    getattr(first, "code", None),
+                    getattr(first, "message", None),
+                )
+
+    # No GCE-specific entries, but maybe an HTTP-level failure (proxy
+    # error, IAM hiccup before GCE even saw the request, etc.). These
+    # are reported on the operation's top-level properties.
+    http_code = getattr(op, "error_code", 0) or 0
+    http_message = getattr(op, "error_message", "") or ""
+    if http_code or http_message:
+        return ("error", str(http_code) if http_code else None, http_message or None)
+
+    return ("ok", None, None)
 
 
 def probe_zones(
@@ -150,16 +196,14 @@ def probe_zones(
             zone=zone,
             instance_resource=instance,
         )
-        code, message = _operation_outcome(insert_op)
+        outcome, code, message = _classify_operation(insert_op)
 
-        if code in _STOCKOUT_CODES:
+        if outcome == "stockout":
             logger.info("Zone %s exhausted (code=%s); trying next.", zone, code)
             exhausted.append(zone)
             continue
 
-        if code:
-            # Unexpected error: quota, permission, bad image, etc. Do
-            # not pretend this was a stockout.
+        if outcome == "error":
             raise RuntimeError(
                 f"Capacity probe in zone={zone} failed with non-stockout error "
                 f"code={code} message={message!r}. Aborting probe so the real "
@@ -174,7 +218,7 @@ def probe_zones(
                 zone=zone,
                 instance=probe_name,
             )
-            _operation_outcome(delete_op)
+            _classify_operation(delete_op)
         except Exception:
             # Probe instance cleanup is best-effort: a leaked $0.01/hr
             # instance is far better than failing the deploy. The
