@@ -1,5 +1,32 @@
 # Release Notes
 
+## v0.12.1
+
+Hardens the `install-gcp.sh` bootstrapper in two ways.
+
+### Changes
+
+- **gcloud version gate.** A new "Step 1b" check inspects
+  `gcloud version --format=json` and, if any installed component is
+  out-of-date, asks the user whether to update. If they accept, the
+  installer runs `gcloud components update --quiet` (with a manual
+  fallback for apt/snap/brew-cask installs that disable in-place
+  updates). If they decline, the installer compares the current
+  versions against the minimums bioAF has tested against
+  (Google Cloud SDK 563.0.0, alpha/core 2026.03.27, bq 2.1.31,
+  gcloud-crc32c 1.0.0, gke-gcloud-auth-plugin 0.5.12, gsutil 5.36)
+  and aborts if any component is below. If versions already meet the
+  minimums and no updates are available, the step is silent.
+- **Conservative quota auto-request.** The Cloud Quotas helper now
+  submits a `QuotaPreference` only when it has successfully read the
+  current limit and confirmed it is below the target. Previously a
+  failure to read (older gcloud, missing alpha component, parse
+  error, region not in the response) was treated as "current = 0",
+  which triggered an unnecessary increase request. The helper now
+  returns empty on those paths and `bioaf_quota_ensure_all` prints
+  a "could not read current limit; request manually if needed"
+  message instead.
+
 ## v0.12.0
 
 Adds a browse-and-install flow for the full nf-core pipeline catalog.
