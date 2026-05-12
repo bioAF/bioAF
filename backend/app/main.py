@@ -248,6 +248,7 @@ async def lifespan(app: FastAPI):
     background_tasks.append(asyncio.create_task(_environment_build_poll_loop()))
     background_tasks.append(asyncio.create_task(_work_node_heartbeat_loop()))
     background_tasks.append(asyncio.create_task(_export_cleanup_loop()))
+    background_tasks.append(asyncio.create_task(_nf_core_registry_refresh_loop()))
     logger.info("Background tasks started")
 
     yield
@@ -711,6 +712,34 @@ async def _export_cleanup_loop():
             break
         except Exception as e:
             logger.error("Export cleanup error: %s", e)
+
+
+async def _nf_core_registry_refresh_loop():
+    """Refresh the nf-core registry cache once per day. Warm the cache 60 s
+    after startup so the first browse modal is populated, then sleep 24 h
+    between refreshes. Failures preserve cached rows."""
+    from app.database import async_session_factory
+    from app.services.nf_core_registry_service import NfCoreRegistryService
+
+    await asyncio.sleep(60)
+    while True:
+        try:
+            async with async_session_factory() as session:
+                result = await NfCoreRegistryService.refresh_registry(session)
+                await session.commit()
+                if result.get("error"):
+                    logger.warning("nf-core registry refresh failed: %s", result["error"])
+                else:
+                    logger.info(
+                        "nf-core registry refresh: fetched=%d archived=%d",
+                        result["fetched"],
+                        result["archived"],
+                    )
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error("nf-core registry refresh loop error: %s", e)
+        await asyncio.sleep(86400)
 
 
 def create_app() -> FastAPI:
