@@ -1,5 +1,61 @@
 # Release Notes
 
+## v0.12.0
+
+Adds a browse-and-install flow for the full nf-core pipeline catalog.
+Previously the pipeline catalog only surfaced four hardcoded entries
+(scrnaseq, rnaseq, fetchngs, bioaf-system-test) and adding anything
+else required a code change or a hand-built Git URL. Admins can now
+open a "Search Available Pipelines" modal from `/pipelines/catalog`,
+filter the ~150 published nf-core pipelines by name, description, or
+topic, pick a version from the release dropdown, and install in one
+click. Pipelines that have a newer release upstream show an "Update
+available" badge and update in-place; existing pipeline runs keep
+their pinned version.
+
+### New features
+
+- **nf-core registry cache.** A new background task refreshes
+  `https://nf-co.re/pipelines.json` once per day and stores the
+  result in `nf_core_registry_pipeline` (migration 075). The cache
+  is global; install state is computed per organization by joining
+  `pipeline_key = 'nf-core/' || name` against `pipeline_catalog`.
+  Fetch failures preserve the cached rows and write the error to a
+  singleton `nf_core_registry_refresh` tracker so the browse modal
+  keeps working when nf-co.re is unreachable.
+- **Search Available Pipelines modal.** Reachable from the new
+  button on `/pipelines/catalog` (gated on `pipelines:view`). Shows
+  name, description, star count, topics, and a status chip
+  ("Installed v X.Y", "Update available", "Not installed",
+  "Archived"). Install opens a sub-step with a version dropdown that
+  defaults to the latest release; the `dev` pseudo-release is
+  filtered out. Admins (any user with `pipelines:create`) also see
+  a "Refresh registry" button and the "last refreshed" timestamp.
+- **One-click version updates.** When the installed version of a
+  catalog entry differs from the registry's latest release, the
+  modal renders an "Update to v X" button that bumps the version
+  through the existing `PATCH /api/pipelines/version/{key}` endpoint
+  and re-fetches `nextflow_schema.json` so the parameter UI picks up
+  any new flags.
+- **Per-pipeline QC template mapping.** Imported nf-core pipelines
+  get a QC template assigned automatically (`scrnaseq -> scrnaseq`,
+  `rnaseq -> rnaseq`, everything else `generic`). Admins can change
+  the template after install via the existing catalog settings.
+
+### Internal changes
+
+- Four new routes under `/api/pipelines/registry/...` (browse,
+  versions, install, manual refresh), declared before the existing
+  `/{key:path}` route so FastAPI's path converter does not capture
+  them.
+- New service `NfCoreRegistryService`
+  (`refresh_registry`, `list_pipelines_with_status`,
+  `get_pipeline_versions`, `install_pipeline`) reuses
+  `PipelineCatalogService.fetch_pipeline_schema` rather than
+  duplicating the GitHub raw-content fetch.
+- The hardcoded `BUILTIN_PIPELINES` list stays as-is for new-org
+  backfill; the new import flow runs alongside it.
+
 ## v0.11.15
 
 Makes the Nextflow report tab actually render: plots, the tasks table,
