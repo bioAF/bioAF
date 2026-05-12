@@ -118,9 +118,7 @@ async def test_refresh_registry_records_error_on_fetch_failure(session):
     rows_after = (await session.execute(select(NfCoreRegistryPipeline))).scalars().all()
     assert len(rows_after) == 3  # preserved
 
-    refresh = (
-        await session.execute(select(NfCoreRegistryRefresh).where(NfCoreRegistryRefresh.id == 1))
-    ).scalar_one()
+    refresh = (await session.execute(select(NfCoreRegistryRefresh).where(NfCoreRegistryRefresh.id == 1))).scalar_one()
     assert refresh.last_error is not None
     assert "boom" in refresh.last_error
 
@@ -170,7 +168,11 @@ async def test_list_pipelines_with_status_marks_installed_and_update_available(s
             # Installed at the same version as the registry's latest -> no update available.
             {"pipeline_key": "nf-core/rnaseq", "source_url": "https://github.com/nf-core/rnaseq", "version": "3.14.0"},
             # Installed at an older version than the registry latest -> update available.
-            {"pipeline_key": "nf-core/scrnaseq", "source_url": "https://github.com/nf-core/scrnaseq", "version": "2.6.0"},
+            {
+                "pipeline_key": "nf-core/scrnaseq",
+                "source_url": "https://github.com/nf-core/scrnaseq",
+                "version": "2.6.0",
+            },
         ],
     )
     await session.commit()
@@ -401,13 +403,17 @@ async def test_install_pipeline_writes_audit_log(session, admin_user):
         await session.commit()
 
     entries = (
-        await session.execute(
-            select(AuditLog).where(
-                AuditLog.entity_type == "pipeline_catalog",
-                AuditLog.action == "install_from_nf_core_registry",
+        (
+            await session.execute(
+                select(AuditLog).where(
+                    AuditLog.entity_type == "pipeline_catalog",
+                    AuditLog.action == "install_from_nf_core_registry",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(entries) == 1
     assert entries[0].details_json["name"] == "rnaseq"
     assert entries[0].details_json["version"] == "3.14.0"
@@ -495,9 +501,7 @@ async def registry_seeded(session):
 
 
 @pytest.mark.asyncio
-async def test_api_registry_list_returns_pipelines_with_status(
-    client, admin_token, registry_seeded
-):
+async def test_api_registry_list_returns_pipelines_with_status(client, admin_token, registry_seeded):
     response = await client.get(
         "/api/pipelines/registry",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -512,9 +516,7 @@ async def test_api_registry_list_returns_pipelines_with_status(
 
 
 @pytest.mark.asyncio
-async def test_api_registry_list_route_not_shadowed_by_keypath(
-    client, admin_token, registry_seeded
-):
+async def test_api_registry_list_route_not_shadowed_by_keypath(client, admin_token, registry_seeded):
     """Critical: the /registry routes must be declared before /{key:path} or
     the path-converter will capture them."""
     response = await client.get(
@@ -557,9 +559,7 @@ async def test_api_registry_list_forbidden_for_viewer(client, viewer_token, regi
 
 
 @pytest.mark.asyncio
-async def test_api_registry_versions_returns_release_list(
-    client, admin_token, registry_seeded
-):
+async def test_api_registry_versions_returns_release_list(client, admin_token, registry_seeded):
     response = await client.get(
         "/api/pipelines/registry/scrnaseq/versions",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -572,9 +572,7 @@ async def test_api_registry_versions_returns_release_list(
 
 
 @pytest.mark.asyncio
-async def test_api_registry_install_creates_catalog_entry(
-    client, admin_token, registry_seeded
-):
+async def test_api_registry_install_creates_catalog_entry(client, admin_token, registry_seeded):
     with patch(
         "app.services.pipeline_catalog_service.PipelineCatalogService.fetch_pipeline_schema",
         new_callable=AsyncMock,
@@ -593,9 +591,7 @@ async def test_api_registry_install_creates_catalog_entry(
 
 
 @pytest.mark.asyncio
-async def test_api_registry_install_returns_409_on_collision(
-    client, admin_token, registry_seeded
-):
+async def test_api_registry_install_returns_409_on_collision(client, admin_token, registry_seeded):
     # First install succeeds.
     with patch(
         "app.services.pipeline_catalog_service.PipelineCatalogService.fetch_pipeline_schema",
@@ -616,9 +612,7 @@ async def test_api_registry_install_returns_409_on_collision(
 
 
 @pytest.mark.asyncio
-async def test_api_registry_install_returns_404_for_unknown_name(
-    client, admin_token, registry_seeded
-):
+async def test_api_registry_install_returns_404_for_unknown_name(client, admin_token, registry_seeded):
     response = await client.post(
         "/api/pipelines/registry/does-not-exist/install",
         json={"version": "1.0.0"},
@@ -628,9 +622,7 @@ async def test_api_registry_install_returns_404_for_unknown_name(
 
 
 @pytest.mark.asyncio
-async def test_api_registry_install_forbidden_for_bench(
-    client, bench_token, registry_seeded
-):
+async def test_api_registry_install_forbidden_for_bench(client, bench_token, registry_seeded):
     response = await client.post(
         "/api/pipelines/registry/sarek/install",
         json={"version": "3.4.0"},
@@ -687,12 +679,16 @@ async def test_api_registry_install_audit_log_attributed_to_user(
         )
 
     entries = (
-        await session.execute(
-            select(AuditLog).where(
-                AuditLog.entity_type == "pipeline_catalog",
-                AuditLog.action == "install_from_nf_core_registry",
+        (
+            await session.execute(
+                select(AuditLog).where(
+                    AuditLog.entity_type == "pipeline_catalog",
+                    AuditLog.action == "install_from_nf_core_registry",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(entries) == 1
     assert entries[0].user_id == admin_user.id

@@ -720,6 +720,43 @@ export interface PipelineCatalogListResponse {
   total: number;
 }
 
+export interface RegistryPipeline {
+  name: string;
+  full_name: string;
+  description: string | null;
+  topics: string[];
+  stars: number | null;
+  latest_release: string | null;
+  archived: boolean;
+  installed: boolean;
+  installed_version: string | null;
+  update_available: boolean;
+}
+
+export interface RegistryListResponse {
+  pipelines: RegistryPipeline[];
+  total: number;
+  last_refreshed_at: string | null;
+}
+
+export interface RegistryVersion {
+  tag_name: string;
+  published_at: string | null;
+  has_schema: boolean;
+}
+
+export interface RegistryVersionsResponse {
+  name: string;
+  versions: RegistryVersion[];
+}
+
+export interface RegistryRefreshResponse {
+  fetched: number;
+  archived: number;
+  error: string | null;
+  last_refreshed_at: string | null;
+}
+
 export interface PipelineProcessRetry {
   name: string;
   attempts: number;
