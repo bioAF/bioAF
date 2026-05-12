@@ -123,3 +123,291 @@ async def test_refresh_registry_records_error_on_fetch_failure(session):
     ).scalar_one()
     assert refresh.last_error is not None
     assert "boom" in refresh.last_error
+
+
+# ----- list_pipelines_with_status -----
+
+
+async def _seed_org_with_catalog_entries(session, catalog_entries: list[dict] | None = None):
+    """Create an org and optionally pre-seed pipeline_catalog rows so the
+    install-status join has data to find. Returns the org_id."""
+    from app.models.organization import Organization
+    from app.models.pipeline_catalog_entry import PipelineCatalogEntry
+
+    org = Organization(name="Status Test Org", setup_complete=True)
+    session.add(org)
+    await session.flush()
+
+    for entry in catalog_entries or []:
+        session.add(
+            PipelineCatalogEntry(
+                organization_id=org.id,
+                pipeline_key=entry["pipeline_key"],
+                name=entry.get("name", entry["pipeline_key"]),
+                source_type=entry.get("source_type", "nf-core"),
+                source_url=entry.get("source_url"),
+                version=entry.get("version"),
+                is_builtin=entry.get("is_builtin", False),
+                enabled=True,
+            )
+        )
+    await session.flush()
+    return org.id
+
+
+@pytest.mark.asyncio
+async def test_list_pipelines_with_status_marks_installed_and_update_available(session):
+    """LEFT JOIN to pipeline_catalog computes installed/update_available per org."""
+    from app.services.nf_core_registry_service import NfCoreRegistryService
+
+    payload = _load_fixture("nf_core_pipelines_sample.json")
+    with patch("httpx.AsyncClient", return_value=_mock_httpx_get(payload)):
+        await NfCoreRegistryService.refresh_registry(session)
+
+    org_id = await _seed_org_with_catalog_entries(
+        session,
+        [
+            # Installed at the same version as the registry's latest -> no update available.
+            {"pipeline_key": "nf-core/rnaseq", "source_url": "https://github.com/nf-core/rnaseq", "version": "3.14.0"},
+            # Installed at an older version than the registry latest -> update available.
+            {"pipeline_key": "nf-core/scrnaseq", "source_url": "https://github.com/nf-core/scrnaseq", "version": "2.6.0"},
+        ],
+    )
+    await session.commit()
+
+    rows = await NfCoreRegistryService.list_pipelines_with_status(session, org_id)
+    by_name = {r["name"]: r for r in rows}
+
+    assert by_name["rnaseq"]["installed"] is True
+    assert by_name["rnaseq"]["installed_version"] == "3.14.0"
+    assert by_name["rnaseq"]["update_available"] is False
+
+    assert by_name["scrnaseq"]["installed"] is True
+    assert by_name["scrnaseq"]["installed_version"] == "2.6.0"
+    assert by_name["scrnaseq"]["update_available"] is True
+    assert by_name["scrnaseq"]["latest_release"] == "2.7.1"
+
+    assert by_name["sarek"]["installed"] is False
+    assert by_name["sarek"]["installed_version"] is None
+    assert by_name["sarek"]["update_available"] is False
+
+
+@pytest.mark.asyncio
+async def test_list_pipelines_with_status_filters_search_query(session):
+    from app.services.nf_core_registry_service import NfCoreRegistryService
+
+    payload = _load_fixture("nf_core_pipelines_sample.json")
+    with patch("httpx.AsyncClient", return_value=_mock_httpx_get(payload)):
+        await NfCoreRegistryService.refresh_registry(session)
+    org_id = await _seed_org_with_catalog_entries(session)
+    await session.commit()
+
+    rows = await NfCoreRegistryService.list_pipelines_with_status(session, org_id, q="rna")
+    names = {r["name"] for r in rows}
+    assert names == {"rnaseq", "scrnaseq"}
+
+    rows = await NfCoreRegistryService.list_pipelines_with_status(session, org_id, q="variant")
+    names = {r["name"] for r in rows}
+    assert names == {"sarek"}
+
+
+@pytest.mark.asyncio
+async def test_list_pipelines_with_status_hides_archived_by_default(session):
+    from app.services.nf_core_registry_service import NfCoreRegistryService
+    from app.models.nf_core_registry_pipeline import NfCoreRegistryPipeline
+    from sqlalchemy import select, update
+
+    payload = _load_fixture("nf_core_pipelines_sample.json")
+    with patch("httpx.AsyncClient", return_value=_mock_httpx_get(payload)):
+        await NfCoreRegistryService.refresh_registry(session)
+    await session.execute(
+        update(NfCoreRegistryPipeline).where(NfCoreRegistryPipeline.name == "sarek").values(archived=True)
+    )
+    await session.flush()
+    org_id = await _seed_org_with_catalog_entries(session)
+    await session.commit()
+
+    rows = await NfCoreRegistryService.list_pipelines_with_status(session, org_id)
+    assert {r["name"] for r in rows} == {"scrnaseq", "rnaseq"}
+
+    rows = await NfCoreRegistryService.list_pipelines_with_status(session, org_id, include_archived=True)
+    assert {r["name"] for r in rows} == {"scrnaseq", "rnaseq", "sarek"}
+    sarek = next(r for r in rows if r["name"] == "sarek")
+    assert sarek["archived"] is True
+
+    # Sanity: select() executed inside the test must be importable
+    assert select is not None
+
+
+# ----- get_pipeline_versions -----
+
+
+@pytest.mark.asyncio
+async def test_get_pipeline_versions_returns_releases_sorted_newest_first(session):
+    from app.services.nf_core_registry_service import NfCoreRegistryService
+
+    payload = _load_fixture("nf_core_pipelines_sample.json")
+    with patch("httpx.AsyncClient", return_value=_mock_httpx_get(payload)):
+        await NfCoreRegistryService.refresh_registry(session)
+    await session.commit()
+
+    versions = await NfCoreRegistryService.get_pipeline_versions(session, "scrnaseq")
+    tags = [v["tag_name"] for v in versions]
+    assert tags == ["2.7.1", "2.6.0"]
+    assert "dev" not in tags
+
+
+@pytest.mark.asyncio
+async def test_get_pipeline_versions_unknown_pipeline_returns_empty(session):
+    from app.services.nf_core_registry_service import NfCoreRegistryService
+
+    versions = await NfCoreRegistryService.get_pipeline_versions(session, "does-not-exist")
+    assert versions == []
+
+
+# ----- install_pipeline -----
+
+
+@pytest.mark.asyncio
+async def test_install_pipeline_creates_catalog_entry(session, admin_user):
+    from app.services.nf_core_registry_service import NfCoreRegistryService
+    from app.models.pipeline_catalog_entry import PipelineCatalogEntry
+    from sqlalchemy import select
+
+    payload = _load_fixture("nf_core_pipelines_sample.json")
+    with patch("httpx.AsyncClient", return_value=_mock_httpx_get(payload)):
+        await NfCoreRegistryService.refresh_registry(session)
+        await session.commit()
+
+    with patch(
+        "app.services.pipeline_catalog_service.PipelineCatalogService.fetch_pipeline_schema",
+        new_callable=AsyncMock,
+        return_value={"definitions": {"core": {}}},
+    ):
+        entry = await NfCoreRegistryService.install_pipeline(
+            session, admin_user.organization_id, admin_user.id, "scrnaseq", "2.7.1"
+        )
+        await session.commit()
+
+    assert entry.pipeline_key == "nf-core/scrnaseq"
+    assert entry.source_type == "nf-core"
+    assert entry.source_url == "https://github.com/nf-core/scrnaseq"
+    assert entry.version == "2.7.1"
+    assert entry.is_builtin is False
+    assert entry.qc_template == "scrnaseq"  # QC_TEMPLATE_MAP lookup
+    assert entry.schema_json == {"definitions": {"core": {}}}
+
+    fetched = (
+        await session.execute(
+            select(PipelineCatalogEntry).where(
+                PipelineCatalogEntry.organization_id == admin_user.organization_id,
+                PipelineCatalogEntry.pipeline_key == "nf-core/scrnaseq",
+            )
+        )
+    ).scalar_one()
+    assert fetched.id == entry.id
+
+
+@pytest.mark.asyncio
+async def test_install_pipeline_unknown_qc_template_falls_back_to_generic(session, admin_user):
+    from app.services.nf_core_registry_service import NfCoreRegistryService
+
+    payload = _load_fixture("nf_core_pipelines_sample.json")
+    with patch("httpx.AsyncClient", return_value=_mock_httpx_get(payload)):
+        await NfCoreRegistryService.refresh_registry(session)
+        await session.commit()
+
+    with patch(
+        "app.services.pipeline_catalog_service.PipelineCatalogService.fetch_pipeline_schema",
+        new_callable=AsyncMock,
+        return_value={},
+    ):
+        entry = await NfCoreRegistryService.install_pipeline(
+            session, admin_user.organization_id, admin_user.id, "sarek", "3.4.0"
+        )
+        await session.commit()
+
+    assert entry.qc_template == "generic"
+
+
+@pytest.mark.asyncio
+async def test_install_pipeline_raises_on_collision(session, admin_user):
+    """Re-installing an already-installed pipeline raises (callers map to 409)."""
+    from app.services.nf_core_registry_service import NfCoreRegistryService
+    from app.models.pipeline_catalog_entry import PipelineCatalogEntry
+
+    payload = _load_fixture("nf_core_pipelines_sample.json")
+    with patch("httpx.AsyncClient", return_value=_mock_httpx_get(payload)):
+        await NfCoreRegistryService.refresh_registry(session)
+    session.add(
+        PipelineCatalogEntry(
+            organization_id=admin_user.organization_id,
+            pipeline_key="nf-core/scrnaseq",
+            name="nf-core/scrnaseq",
+            source_type="nf-core",
+            source_url="https://github.com/nf-core/scrnaseq",
+            version="2.6.0",
+            is_builtin=True,
+            enabled=True,
+        )
+    )
+    await session.commit()
+
+    with pytest.raises(NfCoreRegistryService.PipelineAlreadyInstalledError):
+        with patch(
+            "app.services.pipeline_catalog_service.PipelineCatalogService.fetch_pipeline_schema",
+            new_callable=AsyncMock,
+            return_value={},
+        ):
+            await NfCoreRegistryService.install_pipeline(
+                session, admin_user.organization_id, admin_user.id, "scrnaseq", "2.7.1"
+            )
+
+
+@pytest.mark.asyncio
+async def test_install_pipeline_raises_when_not_in_registry(session, admin_user):
+    from app.services.nf_core_registry_service import NfCoreRegistryService
+
+    payload = _load_fixture("nf_core_pipelines_sample.json")
+    with patch("httpx.AsyncClient", return_value=_mock_httpx_get(payload)):
+        await NfCoreRegistryService.refresh_registry(session)
+        await session.commit()
+
+    with pytest.raises(NfCoreRegistryService.PipelineNotInRegistryError):
+        await NfCoreRegistryService.install_pipeline(
+            session, admin_user.organization_id, admin_user.id, "does-not-exist", "1.0.0"
+        )
+
+
+@pytest.mark.asyncio
+async def test_install_pipeline_writes_audit_log(session, admin_user):
+    from app.services.nf_core_registry_service import NfCoreRegistryService
+    from app.models.audit_log import AuditLog
+    from sqlalchemy import select
+
+    payload = _load_fixture("nf_core_pipelines_sample.json")
+    with patch("httpx.AsyncClient", return_value=_mock_httpx_get(payload)):
+        await NfCoreRegistryService.refresh_registry(session)
+        await session.commit()
+
+    with patch(
+        "app.services.pipeline_catalog_service.PipelineCatalogService.fetch_pipeline_schema",
+        new_callable=AsyncMock,
+        return_value={},
+    ):
+        await NfCoreRegistryService.install_pipeline(
+            session, admin_user.organization_id, admin_user.id, "rnaseq", "3.14.0"
+        )
+        await session.commit()
+
+    entries = (
+        await session.execute(
+            select(AuditLog).where(
+                AuditLog.entity_type == "pipeline_catalog",
+                AuditLog.action == "install_from_nf_core_registry",
+            )
+        )
+    ).scalars().all()
+    assert len(entries) == 1
+    assert entries[0].details_json["name"] == "rnaseq"
+    assert entries[0].details_json["version"] == "3.14.0"
