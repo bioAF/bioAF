@@ -411,3 +411,288 @@ async def test_install_pipeline_writes_audit_log(session, admin_user):
     assert len(entries) == 1
     assert entries[0].details_json["name"] == "rnaseq"
     assert entries[0].details_json["version"] == "3.14.0"
+
+
+# ----- API routes -----
+
+
+import pytest_asyncio  # noqa: E402
+
+
+@pytest_asyncio.fixture
+async def comp_bio_user(session, admin_user):
+    from app.models.user import User
+    from app.services.auth_service import AuthService
+
+    user = User(
+        email="cb@test.com",
+        password_hash=AuthService.hash_password("compbiopass123"),
+        role_id=admin_user._test_role_map["comp_bio"],
+        organization_id=admin_user.organization_id,
+        status="active",
+    )
+    session.add(user)
+    await session.flush()
+    await session.commit()
+    return user
+
+
+@pytest_asyncio.fixture
+async def comp_bio_token(comp_bio_user):
+    from app.services.auth_service import AuthService
+
+    return AuthService.create_token(
+        comp_bio_user.id,
+        comp_bio_user.email,
+        comp_bio_user.role_id,
+        comp_bio_user.organization_id,
+        role_name="comp_bio",
+    )
+
+
+@pytest_asyncio.fixture
+async def bench_user(session, admin_user):
+    """A user with pipelines:view but not pipelines:create -- used to confirm
+    the browse endpoint allows view-only users while install/refresh do not."""
+    from app.models.user import User
+    from app.services.auth_service import AuthService
+
+    user = User(
+        email="bench@test.com",
+        password_hash=AuthService.hash_password("benchpass123"),
+        role_id=admin_user._test_role_map["bench"],
+        organization_id=admin_user.organization_id,
+        status="active",
+    )
+    session.add(user)
+    await session.flush()
+    await session.commit()
+    return user
+
+
+@pytest_asyncio.fixture
+async def bench_token(bench_user):
+    from app.services.auth_service import AuthService
+
+    return AuthService.create_token(
+        bench_user.id,
+        bench_user.email,
+        bench_user.role_id,
+        bench_user.organization_id,
+        role_name="bench",
+    )
+
+
+@pytest_asyncio.fixture
+async def registry_seeded(session):
+    """Ensure the registry cache has data before each API test."""
+    from app.services.nf_core_registry_service import NfCoreRegistryService
+
+    payload = _load_fixture("nf_core_pipelines_sample.json")
+    with patch("httpx.AsyncClient", return_value=_mock_httpx_get(payload)):
+        await NfCoreRegistryService.refresh_registry(session)
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_api_registry_list_returns_pipelines_with_status(
+    client, admin_token, registry_seeded
+):
+    response = await client.get(
+        "/api/pipelines/registry",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    names = {p["name"] for p in data["pipelines"]}
+    assert names == {"scrnaseq", "rnaseq", "sarek"}
+    assert data["total"] == 3
+    # last_refreshed_at populated after refresh
+    assert data["last_refreshed_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_api_registry_list_route_not_shadowed_by_keypath(
+    client, admin_token, registry_seeded
+):
+    """Critical: the /registry routes must be declared before /{key:path} or
+    the path-converter will capture them."""
+    response = await client.get(
+        "/api/pipelines/registry",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    # 404 would mean the {key:path} route caught it (no pipeline_catalog row
+    # named 'registry') -- assert we got the actual registry list response shape.
+    assert response.status_code == 200
+    assert "pipelines" in response.json()
+
+
+@pytest.mark.asyncio
+async def test_api_registry_list_search_query(client, admin_token, registry_seeded):
+    response = await client.get(
+        "/api/pipelines/registry?q=rna",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    names = {p["name"] for p in response.json()["pipelines"]}
+    assert names == {"rnaseq", "scrnaseq"}
+
+
+@pytest.mark.asyncio
+async def test_api_registry_list_allowed_for_bench(client, bench_token, registry_seeded):
+    response = await client.get(
+        "/api/pipelines/registry",
+        headers={"Authorization": f"Bearer {bench_token}"},
+    )
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_api_registry_list_forbidden_for_viewer(client, viewer_token, registry_seeded):
+    response = await client.get(
+        "/api/pipelines/registry",
+        headers={"Authorization": f"Bearer {viewer_token}"},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_api_registry_versions_returns_release_list(
+    client, admin_token, registry_seeded
+):
+    response = await client.get(
+        "/api/pipelines/registry/scrnaseq/versions",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["name"] == "scrnaseq"
+    tags = [v["tag_name"] for v in data["versions"]]
+    assert tags == ["2.7.1", "2.6.0"]
+
+
+@pytest.mark.asyncio
+async def test_api_registry_install_creates_catalog_entry(
+    client, admin_token, registry_seeded
+):
+    with patch(
+        "app.services.pipeline_catalog_service.PipelineCatalogService.fetch_pipeline_schema",
+        new_callable=AsyncMock,
+        return_value={"definitions": {}},
+    ):
+        response = await client.post(
+            "/api/pipelines/registry/sarek/install",
+            json={"version": "3.4.0"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["pipeline_key"] == "nf-core/sarek"
+    assert data["source_type"] == "nf-core"
+    assert data["version"] == "3.4.0"
+
+
+@pytest.mark.asyncio
+async def test_api_registry_install_returns_409_on_collision(
+    client, admin_token, registry_seeded
+):
+    # First install succeeds.
+    with patch(
+        "app.services.pipeline_catalog_service.PipelineCatalogService.fetch_pipeline_schema",
+        new_callable=AsyncMock,
+        return_value={},
+    ):
+        await client.post(
+            "/api/pipelines/registry/sarek/install",
+            json={"version": "3.4.0"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        response = await client.post(
+            "/api/pipelines/registry/sarek/install",
+            json={"version": "3.4.0"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_api_registry_install_returns_404_for_unknown_name(
+    client, admin_token, registry_seeded
+):
+    response = await client.post(
+        "/api/pipelines/registry/does-not-exist/install",
+        json={"version": "1.0.0"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_api_registry_install_forbidden_for_bench(
+    client, bench_token, registry_seeded
+):
+    response = await client.post(
+        "/api/pipelines/registry/sarek/install",
+        json={"version": "3.4.0"},
+        headers={"Authorization": f"Bearer {bench_token}"},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_api_registry_refresh_triggers_fetch(client, admin_token):
+    """POST /registry/refresh invokes refresh_registry and returns the result."""
+    from app.services.nf_core_registry_service import NfCoreRegistryService
+
+    payload = _load_fixture("nf_core_pipelines_sample.json")
+    with patch("httpx.AsyncClient", return_value=_mock_httpx_get(payload)):
+        response = await client.post(
+            "/api/pipelines/registry/refresh",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["fetched"] == 3
+    assert data["archived"] == 0
+    assert data["last_refreshed_at"] is not None
+    # ensure the registry was actually populated
+    assert NfCoreRegistryService is not None
+
+
+@pytest.mark.asyncio
+async def test_api_registry_refresh_forbidden_for_bench(client, bench_token):
+    response = await client.post(
+        "/api/pipelines/registry/refresh",
+        headers={"Authorization": f"Bearer {bench_token}"},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_api_registry_install_audit_log_attributed_to_user(
+    client, admin_token, admin_user, registry_seeded, session
+):
+    from app.models.audit_log import AuditLog
+    from sqlalchemy import select
+
+    with patch(
+        "app.services.pipeline_catalog_service.PipelineCatalogService.fetch_pipeline_schema",
+        new_callable=AsyncMock,
+        return_value={},
+    ):
+        await client.post(
+            "/api/pipelines/registry/sarek/install",
+            json={"version": "3.4.0"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+    entries = (
+        await session.execute(
+            select(AuditLog).where(
+                AuditLog.entity_type == "pipeline_catalog",
+                AuditLog.action == "install_from_nf_core_registry",
+            )
+        )
+    ).scalars().all()
+    assert len(entries) == 1
+    assert entries[0].user_id == admin_user.id
