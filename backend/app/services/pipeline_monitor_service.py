@@ -39,6 +39,42 @@ def _strip_external_favicon_link(html: str) -> str:
     return _FAVICON_LINK_RE.sub("", html)
 
 
+# A srcdoc iframe inherits its base URL from the parent document, so plain
+# in-page anchors like `<a href="#tasks">` resolve to `<parent_url>#tasks`
+# and clicking them triggers a cross-document navigation that the parent's
+# `frame-ancestors 'none'` blocks. This shim intercepts hash-only clicks in
+# capture phase and does an in-iframe scrollIntoView instead. Bootstrap's
+# tab anchors (data-toggle present) are left untouched so the Resources
+# sub-tabs keep working.
+_IFRAME_HASH_NAV_SHIM = (
+    "<script>(function(){function h(e){var n=e.target;"
+    "while(n&&n!==document){if(n.tagName==='A'){"
+    "if(n.hasAttribute('data-toggle'))return;"
+    "var u=n.getAttribute('href');"
+    "if(u&&u.charAt(0)==='#'){e.preventDefault();"
+    "if(u.length>1){var t=document.getElementById(u.substring(1));"
+    "if(t)t.scrollIntoView();}}return;}"
+    "n=n.parentNode;}}"
+    "document.addEventListener('click',h,true);})();</script>"
+)
+
+
+def _inject_iframe_hash_nav_shim(html: str) -> str:
+    """Insert the hash-nav click shim before `</body>` (or append if absent)."""
+    if "</body>" in html:
+        return html.replace("</body>", _IFRAME_HASH_NAV_SHIM + "</body>", 1)
+    return html + _IFRAME_HASH_NAV_SHIM
+
+
+def _prepare_report_for_iframe(html: str) -> str:
+    """Apply all transforms needed before serving the report inside a
+    srcdoc iframe: strip external favicons (CSP) and inject the hash-nav
+    click shim (base URL inheritance workaround)."""
+    if not html:
+        return html
+    return _inject_iframe_hash_nav_shim(_strip_external_favicon_link(html))
+
+
 class PipelineMonitorService:
     @staticmethod
     async def sync_run_statuses(session: AsyncSession) -> None:
@@ -705,12 +741,12 @@ class PipelineMonitorService:
             if not report_uri:
                 return ""
             content = await _read_gcs_text(report_uri)
-            return _strip_external_favicon_link(content or "")
+            return _prepare_report_for_iframe(content or "")
 
         try:
             compute_adapter = get_compute_adapter()
             report = await compute_adapter.get_job_report(run.k8s_job_name)
-            return _strip_external_favicon_link(report)
+            return _prepare_report_for_iframe(report)
         except Exception as e:
             logger.warning("Failed to read report for run %d: %s", run_id, e)
             return ""

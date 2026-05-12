@@ -8,6 +8,7 @@ from app.services.pipeline_monitor_service import (
     _parse_memory_gb,
     _parse_duration,
     _strip_external_favicon_link,
+    _inject_iframe_hash_nav_shim,
 )
 
 
@@ -84,6 +85,38 @@ def test_strip_external_favicon_link_handles_no_favicon():
     assert _strip_external_favicon_link(html) == html
 
 
+def test_inject_iframe_hash_nav_shim_inserts_script_before_body_close():
+    """A srcdoc iframe inherits its base URL from the parent document, so
+    `<a href="#tasks">` inside the Nextflow report resolves to
+    `<parent_url>#tasks` and clicking it triggers a cross-document
+    navigation that is blocked by the parent's frame-ancestors policy.
+    Inject a small inline script that intercepts hash-only anchor
+    clicks in capture phase, prevents the cross-document nav, and does
+    in-iframe scrollIntoView instead. Bootstrap-driven anchors (those
+    with a `data-toggle` attribute) must pass through untouched so the
+    Resources sub-tabs keep working."""
+    html = "<html><body><a href='#tasks'>Tasks</a></body></html>"
+    out = _inject_iframe_hash_nav_shim(html)
+    assert "<script" in out
+    assert "addEventListener" in out
+    # Skip data-toggle anchors so Bootstrap's tab handlers still work.
+    assert "data-toggle" in out
+    # Inserted just before </body>, not after it.
+    assert "</body>" in out
+    assert out.rfind("<script") < out.rfind("</body>")
+    # Original body content preserved.
+    assert "<a href='#tasks'>Tasks</a>" in out
+
+
+def test_inject_iframe_hash_nav_shim_appends_when_no_body_close():
+    """Reports without a `</body>` tag still get the shim appended so we
+    don't silently drop it."""
+    html = "<a href='#x'>x</a>"
+    out = _inject_iframe_hash_nav_shim(html)
+    assert "<script" in out
+    assert out.startswith("<a href='#x'>x</a>")
+
+
 def test_strip_external_favicon_link_handles_variants():
     """Match the link tag regardless of attribute order and self-close style."""
     cases = [
@@ -142,8 +175,10 @@ async def test_get_run_report_strips_favicon_for_nextflow(session, admin_user):
 
     assert "nextflow.io" not in out
     assert "favicon" not in out
-    # Body content survives the strip.
-    assert "<body>ok</body>" in out
+    # Body content survives the transforms (a hash-nav shim is appended
+    # inside the body before </body> but the original content is intact).
+    assert ">ok<" in out
+    assert "</body>" in out
 
 
 # --- Integration tests for sync_run_statuses ---
