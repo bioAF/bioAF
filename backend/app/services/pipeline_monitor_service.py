@@ -318,17 +318,21 @@ class PipelineMonitorService:
         if not adapter_processes:
             return
 
-        existing_by_name = {p.process_name: p for p in run.processes}
+        existing_by_task = {p.task_id: p for p in run.processes if p.task_id}
+        existing_by_name = {p.process_name: p for p in run.processes if not p.task_id}
 
-        # The Nextflow trace contains one row per task attempt, so a task that
-        # was preempted and retried shows up multiple times under the same name.
-        # Group by name and take the LAST attempt as the authoritative final
-        # status, so the UI sees pipeline shape (unique steps), not attempt
-        # count. Retries are surfaced separately so the user can see what
-        # had to retry without conflating it with task count.
-        attempts_by_name: dict[str, list[dict]] = {}
+        # The Nextflow trace has one row per task attempt. Group rows by
+        # `task_id` so retries of the same task collapse, while legitimate
+        # parallel runs of the same process (different task_ids, same name,
+        # e.g. nf-core/scrnaseq's MTX_TO_H5AD running once per matrix
+        # variant) stay as separate entries. Within a task_id, the highest
+        # `attempt` is the authoritative final status.
+        # task_id may be missing on older adapter outputs; fall back to
+        # name so we don't crash, but log it so it can be diagnosed.
+        attempts_by_task: dict[str, list[dict]] = {}
         for proc_data in adapter_processes:
-            attempts_by_name.setdefault(proc_data.get("name", ""), []).append(proc_data)
+            key = proc_data.get("task_id") or proc_data.get("name", "")
+            attempts_by_task.setdefault(key, []).append(proc_data)
 
         completed = 0
         running = 0
@@ -336,9 +340,10 @@ class PipelineMonitorService:
         cached = 0
         retries: list[dict] = []
 
-        for name, attempts in attempts_by_name.items():
-            final = attempts[-1]
+        for key, attempts in attempts_by_task.items():
+            final = max(attempts, key=lambda a: a.get("attempt", 1))
             final_status = final.get("status", "")
+            name = final.get("name", "") or key
 
             if final_status == "completed":
                 completed += 1
@@ -349,15 +354,20 @@ class PipelineMonitorService:
             elif final_status == "cached":
                 cached += 1
 
-            if len(attempts) > 1:
-                retries.append({"name": name, "attempts": len(attempts)})
+            max_attempt = max((a.get("attempt", 1) for a in attempts), default=1)
+            if max_attempt > 1 or len(attempts) > 1:
+                retries.append({"name": name, "attempts": max(max_attempt, len(attempts))})
 
-            if name in existing_by_name:
+            task_id = final.get("task_id") or ""
+            if task_id and task_id in existing_by_task:
+                proc = existing_by_task[task_id]
+            elif not task_id and name in existing_by_name:
                 proc = existing_by_name[name]
             else:
                 proc = PipelineProcess(
                     pipeline_run_id=run.id,
                     process_name=name,
+                    task_id=task_id or None,
                 )
                 session.add(proc)
 
@@ -376,7 +386,7 @@ class PipelineMonitorService:
             if dur_val is not None:
                 proc.duration_seconds = dur_val
 
-        total = len(attempts_by_name)
+        total = len(attempts_by_task)
         pct = round((completed + cached) / total * 100, 1) if total > 0 else 0.0
         progress_payload: dict = {
             "total_processes": total,
