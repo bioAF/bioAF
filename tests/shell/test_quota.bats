@@ -165,7 +165,7 @@ JSON
     [ "$output" = "250" ]
 }
 
-@test "get_current returns 0 when the quota info has no matching region entry" {
+@test "get_current returns empty when the quota info has no matching region entry" {
     cat > "$FIXTURE_DIR/quota_info_SSD-TOTAL-GB-per-project-region.json" <<'JSON'
 { "dimensionsInfos": [
     { "dimensions": {"region": "europe-west1"}, "details": { "value": "999" } }
@@ -173,7 +173,24 @@ JSON
 JSON
     run bash -c "source '$QUOTA_HELPER'; bioaf_quota_get_current compute.googleapis.com SSD-TOTAL-GB-per-project-region my-proj us-central1"
     [ "$status" -eq 0 ]
-    [ "$output" = "0" ]
+    [ -z "$output" ]
+}
+
+@test "get_current returns empty when gcloud describe fails" {
+    # Replace the gcloud stub with one that exits non-zero on the describe
+    # call. The helper must surface this as empty stdout, not "0", so that
+    # ensure_all can distinguish "unknown" from "real zero".
+    cat > "$STUBS_DIR/gcloud" <<'STUB'
+#!/usr/bin/env bash
+case "$1 $2 $3" in
+    "alpha quotas info") exit 1 ;;
+esac
+exit 0
+STUB
+    chmod +x "$STUBS_DIR/gcloud"
+    run bash -c "source '$QUOTA_HELPER'; bioaf_quota_get_current compute.googleapis.com CPUS-ALL-REGIONS-per-project my-proj"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
 }
 
 @test "get_current invokes gcloud with the expected arguments" {
@@ -376,6 +393,26 @@ JSON
 # would never be reached. Bug observed in the wild on a fresh project
 # where curl POST hit a 4xx; install exited silently after the
 # "Requesting an automatic quota increase from Google..." line.
+@test "ensure_all does not submit a request when current limit cannot be read" {
+    # gcloud describe fails for every quota -- the helper returns empty,
+    # ensure_all must skip without ever issuing a POST.
+    cat > "$STUBS_DIR/gcloud" <<'STUB'
+#!/usr/bin/env bash
+printf 'gcloud %s\n' "$*" >> "$CALL_LOG"
+case "$1 $2 $3" in
+    "auth print-access-token "*) echo "ya29.fake-token" ;;
+    "config get-value account") echo "tester@example.com" ;;
+    "alpha quotas info") exit 1 ;;
+esac
+exit 0
+STUB
+    chmod +x "$STUBS_DIR/gcloud"
+    run bash -c "source '$QUOTA_HELPER'; BIOAF_QUOTA_POLL_INTERVAL=1 BIOAF_QUOTA_POLL_TIMEOUT=1 bioaf_quota_ensure_all my-proj us-central1"
+    [ "$status" -eq 0 ]
+    ! grep -q "method: POST" "$CALL_LOG"
+    [[ "$output" == *"could not read current limit"* ]]
+}
+
 @test "ensure_all does not abort under set -e when curl POST fails" {
     _stage_quota_limits 12 100 200
     export CURL_EXIT=22  # curl exits 22 on any HTTP >=400 with -f

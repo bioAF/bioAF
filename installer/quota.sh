@@ -39,34 +39,37 @@ _bioaf_quota_python() {
 #   $2 quota_id       e.g. CPUS-ALL-REGIONS-per-project
 #   $3 project        GCP project id
 #   $4 region (opt)   for regional quotas; omit for project-scoped
-# Prints the limit as an integer string, or "0" if the quota cannot be
-# read or the requested region is not present.
+# Prints the limit as an integer string, or empty string if the quota
+# cannot be read (gcloud failure, parse error, region not present in
+# response, no python interpreter). Callers MUST distinguish empty from
+# "0": empty means "unknown -- do not act", "0" means the API reported a
+# real limit of zero.
 bioaf_quota_get_current() {
     local service="$1" quota_id="$2" project="$3" region="${4:-}"
     local out
     out=$(gcloud alpha quotas info describe "$quota_id" \
             --service="$service" \
             --project="$project" \
-            --format=json 2>/dev/null) || { echo 0; return 0; }
+            --format=json 2>/dev/null) || { echo ""; return 0; }
     local py
     py=$(_bioaf_quota_python)
-    if [ -z "$py" ]; then echo 0; return 0; fi
+    if [ -z "$py" ]; then echo ""; return 0; fi
     REGION="$region" "$py" -c '
 import json, os, sys
 try:
     data = json.loads(sys.stdin.read() or "{}")
 except Exception:
-    print("0"); sys.exit(0)
+    print(""); sys.exit(0)
 region = os.environ.get("REGION", "")
 for entry in (data.get("dimensionsInfos") or []):
     dims = entry.get("dimensions") or {}
     if region:
         if dims.get("region") == region:
-            print((entry.get("details") or {}).get("value", "0")); sys.exit(0)
+            print((entry.get("details") or {}).get("value", "")); sys.exit(0)
     else:
         if not dims:
-            print((entry.get("details") or {}).get("value", "0")); sys.exit(0)
-print("0")
+            print((entry.get("details") or {}).get("value", "")); sys.exit(0)
+print("")
 ' <<<"$out"
 }
 
@@ -237,8 +240,16 @@ bioaf_quota_ensure_all() {
         [ "$scope" = "region" ] && r="$region"
         local current
         current=$(bioaf_quota_get_current "$service" "$quota_id" "$project" "$r")
-        # Treat non-numeric as 0 so we always proceed to ask.
-        case "$current" in (''|*[!0-9]*) current=0 ;; esac
+        # Only auto-request an increase when we successfully read the current
+        # limit AND it is below our target. Anything else (empty/unknown,
+        # non-numeric, or current >= target) is a no-op: we never submit a
+        # request without knowing it is needed.
+        if [ -z "$current" ] || ! [[ "$current" =~ ^[0-9]+$ ]]; then
+            echo "  ${quota_id}: could not read current limit. Skipping (no request submitted)."
+            echo "    If pipeline runs hit QUOTA_EXCEEDED later, request the bump in the"
+            echo "    Cloud Console: IAM & Admin -> Quotas."
+            continue
+        fi
         if [ "$current" -ge "$preferred" ]; then
             echo "  ${quota_id}: current limit ${current} already meets target ${preferred}. Skipping."
             continue
