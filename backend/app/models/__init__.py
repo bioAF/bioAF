@@ -66,6 +66,8 @@ from app.models.github_repo import GitHubRepo
 from app.models.custom_pipeline import CustomPipeline
 from app.models.custom_pipeline_version import CustomPipelineVersion
 from app.models.custom_pipeline_variable import CustomPipelineVariable
+from app.models.nf_core_registry_pipeline import NfCoreRegistryPipeline
+from app.models.nf_core_registry_refresh import NfCoreRegistryRefresh
 
 __all__ = [
     "User",
@@ -142,4 +144,6 @@ __all__ = [
     "CustomPipeline",
     "CustomPipelineVersion",
     "CustomPipelineVariable",
+    "NfCoreRegistryPipeline",
+    "NfCoreRegistryRefresh",
 ]
