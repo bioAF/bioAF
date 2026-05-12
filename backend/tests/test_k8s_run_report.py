@@ -38,7 +38,10 @@ class TestRunReport:
             report = await PipelineMonitorService.get_run_report(mock_session, 11)
 
         mock_adapter.get_job_report.assert_called_once_with("bioaf-pipeline-11")
-        assert report == "<html>report</html>"
+        # The raw HTML from the adapter is preserved, with the iframe
+        # hash-nav shim appended (see `_prepare_report_for_iframe`).
+        assert report.startswith("<html>report</html>")
+        assert "addEventListener('click'" in report
 
     @pytest.mark.asyncio
     async def test_report_returns_empty_when_no_k8s_job(self, mock_session):
