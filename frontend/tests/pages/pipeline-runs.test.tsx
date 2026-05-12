@@ -275,15 +275,19 @@ describe("Cancel Button (Test 30)", () => {
   });
 });
 
-describe("Nextflow Report iframe sandbox", () => {
-  // The Nextflow report HTML bundles Plotly + DataTables which call
-  // `new Function(...)` to render. The parent page's CSP sets
-  // `script-src 'self' 'unsafe-inline'` without `'unsafe-eval'`, so a
-  // srcDoc iframe that inherits that CSP fails to render plots or the
-  // task table. Sandboxing the iframe with allow-scripts gives it a
-  // unique opaque origin that does not inherit the parent CSP, so the
-  // inline JS in the report works as Nextflow ships it.
-  test("report iframe has sandbox=allow-scripts so inline JS in report works", async () => {
+describe("Nextflow Report iframe", () => {
+  // The iframe must NOT carry a `sandbox` attribute. A srcdoc iframe
+  // inherits its parent's CSP per the HTML spec regardless of sandbox,
+  // so sandbox doesn't help with the Plotly `new Function` problem (the
+  // real fix is `unsafe-eval` in CSP). What sandbox *does* break: with
+  // `allow-scripts` but no `allow-same-origin`, the iframe is in a
+  // unique opaque origin while its base URL is inherited from the
+  // parent, so anchor links like `<a href="#tasks">` inside the report
+  // resolve to the parent's URL and clicking them triggers a
+  // cross-origin navigation that hits the parent's
+  // `frame-ancestors 'none'` and fails. Leaving sandbox off keeps the
+  // report's internal nav (Summary/Resources/Tasks) working.
+  test("report iframe is not sandboxed", async () => {
     const completedRun = { ...mockRunWithK8s, status: "completed" as const };
     mockApiGet.mockImplementation((url: string) => {
       if (url.includes("/references")) return Promise.resolve([]);
@@ -308,6 +312,6 @@ describe("Nextflow Report iframe sandbox", () => {
       iframe = container.querySelector("iframe");
       expect(iframe).not.toBeNull();
     });
-    expect(iframe!.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(iframe!.hasAttribute("sandbox")).toBe(false);
   });
 });
