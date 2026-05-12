@@ -6,7 +6,12 @@ from app.config import settings
 _CSP = "; ".join(
     [
         "default-src 'self'",
-        "script-src 'self' 'unsafe-inline'",
+        # 'unsafe-eval' is required because the Nextflow HTML report embeds
+        # Plotly, which JITs vector math via `new Function(...)`. The report
+        # renders in a srcdoc iframe whose CSP is inherited from this page
+        # per the HTML spec (sandbox doesn't change that), so without
+        # unsafe-eval the report's plots and task table stay blank.
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data:",
         "font-src 'self'",
