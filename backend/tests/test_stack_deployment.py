@@ -68,6 +68,23 @@ def _make_progress_event(event_type="apply_complete", message="done", **kwargs):
     return TerraformProgressEvent(event_type=event_type, message=message, **kwargs)
 
 
+@pytest.fixture(autouse=True)
+def _stub_capacity_probe(monkeypatch):
+    """Default the pre-flight capacity probe to a no-op for unit tests.
+
+    The real probe hits the Compute Engine API, which has no ADC in CI.
+    Tests that want to exercise probe behaviour (capture call, force
+    AllZonesExhaustedError) explicitly patch _select_default_pool_zone
+    inside their own with-block, which overrides this stub.
+    """
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(
+        "app.services.stack_deployment._select_default_pool_zone",
+        AsyncMock(return_value="us-central1-a"),
+    )
+
+
 # -----------------------------------------------------------------------
 # deploy_stack tests
 # -----------------------------------------------------------------------
@@ -232,6 +249,106 @@ async def test_deploy_stack_stores_cluster_config_on_success(session):
     assert await _get_config(session, "gke_cluster_name") == "bioaf-myorg"
     assert await _get_config(session, "gke_cluster_endpoint") == "https://10.0.0.1"
     assert await _get_config(session, "gke_cluster_ca_cert") == "dGVzdC1jZXJ0"
+
+
+@pytest.mark.asyncio
+async def test_deploy_stack_runs_capacity_probe_before_compute(session):
+    """The pre-flight zone capacity probe runs before the compute module
+    and writes the selected zone to platform_config under
+    gke_default_pool_zone.
+
+    This is the contract that protects the throwaway default node pool
+    from per-zone GCE_STOCKOUT: by the time terraform apply runs against
+    the compute module, _write_tfvars has a fresh, probed-healthy zone
+    to pin the cluster's node_locations to.
+    """
+    from app.services.stack_deployment import deploy_stack
+
+    _, user_id = await _seed_org_and_user(session)
+
+    await _set_config(session, "gcp_credentials_configured", "true")
+    await _set_config(session, "terraform_initialized", "true")
+    await _set_config(session, "compute_deployed", "false")
+    await _set_config(session, "storage_deployed", "true")
+    await _set_config(session, "gcp_project_id", "test-proj")
+    await _set_config(session, "gcp_region", "us-central1")
+    await session.commit()
+
+    probe_zone_at_compute_time: list[str | None] = []
+
+    async def mock_run_module(sess, uid, module_name):
+        # Capture what the probe wrote at the moment the compute module
+        # is invoked. That is the value _write_tfvars will pick up.
+        probe_zone_at_compute_time.append(await _get_config(sess, "gke_default_pool_zone"))
+        yield _make_progress_event(
+            "apply_complete",
+            f"{module_name} done",
+            extra={
+                "outputs": {
+                    "cluster_name": {"value": "bioaf-test"},
+                    "cluster_endpoint": {"value": "https://1.2.3.4"},
+                    "cluster_ca_cert": {"value": "Y2VydA=="},
+                }
+            },
+        )
+
+    from unittest.mock import AsyncMock
+
+    select_zone_mock = AsyncMock(return_value="us-central1-b")
+
+    with (
+        patch("app.services.stack_deployment._run_module", side_effect=mock_run_module),
+        patch("app.services.stack_deployment._select_default_pool_zone", select_zone_mock),
+    ):
+        async for _ in deploy_stack(session, "kubernetes", user_id=user_id):
+            pass
+
+    # Probe was called exactly once.
+    assert select_zone_mock.call_count == 1
+    # And the compute module saw the probed zone in platform_config.
+    assert probe_zone_at_compute_time == ["us-central1-b"]
+
+
+@pytest.mark.asyncio
+async def test_deploy_stack_skips_compute_when_all_zones_exhausted(session):
+    """If every candidate zone is stocked out, deploy_stack yields a
+    stack_error and does NOT call the compute module. Running terraform
+    apply when we already know capacity is gone just burns 40 minutes.
+    """
+    from app.services.stack_deployment import deploy_stack
+    from app.services.zone_capacity_probe import AllZonesExhaustedError
+
+    _, user_id = await _seed_org_and_user(session)
+
+    await _set_config(session, "gcp_credentials_configured", "true")
+    await _set_config(session, "terraform_initialized", "true")
+    await _set_config(session, "compute_deployed", "false")
+    await _set_config(session, "storage_deployed", "true")
+    await _set_config(session, "gcp_project_id", "test-proj")
+    await _set_config(session, "gcp_region", "us-central1")
+    await session.commit()
+
+    compute_invocations: list[str] = []
+
+    async def mock_run_module(sess, uid, module_name):
+        compute_invocations.append(module_name)
+        yield _make_progress_event("apply_complete", "should not be called")
+
+    from unittest.mock import AsyncMock
+
+    select_zone_mock = AsyncMock(side_effect=AllZonesExhaustedError("no capacity"))
+
+    with (
+        patch("app.services.stack_deployment._run_module", side_effect=mock_run_module),
+        patch("app.services.stack_deployment._select_default_pool_zone", select_zone_mock),
+    ):
+        events = []
+        async for event in deploy_stack(session, "kubernetes", user_id=user_id):
+            events.append(event)
+
+    assert compute_invocations == [], "compute module must not run when all zones are exhausted"
+    assert any(e.event_type == "stack_error" for e in events), "deploy must surface stack_error"
+    assert await _get_config(session, "compute_deployed") != "true"
 
 
 @pytest.mark.asyncio

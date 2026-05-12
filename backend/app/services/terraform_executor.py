@@ -911,6 +911,15 @@ class TerraformExecutor:
             # attaches the bioaf-managed Resource Manager tag to the GKE
             # cluster (required for bioaf-app's tag-conditioned binding).
             tfvars["bioaf_bootstrap_sa_email"] = config.get("gcp_bootstrap_sa_email") or ""
+            # Pin the throwaway default node pool to a single probed-healthy
+            # zone when the pre-flight capacity probe picked one. Without
+            # this, GKE provisions the default pool in every regional zone
+            # and any per-zone e2-medium stockout hangs CREATE_CLUSTER for
+            # ~70 minutes. Empty / missing key means "no constraint" and
+            # falls back to today's behaviour via the variable's "" default.
+            gke_default_pool_zone = config.get("gke_default_pool_zone")
+            if gke_default_pool_zone:
+                tfvars["gke_default_pool_zone"] = gke_default_pool_zone
             # Cluster configuration from platform_config
             if config.get("k8s_pipeline_machine_type"):
                 tfvars["k8s_pipeline_machine_type"] = config["k8s_pipeline_machine_type"]
