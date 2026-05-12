@@ -1,5 +1,51 @@
 # Release Notes
 
+## v0.11.14
+
+Fixes a class of GKE deploy hang where the throwaway default node pool
+the cluster creates at bootstrap (and `remove_default_node_pool=true`
+nukes seconds later) would wait up to 70 minutes for capacity in every
+regional zone before GKE gave up, then Terraform timed out at 40
+minutes and the cluster ended up in `RUNNING_WITH_ERROR`. Random
+resource suffixes don't help here, since they don't change per-zone
+GCE capacity. The deploy now runs a pre-flight capacity probe and pins
+the throwaway default pool to one zone that just accepted a real
+instance insert.
+
+### Bug fixes
+
+- **Cluster bootstrap no longer hangs on a single-zone GCE stockout.**
+  Before this change, a regional Standard cluster fanned its
+  `initial_node_count = 1` default pool across every zone in the
+  region. If any one zone was out of `e2-medium` capacity, that zone's
+  per-zone IGM hung indefinitely (per-zone IGMs don't fall back across
+  zones), and the cluster ended up in `RUNNING_WITH_ERROR` after a
+  ~40-minute Terraform timeout. The real node pools were never
+  affected (they set their own `node_locations` with
+  `location_policy = "ANY"`), only the implicit bootstrap pool.
+- **Probe failure short-circuits the deploy instead of burning 40
+  minutes.** If every regional zone is stocked out at probe time, the
+  deploy now surfaces a `stack_error` with the zones tried, and never
+  starts `terraform apply` for the compute module.
+
+### Enhancements
+
+- **Pre-flight GCE capacity probe before the compute terraform apply.**
+  `stack_deployment` now iterates the regional zones and attempts a
+  real `compute.instances.insert` in each. The first zone that does
+  not return `ZONE_RESOURCE_POOL_EXHAUSTED` / `GCE_STOCKOUT` wins, the
+  probe instance is deleted, and the selected zone is written to
+  `platform_config.gke_default_pool_zone`. Terraform reads that into a
+  new compute module variable that constrains the cluster's
+  `node_locations` to that single zone. The four real node pools
+  (system / pipelines / interactive / pipeline-head) set their own
+  `node_locations` from `k8s_node_zones` and are unchanged: the
+  cluster stays regional, real pools keep multi-zone fallback.
+- **Probe progress is visible in the deploy modal.** The UI shows
+  "Checking GCE zone capacity for cluster bootstrap..." then "Selected
+  zone us-central1-X for cluster bootstrap (has capacity)." before the
+  existing compute progress events.
+
 ## v0.11.13
 
 Fixes a confusing progress count on the pipeline-run page. After a run

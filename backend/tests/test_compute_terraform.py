@@ -324,3 +324,65 @@ def test_pipeline_runner_workload_identity_depends_on_node_pools():
         "google_container_node_pool.system",
     ):
         assert dep in block, f"pipeline_runner_workload_identity must depend_on {dep}"
+
+
+def test_gke_default_pool_zone_variable_exists():
+    """The compute module must accept gke_default_pool_zone.
+
+    This variable holds the zone the pre-flight capacity probe selected.
+    The cluster's top-level node_locations is set from it so the
+    throwaway default pool is only provisioned in that one zone. The
+    real node pools (system / pipelines / interactive / pipeline_head)
+    set their own node_locations and are unaffected, so the cluster
+    remains regional and they retain multi-zone fallback.
+
+    Default is "" (empty list): backward-compatible with existing
+    deploys that have not run the probe yet, behaves like today (GKE
+    picks all zones in the region).
+    """
+    variables_tf = (COMPUTE_MODULE_DIR / "variables.tf").read_text()
+
+    marker = 'variable "gke_default_pool_zone"'
+    assert marker in variables_tf, "gke_default_pool_zone variable must exist"
+
+    start = variables_tf.index(marker)
+    end = variables_tf.find("\nvariable ", start + 1)
+    if end == -1:
+        end = len(variables_tf)
+    block = variables_tf[start:end]
+
+    assert "type        = string" in block or "type = string" in block, (
+        "gke_default_pool_zone must be typed as a string"
+    )
+    assert 'default     = ""' in block or 'default = ""' in block, (
+        'gke_default_pool_zone must default to "" so unset behaves like today'
+    )
+
+
+def test_cluster_pins_default_pool_to_probed_zone():
+    """The cluster's node_locations must be set from gke_default_pool_zone
+    when non-empty.
+
+    The throwaway default pool (initial_node_count = 1, no autoscaling,
+    no location_policy) is the single point of failure for cluster
+    bootstrap. Constraining it to one probed-healthy zone replaces
+    P(any of 3 zones stocked out) with P(this one probed zone stocks
+    out between probe and create). The real node pools set their own
+    node_locations and are unaffected.
+    """
+    main_tf = (COMPUTE_MODULE_DIR / "main.tf").read_text()
+
+    cluster_marker = 'resource "google_container_cluster" "bioaf"'
+    assert cluster_marker in main_tf, "bioaf cluster resource must exist"
+    start = main_tf.index(cluster_marker)
+    end = main_tf.find('\nresource "', start + 1)
+    if end == -1:
+        end = len(main_tf)
+    cluster_block = main_tf[start:end]
+
+    assert "node_locations" in cluster_block, (
+        "cluster must set node_locations to constrain the default pool's bootstrap"
+    )
+    assert "var.gke_default_pool_zone" in cluster_block, (
+        "cluster's node_locations must read from var.gke_default_pool_zone"
+    )
