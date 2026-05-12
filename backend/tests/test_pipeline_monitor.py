@@ -3,7 +3,12 @@ import pytest_asyncio
 from unittest.mock import AsyncMock, patch
 
 from app.models.pipeline_run import PipelineRun
-from app.services.pipeline_monitor_service import PipelineMonitorService, _parse_memory_gb, _parse_duration
+from app.services.pipeline_monitor_service import (
+    PipelineMonitorService,
+    _parse_memory_gb,
+    _parse_duration,
+    _strip_external_favicon_link,
+)
 
 
 # --- Unit tests for trace file parsing ---
@@ -51,6 +56,94 @@ def test_parse_duration():
     assert _parse_duration("1h 2m 3s") == 3723
     assert _parse_duration("-") is None
     assert _parse_duration(None) is None
+
+
+def test_strip_external_favicon_link_removes_nextflow_favicon():
+    """The Nextflow report ships with a `<link rel="icon">` pointing at
+    nextflow.io's favicon. The report renders inside a srcdoc iframe
+    where favicons are never shown (iframes don't get tab icons), so the
+    request just produces a CSP `img-src` console error. Strip it so
+    the report stays quiet."""
+    html = (
+        "<html><head>"
+        "<title>Report</title>"
+        '<link rel="icon" type="image/png" href="https://www.nextflow.io/img/favicon.png" />'
+        "</head><body>x</body></html>"
+    )
+    out = _strip_external_favicon_link(html)
+    assert "favicon.png" not in out
+    assert "nextflow.io" not in out
+    # The rest of the document must be preserved.
+    assert "<title>Report</title>" in out
+    assert "<body>x</body>" in out
+
+
+def test_strip_external_favicon_link_handles_no_favicon():
+    """Reports without a favicon link must be returned unchanged."""
+    html = "<html><body>no favicon here</body></html>"
+    assert _strip_external_favicon_link(html) == html
+
+
+def test_strip_external_favicon_link_handles_variants():
+    """Match the link tag regardless of attribute order and self-close style."""
+    cases = [
+        '<link rel="icon" href="https://www.nextflow.io/img/favicon.png">',
+        '<link href="https://www.nextflow.io/img/favicon.png" rel="icon">',
+        "<link rel='shortcut icon' href='https://www.nextflow.io/img/favicon.png' />",
+    ]
+    for src in cases:
+        html = f"<html><head>{src}</head></html>"
+        out = _strip_external_favicon_link(html)
+        assert "nextflow.io" not in out, f"failed to strip: {src!r}"
+
+
+@pytest.mark.asyncio
+async def test_get_run_report_strips_favicon_for_nextflow(session, admin_user):
+    """get_run_report must strip the favicon link before returning so the
+    iframe doesn't trigger a CSP `img-src` error in the browser console."""
+    from app.models.experiment import Experiment
+    from app.models.pipeline_run import PipelineRun
+
+    exp = Experiment(
+        organization_id=admin_user.organization_id,
+        name="Favicon Strip Test",
+        owner_user_id=admin_user.id,
+        status="processing",
+    )
+    session.add(exp)
+    await session.flush()
+
+    run = PipelineRun(
+        organization_id=admin_user.organization_id,
+        experiment_id=exp.id,
+        submitted_by_user_id=admin_user.id,
+        pipeline_name="nf-core/scrnaseq",
+        pipeline_version="2.7.1",
+        status="completed",
+        k8s_job_name="bioaf-pipeline-fav-1",
+    )
+    session.add(run)
+    await session.flush()
+    await session.commit()
+
+    raw_html = (
+        "<html><head>"
+        '<link rel="icon" type="image/png" href="https://www.nextflow.io/img/favicon.png" />'
+        "<title>r</title></head><body>ok</body></html>"
+    )
+    mock_compute = AsyncMock()
+    mock_compute.get_job_report.return_value = raw_html
+
+    with patch(
+        "app.services.pipeline_monitor_service.get_compute_adapter",
+        return_value=mock_compute,
+    ):
+        out = await PipelineMonitorService.get_run_report(session, run.id)
+
+    assert "nextflow.io" not in out
+    assert "favicon" not in out
+    # Body content survives the strip.
+    assert "<body>ok</body>" in out
 
 
 # --- Integration tests for sync_run_statuses ---

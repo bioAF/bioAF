@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import re
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -21,6 +22,21 @@ if TYPE_CHECKING:
     from app.adapters.base import ComputeProvider
 
 logger = logging.getLogger("bioaf.pipeline_monitor")
+
+
+# Matches `<link rel="icon" ...>` / `<link rel='shortcut icon' ...>` regardless
+# of attribute order. The Nextflow report's favicon points at nextflow.io,
+# which our CSP `img-src` blocks; favicons aren't shown in srcdoc iframes
+# anyway, so we strip the tag rather than weaken the CSP.
+_FAVICON_LINK_RE = re.compile(
+    r"<link\b[^>]*\brel\s*=\s*['\"](?:shortcut\s+)?icon['\"][^>]*/?>",
+    re.IGNORECASE,
+)
+
+
+def _strip_external_favicon_link(html: str) -> str:
+    """Remove `<link rel="icon">` tags from an HTML document."""
+    return _FAVICON_LINK_RE.sub("", html)
 
 
 class PipelineMonitorService:
@@ -689,11 +705,12 @@ class PipelineMonitorService:
             if not report_uri:
                 return ""
             content = await _read_gcs_text(report_uri)
-            return content or ""
+            return _strip_external_favicon_link(content or "")
 
         try:
             compute_adapter = get_compute_adapter()
-            return await compute_adapter.get_job_report(run.k8s_job_name)
+            report = await compute_adapter.get_job_report(run.k8s_job_name)
+            return _strip_external_favicon_link(report)
         except Exception as e:
             logger.warning("Failed to read report for run %d: %s", run_id, e)
             return ""
