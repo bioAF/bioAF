@@ -274,3 +274,40 @@ describe("Cancel Button (Test 30)", () => {
     });
   });
 });
+
+describe("Nextflow Report iframe sandbox", () => {
+  // The Nextflow report HTML bundles Plotly + DataTables which call
+  // `new Function(...)` to render. The parent page's CSP sets
+  // `script-src 'self' 'unsafe-inline'` without `'unsafe-eval'`, so a
+  // srcDoc iframe that inherits that CSP fails to render plots or the
+  // task table. Sandboxing the iframe with allow-scripts gives it a
+  // unique opaque origin that does not inherit the parent CSP, so the
+  // inline JS in the report works as Nextflow ships it.
+  test("report iframe has sandbox=allow-scripts so inline JS in report works", async () => {
+    const completedRun = { ...mockRunWithK8s, status: "completed" as const };
+    mockApiGet.mockImplementation((url: string) => {
+      if (url.includes("/references")) return Promise.resolve([]);
+      return Promise.resolve(completedRun);
+    });
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve("<html><body>Nextflow Report</body></html>"),
+    });
+
+    const PipelineRunDetailPage =
+      require("@/app/pipelines/runs/[id]/page").default;
+    const { container } = render(<PipelineRunDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Report")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Report"));
+
+    let iframe: HTMLIFrameElement | null = null;
+    await waitFor(() => {
+      iframe = container.querySelector("iframe");
+      expect(iframe).not.toBeNull();
+    });
+    expect(iframe!.getAttribute("sandbox")).toBe("allow-scripts");
+  });
+});

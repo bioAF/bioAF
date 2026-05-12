@@ -670,6 +670,7 @@ export default function PipelineRunDetailPage() {
                 ) : (
                   <iframe
                     srcDoc={report}
+                    sandbox="allow-scripts"
                     className="w-full h-[600px] border rounded"
                     title={isCustomRun ? "Pipeline Report" : "Nextflow Report"}
                   />
