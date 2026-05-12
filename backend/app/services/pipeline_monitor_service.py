@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import re
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -21,6 +22,57 @@ if TYPE_CHECKING:
     from app.adapters.base import ComputeProvider
 
 logger = logging.getLogger("bioaf.pipeline_monitor")
+
+
+# Matches `<link rel="icon" ...>` / `<link rel='shortcut icon' ...>` regardless
+# of attribute order. The Nextflow report's favicon points at nextflow.io,
+# which our CSP `img-src` blocks; favicons aren't shown in srcdoc iframes
+# anyway, so we strip the tag rather than weaken the CSP.
+_FAVICON_LINK_RE = re.compile(
+    r"<link\b[^>]*\brel\s*=\s*['\"](?:shortcut\s+)?icon['\"][^>]*/?>",
+    re.IGNORECASE,
+)
+
+
+def _strip_external_favicon_link(html: str) -> str:
+    """Remove `<link rel="icon">` tags from an HTML document."""
+    return _FAVICON_LINK_RE.sub("", html)
+
+
+# A srcdoc iframe inherits its base URL from the parent document, so plain
+# in-page anchors like `<a href="#tasks">` resolve to `<parent_url>#tasks`
+# and clicking them triggers a cross-document navigation that the parent's
+# `frame-ancestors 'none'` blocks. This shim intercepts hash-only clicks in
+# capture phase and does an in-iframe scrollIntoView instead. Bootstrap's
+# tab anchors (data-toggle present) are left untouched so the Resources
+# sub-tabs keep working.
+_IFRAME_HASH_NAV_SHIM = (
+    "<script>(function(){function h(e){var n=e.target;"
+    "while(n&&n!==document){if(n.tagName==='A'){"
+    "if(n.hasAttribute('data-toggle'))return;"
+    "var u=n.getAttribute('href');"
+    "if(u&&u.charAt(0)==='#'){e.preventDefault();"
+    "if(u.length>1){var t=document.getElementById(u.substring(1));"
+    "if(t)t.scrollIntoView();}}return;}"
+    "n=n.parentNode;}}"
+    "document.addEventListener('click',h,true);})();</script>"
+)
+
+
+def _inject_iframe_hash_nav_shim(html: str) -> str:
+    """Insert the hash-nav click shim before `</body>` (or append if absent)."""
+    if "</body>" in html:
+        return html.replace("</body>", _IFRAME_HASH_NAV_SHIM + "</body>", 1)
+    return html + _IFRAME_HASH_NAV_SHIM
+
+
+def _prepare_report_for_iframe(html: str) -> str:
+    """Apply all transforms needed before serving the report inside a
+    srcdoc iframe: strip external favicons (CSP) and inject the hash-nav
+    click shim (base URL inheritance workaround)."""
+    if not html:
+        return html
+    return _inject_iframe_hash_nav_shim(_strip_external_favicon_link(html))
 
 
 class PipelineMonitorService:
@@ -318,17 +370,21 @@ class PipelineMonitorService:
         if not adapter_processes:
             return
 
-        existing_by_name = {p.process_name: p for p in run.processes}
+        existing_by_task = {p.task_id: p for p in run.processes if p.task_id}
+        existing_by_name = {p.process_name: p for p in run.processes if not p.task_id}
 
-        # The Nextflow trace contains one row per task attempt, so a task that
-        # was preempted and retried shows up multiple times under the same name.
-        # Group by name and take the LAST attempt as the authoritative final
-        # status, so the UI sees pipeline shape (unique steps), not attempt
-        # count. Retries are surfaced separately so the user can see what
-        # had to retry without conflating it with task count.
-        attempts_by_name: dict[str, list[dict]] = {}
+        # The Nextflow trace has one row per task attempt. Group rows by
+        # `task_id` so retries of the same task collapse, while legitimate
+        # parallel runs of the same process (different task_ids, same name,
+        # e.g. nf-core/scrnaseq's MTX_TO_H5AD running once per matrix
+        # variant) stay as separate entries. Within a task_id, the highest
+        # `attempt` is the authoritative final status.
+        # task_id may be missing on older adapter outputs; fall back to
+        # name so we don't crash, but log it so it can be diagnosed.
+        attempts_by_task: dict[str, list[dict]] = {}
         for proc_data in adapter_processes:
-            attempts_by_name.setdefault(proc_data.get("name", ""), []).append(proc_data)
+            key = proc_data.get("task_id") or proc_data.get("name", "")
+            attempts_by_task.setdefault(key, []).append(proc_data)
 
         completed = 0
         running = 0
@@ -336,9 +392,10 @@ class PipelineMonitorService:
         cached = 0
         retries: list[dict] = []
 
-        for name, attempts in attempts_by_name.items():
-            final = attempts[-1]
+        for key, attempts in attempts_by_task.items():
+            final = max(attempts, key=lambda a: a.get("attempt", 1))
             final_status = final.get("status", "")
+            name = final.get("name", "") or key
 
             if final_status == "completed":
                 completed += 1
@@ -349,15 +406,20 @@ class PipelineMonitorService:
             elif final_status == "cached":
                 cached += 1
 
-            if len(attempts) > 1:
-                retries.append({"name": name, "attempts": len(attempts)})
+            max_attempt = max((a.get("attempt", 1) for a in attempts), default=1)
+            if max_attempt > 1 or len(attempts) > 1:
+                retries.append({"name": name, "attempts": max(max_attempt, len(attempts))})
 
-            if name in existing_by_name:
+            task_id = final.get("task_id") or ""
+            if task_id and task_id in existing_by_task:
+                proc = existing_by_task[task_id]
+            elif not task_id and name in existing_by_name:
                 proc = existing_by_name[name]
             else:
                 proc = PipelineProcess(
                     pipeline_run_id=run.id,
                     process_name=name,
+                    task_id=task_id or None,
                 )
                 session.add(proc)
 
@@ -376,7 +438,7 @@ class PipelineMonitorService:
             if dur_val is not None:
                 proc.duration_seconds = dur_val
 
-        total = len(attempts_by_name)
+        total = len(attempts_by_task)
         pct = round((completed + cached) / total * 100, 1) if total > 0 else 0.0
         progress_payload: dict = {
             "total_processes": total,
@@ -679,11 +741,12 @@ class PipelineMonitorService:
             if not report_uri:
                 return ""
             content = await _read_gcs_text(report_uri)
-            return content or ""
+            return _prepare_report_for_iframe(content or "")
 
         try:
             compute_adapter = get_compute_adapter()
-            return await compute_adapter.get_job_report(run.k8s_job_name)
+            report = await compute_adapter.get_job_report(run.k8s_job_name)
+            return _prepare_report_for_iframe(report)
         except Exception as e:
             logger.warning("Failed to read report for run %d: %s", run_id, e)
             return ""

@@ -1493,8 +1493,15 @@ class KubernetesComputeProvider(ComputeProvider):
                 except (ValueError, TypeError):
                     pass
 
+            try:
+                attempt = int(row.get("attempt", "1") or "1")
+            except (ValueError, TypeError):
+                attempt = 1
+
             processes.append(
                 {
+                    "task_id": row.get("task_id", "") or "",
+                    "attempt": attempt,
                     "name": row.get("name", "") or row.get("process", ""),
                     "status": mapped_status,
                     "cpu": cpu,
