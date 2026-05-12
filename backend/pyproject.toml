@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bioaf-backend"
-version = "0.11.13"
+version = "0.11.14"
 description = "bioAF control plane backend"
 requires-python = ">=3.12"
 dependencies = [
@@ -19,6 +19,7 @@ dependencies = [
     "bcrypt>=4.1",
     "google-cloud-secret-manager>=2.18",
     "google-cloud-iam>=2.14",
+    "google-cloud-compute>=1.19",
     "httpx>=0.27",
     "python-multipart>=0.0.6",
     "pyyaml>=6.0",
