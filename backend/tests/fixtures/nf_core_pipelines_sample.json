@@ -1,0 +1,79 @@
+{
+  "remote_workflows": [
+    {
+      "name": "scrnaseq",
+      "full_name": "nf-core/scrnaseq",
+      "description": "Single cell RNA-Seq pipeline",
+      "topics": ["nf-core", "scrnaseq", "single-cell"],
+      "stargazers_count": 220,
+      "default_branch": "master",
+      "archived": false,
+      "releases": [
+        {
+          "tag_name": "2.7.1",
+          "published_at": "2025-08-19T09:30:00Z",
+          "has_schema": true,
+          "nextflow_version": ">=23.04.0",
+          "nf_core_version": "2.14.1"
+        },
+        {
+          "tag_name": "2.6.0",
+          "published_at": "2024-12-04T12:00:00Z",
+          "has_schema": true,
+          "nextflow_version": ">=23.04.0",
+          "nf_core_version": "2.13.1"
+        },
+        {
+          "tag_name": "dev",
+          "published_at": "2026-04-01T08:00:00Z",
+          "has_schema": true,
+          "nextflow_version": ">=23.04.0",
+          "nf_core_version": "2.14.1"
+        }
+      ]
+    },
+    {
+      "name": "rnaseq",
+      "full_name": "nf-core/rnaseq",
+      "description": "Bulk RNA-seq analysis pipeline",
+      "topics": ["nf-core", "rnaseq"],
+      "stargazers_count": 870,
+      "default_branch": "master",
+      "archived": false,
+      "releases": [
+        {
+          "tag_name": "3.14.0",
+          "published_at": "2025-01-20T10:00:00Z",
+          "has_schema": true,
+          "nextflow_version": ">=23.04.0",
+          "nf_core_version": "2.13.1"
+        },
+        {
+          "tag_name": "dev",
+          "published_at": "2026-04-02T08:00:00Z",
+          "has_schema": true,
+          "nextflow_version": ">=23.04.0",
+          "nf_core_version": "2.14.1"
+        }
+      ]
+    },
+    {
+      "name": "sarek",
+      "full_name": "nf-core/sarek",
+      "description": "Analysis pipeline to detect germline or somatic variants",
+      "topics": ["nf-core", "variant-calling", "sarek"],
+      "stargazers_count": 410,
+      "default_branch": "master",
+      "archived": false,
+      "releases": [
+        {
+          "tag_name": "3.4.0",
+          "published_at": "2025-03-11T11:00:00Z",
+          "has_schema": true,
+          "nextflow_version": ">=23.04.0",
+          "nf_core_version": "2.13.1"
+        }
+      ]
+    }
+  ]
+}
