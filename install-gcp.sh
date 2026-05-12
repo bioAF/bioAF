@@ -258,6 +258,162 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Step 1b: Verify gcloud CLI is recent enough
+#
+# bioAF depends on flags and behaviors only available in recent gcloud
+# releases (e.g. `gcloud alpha quotas info describe`, Cloud Quotas API
+# submission, IAM Conditions on resource names). The minimums below are the
+# oldest versions we have tested end-to-end. If the user is below them, the
+# installer aborts rather than silently failing partway through.
+# ---------------------------------------------------------------------------
+GCLOUD_MIN_COMPONENTS=(
+    "Google Cloud SDK|563.0.0"
+    "alpha|2026.03.27"
+    "bq|2.1.31"
+    "core|2026.03.27"
+    "gcloud-crc32c|1.0.0"
+    "gke-gcloud-auth-plugin|0.5.12"
+    "gsutil|5.36"
+)
+
+_gcloud_python() {
+    if command -v python3 >/dev/null 2>&1; then echo python3
+    elif command -v python >/dev/null 2>&1; then echo python
+    fi
+}
+
+# Return 0 if $1 >= $2. Works for both dotted versions (563.0.0) and
+# date-style component versions (2026.03.27) because both sort correctly
+# with `sort -V`.
+_version_ge() {
+    [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]
+}
+
+# Compare installed component versions against GCLOUD_MIN_COMPONENTS.
+# Populates the globals:
+#   gcloud_meets_minimums  true | false
+#   gcloud_failing         array of "<component> <current> < <min>" strings
+check_gcloud_minimums() {
+    gcloud_failing=()
+    gcloud_meets_minimums=true
+    local py json
+    py=$(_gcloud_python)
+    json=$(gcloud version --format=json 2>/dev/null || echo '{}')
+    if [ -z "$py" ]; then
+        # No python available. We can't reliably parse the JSON output;
+        # assume meets minimum and let the user catch any issues at runtime.
+        return 0
+    fi
+    local pair key min cur
+    for pair in "${GCLOUD_MIN_COMPONENTS[@]}"; do
+        key="${pair%%|*}"
+        min="${pair##*|}"
+        cur=$(GCLOUD_KEY="$key" "$py" -c '
+import json, os, sys
+try:
+    data = json.loads(sys.stdin.read() or "{}")
+except Exception:
+    data = {}
+print(data.get(os.environ["GCLOUD_KEY"], ""))
+' <<<"$json")
+        if [ -z "$cur" ]; then
+            gcloud_failing+=("$key not installed (need $min)")
+            gcloud_meets_minimums=false
+            continue
+        fi
+        if ! _version_ge "$cur" "$min"; then
+            gcloud_failing+=("$key $cur < $min")
+            gcloud_meets_minimums=false
+        fi
+    done
+}
+
+# Return 0 if gcloud reports that one or more installed components have a
+# newer version available. Works for brew installs of the modern
+# google-cloud-cli cask because that cask defers updates to gcloud itself.
+gcloud_has_updates() {
+    gcloud components list 2>/dev/null | grep -q 'Update Available'
+}
+
+# Run a gcloud self-update. Returns non-zero if update is disabled (apt /
+# snap installs); the caller surfaces a manual-update message in that case.
+do_gcloud_update() {
+    local out
+    out=$(gcloud components update --quiet 2>&1) && { echo "$out"; return 0; }
+    echo "$out"
+    if echo "$out" | grep -qiE 'managed by an external package manager|disabled'; then
+        return 2
+    fi
+    return 1
+}
+
+echo ""
+bold "Step 1b: gcloud version check"
+
+if gcloud_has_updates; then
+    yellow "  A newer version of gcloud is available."
+    echo "  Current: $(gcloud version 2>/dev/null | head -1)"
+    echo ""
+    read -rp "  Update gcloud now? [Y/n] " update_gcloud
+    if [ "$update_gcloud" = "n" ] || [ "$update_gcloud" = "N" ]; then
+        check_gcloud_minimums
+        if [ "$gcloud_meets_minimums" = false ]; then
+            echo ""
+            red "  Your gcloud is below the minimum required for bioAF:"
+            for f in "${gcloud_failing[@]}"; do
+                echo "    - $f"
+            done
+            echo ""
+            red "  Update gcloud and re-run this script."
+            exit 1
+        fi
+        yellow "  Continuing with current gcloud (meets minimum)."
+    else
+        if ! do_gcloud_update; then
+            rc=$?
+            if [ "$rc" = "2" ]; then
+                yellow "  gcloud is managed by an external package manager."
+                echo "  Update with one of:"
+                echo "    brew upgrade --cask google-cloud-cli"
+                echo "    sudo apt-get update && sudo apt-get install --only-upgrade google-cloud-cli"
+                echo "    sudo snap refresh google-cloud-cli"
+                echo ""
+                read -rp "  Continue anyway? [y/N] " continue_anyway
+                if [ "$continue_anyway" != "y" ] && [ "$continue_anyway" != "Y" ]; then
+                    exit 1
+                fi
+            else
+                red "  gcloud update failed."
+                exit 1
+            fi
+        fi
+        check_gcloud_minimums
+        if [ "$gcloud_meets_minimums" = false ]; then
+            echo ""
+            red "  After update, gcloud is still below the minimum required for bioAF:"
+            for f in "${gcloud_failing[@]}"; do
+                echo "    - $f"
+            done
+            exit 1
+        fi
+        green "  gcloud updated."
+    fi
+else
+    check_gcloud_minimums
+    if [ "$gcloud_meets_minimums" = false ]; then
+        echo ""
+        red "  Your gcloud is below the minimum required for bioAF:"
+        for f in "${gcloud_failing[@]}"; do
+            echo "    - $f"
+        done
+        echo ""
+        red "  Update gcloud and re-run this script."
+        exit 1
+    fi
+    green "  gcloud version meets bioAF's minimum requirements."
+fi
+
+# ---------------------------------------------------------------------------
 # Step 2: Authenticate
 # ---------------------------------------------------------------------------
 echo ""
