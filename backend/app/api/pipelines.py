@@ -8,7 +8,14 @@ from app.schemas.pipeline import (
     PipelineCatalogListResponse,
     PipelineCatalogResponse,
     PipelineVersionUpdateRequest,
+    RegistryInstallRequest,
+    RegistryListResponse,
+    RegistryPipelineItem,
+    RegistryRefreshResponse,
+    RegistryVersion,
+    RegistryVersionsResponse,
 )
+from app.services.nf_core_registry_service import NfCoreRegistryService
 from app.services.pipeline_catalog_service import PipelineCatalogService
 
 router = APIRouter(prefix="/api/pipelines", tags=["pipelines"])
@@ -53,6 +60,100 @@ async def list_pipelines(
         pipelines=[_catalog_response(entry, username, latest) for entry, username, latest in enriched],
         total=len(enriched),
     )
+
+
+# ---- nf-core registry routes ----
+# IMPORTANT: these MUST be declared before GET /{key:path} or FastAPI's
+# path-converter will swallow /registry, /registry/{name}/..., and /registry/refresh.
+
+
+@router.get("/registry", response_model=RegistryListResponse)
+async def list_registry_pipelines(
+    q: str | None = None,
+    only_installed: bool = False,
+    include_archived: bool = False,
+    current_user: dict = require_permission("pipelines", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    rows = await NfCoreRegistryService.list_pipelines_with_status(
+        session,
+        org_id,
+        q=q,
+        only_installed=only_installed,
+        include_archived=include_archived,
+    )
+    last_refreshed_at = await NfCoreRegistryService.get_last_refreshed_at(session)
+    return RegistryListResponse(
+        pipelines=[RegistryPipelineItem(**r) for r in rows],
+        total=len(rows),
+        last_refreshed_at=last_refreshed_at,
+    )
+
+
+@router.get("/registry/{name}/versions", response_model=RegistryVersionsResponse)
+async def get_registry_pipeline_versions(
+    name: str,
+    current_user: dict = require_permission("pipelines", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    versions = await NfCoreRegistryService.get_pipeline_versions(session, name)
+    return RegistryVersionsResponse(
+        name=name,
+        versions=[RegistryVersion(**v) for v in versions],
+    )
+
+
+@router.post("/registry/{name}/install", response_model=PipelineCatalogResponse)
+async def install_registry_pipeline(
+    name: str,
+    data: RegistryInstallRequest,
+    current_user: dict = require_permission("pipelines", "create"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    try:
+        entry = await NfCoreRegistryService.install_pipeline(
+            session, org_id, user_id, name, data.version
+        )
+    except NfCoreRegistryService.PipelineNotInRegistryError:
+        raise HTTPException(404, f"Pipeline '{name}' not found in nf-core registry")
+    except NfCoreRegistryService.PipelineAlreadyInstalledError:
+        raise HTTPException(409, f"Pipeline 'nf-core/{name}' is already installed")
+    await session.commit()
+    return _catalog_response(entry)
+
+
+@router.post("/registry/refresh", response_model=RegistryRefreshResponse)
+async def refresh_registry_endpoint(
+    current_user: dict = require_permission("pipelines", "create"),
+    session: AsyncSession = Depends(get_session),
+):
+    user_id = int(current_user["sub"])
+    result = await NfCoreRegistryService.refresh_registry(session)
+    last_refreshed_at = await NfCoreRegistryService.get_last_refreshed_at(session)
+    # Audit only on manual refresh; the background loop stays silent.
+    from app.services.audit_service import log_action
+
+    await log_action(
+        session,
+        user_id=user_id,
+        entity_type="nf_core_registry",
+        entity_id=1,
+        action="manual_refresh",
+        details={"fetched": result["fetched"], "archived": result["archived"], "error": result.get("error")},
+    )
+    await session.commit()
+    return RegistryRefreshResponse(
+        fetched=result["fetched"],
+        archived=result["archived"],
+        error=result.get("error"),
+        last_refreshed_at=last_refreshed_at,
+    )
+
+
+# ---- end nf-core registry routes ----
 
 
 @router.get("/{key:path}", response_model=PipelineCatalogResponse)
