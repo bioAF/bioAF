@@ -9,6 +9,7 @@ import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import type { PipelineCatalog, PipelineCatalogListResponse } from "@/lib/types";
+import { RegistryBrowseModal } from "@/components/pipelines/RegistryBrowseModal";
 
 export default function PipelineCatalogPage() {
   const router = useRouter();
@@ -16,6 +17,7 @@ export default function PipelineCatalogPage() {
 
   const [pipelines, setPipelines] = useState<PipelineCatalog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [registryOpen, setRegistryOpen] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/login"); return; }
@@ -46,6 +48,8 @@ export default function PipelineCatalogPage() {
   }
 
   const canCreateCustom = !permsLoading && canAccess("custom_pipelines", "create");
+  const canBrowseRegistry = !permsLoading && canAccess("pipelines", "view");
+  const canInstallFromRegistry = !permsLoading && canAccess("pipelines", "create");
 
   return (
     <div className="flex h-screen">
@@ -64,14 +68,24 @@ export default function PipelineCatalogPage() {
                 Built-in NF-Core pipelines and your organization&apos;s custom pipelines.
               </p>
             </div>
-            {canCreateCustom && (
-              <button
-                onClick={() => router.push("/pipelines/custom")}
-                className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
-              >
-                Manage Custom Pipelines
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {canBrowseRegistry && (
+                <button
+                  onClick={() => setRegistryOpen(true)}
+                  className="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-md text-sm hover:bg-gray-50"
+                >
+                  Search Available Pipelines
+                </button>
+              )}
+              {canCreateCustom && (
+                <button
+                  onClick={() => router.push("/pipelines/custom")}
+                  className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
+                >
+                  Manage Custom Pipelines
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -130,6 +144,14 @@ export default function PipelineCatalogPage() {
           )}
         </main>
       </div>
+      <RegistryBrowseModal
+        open={registryOpen}
+        canInstall={canInstallFromRegistry}
+        onClose={() => setRegistryOpen(false)}
+        onInstalled={() => {
+          loadPipelines();
+        }}
+      />
     </div>
   );
 }

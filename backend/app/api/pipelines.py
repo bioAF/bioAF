@@ -114,9 +114,7 @@ async def install_registry_pipeline(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
     try:
-        entry = await NfCoreRegistryService.install_pipeline(
-            session, org_id, user_id, name, data.version
-        )
+        entry = await NfCoreRegistryService.install_pipeline(session, org_id, user_id, name, data.version)
     except NfCoreRegistryService.PipelineNotInRegistryError:
         raise HTTPException(404, f"Pipeline '{name}' not found in nf-core registry")
     except NfCoreRegistryService.PipelineAlreadyInstalledError:
