@@ -17,8 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.activity_feed_service import ActivityFeedService
 from app.services.audit_service import log_action
+from app.services.credential_injector import load_gcp_credentials
 from app.services.orphaned_resource_service import OrphanedResourceService
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
+from app.services.zone_capacity_probe import AllZonesExhaustedError, probe_zones
 
 logger = logging.getLogger("bioaf.stack_deployment")
 
@@ -106,6 +108,49 @@ def _get_gke_client(credentials=None):
     if credentials:
         return container_v1.ClusterManagerClient(credentials=credentials)
     return container_v1.ClusterManagerClient()
+
+
+async def _gcp_credentials_config(session: AsyncSession) -> dict:
+    """Collect the platform_config keys that load_gcp_credentials needs.
+
+    Pulls credential source, optional SA key JSON, and bootstrap SA email
+    so the loader can either use a JSON key directly or fall back to ADC
+    with bioaf-bootstrap impersonation.
+    """
+    result = await session.execute(
+        text(
+            "SELECT key, value FROM platform_config WHERE key IN ("
+            "'gcp_credential_source', 'gcp_service_account_key', "
+            "'gcp_bootstrap_sa_email', 'gcp_service_account_email')"
+        )
+    )
+    return {r[0]: r[1] for r in result.fetchall()}
+
+
+async def _select_default_pool_zone(session: AsyncSession, compute_region: str | None) -> str:
+    """Run the pre-flight capacity probe and return the winning zone.
+
+    Tests patch this helper to skip the real GCE round-trip. Production
+    deploys hit the probe which iterates the regional zones and returns
+    the first one with e2-medium capacity. Raises AllZonesExhaustedError
+    if every candidate zone is stocked out.
+    """
+    from app.gcp_zones import zones_for_region
+
+    probe_region = compute_region or (await _read_config(session, "gcp_region")) or "us-central1"
+    probe_project_id = (await _read_config(session, "gcp_project_id")) or ""
+    candidate_zones = zones_for_region(probe_region)
+    credentials_config = await _gcp_credentials_config(session)
+    credentials = load_gcp_credentials(credentials_config)
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: probe_zones(
+            zones=candidate_zones,
+            project_id=probe_project_id,
+            credentials=credentials,
+        ),
+    )
 
 
 async def get_cluster_status(session: AsyncSession) -> StackStatus:
@@ -428,6 +473,40 @@ async def deploy_stack(
 
     await _set_config(session, "deploy_suffix", secrets.token_hex(3))
     await session.flush()
+
+    # Pre-flight: probe regional zones for e2-medium capacity. The GKE
+    # default node pool that gets created (and immediately removed) at
+    # cluster bootstrap has no autoscaling and no location_policy, so a
+    # per-zone stockout hangs CREATE_CLUSTER for ~70 minutes. By picking
+    # one healthy zone here and pinning the cluster's node_locations to
+    # it, we contain the failure surface to a single zone we have just
+    # observed to have capacity. The real node pools override
+    # node_locations per-pool, so the cluster stays regional.
+    yield TerraformProgressEvent(
+        event_type="progress",
+        message="Checking GCE zone capacity for cluster bootstrap...",
+    )
+    try:
+        selected_zone = await _select_default_pool_zone(session, compute_region)
+    except AllZonesExhaustedError as exc:
+        logger.warning("Zone capacity probe found no available zone: %s", exc)
+        yield TerraformProgressEvent(
+            event_type="stack_error",
+            message=(
+                "GCE capacity probe found no zone in the region with capacity for "
+                "cluster bootstrap. Wait a few minutes for capacity to free up and "
+                f"redeploy. Details: {exc}"
+            ),
+        )
+        return
+
+    await _set_config(session, "gke_default_pool_zone", selected_zone)
+    await session.flush()
+    yield TerraformProgressEvent(
+        event_type="progress",
+        message=f"Selected zone {selected_zone} for cluster bootstrap (has capacity).",
+    )
+
     yield TerraformProgressEvent(
         event_type="progress",
         message="Deploying compute infrastructure...",

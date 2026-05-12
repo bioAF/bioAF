@@ -754,6 +754,51 @@ def test_write_tfvars_empty_strings_use_defaults():
     assert tfvars["state_bucket_name"] == "bioaf-tfstate-proj-456"
 
 
+def test_write_tfvars_compute_passes_gke_default_pool_zone():
+    """compute tfvars must carry gke_default_pool_zone when the probe set it.
+
+    The pre-flight capacity probe writes the selected zone to
+    platform_config under this key; _write_tfvars must thread it through
+    so the compute module can constrain the throwaway default pool's
+    node_locations to that one zone.
+    """
+    tmp = Path(tempfile.mkdtemp(prefix="tf_test_"))
+    config = {
+        "gcp_project_id": "proj-789",
+        "gcp_region": "us-central1",
+        "gcp_zone": "us-central1-a",
+        "org_slug": "acme",
+        "deploy_suffix": "a1b2c3",
+        "gke_default_pool_zone": "us-central1-b",
+    }
+    TerraformExecutor._write_tfvars(tmp, "compute", config)
+
+    tfvars = json.loads((tmp / "terraform.tfvars.json").read_text())
+    assert tfvars["gke_default_pool_zone"] == "us-central1-b"
+
+
+def test_write_tfvars_compute_omits_gke_default_pool_zone_when_unset():
+    """Empty / missing gke_default_pool_zone must NOT serialize a value.
+
+    Terraform variable default is "" (no constraint, today's behaviour).
+    Writing an empty string explicitly is fine, but omitting the key
+    entirely is cleaner and matches the convention used by other
+    optional config knobs in this method.
+    """
+    tmp = Path(tempfile.mkdtemp(prefix="tf_test_"))
+    config = {
+        "gcp_project_id": "proj-789",
+        "gcp_region": "us-central1",
+        "gcp_zone": "us-central1-a",
+        "org_slug": "acme",
+        "deploy_suffix": "a1b2c3",
+    }
+    TerraformExecutor._write_tfvars(tmp, "compute", config)
+
+    tfvars = json.loads((tmp / "terraform.tfvars.json").read_text())
+    assert "gke_default_pool_zone" not in tfvars
+
+
 # ---------------------------------------------------------------------------
 # _run_init backend-config tests
 # ---------------------------------------------------------------------------
