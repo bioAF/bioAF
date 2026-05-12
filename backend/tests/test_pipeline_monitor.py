@@ -3,7 +3,13 @@ import pytest_asyncio
 from unittest.mock import AsyncMock, patch
 
 from app.models.pipeline_run import PipelineRun
-from app.services.pipeline_monitor_service import PipelineMonitorService, _parse_memory_gb, _parse_duration
+from app.services.pipeline_monitor_service import (
+    PipelineMonitorService,
+    _parse_memory_gb,
+    _parse_duration,
+    _strip_external_favicon_link,
+    _inject_iframe_hash_nav_shim,
+)
 
 
 # --- Unit tests for trace file parsing ---
@@ -51,6 +57,128 @@ def test_parse_duration():
     assert _parse_duration("1h 2m 3s") == 3723
     assert _parse_duration("-") is None
     assert _parse_duration(None) is None
+
+
+def test_strip_external_favicon_link_removes_nextflow_favicon():
+    """The Nextflow report ships with a `<link rel="icon">` pointing at
+    nextflow.io's favicon. The report renders inside a srcdoc iframe
+    where favicons are never shown (iframes don't get tab icons), so the
+    request just produces a CSP `img-src` console error. Strip it so
+    the report stays quiet."""
+    html = (
+        "<html><head>"
+        "<title>Report</title>"
+        '<link rel="icon" type="image/png" href="https://www.nextflow.io/img/favicon.png" />'
+        "</head><body>x</body></html>"
+    )
+    out = _strip_external_favicon_link(html)
+    assert "favicon.png" not in out
+    assert "nextflow.io" not in out
+    # The rest of the document must be preserved.
+    assert "<title>Report</title>" in out
+    assert "<body>x</body>" in out
+
+
+def test_strip_external_favicon_link_handles_no_favicon():
+    """Reports without a favicon link must be returned unchanged."""
+    html = "<html><body>no favicon here</body></html>"
+    assert _strip_external_favicon_link(html) == html
+
+
+def test_inject_iframe_hash_nav_shim_inserts_script_before_body_close():
+    """A srcdoc iframe inherits its base URL from the parent document, so
+    `<a href="#tasks">` inside the Nextflow report resolves to
+    `<parent_url>#tasks` and clicking it triggers a cross-document
+    navigation that is blocked by the parent's frame-ancestors policy.
+    Inject a small inline script that intercepts hash-only anchor
+    clicks in capture phase, prevents the cross-document nav, and does
+    in-iframe scrollIntoView instead. Bootstrap-driven anchors (those
+    with a `data-toggle` attribute) must pass through untouched so the
+    Resources sub-tabs keep working."""
+    html = "<html><body><a href='#tasks'>Tasks</a></body></html>"
+    out = _inject_iframe_hash_nav_shim(html)
+    assert "<script" in out
+    assert "addEventListener" in out
+    # Skip data-toggle anchors so Bootstrap's tab handlers still work.
+    assert "data-toggle" in out
+    # Inserted just before </body>, not after it.
+    assert "</body>" in out
+    assert out.rfind("<script") < out.rfind("</body>")
+    # Original body content preserved.
+    assert "<a href='#tasks'>Tasks</a>" in out
+
+
+def test_inject_iframe_hash_nav_shim_appends_when_no_body_close():
+    """Reports without a `</body>` tag still get the shim appended so we
+    don't silently drop it."""
+    html = "<a href='#x'>x</a>"
+    out = _inject_iframe_hash_nav_shim(html)
+    assert "<script" in out
+    assert out.startswith("<a href='#x'>x</a>")
+
+
+def test_strip_external_favicon_link_handles_variants():
+    """Match the link tag regardless of attribute order and self-close style."""
+    cases = [
+        '<link rel="icon" href="https://www.nextflow.io/img/favicon.png">',
+        '<link href="https://www.nextflow.io/img/favicon.png" rel="icon">',
+        "<link rel='shortcut icon' href='https://www.nextflow.io/img/favicon.png' />",
+    ]
+    for src in cases:
+        html = f"<html><head>{src}</head></html>"
+        out = _strip_external_favicon_link(html)
+        assert "nextflow.io" not in out, f"failed to strip: {src!r}"
+
+
+@pytest.mark.asyncio
+async def test_get_run_report_strips_favicon_for_nextflow(session, admin_user):
+    """get_run_report must strip the favicon link before returning so the
+    iframe doesn't trigger a CSP `img-src` error in the browser console."""
+    from app.models.experiment import Experiment
+    from app.models.pipeline_run import PipelineRun
+
+    exp = Experiment(
+        organization_id=admin_user.organization_id,
+        name="Favicon Strip Test",
+        owner_user_id=admin_user.id,
+        status="processing",
+    )
+    session.add(exp)
+    await session.flush()
+
+    run = PipelineRun(
+        organization_id=admin_user.organization_id,
+        experiment_id=exp.id,
+        submitted_by_user_id=admin_user.id,
+        pipeline_name="nf-core/scrnaseq",
+        pipeline_version="2.7.1",
+        status="completed",
+        k8s_job_name="bioaf-pipeline-fav-1",
+    )
+    session.add(run)
+    await session.flush()
+    await session.commit()
+
+    raw_html = (
+        "<html><head>"
+        '<link rel="icon" type="image/png" href="https://www.nextflow.io/img/favicon.png" />'
+        "<title>r</title></head><body>ok</body></html>"
+    )
+    mock_compute = AsyncMock()
+    mock_compute.get_job_report.return_value = raw_html
+
+    with patch(
+        "app.services.pipeline_monitor_service.get_compute_adapter",
+        return_value=mock_compute,
+    ):
+        out = await PipelineMonitorService.get_run_report(session, run.id)
+
+    assert "nextflow.io" not in out
+    assert "favicon" not in out
+    # Body content survives the transforms (a hash-nav shim is appended
+    # inside the body before </body> but the original content is intact).
+    assert ">ok<" in out
+    assert "</body>" in out
 
 
 # --- Integration tests for sync_run_statuses ---
@@ -207,17 +335,20 @@ async def test_progress_dedupes_retries_by_name(session, k8s_running_run):
         "pod_name": "bioaf-pipeline-99-xyz",
     }
     # 17 unique tasks; 3 of them have an extra failed attempt before the
-    # final completed one. Total trace rows = 17 + 3 = 20.
+    # final completed one. Total trace rows = 17 + 3 = 20. In Nextflow's
+    # trace the retried task keeps its task_id and the `attempt` column
+    # increments, so dedup is by (task_id, attempt) with the highest
+    # attempt as the final state.
     failed = {"status": "failed", "cpu": 0.0, "memory_gb": 0.0, "duration_s": 60}
     completed = {"status": "completed", "cpu": 50.0, "memory_gb": 1.0, "duration_s": 300}
     processes = []
     # 14 tasks that never failed
     for i in range(14):
-        processes.append({"name": f"TASK_{i}", **completed})
-    # 3 retried tasks: failed attempt then completed attempt (trace order matters)
-    for name in ("STAR_ALIGN", "STAR_GENOMEGENERATE", "MTX_TO_H5AD"):
-        processes.append({"name": name, **failed})
-        processes.append({"name": name, **completed})
+        processes.append({"task_id": str(i), "attempt": 1, "name": f"TASK_{i}", **completed})
+    # 3 retried tasks: failed attempt then completed attempt (same task_id)
+    for tid, name in enumerate(("STAR_ALIGN", "STAR_GENOMEGENERATE", "MTX_TO_H5AD"), start=14):
+        processes.append({"task_id": str(tid), "attempt": 1, "name": name, **failed})
+        processes.append({"task_id": str(tid), "attempt": 2, "name": name, **completed})
 
     mock_compute.get_job_progress.return_value = {
         "percent_complete": 85.0,  # adapter's raw count gets this wrong; we recompute
@@ -285,6 +416,81 @@ async def test_progress_no_retries_omits_or_empties_list(session, k8s_running_ru
     assert pj is not None
     # Either absent or an empty list -- the UI shows the pill only when len > 0.
     assert not pj.get("retries"), f"clean run should have no retries, got {pj.get('retries')!r}"
+
+
+@pytest.mark.asyncio
+async def test_progress_counts_parallel_tasks_with_same_name(session, k8s_running_run):
+    """Some pipelines (e.g. nf-core/scrnaseq's MTX_TO_H5AD) run the same
+    process multiple times on the same input tag, producing different
+    output artifacts each time. The trace then has multiple rows with the
+    same `name` but different `task_id`s and `attempt=1` each, meaning
+    those are not retries -- they are distinct task executions.
+
+    Progress must count by task_id, not by name. Otherwise a 17-task run
+    with 13 unique names (4 of them legitimately repeating) is reported
+    as 13/13 in the UI while Nextflow's report shows 17 succeeded.
+
+    Mirrors the run-1 trace from prod where the discrepancy was first
+    observed.
+    """
+    mock_compute = AsyncMock()
+    mock_compute.get_job_status.return_value = {
+        "status": "completed",
+        "pod_name": "bioaf-pipeline-99-xyz",
+    }
+    completed = {"status": "completed", "cpu": 50.0, "memory_gb": 1.0, "duration_s": 300}
+    # 11 tasks each with a unique name and unique task_id, no retries.
+    processes = [{"task_id": str(i), "attempt": 1, "name": f"TASK_{i}", **completed} for i in range(1, 12)]
+    # 3 tasks all named "MTX_TO_H5AD (SAMPLE-101)" -- different task_ids,
+    # all attempt=1 -- this is the nf-core/scrnaseq pattern.
+    for tid in (12, 13, 14):
+        processes.append(
+            {
+                "task_id": str(tid),
+                "attempt": 1,
+                "name": "MTX_TO_H5AD (SAMPLE-101)",
+                **completed,
+            }
+        )
+    # 3 tasks all named "MTX_TO_SEURAT (SAMPLE-101)" -- same pattern.
+    for tid in (15, 16, 17):
+        processes.append(
+            {
+                "task_id": str(tid),
+                "attempt": 1,
+                "name": "MTX_TO_SEURAT (SAMPLE-101)",
+                **completed,
+            }
+        )
+    assert len(processes) == 17
+
+    mock_compute.get_job_progress.return_value = {
+        "percent_complete": 100.0,
+        "processes": processes,
+    }
+    mock_storage = AsyncMock()
+    mock_storage.collect_outputs.return_value = []
+
+    with (
+        patch("app.services.pipeline_monitor_service.get_compute_adapter", return_value=mock_compute),
+        patch("app.services.pipeline_monitor_service.get_storage_adapter", return_value=mock_storage),
+        patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
+    ):
+        await PipelineMonitorService.sync_run_statuses(session)
+
+    from sqlalchemy import select
+
+    result = await session.execute(select(PipelineRun).where(PipelineRun.id == k8s_running_run.id))
+    run = result.scalar_one()
+    pj = run.progress_json
+    assert pj is not None
+    assert pj["total_processes"] == 17, (
+        f"expected 17 unique task_ids, got {pj['total_processes']} "
+        "(name-based dedup collapses legitimate parallel runs)"
+    )
+    assert pj["completed"] == 17
+    assert pj["percent_complete"] == 100.0
+    assert not pj.get("retries"), f"these are parallel runs, not retries, got {pj.get('retries')!r}"
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,53 @@
 # Release Notes
 
+## v0.11.15
+
+Makes the Nextflow report tab actually render: plots, the tasks table,
+and the report's internal Summary / Resources / Tasks navigation all
+work now. Also fixes a progress-bar regression where pipelines that
+legitimately run the same process more than once on the same input
+tag (nf-core/scrnaseq's `MTX_TO_H5AD`, `MTX_TO_SEURAT`) were
+under-counted in the run-detail stats bar.
+
+### Bug fixes
+
+- **Nextflow report renders correctly inside the iframe.** The report
+  bundles Plotly, which JITs vector math via `new Function(...)`. Our
+  CSP `script-src` allowed `'unsafe-inline'` but not `'unsafe-eval'`,
+  so the very first `Plotly.newPlot` threw a CSP violation and every
+  plot div stayed empty. `srcdoc` iframes inherit their parent's CSP
+  per the HTML spec, so `sandbox` doesn't help here: the only fix is
+  to add `'unsafe-eval'` to the parent CSP (`nginx.conf` and the
+  FastAPI security headers middleware both updated).
+- **Report's Summary / Resources / Tasks navigation no longer
+  "refuses to connect."** A `srcdoc` iframe inherits its base URL
+  from the parent document, so `<a href="#tasks">` inside the report
+  resolved to `<parent_url>#tasks` and clicking it triggered a
+  cross-document navigation that the parent's
+  `frame-ancestors 'none'` policy blocked. A tiny capture-phase
+  click handler is now injected into the report HTML server-side: it
+  intercepts hash-only anchor clicks and does in-iframe
+  `scrollIntoView` instead. Bootstrap `data-toggle` anchors (the
+  Raw Usage / % Allocated sub-tabs) are passed through untouched.
+- **Stop the report from 404-ing nextflow.io's favicon.** The
+  Nextflow HTML ships with `<link rel="icon" href="nextflow.io/...">`,
+  which our `img-src 'self' data:` CSP correctly blocked but which
+  also produced a noisy console error. Favicons aren't shown for
+  `srcdoc` iframes anyway, so strip the link tag in
+  `get_run_report` before returning.
+- **Pipeline progress no longer under-counts parallel tasks.** The
+  v0.11.13 dedup keyed on the trace's `name` column to collapse
+  preempted retries; that mis-collapsed pipelines like
+  nf-core/scrnaseq that legitimately run the same process multiple
+  times on the same input tag to produce different output artifacts
+  (`MTX_TO_H5AD` on SAMPLE-101 runs 3x: raw, filtered, custom-empty-
+  drops). A 17-task run was being reported as 13/13. Dedup now keys
+  on `task_id` (Nextflow's canonical task identifier across retries)
+  and takes the row with the highest `attempt` as the final state.
+- **bioAF tab favicon.** `/favicon.ico` was 404-ing because no asset
+  existed for it. Same icon used on bioaf-site is now bundled into
+  the Next.js app and served at `/favicon.ico` automatically.
+
 ## v0.11.14
 
 Fixes a class of GKE deploy hang where the throwaway default node pool
