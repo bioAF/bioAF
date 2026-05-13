@@ -142,3 +142,33 @@ This is a single migration + codebase-wide refactor. All existing tests are upda
 - ADR-033 (versioned compute environments -- `environments.*` permissions)
 - ADR-034 (custom work nodes -- `work_nodes.*` and `quotas.*` permissions)
 - ADR-009 (immutable audit log -- role changes are audit-logged)
+- ADR-049 (service accounts and API keys -- scope intersection addendum below)
+
+---
+
+## Addendum: API-key scope intersection (2026-05-13)
+
+[ADR-049](ADR-049-service-accounts-and-api-keys.md) introduces API-key-authenticated callers. Each key carries its own scope list (a subset of `resource:action` strings). The authorization rule for API-key requests becomes the strict intersection of the SA role's permissions and the key's scopes.
+
+### Rule
+
+For a request authenticated by an API key, `require_permission(resource, action)` passes iff:
+
+```
+role_has_permission(user.role_id, resource, action) AND f"{resource}:{action}" in user.scopes
+```
+
+For a JWT-authenticated request, `user.scopes` is `None`, and the existing role-only check applies unchanged.
+
+### Why intersection rather than union
+
+A key's scope list is meant to *narrow* what the SA can do, not expand it. An admin who mints a "samples sync" key from an SA whose role grants finance access does not want the key able to touch finance data. Intersection is the only rule that preserves least-privilege under both rotation and role drift.
+
+### Error surface
+
+- Role check fails: 403, `detail="role_missing"` (existing behavior; unchanged).
+- Role check passes but scope check fails: 403, `detail="key_scope_missing"`. Distinguishing the two lets the admin UI tell the operator whether to add a permission to the role or a scope to the key.
+
+### Permission registry
+
+The scope alphabet is drawn from the existing permission registry in `bootstrap_roles.py`. Scopes are validated at key mint-time against this registry; an unknown `resource:action` string is rejected before persisting the key. No new permissions are introduced by ADR-049 itself; the public-API endpoints reuse the same `resource:action` pairs the internal API uses.
