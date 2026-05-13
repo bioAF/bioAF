@@ -54,9 +54,7 @@ async def test_sensitive_key_is_encrypted_on_disk(db_engine):
         await session.commit()
 
         raw = (
-            await session.execute(
-                sa_text("SELECT value FROM platform_config WHERE key='gcp_service_account_key'")
-            )
+            await session.execute(sa_text("SELECT value FROM platform_config WHERE key='gcp_service_account_key'"))
         ).scalar_one()
         assert raw != sa_key
         assert raw.startswith("gAAAA")

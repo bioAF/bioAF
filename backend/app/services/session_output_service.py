@@ -141,12 +141,11 @@ class SessionOutputService:
         Returns the new GCS output prefix in the results bucket.
         """
         from google.cloud import storage
+        from sqlalchemy import text as sa_text
 
         from app.services.platform_config_service import PlatformConfigService
 
-        config = await PlatformConfigService.get_many(
-            db, ["gcp_credential_source", "gcp_service_account_key"]
-        )
+        config = await PlatformConfigService.get_many(db, ["gcp_credential_source", "gcp_service_account_key"])
 
         from app.services.credential_injector import load_gcp_credentials
 
