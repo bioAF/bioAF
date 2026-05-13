@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.config import settings, validate_jwt_secret
+from app.config import settings, validate_encryption_keys, validate_jwt_secret
 from app.database import engine
 from app.logging_config import attach_cloud_logging, configure_logging
 from app.middleware.auth_middleware import AuthMiddleware
@@ -50,6 +50,12 @@ async def lifespan(app: FastAPI):
 
     # Block startup if the JWT secret is a known insecure default
     validate_jwt_secret(settings.jwt_secret_key)
+
+    # Block startup if at-rest encryption keys are missing or malformed.
+    # The encryption_service module already validates at import time, but
+    # call here as well so the failure surfaces in the same lifespan log
+    # block as validate_jwt_secret.
+    validate_encryption_keys(settings.encryption_keys)
 
     # Verify database connection
     from sqlalchemy import text

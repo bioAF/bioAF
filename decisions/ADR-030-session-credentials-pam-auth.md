@@ -116,5 +116,12 @@ The profile page displays a collapsible session credentials section:
 - ADR-021 (Kubernetes compute backend -- `bioaf-interactive` node pool)
 - ADR-026 (SSH access -- kubectl exec for container debugging)
 - ADR-009 (immutable audit log -- credential change logging)
+- ADR-047 (data-at-rest encryption -- DB-side protection for the columns below)
 - #156 (Session credentials implementation issue)
 - #158 (Session credentials, user admin, and notification UX PR)
+
+## Addendum (2026-05-12): At-rest encryption status
+
+ADR-047 added Fernet encryption for `session_credentials.ssh_private_key`. The column now stores ciphertext at rest, so `pg_dump` exposure no longer reveals the user's private SSH key. `password_hash` remains a one-way bcrypt and is not in scope.
+
+The Pod-spec exposure noted under "Negative" above (bcrypt hash visible via `kubectl describe`) is **not** addressed by ADR-047 and remains an open follow-up. The encryption applies to the row in PostgreSQL, not to the kubernetes object that injects credentials into the running container. Moving credential injection off inline `chpasswd` (e.g., to a mounted Kubernetes Secret) is the planned next step.

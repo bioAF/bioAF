@@ -41,6 +41,17 @@ ingress:
     networking.gke.io/managed-certificates: bioaf-cert
     kubernetes.io/ingress.global-static-ip-name: bioaf-ip
 
+# Data-at-rest encryption (Fernet / MultiFernet). BIOAF_ENCRYPTION_KEYS is
+# read from a Kubernetes Secret rather than the ConfigMap because losing this
+# value loses every encrypted column in the database. Operators must create
+# this Secret (and back it up alongside the DB dump) before deploying.
+#
+#   kubectl create secret generic bioaf-encryption \
+#     --from-literal=keys="$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+encryption:
+  secretName: bioaf-encryption
+  secretKey: keys
+
 backupsBucket: ""
 
 configBackup:

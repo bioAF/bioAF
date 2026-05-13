@@ -92,3 +92,9 @@ A Kubernetes CronJob (or background loop) exports platform configuration as JSON
 - GCS bucket versioning is set during Terraform provisioning and is not exposed as toggleable in the UI.
 - Backup health monitoring runs hourly: checks the age of the most recent backup in each tier and emits notification events when backups are overdue.
 - The `backups_bucket_name` is stored in `platform_config` after foundation bootstrap and read by the backup service at runtime.
+
+## Addendum (2026-05-12): At-rest encryption interaction
+
+ADR-047 introduces app-level Fernet encryption for sensitive columns. Because that ciphertext lives in the row itself, it travels into `pg_dump` output automatically. The threat model documented above (read access to `bioaf-backups-{project_id}` is a smaller blast radius than primary DB access) is now materially reduced: an attacker with read on the bucket no longer gets plaintext secrets, only ciphertext gated by `BIOAF_ENCRYPTION_KEYS`.
+
+Operators now have an additional responsibility: back up `BIOAF_ENCRYPTION_KEYS` alongside the dump pointer. Without the key, the backup is unrecoverable. The key must be stored in a *separate* trust boundary from the dump bucket (otherwise the encryption gains nothing). See `documentation/recovery-and-encryption.md`.
