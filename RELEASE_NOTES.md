@@ -38,10 +38,12 @@ for the full design.
 ### Operator action required
 
 - Before deploying v0.13.0 to Kubernetes, create the encryption Secret:
-  ```
+
+  ```bash
   kubectl create secret generic bioaf-encryption \
     --from-literal=keys="$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
   ```
+
   Back the value up *separately* from the dump bucket; losing it
   makes encrypted columns unrecoverable. See
   `documentation/recovery-and-encryption.md`.
