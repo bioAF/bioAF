@@ -66,9 +66,7 @@ async def test_migration_backfill_round_trip(db_engine):
         # Run the backfill body. Replicates migration 076 against the open session.
         for column in ("slack_client_secret", "slack_signing_secret", "smtp_password"):
             rows = (
-                await session.execute(
-                    sa_text(f"SELECT id, {column} FROM organizations WHERE {column} IS NOT NULL")
-                )
+                await session.execute(sa_text(f"SELECT id, {column} FROM organizations WHERE {column} IS NOT NULL"))
             ).fetchall()
             for row_id, value in rows:
                 if encryption_service.looks_like_ciphertext(value):
@@ -95,9 +93,7 @@ async def test_migration_backfill_round_trip(db_engine):
         # ORM read decrypts back to the original plaintext.
         from sqlalchemy import select
 
-        org = (
-            await session.execute(select(Organization).where(Organization.name == "Plaintext Org"))
-        ).scalar_one()
+        org = (await session.execute(select(Organization).where(Organization.name == "Plaintext Org"))).scalar_one()
         assert org.slack_client_secret == "plain-slack-secret"
         assert org.slack_signing_secret == "plain-signing-secret"
         assert org.smtp_password == "plain-smtp-pass"
@@ -176,8 +172,7 @@ async def test_migration_platform_config_sensitive_keys(db_engine):
         rows = (
             await session.execute(
                 sa_text(
-                    "SELECT id, key, value FROM platform_config WHERE key = ANY(:keys) "
-                    "AND value IS NOT NULL"
+                    "SELECT id, key, value FROM platform_config WHERE key = ANY(:keys) AND value IS NOT NULL"
                 ).bindparams(keys=list(SENSITIVE_PLATFORM_CONFIG_KEYS))
             )
         ).fetchall()
@@ -191,16 +186,12 @@ async def test_migration_platform_config_sensitive_keys(db_engine):
         await session.commit()
 
         sensitive_raw = (
-            await session.execute(
-                sa_text("SELECT value FROM platform_config WHERE key='gcp_service_account_key'")
-            )
+            await session.execute(sa_text("SELECT value FROM platform_config WHERE key='gcp_service_account_key'"))
         ).scalar_one()
         assert sensitive_raw.startswith("gAAAA")
 
         nonsensitive = (
-            await session.execute(
-                sa_text("SELECT value FROM platform_config WHERE key='gcp_project_id'")
-            )
+            await session.execute(sa_text("SELECT value FROM platform_config WHERE key='gcp_project_id'"))
         ).scalar_one()
         assert nonsensitive == "my-project"
 

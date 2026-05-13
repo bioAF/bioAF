@@ -107,8 +107,6 @@ class KubernetesNotebookProvider(NotebookProvider):
             if endpoint and endpoint != "null":
                 return self._cluster_config
 
-        from sqlalchemy import text as sa_text
-
         if not self._session_factory:
             self._cluster_config = {}
             return self._cluster_config

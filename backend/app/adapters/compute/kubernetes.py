@@ -728,9 +728,7 @@ class KubernetesComputeProvider(ComputeProvider):
             return "vm_default", ""
 
         async with self._session_factory() as session:
-            rows = await PlatformConfigService.get_many(
-                session, ["gcp_credential_source", "gcp_service_account_key"]
-            )
+            rows = await PlatformConfigService.get_many(session, ["gcp_credential_source", "gcp_service_account_key"])
 
         return rows.get("gcp_credential_source") or "vm_default", rows.get("gcp_service_account_key", "")
 
