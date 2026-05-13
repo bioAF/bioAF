@@ -53,3 +53,12 @@ All secrets are stored in Google Secret Manager. The bioAF control plane accesse
 - Secrets must never appear in: Terraform state files (use `sensitive = true` on outputs), application logs (redact in logging middleware), the GitOps repo (the `.tfvars` file references secret names, not values), or API responses.
 - If the Secret Manager API is unreachable (network issue, permission change), the bioAF control plane will fail to start. Health checks must surface this clearly.
 - For SLURM compute nodes (which run on Compute Engine, not GKE), secrets are accessed via instance metadata or a startup script that reads from Secret Manager using the node's service account.
+
+## Addendum (2026-05-12): Distinction from data-at-rest DEK
+
+ADR-047 introduces `BIOAF_ENCRYPTION_KEYS`: a Fernet keyring used to encrypt sensitive *DB columns* at rest. That secret is operationally distinct from the ones covered here:
+
+- **Deployment secrets (this ADR):** database password, JWT signing key, SMTP credentials, etc. Stored in Secret Manager, fetched once at backend startup, scoped to "things the platform needs to authenticate to other systems."
+- **Data-encryption key (ADR-047):** the key that protects ciphertext sitting inside `pg_dump` output. Sits in the env var because every read/write needs it on the hot path, and because rotation needs to atomically expose both old and new keys to the same process.
+
+The DEK could be stored *in* Secret Manager as a deployment secret (fetched at startup and injected into the env), and that may be a future enhancement. A further extension is KMS-wrapping the DEK so the env var holds a wrapped value that GCP KMS unwraps on demand; ADR-047 leaves this door open with the deferred `BIOAF_KEK_KMS_RESOURCE` flag.
