@@ -224,24 +224,35 @@ generate_env() {
 
     # Read existing values (empty string if not set)
     local existing_pg_user existing_pg_password existing_pg_db
-    local existing_secret_key existing_environment
+    local existing_secret_key existing_environment existing_encryption_keys
     existing_pg_user=$(read_env_value "POSTGRES_USER")
     existing_pg_password=$(read_env_value "POSTGRES_PASSWORD")
     existing_pg_db=$(read_env_value "POSTGRES_DB")
     existing_secret_key=$(read_env_value "SECRET_KEY")
     existing_environment=$(read_env_value "BIOAF_ENVIRONMENT")
+    existing_encryption_keys=$(read_env_value "BIOAF_ENCRYPTION_KEYS")
 
     # Determine values: keep existing unless --force or missing
-    local pg_user pg_password pg_db secret_key environment
+    local pg_user pg_password pg_db secret_key environment encryption_keys
+
+    # Fernet key generator. Python is already a runtime dependency, so use
+    # cryptography.fernet directly rather than shelling out to openssl with a
+    # hand-rolled base64url encoding.
+    local fernet_gen='python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
 
     if [ "$force" = true ]; then
         pg_password=$(openssl rand -hex 16)
         secret_key=$(openssl rand -hex 32)
+        encryption_keys=$(eval "$fernet_gen")
         yellow "Regenerated secrets. If the database volume still has the old"
         yellow "password, you must remove it before starting."
+        yellow "BIOAF_ENCRYPTION_KEYS was also regenerated. Encrypted columns"
+        yellow "in the existing DB will no longer be readable. Restore from a"
+        yellow "backup that matches the new key, or wipe the volume."
     else
         pg_password="${existing_pg_password:-$(openssl rand -hex 16)}"
         secret_key="${existing_secret_key:-$(openssl rand -hex 32)}"
+        encryption_keys="${existing_encryption_keys:-$(eval "$fernet_gen")}"
     fi
 
     environment="${existing_environment:-production}"
@@ -279,6 +290,12 @@ POSTGRES_DB=$pg_db
 # Backend
 DATABASE_URL=postgresql+asyncpg://${pg_user}:${pg_password}@db:5432/${pg_db}
 SECRET_KEY=$secret_key
+
+# Data-at-rest encryption (Fernet). Comma-separated keys; the first key is
+# the primary writer, all keys are accepted readers (so rotation can prepend
+# a new key while the old one still reads legacy rows).
+# LOSING THIS VALUE LOSES THE DATA -- back it up alongside the DB dump.
+BIOAF_ENCRYPTION_KEYS=$encryption_keys
 
 # Environment
 BIOAF_ENVIRONMENT=$environment

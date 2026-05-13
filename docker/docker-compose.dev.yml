@@ -12,6 +12,8 @@ services:
     environment:
       - BIOAF_DATABASE_URL=postgresql+asyncpg://bioaf_app:devpassword@postgres:5432/bioaf
       - BIOAF_JWT_SECRET_KEY=dev-secret-key-do-not-use-in-production
+      # Dev-only Fernet key. NEVER reuse for production.
+      - BIOAF_ENCRYPTION_KEYS=yQWeSjhut-D91YUcqvDUfQ62wQHNq1G3vUstCSJpk9U=
       - BIOAF_DEBUG=true
       - BIOAF_ENVIRONMENT=development
       - BIOAF_USE_SECRET_MANAGER=false
