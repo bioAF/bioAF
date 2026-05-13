@@ -26,7 +26,7 @@ Service accounts are `User` rows with `is_service_account=true`. API keys are se
 
 ### Key components
 
-- **Identity model:** `users.is_service_account` boolean (additive). SAs have a synthetic email (`sa-{slug}@{org}.bioaf.local`), a display name shown in the admin UI, an organization, and a role. They have no password hash.
+- **Identity model:** `users.is_service_account` boolean (additive). SAs have a synthetic non-routable email (`sa-{slug}-{rand}@org{N}.bioaf.svc`; `.svc` avoids the reserved-TLD list that pydantic `EmailStr` rejects), a display name shown in the admin UI, an organization, and a role. They have no password hash.
 - **Login lockout:** every interactive auth path (`auth_service.login`, refresh, password reset) rejects users with `is_service_account=true`. SAs never get a JWT.
 - **Credentials:** `api_keys` table. Multiple keys per SA. Each key has a prefix, a bcrypt hash, a JSON scope list, created_by, last_used_at, and revoked_at.
 - **Key format:** `biokey_<12-char-prefix>.<32-char-secret>`. The prefix is indexed for cheap lookup; the bcrypt comparison runs only on the matched row.
