@@ -81,16 +81,17 @@ async def _get_credentials(session: AsyncSession):
     `roles/cloudbuild.builds.editor` and `roles/artifactregistry.admin`,
     which bioaf-app does not).
     """
-    result = await session.execute(
-        text(
-            "SELECT key, value FROM platform_config "
-            "WHERE key IN ("
-            "  'gcp_credential_source', 'gcp_service_account_key',"
-            "  'gcp_service_account_email', 'gcp_bootstrap_sa_email'"
-            ")"
-        )
+    from app.services.platform_config_service import PlatformConfigService
+
+    config = await PlatformConfigService.get_many(
+        session,
+        [
+            "gcp_credential_source",
+            "gcp_service_account_key",
+            "gcp_service_account_email",
+            "gcp_bootstrap_sa_email",
+        ],
     )
-    config = {r[0]: r[1] for r in result.fetchall()}
 
     # An explicit "null" string sentinel from earlier code paths means
     # "no key set"; let the injector see it as absent.

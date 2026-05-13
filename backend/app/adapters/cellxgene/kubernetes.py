@@ -56,18 +56,14 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         self._namespace_ready = False
 
     async def _read_platform_config(self, *keys: str) -> dict[str, str]:
-        """Read values from platform_config."""
+        """Read values from platform_config, decrypting any sensitive keys."""
         if not self._session_factory:
             return {}
 
-        from sqlalchemy import text as sa_text
+        from app.services.platform_config_service import PlatformConfigService
 
-        placeholders = ", ".join(f"'{k}'" for k in keys)
         async with self._session_factory() as session:
-            result = await session.execute(
-                sa_text(f"SELECT key, value FROM platform_config WHERE key IN ({placeholders})")
-            )
-            return {r[0]: r[1] for r in result.fetchall()}
+            return await PlatformConfigService.get_many(session, list(keys))
 
     async def _resolve_image(self) -> str:
         """Read the cellxgene image URI from platform_config."""
@@ -296,18 +292,22 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
             return self._cluster_config
 
         async with self._session_factory() as session:
-            result = await session.execute(
-                sa_text(
-                    "SELECT key, value FROM platform_config "
-                    "WHERE key IN ("
-                    "  'gke_cluster_endpoint', 'gke_cluster_ca_cert',"
-                    "  'gcp_credential_source', 'gcp_service_account_key',"
-                    "  'gcp_service_account_email', 'gcp_bootstrap_sa_email',"
-                    "  'gke_cluster_name', 'gcp_project_id', 'gcp_zone'"
-                    ")"
-                )
+            from app.services.platform_config_service import PlatformConfigService
+
+            self._cluster_config = await PlatformConfigService.get_many(
+                session,
+                [
+                    "gke_cluster_endpoint",
+                    "gke_cluster_ca_cert",
+                    "gcp_credential_source",
+                    "gcp_service_account_key",
+                    "gcp_service_account_email",
+                    "gcp_bootstrap_sa_email",
+                    "gke_cluster_name",
+                    "gcp_project_id",
+                    "gcp_zone",
+                ],
             )
-            self._cluster_config = {r[0]: r[1] for r in result.fetchall()}
 
         if force:
             self._api_client = None
