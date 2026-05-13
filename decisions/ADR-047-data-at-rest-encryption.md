@@ -69,13 +69,13 @@ Losing `BIOAF_ENCRYPTION_KEYS` makes every encrypted column unrecoverable, even 
 
 ## Consequences
 
-**Positive**
+### Positive
 
 - `pg_dump` output is no longer a path to plaintext secrets.
 - Application code stays plaintext-only; the encryption boundary lives in one TypeDecorator and one service.
 - `MultiFernet` makes key rotation a documented, low-risk operation.
 
-**Negative**
+### Negative
 
 - An additional secret (`BIOAF_ENCRYPTION_KEYS`) operators must back up; losing it is unrecoverable.
 - ORM-only access to encrypted columns. Direct SQL inspections of those columns now return ciphertext. Tests and ops tooling that grep for plaintext secrets must route through the ORM or `encryption_service.decrypt`.
