@@ -12,6 +12,13 @@ from app.services.auth_service import AuthService
 # Ensure adapters run in local/mock mode for all tests
 os.environ.setdefault("BIOAF_COMPUTE_MODE", "local")
 
+# Pin a known Fernet key so encryption round-trips are deterministic in tests.
+# Two keys exercise the MultiFernet rotation path; only the first is the writer.
+os.environ.setdefault(
+    "BIOAF_ENCRYPTION_KEYS",
+    "yQWeSjhut-D91YUcqvDUfQ62wQHNq1G3vUstCSJpk9U=,RULBtMyNqzJbIBpDe1gwY2YCCYkBI0UqjJsdAP-41AU=",
+)
+
 TEST_DATABASE_URL = os.environ.get(
     "BIOAF_TEST_DATABASE_URL",
     "postgresql+asyncpg://bioaf_app:devpassword@localhost:5432/bioaf_test",
