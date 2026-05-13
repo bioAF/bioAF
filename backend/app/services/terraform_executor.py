@@ -1025,12 +1025,9 @@ class TerraformExecutor:
             "k8s_interactive_machine_type",
             "k8s_interactive_max_nodes",
         ]
-        rows = (
-            await session.execute(
-                text("SELECT key, value FROM platform_config WHERE key = ANY(:keys)").bindparams(keys=keys)
-            )
-        ).fetchall()
-        config = {r[0]: r[1] for r in rows}
+        from app.services.platform_config_service import PlatformConfigService
+
+        config = await PlatformConfigService.get_many(session, keys)
         # vm_default mode: ensure the credential injector sees the bootstrap
         # impersonation target. Falls back to the legacy email field for
         # installs that pre-date SA hardening.
