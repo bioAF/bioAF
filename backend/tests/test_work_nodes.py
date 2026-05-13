@@ -5,7 +5,7 @@ TDD: write failing tests first, then implement.
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from app.services.auth_service import AuthService
 
@@ -531,12 +531,12 @@ async def test_heartbeat_with_valid_token(
     )
     node_id = launch_resp.json()["id"]
 
-    # Get heartbeat token from DB
-    result = await session.execute(
-        text("SELECT heartbeat_token FROM compute_sessions WHERE id = :id"),
-        {"id": node_id},
-    )
-    token = result.scalar()
+    # Read heartbeat token via ORM so the EncryptedString TypeDecorator
+    # returns plaintext. Raw SQL would yield ciphertext.
+    from app.models.notebook_session import ComputeSession
+
+    cs = (await session.execute(select(ComputeSession).where(ComputeSession.id == node_id))).scalar_one()
+    token = cs.heartbeat_token
     assert token is not None
 
     response = await client.post(
