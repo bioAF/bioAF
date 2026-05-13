@@ -26,6 +26,25 @@ Hardens the `install-gcp.sh` bootstrapper in two ways.
   returns empty on those paths and `bioaf_quota_ensure_all` prints
   a "could not read current limit; request manually if needed"
   message instead.
+- **Structured per-step installer output.** Both `install-gcp.sh`
+  (laptop side) and `bioaf setup` (VM side) used to emit hundreds of
+  lines of `gcloud` / `docker` chatter during a fresh install,
+  making it hard to see what was happening or whether anything had
+  failed. A new shared helper library at `installer/output.sh` wraps
+  each operational command and renders a one-line status:
+  `[v]` for success (green), `[x]` for failure (red, with the last
+  20 lines of the log dumped inline), or `[o]` for warnings (yellow,
+  collected for an end-of-run summary). Full stdout/stderr from the
+  wrapped commands is captured to `~/.bioaf/install-gcp.log` and
+  `~/.bioaf/install.log` respectively; pass `--verbose` to keep the
+  output inline when debugging. Cloud Logging and update-agent
+  install remain fail-fast since both are critical for production
+  observability and in-app self-update.
+- **Manual worksheet ordering.** The "abort or choose manual"
+  fallback in `install-gcp.sh` now copies the prefill file to the
+  VM **before** telling the user to SSH in. The prior ordering
+  (SSH first, then `scp`) was impossible to follow from inside the
+  SSH session.
 
 ## v0.12.0
 
