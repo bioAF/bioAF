@@ -1077,6 +1077,11 @@ cmd_register_outputs() {
     $DC exec -T backend python -m app.cli.register_outputs "$@"
 }
 
+cmd_rotate_encryption_keys() {
+    bold "=== Re-encrypt sensitive columns under the current primary key ==="
+    $DC exec -T backend python -m app.cli.rotate_encryption_keys "$@"
+}
+
 cmd_help() {
     bold "bioAF Management"
     echo ""
@@ -1112,6 +1117,9 @@ cmd_help() {
     echo ""
     bold "Maintenance:"
     echo "  update [version]    Update to a specific version (or latest if omitted)"
+    echo "  rotate-encryption-keys [--dry-run]"
+    echo "                      Re-encrypt sensitive DB columns under the primary"
+    echo "                      key in BIOAF_ENCRYPTION_KEYS (used during rotation)."
     echo "  help                Show this help message"
     echo ""
     bold "Examples:"
@@ -1162,6 +1170,7 @@ case "$command" in
     update)   cmd_update "$@" ;;
     reset-db) cmd_reset_db ;;
     register-outputs) cmd_register_outputs "$@" ;;
+    rotate-encryption-keys) cmd_rotate_encryption_keys "$@" ;;
     help|-h|--help) cmd_help ;;
     *)
         red "Unknown command: $command"
