@@ -52,13 +52,15 @@ class PlatformConfigService:
     async def get_many(session: AsyncSession, keys: list[str]) -> dict[str, str]:
         if not keys:
             return {}
-        rows = (
-            await session.execute(
-                text("SELECT key, value FROM platform_config WHERE key = ANY(:keys)").bindparams(keys=list(keys))
-            )
-        ).all()
+        result = await session.execute(
+            text("SELECT key, value FROM platform_config WHERE key = ANY(:keys)").bindparams(keys=list(keys))
+        )
+        # fetchall() is the legacy-compatible path; the older callers (and a
+        # handful of tests that mock it directly) all use fetchall.
+        rows = result.fetchall()
         out: dict[str, str] = {}
-        for k, v in rows:
+        for row in rows:
+            k, v = row[0], row[1]
             decrypted = PlatformConfigService._maybe_decrypt(k, v)
             if decrypted is not None:
                 out[k] = decrypted
