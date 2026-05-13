@@ -27,6 +27,12 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ .Release.Name }}-config
+          env:
+            - name: BIOAF_ENCRYPTION_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.encryption.secretName }}
+                  key: {{ .Values.encryption.secretKey }}
           livenessProbe:
             httpGet:
               path: /api/health/live
