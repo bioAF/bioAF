@@ -19,6 +19,9 @@ INSECURE_JWT_SECRETS = frozenset(
 
 MIN_JWT_SECRET_LENGTH = 32
 
+# Fernet keys are 32 raw bytes encoded as urlsafe-base64 -> 44 chars.
+FERNET_KEY_LENGTH = 44
+
 
 def validate_jwt_secret(secret: str) -> None:
     """Refuse to start if the JWT signing key is a known default or too short.
@@ -43,6 +46,57 @@ def validate_jwt_secret(secret: str) -> None:
             MIN_JWT_SECRET_LENGTH,
         )
         sys.exit(1)
+
+
+def parse_encryption_keys(raw: str) -> list[str]:
+    """Split BIOAF_ENCRYPTION_KEYS on commas and return non-empty entries."""
+    if not raw:
+        return []
+    return [k.strip() for k in raw.split(",") if k.strip()]
+
+
+def validate_encryption_keys(raw: str) -> list[str]:
+    """Refuse to start if the at-rest encryption keys are missing or invalid.
+
+    Returns the parsed key list on success. Mirrors validate_jwt_secret in
+    behavior: a fatal-log + sys.exit(1) on failure so the container halts
+    rather than running with broken encryption.
+    """
+    keys = parse_encryption_keys(raw)
+
+    if not keys:
+        logger.critical(
+            "FATAL: BIOAF_ENCRYPTION_KEYS is unset. "
+            "Generate a key with `python3 -c \"from cryptography.fernet import Fernet; "
+            'print(Fernet.generate_key().decode())"` and set BIOAF_ENCRYPTION_KEYS. '
+            "Run `./install.sh generate-env --force` to regenerate secrets."
+        )
+        sys.exit(1)
+
+    from cryptography.fernet import Fernet
+
+    for index, key in enumerate(keys):
+        if len(key) != FERNET_KEY_LENGTH:
+            logger.critical(
+                "FATAL: BIOAF_ENCRYPTION_KEYS entry %d is %d chars; expected %d "
+                "(urlsafe-base64 Fernet key).",
+                index,
+                len(key),
+                FERNET_KEY_LENGTH,
+            )
+            sys.exit(1)
+        try:
+            Fernet(key.encode())
+        except (ValueError, TypeError) as exc:
+            logger.critical(
+                "FATAL: BIOAF_ENCRYPTION_KEYS entry %d is not a valid Fernet key: %s",
+                index,
+                exc,
+            )
+            sys.exit(1)
+
+    logger.info("Loaded %d encryption key(s) for data-at-rest", len(keys))
+    return keys
 
 
 def _read_pyproject_version() -> str:
@@ -118,6 +172,10 @@ class Settings(BaseSettings):
 
     # Internal callbacks (importer container -> bioAF API)
     internal_token: str = ""
+
+    # Data-at-rest encryption (comma-separated Fernet keys; first key is the
+    # primary writer, all keys are accepted readers).
+    encryption_keys: str = ""
 
     model_config = {"env_prefix": "BIOAF_", "env_file": ".env", "extra": "ignore"}
 
