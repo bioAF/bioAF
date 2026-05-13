@@ -49,6 +49,13 @@ for the full design.
   `documentation/recovery-and-encryption.md`.
 - For docker-compose installs, run `./install.sh generate-env` (or a
   full `./install.sh`); the key is added to `docker/.env` automatically.
+- For existing docker-compose installs upgrading via `./bioaf update`:
+  the updater auto-appends a generated `BIOAF_ENCRYPTION_KEYS` line to
+  the existing `docker/.env` before restarting containers (the rest of
+  the file is left untouched). It will print a yellow notice with the
+  key so operators can capture it for backup. You can also pre-generate
+  the key by running `./install.sh ensure-encryption-key` from the
+  install directory before `./bioaf update`.
 
 ## v0.12.1
 
