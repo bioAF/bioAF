@@ -4,6 +4,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.types import EncryptedString
 
 
 class ComputeSession(Base):
@@ -38,7 +39,7 @@ class ComputeSession(Base):
     machine_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     data_mount_paths: Mapped[list | None] = mapped_column(JSON, nullable=True)
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    heartbeat_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    heartbeat_token: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
     git_branch_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     git_commit_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     gcs_output_prefix: Mapped[str | None] = mapped_column(String(500), nullable=True)

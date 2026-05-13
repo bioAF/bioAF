@@ -5,6 +5,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.types import EncryptedString
 
 
 class Notification(Base):
@@ -59,7 +60,7 @@ class SlackWebhook(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    webhook_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    webhook_url: Mapped[str] = mapped_column(EncryptedString, nullable=False)
     channel_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     event_types_json: Mapped[list] = mapped_column(JSONB, server_default="[]", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, server_default="true", nullable=False)
@@ -75,7 +76,7 @@ class SlackInstallation(Base):
     organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, unique=True)
     team_id: Mapped[str] = mapped_column(String(50), nullable=False)
     team_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    bot_token: Mapped[str] = mapped_column(String(500), nullable=False)
+    bot_token: Mapped[str] = mapped_column(EncryptedString, nullable=False)
     bot_user_id: Mapped[str] = mapped_column(String(50), nullable=False)
     authed_user_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     installed_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
