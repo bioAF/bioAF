@@ -6,7 +6,7 @@
 # (runs on the VM) to render a clean per-step UI:
 #
 #   [ ] Doing X...           (in progress -- updated in place on a tty)
-#   [v] Doing X              (success, green check)
+#   [✓] Doing X              (success, green check)
 #   [x] Doing X              (failure, red X, followed by tail of log)
 #   [o] Doing X              (warning, yellow circle; collected for summary)
 #
@@ -46,9 +46,9 @@ _IO_DIM=$'\033[2m'
 _IO_BLD=$'\033[1m'
 _IO_RST=$'\033[0m'
 
-# Status glyphs. ASCII so they render the same in every terminal and
-# copy-paste cleanly into bug reports.
-_IO_OK="[v]"
+# Status glyphs. Mostly ASCII so they copy-paste cleanly into bug reports;
+# success uses U+2713 ✓ which renders in every modern terminal font.
+_IO_OK="[✓]"
 _IO_FAIL="[x]"
 _IO_WARN="[o]"
 _IO_PROG="[ ]"
@@ -130,14 +130,14 @@ fail_line() {
 }
 
 # Render the "in-progress" indicator for a step. On a tty we leave the
-# cursor on the same line so the final state can overwrite it; otherwise
-# we print a normal line.
+# cursor on the same line so the final state can overwrite it. When stdout
+# is not a tty (CI, `gcloud compute ssh --command=...`, piped to tee,
+# etc.) we skip this line entirely; _io_step_end will emit the final
+# state once. Printing both would double every step.
 _io_step_start() {
     local label="$1"
     if _io_is_tty; then
         printf '  %s%s%s %s' "$_IO_DIM" "$_IO_PROG" "$_IO_RST" "$label"
-    else
-        printf '  %s %s\n' "$_IO_PROG" "$label"
     fi
 }
 

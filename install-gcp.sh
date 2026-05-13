@@ -720,6 +720,38 @@ wait_for_sa() {
     return 1
 }
 
+# Run a gcloud IAM binding command, retrying when GCP returns the
+# "Service account ... does not exist" propagation-lag error. wait_for_sa
+# checks the SA endpoint, but the project IAM endpoint can lag behind it
+# by several seconds, so even a successful wait can be followed by a
+# rejected add-iam-policy-binding. Sleep 5s and retry up to twice.
+retry_iam() {
+    local attempts=3
+    local delay=5
+    local i=0 rc=0 output=""
+    for ((i=1; i<=attempts; i++)); do
+        # Capture rc immediately after the assignment. Wrapping it in
+        # `if ... then ... fi` would let `$?` collapse to 0 once the
+        # false branch is taken, which silently swallowed real failures.
+        output=$("$@" 2>&1)
+        rc=$?
+        if [ "$rc" = "0" ]; then
+            [ -n "$output" ] && printf '%s\n' "$output"
+            return 0
+        fi
+        printf '%s\n' "$output" >&2
+        if [ "$i" -lt "$attempts" ] && \
+                printf '%s' "$output" | grep -q "does not exist"; then
+            printf '  (propagation lag detected; retrying in %ss, attempt %s/%s)\n' \
+                "$delay" "$((i+1))" "$attempts" >&2
+            sleep "$delay"
+            continue
+        fi
+        return "$rc"
+    done
+    return "$rc"
+}
+
 # 3. Create bioaf-bootstrap (idempotent).
 if gcloud iam service-accounts describe "${BOOTSTRAP_SA_EMAIL}" \
         --project="${PROJECT_ID}" --quiet >/dev/null 2>&1; then
@@ -751,7 +783,7 @@ step "Wait for ${APP_SA_NAME} to propagate" -- wait_for_sa "${APP_SA_EMAIL}"
 # 5. Grant the broad set to bioaf-bootstrap.
 for role in "${BOOTSTRAP_ROLES[@]}"; do
     step "Grant ${role} to ${BOOTSTRAP_SA_NAME}" -- \
-        gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        retry_iam gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
             --member="serviceAccount:${BOOTSTRAP_SA_EMAIL}" \
             --role="${role}" \
             --condition=None \
@@ -761,7 +793,7 @@ done
 # 6. Grant the unconditioned bindings to bioaf-app.
 for role in "${APP_UNCONDITIONED_ROLES[@]}"; do
     step "Grant ${role} to ${APP_SA_NAME}" -- \
-        gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        retry_iam gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
             --member="serviceAccount:${APP_SA_EMAIL}" \
             --role="${role}" \
             --condition=None \
@@ -770,21 +802,21 @@ done
 
 # 7. Conditioned bindings for bioaf-app.
 step "Grant scoped roles/storage.admin (bioaf- buckets) to ${APP_SA_NAME}" -- \
-    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    retry_iam gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
         --member="serviceAccount:${APP_SA_EMAIL}" \
         --role="roles/storage.admin" \
         --condition='expression=resource.name.startsWith("projects/_/buckets/bioaf-"),title=bioaf_buckets_only,description=bioaf_buckets_only' \
         --quiet
 
 step "Grant scoped ${BIOAFSAMANAGER_ROLE_ID} (bioaf- SAs) to ${APP_SA_NAME}" -- \
-    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    retry_iam gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
         --member="serviceAccount:${APP_SA_EMAIL}" \
         --role="projects/${PROJECT_ID}/roles/${BIOAFSAMANAGER_ROLE_ID}" \
         --condition="expression=resource.name.startsWith(\"projects/${PROJECT_ID}/serviceAccounts/bioaf-\"),title=bioaf_sas_only,description=bioaf_sas_only" \
         --quiet
 
 step "Grant scoped roles/compute.instanceAdmin.v1 (bioaf- VMs) to ${APP_SA_NAME}" -- \
-    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    retry_iam gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
         --member="serviceAccount:${APP_SA_EMAIL}" \
         --role="roles/compute.instanceAdmin.v1" \
         --condition='expression=resource.name.extract("/instances/{name}").startsWith("bioaf-"),title=bioaf_worknodes_only,description=bioaf_worknodes_only' \
@@ -797,7 +829,7 @@ step "Grant scoped roles/compute.instanceAdmin.v1 (bioaf- VMs) to ${APP_SA_NAME}
 # container.clusters.* (where resource.name ends in /clusters/<name>) and
 # container.nodePools.* (which IAM-checks against the parent cluster).
 step "Grant scoped roles/container.admin (bioaf- clusters) to ${APP_SA_NAME}" -- \
-    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    retry_iam gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
         --member="serviceAccount:${APP_SA_EMAIL}" \
         --role="roles/container.admin" \
         --condition='expression=resource.name.extract("/clusters/{name}").startsWith("bioaf-"),title=bioaf_clusters_only,description=bioaf_clusters_only' \
@@ -805,7 +837,7 @@ step "Grant scoped roles/container.admin (bioaf- clusters) to ${APP_SA_NAME}" --
 
 # 8. Resource-scoped tokenCreator on bioaf-bootstrap only.
 step "Grant tokenCreator on ${BOOTSTRAP_SA_NAME} to ${APP_SA_NAME}" -- \
-    gcloud iam service-accounts add-iam-policy-binding "${BOOTSTRAP_SA_EMAIL}" \
+    retry_iam gcloud iam service-accounts add-iam-policy-binding "${BOOTSTRAP_SA_EMAIL}" \
         --project="${PROJECT_ID}" \
         --member="serviceAccount:${APP_SA_EMAIL}" \
         --role="roles/iam.serviceAccountTokenCreator" \
@@ -837,7 +869,7 @@ if [ "${SHEETS_READER_PROVISIONED}" = true ]; then
     # Grant bioaf-app tokenCreator on bioaf-reader so the runtime can mint
     # impersonated tokens for it. Resource-scoped to this SA only.
     step "Grant tokenCreator on ${READER_SA_NAME} to ${APP_SA_NAME}" -- \
-        gcloud iam service-accounts add-iam-policy-binding "${READER_SA_EMAIL}" \
+        retry_iam gcloud iam service-accounts add-iam-policy-binding "${READER_SA_EMAIL}" \
             --project="${PROJECT_ID}" \
             --member="serviceAccount:${APP_SA_EMAIL}" \
             --role="roles/iam.serviceAccountTokenCreator" \
@@ -853,7 +885,7 @@ fi
 # 9. tagUser on the bioaf-managed tag VALUE for bioaf-bootstrap so Terraform
 #    can attach the tag to GKE resources it creates.
 step "Grant tagUser on ${BIOAF_TAG_KEY}/${BIOAF_TAG_VALUE} to ${BOOTSTRAP_SA_NAME}" -- \
-    gcloud resource-manager tags values add-iam-policy-binding \
+    retry_iam gcloud resource-manager tags values add-iam-policy-binding \
         "${PROJECT_ID}/${BIOAF_TAG_KEY}/${BIOAF_TAG_VALUE}" \
         --member="serviceAccount:${BOOTSTRAP_SA_EMAIL}" \
         --role="roles/resourcemanager.tagUser" \
