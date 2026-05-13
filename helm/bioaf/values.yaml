@@ -42,12 +42,20 @@ ingress:
     kubernetes.io/ingress.global-static-ip-name: bioaf-ip
 
 # Data-at-rest encryption (Fernet / MultiFernet). BIOAF_ENCRYPTION_KEYS is
-# read from a Kubernetes Secret rather than the ConfigMap because losing this
-# value loses every encrypted column in the database. Operators must create
-# this Secret (and back it up alongside the DB dump) before deploying.
+# read from a Kubernetes Secret, populated automatically by the chart on
+# first `helm install` (see templates/secret-encryption.yaml). The Secret is
+# annotated with helm.sh/resource-policy=keep so a `helm uninstall` does NOT
+# delete it; losing the key value makes every encrypted DB column
+# unrecoverable, so operators should back the Secret up separately from the
+# DB dump (e.g., into Google Secret Manager).
+#
+# To bring your own key (e.g., rotation procedure, KMS-wrapped DEK), pre-
+# create the Secret BEFORE `helm install`:
 #
 #   kubectl create secret generic bioaf-encryption \
-#     --from-literal=keys="$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+#     --from-literal=keys=<your-fernet-key>
+#
+# The chart's `lookup` check will see it and leave it alone.
 encryption:
   secretName: bioaf-encryption
   secretKey: keys

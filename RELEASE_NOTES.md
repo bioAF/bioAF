@@ -1,5 +1,32 @@
 # Release Notes
 
+## v0.13.1
+
+Removes the last manual step from the v0.13.0 upgrade path. The Helm
+chart now auto-generates `BIOAF_ENCRYPTION_KEYS` on first install, so
+Kubernetes operators no longer have to create the `bioaf-encryption`
+Secret out-of-band.
+
+### Changes
+
+- **Helm: auto-generated encryption Secret.** New
+  `helm/bioaf/templates/secret-encryption.yaml` creates the Secret on
+  first `helm install` using `randBytes 32` shaped into a urlsafe-base64
+  Fernet key (same shape as `cryptography.Fernet.generate_key()`). On
+  subsequent upgrades, `lookup` finds the existing Secret and the chart
+  leaves it alone, so the key never silently rotates. The Secret is
+  annotated `helm.sh/resource-policy: keep` so a `helm uninstall` does
+  not delete it (losing the key value loses every encrypted DB column).
+- **Operator-owned keys still supported.** Pre-creating the Secret
+  before the first `helm install` (e.g., for rotation procedures or
+  KMS-wrapped DEK) is detected by `lookup` and the chart's auto-gen is
+  skipped.
+
+### Operator action required
+
+None for Kubernetes installs. None for docker-compose installs (already
+automatic in v0.13.0).
+
 ## v0.13.0
 
 Encrypts sensitive database columns at rest so `pg_dump` exposure no
