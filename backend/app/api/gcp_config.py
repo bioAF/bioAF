@@ -11,6 +11,7 @@ from app.database import get_session
 from app.schemas.gcp_config import GCPConfigResponse, GCPConfigUpdate, GCPValidationResult
 from app.services import audit_service
 from app.services.gcp_config import validate_gcp_credentials
+from app.services.platform_config_service import PlatformConfigService
 
 router = APIRouter(prefix="/api/v1/settings/gcp", tags=["gcp_config"])
 
@@ -107,7 +108,9 @@ async def update_gcp_config(
             await _upsert(session, key, value)
 
     if body.service_account_key is not None:
-        await _upsert(session, "gcp_service_account_key", body.service_account_key)
+        # Sensitive key: route through PlatformConfigService so the value
+        # is encrypted at rest. Other gcp_* fields stay on the local _upsert.
+        await PlatformConfigService.set(session, "gcp_service_account_key", body.service_account_key)
 
     # Reset validation status whenever config changes
     await _upsert(session, "gcp_validation_status", "")
@@ -145,9 +148,7 @@ async def validate_gcp_config(
     # Prefer the new bootstrap key; fall back to legacy email for backward compat.
     impersonation_target = config.get("gcp_bootstrap_sa_email") or config.get("gcp_service_account_email") or ""
 
-    sa_key_row = (
-        await session.execute(text("SELECT value FROM platform_config WHERE key='gcp_service_account_key'"))
-    ).scalar()
+    sa_key_row = await PlatformConfigService.get(session, "gcp_service_account_key")
 
     result = validate_gcp_credentials(
         project_id=project_id,

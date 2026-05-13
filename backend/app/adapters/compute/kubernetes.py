@@ -722,21 +722,17 @@ class KubernetesComputeProvider(ComputeProvider):
         change, but credentials need a per-launch read so that keys saved or
         rotated through the Settings UI take effect without a backend restart.
         """
-        from sqlalchemy import text as sa_text
+        from app.services.platform_config_service import PlatformConfigService
 
         if not self._session_factory:
             return "vm_default", ""
 
         async with self._session_factory() as session:
-            result = await session.execute(
-                sa_text(
-                    "SELECT key, value FROM platform_config "
-                    "WHERE key IN ('gcp_credential_source', 'gcp_service_account_key')"
-                )
+            rows = await PlatformConfigService.get_many(
+                session, ["gcp_credential_source", "gcp_service_account_key"]
             )
-            rows = {r[0]: (r[1] or "") for r in result.fetchall()}
 
-        return rows.get("gcp_credential_source", "vm_default") or "vm_default", rows.get("gcp_service_account_key", "")
+        return rows.get("gcp_credential_source") or "vm_default", rows.get("gcp_service_account_key", "")
 
     def _ensure_gcs_secret(self, namespace: str, credential_source: str, sa_key: str) -> bool:
         """Create a K8s Secret with the GCP SA key for GCS access.

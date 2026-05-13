@@ -69,14 +69,9 @@ BILLING_EXPORT_CONFIG_KEYS = [
 
 
 async def _read_billing_config(session: AsyncSession) -> dict:
-    rows = (
-        await session.execute(
-            text("SELECT key, value FROM platform_config WHERE key = ANY(:keys)").bindparams(
-                keys=BILLING_EXPORT_CONFIG_KEYS
-            )
-        )
-    ).fetchall()
-    return {r[0]: r[1] for r in rows}
+    from app.services.platform_config_service import PlatformConfigService
+
+    return await PlatformConfigService.get_many(session, BILLING_EXPORT_CONFIG_KEYS)
 
 
 async def deploy_billing_export_module(session: AsyncSession, user_id: int) -> dict:

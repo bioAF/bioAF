@@ -111,17 +111,17 @@ class GcsStorageService:
         works for non-signing operations only.
         """
         from app.services import credential_injector
+        from app.services.platform_config_service import PlatformConfigService
 
-        result = await session.execute(
-            text(
-                "SELECT key, value FROM platform_config "
-                "WHERE key IN ("
-                "  'gcp_credential_source', 'gcp_service_account_key',"
-                "  'gcp_service_account_email', 'gcp_bootstrap_sa_email'"
-                ")"
-            )
+        config = await PlatformConfigService.get_many(
+            session,
+            [
+                "gcp_credential_source",
+                "gcp_service_account_key",
+                "gcp_service_account_email",
+                "gcp_bootstrap_sa_email",
+            ],
         )
-        config = {r[0]: r[1] for r in result.fetchall()}
 
         try:
             return credential_injector.load_gcp_credentials(config)
