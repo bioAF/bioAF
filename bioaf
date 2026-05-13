@@ -285,11 +285,14 @@ for v in cfg.get('volumes', {}).values():
             $DC down -v
     fi
 
-    # Cloud Logging (GCE only, idempotent)
-    maybe_step "Configure Cloud Logging (GCE only, idempotent)" -- ensure_cloud_logging
+    # Cloud Logging (GCE only, idempotent). Critical for production
+    # observability -- abort the install if it fails rather than letting
+    # the user end up with a running stack that ships no logs.
+    step "Configure Cloud Logging (GCE only, idempotent)" -- ensure_cloud_logging
 
-    # Update agent (idempotent)
-    maybe_step "Configure update agent (idempotent)" -- ensure_update_agent
+    # Update agent (idempotent). Required for the in-app self-update
+    # feature to work; without it, backend-triggered updates are a no-op.
+    step "Configure update agent (idempotent)" -- ensure_update_agent
 
     # If a specific version was requested, checkout that tag
     if [ -n "$setup_version" ]; then
