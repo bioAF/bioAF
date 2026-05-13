@@ -246,8 +246,6 @@ class GCEWorkNodeProvider(WorkNodeProvider):
         if self._gcp_config is not None and not force:
             return self._gcp_config
 
-        from sqlalchemy import text as sa_text
-
         if not self._session_factory:
             self._gcp_config = {}
             return self._gcp_config

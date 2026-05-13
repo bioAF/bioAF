@@ -46,8 +46,7 @@ async def test_organization_secrets_encrypted_at_rest(db_engine):
         raw = (
             await session.execute(
                 sa_text(
-                    "SELECT slack_client_secret, slack_signing_secret, smtp_password "
-                    "FROM organizations WHERE id = :id"
+                    "SELECT slack_client_secret, slack_signing_secret, smtp_password FROM organizations WHERE id = :id"
                 ),
                 {"id": org_id},
             )
