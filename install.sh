@@ -235,10 +235,13 @@ generate_env() {
     # Determine values: keep existing unless --force or missing
     local pg_user pg_password pg_db secret_key environment encryption_keys
 
-    # Fernet key generator. Python is already a runtime dependency, so use
-    # cryptography.fernet directly rather than shelling out to openssl with a
-    # hand-rolled base64url encoding.
-    local fernet_gen='python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
+    # Fernet key = urlsafe-base64(32 random bytes). Same primitive as
+    # cryptography.Fernet.generate_key(), implemented with openssl so the
+    # installer has no implicit dependency on the host having python3 or
+    # python3-cryptography. openssl is preinstalled in every Linux base
+    # image; pulling in 50MB of Python deps just to call urandom(32) at
+    # install time is asymmetric.
+    local fernet_gen='openssl rand -base64 32 | tr "+/" "-_" | tr -d "\n"'
 
     if [ "$force" = true ]; then
         pg_password=$(openssl rand -hex 16)
@@ -351,15 +354,16 @@ ensure_encryption_key_in_env() {
         return 0
     fi
 
-    if ! command -v python3 >/dev/null 2>&1; then
-        red "python3 is required to generate a Fernet key; install python3 and re-run."
+    if ! command -v openssl >/dev/null 2>&1; then
+        red "openssl is required to generate a Fernet key; install openssl and re-run."
         return 1
     fi
 
+    # Same urlsafe-base64(32 random bytes) primitive as Fernet.generate_key().
     local new_key
-    new_key=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
-    if [ -z "$new_key" ]; then
-        red "Failed to generate a Fernet key (is the 'cryptography' Python package installed?)."
+    new_key=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '\n')
+    if [ -z "$new_key" ] || [ "${#new_key}" -ne 44 ]; then
+        red "Failed to generate a Fernet key from openssl rand."
         return 1
     fi
 
