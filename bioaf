@@ -907,6 +907,23 @@ STATUSEOF
     fi
     git -C "$SCRIPT_DIR" checkout "v${target_version}"
 
+    # Upgrade-path: installs that predate v0.13.0 have no BIOAF_ENCRYPTION_KEYS
+    # in docker/.env. The backend's startup validator would refuse to come up
+    # without it. Append the variable to the existing .env (leaving every
+    # other line untouched) before the container restart so the backend sees
+    # it on first boot of the new image. No-op on installs that already have
+    # the value.
+    cat > "$status_dir/current.json" <<STATUSEOF
+{"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "ensure_encryption_key", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+STATUSEOF
+    bash "$SCRIPT_DIR/install.sh" ensure-encryption-key || {
+        red "ERROR: could not ensure BIOAF_ENCRYPTION_KEYS in $ENV_FILE."
+        cat > "$status_dir/current.json" <<STATUSEOF
+{"status": "failed", "from_version": "$current_version", "to_version": "$target_version", "step": "ensure_encryption_key", "error": "encryption key bootstrap failed"}
+STATUSEOF
+        exit 1
+    }
+
     # Pull pre-built images while old containers are still running,
     # so the only downtime is the restart + migrate window.
     cat > "$status_dir/current.json" <<STATUSEOF
