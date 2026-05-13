@@ -155,3 +155,90 @@ EOF
     # NEXT_PUBLIC_API_URL should not appear -- nginx handles routing
     ! grep -q "NEXT_PUBLIC_API_URL" "$BIOAF_ROOT/docker/.env"
 }
+
+# ---------------------------------------------------------------------------
+# ensure-encryption-key: upgrade path for installs that predate v0.13.0.
+# Their docker/.env has no BIOAF_ENCRYPTION_KEYS, so the backend's startup
+# check would refuse to come up after a `./bioaf update`. The helper must
+# append (never rewrite) the variable, leaving every other line untouched.
+# ---------------------------------------------------------------------------
+
+@test "ensure-encryption-key appends BIOAF_ENCRYPTION_KEYS when missing" {
+    cd "$BIOAF_ROOT"
+    cat > "$BIOAF_ROOT/docker/.env" <<'EOF'
+POSTGRES_USER=bioaf
+POSTGRES_PASSWORD=existing_password_abc123
+POSTGRES_DB=bioaf
+DATABASE_URL=postgresql+asyncpg://bioaf:existing_password_abc123@db:5432/bioaf
+SECRET_KEY=existing_secret_xyz789
+BIOAF_ENVIRONMENT=production
+EOF
+    if ! command -v python3 >/dev/null 2>&1; then
+        skip "python3 required for Fernet key generation"
+    fi
+    run bash install.sh ensure-encryption-key
+    [ "$status" -eq 0 ]
+
+    # Existing lines must be untouched.
+    grep -q "^POSTGRES_PASSWORD=existing_password_abc123$" "$BIOAF_ROOT/docker/.env"
+    grep -q "^SECRET_KEY=existing_secret_xyz789$" "$BIOAF_ROOT/docker/.env"
+
+    # New variable added with a syntactically valid Fernet key (44 chars,
+    # urlsafe-base64, ends with '=').
+    local key
+    key=$(grep "^BIOAF_ENCRYPTION_KEYS=" "$BIOAF_ROOT/docker/.env" | cut -d= -f2-)
+    [ -n "$key" ]
+    [ "${#key}" -eq 44 ]
+    [[ "$key" == *"=" ]]
+}
+
+@test "ensure-encryption-key is idempotent when key already present" {
+    cd "$BIOAF_ROOT"
+    cat > "$BIOAF_ROOT/docker/.env" <<'EOF'
+POSTGRES_USER=bioaf
+POSTGRES_PASSWORD=existing_password
+BIOAF_ENCRYPTION_KEYS=yQWeSjhut-D91YUcqvDUfQ62wQHNq1G3vUstCSJpk9U=
+BIOAF_ENVIRONMENT=production
+EOF
+    local before
+    before=$(cat "$BIOAF_ROOT/docker/.env")
+
+    run bash install.sh ensure-encryption-key
+    [ "$status" -eq 0 ]
+
+    # Existing key value must survive untouched -- second run is a no-op.
+    local after
+    after=$(cat "$BIOAF_ROOT/docker/.env")
+    [ "$before" = "$after" ]
+}
+
+@test "ensure-encryption-key replaces empty BIOAF_ENCRYPTION_KEYS= line" {
+    cd "$BIOAF_ROOT"
+    # Some installs may have an empty placeholder (e.g. from the
+    # .env.example shipped pre-v0.13.0 once we added the line as a hint).
+    cat > "$BIOAF_ROOT/docker/.env" <<'EOF'
+POSTGRES_USER=bioaf
+BIOAF_ENCRYPTION_KEYS=
+BIOAF_ENVIRONMENT=production
+EOF
+    if ! command -v python3 >/dev/null 2>&1; then
+        skip "python3 required for Fernet key generation"
+    fi
+    run bash install.sh ensure-encryption-key
+    [ "$status" -eq 0 ]
+
+    local key
+    key=$(grep "^BIOAF_ENCRYPTION_KEYS=" "$BIOAF_ROOT/docker/.env" | cut -d= -f2-)
+    [ "${#key}" -eq 44 ]
+}
+
+@test "ensure-encryption-key is a no-op when docker/.env does not exist" {
+    cd "$BIOAF_ROOT"
+    rm -f "$BIOAF_ROOT/docker/.env"
+    run bash install.sh ensure-encryption-key
+    # Nothing to amend; the helper should exit cleanly with a clear message
+    # rather than crash. The operator hasn't run generate-env yet, so this
+    # is "not applicable", not an error.
+    [ "$status" -eq 0 ]
+    [ ! -f "$BIOAF_ROOT/docker/.env" ]
+}
