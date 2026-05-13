@@ -331,6 +331,67 @@ for v in cfg.get('volumes', {}).values():
 }
 
 # ---------------------------------------------------------------------------
+# Upgrade path: ensure BIOAF_ENCRYPTION_KEYS exists in docker/.env.
+#
+# Installs that predate v0.13.0 have an existing docker/.env with no
+# BIOAF_ENCRYPTION_KEYS line. After upgrading the bioAF code, the backend's
+# startup check fails fast on the missing variable. Rather than rewrite the
+# operator's whole .env (which would risk losing custom lines), this helper
+# appends exactly one line if the variable is missing or empty. Idempotent.
+# ---------------------------------------------------------------------------
+ensure_encryption_key_in_env() {
+    if [ ! -f "$ENV_FILE" ]; then
+        # Nothing to amend; generate-env hasn't been run. Not an error.
+        return 0
+    fi
+
+    local existing
+    existing=$(read_env_value "BIOAF_ENCRYPTION_KEYS")
+    if [ -n "$existing" ]; then
+        return 0
+    fi
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        red "python3 is required to generate a Fernet key; install python3 and re-run."
+        return 1
+    fi
+
+    local new_key
+    new_key=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+    if [ -z "$new_key" ]; then
+        red "Failed to generate a Fernet key (is the 'cryptography' Python package installed?)."
+        return 1
+    fi
+
+    # If there's an empty BIOAF_ENCRYPTION_KEYS= line, replace it in place.
+    # Otherwise append. Using a portable sed invocation (-i.bak then rm) so
+    # this works on both GNU sed (Linux) and BSD sed (macOS).
+    if grep -qE "^BIOAF_ENCRYPTION_KEYS=" "$ENV_FILE"; then
+        sed -i.bak "s|^BIOAF_ENCRYPTION_KEYS=.*$|BIOAF_ENCRYPTION_KEYS=${new_key}|" "$ENV_FILE"
+        rm -f "${ENV_FILE}.bak"
+    else
+        # Ensure the file ends with a newline before appending.
+        if [ -s "$ENV_FILE" ] && [ "$(tail -c 1 "$ENV_FILE" | wc -l | tr -d ' ')" = "0" ]; then
+            printf '\n' >> "$ENV_FILE"
+        fi
+        cat >> "$ENV_FILE" <<APPEND_EOF
+
+# Data-at-rest encryption (added by an upgrade; see ADR-047).
+# LOSING THIS VALUE LOSES THE DATA -- back it up alongside the DB dump.
+BIOAF_ENCRYPTION_KEYS=${new_key}
+APPEND_EOF
+    fi
+
+    yellow ""
+    yellow "Generated BIOAF_ENCRYPTION_KEYS and added it to $ENV_FILE."
+    yellow "This key encrypts sensitive DB columns (Slack/SMTP secrets, SSH keys,"
+    yellow "GCP SA keys, heartbeat tokens, etc.). Losing it makes those columns"
+    yellow "unrecoverable. Back it up SEPARATELY from your DB backup."
+    yellow ""
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # Full install
 # ---------------------------------------------------------------------------
 full_install() {
@@ -399,6 +460,10 @@ case "$command" in
     generate-certs)
         shift
         generate_certs "$@"
+        ;;
+    ensure-encryption-key)
+        shift
+        ensure_encryption_key_in_env "$@"
         ;;
     --help|-h)
         usage
