@@ -1,23 +1,23 @@
 import os
-from contextlib import asynccontextmanager
 
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy import text as sa_text
-
-from app.adapters import registry as adapter_registry
-from app.services.auth_service import AuthService
-
-# Ensure adapters run in local/mock mode for all tests
+# Pin env vars BEFORE any app.* import so pydantic-settings reads them at
+# Settings() construction time.
 os.environ.setdefault("BIOAF_COMPUTE_MODE", "local")
-
-# Pin a known Fernet key so encryption round-trips are deterministic in tests.
 # Two keys exercise the MultiFernet rotation path; only the first is the writer.
 os.environ.setdefault(
     "BIOAF_ENCRYPTION_KEYS",
     "yQWeSjhut-D91YUcqvDUfQ62wQHNq1G3vUstCSJpk9U=,RULBtMyNqzJbIBpDe1gwY2YCCYkBI0UqjJsdAP-41AU=",
 )
+
+from contextlib import asynccontextmanager  # noqa: E402
+
+import pytest_asyncio  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine  # noqa: E402
+from sqlalchemy import text as sa_text  # noqa: E402
+
+from app.adapters import registry as adapter_registry  # noqa: E402
+from app.services.auth_service import AuthService  # noqa: E402
 
 TEST_DATABASE_URL = os.environ.get(
     "BIOAF_TEST_DATABASE_URL",
