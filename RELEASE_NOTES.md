@@ -1,5 +1,43 @@
 # Release Notes
 
+## v0.13.2
+
+Polish on the installer UX and one resiliency fix: removes a confusing
+duplicate-line render on the VM, swaps the success glyph for a real
+checkmark, and retries IAM bindings that race against GCP's service-
+account propagation.
+
+### Changes
+
+- **No more duplicated `[ ] / [v]` steps on the VM.** When `install-gcp.sh`
+  hands off to the VM via `gcloud compute ssh --command=...`, the remote
+  shell has no TTY, so `installer/output.sh`'s `_io_is_tty` returned
+  false and `_io_step_start` fell through to a `printf '\n'` branch. The
+  result was every step rendering twice: once in-progress, once final.
+  In non-TTY mode `_io_step_start` is now a no-op; `_io_step_end` still
+  emits the final state once. TTY mode (`install-gcp.sh` on the
+  operator's laptop) is unchanged: the in-progress line still animates
+  in place, then is overwritten by the final state.
+- **Success glyph is now `[✓]` instead of `[v]`.** Both `install-gcp.sh`
+  and `bioaf setup` share `installer/output.sh`, so both pick this up.
+  U+2713 renders cleanly in every modern terminal font; the rest of the
+  glyph set stays ASCII so failures and warnings copy-paste verbatim
+  into bug reports.
+- **Retry IAM bindings on SA-propagation lag.** Newly created service
+  accounts can take 5-30 seconds before the project IAM endpoint sees
+  them, even after `wait_for_sa` (which polls the SA endpoint) returns.
+  When that happens, `gcloud projects add-iam-policy-binding` exits with
+  `INVALID_ARGUMENT: Service account ... does not exist` and aborts the
+  install. A new `retry_iam` wrapper catches that specific error,
+  sleeps 5s, and retries up to twice (3 attempts total) before failing
+  the step. Wraps all nine `add-iam-policy-binding` calls in the
+  bootstrap/app/reader SA setup and the bioaf-managed tag binding.
+
+### Operator action required
+
+None. Re-run `install-gcp.sh` if a prior run failed on the SA
+propagation race; the retry now absorbs it.
+
 ## v0.13.1
 
 Closes two automation gaps in v0.13.0's at-rest encryption rollout.
