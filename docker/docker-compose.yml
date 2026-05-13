@@ -37,6 +37,11 @@ services:
     volumes:
       - ../update-requests:/app/update-requests
       - ../update-status:/app/update-status
+      # Mount the host .env read-write so the entrypoint can bootstrap
+      # BIOAF_ENCRYPTION_KEYS on upgrades from < 0.13.0. See backend/entrypoint.sh
+      # and decisions/ADR-047-data-at-rest-encryption.md. Mount is a no-op
+      # on installs where the key is already populated.
+      - ./.env:/host/.env
     depends_on:
       db:
         condition: service_healthy
