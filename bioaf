@@ -27,6 +27,15 @@ green()  { printf '\033[0;32m%s\033[0m\n' "$*"; }
 yellow() { printf '\033[0;33m%s\033[0m\n' "$*"; }
 bold()   { printf '\033[1m%s\033[0m\n' "$*"; }
 
+# Structured per-step output helpers (step / maybe_step / warn / io_finish).
+# Sourced unconditionally so any command can use them, but io_init is only
+# called from commands that actually want the install-log + step UI
+# treatment (currently cmd_setup).
+if [ -f "$SCRIPT_DIR/installer/output.sh" ]; then
+    # shellcheck source=installer/output.sh
+    source "$SCRIPT_DIR/installer/output.sh"
+fi
+
 wait_for_db() {
     echo "Waiting for database to be ready..."
     local retries=30
@@ -180,12 +189,21 @@ cmd_setup() {
                 local_build=true
                 shift
                 ;;
+            --verbose|-v)
+                BIOAF_VERBOSE=1
+                shift
+                ;;
             *)
                 red "Unknown option: $1"
                 exit 1
                 ;;
         esac
     done
+    export BIOAF_VERBOSE="${BIOAF_VERBOSE:-0}"
+    export BIOAF_INSTALL_LOG="${HOME}/.bioaf/install.log"
+    if declare -F io_init >/dev/null 2>&1; then
+        io_init
+    fi
 
     # OS gate -- catch macOS/Windows before anything else
     local os
@@ -236,19 +254,18 @@ cmd_setup() {
         fi
     fi
 
-    bold "=== bioAF First-Run Setup ==="
-    echo ""
+    section "bioAF First-Run Setup"
 
     # Auto-run install.sh if it hasn't been run yet
     if [ ! -f "$ENV_FILE" ] || [ ! -f "$SCRIPT_DIR/docker/certs/tls.crt" ]; then
-        bold "Running installer (first time)..."
-        "$SCRIPT_DIR/install.sh" --non-interactive --quiet
-        echo ""
+        step "Run first-time installer (generate .env, TLS certs)" -- \
+            "$SCRIPT_DIR/install.sh" --non-interactive --quiet
     else
         # .env and certs exist -- just ensure they're current (idempotent)
-        "$SCRIPT_DIR/install.sh" generate-env --non-interactive
-        "$SCRIPT_DIR/install.sh" generate-certs
-        echo ""
+        step "Refresh .env" -- \
+            "$SCRIPT_DIR/install.sh" generate-env --non-interactive
+        step "Refresh TLS certs" -- \
+            "$SCRIPT_DIR/install.sh" generate-certs
     fi
 
     # Remove stale database volume if it exists. The volume holds the
@@ -264,50 +281,46 @@ for v in cfg.get('volumes', {}).values():
 " 2>/dev/null || echo "")
 
     if [ -n "$vol_name" ] && docker volume inspect "$vol_name" > /dev/null 2>&1; then
-        yellow "Removing existing database volume ($vol_name) to avoid password mismatch..."
-        $DC down -v 2>/dev/null || true
+        maybe_step "Remove stale database volume ($vol_name) to avoid password mismatch" -- \
+            $DC down -v
     fi
 
     # Cloud Logging (GCE only, idempotent)
-    ensure_cloud_logging
+    maybe_step "Configure Cloud Logging (GCE only, idempotent)" -- ensure_cloud_logging
 
     # Update agent (idempotent)
-    ensure_update_agent
+    maybe_step "Configure update agent (idempotent)" -- ensure_update_agent
 
     # If a specific version was requested, checkout that tag
     if [ -n "$setup_version" ]; then
-        bold "Checking out version ${setup_version}..."
-        git -C "$SCRIPT_DIR" fetch --tags --force
+        step "Fetch tags from origin" -- git -C "$SCRIPT_DIR" fetch --tags --force
         if ! git -C "$SCRIPT_DIR" rev-parse "v${setup_version}" >/dev/null 2>&1; then
-            red "ERROR: Version ${setup_version} not found."
+            fail_line "Version ${setup_version} not found."
+            io_finish
             exit 1
         fi
-        git -C "$SCRIPT_DIR" checkout "v${setup_version}"
+        step "Checkout v${setup_version}" -- git -C "$SCRIPT_DIR" checkout "v${setup_version}"
     fi
 
     # Resolve and pull pre-built images (falls back to building from source).
     # --local-build short-circuits the registry lookup entirely.
     if [ "$local_build" = true ]; then
-        bold "Building images from local source (--local-build)..."
         export BIOAF_IMAGE_TAG="v$(get_current_version)"
-        $DC_BUILD
-        green "Local build complete."
+        step "Build images from local source (--local-build)" -- $DC_BUILD
     else
-        resolve_and_pull_images "$setup_version"
+        step "Resolve and pull bioAF images" -- resolve_and_pull_images "$setup_version"
     fi
     # Pin whichever tag we ended up with so future start/restart commands
     # always use this exact version, independent of the worktree.
     pin_image_tag "${BIOAF_IMAGE_TAG:-v$(get_current_version)}"
-    $DC up -d
+    step "Start services (docker compose up -d)" -- $DC up -d
 
     # Wait for DB
-    wait_for_db
+    step "Wait for database to accept connections" -- wait_for_db
 
     # Run migrations
-    bold "Running database migrations..."
-    $DC exec -T backend alembic -c alembic/alembic.ini upgrade head
-    green "Migrations complete."
-    echo ""
+    step "Run database migrations (alembic upgrade head)" -- \
+        $DC exec -T backend alembic -c alembic/alembic.ini upgrade head
 
     # Apply prefill values to platform_config if --prefill was supplied.
     # The file is YAML with flat key/value pairs, e.g.:
@@ -317,10 +330,10 @@ for v in cfg.get('volumes', {}).values():
     # Each pair is upserted into the existing platform_config table; existing
     # rows are overwritten so re-running setup with a fresh prefill always wins.
     if [ -n "$prefill_path" ]; then
-        bold "Applying prefill values to platform_config..."
-        # Copy the file into the backend container so we don't have to volume-mount it.
-        $DC cp "$prefill_path" backend:/tmp/bioaf-prefill.yaml >/dev/null
-        $DC exec -T backend python -c "
+        step "Copy prefill into backend container" -- \
+            $DC cp "$prefill_path" backend:/tmp/bioaf-prefill.yaml
+        step "Apply prefill values to platform_config" -- \
+            $DC exec -T backend python -c "
 import asyncio, yaml
 from sqlalchemy import text
 from app.database import async_session_factory
@@ -345,19 +358,22 @@ async def _apply():
 
 asyncio.run(_apply())
 "
-        green "Prefill applied."
-        echo ""
     fi
 
-    # Generate setup code via the Python service
-    bold "Generating setup code..."
+    # Generate setup code via the Python service. We need its stdout, so
+    # use $() directly rather than step.
     local setup_response
     setup_response=$($DC exec -T backend python -c "
 import asyncio, json
 from app.services.setup_code_service import generate_setup_code_for_cli
 result = asyncio.run(generate_setup_code_for_cli())
 print(json.dumps(result))
-")
+" 2>>"$BIOAF_INSTALL_LOG" || echo '')
+    if [ -z "$setup_response" ]; then
+        fail_line "Failed to generate a setup code (see $BIOAF_INSTALL_LOG)."
+        io_finish
+        exit 1
+    fi
 
     local already_setup
     already_setup=$(echo "$setup_response" | python3 -c "import sys, json; print(json.load(sys.stdin).get('already_setup', False))")
@@ -368,6 +384,7 @@ print(json.dumps(result))
         echo ""
         green "bioAF is already set up."
         echo "Log in at: $access_url"
+        if declare -F io_finish >/dev/null 2>&1; then io_finish; fi
         return 0
     fi
 
@@ -388,7 +405,7 @@ print(json.dumps(result))
     echo ""
     echo "  Open the setup wizard in your browser:"
     echo ""
-    echo "    ${access_url}/setup"
+    green "    ${access_url}/setup"
     echo ""
     echo "  Enter the code above to begin platform setup."
     echo "  The code expires in 1 hour."
@@ -400,6 +417,7 @@ print(json.dumps(result))
     echo "  ./bioaf logs       Tail logs (use -n N for more lines)"
     echo "  ./bioaf stop       Stop all services"
     echo "  ./bioaf help       Show all commands"
+    if declare -F io_finish >/dev/null 2>&1; then io_finish; fi
 }
 
 cmd_start() {
@@ -1062,7 +1080,9 @@ cmd_help() {
     echo "Usage: ./bioaf <command> [args]"
     echo ""
     bold "First-Run:"
-    echo "  setup [--version X.Y.Z]  Pull images and generate a setup code for the web wizard"
+    echo "  setup [--version X.Y.Z] [--prefill FILE] [--verbose]"
+    echo "                      Pull images and generate a setup code for the web wizard."
+    echo "                      Verbose output goes to ~/.bioaf/install.log by default."
     echo ""
     bold "Service Management:"
     echo "  start               Start all services"
