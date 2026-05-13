@@ -155,17 +155,12 @@ async def inspect_file(
         raise HTTPException(404, "File not found")
 
     # Load GCP credentials from platform_config
-    from sqlalchemy import text
+    from app.services.platform_config_service import PlatformConfigService
 
-    config_rows = (
-        await session.execute(
-            text(
-                "SELECT key, value FROM platform_config "
-                "WHERE key IN ('gcp_credential_source', 'gcp_service_account_key', 'gcp_service_account_email')"
-            )
-        )
-    ).fetchall()
-    config = {r[0]: r[1] for r in config_rows}
+    config = await PlatformConfigService.get_many(
+        session,
+        ["gcp_credential_source", "gcp_service_account_key", "gcp_service_account_email"],
+    )
     credentials = load_gcp_credentials(config)
 
     info = inspect_h5ad(file.gcs_uri, credentials=credentials)

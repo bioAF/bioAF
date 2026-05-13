@@ -253,19 +253,22 @@ class GCEWorkNodeProvider(WorkNodeProvider):
             return self._gcp_config
 
         async with self._session_factory() as session:
-            result = await session.execute(
-                sa_text(
-                    "SELECT key, value FROM platform_config "
-                    "WHERE key IN ("
-                    "  'gcp_project_id', 'gcp_zone', 'gcp_region',"
-                    "  'gcp_credential_source',"
-                    "  'gcp_service_account_key', 'gcp_service_account_email',"
-                    "  'gcp_bootstrap_sa_email',"
-                    "  'notebook_runner_sa_email', 'working_bucket_name'"
-                    ")"
-                )
+            from app.services.platform_config_service import PlatformConfigService
+
+            self._gcp_config = await PlatformConfigService.get_many(
+                session,
+                [
+                    "gcp_project_id",
+                    "gcp_zone",
+                    "gcp_region",
+                    "gcp_credential_source",
+                    "gcp_service_account_key",
+                    "gcp_service_account_email",
+                    "gcp_bootstrap_sa_email",
+                    "notebook_runner_sa_email",
+                    "working_bucket_name",
+                ],
             )
-            self._gcp_config = {r[0]: r[1] for r in result.fetchall()}
 
         return self._gcp_config
 
