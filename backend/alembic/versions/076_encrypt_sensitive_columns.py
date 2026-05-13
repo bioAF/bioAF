@@ -76,9 +76,7 @@ def upgrade() -> None:
     # 2. Backfill each encrypted column. Encrypts every non-null row whose
     # current value does not already look like Fernet ciphertext.
     for table, column, _widen in _ENCRYPTED_COLUMNS:
-        rows = bind.execute(
-            sa.text(f"SELECT id, {column} FROM {table} WHERE {column} IS NOT NULL")
-        ).fetchall()
+        rows = bind.execute(sa.text(f"SELECT id, {column} FROM {table} WHERE {column} IS NOT NULL")).fetchall()
         for row_id, value in rows:
             if value is None:
                 continue
@@ -94,8 +92,7 @@ def upgrade() -> None:
     if SENSITIVE_PLATFORM_CONFIG_KEYS:
         pc_rows = bind.execute(
             sa.text(
-                "SELECT id, key, value FROM platform_config "
-                "WHERE key = ANY(:keys) AND value IS NOT NULL"
+                "SELECT id, key, value FROM platform_config WHERE key = ANY(:keys) AND value IS NOT NULL"
             ).bindparams(keys=list(SENSITIVE_PLATFORM_CONFIG_KEYS))
         ).fetchall()
         for row_id, _key, value in pc_rows:
@@ -122,9 +119,7 @@ def downgrade() -> None:
     bind = op.get_bind()
 
     for table, column, _widen in _ENCRYPTED_COLUMNS:
-        rows = bind.execute(
-            sa.text(f"SELECT id, {column} FROM {table} WHERE {column} IS NOT NULL")
-        ).fetchall()
+        rows = bind.execute(sa.text(f"SELECT id, {column} FROM {table} WHERE {column} IS NOT NULL")).fetchall()
         for row_id, value in rows:
             if value is None or not encryption_service.looks_like_ciphertext(value):
                 continue
@@ -136,9 +131,9 @@ def downgrade() -> None:
 
     if SENSITIVE_PLATFORM_CONFIG_KEYS:
         pc_rows = bind.execute(
-            sa.text(
-                "SELECT id, key, value FROM platform_config WHERE key = ANY(:keys)"
-            ).bindparams(keys=list(SENSITIVE_PLATFORM_CONFIG_KEYS))
+            sa.text("SELECT id, key, value FROM platform_config WHERE key = ANY(:keys)").bindparams(
+                keys=list(SENSITIVE_PLATFORM_CONFIG_KEYS)
+            )
         ).fetchall()
         for row_id, _key, value in pc_rows:
             if value is None or not encryption_service.looks_like_ciphertext(value):

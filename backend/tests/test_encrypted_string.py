@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import Column, Integer, Text, select
+from sqlalchemy import Integer, Text, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from app.services import encryption_service

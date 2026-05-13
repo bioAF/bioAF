@@ -67,7 +67,7 @@ def validate_encryption_keys(raw: str) -> list[str]:
     if not keys:
         logger.critical(
             "FATAL: BIOAF_ENCRYPTION_KEYS is unset. "
-            "Generate a key with `python3 -c \"from cryptography.fernet import Fernet; "
+            'Generate a key with `python3 -c "from cryptography.fernet import Fernet; '
             'print(Fernet.generate_key().decode())"` and set BIOAF_ENCRYPTION_KEYS. '
             "Run `./install.sh generate-env --force` to regenerate secrets."
         )
@@ -78,8 +78,7 @@ def validate_encryption_keys(raw: str) -> list[str]:
     for index, key in enumerate(keys):
         if len(key) != FERNET_KEY_LENGTH:
             logger.critical(
-                "FATAL: BIOAF_ENCRYPTION_KEYS entry %d is %d chars; expected %d "
-                "(urlsafe-base64 Fernet key).",
+                "FATAL: BIOAF_ENCRYPTION_KEYS entry %d is %d chars; expected %d (urlsafe-base64 Fernet key).",
                 index,
                 len(key),
                 FERNET_KEY_LENGTH,
