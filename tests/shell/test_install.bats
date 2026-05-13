@@ -112,6 +112,20 @@ teardown() {
     [ -n "$secret" ]
 }
 
+@test "generate-env produces a valid 44-char urlsafe Fernet key for BIOAF_ENCRYPTION_KEYS" {
+    cd "$BIOAF_ROOT"
+    run bash install.sh generate-env --non-interactive
+    [ "$status" -eq 0 ]
+    # Fernet key contract: 44 chars, urlsafe-base64 (only A-Z a-z 0-9 - _ =).
+    # The backend's validate_encryption_keys rejects anything else, so this
+    # test is the canary for "fresh install will start cleanly".
+    local key
+    key=$(grep "^BIOAF_ENCRYPTION_KEYS=" "$BIOAF_ROOT/docker/.env" | cut -d= -f2-)
+    [ -n "$key" ]
+    [ "${#key}" -eq 44 ]
+    [[ "$key" =~ ^[A-Za-z0-9_-]+=$ ]]
+}
+
 @test "generate-env preserves existing POSTGRES_PASSWORD and SECRET_KEY across re-runs" {
     cd "$BIOAF_ROOT"
     cat > "$BIOAF_ROOT/docker/.env" <<'EOF'
@@ -173,8 +187,8 @@ DATABASE_URL=postgresql+asyncpg://bioaf:existing_password_abc123@db:5432/bioaf
 SECRET_KEY=existing_secret_xyz789
 BIOAF_ENVIRONMENT=production
 EOF
-    if ! command -v python3 >/dev/null 2>&1; then
-        skip "python3 required for Fernet key generation"
+    if ! command -v openssl >/dev/null 2>&1; then
+        skip "openssl required for Fernet key generation"
     fi
     run bash install.sh ensure-encryption-key
     [ "$status" -eq 0 ]
@@ -184,12 +198,15 @@ EOF
     grep -q "^SECRET_KEY=existing_secret_xyz789$" "$BIOAF_ROOT/docker/.env"
 
     # New variable added with a syntactically valid Fernet key (44 chars,
-    # urlsafe-base64, ends with '=').
+    # urlsafe-base64, ends with '=', uses '-' and '_' instead of '+' and '/').
     local key
     key=$(grep "^BIOAF_ENCRYPTION_KEYS=" "$BIOAF_ROOT/docker/.env" | cut -d= -f2-)
     [ -n "$key" ]
     [ "${#key}" -eq 44 ]
     [[ "$key" == *"=" ]]
+    # Must not contain the non-urlsafe base64 characters.
+    [[ "$key" != *"+"* ]]
+    [[ "$key" != *"/"* ]]
 }
 
 @test "ensure-encryption-key is idempotent when key already present" {
@@ -221,8 +238,8 @@ POSTGRES_USER=bioaf
 BIOAF_ENCRYPTION_KEYS=
 BIOAF_ENVIRONMENT=production
 EOF
-    if ! command -v python3 >/dev/null 2>&1; then
-        skip "python3 required for Fernet key generation"
+    if ! command -v openssl >/dev/null 2>&1; then
+        skip "openssl required for Fernet key generation"
     fi
     run bash install.sh ensure-encryption-key
     [ "$status" -eq 0 ]
