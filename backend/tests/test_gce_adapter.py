@@ -51,8 +51,8 @@ def test_get_gcp_credentials_works_with_legacy_key_mode():
 
 @pytest.mark.asyncio
 async def test_load_gcp_config_includes_bootstrap_sa_email_key():
-    """The platform_config SELECT must include gcp_bootstrap_sa_email."""
-    captured_sql: list[str] = []
+    """The platform_config lookup must request gcp_bootstrap_sa_email."""
+    captured_keys: list[list[str]] = []
 
     class _FakeResult:
         def fetchall(self):
@@ -66,7 +66,12 @@ async def test_load_gcp_config_includes_bootstrap_sa_email_key():
             return False
 
         async def execute(self, stmt):
-            captured_sql.append(str(stmt))
+            # Adapter now goes through PlatformConfigService.get_many, which
+            # uses parameterized SQL. Inspect the bound params instead of the
+            # SQL text to confirm the bootstrap key is requested.
+            params = getattr(stmt, "compile", lambda: stmt)().params if hasattr(stmt, "compile") else {}
+            keys = params.get("keys", [])
+            captured_keys.append(list(keys))
             return _FakeResult()
 
     def factory():
@@ -75,7 +80,7 @@ async def test_load_gcp_config_includes_bootstrap_sa_email_key():
     provider = GCEWorkNodeProvider(session_factory=factory)
     await provider.load_gcp_config()
 
-    assert any("gcp_bootstrap_sa_email" in s for s in captured_sql), captured_sql
+    assert any("gcp_bootstrap_sa_email" in keys for keys in captured_keys), captured_keys
 
 
 def test_work_node_sa_resolution_drops_legacy_email_fallback():
