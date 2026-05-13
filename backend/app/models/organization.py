@@ -5,6 +5,7 @@ from sqlalchemy import Boolean, DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+from app.types import EncryptedString
 
 
 class Organization(Base):
@@ -17,12 +18,12 @@ class Organization(Base):
     smtp_host: Mapped[str] = mapped_column(String(255), default="")
     smtp_port: Mapped[int] = mapped_column(Integer, default=587)
     smtp_username: Mapped[str] = mapped_column(String(255), default="")
-    smtp_password: Mapped[str] = mapped_column(String(500), default="")
+    smtp_password: Mapped[str] = mapped_column(EncryptedString, default="")
     smtp_from_address: Mapped[str] = mapped_column(String(255), default="")
     smtp_encryption: Mapped[str] = mapped_column(String(20), default="starttls")
     slack_client_id: Mapped[str] = mapped_column(String(255), default="")
-    slack_client_secret: Mapped[str] = mapped_column(String(500), default="")
-    slack_signing_secret: Mapped[str] = mapped_column(String(255), default="")
+    slack_client_secret: Mapped[str] = mapped_column(EncryptedString, default="")
+    slack_signing_secret: Mapped[str] = mapped_column(EncryptedString, default="")
     setup_code_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, default=None)
     setup_code_expires_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
