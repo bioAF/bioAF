@@ -67,11 +67,18 @@ export function ServiceAccountsTab({ roles }: Props) {
   const handleCreateSa = async () => {
     if (!newName.trim() || !newRoleId) return;
     try {
-      await integrationsApi.createServiceAccount(newName.trim(), newRoleId);
+      const created = await integrationsApi.createServiceAccount(newName.trim(), newRoleId);
       setShowCreate(false);
       setNewName("");
       setNewRoleId(null);
-      load();
+      await load();
+      // Open the new SA's drawer and jump straight to the mint-key modal.
+      // Creating a service account is almost always immediately followed by
+      // minting a key for it; making that two clicks hides the path. Open
+      // the drawer auto-expanded so "Mint key" is visible without hunting.
+      setSelectedSa(created);
+      await refreshKeys(created.id);
+      setShowMintKey(true);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Failed to create service account");
     }
@@ -131,7 +138,7 @@ export function ServiceAccountsTab({ roles }: Props) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-2">
         <p className="text-sm text-gray-600">
           Service accounts authenticate external LIMS systems against the integration API.
         </p>
@@ -142,6 +149,11 @@ export function ServiceAccountsTab({ roles }: Props) {
           Create Service Account
         </button>
       </div>
+      <p className="text-xs text-gray-500 mb-4">
+        API keys live under each service account. Create an account, then click its row to mint a
+        scoped key. The full <code className="bg-gray-100 px-1 rounded">biokey_…</code> secret is
+        shown exactly once at mint time.
+      </p>
 
       {error && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded text-sm">
@@ -153,7 +165,8 @@ export function ServiceAccountsTab({ roles }: Props) {
         <LoadingSpinner size="lg" />
       ) : accounts.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-6 text-center text-sm text-gray-500">
-          No service accounts yet. Create one to let an external LIMS read or write to bioAF.
+          No service accounts yet. Click <strong>Create Service Account</strong> above to start.
+          Once created, you can click into it to mint an API key.
         </div>
       ) : (
         <div className="bg-white rounded-lg shadow overflow-hidden">

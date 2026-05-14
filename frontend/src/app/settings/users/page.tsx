@@ -373,7 +373,7 @@ function SettingsUsersPageInner() {
         <Header />
         <main className="flex-1 overflow-y-auto p-6">
           <div className="flex items-center justify-between mb-4">
-            <h1 className="text-2xl font-bold">Users and Accounts</h1>
+            <h1 className="text-2xl font-bold">Users &amp; Accounts</h1>
             {activeTab === "users" && (
               <button
                 onClick={() => setShowInvite(!showInvite)}
