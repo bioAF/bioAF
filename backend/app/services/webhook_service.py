@@ -137,7 +137,9 @@ async def update_subscription(
     return row
 
 
-async def rotate_secret(session: AsyncSession, sub_id: int, org_id: int, actor_user_id: int) -> tuple[WebhookSubscription, str]:
+async def rotate_secret(
+    session: AsyncSession, sub_id: int, org_id: int, actor_user_id: int
+) -> tuple[WebhookSubscription, str]:
     row = (
         await session.execute(
             select(WebhookSubscription).where(
@@ -161,10 +163,10 @@ async def rotate_secret(session: AsyncSession, sub_id: int, org_id: int, actor_u
     return row, new_secret
 
 
-async def disable_subscription(session: AsyncSession, sub_id: int, org_id: int, actor_user_id: int) -> WebhookSubscription:
-    return await update_subscription(
-        session, sub_id, org_id, actor_user_id, is_active=False
-    )
+async def disable_subscription(
+    session: AsyncSession, sub_id: int, org_id: int, actor_user_id: int
+) -> WebhookSubscription:
+    return await update_subscription(session, sub_id, org_id, actor_user_id, is_active=False)
 
 
 async def list_deliveries(
@@ -185,17 +187,11 @@ async def list_deliveries(
     return list(result.scalars().all())
 
 
-async def replay_delivery(
-    session: AsyncSession, delivery_id: int, actor_user_id: int
-) -> WebhookDelivery:
+async def replay_delivery(session: AsyncSession, delivery_id: int, actor_user_id: int) -> WebhookDelivery:
     """Clone an existing delivery into a fresh pending row."""
     from datetime import datetime, timezone
 
-    row = (
-        await session.execute(
-            select(WebhookDelivery).where(WebhookDelivery.id == delivery_id)
-        )
-    ).scalar_one_or_none()
+    row = (await session.execute(select(WebhookDelivery).where(WebhookDelivery.id == delivery_id))).scalar_one_or_none()
     if row is None:
         raise LookupError(f"webhook_delivery {delivery_id} not found")
     clone = WebhookDelivery(
@@ -220,9 +216,7 @@ async def replay_delivery(
     return clone
 
 
-async def fire_test_event(
-    session: AsyncSession, sub_id: int, org_id: int, actor_user_id: int
-) -> WebhookDelivery:
+async def fire_test_event(session: AsyncSession, sub_id: int, org_id: int, actor_user_id: int) -> WebhookDelivery:
     """Synthesize a webhook.test event delivery for an admin-driven smoke test."""
     from datetime import datetime, timezone
 

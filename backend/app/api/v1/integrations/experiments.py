@@ -19,6 +19,7 @@ from app.database import get_session
 from app.models.experiment import Experiment
 from app.models.experiment_custom_field import ExperimentCustomField
 from app.models.project import Project
+from app.schemas.integrations.common import CustomFieldOut
 from app.schemas.integrations.experiment import (
     ExperimentCreate,
     ExperimentListOut,
@@ -50,7 +51,8 @@ def _experiment_out(exp: Experiment) -> ExperimentOut:
         variables_json=exp.variables_json,
         created_at=exp.created_at,
         custom_fields=[
-            {"field_name": cf.field_name, "field_value": cf.field_value} for cf in (exp.custom_fields or [])
+            CustomFieldOut(field_name=cf.field_name, field_value=cf.field_value)
+            for cf in (exp.custom_fields or [])
         ],
     )
 

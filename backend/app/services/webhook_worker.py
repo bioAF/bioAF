@@ -40,9 +40,7 @@ async def _send_one(
         "X-bioAF-Signature": signature,
     }
     try:
-        resp = await client.post(
-            subscription.url, content=body_bytes, headers=headers
-        )
+        resp = await client.post(subscription.url, content=body_bytes, headers=headers)
         body_truncated = resp.text[:MAX_RESPONSE_BODY_BYTES]
         return (200 <= resp.status_code < 300, resp.status_code, body_truncated)
     except Exception as exc:
@@ -74,10 +72,10 @@ async def _drain_once() -> int:
 
         sub_ids = {d.subscription_id for d in deliveries}
         subs = (
-            await session.execute(
-                select(WebhookSubscription).where(WebhookSubscription.id.in_(sub_ids))
-            )
-        ).scalars().all()
+            (await session.execute(select(WebhookSubscription).where(WebhookSubscription.id.in_(sub_ids))))
+            .scalars()
+            .all()
+        )
         subs_by_id = {s.id: s for s in subs}
 
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:

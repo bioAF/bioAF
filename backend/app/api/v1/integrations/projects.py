@@ -16,6 +16,7 @@ from app.api.v1.integrations.dependencies import require_api_key_permission
 from app.database import get_session
 from app.models.project import Project
 from app.models.project_custom_field import ProjectCustomField
+from app.schemas.integrations.common import CustomFieldOut
 from app.schemas.integrations.project import (
     ProjectCreate,
     ProjectListOut,
@@ -44,7 +45,8 @@ def _project_out(project: Project) -> ProjectOut:
         status=project.status,
         created_at=project.created_at,
         custom_fields=[
-            {"field_name": cf.field_name, "field_value": cf.field_value} for cf in (project.custom_fields or [])
+            CustomFieldOut(field_name=cf.field_name, field_value=cf.field_value)
+            for cf in (project.custom_fields or [])
         ],
     )
 

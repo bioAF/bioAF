@@ -73,13 +73,17 @@ async def dispatch_event(internal_event: str, payload: dict[str, Any]) -> None:
 
     async with database_module.async_session_factory() as session:
         subs = (
-            await session.execute(
-                select(WebhookSubscription).where(
-                    WebhookSubscription.organization_id == org_id,
-                    WebhookSubscription.is_active.is_(True),
+            (
+                await session.execute(
+                    select(WebhookSubscription).where(
+                        WebhookSubscription.organization_id == org_id,
+                        WebhookSubscription.is_active.is_(True),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         created = 0
         for sub in subs:
             if public_event not in (sub.events or []):
@@ -110,8 +114,6 @@ def _make_callback(internal_event: str):
         try:
             await dispatch_event(internal_event, payload)
         except Exception as exc:  # pragma: no cover - defensive
-            logger.exception(
-                "webhook dispatcher failed for %s: %s", internal_event, exc
-            )
+            logger.exception("webhook dispatcher failed for %s: %s", internal_event, exc)
 
     return _cb

@@ -69,13 +69,9 @@ def upgrade() -> None:
         sa.Column("subscription_id", sa.BigInteger(), nullable=False),
         sa.Column("event_id", sa.String(32), nullable=False),
         sa.Column("event_type", sa.String(64), nullable=False),
-        sa.Column(
-            "payload_json", postgresql.JSONB(astext_type=sa.Text()), nullable=False
-        ),
+        sa.Column("payload_json", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column("status", sa.String(16), nullable=False),
-        sa.Column(
-            "attempt_count", sa.SmallInteger(), nullable=False, server_default="0"
-        ),
+        sa.Column("attempt_count", sa.SmallInteger(), nullable=False, server_default="0"),
         sa.Column("next_attempt_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_response_status", sa.SmallInteger(), nullable=True),
         sa.Column("last_response_body", sa.Text(), nullable=True),
@@ -87,9 +83,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("delivered_at", sa.DateTime(timezone=True), nullable=True),
-        sa.ForeignKeyConstraint(
-            ["subscription_id"], ["webhook_subscriptions.id"]
-        ),
+        sa.ForeignKeyConstraint(["subscription_id"], ["webhook_subscriptions.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
@@ -97,9 +91,7 @@ def upgrade() -> None:
         "webhook_deliveries",
         ["subscription_id"],
     )
-    op.create_index(
-        "ix_webhook_deliveries_event_type", "webhook_deliveries", ["event_type"]
-    )
+    op.create_index("ix_webhook_deliveries_event_type", "webhook_deliveries", ["event_type"])
     op.create_index(
         "ix_webhook_deliveries_status_next",
         "webhook_deliveries",
@@ -112,7 +104,5 @@ def downgrade() -> None:
     op.drop_index("ix_webhook_deliveries_event_type", table_name="webhook_deliveries")
     op.drop_index("ix_webhook_deliveries_subscription_id", table_name="webhook_deliveries")
     op.drop_table("webhook_deliveries")
-    op.drop_index(
-        "ix_webhook_subscriptions_organization_id", table_name="webhook_subscriptions"
-    )
+    op.drop_index("ix_webhook_subscriptions_organization_id", table_name="webhook_subscriptions")
     op.drop_table("webhook_subscriptions")

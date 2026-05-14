@@ -17,6 +17,7 @@ from app.database import get_session
 from app.models.experiment import Experiment
 from app.models.sample import Sample
 from app.models.sample_custom_field import SampleCustomField
+from app.schemas.integrations.common import CustomFieldOut
 from app.schemas.integrations.sample import (
     SampleCreate,
     SampleListOut,
@@ -52,7 +53,8 @@ def _sample_out(sample: Sample) -> SampleOut:
         status=sample.status,
         created_at=sample.created_at,
         custom_fields=[
-            {"field_name": cf.field_name, "field_value": cf.field_value} for cf in (sample.custom_fields or [])
+            CustomFieldOut(field_name=cf.field_name, field_value=cf.field_value)
+            for cf in (sample.custom_fields or [])
         ],
     )
 

@@ -1,5 +1,49 @@
 # Release Notes
 
+## v0.14.0
+
+First public LIMS integration surface. Introduces a versioned key-authenticated
+API at `/api/v1/integrations/*` plus signed outbound webhooks, so external
+LIMS systems (Benchling, LabKey, in-house tooling) can read and write
+projects, experiments, samples, and file metadata without manual re-keying.
+See ADR-048, ADR-049, ADR-050, ADR-051 and addenda to ADR-009 / ADR-032.
+
+### Changes
+
+- **New public sub-app at `/api/v1/integrations/*`.** Mounted as a
+  separate FastAPI app with its own OpenAPI document served in
+  production. The main app's `/docs` and `/openapi.json` remain gated.
+  Resources covered in v1: projects (create/upsert/list/get/patch),
+  experiments (same shape, no status writes), samples (no QC writes),
+  files (read-only metadata, `gcs_uri` excluded). All endpoints honor
+  `Idempotency-Key` retries and upsert by `external_id` on create.
+- **Service accounts and API keys.** Org-scoped service accounts are
+  `User` rows with `is_service_account=true` and a synthetic
+  non-routable email. Keys format `biokey_<prefix>.<secret>`, bcrypt
+  hashed, with per-key scope envelopes intersected with the SA role.
+  Service accounts cannot log in interactively.
+- **Outbound webhooks.** Per-org subscriptions with HMAC-signed
+  payloads (`X-bioAF-Signature: t=...,v1=sha256(t.body)`). Background
+  worker delivers with `FOR UPDATE SKIP LOCKED`, exponential backoff
+  (1m, 5m, 30m, 2h, 12h), and `dead_letter` after five failures.
+  Public event vocabulary: `experiment.*`, `sample.*`, `file.*`.
+- **Audit-log actor tuple.** New nullable `audit_log.api_key_id`
+  column. API-key-authenticated routes write rows with both
+  `user_id` (SA) and `api_key_id` so revocation decisions are
+  unambiguous in incidents.
+- **Admin UI: Users and Accounts.** Settings > Users renamed to
+  Settings > Users and Accounts with four tabs: Users (unchanged),
+  Service Accounts, Webhooks, API Activity. Key minting and webhook
+  creation both reveal the secret exactly once through a modal that
+  blocks dismissal until the operator acknowledges they have saved
+  the value.
+- **Additive migrations 077, 078, 079.** No drops, no renames.
+
+### Operator action required
+
+None. The new endpoints are off-network until an admin creates a
+service account and mints a key from the UI.
+
 ## v0.13.2
 
 Polish on the installer UX and one resiliency fix: removes a confusing

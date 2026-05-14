@@ -3,12 +3,10 @@
 import asyncio
 import hashlib
 import hmac
-import json
 from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
-import respx
 from sqlalchemy import select
 
 from app.models.webhook import WebhookDelivery, WebhookSubscription
@@ -37,11 +35,7 @@ async def test_create_subscription_returns_secret_once(session, admin_user):
     await session.commit()
     assert secret.startswith("whsec_")
     # The encrypted column round-trips back to the same plaintext.
-    fresh = (
-        await session.execute(
-            select(WebhookSubscription).where(WebhookSubscription.id == row.id)
-        )
-    ).scalar_one()
+    fresh = (await session.execute(select(WebhookSubscription).where(WebhookSubscription.id == row.id))).scalar_one()
     assert fresh.secret == secret
 
 
@@ -59,9 +53,7 @@ async def test_create_subscription_rejects_unknown_event_type(session, admin_use
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_creates_one_delivery_per_active_subscription(
-    session, admin_user
-):
+async def test_dispatcher_creates_one_delivery_per_active_subscription(session, admin_user):
     await webhook_service.create_subscription(
         session,
         org_id=admin_user.organization_id,
@@ -90,12 +82,10 @@ async def test_dispatcher_creates_one_delivery_per_active_subscription(
     )
 
     deliveries = (
-        await session.execute(
-            select(WebhookDelivery).where(
-                WebhookDelivery.event_type == WEBHOOK_EXPERIMENT_CREATED
-            )
-        )
-    ).scalars().all()
+        (await session.execute(select(WebhookDelivery).where(WebhookDelivery.event_type == WEBHOOK_EXPERIMENT_CREATED)))
+        .scalars()
+        .all()
+    )
     assert len(deliveries) == 1
     payload = deliveries[0].payload_json
     assert payload["event"] == WEBHOOK_EXPERIMENT_CREATED
@@ -138,9 +128,7 @@ async def test_signature_validates(session, admin_user):
     body = b'{"id":"evt_x","event":"experiment.created"}'
     sig = webhook_service.sign_payload("whsec_test", body, timestamp=1717000000)
     assert sig.startswith("t=1717000000,v1=")
-    expected = hmac.new(
-        b"whsec_test", b"1717000000." + body, hashlib.sha256
-    ).hexdigest()
+    expected = hmac.new(b"whsec_test", b"1717000000." + body, hashlib.sha256).hexdigest()
     assert sig.endswith(expected)
 
 
@@ -160,15 +148,11 @@ async def test_worker_marks_2xx_as_delivered(session, admin_user, respx_mock):
         {"organization_id": admin_user.organization_id, "data": {"experiment_id": 1}},
     )
 
-    respx_mock.post("https://hooks.example/path").mock(
-        return_value=httpx.Response(200, json={"ok": True})
-    )
+    respx_mock.post("https://hooks.example/path").mock(return_value=httpx.Response(200, json={"ok": True}))
     await webhook_worker._drain_once()
 
     delivery = (
-        await session.execute(
-            select(WebhookDelivery).where(WebhookDelivery.subscription_id == sub.id)
-        )
+        await session.execute(select(WebhookDelivery).where(WebhookDelivery.subscription_id == sub.id))
     ).scalar_one()
     await session.refresh(delivery)
     assert delivery.status == "delivered"
@@ -190,15 +174,11 @@ async def test_worker_retries_on_5xx(session, admin_user, respx_mock):
         INTEGRATION_EXPERIMENT_CREATED,
         {"organization_id": admin_user.organization_id, "data": {"experiment_id": 1}},
     )
-    respx_mock.post("https://hooks.example/fail").mock(
-        return_value=httpx.Response(500, text="bad")
-    )
+    respx_mock.post("https://hooks.example/fail").mock(return_value=httpx.Response(500, text="bad"))
     await webhook_worker._drain_once()
 
     delivery = (
-        await session.execute(
-            select(WebhookDelivery).where(WebhookDelivery.subscription_id == sub.id)
-        )
+        await session.execute(select(WebhookDelivery).where(WebhookDelivery.subscription_id == sub.id))
     ).scalar_one()
     await session.refresh(delivery)
     assert delivery.status == "pending"
@@ -221,17 +201,13 @@ async def test_worker_dead_letters_after_max_attempts(session, admin_user, respx
         INTEGRATION_EXPERIMENT_CREATED,
         {"organization_id": admin_user.organization_id, "data": {"experiment_id": 1}},
     )
-    respx_mock.post("https://hooks.example/dead").mock(
-        return_value=httpx.Response(500, text="bad")
-    )
+    respx_mock.post("https://hooks.example/dead").mock(return_value=httpx.Response(500, text="bad"))
 
     # Run the worker enough times to exceed MAX_ATTEMPTS. Reset next_attempt_at
     # between iterations so the worker actually picks the row up.
     for _ in range(webhook_service.MAX_ATTEMPTS + 1):
         d = (
-            await session.execute(
-                select(WebhookDelivery).where(WebhookDelivery.subscription_id == sub.id)
-            )
+            await session.execute(select(WebhookDelivery).where(WebhookDelivery.subscription_id == sub.id))
         ).scalar_one()
         if d.status != "pending":
             break
@@ -240,9 +216,7 @@ async def test_worker_dead_letters_after_max_attempts(session, admin_user, respx
         await webhook_worker._drain_once()
 
     delivery = (
-        await session.execute(
-            select(WebhookDelivery).where(WebhookDelivery.subscription_id == sub.id)
-        )
+        await session.execute(select(WebhookDelivery).where(WebhookDelivery.subscription_id == sub.id))
     ).scalar_one()
     await session.refresh(delivery)
     assert delivery.status == "dead_letter"
@@ -265,9 +239,7 @@ async def test_replay_clones_into_pending(session, admin_user):
         {"organization_id": admin_user.organization_id, "data": {"experiment_id": 1}},
     )
     original = (
-        await session.execute(
-            select(WebhookDelivery).where(WebhookDelivery.subscription_id == sub.id)
-        )
+        await session.execute(select(WebhookDelivery).where(WebhookDelivery.subscription_id == sub.id))
     ).scalar_one()
     # Mark the original as dead_letter so we can prove replay clones a fresh row.
     original.status = "dead_letter"
@@ -292,9 +264,7 @@ async def test_fire_test_event(session, admin_user):
         created_by_user_id=admin_user.id,
     )
     await session.commit()
-    delivery = await webhook_service.fire_test_event(
-        session, sub.id, admin_user.organization_id, admin_user.id
-    )
+    delivery = await webhook_service.fire_test_event(session, sub.id, admin_user.organization_id, admin_user.id)
     await session.commit()
     assert delivery.event_type == webhook_service.TEST_EVENT_TYPE
     assert delivery.status == "pending"
@@ -330,12 +300,14 @@ async def test_dispatcher_subscribes_via_event_bus(session, admin_user):
         # Give the event bus a tick to deliver
         await asyncio.sleep(0.05)
         deliveries = (
-            await session.execute(
-                select(WebhookDelivery).where(
-                    WebhookDelivery.event_type == WEBHOOK_EXPERIMENT_CREATED
+            (
+                await session.execute(
+                    select(WebhookDelivery).where(WebhookDelivery.event_type == WEBHOOK_EXPERIMENT_CREATED)
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(deliveries) == 1
     finally:
         event_bus._subscribers = original
