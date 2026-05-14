@@ -154,7 +154,7 @@ This is a single migration + codebase-wide refactor. All existing tests are upda
 
 For a request authenticated by an API key, `require_permission(resource, action)` passes iff:
 
-```
+```python
 role_has_permission(user.role_id, resource, action) AND f"{resource}:{action}" in user.scopes
 ```
 

@@ -28,6 +28,7 @@ Add a per-organization webhook subscription model. Persist every delivery attemp
 - **Subscription model:** `webhook_subscriptions` table. Per-org. Admin-managed via Settings > Users and Accounts. Each row has a URL, friendly name, list of subscribed event types, HMAC secret, and `is_active`. Secret stored encrypted via `EncryptedString` ([ADR-047](ADR-047-data-at-rest-encryption.md)).
 - **Delivery model:** `webhook_deliveries` table. One row per `(subscription, event)` pair. Columns include `status` (`pending`, `delivered`, `failed`, `dead_letter`), `attempt_count`, `next_attempt_at`, `last_response_status`, `last_response_body` (truncated to 4KB), `payload_json` (full envelope as sent).
 - **Event envelope (every payload):**
+
   ```json
   {
     "id": "evt_01H...",        // ULID; receivers dedupe on this
@@ -37,6 +38,7 @@ Add a per-organization webhook subscription model. Persist every delivery attemp
     "data": { ... }
   }
   ```
+
 - **Headers:**
   - `X-bioAF-Event: <event_type>`
   - `X-bioAF-Delivery: <delivery_id>`
