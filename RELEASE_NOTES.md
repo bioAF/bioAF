@@ -1,5 +1,85 @@
 # Release Notes
 
+## v0.15.0
+
+Hardens the LIMS integration API introduced in v0.14.0 and lands a set of
+related identifier, audit, and admin-UX fixes from real-world use.
+Published API contracts ship in `docs/api/`.
+
+### Breaking changes (Integration API)
+
+These affect external systems calling `/api/v1/integrations/*` and shipped
+before any consumer hit production, but the contract has changed:
+
+- `POST /projects`, `/experiments`, `/samples` now **require** a non-empty
+  `external_id`. Missing returns `422`.
+- Duplicate `external_id` is **rejected with `409 external_id_already_exists`**
+  (previously upserted with `200`). Use `PATCH` to update existing rows;
+  use `Idempotency-Key` for safe retries. Duplicate scope: per-org for
+  projects/experiments, per-experiment for samples.
+- `POST /projects` no longer accepts a `code` field. `code` is now
+  server-generated.
+- The samples integration field is renamed `sample_id_external` -> `external_id`
+  in request bodies, response bodies, the list query parameter, and the
+  `sample.created`/`sample.updated` event payloads.
+
+### Identifiers
+
+- Every project, experiment, and sample now carries an internal `uuid`
+  (NOT NULL, server-default `gen_random_uuid()`). Internal use only; not
+  exposed via API or UI.
+- Project and experiment `code` is now a per-org odometer:
+  `{4-char org prefix}p-{NNNN}` for projects, `{4-char org prefix}e-{NNNN}`
+  for experiments (e.g. `bioap-0008`, `bioae-0025`). Counter lives in the
+  new `org_code_counters` table and never decrements on delete. Existing
+  codes are left in place; the new scheme applies only to new rows.
+- Lists and detail pages show `external_id || code` as the ID. Detail
+  pages display both. Sample tables fall back to `#{id}` since samples
+  do not have a `code` today.
+
+### Database
+
+- Migration 080 is additive only:
+  - `uuid` on `projects`, `experiments`, `samples`.
+  - `samples.external_id` (new column; data copied from the now-dead
+    `samples.sample_id_external`, which stays in place pending a future
+    drop). The SQLAlchemy attribute `Sample.sample_id_unique` is renamed
+    `Sample.external_id` and propagated across services, CSV mapping,
+    raw SQL, and tests.
+  - `org_code_counters` (org_id, kind, next_value).
+- No drops, no renames. The old column is recorded in the local-only
+  `documentation/dead_columns.md`.
+
+### Admin UX (Settings > Users & Accounts)
+
+- Service accounts no longer appear in the Users tab (`/api/users` now
+  filters `is_service_account=False`).
+- "Users who have never logged in" panel: excludes service accounts,
+  applies a 2-day grace window after invite, and returns / renders
+  `role_name` instead of leaving an empty `()` placeholder.
+- Service Accounts and Webhooks tabs use centered detail and edit modals
+  (no more right-hand drawer); both gain Edit modals matching the Users
+  tab pattern. Service Account edit lets you change display name and
+  role; Webhook edit covers name, URL, events, and is_active.
+- Mint API Key dialog no longer asks for per-key scopes. A key inherits
+  its scopes from the service account's role; the dialog shows the role
+  and permission count as context.
+- "Create custom role" shortcut on Create / Edit Service Account opens
+  the same Create Role modal used in Settings > Roles & Permissions and
+  auto-selects the freshly created role on save (modal extracted to
+  `frontend/src/components/settings/RoleEditorModal.tsx` for reuse).
+- API Activity tab Key column shows `{service account name} / {key name}`
+  instead of the raw `api_key_id`. The admin endpoint joins `ApiKey` and
+  the SA `User` row and returns both labels per audit row.
+
+### Docs
+
+- `docs/api/` now publishes the human-readable contracts for the
+  integration API: overview, auth, conventions, per-resource endpoints
+  (projects, experiments, samples, files), and webhooks (event catalog,
+  signature, retry/dead-letter, replay). The live OpenAPI document at
+  `/api/v1/integrations/openapi.json` remains the authoritative schema.
+
 ## v0.14.0
 
 First public LIMS integration surface. Introduces a versioned key-authenticated
