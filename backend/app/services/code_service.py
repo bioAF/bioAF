@@ -1,12 +1,15 @@
 """Auto-generation of project codes and experiment codes."""
 
 import re
-from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-VOWELS = set("aeiouAEIOU")
+from app.models.org_code_counter import OrgCodeCounter
+from app.models.organization import Organization
+
+PROJECT_CODE_KIND = "project"
+EXPERIMENT_CODE_KIND = "experiment"
 
 # Extension → data type label mapping
 _EXT_DATA_TYPES: dict[str, str] = {
@@ -32,49 +35,32 @@ _EXT_DATA_TYPES: dict[str, str] = {
 
 class CodeService:
     # ------------------------------------------------------------------
-    # Project code helpers (pure, no DB)
+    # Code format helpers (pure, no DB)
     # ------------------------------------------------------------------
 
     @staticmethod
-    def derive_project_prefix(name: str) -> str:
-        """Return the consonant-initial prefix from a project name.
+    def derive_org_prefix(org_name: str) -> str:
+        """Lowercase, drop non-alphanumeric, take first 4 chars.
 
-        For each space-delimited token, take the first consonant (a,e,i,o,u
-        are vowels). Tokens with no consonants are skipped. Result is
-        uppercased. Falls back to 'PRJ' if no consonants found.
+        Examples:
+        - "bioAF" -> "bioa"
+        - "Acme & Co" -> "acme"
+        - "42 Bio" -> "42bi"
+        - "X" -> "x"
+        Returns "" if no alphanumerics in the name (caller must handle).
         """
-        tokens = name.split()
-        consonants: list[str] = []
-        for token in tokens:
-            for ch in token:
-                if ch.isalpha() and ch not in VOWELS:
-                    consonants.append(ch.upper())
-                    break
-        return "".join(consonants) if consonants else "PRJ"
+        cleaned = re.sub(r"[^a-z0-9]", "", org_name.lower())
+        return cleaned[:4]
 
     @staticmethod
-    def generate_project_code(name: str, year: int, existing_codes: list[str]) -> str:
-        """Build a project code like CS26-1.
-
-        Counter is per-prefix-per-year: looks at *existing_codes* for entries
-        matching ``{prefix}{2-digit-year}-N`` and picks the next integer.
-        """
-        prefix = CodeService.derive_project_prefix(name)
-        yr = str(year)[-2:]  # 2-digit year
-        pattern = re.compile(rf"^{re.escape(prefix)}{re.escape(yr)}-(\d+)$")
-
-        max_counter = 0
-        for code in existing_codes:
-            m = pattern.match(code)
-            if m:
-                max_counter = max(max_counter, int(m.group(1)))
-
-        return f"{prefix}{yr}-{max_counter + 1}"
+    def format_project_code(org_prefix: str, counter: int) -> str:
+        """Build a project code like 'bioap-0008'."""
+        return f"{org_prefix}p-{counter:04d}"
 
     @staticmethod
-    def generate_experiment_code(existing_count: int) -> str:
-        """Return E001, E002, ... based on how many experiments already exist."""
-        return f"E{existing_count + 1:03d}"
+    def format_experiment_code(org_prefix: str, counter: int) -> str:
+        """Build an experiment code like 'bioae-0025'."""
+        return f"{org_prefix}e-{counter:04d}"
 
     # ------------------------------------------------------------------
     # Filename suggestion (pure, no DB)
@@ -142,29 +128,56 @@ class CodeService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def next_project_code(session: AsyncSession, org_id: int, name: str) -> str:
-        """Query existing project codes for the org and return the next code."""
-        from app.models.project import Project
+    async def _next_counter(session: AsyncSession, org_id: int, kind: str) -> int:
+        """Atomically allocate the next counter value for (org_id, kind).
 
-        year = datetime.now().year
-        rows = await session.execute(
-            select(Project.code).where(
-                Project.organization_id == org_id,
-                Project.code.isnot(None),
+        Treats the counter as an odometer: monotonically increasing, never
+        reset, unaffected by deletes.
+        """
+        row = (
+            await session.execute(
+                select(OrgCodeCounter)
+                .where(OrgCodeCounter.organization_id == org_id, OrgCodeCounter.kind == kind)
+                .with_for_update()
             )
-        )
-        existing = [r[0] for r in rows.all() if r[0]]
-        return CodeService.generate_project_code(name, year, existing)
+        ).scalar_one_or_none()
+
+        if row is None:
+            row = OrgCodeCounter(organization_id=org_id, kind=kind, next_value=1)
+            session.add(row)
+            await session.flush()
+
+        value = row.next_value
+        row.next_value = value + 1
+        await session.flush()
+        return value
+
+    @staticmethod
+    async def _org_prefix_for(session: AsyncSession, org_id: int) -> str:
+        org = (await session.execute(select(Organization).where(Organization.id == org_id))).scalar_one()
+        prefix = CodeService.derive_org_prefix(org.name or "")
+        return prefix or "org"
+
+    @staticmethod
+    async def next_project_code(session: AsyncSession, org_id: int, name: str) -> str:
+        """Return the next project code (e.g., 'bioap-0008') for the org.
+
+        The ``name`` argument is retained for backwards-compatible call sites
+        but is no longer used: codes are derived from the organization name.
+        """
+        del name  # unused; org prefix drives code now
+        prefix = await CodeService._org_prefix_for(session, org_id)
+        counter = await CodeService._next_counter(session, org_id, PROJECT_CODE_KIND)
+        return CodeService.format_project_code(prefix, counter)
 
     @staticmethod
     async def next_experiment_code(session: AsyncSession, org_id: int, project_id: int | None) -> str:
-        """Return the next experiment code (E001, E002, ...) for the project."""
-        from app.models.experiment import Experiment
+        """Return the next experiment code (e.g., 'bioae-0025') for the org.
 
-        where = [Experiment.organization_id == org_id]
-        if project_id is not None:
-            where.append(Experiment.project_id == project_id)
-
-        result = await session.execute(select(func.count()).select_from(Experiment).where(*where))
-        count = result.scalar_one()
-        return CodeService.generate_experiment_code(count)
+        The ``project_id`` argument is retained for backwards-compatible call
+        sites but is no longer used: the counter is per-org, not per-project.
+        """
+        del project_id  # unused; counter is org-scoped now
+        prefix = await CodeService._org_prefix_for(session, org_id)
+        counter = await CodeService._next_counter(session, org_id, EXPERIMENT_CODE_KIND)
+        return CodeService.format_experiment_code(prefix, counter)
