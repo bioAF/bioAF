@@ -72,6 +72,7 @@ from app.models.api_key import ApiKey
 from app.models.project_custom_field import ProjectCustomField
 from app.models.idempotency_key import IdempotencyKey
 from app.models.webhook import WebhookSubscription, WebhookDelivery
+from app.models.org_code_counter import OrgCodeCounter
 
 __all__ = [
     "User",
@@ -155,4 +156,5 @@ __all__ = [
     "IdempotencyKey",
     "WebhookSubscription",
     "WebhookDelivery",
+    "OrgCodeCounter",
 ]
