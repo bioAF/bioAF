@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -13,6 +13,18 @@ import { api, ApiError } from "@/lib/api";
 import type { User, Role, RoleListResponse } from "@/lib/types";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { DetailModal } from "@/components/shared/DetailModal";
+import { ServiceAccountsTab } from "./components/ServiceAccountsTab";
+import { WebhooksTab } from "./components/WebhooksTab";
+import { ApiActivityTab } from "./components/ApiActivityTab";
+
+type TabKey = "users" | "service-accounts" | "webhooks" | "api-activity";
+
+const TAB_LABELS: Record<TabKey, string> = {
+  users: "Users",
+  "service-accounts": "Service Accounts",
+  webhooks: "Webhooks",
+  "api-activity": "API Activity",
+};
 
 interface NeverLoggedInUser {
   id: number;
@@ -34,7 +46,14 @@ type PendingAction =
 
 export default function SettingsUsersPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { canAccess, loading: permLoading } = usePermissions();
+  const initialTab = (searchParams?.get("tab") as TabKey) || "users";
+  const [activeTab, setActiveTab] = useState<TabKey>(
+    (["users", "service-accounts", "webhooks", "api-activity"] as TabKey[]).includes(initialTab)
+      ? initialTab
+      : "users",
+  );
   const [users, setUsers] = useState<User[]>([]);
   const [viewingUser, setViewingUser] = useState<User | null>(null);
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -345,16 +364,45 @@ export default function SettingsUsersPage() {
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header />
         <main className="flex-1 overflow-y-auto p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h1 className="text-2xl font-bold">Users & Roles</h1>
-            <button
-              onClick={() => setShowInvite(!showInvite)}
-              className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
-            >
-              {showInvite ? "Close" : "Invite Users"}
-            </button>
+          <div className="flex items-center justify-between mb-4">
+            <h1 className="text-2xl font-bold">Users and Accounts</h1>
+            {activeTab === "users" && (
+              <button
+                onClick={() => setShowInvite(!showInvite)}
+                className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
+              >
+                {showInvite ? "Close" : "Invite Users"}
+              </button>
+            )}
           </div>
 
+          <div className="flex border-b border-gray-200 mb-6">
+            {(Object.keys(TAB_LABELS) as TabKey[]).map((key) => (
+              <button
+                key={key}
+                onClick={() => {
+                  setActiveTab(key);
+                  const params = new URLSearchParams(searchParams?.toString() ?? "");
+                  params.set("tab", key);
+                  router.replace(`/settings/users?${params.toString()}`);
+                }}
+                className={`px-4 py-2 -mb-px border-b-2 text-sm font-medium ${
+                  activeTab === key
+                    ? "border-bioaf-600 text-bioaf-700"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                {TAB_LABELS[key]}
+              </button>
+            ))}
+          </div>
+
+          {activeTab === "service-accounts" && <ServiceAccountsTab roles={roles} />}
+          {activeTab === "webhooks" && <WebhooksTab />}
+          {activeTab === "api-activity" && <ApiActivityTab />}
+
+          {activeTab === "users" && (
+          <>
           {error && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded text-sm">
               {error}
@@ -459,6 +507,8 @@ export default function SettingsUsersPage() {
                 </tbody>
               </table>
             </div>
+          )}
+          </>
           )}
 
           {/* Confirmation dialog */}

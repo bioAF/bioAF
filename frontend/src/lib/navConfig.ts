@@ -101,7 +101,7 @@ export const navConfig: NavSection[] = [
     icon: "settings",
     adminOnly: true,
     children: [
-      { label: "Users", path: "/settings/users", permission: { resource: "users", action: "view" } },
+      { label: "Users and Accounts", path: "/settings/users", permission: { resource: "users", action: "view" } },
       { label: "Roles & Permissions", path: "/settings/roles", permission: { resource: "roles", action: "view" } },
       { label: "Audit Log", path: "/settings/audit-log", permission: { resource: "audit_log", action: "view" } },
       { label: "Integrations", path: "/settings/integrations", permission: { resource: "infrastructure", action: "configure" } },
