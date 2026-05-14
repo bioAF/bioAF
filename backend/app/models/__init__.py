@@ -71,6 +71,7 @@ from app.models.nf_core_registry_refresh import NfCoreRegistryRefresh
 from app.models.api_key import ApiKey
 from app.models.project_custom_field import ProjectCustomField
 from app.models.idempotency_key import IdempotencyKey
+from app.models.webhook import WebhookSubscription, WebhookDelivery
 
 __all__ = [
     "User",
@@ -152,4 +153,6 @@ __all__ = [
     "ApiKey",
     "ProjectCustomField",
     "IdempotencyKey",
+    "WebhookSubscription",
+    "WebhookDelivery",
 ]

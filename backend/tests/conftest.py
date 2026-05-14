@@ -89,7 +89,19 @@ async def db_engine(worker_id):
             cursor.execute(f"SET search_path TO {schema}")
             cursor.close()
 
+    # Redirect any code path that calls `app.database.async_session_factory`
+    # directly (auth middleware, webhook dispatcher and worker, etc.) to the
+    # test engine for the duration of this test.
+    import app.database as database_module
+
+    original_session_factory = database_module.async_session_factory
+    database_module.async_session_factory = async_sessionmaker(  # type: ignore[assignment]
+        engine, class_=AsyncSession, expire_on_commit=False
+    )
+
     yield engine
+
+    database_module.async_session_factory = original_session_factory  # type: ignore[assignment]
 
     if schema != "public":
         async with engine.begin() as conn:
