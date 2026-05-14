@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
@@ -7,11 +7,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
 from app.api.dependencies import require_permission
 from app.models.audit_log import AuditLog
+from app.models.role import Role
 from app.models.user import User
 from app.schemas.access_log import AccessLogEntry, AccessLogListResponse
 from app.services.access_log_service import AccessLogService
 
 router = APIRouter(prefix="/api/access-logs", tags=["access-logs"])
+
+# Hide newly-invited users from the "never logged in" nudge for this many days
+# so that admins are not pinged about accounts that were just created.
+NEVER_LOGGED_IN_GRACE_DAYS = 2
 
 
 @router.get("/never-logged-in")
@@ -19,7 +24,12 @@ async def never_logged_in_users(
     current_user: dict = require_permission("audit_log", "view"),
     session: AsyncSession = Depends(get_session),
 ):
-    """List users in the org who have never logged in."""
+    """List human users in the org who have never logged in, older than the grace window.
+
+    Excludes service accounts (which authenticate via API keys, not browser
+    login) and users created within ``NEVER_LOGGED_IN_GRACE_DAYS`` so that
+    fresh invites do not produce a false-positive nag.
+    """
     org_id = current_user["org_id"]
 
     # Check audit_log for logins since that's where all historical logins
@@ -32,11 +42,24 @@ async def never_logged_in_users(
         .subquery()
     )
 
+    cutoff = datetime.now(timezone.utc) - timedelta(days=NEVER_LOGGED_IN_GRACE_DAYS)
+
     result = await session.execute(
-        select(User.id, User.email, User.name, User.role_id, User.status, User.created_at)
+        select(
+            User.id,
+            User.email,
+            User.name,
+            User.role_id,
+            User.status,
+            User.created_at,
+            Role.name.label("role_name"),
+        )
+        .outerjoin(Role, Role.id == User.role_id)
         .where(User.organization_id == org_id)
         .where(User.id.notin_(select(logged_in_subq.c.user_id)))
         .where(User.status != "deactivated")
+        .where(User.is_service_account.is_(False))
+        .where(User.created_at <= cutoff)
         .order_by(User.created_at.asc())
     )
     rows = result.all()
@@ -48,6 +71,7 @@ async def never_logged_in_users(
                 "email": r.email,
                 "name": r.name,
                 "role_id": r.role_id,
+                "role_name": r.role_name,
                 "status": r.status,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
             }

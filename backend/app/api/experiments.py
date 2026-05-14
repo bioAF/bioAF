@@ -48,6 +48,7 @@ def _experiment_response(exp) -> ExperimentResponse:
         id=exp.id,
         name=exp.name,
         code=exp.code,
+        external_id=exp.external_id,
         project=ProjectSummary(id=exp.project.id, name=exp.project.name) if exp.project else None,
         template_id=exp.template_id,
         template_name=exp.template.name if exp.template else None,
@@ -135,6 +136,8 @@ async def get_experiment(
     return ExperimentDetailResponse(
         id=experiment.id,
         name=experiment.name,
+        code=experiment.code,
+        external_id=experiment.external_id,
         project=ProjectSummary(id=experiment.project.id, name=experiment.project.name) if experiment.project else None,
         template_id=experiment.template_id,
         template_name=experiment.template.name if experiment.template else None,
@@ -152,7 +155,7 @@ async def get_experiment(
         samples=[
             SampleResponseBrief(
                 id=s.id,
-                sample_id_unique=s.sample_id_unique,
+                external_id=s.external_id,
                 organism=s.organism,
                 tissue_type=s.tissue_type,
                 molecule_type=s.molecule_type,
@@ -246,7 +249,7 @@ async def list_experiment_samples(
     return [
         SampleResponse(
             id=s.id,
-            sample_id_unique=s.sample_id_unique,
+            external_id=s.external_id,
             organism=s.organism,
             tissue_type=s.tissue_type,
             donor_source=s.donor_source,
@@ -292,7 +295,7 @@ async def create_sample(
     sample = await SampleService.get_sample(session, sample.id)
     return SampleResponse(
         id=sample.id,
-        sample_id_unique=sample.sample_id_unique,
+        external_id=sample.external_id,
         organism=sample.organism,
         tissue_type=sample.tissue_type,
         donor_source=sample.donor_source,

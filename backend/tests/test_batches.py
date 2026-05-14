@@ -69,12 +69,12 @@ async def test_assign_samples_to_sample_batch(client, admin_token, experiment_id
     # Create samples
     s1 = await client.post(
         f"/api/experiments/{experiment_id}/samples",
-        json={"sample_id_unique": "AS001"},
+        json={"external_id": "AS001"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     s2 = await client.post(
         f"/api/experiments/{experiment_id}/samples",
-        json={"sample_id_unique": "AS002"},
+        json={"external_id": "AS002"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
 
@@ -113,7 +113,7 @@ async def test_list_sample_batches_with_sample_counts(client, admin_token, exper
     # Add samples to batch
     await client.post(
         f"/api/experiments/{experiment_id}/samples",
-        json={"sample_id_unique": "CB001", "sample_batch_code": "Count Batch"},
+        json={"external_id": "CB001", "sample_batch_code": "Count Batch"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
 

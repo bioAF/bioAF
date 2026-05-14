@@ -453,7 +453,7 @@ async def _resolve_input_file_context(
     if file_ids:
         rows = await session.execute(
             sa_text(
-                "SELECT sf.file_id, COALESCE(s.sample_id_external, CAST(s.id AS TEXT)) "
+                "SELECT sf.file_id, COALESCE(s.external_id, CAST(s.id AS TEXT)) "
                 "FROM sample_files sf "
                 "JOIN samples s ON s.id = sf.sample_id "
                 "WHERE sf.file_id = ANY(:ids)"

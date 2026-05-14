@@ -19,8 +19,12 @@ class UserService:
 
     @staticmethod
     async def list_users(session: AsyncSession, org_id: int) -> list[User]:
+        """Return human users for the org; service accounts have their own tab."""
         result = await session.execute(
-            select(User).where(User.organization_id == org_id).order_by(User.created_at.desc())
+            select(User)
+            .where(User.organization_id == org_id)
+            .where(User.is_service_account.is_(False))
+            .order_by(User.created_at.desc())
         )
         return list(result.scalars().all())
 

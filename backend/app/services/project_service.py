@@ -151,6 +151,7 @@ class ProjectService:
                     "id": project.id,
                     "name": project.name,
                     "code": project.code,
+                    "external_id": project.external_id,
                     "description": project.description,
                     "hypothesis": project.hypothesis,
                     "status": project.status,
@@ -185,7 +186,7 @@ class ProjectService:
             select(Experiment, Sample)
             .outerjoin(Sample, Sample.experiment_id == Experiment.id)
             .where(Experiment.project_id == project_id)
-            .order_by(Experiment.name, Sample.sample_id_unique)
+            .order_by(Experiment.name, Sample.external_id)
         )
         exp_result = await session.execute(exp_stmt)
         exp_rows = exp_result.all()
@@ -196,7 +197,7 @@ class ProjectService:
             .join(Sample, Sample.id == ProjectSample.sample_id)
             .join(Experiment, Experiment.id == Sample.experiment_id)
             .where(ProjectSample.project_id == project_id)
-            .order_by(Experiment.name, Sample.sample_id_unique)
+            .order_by(Experiment.name, Sample.external_id)
         )
         ps_result = await session.execute(ps_stmt)
         ps_rows = ps_result.all()
@@ -225,7 +226,7 @@ class ProjectService:
                 groups[experiment.id]["samples"].append(
                     {
                         "sample_id": sample.id,
-                        "sample_id_unique": sample.sample_id_unique,
+                        "external_id": sample.external_id,
                         "organism": sample.organism,
                         "tissue_type": sample.tissue_type,
                         "qc_status": sample.qc_status,
@@ -249,7 +250,7 @@ class ProjectService:
             groups[experiment.id]["samples"].append(
                 {
                     "sample_id": sample.id,
-                    "sample_id_unique": sample.sample_id_unique,
+                    "external_id": sample.external_id,
                     "organism": sample.organism,
                     "tissue_type": sample.tissue_type,
                     "qc_status": sample.qc_status,

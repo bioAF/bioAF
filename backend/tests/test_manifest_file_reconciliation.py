@@ -187,7 +187,7 @@ async def test_manifest_entry_enhances_resolution(client: AsyncClient, admin_tok
 
     sample_resp = await client.post(
         f"/api/experiments/{exp_id}/samples",
-        json={"sample_id_unique": "ENHANCE-001", "sequencing_batch_code": "ENH-BATCH"},
+        json={"external_id": "ENHANCE-001", "sequencing_batch_code": "ENH-BATCH"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     await session.commit()

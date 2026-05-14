@@ -8,10 +8,9 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api, ApiError } from "@/lib/api";
-import type { Role, RoleListResponse, PermissionEntry } from "@/lib/types";
+import type { Role, RoleListResponse } from "@/lib/types";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-
-type PermissionCatalog = Record<string, string[]>;
+import { RoleEditorModal, type PermissionCatalog } from "@/components/settings/RoleEditorModal";
 
 export default function SettingsRolesPage() {
   const router = useRouter();
@@ -25,10 +24,6 @@ export default function SettingsRolesPage() {
   // Create/edit form
   const [showForm, setShowForm] = useState(false);
   const [editingRole, setEditingRole] = useState<Role | null>(null);
-  const [formName, setFormName] = useState("");
-  const [formDescription, setFormDescription] = useState("");
-  const [formPermissions, setFormPermissions] = useState<Record<string, Set<string>>>({});
-  const [saving, setSaving] = useState(false);
 
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState<Role | null>(null);
@@ -60,9 +55,6 @@ export default function SettingsRolesPage() {
 
   function openCreateForm() {
     setEditingRole(null);
-    setFormName("");
-    setFormDescription("");
-    setFormPermissions({});
     setShowForm(true);
     setError("");
     setSuccess("");
@@ -70,87 +62,15 @@ export default function SettingsRolesPage() {
 
   function openEditForm(role: Role) {
     setEditingRole(role);
-    setFormName(role.name);
-    setFormDescription(role.description || "");
-    const perms: Record<string, Set<string>> = {};
-    for (const p of role.permissions) {
-      if (!perms[p.resource]) perms[p.resource] = new Set();
-      perms[p.resource].add(p.action);
-    }
-    setFormPermissions(perms);
     setShowForm(true);
     setError("");
     setSuccess("");
   }
 
-  function togglePermission(resource: string, action: string) {
-    setFormPermissions((prev) => {
-      const next = { ...prev };
-      if (!next[resource]) next[resource] = new Set();
-      else next[resource] = new Set(next[resource]);
-      if (next[resource].has(action)) {
-        next[resource].delete(action);
-        if (next[resource].size === 0) delete next[resource];
-      } else {
-        next[resource].add(action);
-      }
-      return next;
-    });
-  }
-
-  function toggleAllForResource(resource: string, actions: string[]) {
-    setFormPermissions((prev) => {
-      const next = { ...prev };
-      const current = prev[resource] || new Set();
-      const allSelected = actions.every((a) => current.has(a));
-      if (allSelected) {
-        delete next[resource];
-      } else {
-        next[resource] = new Set(actions);
-      }
-      return next;
-    });
-  }
-
-  function buildPermissionList(): PermissionEntry[] {
-    const perms: PermissionEntry[] = [];
-    for (const [resource, actions] of Object.entries(formPermissions)) {
-      for (const action of actions) {
-        perms.push({ resource, action });
-      }
-    }
-    return perms;
-  }
-
-  async function handleSave() {
-    if (!formName.trim()) { setError("Role name is required"); return; }
-    setSaving(true);
-    setError("");
-    try {
-      if (editingRole) {
-        await api.patch(`/api/roles/${editingRole.id}`, {
-          name: formName.trim(),
-          description: formDescription.trim() || null,
-        });
-        await api.put(`/api/roles/${editingRole.id}/permissions`, {
-          permissions: buildPermissionList(),
-        });
-        setSuccess(`Role "${formName}" updated`);
-      } else {
-        await api.post("/api/roles", {
-          name: formName.trim(),
-          description: formDescription.trim() || null,
-          permissions: buildPermissionList(),
-        });
-        setSuccess(`Role "${formName}" created`);
-      }
-      setShowForm(false);
-      await loadData();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Save failed");
-    } finally {
-      setSaving(false);
-    }
+  async function handleRoleSaved(saved: Role) {
+    setShowForm(false);
+    setSuccess(`Role "${saved.name}" ${editingRole ? "updated" : "created"}`);
+    await loadData();
   }
 
   async function handleDelete() {
@@ -306,93 +226,13 @@ export default function SettingsRolesPage() {
               );
             })()}
 
-            {/* Create/Edit modal */}
             {showForm && (
-              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-                  <div className="p-6 border-b">
-                    <h2 className="text-lg font-semibold">
-                      {editingRole ? `Edit Role: ${editingRole.name}` : "Create New Role"}
-                    </h2>
-                  </div>
-                  <div className="p-6 space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                        <input
-                          type="text"
-                          value={formName}
-                          onChange={(e) => setFormName(e.target.value)}
-                          className="w-full border rounded px-3 py-2 text-sm"
-                          placeholder="e.g. data_analyst"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                        <input
-                          type="text"
-                          value={formDescription}
-                          onChange={(e) => setFormDescription(e.target.value)}
-                          className="w-full border rounded px-3 py-2 text-sm"
-                          placeholder="Optional description"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <h3 className="text-sm font-semibold text-gray-700 mb-2">Permissions</h3>
-                      <div className="border rounded divide-y max-h-96 overflow-y-auto">
-                        {Object.entries(catalog).sort(([a], [b]) => a.localeCompare(b)).map(([resource, actions]) => {
-                          const selected = formPermissions[resource] || new Set();
-                          const allSelected = actions.every((a) => selected.has(a));
-                          return (
-                            <div key={resource} className="p-3">
-                              <div className="flex items-center justify-between mb-2">
-                                <span className="text-sm font-medium text-gray-800">{resource}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => toggleAllForResource(resource, actions)}
-                                  className="text-xs text-blue-600 hover:underline"
-                                >
-                                  {allSelected ? "Deselect all" : "Select all"}
-                                </button>
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                {actions.sort().map((action) => (
-                                  <label key={action} className="flex items-center gap-1 text-xs cursor-pointer">
-                                    <input
-                                      type="checkbox"
-                                      checked={selected.has(action)}
-                                      onChange={() => togglePermission(resource, action)}
-                                      className="rounded border-gray-300"
-                                    />
-                                    <span className="text-gray-700">{action}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="p-6 border-t flex justify-end gap-3">
-                    <button
-                      onClick={() => setShowForm(false)}
-                      className="px-4 py-2 text-sm border rounded hover:bg-gray-50"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleSave}
-                      disabled={saving}
-                      className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-                    >
-                      {saving ? "Saving..." : editingRole ? "Save Changes" : "Create Role"}
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <RoleEditorModal
+                editingRole={editingRole}
+                catalog={catalog}
+                onClose={() => setShowForm(false)}
+                onSaved={handleRoleSaved}
+              />
             )}
 
             {/* Delete confirm */}

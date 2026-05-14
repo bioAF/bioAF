@@ -259,7 +259,7 @@ class FileService:
             return {"id": u.id, "name": u.name, "email": u.email}
 
         def _sample_label(sample: Sample) -> str:
-            return sample.sample_id_unique or f"Sample {sample.id}"
+            return sample.external_id or f"Sample {sample.id}"
 
         def _session_kind_and_type(cs: ComputeSession) -> tuple[str, str | None]:
             if cs.session_type == "ssh":

@@ -255,6 +255,16 @@ async def lifespan(app: FastAPI):
     background_tasks.append(asyncio.create_task(_work_node_heartbeat_loop()))
     background_tasks.append(asyncio.create_task(_export_cleanup_loop()))
     background_tasks.append(asyncio.create_task(_nf_core_registry_refresh_loop()))
+
+    # LIMS integration (ADR-051): subscribe webhook dispatcher to internal
+    # events, start the delivery worker, and add an idempotency-key cleanup
+    # tick alongside the existing background loops.
+    from app.services import webhook_dispatcher
+    from app.services.webhook_worker import run_worker_loop as _webhook_run_worker_loop
+
+    webhook_dispatcher.subscribe_all()
+    background_tasks.append(asyncio.create_task(_webhook_run_worker_loop()))
+    background_tasks.append(asyncio.create_task(_idempotency_cleanup_loop()))
     logger.info("Background tasks started")
 
     yield
@@ -414,6 +424,24 @@ async def _notification_cleanup_loop():
             break
         except Exception as e:
             logger.error("Notification cleanup error: %s", e)
+
+
+async def _idempotency_cleanup_loop():
+    """Sweep expired idempotency_keys rows once an hour (ADR-050)."""
+    from app import database as database_module
+    from app.services import idempotency_service
+
+    while True:
+        try:
+            await asyncio.sleep(3600)
+            async with database_module.async_session_factory() as session:
+                deleted = await idempotency_service.cleanup_expired(session)
+                if deleted:
+                    await session.commit()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error("Idempotency cleanup error: %s", e)
 
 
 async def _backup_health_check_loop():
@@ -774,6 +802,12 @@ def create_app() -> FastAPI:
     from app.api.router import api_router
 
     application.include_router(api_router)
+
+    # Public integration API sub-app (ADR-048). Owns its own OpenAPI document;
+    # docs are served in production regardless of the main app's gating.
+    from app.api.v1.integrations import build_integrations_app
+
+    application.mount("/api/v1/integrations", build_integrations_app())
     return application
 
 

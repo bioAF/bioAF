@@ -293,7 +293,7 @@ export default function ExperimentDetailPage() {
   function startEditSample(sample: Sample) {
     setEditingSampleId(sample.id);
     setEditSampleForm({
-      sample_id_unique: sample.sample_id_unique,
+      external_id: sample.external_id,
       organism: sample.organism,
       tissue_type: sample.tissue_type,
       donor_source: sample.donor_source,
@@ -448,7 +448,10 @@ export default function ExperimentDetailPage() {
             </button>
             <h1 className="text-2xl font-bold">{experiment.name}</h1>
             {experiment.code && (
-              <span className="text-sm font-mono bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{experiment.code}</span>
+              <span className="text-sm font-mono bg-gray-100 text-gray-600 px-2 py-0.5 rounded" title="Internal ID">{experiment.code}</span>
+            )}
+            {experiment.external_id && (
+              <span className="text-sm font-mono bg-blue-50 text-blue-700 px-2 py-0.5 rounded" title="External ID">{experiment.external_id}</span>
             )}
             <ExperimentStatusBadge status={experiment.status} />
             <div className="ml-auto flex items-center gap-2">
@@ -755,7 +758,7 @@ export default function ExperimentDetailPage() {
               {showSampleForm && (
                 <div className="bg-white rounded-lg shadow p-4 mb-4">
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    <input placeholder="External Sample ID" value={sampleForm.sample_id_unique ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, sample_id_unique: e.target.value })} className="border rounded px-3 py-2 text-sm" />
+                    <input placeholder="External Sample ID" value={sampleForm.external_id ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, external_id: e.target.value })} className="border rounded px-3 py-2 text-sm" />
                     <input placeholder="Organism" value={sampleForm.organism ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, organism: e.target.value })} className="border rounded px-3 py-2 text-sm" />
                     <input placeholder="Tissue Type" value={sampleForm.tissue_type ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, tissue_type: e.target.value })} className="border rounded px-3 py-2 text-sm" />
                     <input placeholder="Donor ID" value={sampleForm.donor_source ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, donor_source: e.target.value })} className="border rounded px-3 py-2 text-sm" />
@@ -824,7 +827,7 @@ export default function ExperimentDetailPage() {
                           className="rounded border-gray-300"
                         />
                       </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">External ID</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Organism</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tissue</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Molecule</th>
@@ -848,7 +851,7 @@ export default function ExperimentDetailPage() {
                             className="rounded border-gray-300"
                           />
                         </td>
-                        <td className="px-4 py-3 text-sm">{s.sample_id_unique || "---"}</td>
+                        <td className="px-4 py-3 text-sm">{s.external_id || `#${s.id}`}</td>
                         <td className="px-4 py-3 text-sm">{s.organism || "---"}</td>
                         <td className="px-4 py-3 text-sm">{s.tissue_type || "---"}</td>
                         <td className="px-4 py-3 text-sm">{s.molecule_type || "---"}</td>
@@ -889,10 +892,11 @@ export default function ExperimentDetailPage() {
               {/* View Sample Modal */}
               {viewingSample && (
                 <DetailModal
-                  title={viewingSample.sample_id_unique || `Sample #${viewingSample.id}`}
+                  title={viewingSample.external_id || `Sample #${viewingSample.id}`}
                   onClose={() => setViewingSample(null)}
                   fields={[
-                    { label: "External ID", value: viewingSample.sample_id_unique },
+                    { label: "Internal ID", value: `#${viewingSample.id}` },
+                    { label: "External ID", value: viewingSample.external_id },
                     { label: "Status", value: viewingSample.status.replace(/_/g, " ") },
                     { label: "Organism", value: viewingSample.organism },
                     { label: "Tissue Type", value: viewingSample.tissue_type },
@@ -940,7 +944,7 @@ export default function ExperimentDetailPage() {
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">External Sample ID</label>
-                        <input value={editSampleForm.sample_id_unique ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, sample_id_unique: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
+                        <input value={editSampleForm.external_id ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, external_id: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Organism</label>

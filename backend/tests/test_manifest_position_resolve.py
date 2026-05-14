@@ -60,12 +60,12 @@ async def test_manifest_resolves_by_sample_index(client: AsyncClient, admin_toke
     # Create 2 samples with positions 1 and 2 in batch CCB0001
     sample1 = await client.post(
         f"/api/experiments/{exp_id}/samples",
-        json={"sample_id_unique": "PBMC-001", "sequencing_batch_code": "CCB0001"},
+        json={"external_id": "PBMC-001", "sequencing_batch_code": "CCB0001"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     sample2 = await client.post(
         f"/api/experiments/{exp_id}/samples",
-        json={"sample_id_unique": "PBMC-002", "sequencing_batch_code": "CCB0001"},
+        json={"external_id": "PBMC-002", "sequencing_batch_code": "CCB0001"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     await session.commit()
@@ -137,7 +137,7 @@ async def test_manifest_unknown_position_stays_unresolved(client: AsyncClient, a
     # Create only 1 sample at position 1
     await client.post(
         f"/api/experiments/{exp_id}/samples",
-        json={"sample_id_unique": "ONLY-ONE", "sequencing_batch_code": "CCB0002"},
+        json={"external_id": "ONLY-ONE", "sequencing_batch_code": "CCB0002"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     await session.commit()
@@ -195,7 +195,7 @@ async def test_manifest_paired_end_same_sample(client: AsyncClient, admin_token:
 
     sample_resp = await client.post(
         f"/api/experiments/{exp_id}/samples",
-        json={"sample_id_unique": "PAIR-001", "sequencing_batch_code": "CCB0003"},
+        json={"external_id": "PAIR-001", "sequencing_batch_code": "CCB0003"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     await session.commit()
@@ -257,7 +257,7 @@ async def test_manifest_derives_experiment_from_sample(client: AsyncClient, admi
 
     await client.post(
         f"/api/experiments/{exp_id}/samples",
-        json={"sample_id_unique": "DERIVE-001", "sequencing_batch_code": "CCB0004"},
+        json={"external_id": "DERIVE-001", "sequencing_batch_code": "CCB0004"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     await session.commit()

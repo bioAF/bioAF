@@ -31,7 +31,7 @@ class SampleCustomFieldResponse(BaseModel):
 
 
 class SampleCreate(BaseModel):
-    sample_id_unique: str | None = None
+    external_id: str | None = None
     organism: str | None = None
     tissue_type: str | None = None
     donor_source: str | None = None
@@ -69,7 +69,7 @@ class SampleCreate(BaseModel):
 
 
 class SampleUpdate(BaseModel):
-    sample_id_unique: str | None = None
+    external_id: str | None = None
     organism: str | None = None
     tissue_type: str | None = None
     donor_source: str | None = None
@@ -133,7 +133,7 @@ class SampleStatusUpdate(BaseModel):
 
 class SampleResponse(BaseModel):
     id: int
-    sample_id_unique: str | None
+    external_id: str | None
     organism: str | None
     tissue_type: str | None
     donor_source: str | None

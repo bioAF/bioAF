@@ -29,6 +29,18 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 @router.post("/login", response_model=LoginResponse)
 async def login(body: LoginRequest, session: AsyncSession = Depends(get_session)):
     user = await UserService.get_by_email(session, body.email)
+    if user is not None and user.is_service_account:
+        # Service accounts cannot acquire a JWT through password login.
+        await log_action(
+            session,
+            user_id=user.id,
+            entity_type="auth",
+            entity_id=user.id,
+            action="login_failed",
+            details={"email": body.email, "reason": "service_account_login_blocked"},
+        )
+        await session.commit()
+        raise HTTPException(status_code=401, detail="Invalid email or password")
     if not user or not AuthService.verify_password(body.password, user.password_hash):
         await log_action(
             session,

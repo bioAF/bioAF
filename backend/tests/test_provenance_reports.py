@@ -59,7 +59,7 @@ async def _seed_experiment_with_data(session, org_id: int, owner_id: int) -> dic
     for i in range(1, 4):
         await session.execute(
             text(
-                "INSERT INTO samples (id, experiment_id, sample_batch_id, sample_id_external, organism, "
+                "INSERT INTO samples (id, experiment_id, sample_batch_id, external_id, organism, "
                 "tissue_type, qc_status, status, library_prep_method, library_layout, molecule_type, "
                 "chemistry_version, donor_source, treatment_condition) "
                 "VALUES (:id, 1, 1, :ext, 'Homo sapiens', 'PBMC', 'pass', 'registered', "

@@ -95,3 +95,30 @@ When a user updates experiment or sample metadata, the audit log captures both t
 - The Cloud SQL admin user (used by Terraform for schema migrations) technically has superuser privileges. This is a known gap — in v2, schema migrations could be run by a separate privileged role that is not used at runtime.
 - Audit log entries grow indefinitely. For a typical small biotech, this is likely thousands of entries per month — negligible storage. If it becomes a concern, archival to GCS can be implemented without deleting entries (export, then consider partitioning by date).
 - The API must ensure every state-changing operation writes to the audit log within the same database transaction as the state change. If the state change succeeds but the audit log write fails, the entire transaction must roll back.
+
+---
+
+## Addendum: API-key actor (2026-05-13)
+
+[ADR-049](ADR-049-service-accounts-and-api-keys.md) introduces a second class of caller (service accounts authenticated by API keys). The audit-log actor tuple is no longer 1:1 with a human user.
+
+### Schema change
+
+- New column: `audit_log.api_key_id BIGINT NULL`. Additive; existing rows have `NULL`. No foreign key constraint so revoking or deleting an `api_keys` row does not cascade into audit history.
+- The existing immutability guarantees (no UPDATE, no DELETE; PostgreSQL role lacks those grants on `audit_log`) extend to the new column without any further change.
+
+### Semantics
+
+The actor tuple becomes `(user_id, api_key_id)`:
+
+| `user_id` | `api_key_id` | Caller class |
+| --- | --- | --- |
+| set | NULL | Human user via JWT (existing behavior) |
+| set | set | Service account via API key (new) |
+| NULL | NULL | System action (background worker, migration) |
+
+Service-account audit rows always have both columns set: `user_id` is the SA user row, `api_key_id` is the specific key used. This lets operators answer "who did this?" (the SA) and "which credential?" (the key) without joining additional tables.
+
+### Migration
+
+Single Alembic migration adds the column. No backfill required.

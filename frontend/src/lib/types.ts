@@ -128,6 +128,7 @@ export interface Project {
   id: number;
   name: string;
   code: string | null;
+  external_id: string | null;
   description: string | null;
   hypothesis: string | null;
   status: string | null;
@@ -142,7 +143,7 @@ export interface Project {
 
 export interface ProjectSampleResponse {
   sample_id: number;
-  sample_id_unique: string | null;
+  external_id: string | null;
   organism: string | null;
   tissue_type: string | null;
   qc_status: QCStatus | null;
@@ -206,6 +207,7 @@ export interface Experiment {
   id: number;
   name: string;
   code: string | null;
+  external_id: string | null;
   project: ProjectSummary | null;
   template_id: number | null;
   template_name: string | null;
@@ -257,7 +259,7 @@ export interface CustomFieldResponse {
 
 export interface SampleBrief {
   id: number;
-  sample_id_unique: string | null;
+  external_id: string | null;
   organism: string | null;
   tissue_type: string | null;
   molecule_type: string | null;
@@ -315,7 +317,7 @@ export interface SampleCustomFieldResponse {
 
 export interface Sample {
   id: number;
-  sample_id_unique: string | null;
+  external_id: string | null;
   organism: string | null;
   tissue_type: string | null;
   donor_source: string | null;
@@ -432,7 +434,7 @@ export interface ExperimentCreateRequest {
 }
 
 export interface SampleCreateRequest {
-  sample_id_unique?: string | null;
+  external_id?: string | null;
   organism?: string | null;
   tissue_type?: string | null;
   donor_source?: string | null;
@@ -452,7 +454,7 @@ export interface SampleCreateRequest {
 }
 
 export interface SampleUpdateRequest {
-  sample_id_unique?: string | null;
+  external_id?: string | null;
   organism?: string | null;
   tissue_type?: string | null;
   donor_source?: string | null;
@@ -820,7 +822,7 @@ export interface PipelineRunDetail extends PipelineRun {
   processes: PipelineProcess[];
   samples: Array<{
     id: number;
-    sample_id_unique: string | null;
+    external_id: string | null;
     organism: string | null;
   }>;
 }

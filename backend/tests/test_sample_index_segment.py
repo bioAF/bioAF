@@ -67,7 +67,7 @@ def test_parse_invalid_sample_index():
 
 
 def test_sample_id_still_resolves_by_external_id():
-    """Profile with sample_id segment still resolves via sample_id_unique lookup."""
+    """Profile with sample_id segment still resolves via external_id lookup."""
     segments = [
         {"position": 0, "field": "sample_id", "required": True},
         {"position": 1, "field": "ignore", "required": True},

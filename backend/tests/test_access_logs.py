@@ -84,18 +84,27 @@ async def test_list_access_logs_with_data(client: AsyncClient, admin_token: str,
     assert data["total"] == 2
 
 
-@pytest.mark.asyncio
-async def test_never_logged_in_excludes_deactivated(client: AsyncClient, admin_token: str, admin_user, session):
-    """Deactivated users should not appear in the never-logged-in list."""
-    role_map = admin_user._test_role_map
-    # Invite a user (never logs in)
+async def _invite_and_backdate(client, admin_token, session, email, role_id, days_old=3):
     resp = await client.post(
         "/api/users",
-        json={"email": "ghost@test.com", "role_id": role_map["bench"]},
+        json={"email": email, "role_id": role_id},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert resp.status_code == 200
     user_id = resp.json()["id"]
+    await session.execute(
+        text("UPDATE users SET created_at = NOW() - (:days * INTERVAL '1 day') WHERE id = :id"),
+        {"days": days_old, "id": user_id},
+    )
+    await session.commit()
+    return user_id
+
+
+@pytest.mark.asyncio
+async def test_never_logged_in_excludes_deactivated(client: AsyncClient, admin_token: str, admin_user, session):
+    """Deactivated users should not appear in the never-logged-in list."""
+    role_map = admin_user._test_role_map
+    user_id = await _invite_and_backdate(client, admin_token, session, "ghost@test.com", role_map["bench"])
 
     # Should appear in never-logged-in
     resp = await client.get(
@@ -117,6 +126,69 @@ async def test_never_logged_in_excludes_deactivated(client: AsyncClient, admin_t
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert not any(u["id"] == user_id for u in resp.json()["users"])
+
+
+@pytest.mark.asyncio
+async def test_never_logged_in_excludes_recent_invites(client: AsyncClient, admin_token: str, admin_user, session):
+    """Users invited within the grace window should not appear."""
+    role_map = admin_user._test_role_map
+    # Just-invited user: created_at = NOW(), well inside the 2-day grace
+    resp = await client.post(
+        "/api/users",
+        json={"email": "fresh@test.com", "role_id": role_map["bench"]},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    fresh_id = resp.json()["id"]
+
+    # Older invite (3 days old) for comparison
+    aged_id = await _invite_and_backdate(client, admin_token, session, "aged@test.com", role_map["bench"])
+
+    resp = await client.get(
+        "/api/access-logs/never-logged-in",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    ids = {u["id"] for u in resp.json()["users"]}
+    assert fresh_id not in ids
+    assert aged_id in ids
+
+
+@pytest.mark.asyncio
+async def test_never_logged_in_excludes_service_accounts(client: AsyncClient, admin_token: str, admin_user, session):
+    """Service-account users should not appear (they authenticate via API keys)."""
+    role_map = admin_user._test_role_map
+    # Create a service-account user directly: the public users API does not
+    # expose is_service_account=True, so insert via SQL with a 3-day backdate
+    # so the grace window cannot mask the assertion.
+    await session.execute(
+        text(
+            "INSERT INTO users (organization_id, email, password_hash, role_id, status, "
+            "is_service_account, created_at, updated_at) "
+            "VALUES (:org, :email, 'x', :role, 'active', true, NOW() - INTERVAL '3 days', NOW())"
+        ),
+        {"org": admin_user.organization_id, "email": "sa-bot@test.bioaf.svc", "role": role_map["bench"]},
+    )
+    await session.commit()
+
+    resp = await client.get(
+        "/api/access-logs/never-logged-in",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    emails = {u["email"] for u in resp.json()["users"]}
+    assert "sa-bot@test.bioaf.svc" not in emails
+
+
+@pytest.mark.asyncio
+async def test_never_logged_in_includes_role_name(client: AsyncClient, admin_token: str, admin_user, session):
+    """Response should include role_name so the UI can render it directly."""
+    role_map = admin_user._test_role_map
+    user_id = await _invite_and_backdate(client, admin_token, session, "rolecheck@test.com", role_map["comp_bio"])
+
+    resp = await client.get(
+        "/api/access-logs/never-logged-in",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    row = next(u for u in resp.json()["users"] if u["id"] == user_id)
+    assert row["role_name"] == "comp_bio"
 
 
 @pytest.mark.asyncio

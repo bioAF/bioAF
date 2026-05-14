@@ -1,5 +1,6 @@
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import text
 
 
 @pytest.mark.asyncio
@@ -14,6 +15,30 @@ async def test_list_users(client: AsyncClient, admin_token: str, admin_user):
     data = response.json()
     assert data["total"] >= 1
     assert any(u["email"] == "admin@test.com" for u in data["users"])
+
+
+@pytest.mark.asyncio
+async def test_list_users_excludes_service_accounts(client: AsyncClient, admin_token: str, admin_user, session):
+    """Service accounts must not appear in the Users tab; they have their own tab."""
+    role_map = admin_user._test_role_map
+    await session.execute(
+        text(
+            "INSERT INTO users (organization_id, email, password_hash, role_id, status, "
+            "is_service_account, created_at, updated_at) "
+            "VALUES (:org, :email, 'x', :role, 'active', true, NOW(), NOW())"
+        ),
+        {"org": admin_user.organization_id, "email": "sa-bot@test.bioaf.svc", "role": role_map["bench"]},
+    )
+    await session.commit()
+
+    response = await client.get(
+        "/api/users",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    emails = {u["email"] for u in response.json()["users"]}
+    assert "sa-bot@test.bioaf.svc" not in emails
+    assert "admin@test.com" in emails
 
 
 @pytest.mark.asyncio

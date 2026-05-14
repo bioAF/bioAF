@@ -92,6 +92,39 @@ TERRAFORM_APPLY_FAILURE = "terraform.apply_failure"
 # Environment build events
 ENVIRONMENT_BUILD_COMPLETED = "environment.build.completed"
 
+# Public LIMS integration events (ADR-051). Project events are internal-only
+# in v1; webhook subscribers only see the experiment/sample/file vocabulary.
+INTEGRATION_PROJECT_CREATED = "integration.project.created"
+INTEGRATION_PROJECT_UPDATED = "integration.project.updated"
+INTEGRATION_EXPERIMENT_CREATED = "integration.experiment.created"
+INTEGRATION_EXPERIMENT_UPDATED = "integration.experiment.updated"
+INTEGRATION_SAMPLE_CREATED = "integration.sample.created"
+INTEGRATION_SAMPLE_UPDATED = "integration.sample.updated"
+INTEGRATION_SAMPLE_QC_CHANGED = "integration.sample.qc_changed"
+INTEGRATION_FILE_REGISTERED = "integration.file.registered"
+INTEGRATION_FILE_READY = "integration.file.ready"
+
+# Public-API webhook event names (the vocabulary sent over the wire).
+WEBHOOK_EXPERIMENT_CREATED = "experiment.created"
+WEBHOOK_EXPERIMENT_UPDATED = "experiment.updated"
+WEBHOOK_EXPERIMENT_STATUS_CHANGED = "experiment.status_changed"
+WEBHOOK_SAMPLE_CREATED = "sample.created"
+WEBHOOK_SAMPLE_UPDATED = "sample.updated"
+WEBHOOK_SAMPLE_QC_CHANGED = "sample.qc_changed"
+WEBHOOK_FILE_REGISTERED = "file.registered"
+WEBHOOK_FILE_READY = "file.ready"
+
+ALL_WEBHOOK_EVENT_TYPES = [
+    WEBHOOK_EXPERIMENT_CREATED,
+    WEBHOOK_EXPERIMENT_UPDATED,
+    WEBHOOK_EXPERIMENT_STATUS_CHANGED,
+    WEBHOOK_SAMPLE_CREATED,
+    WEBHOOK_SAMPLE_UPDATED,
+    WEBHOOK_SAMPLE_QC_CHANGED,
+    WEBHOOK_FILE_REGISTERED,
+    WEBHOOK_FILE_READY,
+]
+
 ALL_EVENT_TYPES = [
     PIPELINE_STARTED,
     PIPELINE_COMPLETED,

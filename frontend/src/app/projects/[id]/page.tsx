@@ -36,7 +36,7 @@ export default function ProjectDetailPage() {
   const [showSamplePicker, setShowSamplePicker] = useState(false);
   const [availableSamples, setAvailableSamples] = useState<Array<{
     id: number;
-    sample_id_unique: string;
+    external_id: string;
     experiment_name: string;
     experiment_id: number;
     organism: string | null;
@@ -98,7 +98,7 @@ export default function ProjectDetailPage() {
           name: string;
           samples: Array<{
             id: number;
-            sample_id_unique: string;
+            external_id: string;
             organism: string | null;
             tissue_type: string | null;
             qc_status: QCStatus | null;
@@ -166,7 +166,7 @@ export default function ProjectDetailPage() {
     (s) =>
       !existingSampleIds.has(s.id) &&
       (sampleSearch === "" ||
-        s.sample_id_unique.toLowerCase().includes(sampleSearch.toLowerCase()) ||
+        s.external_id.toLowerCase().includes(sampleSearch.toLowerCase()) ||
         s.experiment_name.toLowerCase().includes(sampleSearch.toLowerCase()) ||
         (s.organism || "").toLowerCase().includes(sampleSearch.toLowerCase()))
   );
@@ -204,7 +204,10 @@ export default function ProjectDetailPage() {
             <div className="flex items-center gap-3 mb-2">
               <h1 className="text-2xl font-bold">{project.name}</h1>
               {project.code && (
-                <span className="text-sm font-mono bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{project.code}</span>
+                <span className="text-sm font-mono bg-gray-100 text-gray-600 px-2 py-0.5 rounded" title="Internal ID">{project.code}</span>
+              )}
+              {project.external_id && (
+                <span className="text-sm font-mono bg-blue-50 text-blue-700 px-2 py-0.5 rounded" title="External ID">{project.external_id}</span>
               )}
               <StatusBadge status={project.status || "active"} />
               <div className="ml-auto">
@@ -320,7 +323,7 @@ export default function ProjectDetailPage() {
                       <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-gray-50">
                           <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sample ID</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Organism</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tissue</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">QC</th>
@@ -335,7 +338,7 @@ export default function ProjectDetailPage() {
                           {group.samples.map((s) => (
                             <tr key={s.sample_id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setViewingSample({ ...s, experiment_name: group.experiment_name })}>
                               <td className="px-6 py-4 text-sm font-medium text-gray-900">
-                                {s.sample_id_unique || `#${s.sample_id}`}
+                                {s.external_id || `#${s.sample_id}`}
                               </td>
                               <td className="px-6 py-4 text-sm text-gray-500">{s.organism || "—"}</td>
                               <td className="px-6 py-4 text-sm text-gray-500">{s.tissue_type || "—"}</td>
@@ -369,10 +372,11 @@ export default function ProjectDetailPage() {
 
           {viewingSample && (
             <DetailModal
-              title={viewingSample.sample_id_unique || `Sample #${viewingSample.sample_id}`}
+              title={viewingSample.external_id || `Sample #${viewingSample.sample_id}`}
               onClose={() => setViewingSample(null)}
               fields={[
-                { label: "Sample ID", value: viewingSample.sample_id_unique || `#${viewingSample.sample_id}` },
+                { label: "Internal ID", value: `#${viewingSample.sample_id}` },
+                { label: "External ID", value: viewingSample.external_id },
                 { label: "Experiment", value: viewingSample.experiment_name },
                 { label: "Organism", value: viewingSample.organism },
                 { label: "Tissue Type", value: viewingSample.tissue_type },
@@ -507,7 +511,7 @@ export default function ProjectDetailPage() {
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase w-8"></th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Sample ID</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Experiment</th>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Organism</th>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Tissue</th>
@@ -531,7 +535,7 @@ export default function ProjectDetailPage() {
                             className="rounded"
                           />
                         </td>
-                        <td className="px-4 py-2 text-sm">{s.sample_id_unique}</td>
+                        <td className="px-4 py-2 text-sm">{s.external_id || `#${s.id}`}</td>
                         <td className="px-4 py-2 text-sm text-gray-500">{s.experiment_name}</td>
                         <td className="px-4 py-2 text-sm text-gray-500">{s.organism || "—"}</td>
                         <td className="px-4 py-2 text-sm text-gray-500">{s.tissue_type || "—"}</td>

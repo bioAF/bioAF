@@ -62,7 +62,7 @@ async def sample_with_manifest(session, admin_user, experiment):
 
     sample = Sample(
         experiment_id=experiment.id,
-        sample_id_unique="AUTO_S001",
+        external_id="AUTO_S001",
         sequencing_batch_id=batch.id,
     )
     session.add(sample)

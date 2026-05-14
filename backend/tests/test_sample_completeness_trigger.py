@@ -55,13 +55,13 @@ async def _setup_scenario(session: AsyncSession) -> dict:
 
     s1 = Sample(
         experiment_id=exp.id,
-        sample_id_unique="SAMPLE_A",
+        external_id="SAMPLE_A",
         sequencing_batch_id=batch.id,
         status="registered",
     )
     s2 = Sample(
         experiment_id=exp.id,
-        sample_id_unique="SAMPLE_B",
+        external_id="SAMPLE_B",
         sequencing_batch_id=batch.id,
         status="registered",
     )

@@ -7,7 +7,7 @@ import type { FieldDefaultValue, SheetPreviewResponse } from "@/lib/types";
 // All user-facing sample fields. Must match SAMPLE_FIELDS + DEFAULTABLE_SAMPLE_FIELDS
 // on the backend. Fields marked defaultable can have experiment-level defaults set.
 const ALL_SAMPLE_FIELDS = [
-  { value: "sample_id_unique", label: "Sample ID", defaultable: false },
+  { value: "external_id", label: "Sample ID", defaultable: false },
   { value: "organism", label: "Organism", defaultable: true },
   { value: "tissue_type", label: "Tissue Type", defaultable: true },
   { value: "donor_source", label: "Donor ID", defaultable: true },
@@ -125,7 +125,7 @@ export function SheetImportModal({
           is_required: null,
         });
       }
-      // Non-defaultable recognized fields (sample_id_unique, viability_pct, etc.)
+      // Non-defaultable recognized fields (external_id, viability_pct, etc.)
       // don't need any action -- they'll be handled during sample CSV import
     }
 

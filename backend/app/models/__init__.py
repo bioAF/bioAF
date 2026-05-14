@@ -68,6 +68,11 @@ from app.models.custom_pipeline_version import CustomPipelineVersion
 from app.models.custom_pipeline_variable import CustomPipelineVariable
 from app.models.nf_core_registry_pipeline import NfCoreRegistryPipeline
 from app.models.nf_core_registry_refresh import NfCoreRegistryRefresh
+from app.models.api_key import ApiKey
+from app.models.project_custom_field import ProjectCustomField
+from app.models.idempotency_key import IdempotencyKey
+from app.models.webhook import WebhookSubscription, WebhookDelivery
+from app.models.org_code_counter import OrgCodeCounter
 
 __all__ = [
     "User",
@@ -146,4 +151,10 @@ __all__ = [
     "CustomPipelineVariable",
     "NfCoreRegistryPipeline",
     "NfCoreRegistryRefresh",
+    "ApiKey",
+    "ProjectCustomField",
+    "IdempotencyKey",
+    "WebhookSubscription",
+    "WebhookDelivery",
+    "OrgCodeCounter",
 ]

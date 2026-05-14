@@ -54,6 +54,7 @@ async def create_project(
         id=project.id,
         name=project.name,
         code=project.code,
+        external_id=project.external_id,
         description=project.description,
         hypothesis=project.hypothesis,
         status=project.status,
@@ -104,6 +105,8 @@ async def update_project(
     return ProjectResponse(
         id=updated.id,
         name=updated.name,
+        code=updated.code,
+        external_id=updated.external_id,
         description=updated.description,
         hypothesis=updated.hypothesis,
         status=updated.status,

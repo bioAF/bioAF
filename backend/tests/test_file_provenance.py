@@ -35,7 +35,7 @@ async def test_provenance_for_uploaded_file_with_full_hierarchy(session, admin_u
     session.add(exp)
     await session.flush()
 
-    sample = Sample(experiment_id=exp.id, sample_id_unique="S001", status="registered")
+    sample = Sample(experiment_id=exp.id, external_id="S001", status="registered")
     session.add(sample)
     await session.flush()
     await session.commit()

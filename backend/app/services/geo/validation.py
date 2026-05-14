@@ -137,7 +137,7 @@ def _derive_value(
         if not sample_data:
             return None
         parts = [
-            sample_data.get("sample_id_unique", ""),
+            sample_data.get("external_id", ""),
             sample_data.get("tissue_type", ""),
             sample_data.get("treatment_condition", ""),
         ]
@@ -341,7 +341,7 @@ def validate_experiment_for_geo(
         sample_validations.append(
             SampleValidation(
                 sample_id=sample.get("id", 0),
-                sample_name=sample.get("sample_id_unique", "unknown"),
+                sample_name=sample.get("external_id", "unknown"),
                 fields=sample_fields,
             )
         )
