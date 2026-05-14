@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
@@ -45,6 +45,14 @@ type PendingAction =
   | { type: "delete"; user: User };
 
 export default function SettingsUsersPage() {
+  return (
+    <Suspense fallback={null}>
+      <SettingsUsersPageInner />
+    </Suspense>
+  );
+}
+
+function SettingsUsersPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { canAccess, loading: permLoading } = usePermissions();
