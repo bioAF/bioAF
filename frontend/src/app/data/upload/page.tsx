@@ -118,7 +118,7 @@ export default function DataUploadPage() {
         setSamples(
           data.map((s) => ({
             id: s.id,
-            label: s.sample_id_unique ?? `Sample #${s.id}`,
+            label: s.external_id ?? `Sample #${s.id}`,
           })),
         ),
       )

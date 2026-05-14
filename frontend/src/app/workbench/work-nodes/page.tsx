@@ -209,12 +209,12 @@ export default function WorkNodesPage() {
       }
       if (sampleIds.size > 0) {
         try {
-          const samplesData = await api.get<{ samples: { id: number; sample_id_unique: string }[] }>(
+          const samplesData = await api.get<{ samples: { id: number; external_id: string }[] }>(
             `/api/experiments/${experimentId}/samples?page_size=500`
           );
           const names: Record<number, string> = {};
           for (const s of samplesData.samples) {
-            names[s.id] = s.sample_id_unique || `Sample ${s.id}`;
+            names[s.id] = s.external_id || `Sample ${s.id}`;
           }
           setSampleNames(names);
         } catch {
