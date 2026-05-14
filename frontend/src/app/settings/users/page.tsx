@@ -30,7 +30,7 @@ interface NeverLoggedInUser {
   id: number;
   email: string;
   name: string | null;
-  role_name: string;
+  role_name: string | null;
   status: string;
   created_at: string | null;
 }
@@ -405,7 +405,16 @@ function SettingsUsersPageInner() {
             ))}
           </div>
 
-          {activeTab === "service-accounts" && <ServiceAccountsTab roles={roles} />}
+          {activeTab === "service-accounts" && (
+            <ServiceAccountsTab
+              roles={roles}
+              onRolesChanged={() => {
+                api.get<RoleListResponse>("/api/roles")
+                  .then((data) => setRoles(data.roles))
+                  .catch(() => {});
+              }}
+            />
+          )}
           {activeTab === "webhooks" && <WebhooksTab />}
           {activeTab === "api-activity" && <ApiActivityTab />}
 
@@ -431,7 +440,9 @@ function SettingsUsersPageInner() {
                 {neverLoggedIn.map((u) => (
                   <li key={u.id}>
                     {u.email}
-                    {u.role_name !== "viewer" && <span className="ml-2 text-amber-500">({u.role_name})</span>}
+                    {u.role_name && u.role_name !== "viewer" && (
+                      <span className="ml-2 text-amber-500">({u.role_name})</span>
+                    )}
                     {u.created_at && (
                       <span className="ml-2 text-amber-400 text-xs">
                         invited {new Date(u.created_at).toLocaleDateString()}
