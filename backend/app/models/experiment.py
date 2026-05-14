@@ -1,7 +1,8 @@
+import uuid as uuid_pkg
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -36,11 +37,15 @@ class Experiment(Base):
     __tablename__ = "experiments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    uuid: Mapped[uuid_pkg.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, server_default=text("gen_random_uuid()"), unique=True
+    )
     organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False)
     project_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("projects.id"), nullable=True)
     template_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("experiment_templates.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     hypothesis: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     protocol_doc_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

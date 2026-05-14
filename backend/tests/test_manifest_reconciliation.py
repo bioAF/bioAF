@@ -98,7 +98,7 @@ async def recon_ctx(session: AsyncSession):
 
     sample = Sample(
         experiment_id=exp.id,
-        sample_id_unique="SAMP01",
+        external_id="SAMP01",
         status="registered",
     )
     session.add(sample)

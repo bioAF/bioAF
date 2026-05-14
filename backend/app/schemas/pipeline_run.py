@@ -16,7 +16,7 @@ class UserSummary(BaseModel):
 
 class SampleSummary(BaseModel):
     id: int
-    sample_id_unique: str | None = None
+    external_id: str | None = None
     organism: str | None = None
 
 

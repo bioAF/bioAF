@@ -26,7 +26,7 @@ async def completed_run(session, admin_user):
     await session.flush()
 
     sample = Sample(
-        sample_id_unique="CLI-Sample-001",
+        external_id="CLI-Sample-001",
         experiment_id=exp.id,
     )
     session.add(sample)

@@ -48,6 +48,11 @@
 | [ADR-044](ADR-044-custom-pipelines.md) | Custom Pipelines | Accepted | 2026-04-26 |
 | [ADR-045](ADR-045-pipeline-environments.md) | Pipeline Environments | Accepted | 2026-04-26 |
 | [ADR-046](ADR-046-pipeline-version-cascade.md) | Pipeline Version Cascade via Event Bus | Accepted | 2026-04-26 |
+| [ADR-047](ADR-047-data-at-rest-encryption.md) | Data-at-Rest Encryption via App-Level Fernet | Accepted | 2026-05-12 |
+| [ADR-048](ADR-048-public-integration-api-surface.md) | Public Integration API Surface | Accepted | 2026-05-13 |
+| [ADR-049](ADR-049-service-accounts-and-api-keys.md) | Service Accounts and API Key Authentication | Accepted | 2026-05-13 |
+| [ADR-050](ADR-050-external-ids-and-idempotent-writes.md) | External IDs and Idempotent Writes | Accepted | 2026-05-13 |
+| [ADR-051](ADR-051-outbound-webhook-delivery.md) | Outbound Webhook Delivery | Accepted | 2026-05-13 |
 
 ## How to Use This Directory
 

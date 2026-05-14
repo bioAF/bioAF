@@ -38,12 +38,12 @@ async def template_experiment_id(client, admin_token):
 async def test_create_sample(client, admin_token, experiment_id, session):
     response = await client.post(
         f"/api/experiments/{experiment_id}/samples",
-        json={"sample_id_unique": "S001", "organism": "Human", "tissue_type": "Brain"},
+        json={"external_id": "S001", "organism": "Human", "tissue_type": "Brain"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["sample_id_unique"] == "S001"
+    assert data["external_id"] == "S001"
     assert data["status"] == "registered"
 
     # Verify audit
@@ -57,9 +57,9 @@ async def test_bulk_create_samples(client, admin_token, experiment_id, session):
         f"/api/experiments/{experiment_id}/samples/bulk",
         json={
             "samples": [
-                {"sample_id_unique": "B001", "organism": "Mouse"},
-                {"sample_id_unique": "B002", "organism": "Human"},
-                {"sample_id_unique": "B003", "organism": "Rat"},
+                {"external_id": "B001", "organism": "Mouse"},
+                {"external_id": "B002", "organism": "Human"},
+                {"external_id": "B003", "organism": "Rat"},
             ]
         },
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -79,7 +79,7 @@ async def test_bulk_create_samples(client, admin_token, experiment_id, session):
 async def test_update_sample(client, admin_token, experiment_id, session):
     resp = await client.post(
         f"/api/experiments/{experiment_id}/samples",
-        json={"sample_id_unique": "U001", "organism": "Human"},
+        json={"external_id": "U001", "organism": "Human"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     sample_id = resp.json()["id"]
@@ -104,7 +104,7 @@ async def test_create_sample_with_qc_metrics(client, admin_token, experiment_id,
     response = await client.post(
         f"/api/experiments/{experiment_id}/samples",
         json={
-            "sample_id_unique": "PBMC_donor1",
+            "external_id": "PBMC_donor1",
             "organism": "Homo sapiens",
             "tissue_type": "PBMC",
             "cell_count": 5000,
@@ -122,7 +122,7 @@ async def test_create_sample_with_qc_metrics(client, admin_token, experiment_id,
 async def test_qc_status_update(client, admin_token, experiment_id, session):
     resp = await client.post(
         f"/api/experiments/{experiment_id}/samples",
-        json={"sample_id_unique": "QC001"},
+        json={"external_id": "QC001"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     sample_id = resp.json()["id"]
@@ -146,7 +146,7 @@ async def test_qc_status_update(client, admin_token, experiment_id, session):
 async def test_sample_status_transition(client, admin_token, experiment_id):
     resp = await client.post(
         f"/api/experiments/{experiment_id}/samples",
-        json={"sample_id_unique": "ST001"},
+        json={"external_id": "ST001"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     sample_id = resp.json()["id"]
@@ -173,7 +173,7 @@ async def test_template_required_fields_enforcement(client, admin_token, templat
     # Missing required fields
     response = await client.post(
         f"/api/experiments/{template_experiment_id}/samples",
-        json={"sample_id_unique": "TF001"},
+        json={"external_id": "TF001"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert response.status_code == 400
@@ -182,7 +182,7 @@ async def test_template_required_fields_enforcement(client, admin_token, templat
     # With required fields
     response = await client.post(
         f"/api/experiments/{template_experiment_id}/samples",
-        json={"sample_id_unique": "TF002", "organism": "Human", "tissue_type": "Liver"},
+        json={"external_id": "TF002", "organism": "Human", "tissue_type": "Liver"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert response.status_code == 200
@@ -195,8 +195,8 @@ async def test_bulk_create_validates_all(client, admin_token, template_experimen
         f"/api/experiments/{template_experiment_id}/samples/bulk",
         json={
             "samples": [
-                {"sample_id_unique": "BV001", "organism": "Human", "tissue_type": "Brain"},
-                {"sample_id_unique": "BV002"},  # missing required fields
+                {"external_id": "BV001", "organism": "Human", "tissue_type": "Brain"},
+                {"external_id": "BV002"},  # missing required fields
             ]
         },
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -208,12 +208,12 @@ async def test_bulk_create_validates_all(client, admin_token, template_experimen
 async def test_filter_samples(client, admin_token, experiment_id):
     await client.post(
         f"/api/experiments/{experiment_id}/samples",
-        json={"sample_id_unique": "F001", "organism": "Human", "qc_status": "pass"},
+        json={"external_id": "F001", "organism": "Human", "qc_status": "pass"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     await client.post(
         f"/api/experiments/{experiment_id}/samples",
-        json={"sample_id_unique": "F002", "organism": "Mouse", "qc_status": "fail"},
+        json={"external_id": "F002", "organism": "Mouse", "qc_status": "fail"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
 
@@ -234,7 +234,7 @@ async def test_bulk_update_samples(client, admin_token, experiment_id, session):
     for ext_id in ["BU001", "BU002", "BU003"]:
         resp = await client.post(
             f"/api/experiments/{experiment_id}/samples",
-            json={"sample_id_unique": ext_id, "organism": "Human"},
+            json={"external_id": ext_id, "organism": "Human"},
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         ids.append(resp.json()["id"])
@@ -268,7 +268,7 @@ async def test_bulk_update_samples(client, admin_token, experiment_id, session):
 async def test_bulk_update_nonexistent_sample(client, admin_token, experiment_id):
     resp = await client.post(
         f"/api/experiments/{experiment_id}/samples",
-        json={"sample_id_unique": "BU_EXIST", "organism": "Human"},
+        json={"external_id": "BU_EXIST", "organism": "Human"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     real_id = resp.json()["id"]
@@ -292,7 +292,7 @@ async def test_sample_custom_fields_in_responses(client, admin_token, experiment
     resp = await client.post(
         f"/api/experiments/{experiment_id}/samples",
         json={
-            "sample_id_unique": "CF001",
+            "external_id": "CF001",
             "organism": "Human",
             "custom_fields": [
                 {"field_name": "Library", "field_value": "ICGL15422"},

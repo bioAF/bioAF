@@ -5,6 +5,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from app.services.auth_service import AuthService
+from app.services.api_key_service import KEY_PREFIX as API_KEY_PREFIX
 
 # Endpoints that don't require authentication
 PUBLIC_PATHS = {
@@ -24,6 +25,12 @@ PUBLIC_PATHS = {
     # (docs_url=None) or serves Swagger UI in development.
     "/docs",
     "/openapi.json",
+    # Public Integration API OpenAPI document and docs UI (ADR-048).
+    # The schema is fetchable without a key; the operations themselves still
+    # require authentication.
+    "/api/v1/integrations/openapi.json",
+    "/api/v1/integrations/docs",
+    "/api/v1/integrations/docs/oauth2-redirect",
 }
 
 
@@ -98,8 +105,50 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         if not token:
             return JSONResponse(status_code=401, content={"detail": "Missing or invalid authorization header"})
+
+        # API key path: biokey_<prefix>.<secret>. Looks up the row, sets
+        # current_user with the SA identity plus the key's scopes and id, and
+        # debounces a last_used_at write. JWT path is unchanged.
+        if token.startswith(API_KEY_PREFIX):
+            from app import database as database_module
+            from app.services import api_key_service, role_service
+            from sqlalchemy import select
+            from app.models.user import User
+            from app.models.role import Role
+
+            async with database_module.async_session_factory() as ak_session:
+                key = await api_key_service.verify(ak_session, token)
+                if key is None:
+                    return JSONResponse(status_code=401, content={"detail": "Invalid API key"})
+                user_result = await ak_session.execute(select(User).where(User.id == key.service_account_user_id))
+                sa_user = user_result.scalar_one_or_none()
+                if sa_user is None or sa_user.status != "active" or not sa_user.is_service_account:
+                    return JSONResponse(status_code=401, content={"detail": "Service account inactive"})
+                role_result = await ak_session.execute(select(Role).where(Role.id == sa_user.role_id))
+                role = role_result.scalar_one_or_none()
+                role_name = role.name if role is not None else ""
+                # Warm the permission cache for this role; cheap and avoids a
+                # later miss inside require_permission.
+                await role_service.get_permissions_for_role(ak_session, sa_user.role_id)
+                await api_key_service.touch_last_used(ak_session, key.id)
+                await ak_session.commit()
+
+            request.state.current_user = {
+                "sub": sa_user.id,
+                "email": sa_user.email,
+                "role_id": sa_user.role_id,
+                "role_name": role_name,
+                "org_id": sa_user.organization_id,
+                "scopes": list(key.scopes or []),
+                "api_key_id": key.id,
+            }
+            return await call_next(request)
+
         try:
             payload = AuthService.validate_token(token)
+            # JWT callers have no per-key scope envelope; mark explicitly.
+            payload.setdefault("scopes", None)
+            payload.setdefault("api_key_id", None)
             request.state.current_user = payload
         except Exception:
             return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})

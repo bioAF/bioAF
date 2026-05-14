@@ -1,3 +1,4 @@
+import uuid as uuid_pkg
 from datetime import datetime
 from decimal import Decimal
 
@@ -13,7 +14,9 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -45,11 +48,14 @@ class Sample(Base):
     __tablename__ = "samples"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    uuid: Mapped[uuid_pkg.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, server_default=text("gen_random_uuid()"), unique=True
+    )
     experiment_id: Mapped[int] = mapped_column(Integer, ForeignKey("experiments.id"), nullable=False)
     sample_batch_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("sample_batches.id"), nullable=True)
     sequencing_batch_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("sequencing_batches.id"), nullable=True)
     sequencing_batch_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    sample_id_unique: Mapped[str | None] = mapped_column("sample_id_external", String(255), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     organism: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tissue_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     donor_source: Mapped[str | None] = mapped_column(String(255), nullable=True)

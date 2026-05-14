@@ -2,14 +2,15 @@
 
 from datetime import date, datetime
 from decimal import Decimal
+from uuid import UUID
 
 
 def serialize_entity(obj) -> dict:
     """Serialize a SQLAlchemy model instance to a JSON-safe dict.
 
     Uses obj.__dict__ to avoid triggering lazy loads on expired attributes.
-    Handles datetime, date, and Decimal types. Skips relationship attributes
-    and SQLAlchemy internal state.
+    Handles datetime, date, Decimal, and UUID types. Skips relationship
+    attributes and SQLAlchemy internal state.
     """
     # Build set of valid attribute names from the mapper (handles column name != attr name)
     attr_names = {prop.key for prop in obj.__class__.__mapper__.column_attrs}
@@ -23,5 +24,7 @@ def serialize_entity(obj) -> dict:
             val = val.isoformat()
         elif isinstance(val, Decimal):
             val = float(val)
+        elif isinstance(val, UUID):
+            val = str(val)
         result[key] = val
     return result

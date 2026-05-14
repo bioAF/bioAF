@@ -58,7 +58,7 @@ async def samples(session, experiment):
     for i in range(3):
         s = Sample(
             experiment_id=experiment.id,
-            sample_id_unique=f"SAMPLE_{i + 1}",
+            external_id=f"SAMPLE_{i + 1}",
             organism="Homo sapiens",
             tissue_type="PBMC",
         )

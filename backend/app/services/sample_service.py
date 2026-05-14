@@ -171,7 +171,7 @@ class SampleService:
             sample_batch_id=sample_batch_id,
             sequencing_batch_id=sequencing_batch_id,
             sequencing_batch_position=sequencing_batch_position,
-            sample_id_unique=data.sample_id_unique,
+            external_id=data.external_id,
             organism=data.organism,
             tissue_type=data.tissue_type,
             donor_source=data.donor_source,
@@ -212,7 +212,7 @@ class SampleService:
             action="create",
             details={
                 "experiment_id": experiment_id,
-                "sample_id_unique": data.sample_id_unique,
+                "external_id": data.external_id,
             },
             snapshot=serialize_entity(sample),
         )
@@ -286,7 +286,7 @@ class SampleService:
                 sample_batch_id=sample_batch_id,
                 sequencing_batch_id=sequencing_batch_id,
                 sequencing_batch_position=sequencing_batch_position,
-                sample_id_unique=data.sample_id_unique,
+                external_id=data.external_id,
                 organism=data.organism,
                 tissue_type=data.tissue_type,
                 donor_source=data.donor_source,
@@ -327,7 +327,7 @@ class SampleService:
                 action="create",
                 details={
                     "experiment_id": experiment_id,
-                    "sample_id_unique": data.sample_id_unique,
+                    "external_id": data.external_id,
                 },
                 snapshot=serialize_entity(sample),
             )
@@ -393,7 +393,7 @@ class SampleService:
             sample.sequencing_batch_position = data.sequencing_batch_position
             updates["sequencing_batch_position"] = str(data.sequencing_batch_position)
         for field in [
-            "sample_id_unique",
+            "external_id",
             "organism",
             "tissue_type",
             "donor_source",

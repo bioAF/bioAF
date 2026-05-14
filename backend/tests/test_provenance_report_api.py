@@ -28,7 +28,7 @@ async def _seed_experiment(session, org_id: int, owner_id: int) -> dict:
     )
     await session.execute(
         text(
-            "INSERT INTO samples (id, experiment_id, sample_id_external, organism, tissue_type, "
+            "INSERT INTO samples (id, experiment_id, external_id, organism, tissue_type, "
             "qc_status, status) VALUES (1, 1, 'S001', 'Homo sapiens', 'PBMC', 'pass', 'registered')"
         ),
     )

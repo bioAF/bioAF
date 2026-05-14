@@ -67,6 +67,7 @@ from app.api.content_tokens import router as content_tokens_router
 from app.api.sheets_import import router as sheets_import_router
 from app.api.github_repos import router as github_repos_router
 from app.api.custom_pipelines import router as custom_pipelines_router
+from app.api.integrations_admin import router as integrations_admin_router
 
 api_router = APIRouter()
 
@@ -137,3 +138,4 @@ api_router.include_router(content_tokens_router)
 api_router.include_router(sheets_import_router)
 api_router.include_router(github_repos_router)
 api_router.include_router(custom_pipelines_router)
+api_router.include_router(integrations_admin_router)

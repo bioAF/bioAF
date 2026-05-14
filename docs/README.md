@@ -22,4 +22,17 @@ Welcome to the bioAF documentation. bioAF is a turnkey computational biology pla
 
 ## API Reference
 
-The FastAPI backend auto-generates an OpenAPI specification at `/docs` in development mode (`BIOAF_ENVIRONMENT=development`). Access it at `http://localhost:8000/docs` during local development. The docs endpoint is disabled in production.
+The bioAF Integration API is the public, key-authenticated REST surface for
+LIMS and other external integrations.
+
+- [Integration API overview](api/README.md)
+- [Authentication and Authorization](api/auth.md)
+- [Conventions](api/conventions.md): error envelope, idempotency, pagination, status codes
+- Per-resource contracts: [Projects](api/projects.md), [Experiments](api/experiments.md), [Samples](api/samples.md), [Files](api/files.md)
+- [Webhooks](api/webhooks.md): event catalog, signature, retry/dead-letter
+
+The authoritative schema is the live OpenAPI document served at
+`/api/v1/integrations/openapi.json` (Swagger UI at
+`/api/v1/integrations/docs`). The internal/admin API (under `/api/...`,
+JWT-authenticated) auto-generates an OpenAPI spec at `/docs` when
+`BIOAF_ENVIRONMENT=development`; it is disabled in production.

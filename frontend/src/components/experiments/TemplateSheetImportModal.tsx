@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import type { SheetPreviewResponse } from "@/lib/types";
 
 const ALL_SAMPLE_FIELDS = [
-  { value: "sample_id_unique", label: "Sample ID" },
+  { value: "external_id", label: "Sample ID" },
   { value: "organism", label: "Organism" },
   { value: "tissue_type", label: "Tissue Type" },
   { value: "donor_source", label: "Donor ID" },
