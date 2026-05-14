@@ -13,6 +13,7 @@ class Project(Base):
     organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str | None] = mapped_column(String(50), server_default="active", nullable=True)
     hypothesis: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -31,3 +32,4 @@ class Project(Base):
     project_samples = relationship("ProjectSample", back_populates="project", cascade="all, delete-orphan")
     pipeline_runs = relationship("PipelineRun", back_populates="project", foreign_keys="PipelineRun.project_id")
     snapshots = relationship("AnalysisSnapshot", back_populates="project", foreign_keys="AnalysisSnapshot.project_id")
+    custom_fields = relationship("ProjectCustomField", back_populates="project", cascade="all, delete-orphan")

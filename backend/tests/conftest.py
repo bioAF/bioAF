@@ -128,6 +128,7 @@ async def _test_lifespan(app):
 async def client(db_engine):
     from app.database import get_session
     from app.middleware.rate_limit import rate_limit_requests
+    import app.database as database_module
     import app.main as main_module
 
     factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
@@ -135,6 +136,11 @@ async def client(db_engine):
     original_lifespan = main_module.app.router.lifespan_context
     main_module.app.router.lifespan_context = _test_lifespan
     rate_limit_requests.clear()
+
+    # Middleware paths that go through `async_session_factory` directly (e.g.
+    # the API-key authentication path) need to see the test schema.
+    original_session_factory = database_module.async_session_factory
+    database_module.async_session_factory = factory  # type: ignore[assignment]
 
     async def override_get_session():
         async with factory() as session:
@@ -145,6 +151,7 @@ async def client(db_engine):
         yield c
     main_module.app.dependency_overrides.clear()
     main_module.app.router.lifespan_context = original_lifespan
+    database_module.async_session_factory = original_session_factory  # type: ignore[assignment]
 
 
 @pytest_asyncio.fixture
@@ -213,3 +220,58 @@ async def viewer_token(viewer_user) -> str:
     return AuthService.create_token(
         viewer_user.id, viewer_user.email, viewer_user.role_id, viewer_user.organization_id, role_name="viewer"
     )
+
+
+@pytest_asyncio.fixture
+async def integration_api_key(session, admin_user):
+    """Service account + API key with the full public scope alphabet."""
+    from app.services import api_key_service, service_account_service
+
+    role_map = admin_user._test_role_map  # type: ignore[attr-defined]
+    sa = await service_account_service.create(
+        session,
+        org_id=admin_user.organization_id,
+        display_name="Test SA",
+        role_id=role_map["admin"],
+        created_by_user_id=admin_user.id,
+    )
+    _row, secret = await api_key_service.mint(
+        session,
+        org_id=admin_user.organization_id,
+        sa_user_id=sa.id,
+        name="primary",
+        scopes=list(api_key_service.PUBLIC_SCOPE_ALPHABET),
+        created_by_user_id=admin_user.id,
+    )
+    await session.commit()
+    return {"sa": sa, "secret": secret, "headers": {"Authorization": f"Bearer {secret}"}}
+
+
+@pytest_asyncio.fixture
+async def viewer_api_key(session, admin_user):
+    """SA with viewer role + a key carrying only :view scopes."""
+    from app.services import api_key_service, service_account_service
+
+    role_map = admin_user._test_role_map  # type: ignore[attr-defined]
+    sa = await service_account_service.create(
+        session,
+        org_id=admin_user.organization_id,
+        display_name="Test SA (viewer)",
+        role_id=role_map["viewer"],
+        created_by_user_id=admin_user.id,
+    )
+    _row, secret = await api_key_service.mint(
+        session,
+        org_id=admin_user.organization_id,
+        sa_user_id=sa.id,
+        name="viewer-key",
+        scopes=[
+            "projects:view",
+            "experiments:view",
+            "samples:view",
+            "files:view",
+        ],
+        created_by_user_id=admin_user.id,
+    )
+    await session.commit()
+    return {"sa": sa, "secret": secret, "headers": {"Authorization": f"Bearer {secret}"}}

@@ -41,6 +41,7 @@ class Experiment(Base):
     template_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("experiment_templates.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     hypothesis: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     protocol_doc_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -774,6 +774,12 @@ def create_app() -> FastAPI:
     from app.api.router import api_router
 
     application.include_router(api_router)
+
+    # Public integration API sub-app (ADR-048). Owns its own OpenAPI document;
+    # docs are served in production regardless of the main app's gating.
+    from app.api.v1.integrations import build_integrations_app
+
+    application.mount("/api/v1/integrations", build_integrations_app())
     return application
 
 

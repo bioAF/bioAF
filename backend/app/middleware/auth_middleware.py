@@ -25,6 +25,12 @@ PUBLIC_PATHS = {
     # (docs_url=None) or serves Swagger UI in development.
     "/docs",
     "/openapi.json",
+    # Public Integration API OpenAPI document and docs UI (ADR-048).
+    # The schema is fetchable without a key; the operations themselves still
+    # require authentication.
+    "/api/v1/integrations/openapi.json",
+    "/api/v1/integrations/docs",
+    "/api/v1/integrations/docs/oauth2-redirect",
 }
 
 
@@ -104,13 +110,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # current_user with the SA identity plus the key's scopes and id, and
         # debounces a last_used_at write. JWT path is unchanged.
         if token.startswith(API_KEY_PREFIX):
-            from app.database import async_session_factory
+            from app import database as database_module
             from app.services import api_key_service, role_service
             from sqlalchemy import select
             from app.models.user import User
             from app.models.role import Role
 
-            async with async_session_factory() as ak_session:
+            async with database_module.async_session_factory() as ak_session:
                 key = await api_key_service.verify(ak_session, token)
                 if key is None:
                     return JSONResponse(status_code=401, content={"detail": "Invalid API key"})
