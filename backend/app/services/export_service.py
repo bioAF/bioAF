@@ -358,11 +358,11 @@ def _build_sample_manifest(samples: list[Sample]) -> str:
     if not samples:
         buf = io.StringIO()
         writer = csv.writer(buf)
-        writer.writerow(["sample_id_unique", "organism", "tissue_type", "qc_status", "status"])
+        writer.writerow(["external_id", "organism", "tissue_type", "qc_status", "status"])
         return buf.getvalue()
 
     fields = [
-        "sample_id_unique",
+        "external_id",
         "organism",
         "tissue_type",
         "donor_source",

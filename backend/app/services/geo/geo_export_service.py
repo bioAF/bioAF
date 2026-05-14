@@ -186,7 +186,7 @@ class GeoExportService:
         for s in samples:
             sample_dict: dict = {
                 "id": s.id,
-                "sample_id_unique": s.sample_id_unique,
+                "external_id": s.external_id,
                 "organism": s.organism,
                 "molecule_type": s.molecule_type,
                 "tissue_type": s.tissue_type,
@@ -229,7 +229,7 @@ class GeoExportService:
 
         # Build per-sample file data by matching filename prefix to sample external ID
         for sd in samples_data:
-            ext_id = sd["sample_id_unique"]
+            ext_id = sd["external_id"]
             s_raw = [f for f in raw_files if f.filename.startswith(ext_id)]
             s_proc = [f for f in processed_files if f.filename.startswith(ext_id)]
             sd["files"] = {

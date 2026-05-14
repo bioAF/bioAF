@@ -263,10 +263,10 @@ async def resolve_entities(
     sample_id_ext = segments.get("sample_id")
     if sample_id_ext:
         resolution.sample_name = sample_id_ext
-        result = await db.execute(select(Sample).where(Sample.sample_id_unique == sample_id_ext))
+        result = await db.execute(select(Sample).where(Sample.external_id == sample_id_ext))
         sample = result.scalar_one_or_none()
         if sample:
             resolution.sample_id = sample.id
-            resolution.sample_name = sample.sample_id_unique
+            resolution.sample_name = sample.external_id
 
     return resolution

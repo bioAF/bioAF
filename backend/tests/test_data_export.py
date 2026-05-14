@@ -44,7 +44,7 @@ async def _seed_experiment(
 async def _seed_sample(session, experiment_id: int, sample_id: int = 1) -> None:
     await session.execute(
         text(
-            "INSERT INTO samples (id, experiment_id, sample_id_external, organism, tissue_type, "
+            "INSERT INTO samples (id, experiment_id, external_id, organism, tissue_type, "
             "qc_status, status) VALUES (:sid, :eid, :extid, 'Homo sapiens', 'PBMC', 'pass', 'registered')"
         ),
         {"sid": sample_id, "eid": experiment_id, "extid": f"S{sample_id:03d}"},

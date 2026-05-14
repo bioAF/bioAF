@@ -106,6 +106,7 @@ class ExperimentResponse(BaseModel):
     id: int
     name: str
     code: str | None = None
+    external_id: str | None = None
     project: ProjectSummary | None = None
     template_id: int | None = None
     template_name: str | None = None
@@ -135,7 +136,7 @@ class ExperimentListResponse(BaseModel):
 
 class SampleResponseBrief(BaseModel):
     id: int
-    sample_id_unique: str | None
+    external_id: str | None
     organism: str | None
     tissue_type: str | None
     molecule_type: str | None = None
