@@ -20,7 +20,7 @@ async def test_create_project_returns_201(client, integration_api_key):
 
 
 @pytest.mark.asyncio
-async def test_create_project_upsert_by_external_id(client, integration_api_key, session):
+async def test_create_project_duplicate_external_id_returns_409(client, integration_api_key, session):
     headers = integration_api_key["headers"]
     r1 = await client.post(
         "/api/v1/integrations/projects",
@@ -28,19 +28,39 @@ async def test_create_project_upsert_by_external_id(client, integration_api_key,
         json={"name": "Atlas", "external_id": "LIMS-A"},
     )
     assert r1.status_code == 201
-    id_first = r1.json()["id"]
 
     r2 = await client.post(
         "/api/v1/integrations/projects",
         headers=headers,
-        json={"name": "Atlas v2", "external_id": "LIMS-A"},
+        json={"name": "Different", "external_id": "LIMS-A"},
     )
-    assert r2.status_code == 200
-    assert r2.json()["id"] == id_first
-    assert r2.json()["name"] == "Atlas v2"
+    assert r2.status_code == 409
 
     count = (await session.execute(text("SELECT count(*) FROM projects WHERE external_id = 'LIMS-A'"))).scalar()
     assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_create_project_missing_external_id_returns_422(client, integration_api_key):
+    headers = integration_api_key["headers"]
+    r = await client.post(
+        "/api/v1/integrations/projects",
+        headers=headers,
+        json={"name": "Atlas"},
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_project_assigns_code(client, integration_api_key):
+    headers = integration_api_key["headers"]
+    r = await client.post(
+        "/api/v1/integrations/projects",
+        headers=headers,
+        json={"name": "Atlas", "external_id": "LIMS-A"},
+    )
+    assert r.status_code == 201
+    assert r.json()["code"] == "testp-0001"
 
 
 @pytest.mark.asyncio
@@ -164,7 +184,7 @@ async def test_scope_intersection_enforced(client, viewer_api_key):
     r = await client.post(
         "/api/v1/integrations/projects",
         headers=headers,
-        json={"name": "Atlas"},
+        json={"name": "Atlas", "external_id": "LIMS-A"},
     )
     # The viewer role does not have projects:create either, so this fails
     # on the role check (role_missing) before the scope check ever runs.
@@ -178,7 +198,7 @@ async def test_jwt_token_cannot_access_integration_api(client, admin_token):
     r = await client.post(
         "/api/v1/integrations/projects",
         headers={"Authorization": f"Bearer {admin_token}"},
-        json={"name": "Atlas"},
+        json={"name": "Atlas", "external_id": "LIMS-A"},
     )
     assert r.status_code == 401
 

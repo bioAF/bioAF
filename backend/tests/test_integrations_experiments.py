@@ -41,6 +41,7 @@ async def test_create_experiment_rejects_status(client, integration_api_key):
         json={
             "name": "RNA-seq",
             "project_id": project["id"],
+            "external_id": "EXP-S",
             "status": "library_prep",
         },
     )
@@ -54,7 +55,7 @@ async def test_patch_experiment_rejects_status(client, integration_api_key):
     create = await client.post(
         "/api/v1/integrations/experiments",
         headers=headers,
-        json={"name": "RNA-seq", "project_id": project["id"]},
+        json={"name": "RNA-seq", "project_id": project["id"], "external_id": "EXP-P"},
     )
     eid = create.json()["id"]
     resp = await client.patch(
@@ -66,33 +67,47 @@ async def test_patch_experiment_rejects_status(client, integration_api_key):
 
 
 @pytest.mark.asyncio
-async def test_upsert_experiment_by_external_id(client, integration_api_key):
+async def test_create_experiment_duplicate_external_id_returns_409(client, integration_api_key):
     headers = integration_api_key["headers"]
     project = await _make_project(client, headers)
     r1 = await client.post(
         "/api/v1/integrations/experiments",
         headers=headers,
-        json={
-            "name": "First",
-            "project_id": project["id"],
-            "external_id": "EXP-001",
-        },
+        json={"name": "First", "project_id": project["id"], "external_id": "EXP-001"},
     )
     assert r1.status_code == 201
-    eid = r1.json()["id"]
 
     r2 = await client.post(
         "/api/v1/integrations/experiments",
         headers=headers,
-        json={
-            "name": "Renamed",
-            "project_id": project["id"],
-            "external_id": "EXP-001",
-        },
+        json={"name": "Different", "project_id": project["id"], "external_id": "EXP-001"},
     )
-    assert r2.status_code == 200
-    assert r2.json()["id"] == eid
-    assert r2.json()["name"] == "Renamed"
+    assert r2.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_create_experiment_missing_external_id_returns_422(client, integration_api_key):
+    headers = integration_api_key["headers"]
+    project = await _make_project(client, headers)
+    r = await client.post(
+        "/api/v1/integrations/experiments",
+        headers=headers,
+        json={"name": "EXP", "project_id": project["id"]},
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_experiment_assigns_code(client, integration_api_key):
+    headers = integration_api_key["headers"]
+    project = await _make_project(client, headers)
+    r = await client.post(
+        "/api/v1/integrations/experiments",
+        headers=headers,
+        json={"name": "EXP", "project_id": project["id"], "external_id": "EXP-CODE"},
+    )
+    assert r.status_code == 201
+    assert r.json()["code"] == "teste-0001"
 
 
 @pytest.mark.asyncio
@@ -102,7 +117,11 @@ async def test_resolve_project_by_external_id(client, integration_api_key):
     r = await client.post(
         "/api/v1/integrations/experiments",
         headers=headers,
-        json={"name": "EXP", "project_external_id": "LIMS-PROJ"},
+        json={
+            "name": "EXP",
+            "project_external_id": "LIMS-PROJ",
+            "external_id": "EXP-RESOLVE",
+        },
     )
     assert r.status_code == 201
     assert r.json()["project_id"] == project["id"]
@@ -129,7 +148,7 @@ async def test_status_is_readable(client, integration_api_key):
     create = await client.post(
         "/api/v1/integrations/experiments",
         headers=headers,
-        json={"name": "EXP", "project_id": project["id"]},
+        json={"name": "EXP", "project_id": project["id"], "external_id": "EXP-READ"},
     )
     eid = create.json()["id"]
     r = await client.get(f"/api/v1/integrations/experiments/{eid}", headers=headers)

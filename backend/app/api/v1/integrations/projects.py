@@ -1,7 +1,7 @@
 """Projects endpoints for /api/v1/integrations.
 
-Upsert on POST by external_id; PATCH disallows status changes. Custom fields
-are delta-applied (null deletes the row)."""
+POST requires external_id and rejects duplicates with 409; PATCH disallows
+status changes. Custom fields are delta-applied (null deletes the row)."""
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from app.schemas.integrations.project import (
 )
 from app.services import idempotency_service
 from app.services.audit_service import log_action
+from app.services.code_service import CodeService
 from app.services.event_bus import event_bus
 from app.services.event_types import (
     INTEGRATION_PROJECT_CREATED,
@@ -45,8 +46,7 @@ def _project_out(project: Project) -> ProjectOut:
         status=project.status,
         created_at=project.created_at,
         custom_fields=[
-            CustomFieldOut(field_name=cf.field_name, field_value=cf.field_value)
-            for cf in (project.custom_fields or [])
+            CustomFieldOut(field_name=cf.field_name, field_value=cf.field_value) for cf in (project.custom_fields or [])
         ],
     )
 
@@ -77,12 +77,11 @@ async def _apply_custom_fields(
 @router.post(
     "",
     response_model=ProjectOut,
-    summary="Create or upsert a project",
+    summary="Create a project",
     description=(
-        "Creates a project, or upserts an existing one if `external_id` is "
-        "provided and a row with the same `(org, external_id)` already exists. "
-        "Returns 201 on create, 200 on upsert match. `Idempotency-Key` is "
-        "honored on retries."
+        "Creates a project. `external_id` is required and must be unique for "
+        "the organization; duplicate `external_id` returns 409. Returns 201 on "
+        "success. `Idempotency-Key` is honored on retries."
     ),
 )
 async def create_project(
@@ -107,73 +106,24 @@ async def create_project(
             response.status_code = cached.response_status
             return cached.response_body
 
-    # Upsert by external_id if supplied
-    existing: Project | None = None
-    if body.external_id is not None:
-        result = await session.execute(
-            select(Project)
-            .options(selectinload(Project.custom_fields))
-            .where(
+    existing_dup = (
+        await session.execute(
+            select(Project.id).where(
                 Project.organization_id == org_id,
                 Project.external_id == body.external_id,
             )
         )
-        existing = result.scalar_one_or_none()
+    ).scalar_one_or_none()
+    if existing_dup is not None:
+        raise HTTPException(409, "external_id_already_exists")
 
-    if existing is not None:
-        for field in ("name", "description", "hypothesis"):
-            new_val = getattr(body, field, None)
-            if new_val is not None:
-                setattr(existing, field, new_val)
-        if body.code is not None:
-            existing.code = body.code
-        await session.flush()
-        await _apply_custom_fields(
-            session,
-            existing.id,
-            list(existing.custom_fields or []),
-            [cf.model_dump() for cf in body.custom_fields] if body.custom_fields else None,
-        )
-        await log_action(
-            session,
-            user_id=int(user["sub"]),
-            api_key_id=api_key_id,
-            entity_type="project",
-            entity_id=existing.id,
-            action="upsert_matched",
-            details={"external_id": body.external_id},
-        )
-        # Reload with custom_fields eager-loaded
-        result = await session.execute(
-            select(Project).options(selectinload(Project.custom_fields)).where(Project.id == existing.id)
-        )
-        existing = result.scalar_one()
-        out = _project_out(existing)
-        await event_bus.emit(
-            INTEGRATION_PROJECT_UPDATED,
-            {
-                "organization_id": org_id,
-                "data": {"project_id": existing.id, "external_id": existing.external_id},
-            },
-        )
-        if idempotency_key is not None:
-            await idempotency_service.record(
-                session,
-                api_key_id,
-                idempotency_key,
-                idempotency_service.fingerprint("POST", "/api/v1/integrations/projects", body_dict),
-                200,
-                json.loads(out.model_dump_json()),
-            )
-        await session.commit()
-        response.status_code = 200
-        return out
+    code = await CodeService.next_project_code(session, org_id, body.name)
 
     project = Project(
         organization_id=org_id,
         external_id=body.external_id,
         name=body.name,
-        code=body.code,
+        code=code,
         description=body.description,
         hypothesis=body.hypothesis,
         owner_user_id=int(user["sub"]),

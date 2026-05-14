@@ -28,6 +28,7 @@ from app.schemas.integrations.experiment import (
 )
 from app.services import idempotency_service
 from app.services.audit_service import log_action
+from app.services.code_service import CodeService
 from app.services.event_bus import event_bus
 from app.services.event_types import (
     INTEGRATION_EXPERIMENT_CREATED,
@@ -51,8 +52,7 @@ def _experiment_out(exp: Experiment) -> ExperimentOut:
         variables_json=exp.variables_json,
         created_at=exp.created_at,
         custom_fields=[
-            CustomFieldOut(field_name=cf.field_name, field_value=cf.field_value)
-            for cf in (exp.custom_fields or [])
+            CustomFieldOut(field_name=cf.field_name, field_value=cf.field_value) for cf in (exp.custom_fields or [])
         ],
     )
 
@@ -116,7 +116,12 @@ def _reject_status_in_payload(body: dict) -> None:
 @router.post(
     "",
     response_model=ExperimentOut,
-    summary="Create or upsert an experiment",
+    summary="Create an experiment",
+    description=(
+        "Creates an experiment. `external_id` is required and must be unique "
+        "for the organization; duplicate `external_id` returns 409. Returns "
+        "201 on success. `Idempotency-Key` is honored on retries."
+    ),
 )
 async def create_experiment(
     body: ExperimentCreate,
@@ -151,71 +156,25 @@ async def create_experiment(
 
     project_id = await _resolve_project_id(session, org_id, body)
 
-    existing: Experiment | None = None
-    if body.external_id is not None:
-        result = await session.execute(
-            select(Experiment)
-            .options(selectinload(Experiment.custom_fields))
-            .where(
+    existing_dup = (
+        await session.execute(
+            select(Experiment.id).where(
                 Experiment.organization_id == org_id,
                 Experiment.external_id == body.external_id,
             )
         )
-        existing = result.scalar_one_or_none()
+    ).scalar_one_or_none()
+    if existing_dup is not None:
+        raise HTTPException(409, "external_id_already_exists")
 
-    if existing is not None:
-        for field in ("name", "hypothesis", "description", "expected_sample_count", "variables_json"):
-            new_val = getattr(body, field, None)
-            if new_val is not None:
-                setattr(existing, field, new_val)
-        if project_id is not None:
-            existing.project_id = project_id
-        await session.flush()
-        await _apply_custom_fields(
-            session,
-            existing.id,
-            list(existing.custom_fields or []),
-            [cf.model_dump() for cf in body.custom_fields] if body.custom_fields else None,
-        )
-        await log_action(
-            session,
-            user_id=int(user["sub"]),
-            api_key_id=api_key_id,
-            entity_type="experiment",
-            entity_id=existing.id,
-            action="upsert_matched",
-            details={"external_id": body.external_id},
-        )
-        result = await session.execute(
-            select(Experiment).options(selectinload(Experiment.custom_fields)).where(Experiment.id == existing.id)
-        )
-        existing = result.scalar_one()
-        out = _experiment_out(existing)
-        await event_bus.emit(
-            INTEGRATION_EXPERIMENT_UPDATED,
-            {
-                "organization_id": org_id,
-                "data": {"experiment_id": existing.id, "external_id": existing.external_id},
-            },
-        )
-        if idempotency_key is not None:
-            await idempotency_service.record(
-                session,
-                api_key_id,
-                idempotency_key,
-                idempotency_service.fingerprint("POST", "/api/v1/integrations/experiments", body_dict),
-                200,
-                json.loads(out.model_dump_json()),
-            )
-        await session.commit()
-        response.status_code = 200
-        return out
+    code = await CodeService.next_experiment_code(session, org_id, project_id)
 
     exp = Experiment(
         organization_id=org_id,
         project_id=project_id,
         external_id=body.external_id,
         name=body.name,
+        code=code,
         hypothesis=body.hypothesis,
         description=body.description,
         expected_sample_count=body.expected_sample_count,

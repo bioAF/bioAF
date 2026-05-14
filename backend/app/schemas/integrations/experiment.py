@@ -8,7 +8,7 @@ from app.schemas.integrations.common import CustomFieldIn, CustomFieldOut
 
 
 class ExperimentCreate(BaseModel):
-    external_id: str | None = Field(None, max_length=255)
+    external_id: str = Field(..., min_length=1, max_length=255)
     name: str = Field(..., min_length=1, max_length=255)
     project_id: int | None = None
     project_external_id: str | None = Field(None, max_length=255)

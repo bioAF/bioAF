@@ -38,7 +38,7 @@ router = APIRouter(prefix="/samples", tags=["Samples"])
 def _sample_out(sample: Sample) -> SampleOut:
     return SampleOut(
         id=sample.id,
-        sample_id_external=sample.sample_id_unique,
+        external_id=sample.external_id,
         experiment_id=sample.experiment_id,
         organism=sample.organism,
         tissue_type=sample.tissue_type,
@@ -53,8 +53,7 @@ def _sample_out(sample: Sample) -> SampleOut:
         status=sample.status,
         created_at=sample.created_at,
         custom_fields=[
-            CustomFieldOut(field_name=cf.field_name, field_value=cf.field_value)
-            for cf in (sample.custom_fields or [])
+            CustomFieldOut(field_name=cf.field_name, field_value=cf.field_value) for cf in (sample.custom_fields or [])
         ],
     )
 
@@ -90,7 +89,12 @@ def _reject_qc_status_in_payload(body: dict) -> None:
 @router.post(
     "",
     response_model=SampleOut,
-    summary="Create or upsert a sample",
+    summary="Create a sample",
+    description=(
+        "Creates a sample. `external_id` is required and must be unique within "
+        "the experiment; duplicate `external_id` returns 409. Returns 201 on "
+        "success. `Idempotency-Key` is honored on retries."
+    ),
 )
 async def create_sample(
     body: SampleCreate,
@@ -131,81 +135,20 @@ async def create_sample(
     if exp is None:
         raise HTTPException(404, "experiment_not_found")
 
-    existing: Sample | None = None
-    if body.sample_id_external is not None:
-        result = await session.execute(
-            select(Sample)
-            .options(selectinload(Sample.custom_fields))
-            .where(
+    existing_dup = (
+        await session.execute(
+            select(Sample.id).where(
                 Sample.experiment_id == body.experiment_id,
-                Sample.sample_id_unique == body.sample_id_external,
+                Sample.external_id == body.external_id,
             )
         )
-        existing = result.scalar_one_or_none()
-
-    if existing is not None:
-        for field in (
-            "organism",
-            "tissue_type",
-            "donor_source",
-            "treatment_condition",
-            "chemistry_version",
-            "cell_count",
-            "prep_notes",
-            "molecule_type",
-            "library_prep_method",
-        ):
-            new_val = getattr(body, field, None)
-            if new_val is not None:
-                setattr(existing, field, new_val)
-        await session.flush()
-        await _apply_custom_fields(
-            session,
-            existing.id,
-            list(existing.custom_fields or []),
-            [cf.model_dump() for cf in body.custom_fields] if body.custom_fields else None,
-        )
-        await log_action(
-            session,
-            user_id=int(user["sub"]),
-            api_key_id=api_key_id,
-            entity_type="sample",
-            entity_id=existing.id,
-            action="upsert_matched",
-            details={"sample_id_external": body.sample_id_external},
-        )
-        result = await session.execute(
-            select(Sample).options(selectinload(Sample.custom_fields)).where(Sample.id == existing.id)
-        )
-        existing = result.scalar_one()
-        out = _sample_out(existing)
-        await event_bus.emit(
-            INTEGRATION_SAMPLE_UPDATED,
-            {
-                "organization_id": org_id,
-                "data": {
-                    "sample_id": existing.id,
-                    "sample_id_external": existing.sample_id_unique,
-                    "experiment_id": existing.experiment_id,
-                },
-            },
-        )
-        if idempotency_key is not None:
-            await idempotency_service.record(
-                session,
-                api_key_id,
-                idempotency_key,
-                idempotency_service.fingerprint("POST", "/api/v1/integrations/samples", body_dict),
-                200,
-                json.loads(out.model_dump_json()),
-            )
-        await session.commit()
-        response.status_code = 200
-        return out
+    ).scalar_one_or_none()
+    if existing_dup is not None:
+        raise HTTPException(409, "external_id_already_exists")
 
     sample = Sample(
         experiment_id=body.experiment_id,
-        sample_id_unique=body.sample_id_external,
+        external_id=body.external_id,
         organism=body.organism,
         tissue_type=body.tissue_type,
         donor_source=body.donor_source,
@@ -232,7 +175,7 @@ async def create_sample(
         entity_type="sample",
         entity_id=sample.id,
         action="created",
-        details={"sample_id_external": body.sample_id_external},
+        details={"external_id": body.external_id},
     )
     result = await session.execute(
         select(Sample).options(selectinload(Sample.custom_fields)).where(Sample.id == sample.id)
@@ -245,7 +188,7 @@ async def create_sample(
             "organization_id": org_id,
             "data": {
                 "sample_id": sample.id,
-                "sample_id_external": sample.sample_id_unique,
+                "external_id": sample.external_id,
                 "experiment_id": sample.experiment_id,
             },
         },
@@ -269,7 +212,7 @@ async def list_samples(
     user: dict = require_api_key_permission("samples", "view"),
     session: AsyncSession = Depends(get_session),
     experiment_id: int | None = Query(None),
-    sample_id_external: str | None = Query(None),
+    external_id: str | None = Query(None),
     q: str | None = Query(None),
     cursor: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
@@ -283,11 +226,11 @@ async def list_samples(
     )
     if experiment_id is not None:
         stmt = stmt.where(Sample.experiment_id == experiment_id)
-    if sample_id_external:
-        stmt = stmt.where(Sample.sample_id_unique == sample_id_external)
+    if external_id:
+        stmt = stmt.where(Sample.external_id == external_id)
     if q:
         like = f"%{q}%"
-        stmt = stmt.where((Sample.sample_id_unique.ilike(like)) | (Sample.organism.ilike(like)))
+        stmt = stmt.where((Sample.external_id.ilike(like)) | (Sample.organism.ilike(like)))
     if cursor:
         try:
             stmt = stmt.where(Sample.id < int(cursor))
@@ -344,7 +287,7 @@ async def get_sample_by_external(
         .where(
             Experiment.organization_id == org_id,
             Sample.experiment_id == experiment_id,
-            Sample.sample_id_unique == external_id,
+            Sample.external_id == external_id,
         )
     )
     row = result.scalar_one_or_none()
@@ -423,7 +366,7 @@ async def patch_sample(
             "organization_id": org_id,
             "data": {
                 "sample_id": row.id,
-                "sample_id_external": row.sample_id_unique,
+                "external_id": row.external_id,
                 "changed_fields": list(updates.keys()),
             },
         },

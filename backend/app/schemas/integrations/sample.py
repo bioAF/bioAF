@@ -8,7 +8,7 @@ from app.schemas.integrations.common import CustomFieldIn, CustomFieldOut
 
 
 class SampleCreate(BaseModel):
-    sample_id_external: str | None = Field(None, max_length=255)
+    external_id: str = Field(..., min_length=1, max_length=255)
     experiment_id: int
     organism: str | None = None
     tissue_type: str | None = None
@@ -40,7 +40,7 @@ class SampleOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    sample_id_external: str | None
+    external_id: str | None
     experiment_id: int
     organism: str | None
     tissue_type: str | None

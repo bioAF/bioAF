@@ -8,9 +8,8 @@ from app.schemas.integrations.common import CustomFieldIn, CustomFieldOut
 
 
 class ProjectCreate(BaseModel):
-    external_id: str | None = Field(None, max_length=255)
+    external_id: str = Field(..., min_length=1, max_length=255)
     name: str = Field(..., min_length=1, max_length=255)
-    code: str | None = Field(None, max_length=20)
     description: str | None = None
     hypothesis: str | None = None
     custom_fields: list[CustomFieldIn] | None = None
