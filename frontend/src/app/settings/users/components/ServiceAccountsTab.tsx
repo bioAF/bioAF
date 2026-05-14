@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ApiKey,
   ServiceAccount,
@@ -9,6 +9,7 @@ import {
 import type { Role, RoleListResponse } from "@/lib/types";
 import { api, ApiError } from "@/lib/api";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { RevealSecretModal } from "./RevealSecretModal";
 import { RoleEditorModal, type PermissionCatalog } from "@/components/settings/RoleEditorModal";
 
@@ -23,28 +24,41 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
   const [accounts, setAccounts] = useState<ServiceAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  // Create SA
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [newRoleId, setNewRoleId] = useState<number | null>(null);
 
+  // Detail + keys
   const [selectedSa, setSelectedSa] = useState<ServiceAccount | null>(null);
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [keysLoading, setKeysLoading] = useState(false);
 
+  // Edit SA
+  const [editingSa, setEditingSa] = useState<ServiceAccount | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editRoleId, setEditRoleId] = useState<number | null>(null);
+
+  // Mint key
   const [showMintKey, setShowMintKey] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
-  const [mintRoleId, setMintRoleId] = useState<number | null>(null);
 
+  // Role catalog (for "Create custom role" shortcut)
   const [catalog, setCatalog] = useState<PermissionCatalog>({});
   const [showRoleEditor, setShowRoleEditor] = useState(false);
+  // Which form should auto-select the freshly-created role
+  const [pendingRoleTarget, setPendingRoleTarget] = useState<"create" | "edit" | null>(null);
+
+  // Disable confirm
+  const [pendingDisable, setPendingDisable] = useState<ServiceAccount | null>(null);
 
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
     try {
-      const sas = await integrationsApi.listServiceAccounts();
-      setAccounts(sas);
+      setAccounts(await integrationsApi.listServiceAccounts());
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Failed to load service accounts");
     } finally {
@@ -70,27 +84,24 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
     }
   };
 
-  const mintRole = useMemo(
-    () => roles.find((r) => r.id === mintRoleId) ?? null,
-    [roles, mintRoleId],
-  );
-
   const refreshKeys = async (saId: number) => {
     setKeysLoading(true);
     try {
-      const k = await integrationsApi.listApiKeys(saId);
-      setKeys(k);
+      setKeys(await integrationsApi.listApiKeys(saId));
     } finally {
       setKeysLoading(false);
     }
   };
 
-  const openMintKey = (sa: ServiceAccount) => {
-    setShowMintKey(true);
-    setNewKeyName("");
-    // Default the role picker to the SA's role so the listed permissions
-    // match the key's actual upper bound at auth time.
-    setMintRoleId(sa.role_id);
+  const openDetail = async (sa: ServiceAccount) => {
+    setSelectedSa(sa);
+    await refreshKeys(sa.id);
+  };
+
+  const openEdit = (sa: ServiceAccount) => {
+    setEditingSa(sa);
+    setEditName(sa.display_name ?? "");
+    setEditRoleId(sa.role_id);
   };
 
   const handleCreateSa = async () => {
@@ -101,35 +112,45 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
       setNewName("");
       setNewRoleId(null);
       await load();
-      // Open the new SA's drawer and jump straight to the mint-key modal.
-      // Creating a service account is almost always immediately followed by
-      // minting a key for it; making that two clicks hides the path. Open
-      // the drawer auto-expanded so "Mint key" is visible without hunting.
-      setSelectedSa(created);
-      await refreshKeys(created.id);
-      openMintKey(created);
+      // Almost always followed by minting a key; jump straight there.
+      await openDetail(created);
+      setNewKeyName("");
+      setShowMintKey(true);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Failed to create service account");
     }
   };
 
+  const handleEditSave = async () => {
+    if (!editingSa || !editName.trim() || !editRoleId) return;
+    try {
+      const updated = await integrationsApi.updateServiceAccount(editingSa.id, {
+        display_name: editName.trim(),
+        role_id: editRoleId,
+      });
+      setEditingSa(null);
+      await load();
+      if (selectedSa?.id === editingSa.id) setSelectedSa(updated);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to update service account");
+    }
+  };
+
   const handleMintKey = async () => {
-    if (!selectedSa || !newKeyName.trim() || !mintRole) return;
-    const scopes = mintRole.permissions.map((p) => `${p.resource}:${p.action}`);
+    if (!selectedSa || !newKeyName.trim()) return;
+    const role = roles.find((r) => r.id === selectedSa.role_id);
+    const scopes = (role?.permissions ?? []).map((p) => `${p.resource}:${p.action}`);
     if (scopes.length === 0) {
-      setError("Selected role has no permissions; the key would be unable to call anything.");
+      setError(
+        "This service account's role grants no permissions. Edit the role or pick a different one before minting a key.",
+      );
       return;
     }
     try {
-      const result = await integrationsApi.mintApiKey(
-        selectedSa.id,
-        newKeyName.trim(),
-        scopes,
-      );
+      const result = await integrationsApi.mintApiKey(selectedSa.id, newKeyName.trim(), scopes);
       setRevealedSecret(result.secret);
       setShowMintKey(false);
       setNewKeyName("");
-      setMintRoleId(null);
       refreshKeys(selectedSa.id);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Failed to mint key");
@@ -139,10 +160,10 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
   const handleRoleEditorSaved = async (saved: Role) => {
     setShowRoleEditor(false);
     const fresh = await refreshRoles();
-    // Auto-select the freshly-created/edited role in the mint dialog so the
-    // user sees the new permissions list immediately.
     const match = fresh.find((r) => r.id === saved.id) ?? saved;
-    setMintRoleId(match.id);
+    if (pendingRoleTarget === "create") setNewRoleId(match.id);
+    else if (pendingRoleTarget === "edit") setEditRoleId(match.id);
+    setPendingRoleTarget(null);
   };
 
   const handleRevoke = async (keyId: number) => {
@@ -154,23 +175,22 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
     }
   };
 
-  const handleDisableSa = async (sa: ServiceAccount) => {
-    if (!window.confirm(`Disable ${sa.display_name}? All its keys will be revoked.`)) {
-      return;
-    }
+  const handleDisableSa = async () => {
+    if (!pendingDisable) return;
     try {
-      await integrationsApi.disableServiceAccount(sa.id);
+      await integrationsApi.disableServiceAccount(pendingDisable.id);
+      setPendingDisable(null);
       setSelectedSa(null);
       load();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Failed to disable SA");
+      setPendingDisable(null);
     }
   };
 
-  const openDetail = (sa: ServiceAccount) => {
-    setSelectedSa(sa);
-    refreshKeys(sa.id);
-  };
+  const roleName = (roleId: number) => roles.find((r) => r.id === roleId)?.name ?? String(roleId);
+  const selectedSaRole = selectedSa ? roles.find((r) => r.id === selectedSa.role_id) : null;
+  const selectedSaScopeCount = selectedSaRole?.permissions.length ?? 0;
 
   return (
     <div>
@@ -186,9 +206,8 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
         </button>
       </div>
       <p className="text-xs text-gray-500 mb-4">
-        API keys live under each service account. Create an account, then click its row to mint a
-        scoped key. The full <code className="bg-gray-100 px-1 rounded">biokey_…</code> secret is
-        shown exactly once at mint time.
+        Each service account holds a role that defines what its keys can do. Click a row to open
+        details, mint keys, or edit.
       </p>
 
       {error && (
@@ -202,7 +221,6 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
       ) : accounts.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-6 text-center text-sm text-gray-500">
           No service accounts yet. Click <strong>Create Service Account</strong> above to start.
-          Once created, you can click into it to mint an API key.
         </div>
       ) : (
         <div className="bg-white rounded-lg shadow overflow-hidden">
@@ -216,28 +234,26 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {accounts.map((sa) => {
-                const role = roles.find((r) => r.id === sa.role_id);
-                return (
-                  <tr
-                    key={sa.id}
-                    onClick={() => openDetail(sa)}
-                    className="hover:bg-gray-50 cursor-pointer"
-                  >
-                    <td className="px-4 py-3 text-sm font-medium">{sa.display_name}</td>
-                    <td className="px-4 py-3 text-sm">{role?.name ?? sa.role_id}</td>
-                    <td className="px-4 py-3 text-sm">{sa.status}</td>
-                    <td className="px-4 py-3 text-sm text-gray-500">
-                      {new Date(sa.created_at).toLocaleDateString()}
-                    </td>
-                  </tr>
-                );
-              })}
+              {accounts.map((sa) => (
+                <tr
+                  key={sa.id}
+                  onClick={() => openDetail(sa)}
+                  className="hover:bg-gray-50 cursor-pointer"
+                >
+                  <td className="px-4 py-3 text-sm font-medium">{sa.display_name}</td>
+                  <td className="px-4 py-3 text-sm">{roleName(sa.role_id)}</td>
+                  <td className="px-4 py-3 text-sm">{sa.status}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500">
+                    {new Date(sa.created_at).toLocaleDateString()}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
       )}
 
+      {/* Create Service Account modal */}
       {showCreate && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-40 p-4">
           <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full">
@@ -250,18 +266,32 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
               placeholder="Benchling Sync"
             />
             <label className="block text-sm font-medium mb-1">Role</label>
-            <select
-              value={newRoleId ?? ""}
-              onChange={(e) => setNewRoleId(Number(e.target.value) || null)}
-              className="w-full border rounded px-3 py-2 text-sm mb-4"
-            >
-              <option value="">Select a role</option>
-              {roles.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-2 mb-2">
+              <select
+                value={newRoleId ?? ""}
+                onChange={(e) => setNewRoleId(Number(e.target.value) || null)}
+                className="flex-1 border rounded px-3 py-2 text-sm"
+              >
+                <option value="">Select a role</option>
+                {roles.map((r) => (
+                  <option key={r.id} value={r.id}>{r.name}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingRoleTarget("create");
+                  setShowRoleEditor(true);
+                }}
+                className="px-3 py-2 text-xs border border-bioaf-600 text-bioaf-600 rounded hover:bg-bioaf-50 whitespace-nowrap"
+              >
+                Create custom role
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">
+              The role determines what every key minted under this account can do. You can change
+              it later by editing the service account.
+            </p>
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setShowCreate(false)}
@@ -281,13 +311,18 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
         </div>
       )}
 
-      {selectedSa && (
-        <div className="fixed inset-0 bg-black/40 flex justify-end z-30">
-          <div className="bg-white w-full max-w-xl h-full overflow-y-auto p-6 shadow-xl">
+      {/* Detail modal */}
+      {selectedSa && !editingSa && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-30 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
             <div className="flex justify-between items-start mb-4">
               <div>
                 <h2 className="text-lg font-semibold">{selectedSa.display_name}</h2>
                 <p className="text-xs text-gray-500 font-mono">{selectedSa.email}</p>
+                <p className="text-xs text-gray-600 mt-1">
+                  Role: <span className="font-medium">{roleName(selectedSa.role_id)}</span>{" "}
+                  <span className="text-gray-400">({selectedSaScopeCount} permissions)</span>
+                </p>
               </div>
               <button
                 onClick={() => setSelectedSa(null)}
@@ -297,20 +332,36 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
               </button>
             </div>
 
-            <div className="mb-4">
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={() => openEdit(selectedSa)}
+                className="px-3 py-1.5 text-xs bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
+              >
+                Edit
+              </button>
+              <button
+                onClick={() => {
+                  setNewKeyName("");
+                  setShowMintKey(true);
+                }}
+                className="px-3 py-1.5 text-xs bg-gray-100 border rounded hover:bg-gray-200"
+              >
+                Mint key
+              </button>
+              <button
+                onClick={() => setPendingDisable(selectedSa)}
+                className="px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 ml-auto"
+              >
+                Disable Service Account
+              </button>
+            </div>
+
+            <div>
               <h3 className="text-sm font-semibold mb-2">API Keys</h3>
-              <div className="flex justify-end mb-2">
-                <button
-                  onClick={() => openMintKey(selectedSa)}
-                  className="px-3 py-1.5 text-xs bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
-                >
-                  Mint key
-                </button>
-              </div>
               {keysLoading ? (
                 <LoadingSpinner size="sm" />
               ) : keys.length === 0 ? (
-                <p className="text-sm text-gray-500">No keys yet.</p>
+                <p className="text-sm text-gray-500">No keys yet. Click <strong>Mint key</strong> above.</p>
               ) : (
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
@@ -327,7 +378,7 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
                         <td className="px-2 py-2">{k.name}</td>
                         <td className="px-2 py-2 font-mono text-xs">biokey_{k.key_prefix}</td>
                         <td className="px-2 py-2">{k.revoked_at ? "revoked" : "active"}</td>
-                        <td className="px-2 py-2">
+                        <td className="px-2 py-2 text-right">
                           {!k.revoked_at && (
                             <button
                               onClick={() => handleRevoke(k.id)}
@@ -343,93 +394,87 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
                 </table>
               )}
             </div>
-
-            <button
-              onClick={() => handleDisableSa(selectedSa)}
-              className="px-3 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700"
-            >
-              Disable Service Account
-            </button>
           </div>
         </div>
       )}
 
+      {/* Edit Service Account modal */}
+      {editingSa && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold mb-4">Edit {editingSa.display_name}</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Display name</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-bioaf-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={editRoleId ?? ""}
+                    onChange={(e) => setEditRoleId(Number(e.target.value) || null)}
+                    className="flex-1 px-3 py-2 border rounded-md text-sm"
+                  >
+                    {roles.map((r) => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingRoleTarget("edit");
+                      setShowRoleEditor(true);
+                    }}
+                    className="px-3 py-2 text-xs border border-bioaf-600 text-bioaf-600 rounded hover:bg-bioaf-50 whitespace-nowrap"
+                  >
+                    Create custom role
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setEditingSa(null)}
+                className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleEditSave}
+                disabled={!editName.trim() || !editRoleId}
+                className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded hover:bg-bioaf-700 disabled:opacity-50"
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mint API Key modal (scopes derived from the SA's role) */}
       {showMintKey && selectedSa && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl p-6 max-w-lg w-full">
-            <h2 className="text-lg font-semibold mb-4">Mint API Key</h2>
-            <label className="block text-sm font-medium mb-1">Name</label>
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h2 className="text-lg font-semibold mb-1">Mint API Key</h2>
+            <p className="text-xs text-gray-500 mb-4">
+              Permissions are inherited from the service account&apos;s role:{" "}
+              <span className="font-medium">{roleName(selectedSa.role_id)}</span>{" "}
+              ({selectedSaScopeCount} permissions).
+              To change what the key can do, edit the service account&apos;s role.
+            </p>
+            <label className="block text-sm font-medium mb-1">Key name</label>
             <input
               value={newKeyName}
               onChange={(e) => setNewKeyName(e.target.value)}
               className="w-full border rounded px-3 py-2 text-sm mb-4"
               placeholder="Primary"
             />
-
-            <label className="block text-sm font-medium mb-1">Role</label>
-            <div className="flex items-center gap-2 mb-2">
-              <select
-                value={mintRoleId ?? ""}
-                onChange={(e) => setMintRoleId(Number(e.target.value) || null)}
-                className="flex-1 border rounded px-3 py-2 text-sm"
-              >
-                <option value="">Select a role</option>
-                {roles.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}
-                    {r.id === selectedSa.role_id ? " (service account role)" : ""}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => setShowRoleEditor(true)}
-                className="px-3 py-2 text-xs border border-bioaf-600 text-bioaf-600 rounded hover:bg-bioaf-50 whitespace-nowrap"
-              >
-                Create custom role
-              </button>
-            </div>
-            {mintRole && mintRole.id !== selectedSa.role_id && (
-              <p className="text-xs text-amber-600 mb-2">
-                The key&apos;s effective permissions are the intersection of this role and the
-                service account&apos;s role ({roles.find((r) => r.id === selectedSa.role_id)?.name ?? "unknown"}).
-              </p>
-            )}
-
-            <label className="block text-sm font-medium mb-2">Permissions this role grants</label>
-            <div className="space-y-2 mb-4 max-h-64 overflow-y-auto border rounded p-3 bg-gray-50">
-              {!mintRole ? (
-                <p className="text-xs text-gray-500">Pick a role to see what this key will be allowed to do.</p>
-              ) : mintRole.permissions.length === 0 ? (
-                <p className="text-xs text-gray-500">This role grants no permissions.</p>
-              ) : (
-                Object.entries(
-                  mintRole.permissions.reduce<Record<string, string[]>>((acc, p) => {
-                    (acc[p.resource] = acc[p.resource] || []).push(p.action);
-                    return acc;
-                  }, {}),
-                )
-                  .sort(([a], [b]) => a.localeCompare(b))
-                  .map(([resource, actions]) => (
-                    <div key={resource}>
-                      <div className="text-xs uppercase text-gray-500 font-semibold mb-1">
-                        {resource}
-                      </div>
-                      <div className="flex flex-wrap gap-1">
-                        {actions.sort().map((action) => (
-                          <span
-                            key={action}
-                            className="text-xs bg-white border border-gray-200 px-1.5 py-0.5 rounded"
-                          >
-                            {action}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ))
-              )}
-            </div>
-
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setShowMintKey(false)}
@@ -439,7 +484,7 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
               </button>
               <button
                 onClick={handleMintKey}
-                disabled={!newKeyName.trim() || !mintRole || mintRole.permissions.length === 0}
+                disabled={!newKeyName.trim() || selectedSaScopeCount === 0}
                 className="px-3 py-2 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
               >
                 Mint
@@ -453,8 +498,22 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
         <RoleEditorModal
           editingRole={null}
           catalog={catalog}
-          onClose={() => setShowRoleEditor(false)}
+          onClose={() => {
+            setShowRoleEditor(false);
+            setPendingRoleTarget(null);
+          }}
           onSaved={handleRoleEditorSaved}
+        />
+      )}
+
+      {pendingDisable && (
+        <ConfirmDialog
+          open={true}
+          title="Disable Service Account"
+          message={`Disable ${pendingDisable.display_name}? All of its API keys will be revoked. This cannot be undone.`}
+          confirmLabel="Disable"
+          onConfirm={handleDisableSa}
+          onCancel={() => setPendingDisable(null)}
         />
       )}
 

@@ -8,6 +8,7 @@ import {
 } from "@/lib/integrationsApi";
 import { ApiError } from "@/lib/api";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { RevealSecretModal } from "./RevealSecretModal";
 
 const VALID_EVENTS = [
@@ -26,16 +27,28 @@ export function WebhooksTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // Create
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [newUrl, setNewUrl] = useState("");
   const [newEvents, setNewEvents] = useState<Set<string>>(new Set());
 
-  const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
-
+  // Detail
   const [selectedSub, setSelectedSub] = useState<WebhookSubscription | null>(null);
   const [deliveries, setDeliveries] = useState<WebhookDelivery[]>([]);
   const [statusFilter, setStatusFilter] = useState<string>("");
+
+  // Edit
+  const [editingSub, setEditingSub] = useState<WebhookSubscription | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editUrl, setEditUrl] = useState("");
+  const [editEvents, setEditEvents] = useState<Set<string>>(new Set());
+  const [editActive, setEditActive] = useState(true);
+
+  // Disable confirm
+  const [pendingDisable, setPendingDisable] = useState<WebhookSubscription | null>(null);
+
+  const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -88,6 +101,31 @@ export function WebhooksTab() {
     }
   };
 
+  const openEdit = (s: WebhookSubscription) => {
+    setEditingSub(s);
+    setEditName(s.name);
+    setEditUrl(s.url);
+    setEditEvents(new Set(s.events));
+    setEditActive(s.is_active);
+  };
+
+  const handleEditSave = async () => {
+    if (!editingSub || !editName.trim() || !editUrl.trim() || editEvents.size === 0) return;
+    try {
+      const updated = await integrationsApi.updateWebhook(editingSub.id, {
+        name: editName.trim(),
+        url: editUrl.trim(),
+        events: Array.from(editEvents),
+        is_active: editActive,
+      });
+      setEditingSub(null);
+      await load();
+      if (selectedSub?.id === editingSub.id) setSelectedSub(updated);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to update webhook");
+    }
+  };
+
   const handleTest = async (subId: number) => {
     try {
       await integrationsApi.fireTestWebhook(subId);
@@ -112,6 +150,19 @@ export function WebhooksTab() {
       setRevealedSecret(res.secret);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Failed to rotate secret");
+    }
+  };
+
+  const handleDisable = async () => {
+    if (!pendingDisable) return;
+    try {
+      await integrationsApi.disableWebhook(pendingDisable.id);
+      setPendingDisable(null);
+      setSelectedSub(null);
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to disable webhook");
+      setPendingDisable(null);
     }
   };
 
@@ -170,6 +221,7 @@ export function WebhooksTab() {
         </div>
       )}
 
+      {/* Create Webhook modal */}
       {showCreate && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-40 p-4">
           <div className="bg-white rounded-lg shadow-xl p-6 max-w-lg w-full">
@@ -225,13 +277,18 @@ export function WebhooksTab() {
         </div>
       )}
 
-      {selectedSub && (
-        <div className="fixed inset-0 bg-black/40 flex justify-end z-30">
-          <div className="bg-white w-full max-w-2xl h-full overflow-y-auto p-6 shadow-xl">
+      {/* Detail modal */}
+      {selectedSub && !editingSub && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-30 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6">
             <div className="flex justify-between items-start mb-4">
               <div>
                 <h2 className="text-lg font-semibold">{selectedSub.name}</h2>
                 <p className="text-xs text-gray-500 break-all">{selectedSub.url}</p>
+                <p className="text-xs text-gray-600 mt-1">
+                  {selectedSub.events.length} event{selectedSub.events.length === 1 ? "" : "s"}{" "}
+                  &middot; {selectedSub.is_active ? "active" : "disabled"}
+                </p>
               </div>
               <button
                 onClick={() => setSelectedSub(null)}
@@ -241,18 +298,30 @@ export function WebhooksTab() {
               </button>
             </div>
 
-            <div className="flex gap-2 mb-4">
+            <div className="flex flex-wrap gap-2 mb-4">
+              <button
+                onClick={() => openEdit(selectedSub)}
+                className="px-3 py-1.5 text-xs bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
+              >
+                Edit
+              </button>
               <button
                 onClick={() => handleTest(selectedSub.id)}
-                className="px-3 py-1.5 text-xs bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
+                className="px-3 py-1.5 text-xs bg-gray-100 border rounded hover:bg-gray-200"
               >
                 Send test event
               </button>
               <button
                 onClick={() => handleRotate(selectedSub.id)}
-                className="px-3 py-1.5 text-xs bg-gray-200 rounded hover:bg-gray-300"
+                className="px-3 py-1.5 text-xs bg-gray-100 border rounded hover:bg-gray-200"
               >
                 Rotate secret
+              </button>
+              <button
+                onClick={() => setPendingDisable(selectedSub)}
+                className="px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 ml-auto"
+              >
+                Disable Webhook
               </button>
             </div>
 
@@ -282,26 +351,117 @@ export function WebhooksTab() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {deliveries.map((d) => (
-                  <tr key={d.id}>
-                    <td className="px-2 py-2 text-xs">{d.event_type}</td>
-                    <td className="px-2 py-2 text-xs">{d.status}</td>
-                    <td className="px-2 py-2 text-xs">{d.attempt_count}</td>
-                    <td className="px-2 py-2 text-xs">{d.last_response_status ?? "—"}</td>
-                    <td className="px-2 py-2 text-xs">
-                      <button
-                        onClick={() => handleReplay(d.id)}
-                        className="text-xs text-bioaf-600 hover:underline"
-                      >
-                        Replay
-                      </button>
+                {deliveries.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-2 py-4 text-xs text-gray-500 text-center">
+                      No deliveries yet.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  deliveries.map((d) => (
+                    <tr key={d.id}>
+                      <td className="px-2 py-2 text-xs">{d.event_type}</td>
+                      <td className="px-2 py-2 text-xs">{d.status}</td>
+                      <td className="px-2 py-2 text-xs">{d.attempt_count}</td>
+                      <td className="px-2 py-2 text-xs">{d.last_response_status ?? "-"}</td>
+                      <td className="px-2 py-2 text-xs">
+                        <button
+                          onClick={() => handleReplay(d.id)}
+                          className="text-xs text-bioaf-600 hover:underline"
+                        >
+                          Replay
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
         </div>
+      )}
+
+      {/* Edit Webhook modal */}
+      {editingSub && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-6">
+            <h3 className="text-lg font-semibold mb-4">Edit {editingSub.name}</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-bioaf-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">URL</label>
+                <input
+                  type="text"
+                  value={editUrl}
+                  onChange={(e) => setEditUrl(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-bioaf-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Events</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {VALID_EVENTS.map((e) => (
+                    <label key={e} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={editEvents.has(e)}
+                        onChange={(ev) => {
+                          const next = new Set(editEvents);
+                          if (ev.target.checked) next.add(e);
+                          else next.delete(e);
+                          setEditEvents(next);
+                        }}
+                      />
+                      <span>{e}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={editActive}
+                  onChange={(e) => setEditActive(e.target.checked)}
+                />
+                <span>Active (deliveries will be queued for this subscription)</span>
+              </label>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setEditingSub(null)}
+                className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleEditSave}
+                disabled={!editName.trim() || !editUrl.trim() || editEvents.size === 0}
+                className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded hover:bg-bioaf-700 disabled:opacity-50"
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingDisable && (
+        <ConfirmDialog
+          open={true}
+          title="Disable Webhook"
+          message={`Disable ${pendingDisable.name}? No further deliveries will be queued.`}
+          confirmLabel="Disable"
+          onConfirm={handleDisable}
+          onCancel={() => setPendingDisable(null)}
+        />
       )}
 
       {revealedSecret && (
