@@ -417,12 +417,12 @@ async def fire_test_webhook(
 
 
 class AuditRowOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     timestamp: datetime
     user_id: int | None
     api_key_id: int | None
+    service_account_name: str | None
+    api_key_name: str | None
     entity_type: str
     entity_id: int
     action: str
@@ -436,10 +436,20 @@ async def list_api_activity(
     user: dict = require_permission("audit_log", "view"),
     session: AsyncSession = Depends(get_session),
 ):
-    # Scope to rows whose actor user belongs to the caller's org.
+    """Return recent API-key-authenticated audit rows for the caller's org.
+
+    Each row is enriched with the service account's display name and the
+    key's name so the UI can label rows without a second round-trip.
+    """
     stmt = (
-        select(AuditLog)
+        select(
+            AuditLog,
+            User.display_name.label("sa_display_name"),
+            User.name.label("sa_name"),
+            ApiKey.name.label("key_name"),
+        )
         .join(User, User.id == AuditLog.user_id)
+        .outerjoin(ApiKey, ApiKey.id == AuditLog.api_key_id)
         .where(
             AuditLog.api_key_id.is_not(None),
             User.organization_id == int(user["org_id"]),
@@ -449,5 +459,21 @@ async def list_api_activity(
     )
     if cursor is not None:
         stmt = stmt.where(AuditLog.id < cursor)
-    rows = (await session.execute(stmt)).scalars().all()
-    return [AuditRowOut.model_validate(r) for r in rows]
+    result = await session.execute(stmt)
+    out: list[AuditRowOut] = []
+    for row, sa_display_name, sa_name, key_name in result.all():
+        out.append(
+            AuditRowOut(
+                id=row.id,
+                timestamp=row.timestamp,
+                user_id=row.user_id,
+                api_key_id=row.api_key_id,
+                service_account_name=sa_display_name or sa_name,
+                api_key_name=key_name,
+                entity_type=row.entity_type,
+                entity_id=row.entity_id,
+                action=row.action,
+                details_json=row.details_json,
+            )
+        )
+    return out

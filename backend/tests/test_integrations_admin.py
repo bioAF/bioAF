@@ -100,7 +100,8 @@ async def test_create_webhook_returns_secret(client, admin_token):
 @pytest.mark.asyncio
 async def test_list_api_activity(client, admin_user, admin_token, integration_api_key):
     """Audit-log activity rows for API-key callers are filterable via the
-    admin endpoint."""
+    admin endpoint. Rows must carry the service account's display name and
+    the key's name so the UI can label them without a follow-up lookup."""
     headers = integration_api_key["headers"]
     # Exercise the API as the SA so audit rows accumulate.
     await client.post(
@@ -114,7 +115,12 @@ async def test_list_api_activity(client, admin_user, admin_token, integration_ap
     )
     assert r.status_code == 200
     rows = r.json()
-    assert any(row["api_key_id"] is not None for row in rows)
+    assert rows, "expected at least one audit row"
+    api_rows = [row for row in rows if row["api_key_id"] is not None]
+    assert api_rows
+    row = api_rows[0]
+    assert row["service_account_name"] == "Test SA"
+    assert row["api_key_name"] == "primary"
 
 
 @pytest.mark.asyncio

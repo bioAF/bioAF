@@ -67,6 +67,8 @@ export interface ApiActivityRow {
   timestamp: string;
   user_id: number | null;
   api_key_id: number | null;
+  service_account_name: string | null;
+  api_key_name: string | null;
   entity_type: string;
   entity_id: number;
   action: string;

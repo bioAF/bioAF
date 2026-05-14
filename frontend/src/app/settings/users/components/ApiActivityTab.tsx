@@ -25,10 +25,17 @@ export function ApiActivityTab() {
     load();
   }, []);
 
+  const keyLabel = (r: ApiActivityRow): string => {
+    if (!r.service_account_name && !r.api_key_name) return "-";
+    const sa = r.service_account_name ?? "(unknown SA)";
+    const key = r.api_key_name ?? "(unknown key)";
+    return `${sa} / ${key}`;
+  };
+
   return (
     <div>
       <p className="text-sm text-gray-600 mb-4">
-        Audit-log entries from API-key authenticated calls. Each row shows the service account user,
+        Audit-log entries from API-key authenticated calls. Each row shows the service account,
         the key, and what they touched.
       </p>
 
@@ -65,7 +72,7 @@ export function ApiActivityTab() {
                   <td className="px-4 py-3 text-sm text-gray-500">
                     {new Date(r.timestamp).toLocaleString()}
                   </td>
-                  <td className="px-4 py-3 text-sm">{r.api_key_id ?? "—"}</td>
+                  <td className="px-4 py-3 text-sm">{keyLabel(r)}</td>
                   <td className="px-4 py-3 text-sm">
                     {r.entity_type}/{r.entity_id}
                   </td>
@@ -78,12 +85,20 @@ export function ApiActivityTab() {
       )}
 
       {selected && (
-        <div className="fixed inset-0 bg-black/40 flex justify-end z-30">
-          <div className="bg-white w-full max-w-xl h-full overflow-y-auto p-6 shadow-xl">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-30 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
             <div className="flex justify-between items-start mb-4">
-              <h2 className="text-lg font-semibold">
-                {selected.action} on {selected.entity_type}/{selected.entity_id}
-              </h2>
+              <div>
+                <h2 className="text-lg font-semibold">
+                  {selected.action} on {selected.entity_type}/{selected.entity_id}
+                </h2>
+                <p className="text-xs text-gray-500 mt-1">
+                  {new Date(selected.timestamp).toLocaleString()}
+                </p>
+                <p className="text-xs text-gray-600 mt-1">
+                  <span className="font-medium">{keyLabel(selected)}</span>
+                </p>
+              </div>
               <button
                 onClick={() => setSelected(null)}
                 className="text-gray-400 hover:text-gray-600"
@@ -91,9 +106,6 @@ export function ApiActivityTab() {
                 Close
               </button>
             </div>
-            <p className="text-xs text-gray-500 mb-2">
-              {new Date(selected.timestamp).toLocaleString()}
-            </p>
             <pre className="bg-gray-50 border border-gray-200 rounded p-3 text-xs whitespace-pre-wrap break-all">
               {JSON.stringify(selected.details_json ?? {}, null, 2)}
             </pre>
