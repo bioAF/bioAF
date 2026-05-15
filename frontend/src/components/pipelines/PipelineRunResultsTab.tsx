@@ -17,6 +17,48 @@ interface Props {
   pipelineRunId: number;
 }
 
+function QCDashboardPlot({
+  fileId,
+  title,
+  onExpand,
+}: {
+  fileId: number;
+  title: string;
+  onExpand: (url: string) => void;
+}) {
+  const url = useFileContentUrl(fileId);
+  const [error, setError] = useState(false);
+
+  return (
+    <div className="relative bg-gray-100 rounded min-h-[12rem] flex items-center justify-center group">
+      {error ? (
+        <span className="text-gray-400 text-sm">Failed to load plot</span>
+      ) : url ? (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={url}
+            alt={title}
+            className="w-full rounded"
+            onError={() => setError(true)}
+          />
+          <button
+            onClick={() => onExpand(url)}
+            className="absolute top-2 right-2 p-1.5 bg-white/80 rounded shadow opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white"
+            title="Expand plot"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5" />
+            </svg>
+          </button>
+        </>
+      ) : (
+        <span className="text-gray-400 text-sm">Loading plot...</span>
+      )}
+    </div>
+  );
+}
+
 function PlotThumbnail({
   plot,
   onClick,
@@ -90,6 +132,7 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
   const [expandedUrl, setExpandedUrl] = useState<string | null>(null);
   const [expandedTitle, setExpandedTitle] = useState("");
   const [expandedPlot, setExpandedPlot] = useState<PlotArchiveResponse | null>(null);
+  const [expandedQCUrl, setExpandedQCUrl] = useState<{ url: string; title: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -161,7 +204,30 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
             <span>Loading QC dashboard...</span>
           </div>
         ) : dashboard ? (
-          <GenericQCDashboard dashboard={dashboard} />
+          <>
+            <GenericQCDashboard dashboard={dashboard} />
+            {dashboard.plots.length > 0 && (
+              <>
+                <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mt-6 mb-3">
+                  Plots
+                </h3>
+                <div className="grid grid-cols-2 gap-4">
+                  {dashboard.plots.map((plot, i) => (
+                    <div key={i} className="border rounded-lg p-3">
+                      <p className="text-sm font-medium mb-2">{plot.title}</p>
+                      <QCDashboardPlot
+                        fileId={plot.file_id}
+                        title={plot.title}
+                        onExpand={(url) =>
+                          setExpandedQCUrl({ url, title: plot.title })
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </>
         ) : dashboardMissing ? (
           <p className="text-sm text-gray-500">
             No QC dashboard yet for this run. Dashboards are generated automatically when the run completes.
@@ -239,6 +305,14 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
             setExpandedUrl(null);
             setExpandedPlot(null);
           }}
+        />
+      )}
+
+      {expandedQCUrl && (
+        <PlotModal
+          url={expandedQCUrl.url}
+          title={expandedQCUrl.title}
+          onClose={() => setExpandedQCUrl(null)}
         />
       )}
     </div>

@@ -220,6 +220,63 @@ describe("PipelineRunDetailPage Results tab", () => {
     expect(screen.getByRole("link", { name: /open in plot archive/i })).toBeTruthy();
   });
 
+  test("shows static QC plots from dashboard.plots below the interactive dashboard", async () => {
+    // The standalone Results > QC Dashboards page renders dashboard.plots
+    // (the static QCPlot items the extractor saved with the dashboard)
+    // beneath GenericQCDashboard. The Results tab must match that, so
+    // reviewers see the same set of figures inline as they would on the
+    // full QC dashboard page.
+    mockGet.mockImplementation((url: string) => {
+      if (url === "/api/pipeline-runs/1") {
+        return Promise.resolve({
+          id: 1,
+          status: "completed",
+          pipeline_name: "nf-core/scrnaseq",
+          custom_pipeline_version_id: null,
+          organization_id: 1,
+          processes: [],
+        });
+      }
+      if (url === "/api/pipeline-runs/1/references") return Promise.resolve([]);
+      if (url === "/api/qc-dashboards/by-run/1") {
+        return Promise.resolve({
+          id: 7,
+          pipeline_run_id: 1,
+          experiment_id: 2,
+          qc_config: { sections: [], chart_sections: [] },
+          raw_metrics: {},
+          metrics: { quality_rating: "good" },
+          summary_text: "Looks good",
+          plots: [
+            { plot_type: "umap", title: "UMAP clusters", file_id: 101 },
+            { plot_type: "violin", title: "Mito % distribution", file_id: 102 },
+          ],
+          status: "ready",
+          generated_at: "2026-05-14T00:00:00Z",
+          created_at: "2026-05-14T00:00:00Z",
+        });
+      }
+      if (url.startsWith("/api/plots")) {
+        return Promise.resolve({ plots: [], total: 0, page: 1, page_size: 24 });
+      }
+      return Promise.resolve({});
+    });
+
+    render(<PipelineRunDetailPage />);
+    const results = await waitFor(() => {
+      const btn = screen.queryByRole("button", { name: "Results" });
+      if (!btn) throw new Error("Results tab not rendered yet");
+      return btn;
+    });
+    await act(async () => {
+      fireEvent.click(results);
+    });
+    await waitFor(() =>
+      expect(screen.queryByText("UMAP clusters")).toBeTruthy(),
+    );
+    expect(screen.getByText("Mito % distribution")).toBeTruthy();
+  });
+
   test("Results tab handles a run with no QC dashboard yet", async () => {
     mockGet.mockImplementation((url: string) => {
       if (url === "/api/pipeline-runs/1") {
