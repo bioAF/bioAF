@@ -194,22 +194,58 @@ export default function QCDashboardsPage() {
             </p>
           ) : (
             <div className="bg-white rounded-lg shadow divide-y divide-gray-200">
-              {dashboards.map((d) => (
-                <div
-                  key={d.id}
-                  onClick={() => viewDashboard(d.id)}
-                  className="p-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer"
-                >
-                  <div>
-                    <p className="font-medium text-sm">Run #{d.pipeline_run_id}</p>
-                    <p className="text-xs text-gray-400">
-                      Generated {d.generated_at ? new Date(d.generated_at).toLocaleDateString() : "N/A"}
-                      {d.cell_count != null && ` | ${d.cell_count.toLocaleString()} cells`}
-                    </p>
+              {dashboards.map((d) => {
+                const samples = d.sample_external_ids ?? [];
+                const sampleDisplay =
+                  samples.length === 0
+                    ? null
+                    : samples.length <= 3
+                      ? samples.join(", ")
+                      : `${samples.slice(0, 3).join(", ")} +${samples.length - 3} more`;
+                return (
+                  <div
+                    key={d.id}
+                    onClick={() => viewDashboard(d.id)}
+                    className="p-4 flex items-start justify-between gap-4 hover:bg-gray-50 cursor-pointer"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline gap-2 flex-wrap">
+                        <p className="font-medium text-sm">Run #{d.pipeline_run_id}</p>
+                        {d.pipeline_name && (
+                          <span className="text-xs text-gray-600">
+                            {`${d.pipeline_name}${d.pipeline_version ? ` v${d.pipeline_version}` : ""}`}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1 text-xs text-gray-600">
+                        {d.project_name && (
+                          <div>
+                            <span className="text-gray-400">Project:</span>{" "}
+                            <span className="text-gray-700">{d.project_name}</span>
+                          </div>
+                        )}
+                        {d.experiment_name && (
+                          <div>
+                            <span className="text-gray-400">Experiment:</span>{" "}
+                            <span className="text-gray-700">{d.experiment_name}</span>
+                          </div>
+                        )}
+                        {sampleDisplay && (
+                          <div className="sm:col-span-2 lg:col-span-1">
+                            <span className="text-gray-400">Samples:</span>{" "}
+                            <span className="text-gray-700">{sampleDisplay}</span>
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-400 mt-1">
+                        Generated {d.generated_at ? new Date(d.generated_at).toLocaleDateString() : "N/A"}
+                        {d.cell_count != null && ` | ${d.cell_count.toLocaleString()} cells`}
+                      </p>
+                    </div>
+                    <QualityBadge rating={d.quality_rating} />
                   </div>
-                  <QualityBadge rating={d.quality_rating} />
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </main>
