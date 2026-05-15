@@ -212,8 +212,8 @@ class UpgradeService:
         """Trigger an upgrade by writing a trigger file for the host update agent."""
         current = settings.app_version
 
-        # Validate version format: accepts SemVer (X.Y.Z) and CalVer (YYYY.M.D.N)
-        if not re.match(r"^\d+(\.\d+)+$", target_version):
+        # Validate version format
+        if not re.match(r"^\d+\.\d+\.\d+$", target_version):
             raise ValueError(f"Invalid version format: {target_version}")
 
         if target_version == current:

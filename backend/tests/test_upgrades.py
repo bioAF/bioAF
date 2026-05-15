@@ -466,23 +466,28 @@ async def test_get_update_status_in_progress(client: AsyncClient, admin_token: s
 
 # ---------------------------------------------------------------------------
 # CalVer compatibility tests
+#
+# CalVer here is YYYY.MM.N (year, month, monthly increment). Three numeric
+# segments by design so the deployed strict-SemVer validator on every
+# existing client accepts it, enabling the SemVer-to-CalVer cutover with no
+# bridge release.
 # ---------------------------------------------------------------------------
 
 
 def test_parse_version_handles_calver():
-    """CalVer tags like v2026.5.15.0 must parse to a 4-tuple of ints."""
+    """CalVer tags like v2026.5.0 must parse to a 3-tuple of ints."""
     from app.services.upgrade_service import _parse_version
 
-    assert _parse_version("v2026.5.15.0") == (2026, 5, 15, 0)
-    assert _parse_version("2026.5.15.3") == (2026, 5, 15, 3)
+    assert _parse_version("v2026.5.0") == (2026, 5, 0)
+    assert _parse_version("2026.5.47") == (2026, 5, 47)
 
 
 def test_parse_version_calver_greater_than_semver():
     """A CalVer release must compare greater than any pre-migration SemVer."""
     from app.services.upgrade_service import _parse_version
 
-    assert _parse_version("v2026.5.15.0") > _parse_version("v0.15.1")
-    assert _parse_version("v2026.5.15.0") > _parse_version("v1.99.99")
+    assert _parse_version("v2026.5.0") > _parse_version("v0.15.1")
+    assert _parse_version("v2026.5.0") > _parse_version("v1.99.99")
 
 
 @pytest.mark.asyncio
@@ -495,9 +500,9 @@ async def test_check_for_updates_detects_calver_newer_than_semver():
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
-        "tag_name": "v2026.5.15.0",
+        "tag_name": "v2026.5.0",
         "body": "First CalVer release",
-        "html_url": "https://github.com/bioAF/bioAF/releases/tag/v2026.5.15.0",
+        "html_url": "https://github.com/bioAF/bioAF/releases/tag/v2026.5.0",
     }
 
     with patch("app.services.upgrade_service.httpx.AsyncClient") as mock_client_cls:
@@ -510,12 +515,12 @@ async def test_check_for_updates_detects_calver_newer_than_semver():
         result = await UpgradeService.check_for_updates(1)
 
     assert result["update_available"] is True
-    assert result["latest_version"] == "2026.5.15.0"
+    assert result["latest_version"] == "2026.5.0"
 
 
 @pytest.mark.asyncio
 async def test_execute_upgrade_accepts_calver_target(client: AsyncClient, admin_token: str):
-    """The /execute endpoint must accept CalVer target versions, not only SemVer."""
+    """The /execute endpoint must accept three-segment CalVer targets on the existing validator."""
     with tempfile.TemporaryDirectory() as tmpdir:
         requests_dir = os.path.join(tmpdir, "requests")
         os.makedirs(requests_dir)
@@ -526,12 +531,12 @@ async def test_execute_upgrade_accepts_calver_target(client: AsyncClient, admin_
 
             response = await client.post(
                 "/api/upgrades/execute",
-                json={"target_version": "2026.5.15.0"},
+                json={"target_version": "2026.5.0"},
                 headers={"Authorization": f"Bearer {admin_token}"},
             )
 
     assert response.status_code == 200
-    assert response.json()["to_version"] == "2026.5.15.0"
+    assert response.json()["to_version"] == "2026.5.0"
 
 
 @pytest.mark.asyncio

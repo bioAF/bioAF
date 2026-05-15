@@ -1,12 +1,15 @@
 # Release Notes
 
 > Starting with the first release after v0.15.1, bioAF uses CalVer instead of
-> SemVer. Version tags are `vYYYY.M.D.N` (year, month, day, daily increment),
-> for example `v2026.5.15.0` for the first release on 15 May 2026. CalVer
-> tags compare as strictly greater than any prior `0.x` / `1.x` tag, so the
-> in-app Update button continues to surface and install the latest release
-> across the cutover with no user action required. Sections below v0.15.1
-> remain in their original SemVer format.
+> SemVer. Version tags are `vYYYY.MM.N` (year, month, monthly increment), for
+> example `v2026.5.0` for the first release in May 2026, `v2026.5.1` for the
+> second, and so on. The format is three numeric segments by design: every
+> deployed client (including pre-cutover `0.x` releases) accepts it as a
+> valid install target, so the in-app Update button continues to surface and
+> install the latest release across the cutover with no user action. The
+> release date is recoverable from the GitHub release timestamp and the
+> changelog section. Sections below v0.15.1 remain in their original SemVer
+> format.
 
 ## v0.15.1
 

@@ -38,7 +38,7 @@ a file. The changelog-check workflow respects that label.
 On release, the workflow:
 
 1. Reads every `*.md` file under `changes/unreleased/` (this README excluded).
-2. Concatenates them in filename order under a new `## v<calver>` header.
+2. Concatenates them in filename order under a new `## vYYYY.MM.N` header.
 3. Prepends that section to `RELEASE_NOTES.md`.
 4. Deletes the consumed files.
 5. Commits, tags, and creates the GitHub Release.

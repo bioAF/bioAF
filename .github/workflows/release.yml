@@ -52,9 +52,8 @@ jobs:
           git fetch --tags --force
           Y=$(date -u +%Y)
           M=$(date -u +%-m)
-          D=$(date -u +%-d)
-          MAX_N=$(git tag --list "v${Y}.${M}.${D}.*" \
-            | sed "s|^v${Y}\.${M}\.${D}\.||" \
+          MAX_N=$(git tag --list "v${Y}.${M}.*" \
+            | sed "s|^v${Y}\.${M}\.||" \
             | grep -E '^[0-9]+$' \
             | sort -n \
             | tail -1)
@@ -63,7 +62,7 @@ jobs:
           else
             N=$((MAX_N + 1))
           fi
-          VERSION="${Y}.${M}.${D}.${N}"
+          VERSION="${Y}.${M}.${N}"
           TAG="v${VERSION}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
