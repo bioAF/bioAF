@@ -7,6 +7,7 @@ import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { ReviewPanel } from "@/components/experiments/ReviewPanel";
+import { PipelineRunResultsTab } from "@/components/pipelines/PipelineRunResultsTab";
 import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBadge";
 import { isAuthenticated } from "@/lib/auth";
 import { getToken } from "@/lib/auth";
@@ -29,7 +30,7 @@ const STATUS_COLORS: Record<PipelineRunStatus | PipelineProcessStatus, string> =
   cached: "bg-purple-100 text-purple-700",
 };
 
-type Tab = "logs" | "report" | "parameters" | "provenance" | "review";
+type Tab = "logs" | "report" | "parameters" | "provenance" | "results" | "review";
 
 interface LogResponse {
   stdout: string;
@@ -366,6 +367,7 @@ export default function PipelineRunDetailPage() {
     ...(showReportTab ? [{ key: "report" as Tab, label: "Report" }] : []),
     { key: "parameters", label: "Parameters" },
     { key: "provenance", label: "Provenance" },
+    { key: "results", label: "Results" },
     { key: "review", label: "Review" },
   ];
 
@@ -760,6 +762,11 @@ export default function PipelineRunDetailPage() {
                 )
               ) : <p className="text-gray-400">Select a process to view logs</p>}
             </div>
+          )}
+
+          {/* Results tab */}
+          {activeTab === "results" && (
+            <PipelineRunResultsTab pipelineRunId={run.id} />
           )}
 
           {/* Review tab */}

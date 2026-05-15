@@ -101,5 +101,10 @@ class QCDashboardSummary(BaseModel):
     cell_count: int | None
     status: str
     generated_at: datetime | None
+    project_name: str | None = None
+    experiment_name: str | None = None
+    pipeline_name: str | None = None
+    pipeline_version: str | None = None
+    sample_external_ids: list[str] = []
 
     model_config = {"from_attributes": True}

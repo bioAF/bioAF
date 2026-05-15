@@ -71,6 +71,92 @@ async def test_list_qc_dashboards(client, admin_token, qc_dashboard):
 
 
 @pytest.mark.asyncio
+async def test_list_qc_dashboards_includes_context(client, admin_token, session, admin_user):
+    """The list response must surface enough context for users to tell runs
+    apart at a glance: project, experiment, sample external IDs, pipeline."""
+    from datetime import datetime, timezone
+
+    from app.models.experiment import Experiment
+    from app.models.pipeline_run import PipelineRun, PipelineRunSample
+    from app.models.project import Project
+    from app.models.qc_dashboard import QCDashboard
+    from app.models.sample import Sample
+
+    project = Project(
+        organization_id=admin_user.organization_id,
+        name="Project Alpha",
+        code="ALPH",
+    )
+    session.add(project)
+    await session.flush()
+
+    exp = Experiment(
+        organization_id=admin_user.organization_id,
+        name="Alpha Exp 1",
+        owner_user_id=admin_user.id,
+        status="processing",
+        project_id=project.id,
+    )
+    session.add(exp)
+    await session.flush()
+
+    s1 = Sample(
+        experiment_id=exp.id,
+        external_id="SAMPLE-001",
+    )
+    s2 = Sample(
+        experiment_id=exp.id,
+        external_id="SAMPLE-002",
+    )
+    session.add_all([s1, s2])
+    await session.flush()
+
+    run = PipelineRun(
+        organization_id=admin_user.organization_id,
+        experiment_id=exp.id,
+        project_id=project.id,
+        submitted_by_user_id=admin_user.id,
+        pipeline_name="nf-core/scrnaseq",
+        pipeline_version="2.6.0",
+        status="completed",
+        work_dir="/data/working/nextflow/run-ctx",
+    )
+    session.add(run)
+    await session.flush()
+    session.add_all(
+        [
+            PipelineRunSample(pipeline_run_id=run.id, sample_id=s1.id),
+            PipelineRunSample(pipeline_run_id=run.id, sample_id=s2.id),
+        ]
+    )
+
+    d = QCDashboard(
+        organization_id=admin_user.organization_id,
+        pipeline_run_id=run.id,
+        experiment_id=exp.id,
+        metrics_json={"quality_rating": "good"},
+        plots_json=[],
+        status="ready",
+        generated_at=datetime.now(timezone.utc),
+    )
+    session.add(d)
+    await session.commit()
+
+    resp = await client.get(
+        "/api/qc-dashboards",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    rows = resp.json()
+    row = next(r for r in rows if r["id"] == d.id)
+    assert row["pipeline_run_id"] == run.id
+    assert row["project_name"] == "Project Alpha"
+    assert row["experiment_name"] == "Alpha Exp 1"
+    assert row["pipeline_name"] == "nf-core/scrnaseq"
+    assert sorted(row["sample_external_ids"]) == ["SAMPLE-001", "SAMPLE-002"]
+
+
+@pytest.mark.asyncio
 async def test_get_qc_dashboard(client, admin_token, qc_dashboard):
     resp = await client.get(
         f"/api/qc-dashboards/{qc_dashboard.id}",

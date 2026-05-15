@@ -23,6 +23,7 @@ A turnkey computational biology platform for small biotech companies (5-50 resea
 - **Upgrade System** - GitHub-based version checking, managed upgrade flow with rollback
 - **Audit Log** - Immutable audit trail with filtering, pagination, and human-readable descriptions
 - **GitOps** - Version-controlled platform configuration with diff and rollback
+- **Integration API** - Public, key-authenticated REST surface for LIMS and other external systems, with webhooks for event delivery
 
 ## Architecture
 
@@ -117,6 +118,19 @@ See the full [Deployment Guide](docs/deployment-guide.md) for detailed instructi
 - [GEO Export Guide](docs/guides/geo-export.md) - Exporting to NCBI GEO
 - [Reference Data Guide](docs/guides/reference-data.md) - Managing reference genomes and annotations
 - [Compute Stack Setup](docs/guides/compute-stack-setup.md) - Kubernetes configuration
+
+### Integration API
+
+Public, key-authenticated REST surface for LIMS systems and other external
+callers. The OpenAPI document at `/api/v1/integrations/openapi.json` is the
+source of truth (Swagger UI at `/api/v1/integrations/docs`); the docs below
+cover the contracts, conventions, and event delivery story.
+
+- [Integration API overview](docs/api/README.md) - What this API is and is not
+- [Authentication and Authorization](docs/api/auth.md) - Service accounts, API keys, scopes
+- [Conventions](docs/api/conventions.md) - Error envelope, idempotency, pagination, external IDs
+- Per-resource contracts: [Projects](docs/api/projects.md), [Experiments](docs/api/experiments.md), [Samples](docs/api/samples.md), [Files](docs/api/files.md)
+- [Webhooks](docs/api/webhooks.md) - Event catalog, HMAC signatures, retries
 
 ## Development Setup
 

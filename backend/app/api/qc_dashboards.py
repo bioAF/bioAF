@@ -1,10 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import delete as sa_delete
+from sqlalchemy import delete as sa_delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import get_session
+from app.models.experiment import Experiment
 from app.models.file import File
+from app.models.pipeline_run import PipelineRun, PipelineRunSample
+from app.models.project import Project
+from app.models.sample import Sample
 from app.schemas.qc_dashboard import (
     QCDashboardConfig,
     QCDashboardResponse,
@@ -89,7 +93,15 @@ async def _resolve_dashboard_config(session, dashboard) -> dict:
     return cfg
 
 
-def _dashboard_summary(d) -> QCDashboardSummary:
+def _dashboard_summary(
+    d,
+    *,
+    project_name: str | None = None,
+    experiment_name: str | None = None,
+    pipeline_name: str | None = None,
+    pipeline_version: str | None = None,
+    sample_external_ids: list[str] | None = None,
+) -> QCDashboardSummary:
     metrics = d.metrics_json or {}
     return QCDashboardSummary(
         id=d.id,
@@ -98,7 +110,62 @@ def _dashboard_summary(d) -> QCDashboardSummary:
         cell_count=metrics.get("cell_count"),
         status=d.status,
         generated_at=d.generated_at,
+        project_name=project_name,
+        experiment_name=experiment_name,
+        pipeline_name=pipeline_name,
+        pipeline_version=pipeline_version,
+        sample_external_ids=sample_external_ids or [],
     )
+
+
+async def _load_summary_context(session: AsyncSession, org_id: int, dashboards) -> dict[int, dict]:
+    """Batch-load project, experiment, pipeline, and sample external_ids for
+    each dashboard's pipeline_run. Returns a map: dashboard_id -> context."""
+    if not dashboards:
+        return {}
+
+    run_ids = [d.pipeline_run_id for d in dashboards]
+
+    run_rows = (
+        await session.execute(
+            select(
+                PipelineRun.id,
+                PipelineRun.pipeline_name,
+                PipelineRun.pipeline_version,
+                Project.name,
+                Experiment.name,
+            )
+            .outerjoin(Project, Project.id == PipelineRun.project_id)
+            .outerjoin(Experiment, Experiment.id == PipelineRun.experiment_id)
+            .where(
+                PipelineRun.id.in_(run_ids),
+                PipelineRun.organization_id == org_id,
+            )
+        )
+    ).all()
+    run_ctx: dict[int, dict] = {
+        row[0]: {
+            "pipeline_name": row[1],
+            "pipeline_version": row[2],
+            "project_name": row[3],
+            "experiment_name": row[4],
+            "sample_external_ids": [],
+        }
+        for row in run_rows
+    }
+
+    sample_rows = (
+        await session.execute(
+            select(PipelineRunSample.pipeline_run_id, Sample.external_id)
+            .join(Sample, Sample.id == PipelineRunSample.sample_id)
+            .where(PipelineRunSample.pipeline_run_id.in_(run_ids))
+        )
+    ).all()
+    for run_id, external_id in sample_rows:
+        if run_id in run_ctx and external_id:
+            run_ctx[run_id]["sample_external_ids"].append(external_id)
+
+    return {d.id: run_ctx.get(d.pipeline_run_id, {}) for d in dashboards}
 
 
 @router.get("")
@@ -111,7 +178,18 @@ async def list_dashboards(
     org_id = int(current_user["org_id"])
 
     dashboards = await QCDashboardService.list_dashboards(session, org_id, experiment_id)
-    return [_dashboard_summary(d) for d in dashboards]
+    ctx_by_id = await _load_summary_context(session, org_id, dashboards)
+    return [
+        _dashboard_summary(
+            d,
+            project_name=ctx_by_id.get(d.id, {}).get("project_name"),
+            experiment_name=ctx_by_id.get(d.id, {}).get("experiment_name"),
+            pipeline_name=ctx_by_id.get(d.id, {}).get("pipeline_name"),
+            pipeline_version=ctx_by_id.get(d.id, {}).get("pipeline_version"),
+            sample_external_ids=ctx_by_id.get(d.id, {}).get("sample_external_ids", []),
+        )
+        for d in dashboards
+    ]
 
 
 @router.get("/{dashboard_id}", response_model=QCDashboardResponse)

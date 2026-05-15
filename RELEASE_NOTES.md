@@ -1,5 +1,40 @@
 # Release Notes
 
+## v0.15.1
+
+Adds reviewer ergonomics to the Pipeline Run page and surfaces more
+context throughout the Results area, plus a fix for empty QC dashboard
+plot grids after the nf-core pipeline upgrade.
+
+### Pipeline runs
+
+- New **Results** tab on the Pipeline Run detail page, placed before the
+  Review tab. Embeds the QC dashboard for the run (interactive metrics,
+  charts, and static plots) and the Plot Archive entries scoped to that
+  run, with deep-links to the full Results > QC Dashboards and Results
+  > Plot Archive pages. Reviewers can now see results and submit a
+  review without leaving the page or refreshing.
+
+### QC Dashboards
+
+- The QC Dashboards list view now shows project, experiment, sample
+  external IDs, and pipeline name on each row instead of just
+  `Run #N`. Context is batch-loaded so adding the fields does not
+  multiply round-trips.
+- Fixed the empty plot grid that appeared after upgrading
+  nf-core/scrnaseq (and other nf-core pipelines on newer MultiQC):
+  MultiQC 1.20+ stopped writing `multiqc_plots/png/` by default, so the
+  collector had nothing to ingest. The generated `nextflow.config` now
+  scopes `ext.args = ' --export'` to the `MULTIQC` process, so future
+  runs produce the static PNGs again. Already-completed runs need to be
+  re-launched (Reproduce) to regain their plots.
+
+### Docs
+
+- Surfaced the Integration API documentation on the main `README.md`
+  (new "Integration API" feature bullet plus a dedicated subsection in
+  Documentation linking to the contracts and webhooks references).
+
 ## v0.15.0
 
 Hardens the LIMS integration API introduced in v0.14.0 and lands a set of
