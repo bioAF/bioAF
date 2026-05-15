@@ -31,3 +31,11 @@ Branches are cut from `main`.
 - No em-dashes anywhere in messages.
 - A message that could apply to any commit ("fix", "update", "wip") is not useful and
   is not acceptable.
+
+## .gitignore is absolute
+
+Never override, bypass, or work around `.gitignore`. Never use `git add -f` or any
+other mechanism to force-track ignored files. If `.gitignore` excludes a path, that
+path must not be committed under any circumstances. If you believe a gitignored file
+should be tracked, ask the engineer for explicit permission before doing anything; do
+not add it yourself.

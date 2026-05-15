@@ -36,6 +36,7 @@ process. These guides are that shared contract.
 | [grilling-protocol.md](grilling-protocol.md) | You are starting non-trivial work and need shared understanding before building. |
 | [spec-format.md](spec-format.md) | You are writing or reading a spec. |
 | [git-conventions.md](git-conventions.md) | You are branching, committing, or pushing. |
+| [writing-style.md](writing-style.md) | You are writing prose, comments, commit messages, or any other text output. |
 
 ## Scope of process
 
