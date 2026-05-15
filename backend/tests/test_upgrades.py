@@ -464,6 +464,81 @@ async def test_get_update_status_in_progress(client: AsyncClient, admin_token: s
     assert data["to_version"] == "0.7.0"
 
 
+# ---------------------------------------------------------------------------
+# CalVer compatibility tests
+#
+# CalVer here is YYYY.MM.N (year, month, monthly increment). Three numeric
+# segments by design so the deployed strict-SemVer validator on every
+# existing client accepts it, enabling the SemVer-to-CalVer cutover with no
+# bridge release.
+# ---------------------------------------------------------------------------
+
+
+def test_parse_version_handles_calver():
+    """CalVer tags like v2026.5.0 must parse to a 3-tuple of ints."""
+    from app.services.upgrade_service import _parse_version
+
+    assert _parse_version("v2026.5.0") == (2026, 5, 0)
+    assert _parse_version("2026.5.47") == (2026, 5, 47)
+
+
+def test_parse_version_calver_greater_than_semver():
+    """A CalVer release must compare greater than any pre-migration SemVer."""
+    from app.services.upgrade_service import _parse_version
+
+    assert _parse_version("v2026.5.0") > _parse_version("v0.15.1")
+    assert _parse_version("v2026.5.0") > _parse_version("v1.99.99")
+
+
+@pytest.mark.asyncio
+async def test_check_for_updates_detects_calver_newer_than_semver():
+    """A client on SemVer must recognize a CalVer GitHub release as an available update."""
+    from app.services.upgrade_service import UpgradeService, _clear_version_cache
+
+    _clear_version_cache()
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "tag_name": "v2026.5.0",
+        "body": "First CalVer release",
+        "html_url": "https://github.com/bioAF/bioAF/releases/tag/v2026.5.0",
+    }
+
+    with patch("app.services.upgrade_service.httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client_cls.return_value = mock_client
+
+        result = await UpgradeService.check_for_updates(1)
+
+    assert result["update_available"] is True
+    assert result["latest_version"] == "2026.5.0"
+
+
+@pytest.mark.asyncio
+async def test_execute_upgrade_accepts_calver_target(client: AsyncClient, admin_token: str):
+    """The /execute endpoint must accept three-segment CalVer targets on the existing validator."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        requests_dir = os.path.join(tmpdir, "requests")
+        os.makedirs(requests_dir)
+
+        with patch("app.services.upgrade_service.settings") as mock_settings:
+            mock_settings.app_version = "0.15.1"
+            mock_settings.update_requests_dir = requests_dir
+
+            response = await client.post(
+                "/api/upgrades/execute",
+                json={"target_version": "2026.5.0"},
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+
+    assert response.status_code == 200
+    assert response.json()["to_version"] == "2026.5.0"
+
+
 @pytest.mark.asyncio
 async def test_resolve_pending_upgrade_on_startup():
     """Pending 'started' upgrades should be resolved when the app version matches the target."""
