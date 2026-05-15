@@ -1,10 +1,10 @@
 .DS_Store
 
 # Claude Code project settings
-CLAUDE.md
 .claude/
 
-# Documentation
+# Local-only working documents (specs, scratch, plans)
+local/
 documentation/
 
 # Environment
