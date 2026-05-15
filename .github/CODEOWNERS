@@ -3,3 +3,6 @@
 # This works with the branch ruleset's "Require review from code owners" setting.
 
 * @not-that-guy-again
+
+# AI guides: the shared working model. Owner-approved changes only.
+/ai_guides/ @not-that-guy-again
