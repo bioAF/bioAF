@@ -8,60 +8,152 @@ on:
 jobs:
   release:
     name: Tag & Release
+    # Skip the bot's own release commits to avoid infinite loops.
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     outputs:
-      tag: ${{ steps.version.outputs.TAG }}
-      new_release: ${{ steps.check_tag.outputs.new_release }}
+      tag: ${{ steps.compute.outputs.tag }}
+      new_release: ${{ steps.check_entries.outputs.has_entries }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          # Use the default GITHUB_TOKEN; branch protection on main must allow
+          # the github-actions[bot] identity to push (no required reviews for it).
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
 
-      - name: Read version from pyproject.toml
-        id: version
+      - name: Configure git identity
         run: |
-          VERSION=$(grep '^version' backend/pyproject.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "TAG=v$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Detected version: $VERSION"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Check if tag already exists
-        id: check_tag
+      - name: Check for changelog entries
+        id: check_entries
         run: |
-          if git rev-parse "v${{ steps.version.outputs.VERSION }}" >/dev/null 2>&1; then
-            echo "new_release=false" >> "$GITHUB_OUTPUT"
-            echo "Tag v${{ steps.version.outputs.VERSION }} already exists, skipping release"
+          ENTRIES=$(find changes/unreleased -maxdepth 1 -type f -name '*.md' ! -name 'README.md' | wc -l | tr -d ' ')
+          echo "count=$ENTRIES" >> "$GITHUB_OUTPUT"
+          if [ "$ENTRIES" -gt 0 ]; then
+            echo "has_entries=true" >> "$GITHUB_OUTPUT"
+            echo "Found $ENTRIES changelog entries, proceeding with release"
           else
-            echo "new_release=true" >> "$GITHUB_OUTPUT"
+            echo "has_entries=false" >> "$GITHUB_OUTPUT"
+            echo "No changelog entries under changes/unreleased/, skipping release"
           fi
 
-      - name: Extract release notes
-        if: steps.check_tag.outputs.new_release == 'true'
-        id: notes
+      - name: Compute next CalVer
+        if: steps.check_entries.outputs.has_entries == 'true'
+        id: compute
         run: |
-          TAG="${{ steps.version.outputs.TAG }}"
-          # Extract everything between "## vX.Y.Z" and the next "## v" heading
-          NOTES=$(awk "BEGIN{p=0} /^## ${TAG}/{p=1; next} /^## v[0-9]/{p=0} p" RELEASE_NOTES.md)
-          if [ -z "$NOTES" ]; then
-            echo "No release notes found for $TAG in RELEASE_NOTES.md"
-            NOTES="Release $TAG"
+          git fetch --tags --force
+          Y=$(date -u +%Y)
+          M=$(date -u +%-m)
+          D=$(date -u +%-d)
+          MAX_N=$(git tag --list "v${Y}.${M}.${D}.*" \
+            | sed "s|^v${Y}\.${M}\.${D}\.||" \
+            | grep -E '^[0-9]+$' \
+            | sort -n \
+            | tail -1)
+          if [ -z "$MAX_N" ]; then
+            N=0
+          else
+            N=$((MAX_N + 1))
           fi
-          echo "$NOTES" > /tmp/release_notes.txt
-          echo "Found release notes for $TAG"
+          VERSION="${Y}.${M}.${D}.${N}"
+          TAG="v${VERSION}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Computed next version: $VERSION (tag: $TAG)"
 
-      - name: Create tag and release
-        if: steps.check_tag.outputs.new_release == 'true'
+      - name: Assemble changelog section
+        if: steps.check_entries.outputs.has_entries == 'true'
+        env:
+          TAG: ${{ steps.compute.outputs.tag }}
+        run: |
+          {
+            echo "## ${TAG}"
+            echo
+            for f in $(ls changes/unreleased/*.md 2>/dev/null | grep -v 'README\.md$' | sort); do
+              cat "$f"
+              echo
+            done
+          } > /tmp/new_section.md
+
+          # Capture the bullets-only body for the GitHub Release notes
+          # (strip the leading "## tag" header and the blank line after it).
+          tail -n +3 /tmp/new_section.md > /tmp/release_body.md
+
+          # Prepend the new section to RELEASE_NOTES.md, immediately before
+          # the first existing "## v" header. If none exists, append at end.
+          HEADER_LINE=$(grep -n '^## v' RELEASE_NOTES.md | head -1 | cut -d: -f1 || true)
+          if [ -n "$HEADER_LINE" ]; then
+            BEFORE=$((HEADER_LINE - 1))
+            head -n "$BEFORE" RELEASE_NOTES.md > /tmp/RELEASE_NOTES.new
+            cat /tmp/new_section.md >> /tmp/RELEASE_NOTES.new
+            tail -n +"$HEADER_LINE" RELEASE_NOTES.md >> /tmp/RELEASE_NOTES.new
+          else
+            cat RELEASE_NOTES.md > /tmp/RELEASE_NOTES.new
+            echo >> /tmp/RELEASE_NOTES.new
+            cat /tmp/new_section.md >> /tmp/RELEASE_NOTES.new
+          fi
+          mv /tmp/RELEASE_NOTES.new RELEASE_NOTES.md
+
+      - name: Clear consumed changelog snippets
+        if: steps.check_entries.outputs.has_entries == 'true'
+        run: |
+          find changes/unreleased -maxdepth 1 -type f -name '*.md' ! -name 'README.md' -delete
+
+      - name: Update version in source files
+        if: steps.check_entries.outputs.has_entries == 'true'
+        env:
+          VERSION: ${{ steps.compute.outputs.version }}
+        run: |
+          # Python projects: replace the top-level version = "..." line under [project].
+          # The regex pins to a line starting with "version = " to avoid hitting
+          # dependency specifiers.
+          sed -i.bak -E 's/^(version = ")[^"]*(")/\1'"$VERSION"'\2/' backend/pyproject.toml
+          sed -i.bak -E 's/^(version = ")[^"]*(")/\1'"$VERSION"'\2/' cli/pyproject.toml
+          rm -f backend/pyproject.toml.bak cli/pyproject.toml.bak
+
+          # frontend: update package.json safely as JSON.
+          node -e "
+            const fs = require('fs');
+            const path = 'frontend/package.json';
+            const v = process.env.VERSION;
+            if (!v) { console.error('VERSION env var is empty'); process.exit(1); }
+            const j = JSON.parse(fs.readFileSync(path, 'utf8'));
+            j.version = v;
+            fs.writeFileSync(path, JSON.stringify(j, null, 2) + '\n');
+          "
+
+          echo "Updated versions:"
+          grep '^version' backend/pyproject.toml cli/pyproject.toml
+          grep '"version"' frontend/package.json
+
+      - name: Commit, tag, and push
+        if: steps.check_entries.outputs.has_entries == 'true'
+        env:
+          TAG: ${{ steps.compute.outputs.tag }}
+        run: |
+          git add backend/pyproject.toml cli/pyproject.toml frontend/package.json RELEASE_NOTES.md changes/unreleased
+          git commit -m "chore: release ${TAG} [skip ci]"
+          git tag "$TAG"
+          # Push the commit and the tag atomically. If the push is rejected
+          # (concurrent merge raced us), the workflow fails and the next push
+          # to main will re-run this job with a fresh N.
+          git push origin HEAD:main "$TAG"
+
+      - name: Create GitHub Release
+        if: steps.check_entries.outputs.has_entries == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.compute.outputs.tag }}
         run: |
-          TAG="${{ steps.version.outputs.TAG }}"
-          git tag "$TAG"
-          git push origin "$TAG"
           gh release create "$TAG" \
             --title "$TAG" \
-            --notes-file /tmp/release_notes.txt
+            --notes-file /tmp/release_body.md
 
   publish-images:
     name: Publish Docker Images
