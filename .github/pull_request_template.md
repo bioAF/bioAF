@@ -19,6 +19,17 @@
 
 <!-- Bullet the key changes. For Terraform changes, include the affected components. -->
 
+## Changelog
+
+<!--
+Add a file under `changes/unreleased/<branch-or-slug>.md` describing the
+user-visible change in this PR. See `changes/unreleased/README.md` for the
+format. If this PR has no user-visible impact (test-only, CI, internal
+refactor), apply the `no-changelog` label instead.
+-->
+
+- [ ] Added a file under `changes/unreleased/`, OR applied the `no-changelog` label
+
 ## How to Test
 
 <!-- Steps a reviewer can follow to verify this works. -->

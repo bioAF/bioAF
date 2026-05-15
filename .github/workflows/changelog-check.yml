@@ -1,0 +1,46 @@
+name: Changelog Check
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+jobs:
+  check:
+    name: Verify changelog entry
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip if no-changelog label is present
+        id: label
+        run: |
+          if echo '${{ toJSON(github.event.pull_request.labels.*.name) }}' | grep -q '"no-changelog"'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "PR carries no-changelog label, skipping entry check"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v5
+        if: steps.label.outputs.skip != 'true'
+        with:
+          fetch-depth: 0
+
+      - name: Require at least one new file under changes/unreleased/
+        if: steps.label.outputs.skip != 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          ADDED=$(git diff --name-only --diff-filter=A "$BASE_SHA" "$HEAD_SHA" \
+            | grep -E '^changes/unreleased/.+\.md$' \
+            | grep -v '^changes/unreleased/README\.md$' || true)
+          if [ -z "$ADDED" ]; then
+            echo "::error::No changelog entry found."
+            echo "Add a markdown file under changes/unreleased/ describing the"
+            echo "user-visible change, or apply the 'no-changelog' label if the PR"
+            echo "has no user-visible impact. See changes/unreleased/README.md."
+            exit 1
+          fi
+          echo "Found changelog entries:"
+          echo "$ADDED"
