@@ -1236,6 +1236,11 @@ export interface QCDashboardSummary {
   cell_count: number | null;
   status: string;
   generated_at: string | null;
+  project_name: string | null;
+  experiment_name: string | null;
+  pipeline_name: string | null;
+  pipeline_version: string | null;
+  sample_external_ids: string[];
 }
 
 export interface PlotArchiveResponse {
