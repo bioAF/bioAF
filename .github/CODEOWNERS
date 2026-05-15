@@ -2,4 +2,7 @@
 # Brent is the sole maintainer and required reviewer for all changes.
 # This works with the branch ruleset's "Require review from code owners" setting.
 
-* @not-that-guy-again
+* @brent-mills-engineering
+
+# AI guides: the shared working model. Owner-approved changes only.
+/ai_guides/ @brent-mills-engineering
