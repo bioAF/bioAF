@@ -26,7 +26,7 @@ Changes to this file require approval from the `ai_guides/` code owner.
 Each term is a level-3 heading followed by a definition. Keep definitions to behavior
 and meaning, not implementation.
 
-```
+```markdown
 ### Term Name
 
 One or two sentences. What it is, what it is not. Reference related terms by name.
@@ -133,7 +133,7 @@ a code, belongs to an [Organization](#organization), optionally to a Project.
 
 ### Naming Profile
 
-A configurable template for parsing structured filenames, typically from a [CRO](#cro)
+A configurable template for parsing structured filenames, typically from a [CRO](#cro-contract-research-organization)
 delivery, into bioAF entity codes. Defines a delimiter and ordered segments plus
 mappings from parsed codes to [Project](#project) and [Experiment](#experiment) codes.
 Multiple profiles can be active simultaneously; ambiguous matches flag for manual review.
