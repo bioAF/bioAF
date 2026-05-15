@@ -224,6 +224,29 @@ class TestK8sExecutor:
         assert "wave.enabled" not in config
         assert "fusion.enabled" not in config
 
+    def test_k8s_config_forces_multiqc_to_export_static_plots(self):
+        """Newer MultiQC versions no longer export PNGs by default, so the
+        nf-core MULTIQC process must be invoked with --export. We inject this
+        via a process selector in nextflow.config so every pipeline run that
+        invokes MULTIQC produces multiqc_plots/png/, which the QC dashboard
+        plot collector reads from GCS.
+
+        Without this, the QC dashboard plot grid is empty -- not because the
+        pipeline failed, but because MultiQC stopped writing PNGs by default."""
+        config = KubernetesComputeProvider._build_nextflow_k8s_config(
+            namespace="bioaf-pipelines",
+            has_gcs_secret=True,
+            gcs_work_dir="gs://bioaf-raw-test-abc123/nextflow-work",
+        )
+        # Must scope the override to the MULTIQC process so it does not affect
+        # other tasks.
+        assert "withName: 'MULTIQC'" in config
+        # Must pass --export through to MultiQC.
+        assert "--export" in config
+        # Must preserve any pre-existing ext.args so we don't clobber pipeline
+        # defaults (e.g. nf-core sometimes ships args like --cl-config ...).
+        assert "task.ext.args" in config or "ext.args ?:" in config
+
     def test_command_logs_config_before_run(self):
         """Nextflow command should cat the config file for diagnostic logging."""
         job_spec = {

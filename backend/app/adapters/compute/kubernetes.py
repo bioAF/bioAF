@@ -713,6 +713,14 @@ class KubernetesComputeProvider(ComputeProvider):
         # Docker is the default container engine for nf-core
         lines.append("docker.enabled = true")
 
+        # MultiQC 1.20+ no longer writes multiqc_plots/png/ by default. The
+        # bioAF QC dashboard collects PNGs from that directory, so force
+        # MultiQC to export them by appending --export to its CLI args.
+        # Scope this to the MULTIQC process selector so only the MultiQC
+        # task picks it up. Preserve any pre-existing ext.args so we don't
+        # clobber pipeline-specific defaults (e.g. --cl-config blocks).
+        lines.append("process { withName: 'MULTIQC' { ext.args = { (task.ext.args ?: '') + ' --export' } } }")
+
         return "\n".join(lines)
 
     async def _read_gcp_credentials(self) -> tuple[str, str]:
