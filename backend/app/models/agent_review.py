@@ -11,9 +11,7 @@ class AgentReview(Base):
     __tablename__ = "agent_reviews"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    organization_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("organizations.id"), nullable=False, index=True
-    )
+    organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     triggered_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     entity_type: Mapped[str] = mapped_column(String(32), nullable=False)
     entity_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -29,9 +27,7 @@ class AgentReview(Base):
     evidence: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    artifact_gcs_paths: Mapped[list[str]] = mapped_column(
-        JSONB, nullable=False, default=list, server_default="[]"
-    )
+    artifact_gcs_paths: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
     agent_review_job_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("agent_review_jobs.id"), nullable=False, unique=True
     )

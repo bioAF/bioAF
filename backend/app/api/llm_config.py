@@ -76,13 +76,9 @@ async def list_providers(
         c = by_provider.get(provider)
         api_key = c.api_key if c else None
         models, used_fallback = await list_models_with_fallback(provider, api_key)
-        model_lists.append(
-            ProviderModelList(provider=provider, models=models, used_fallback=used_fallback)
-        )
+        model_lists.append(ProviderModelList(provider=provider, models=models, used_fallback=used_fallback))
 
-    return ProvidersResponse(
-        configs=summaries, active_provider=active, model_lists=model_lists
-    )
+    return ProvidersResponse(configs=summaries, active_provider=active, model_lists=model_lists)
 
 
 @router.post("/providers/deactivate", status_code=204)
@@ -92,9 +88,7 @@ async def deactivate_all(
 ):
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
-    await llm_provider_config_service.deactivate_all(
-        session, org_id=org_id, actor_user_id=user_id
-    )
+    await llm_provider_config_service.deactivate_all(session, org_id=org_id, actor_user_id=user_id)
     await session.commit()
 
 
@@ -179,7 +173,5 @@ async def delete_provider(
         raise HTTPException(404, f"unknown provider: {provider}")
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
-    await llm_provider_config_service.delete(
-        session, org_id=org_id, provider=provider, actor_user_id=user_id
-    )
+    await llm_provider_config_service.delete(session, org_id=org_id, provider=provider, actor_user_id=user_id)
     await session.commit()

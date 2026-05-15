@@ -11,9 +11,7 @@ class AgentReviewJob(Base):
     __tablename__ = "agent_review_jobs"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    organization_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("organizations.id"), nullable=False, index=True
-    )
+    organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     triggered_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     entity_type: Mapped[str] = mapped_column(String(32), nullable=False)
     entity_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -24,9 +22,7 @@ class AgentReviewJob(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", server_default="pending")
     included_run_ids: Mapped[list[int] | None] = mapped_column(JSONB, nullable=True)
     include_html_report_run_ids: Mapped[list[int] | None] = mapped_column(JSONB, nullable=True)
-    artifact_gcs_paths: Mapped[list[str]] = mapped_column(
-        JSONB, nullable=False, default=list, server_default="[]"
-    )
+    artifact_gcs_paths: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
     agent_review_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     pipeline_run_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     error_text: Mapped[str | None] = mapped_column(Text, nullable=True)

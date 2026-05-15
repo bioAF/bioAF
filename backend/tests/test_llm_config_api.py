@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.auth_service import AuthService
 
 
 @pytest.fixture
@@ -49,9 +48,7 @@ async def test_upsert_then_activate_flow(client, admin_auth):
     assert save.json()["configured"] is True
     assert save.json()["api_key_prefix_last5"] == "end55"
 
-    activate = await client.post(
-        "/api/integrations/llm/providers/openai/activate", headers=admin_auth
-    )
+    activate = await client.post("/api/integrations/llm/providers/openai/activate", headers=admin_auth)
     assert activate.status_code == 200, activate.text
     assert activate.json()["is_active"] is True
 
@@ -71,12 +68,8 @@ async def test_activate_flips_singleton(client, admin_auth):
         json={"api_key": "sk-anth-LAST5", "model": "claude-opus-4-7"},
         headers=admin_auth,
     )
-    await client.post(
-        "/api/integrations/llm/providers/openai/activate", headers=admin_auth
-    )
-    await client.post(
-        "/api/integrations/llm/providers/anthropic/activate", headers=admin_auth
-    )
+    await client.post("/api/integrations/llm/providers/openai/activate", headers=admin_auth)
+    await client.post("/api/integrations/llm/providers/anthropic/activate", headers=admin_auth)
 
     listed = (await client.get("/api/integrations/llm/providers", headers=admin_auth)).json()
     assert listed["active_provider"] == "anthropic"
@@ -92,12 +85,8 @@ async def test_deactivate_all(client, admin_auth):
         json={"api_key": "sk-openai-LAST5", "model": "gpt-5"},
         headers=admin_auth,
     )
-    await client.post(
-        "/api/integrations/llm/providers/openai/activate", headers=admin_auth
-    )
-    resp = await client.post(
-        "/api/integrations/llm/providers/deactivate", headers=admin_auth
-    )
+    await client.post("/api/integrations/llm/providers/openai/activate", headers=admin_auth)
+    resp = await client.post("/api/integrations/llm/providers/deactivate", headers=admin_auth)
     assert resp.status_code == 204
     listed = (await client.get("/api/integrations/llm/providers", headers=admin_auth)).json()
     assert listed["active_provider"] is None
@@ -147,9 +136,7 @@ async def test_delete_provider(client, admin_auth):
         json={"api_key": "sk-openai-LAST5", "model": "gpt-5"},
         headers=admin_auth,
     )
-    resp = await client.delete(
-        "/api/integrations/llm/providers/openai", headers=admin_auth
-    )
+    resp = await client.delete("/api/integrations/llm/providers/openai", headers=admin_auth)
     assert resp.status_code == 204
     listed = (await client.get("/api/integrations/llm/providers", headers=admin_auth)).json()
     configs_by_provider = {c["provider"]: c for c in listed["configs"]}

@@ -37,9 +37,7 @@ async def list_for_org(session: AsyncSession, org_id: int) -> Sequence[LlmProvid
     return result.scalars().all()
 
 
-async def get_for_provider(
-    session: AsyncSession, org_id: int, provider: str
-) -> LlmProviderConfig | None:
+async def get_for_provider(session: AsyncSession, org_id: int, provider: str) -> LlmProviderConfig | None:
     result = await session.execute(
         select(LlmProviderConfig).where(
             LlmProviderConfig.organization_id == org_id,
@@ -114,9 +112,7 @@ async def upsert(
     return row
 
 
-async def set_active(
-    session: AsyncSession, org_id: int, provider: str, actor_user_id: int
-) -> LlmProviderConfig:
+async def set_active(session: AsyncSession, org_id: int, provider: str, actor_user_id: int) -> LlmProviderConfig:
     target = await get_for_provider(session, org_id, provider)
     if target is None:
         raise ValueError(f"no config row for provider {provider} in org {org_id}")
@@ -148,9 +144,7 @@ async def set_active(
     return target
 
 
-async def deactivate_all(
-    session: AsyncSession, org_id: int, actor_user_id: int
-) -> None:
+async def deactivate_all(session: AsyncSession, org_id: int, actor_user_id: int) -> None:
     previous = await get_active(session, org_id)
     await session.execute(
         update(LlmProviderConfig)
@@ -172,9 +166,7 @@ async def deactivate_all(
         )
 
 
-async def delete(
-    session: AsyncSession, org_id: int, provider: str, actor_user_id: int
-) -> None:
+async def delete(session: AsyncSession, org_id: int, provider: str, actor_user_id: int) -> None:
     row = await get_for_provider(session, org_id, provider)
     if row is None:
         return

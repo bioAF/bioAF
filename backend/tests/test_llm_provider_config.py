@@ -54,13 +54,17 @@ async def test_upsert_creates_then_updates(db_engine, admin_user):
 
     async with _factory(db_engine)() as session:
         count = (
-            await session.execute(
-                select(LlmProviderConfig).where(
-                    LlmProviderConfig.organization_id == admin_user.organization_id,
-                    LlmProviderConfig.provider == "openai",
+            (
+                await session.execute(
+                    select(LlmProviderConfig).where(
+                        LlmProviderConfig.organization_id == admin_user.organization_id,
+                        LlmProviderConfig.provider == "openai",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(count) == 1
 
 
@@ -82,9 +86,7 @@ async def test_api_key_encrypted_at_rest(db_engine, admin_user):
     async with _factory(db_engine)() as session:
         raw = (
             await session.execute(
-                sa_text(
-                    "SELECT api_key FROM llm_provider_config WHERE organization_id = :org AND provider = :p"
-                ),
+                sa_text("SELECT api_key FROM llm_provider_config WHERE organization_id = :org AND provider = :p"),
                 {"org": admin_user.organization_id, "p": "anthropic"},
             )
         ).scalar_one()
@@ -206,10 +208,14 @@ async def test_partial_unique_index_at_db_level(db_engine, admin_user):
 
     async with _factory(db_engine)() as session:
         rows = (
-            await session.execute(
-                select(LlmProviderConfig).where(LlmProviderConfig.organization_id == admin_user.organization_id)
+            (
+                await session.execute(
+                    select(LlmProviderConfig).where(LlmProviderConfig.organization_id == admin_user.organization_id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for r in rows:
             r.is_active = True
         with pytest.raises(IntegrityError):

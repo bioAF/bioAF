@@ -24,11 +24,7 @@ from sqlalchemy import text
 @pytest.mark.asyncio
 async def test_migration_081_tables_exist(session):
     for table in ("llm_provider_config", "agent_review_jobs", "agent_reviews"):
-        row = await session.execute(
-            text(
-                "SELECT to_regclass(:t) AS rel"
-            ).bindparams(t=table)
-        )
+        row = await session.execute(text("SELECT to_regclass(:t) AS rel").bindparams(t=table))
         assert row.scalar_one() is not None, f"{table} missing"
 
 

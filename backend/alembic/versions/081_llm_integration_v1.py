@@ -35,9 +35,7 @@ def upgrade() -> None:
         sa.Column("api_key", sa.Text(), nullable=True),
         sa.Column("api_key_prefix_last5", sa.String(5), nullable=True),
         sa.Column("model", sa.String(255), nullable=True),
-        sa.Column(
-            "is_active", sa.Boolean(), nullable=False, server_default=sa.text("false")
-        ),
+        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -271,10 +269,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(
-        "DELETE FROM role_permissions "
-        "WHERE resource = 'llm_integration' AND action IN ('configure', 'use')"
-    )
+    op.execute("DELETE FROM role_permissions WHERE resource = 'llm_integration' AND action IN ('configure', 'use')")
     op.drop_index("ix_agent_reviews_org_dismissed", table_name="agent_reviews")
     op.drop_index("ix_agent_reviews_org_status", table_name="agent_reviews")
     op.drop_index("ix_agent_reviews_org_entity_created", table_name="agent_reviews")

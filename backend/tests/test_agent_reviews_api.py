@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.experiment import Experiment

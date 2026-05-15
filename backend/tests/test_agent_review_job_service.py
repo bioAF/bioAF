@@ -82,9 +82,7 @@ async def _configure_active_provider(
         model=f"{provider}-test-model",
         actor_user_id=user_id,
     )
-    await llm_provider_config_service.set_active(
-        session, org_id=org_id, provider=provider, actor_user_id=user_id
-    )
+    await llm_provider_config_service.set_active(session, org_id=org_id, provider=provider, actor_user_id=user_id)
     await session.commit()
 
 
@@ -203,9 +201,7 @@ async def test_concurrent_button_a_and_button_b_allowed(db_engine, admin_user):
         await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
         run_id = await _make_pipeline_run(session, admin_user.organization_id)
         # Find the experiment for that run to use as the Button B target.
-        run = (
-            await session.execute(select(PipelineRun).where(PipelineRun.id == run_id))
-        ).scalar_one()
+        run = (await session.execute(select(PipelineRun).where(PipelineRun.id == run_id))).scalar_one()
         exp_id = run.experiment_id
 
     async with _factory(db_engine)() as session:
@@ -253,12 +249,8 @@ async def test_mark_orphaned_transitions_inflight_hosted_to_failed(db_engine, ad
         count = await job_service.mark_orphaned_on_startup(session)
         await session.commit()
         assert count == 1
-        loaded_job = (
-            await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))
-        ).scalar_one()
-        loaded_review = (
-            await session.execute(select(AgentReview).where(AgentReview.id == review_id))
-        ).scalar_one()
+        loaded_job = (await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))).scalar_one()
+        loaded_review = (await session.execute(select(AgentReview).where(AgentReview.id == review_id))).scalar_one()
         assert loaded_job.status == "failed"
         assert loaded_job.error_class == "process_restart"
         assert loaded_review.status == "failed"
@@ -267,9 +259,7 @@ async def test_mark_orphaned_transitions_inflight_hosted_to_failed(db_engine, ad
 @pytest.mark.asyncio
 async def test_mark_orphaned_leaves_gemma_alone(db_engine, admin_user):
     async with _factory(db_engine)() as session:
-        await _configure_active_provider(
-            session, admin_user.organization_id, admin_user.id, provider="gemma"
-        )
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id, provider="gemma")
         run_id = await _make_pipeline_run(session, admin_user.organization_id)
         job, _ = await job_service.create(
             session,
@@ -288,9 +278,7 @@ async def test_mark_orphaned_leaves_gemma_alone(db_engine, admin_user):
         count = await job_service.mark_orphaned_on_startup(session)
         await session.commit()
         assert count == 0
-        loaded = (
-            await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))
-        ).scalar_one()
+        loaded = (await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))).scalar_one()
         assert loaded.status == "submitted"
 
 
@@ -302,12 +290,7 @@ async def test_execute_hosted_happy_path_writes_two_audit_rows(db_engine, admin_
         captured[path] = content
 
     async def submit(*, prompt, payload, model, api_key):
-        return (
-            "```json\n"
-            '{"severity": "green", "headline": "All good"}\n'
-            "```\n"
-            "free-text body here"
-        )
+        return '```json\n{"severity": "green", "headline": "All good"}\n```\nfree-text body here'
 
     async with _factory(db_engine)() as session:
         await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
@@ -333,25 +316,25 @@ async def test_execute_hosted_happy_path_writes_two_audit_rows(db_engine, admin_
     )
 
     async with factory() as session:
-        loaded_job = (
-            await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))
-        ).scalar_one()
-        loaded_review = (
-            await session.execute(select(AgentReview).where(AgentReview.id == review_id))
-        ).scalar_one()
+        loaded_job = (await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))).scalar_one()
+        loaded_review = (await session.execute(select(AgentReview).where(AgentReview.id == review_id))).scalar_one()
         assert loaded_job.status == "succeeded"
         assert loaded_review.status == "succeeded"
         assert loaded_review.severity == "green"
         assert loaded_review.headline == "All good"
         assert loaded_review.artifact_gcs_paths and loaded_review.artifact_gcs_paths[0] in captured
         audits = (
-            await session.execute(
-                select(AuditLog).where(
-                    AuditLog.entity_type == "agent_review_job",
-                    AuditLog.entity_id == job_id,
+            (
+                await session.execute(
+                    select(AuditLog).where(
+                        AuditLog.entity_type == "agent_review_job",
+                        AuditLog.entity_id == job_id,
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         actions = sorted(a.action for a in audits)
         assert actions == ["llm_review_submitted", "llm_review_succeeded"]
         submitted = next(a for a in audits if a.action == "llm_review_submitted")
@@ -387,24 +370,24 @@ async def test_execute_hosted_provider_error_writes_failed_audit(db_engine, admi
         job_id = job.id
 
     factory = _factory(db_engine)
-    await job_service.execute_hosted(
-        factory, job_id=job_id, gcs_writer=writer, submit_override=submit
-    )
+    await job_service.execute_hosted(factory, job_id=job_id, gcs_writer=writer, submit_override=submit)
 
     async with factory() as session:
-        loaded = (
-            await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))
-        ).scalar_one()
+        loaded = (await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))).scalar_one()
         assert loaded.status == "failed"
         assert loaded.error_class == "provider_error"
         audits = (
-            await session.execute(
-                select(AuditLog).where(
-                    AuditLog.entity_type == "agent_review_job",
-                    AuditLog.entity_id == job_id,
+            (
+                await session.execute(
+                    select(AuditLog).where(
+                        AuditLog.entity_type == "agent_review_job",
+                        AuditLog.entity_id == job_id,
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         actions = sorted(a.action for a in audits)
         # The submitted row IS written because the artifact was built and the
         # call was made (and only then failed); per the audit spec the failure
@@ -438,24 +421,24 @@ async def test_execute_hosted_artifact_build_failure(db_engine, admin_user):
         job_id = job.id
 
     factory = _factory(db_engine)
-    await job_service.execute_hosted(
-        factory, job_id=job_id, gcs_writer=writer, submit_override=submit
-    )
+    await job_service.execute_hosted(factory, job_id=job_id, gcs_writer=writer, submit_override=submit)
 
     async with factory() as session:
-        loaded = (
-            await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))
-        ).scalar_one()
+        loaded = (await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))).scalar_one()
         assert loaded.status == "failed"
         assert loaded.error_class == "artifact_build_failure"
         audits = (
-            await session.execute(
-                select(AuditLog).where(
-                    AuditLog.entity_type == "agent_review_job",
-                    AuditLog.entity_id == job_id,
+            (
+                await session.execute(
+                    select(AuditLog).where(
+                        AuditLog.entity_type == "agent_review_job",
+                        AuditLog.entity_id == job_id,
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         actions = [a.action for a in audits]
         # No submitted row: nothing was sent.
         assert actions == ["llm_review_failed"]
@@ -487,27 +470,25 @@ async def test_execute_hosted_parse_failure_succeeds_with_marker(db_engine, admi
         review_id = review.id
 
     factory = _factory(db_engine)
-    await job_service.execute_hosted(
-        factory, job_id=job_id, gcs_writer=writer, submit_override=submit
-    )
+    await job_service.execute_hosted(factory, job_id=job_id, gcs_writer=writer, submit_override=submit)
 
     async with factory() as session:
-        loaded_job = (
-            await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))
-        ).scalar_one()
-        loaded_review = (
-            await session.execute(select(AgentReview).where(AgentReview.id == review_id))
-        ).scalar_one()
+        loaded_job = (await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))).scalar_one()
+        loaded_review = (await session.execute(select(AgentReview).where(AgentReview.id == review_id))).scalar_one()
         assert loaded_job.status == "succeeded"
         assert loaded_review.severity == "unknown"
         audits = (
-            await session.execute(
-                select(AuditLog).where(
-                    AuditLog.entity_type == "agent_review_job",
-                    AuditLog.entity_id == job_id,
-                    AuditLog.action == "llm_review_succeeded",
+            (
+                await session.execute(
+                    select(AuditLog).where(
+                        AuditLog.entity_type == "agent_review_job",
+                        AuditLog.entity_id == job_id,
+                        AuditLog.action == "llm_review_succeeded",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert audits[0].details_json["parse_failure"] is True
         assert audits[0].details_json["severity"] == "unknown"

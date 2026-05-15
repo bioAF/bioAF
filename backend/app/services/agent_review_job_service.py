@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_review import AgentReview
 from app.models.agent_review_job import AgentReviewJob
@@ -259,9 +259,7 @@ async def execute_hosted(
                 # entity_type == 'experiment'
                 from app.models.experiment import Experiment
 
-                exp = (
-                    await session.execute(select(Experiment).where(Experiment.id == job.entity_id))
-                ).scalar_one()
+                exp = (await session.execute(select(Experiment).where(Experiment.id == job.entity_id))).scalar_one()
                 run_ids = list(job.included_run_ids or [])
                 header = render_experiment_header(
                     experiment_id=exp.id,

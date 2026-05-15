@@ -22,7 +22,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import require_permission
 from app.database import get_session, async_session_factory
 from app.models.agent_review import AgentReview
-from app.models.agent_review_job import AgentReviewJob
 from app.models.pipeline_run import PipelineRun
 from app.services import agent_review_job_service as job_service
 from app.services.agent_review_job_service import (
@@ -82,10 +81,10 @@ async def _is_stale(session: AsyncSession, review: AgentReview) -> bool:
         return False
     included = set(review.included_run_ids or [])
     rows = (
-        await session.execute(
-            select(PipelineRun.id).where(PipelineRun.experiment_id == review.entity_id)
-        )
-    ).scalars().all()
+        (await session.execute(select(PipelineRun.id).where(PipelineRun.experiment_id == review.entity_id)))
+        .scalars()
+        .all()
+    )
     return any(rid not in included for rid in rows)
 
 
@@ -173,24 +172,23 @@ async def list_reviews(
     # reviews that included X. The Experiment tab shows only experiment-level
     # reviews of the experiment id.
     if entity_type == "pipeline_run":
-        run_match = (
-            (AgentReview.entity_type == "pipeline_run") & (AgentReview.entity_id == entity_id)
-        )
-        exp_match = (
-            (AgentReview.entity_type == "experiment")
-            & (AgentReview.included_run_ids.contains([entity_id]))
-        )
+        run_match = (AgentReview.entity_type == "pipeline_run") & (AgentReview.entity_id == entity_id)
+        exp_match = (AgentReview.entity_type == "experiment") & (AgentReview.included_run_ids.contains([entity_id]))
         clause = run_match | exp_match
     else:
         clause = (AgentReview.entity_type == "experiment") & (AgentReview.entity_id == entity_id)
 
     rows = (
-        await session.execute(
-            select(AgentReview)
-            .where(AgentReview.organization_id == org_id, clause)
-            .order_by(AgentReview.created_at.desc())
+        (
+            await session.execute(
+                select(AgentReview)
+                .where(AgentReview.organization_id == org_id, clause)
+                .order_by(AgentReview.created_at.desc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     summaries: list[AgentReviewSummary] = []
     for r in rows:
@@ -217,9 +215,7 @@ async def get_review(
     org_id = int(current_user["org_id"])
     review = (
         await session.execute(
-            select(AgentReview).where(
-                AgentReview.id == review_id, AgentReview.organization_id == org_id
-            )
+            select(AgentReview).where(AgentReview.id == review_id, AgentReview.organization_id == org_id)
         )
     ).scalar_one_or_none()
     if review is None:
@@ -247,9 +243,7 @@ async def dismiss_review(
     user_id = int(current_user["sub"])
     review = (
         await session.execute(
-            select(AgentReview).where(
-                AgentReview.id == review_id, AgentReview.organization_id == org_id
-            )
+            select(AgentReview).where(AgentReview.id == review_id, AgentReview.organization_id == org_id)
         )
     ).scalar_one_or_none()
     if review is None:
@@ -268,9 +262,7 @@ async def undismiss_review(
     org_id = int(current_user["org_id"])
     review = (
         await session.execute(
-            select(AgentReview).where(
-                AgentReview.id == review_id, AgentReview.organization_id == org_id
-            )
+            select(AgentReview).where(AgentReview.id == review_id, AgentReview.organization_id == org_id)
         )
     ).scalar_one_or_none()
     if review is None:

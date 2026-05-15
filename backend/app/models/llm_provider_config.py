@@ -11,9 +11,7 @@ class LlmProviderConfig(Base):
     __tablename__ = "llm_provider_config"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    organization_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("organizations.id"), nullable=False, index=True
-    )
+    organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     api_key: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
     api_key_prefix_last5: Mapped[str | None] = mapped_column(String(5), nullable=True)

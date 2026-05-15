@@ -60,10 +60,7 @@ def _truncate(text: str) -> str:
 def _format_samples_table(samples: list[Sample]) -> str:
     if not samples:
         return "_No samples linked to this run._"
-    header = (
-        "| Sample ID | External ID | Tissue | QC status | QC notes |\n"
-        "| --- | --- | --- | --- | --- |"
-    )
+    header = "| Sample ID | External ID | Tissue | QC status | QC notes |\n| --- | --- | --- | --- | --- |"
     rows = []
     for s in samples:
         ext = (s.external_id or "").replace("|", "\\|")

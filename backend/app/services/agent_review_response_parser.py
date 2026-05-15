@@ -90,7 +90,7 @@ def parse(response_text: str) -> ParsedResponse:
     evidence_in = header.get("evidence") or []
     evidence: list[str] = [str(e) for e in evidence_in] if isinstance(evidence_in, list) else []
 
-    body = response_text[match.end():].lstrip("\n")
+    body = response_text[match.end() :].lstrip("\n")
 
     return ParsedResponse(
         severity=severity,
