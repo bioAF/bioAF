@@ -32,6 +32,16 @@ Branches are cut from `main`.
 - A message that could apply to any commit ("fix", "update", "wip") is not useful and
   is not acceptable.
 
+## Before opening a PR
+
+All tests must pass before opening a pull request. Run the full suite locally and
+confirm it is green. Pushing a PR with known-failing tests wastes reviewer attention
+and CI minutes.
+
+If a test is failing for a reason unrelated to your change, stop and resolve it before
+opening the PR: either fix the test, fix the underlying issue, or flag it to the
+engineer. Do not open a PR on top of a broken baseline.
+
 ## .gitignore is absolute
 
 Never override, bypass, or work around `.gitignore`. Never use `git add -f` or any
