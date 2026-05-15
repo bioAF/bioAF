@@ -20,15 +20,17 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          # Use the default GITHUB_TOKEN; branch protection on main must allow
-          # the github-actions[bot] identity to push (no required reviews for it).
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # RELEASE_PAT is a fine-grained PAT with Contents: write on this repo.
+          # The PAT inherits its owner's identity, which has the Admin
+          # RepositoryRole bypass on the main-protective ruleset, so the
+          # workflow's commit + tag push to main is accepted.
+          token: ${{ secrets.RELEASE_PAT }}
           persist-credentials: true
 
       - name: Configure git identity
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "bioaf-release-bot"
+          git config user.email "bioaf-release-bot@users.noreply.github.com"
 
       - name: Check for changelog entries
         id: check_entries
