@@ -1,0 +1,365 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { api } from "@/lib/api";
+
+type ProviderId = "openai" | "anthropic" | "google" | "gemma";
+
+const HOSTED: ReadonlyArray<ProviderId> = ["openai", "anthropic", "google"];
+const ALL_PROVIDERS: ReadonlyArray<ProviderId> = [
+  "openai",
+  "anthropic",
+  "google",
+  "gemma",
+];
+
+const PROVIDER_LABEL: Record<ProviderId, string> = {
+  openai: "OpenAI",
+  anthropic: "Anthropic Claude",
+  google: "Google Gemini",
+  gemma: "Gemma 4 (self-hosted)",
+};
+
+interface ProviderConfigSummary {
+  provider: ProviderId;
+  model: string | null;
+  api_key_prefix_last5: string | null;
+  is_active: boolean;
+  configured: boolean;
+}
+
+interface ProviderModelList {
+  provider: ProviderId;
+  models: string[];
+  used_fallback: boolean;
+}
+
+interface ProvidersResponse {
+  configs: ProviderConfigSummary[];
+  active_provider: ProviderId | null;
+  model_lists: ProviderModelList[];
+}
+
+export function LlmSettingsContent() {
+  const [data, setData] = useState<ProvidersResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [savingProvider, setSavingProvider] = useState<ProviderId | null>(null);
+  const [pendingActivate, setPendingActivate] = useState<ProviderId | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const resp = await api.get<ProvidersResponse>(
+        "/api/integrations/llm/providers",
+      );
+      setData(resp);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const modelsByProvider = useMemo(() => {
+    const m = new Map<ProviderId, ProviderModelList>();
+    for (const ml of data?.model_lists ?? []) m.set(ml.provider, ml);
+    return m;
+  }, [data]);
+
+  const configsByProvider = useMemo(() => {
+    const m = new Map<ProviderId, ProviderConfigSummary>();
+    for (const c of data?.configs ?? []) m.set(c.provider, c);
+    return m;
+  }, [data]);
+
+  async function handleSave(
+    provider: ProviderId,
+    apiKey: string | null,
+    model: string,
+  ) {
+    setSavingProvider(provider);
+    setError(null);
+    try {
+      await api.post(`/api/integrations/llm/providers/${provider}`, {
+        api_key: apiKey,
+        model,
+      });
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSavingProvider(null);
+    }
+  }
+
+  async function handleActivate(provider: ProviderId) {
+    if (HOSTED.includes(provider)) {
+      setPendingActivate(provider);
+      return;
+    }
+    await doActivate(provider);
+  }
+
+  async function doActivate(provider: ProviderId) {
+    setError(null);
+    try {
+      await api.post(`/api/integrations/llm/providers/${provider}/activate`);
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setPendingActivate(null);
+    }
+  }
+
+  async function handleDeactivateAll() {
+    setError(null);
+    try {
+      await api.post("/api/integrations/llm/providers/deactivate");
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function handleDelete(provider: ProviderId) {
+    if (!confirm(`Remove the ${PROVIDER_LABEL[provider]} configuration?`)) return;
+    setError(null);
+    try {
+      await api.delete(`/api/integrations/llm/providers/${provider}`);
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  if (loading) return <div className="text-gray-500">Loading...</div>;
+  if (error)
+    return (
+      <div className="bg-red-50 border border-red-200 rounded p-4 text-red-700">
+        {error}
+      </div>
+    );
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <p className="text-sm text-gray-600">
+        Configure an LLM provider for the Agent Review feature. Exactly one
+        provider is active at a time. Hosted providers transmit pipeline output
+        to a third party; the self-hosted Gemma 4 option keeps inference inside
+        your bioAF GCP project.
+      </p>
+
+      {data?.active_provider && (
+        <div className="flex items-center justify-between bg-bioaf-50 border border-bioaf-200 rounded p-3 text-sm">
+          <div>
+            Active provider:{" "}
+            <strong>{PROVIDER_LABEL[data.active_provider]}</strong>
+          </div>
+          <button
+            onClick={handleDeactivateAll}
+            className="text-bioaf-700 hover:underline"
+          >
+            Disable LLM
+          </button>
+        </div>
+      )}
+
+      <div className="space-y-4">
+        {ALL_PROVIDERS.map((provider) => (
+          <ProviderCard
+            key={provider}
+            provider={provider}
+            config={configsByProvider.get(provider)}
+            models={modelsByProvider.get(provider)}
+            saving={savingProvider === provider}
+            onSave={(key, model) => handleSave(provider, key, model)}
+            onActivate={() => handleActivate(provider)}
+            onDelete={() => handleDelete(provider)}
+          />
+        ))}
+      </div>
+
+      {pendingActivate !== null && (
+        <DataEgressWarningModal
+          provider={pendingActivate}
+          onConfirm={() => doActivate(pendingActivate)}
+          onCancel={() => setPendingActivate(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+interface ProviderCardProps {
+  provider: ProviderId;
+  config: ProviderConfigSummary | undefined;
+  models: ProviderModelList | undefined;
+  saving: boolean;
+  onSave: (apiKey: string | null, model: string) => void;
+  onActivate: () => void;
+  onDelete: () => void;
+}
+
+function ProviderCard({
+  provider,
+  config,
+  models,
+  saving,
+  onSave,
+  onActivate,
+  onDelete,
+}: ProviderCardProps) {
+  const hosted = HOSTED.includes(provider);
+  const [apiKey, setApiKey] = useState("");
+  const [model, setModel] = useState(config?.model ?? "");
+  const modelOptions = models?.models ?? [];
+
+  useEffect(() => {
+    setModel(config?.model ?? "");
+  }, [config?.model]);
+
+  const canSave =
+    (hosted ? apiKey.length > 0 || config?.api_key_prefix_last5 != null : true) &&
+    model.length > 0 &&
+    !saving;
+
+  return (
+    <div className="bg-white rounded-lg shadow p-5">
+      <div className="flex items-start justify-between">
+        <div>
+          <h3 className="text-lg font-semibold">{PROVIDER_LABEL[provider]}</h3>
+          <div className="text-xs text-gray-500 mt-1">
+            {config?.is_active
+              ? "Active"
+              : config?.configured
+                ? "Configured (inactive)"
+                : "Not configured"}
+          </div>
+        </div>
+        <div className="space-x-2">
+          {config?.configured && !config.is_active && (
+            <button
+              onClick={onActivate}
+              className="text-bioaf-600 hover:underline text-sm"
+            >
+              Set Active
+            </button>
+          )}
+          {config?.configured && (
+            <button
+              onClick={onDelete}
+              className="text-red-600 hover:underline text-sm"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        {hosted && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              API key
+            </label>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder={
+                config?.api_key_prefix_last5
+                  ? `*** ${config.api_key_prefix_last5}`
+                  : "Paste API key"
+              }
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+            />
+            {config?.api_key_prefix_last5 && (
+              <div className="text-xs text-gray-500 mt-1">
+                Leave blank to keep the existing key.
+              </div>
+            )}
+          </div>
+        )}
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Model
+          </label>
+          <select
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+          >
+            <option value="">Select a model</option>
+            {modelOptions.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+          {models?.used_fallback && (
+            <div className="text-xs text-amber-600 mt-1">
+              Model list shown from local fallback; live fetch failed.
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-4 flex items-center justify-end gap-2">
+        <button
+          onClick={() => onSave(apiKey.length > 0 ? apiKey : null, model)}
+          disabled={!canSave}
+          className="bg-bioaf-600 disabled:bg-gray-300 text-white px-4 py-2 rounded text-sm"
+        >
+          {saving ? "Saving..." : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DataEgressWarningModal({
+  provider,
+  onConfirm,
+  onCancel,
+}: {
+  provider: ProviderId;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg shadow-xl p-6 max-w-lg">
+        <h3 className="text-lg font-semibold mb-2">
+          Enable {PROVIDER_LABEL[provider]}?
+        </h3>
+        <p className="text-sm text-gray-700">
+          Enabling this provider will send pipeline output data to a
+          third-party LLM over the public internet. Sample metadata, JSON
+          outputs, and QC reports may be transmitted. Continue?
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 text-sm border border-gray-300 rounded"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className="px-4 py-2 text-sm bg-bioaf-600 text-white rounded"
+          >
+            Confirm and enable
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

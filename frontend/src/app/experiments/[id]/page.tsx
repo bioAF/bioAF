@@ -23,6 +23,7 @@ import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { useFileContentUrl } from "@/hooks/useContentUrl";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
+import { AgentReviewTab } from "@/components/agent-reviews/AgentReviewTab";
 import type {
   ExperimentDetail,
   ExperimentUpdateRequest,
@@ -50,7 +51,7 @@ import type {
   PlotArchiveListResponse,
 } from "@/lib/types";
 
-type Tab = "overview" | "samples" | "batches" | "files" | "analysis" | "pipelines" | "results" | "provenance" | "audit";
+type Tab = "overview" | "samples" | "batches" | "files" | "analysis" | "pipelines" | "results" | "provenance" | "audit" | "agent_review";
 
 export default function ExperimentDetailPage() {
   const router = useRouter();
@@ -434,6 +435,7 @@ export default function ExperimentDetailPage() {
     { key: "results", label: "Results" },
     { key: "provenance", label: "Provenance" },
     { key: "audit", label: "Audit Trail" },
+    { key: "agent_review", label: "Agent Review" },
   ];
 
   return (
@@ -1298,6 +1300,10 @@ export default function ExperimentDetailPage() {
                 </table>
               </div>
             </div>
+          )}
+
+          {activeTab === "agent_review" && experiment && (
+            <AgentReviewTab entityType="experiment" entityId={experiment.id} />
           )}
           {showCsvUpload && (
             <CsvUploadModal
