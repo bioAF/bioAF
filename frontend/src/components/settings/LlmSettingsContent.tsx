@@ -207,6 +207,13 @@ interface ProviderCardProps {
   onDelete: () => void;
 }
 
+interface TestResult {
+  ok: boolean;
+  model_count: number | null;
+  error: string | null;
+  error_class: string | null;
+}
+
 function ProviderCard({
   provider,
   config,
@@ -220,15 +227,38 @@ function ProviderCard({
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState(config?.model ?? "");
   const modelOptions = models?.models ?? [];
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<TestResult | null>(null);
 
   useEffect(() => {
     setModel(config?.model ?? "");
-  }, [config?.model]);
+    setTestResult(null);
+  }, [config?.model, config?.api_key_prefix_last5]);
 
   const canSave =
     (hosted ? apiKey.length > 0 || config?.api_key_prefix_last5 != null : true) &&
     model.length > 0 &&
     !saving;
+
+  async function runTest() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await api.post<TestResult>(
+        `/api/integrations/llm/providers/${provider}/test`,
+      );
+      setTestResult(result);
+    } catch (e) {
+      setTestResult({
+        ok: false,
+        model_count: null,
+        error: (e as Error).message,
+        error_class: "transport",
+      });
+    } finally {
+      setTesting(false);
+    }
+  }
 
   return (
     <div className="bg-white rounded-lg shadow p-5">
@@ -312,7 +342,38 @@ function ProviderCard({
         </div>
       </div>
 
+      {config?.configured && testResult && (
+        <div
+          className={`mt-3 text-sm rounded p-2 ${
+            testResult.ok
+              ? "bg-emerald-50 border border-emerald-200 text-emerald-800"
+              : "bg-red-50 border border-red-200 text-red-700"
+          }`}
+        >
+          {testResult.ok ? (
+            <>
+              Connected. {testResult.model_count} model
+              {testResult.model_count === 1 ? "" : "s"} available.
+            </>
+          ) : (
+            <>
+              <strong>Failed ({testResult.error_class}):</strong>{" "}
+              <span className="break-all">{testResult.error}</span>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="mt-4 flex items-center justify-end gap-2">
+        {config?.configured && (
+          <button
+            onClick={runTest}
+            disabled={testing}
+            className="border border-gray-300 text-gray-700 px-4 py-2 rounded text-sm hover:bg-gray-50 disabled:opacity-50"
+          >
+            {testing ? "Testing..." : "Test connection"}
+          </button>
+        )}
         <button
           onClick={() => onSave(apiKey.length > 0 ? apiKey : null, model)}
           disabled={!canSave}

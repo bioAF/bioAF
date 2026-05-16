@@ -14,6 +14,7 @@ from app.api.dependencies import require_permission
 from app.database import get_session
 from app.services import llm_provider_config_service
 from app.services.llm_models_fetch_service import list_models_with_fallback
+from app.services.llm_provider_clients import ProviderError, get_client
 from app.services.llm_provider_config_service import (
     HOSTED_PROVIDERS,
     SUPPORTED_PROVIDERS,
@@ -45,6 +46,14 @@ class ProvidersResponse(BaseModel):
 class UpsertProviderRequest(BaseModel):
     api_key: str | None = Field(default=None)
     model: str | None = Field(default=None)
+
+
+class TestProviderResponse(BaseModel):
+    ok: bool
+    provider: str
+    model_count: int | None = None
+    error: str | None = None
+    error_class: str | None = None
 
 
 @router.get("/providers", response_model=ProvidersResponse)
@@ -90,6 +99,54 @@ async def deactivate_all(
     user_id = int(current_user["sub"])
     await llm_provider_config_service.deactivate_all(session, org_id=org_id, actor_user_id=user_id)
     await session.commit()
+
+
+@router.post("/providers/{provider}/test", response_model=TestProviderResponse)
+async def test_provider(
+    provider: str,
+    current_user: dict = require_permission("llm_integration", "configure"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Hit the provider's /models endpoint with the stored key.
+
+    A cheap end-to-end check that the key authenticates and the network path
+    is reachable. Returns model_count on success; on failure returns the
+    verbatim provider error so the admin can act on it (revoked key,
+    rate-limit, unreachable host, etc.).
+    """
+    if provider not in SUPPORTED_PROVIDERS:
+        raise HTTPException(404, f"unknown provider: {provider}")
+    org_id = int(current_user["org_id"])
+
+    cfg = await llm_provider_config_service.get_for_provider(session, org_id, provider)
+    if cfg is None:
+        return TestProviderResponse(
+            ok=False,
+            provider=provider,
+            error="No configuration saved for this provider.",
+            error_class="not_configured",
+        )
+
+    api_key = cfg.api_key
+    if provider in HOSTED_PROVIDERS and not api_key:
+        return TestProviderResponse(
+            ok=False,
+            provider=provider,
+            error="No API key saved for this provider.",
+            error_class="not_configured",
+        )
+
+    client = get_client(provider)
+    try:
+        models = await client.list_models(api_key)
+    except ProviderError as exc:
+        return TestProviderResponse(
+            ok=False,
+            provider=provider,
+            error=str(exc)[:2000],
+            error_class=exc.error_class,
+        )
+    return TestProviderResponse(ok=True, provider=provider, model_count=len(models))
 
 
 @router.post("/providers/{provider}", response_model=ProviderConfigSummary)

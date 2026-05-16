@@ -61,7 +61,7 @@ export function AgentReviewButtons({
   }, [runId, onTriggered]);
 
   if (!canUse) return null;
-  if (pipelineStatus !== "complete") return null;
+  if (pipelineStatus !== "completed") return null;
   if (hasActiveProvider === false) return null;
 
   return (

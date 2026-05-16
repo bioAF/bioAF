@@ -14,7 +14,6 @@ from __future__ import annotations
 import pytest
 
 
-
 @pytest.fixture
 def admin_auth(admin_token):
     return {"Authorization": f"Bearer {admin_token}"}
@@ -150,3 +149,71 @@ async def test_model_list_falls_back_on_live_fetch_failure(client, admin_auth):
     openai_list = next(ml for ml in listed["model_lists"] if ml["provider"] == "openai")
     assert openai_list["used_fallback"] is True
     assert "gpt-5" in openai_list["models"]
+
+
+@pytest.mark.asyncio
+async def test_test_provider_returns_ok_on_live_models(client, admin_auth):
+    import respx
+    from httpx import Response
+
+    await client.post(
+        "/api/integrations/llm/providers/openai",
+        json={"api_key": "sk-test-LAST5", "model": "gpt-5"},
+        headers=admin_auth,
+    )
+    with respx.mock(base_url="https://api.openai.com/v1") as r:
+        r.get("/models").mock(
+            return_value=Response(
+                200,
+                json={"data": [{"id": "gpt-5"}, {"id": "gpt-4o"}]},
+            )
+        )
+        resp = await client.post("/api/integrations/llm/providers/openai/test", headers=admin_auth)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["provider"] == "openai"
+    assert body["model_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_test_provider_returns_error_on_auth_failure(client, admin_auth):
+    import respx
+    from httpx import Response
+
+    await client.post(
+        "/api/integrations/llm/providers/openai",
+        json={"api_key": "sk-bad-LAST5", "model": "gpt-5"},
+        headers=admin_auth,
+    )
+    with respx.mock(base_url="https://api.openai.com/v1") as r:
+        r.get("/models").mock(return_value=Response(401, text="invalid key"))
+        resp = await client.post("/api/integrations/llm/providers/openai/test", headers=admin_auth)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["error_class"] == "auth"
+    assert "invalid key" in body["error"]
+
+
+@pytest.mark.asyncio
+async def test_test_provider_returns_not_configured_when_no_row(client, admin_auth):
+    resp = await client.post("/api/integrations/llm/providers/openai/test", headers=admin_auth)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["error_class"] == "not_configured"
+
+
+@pytest.mark.asyncio
+async def test_test_provider_gemma_returns_ok_without_key(client, admin_auth):
+    await client.post(
+        "/api/integrations/llm/providers/gemma",
+        json={"model": "gemma-4-9b"},
+        headers=admin_auth,
+    )
+    resp = await client.post("/api/integrations/llm/providers/gemma/test", headers=admin_auth)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["model_count"] is not None and body["model_count"] > 0
