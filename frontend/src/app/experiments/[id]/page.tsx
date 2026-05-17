@@ -24,6 +24,7 @@ import { api } from "@/lib/api";
 import { useFileContentUrl } from "@/hooks/useContentUrl";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
 import { AgentReviewTab } from "@/components/agent-reviews/AgentReviewTab";
+import { AgentReviewButtons } from "@/components/agent-reviews/AgentReviewButtons";
 import type {
   ExperimentDetail,
   ExperimentUpdateRequest,
@@ -435,7 +436,7 @@ export default function ExperimentDetailPage() {
     { key: "results", label: "Results" },
     { key: "provenance", label: "Provenance" },
     { key: "audit", label: "Audit Trail" },
-    { key: "agent_review", label: "Agent Review" },
+    { key: "agent_review", label: "AI Review" },
   ];
 
   return (
@@ -1303,7 +1304,13 @@ export default function ExperimentDetailPage() {
           )}
 
           {activeTab === "agent_review" && experiment && (
-            <AgentReviewTab entityType="experiment" entityId={experiment.id} />
+            <div className="space-y-4">
+              <AgentReviewButtons
+                mode="experiment"
+                experimentId={experiment.id}
+              />
+              <AgentReviewTab entityType="experiment" entityId={experiment.id} />
+            </div>
           )}
           {showCsvUpload && (
             <CsvUploadModal

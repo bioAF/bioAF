@@ -63,7 +63,12 @@ export type RunBody =
 
 interface Props {
   entityType: "pipeline_run" | "experiment";
-  runId: number;
+  /**
+   * Required for pipeline_run scope. Optional for experiment scope: when
+   * present the corresponding run is pre-checked and locked, when absent the
+   * modal launches with every visible run in the experiment selected.
+   */
+  runId?: number;
   experimentId: number | null;
   onCancel: () => void;
   onSubmitted: () => void;
@@ -89,7 +94,9 @@ export function SectionBuilderModal({
 
   // Button B-only state.
   const [otherRuns, setOtherRuns] = useState<OtherRun[] | null>(null);
-  const [selectedRuns, setSelectedRuns] = useState<Set<number>>(new Set([runId]));
+  const [selectedRuns, setSelectedRuns] = useState<Set<number>>(
+    runId !== undefined ? new Set([runId]) : new Set(),
+  );
   const [htmlReportRuns, setHtmlReportRuns] = useState<Set<number>>(new Set());
 
   // Display prompt modal state.
@@ -118,9 +125,16 @@ export function SectionBuilderModal({
     if (!isExperiment || experimentId === null) return;
     api
       .get<{ items: OtherRun[] }>(`/api/pipeline-runs?experiment_id=${experimentId}`)
-      .then((d) => setOtherRuns(d.items ?? []))
+      .then((d) => {
+        const items = d.items ?? [];
+        setOtherRuns(items);
+        // Experiment-page entry (no runId): preselect every visible run.
+        if (runId === undefined) {
+          setSelectedRuns(new Set(items.map((r) => r.id)));
+        }
+      })
       .catch(() => setOtherRuns([]));
-  }, [isExperiment, experimentId]);
+  }, [isExperiment, experimentId, runId]);
 
   const visibleSections = useMemo<Section[]>(() => {
     if (!catalog) return [];
@@ -165,7 +179,7 @@ export function SectionBuilderModal({
   }
 
   function toggleRun(id: number) {
-    if (id === runId) return; // current run always included
+    if (runId !== undefined && id === runId) return; // current run always included
     setSelectedRuns((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -220,7 +234,7 @@ export function SectionBuilderModal({
     try {
       const base = {
         entity_type: entityType,
-        entity_id: isExperiment ? experimentId! : runId,
+        entity_id: isExperiment ? experimentId! : runId!,
         ...(isExperiment
           ? {
               included_run_ids: Array.from(selectedRuns),
@@ -370,7 +384,7 @@ export function SectionBuilderModal({
                 </thead>
                 <tbody>
                   {otherRuns.map((r) => {
-                    const isCurrent = r.id === runId;
+                    const isCurrent = runId !== undefined && r.id === runId;
                     return (
                       <tr key={r.id} className="border-b">
                         <td className="py-2">
@@ -454,7 +468,7 @@ export function SectionBuilderModal({
             try {
               const base = {
                 entity_type: entityType,
-                entity_id: isExperiment ? experimentId! : runId,
+                entity_id: isExperiment ? experimentId! : runId!,
                 ...(isExperiment
                   ? {
                       included_run_ids: Array.from(selectedRuns),

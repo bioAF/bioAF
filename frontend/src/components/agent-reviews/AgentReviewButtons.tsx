@@ -6,13 +6,15 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { SectionBuilderModal } from "./SectionBuilderModal";
 
 interface AgentReviewButtonsProps {
-  runId: number;
+  mode: "pipeline_run" | "experiment";
+  runId?: number;
   experimentId: number | null;
-  pipelineStatus: string;
+  pipelineStatus?: string;
   onTriggered?: () => void;
 }
 
 export function AgentReviewButtons({
+  mode,
   runId,
   experimentId,
   pipelineStatus,
@@ -22,7 +24,7 @@ export function AgentReviewButtons({
   const canUse = canAccess("llm_integration", "use");
   const [hasActiveProvider, setHasActiveProvider] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [openMode, setOpenMode] = useState<"a" | "b" | null>(null);
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     if (!canUse) return;
@@ -33,38 +35,34 @@ export function AgentReviewButtons({
   }, [canUse]);
 
   if (!canUse) return null;
-  if (pipelineStatus !== "completed") return null;
   if (hasActiveProvider === false) return null;
+  if (mode === "pipeline_run" && pipelineStatus !== "completed") return null;
+  if (mode === "experiment" && experimentId === null) return null;
+
+  const label =
+    mode === "pipeline_run" ? "Review this pipeline run" : "Review this Experiment";
 
   return (
     <div className="flex items-center gap-2">
       <button
-        onClick={() => setOpenMode("a")}
-        className="px-3 py-1.5 text-sm border border-bioaf-600 text-bioaf-700 rounded hover:bg-bioaf-50"
+        onClick={() => setOpen(true)}
+        className="px-3 py-1.5 text-sm bg-bioaf-600 hover:bg-bioaf-700 text-white rounded"
       >
-        Review this pipeline run
+        {label}
       </button>
-      {experimentId !== null && (
-        <button
-          onClick={() => setOpenMode("b")}
-          className="px-3 py-1.5 text-sm border border-bioaf-600 text-bioaf-700 rounded hover:bg-bioaf-50"
-        >
-          Review across experiment
-        </button>
-      )}
       {error && (
         <span className="text-red-600 text-sm" role="alert">
           {error}
         </span>
       )}
-      {openMode !== null && (
+      {open && (
         <SectionBuilderModal
-          entityType={openMode === "a" ? "pipeline_run" : "experiment"}
-          runId={runId}
+          entityType={mode}
+          runId={mode === "pipeline_run" ? runId : undefined}
           experimentId={experimentId}
-          onCancel={() => setOpenMode(null)}
+          onCancel={() => setOpen(false)}
           onSubmitted={() => {
-            setOpenMode(null);
+            setOpen(false);
             onTriggered?.();
           }}
           onError={(m) => setError(m)}

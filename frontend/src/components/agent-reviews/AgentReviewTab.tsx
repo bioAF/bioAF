@@ -23,6 +23,7 @@ interface AgentReviewSummary {
   headline: string | null;
   stale: boolean;
   dismissed: boolean;
+  prompt_source: string | null;
   created_at: string;
   completed_at: string | null;
 }
@@ -44,13 +45,6 @@ interface AgentReviewDetail extends AgentReviewSummary {
 interface ListResponse {
   items: AgentReviewSummary[];
 }
-
-const SEVERITY_BAR: Record<string, string> = {
-  red: "bg-red-500",
-  orange: "bg-amber-500",
-  green: "bg-emerald-500",
-  unknown: "bg-gray-400",
-};
 
 function filterKeyFor(entityType: AgentReviewEntityType, entityId: number): string {
   return `agentReviewTab:${entityType}:${entityId}:filter`;
@@ -161,6 +155,47 @@ export function AgentReviewTab({ entityType, entityId }: AgentReviewTabProps) {
   );
 }
 
+function severityClass(review: AgentReviewSummary): {
+  bar: string;
+  badge: string;
+  badgeLabel: string;
+} {
+  // Always render one of red/orange/green per the user spec. Failed = red;
+  // pending and parse-failure "unknown" severities map to orange.
+  if (review.status === "failed") {
+    return { bar: "bg-red-500", badge: "bg-red-100 text-red-700", badgeLabel: "red" };
+  }
+  if (review.status === "pending") {
+    return {
+      bar: "bg-amber-500",
+      badge: "bg-amber-100 text-amber-700",
+      badgeLabel: "orange",
+    };
+  }
+  if (review.severity === "green") {
+    return {
+      bar: "bg-emerald-500",
+      badge: "bg-emerald-100 text-emerald-700",
+      badgeLabel: "green",
+    };
+  }
+  if (review.severity === "red") {
+    return { bar: "bg-red-500", badge: "bg-red-100 text-red-700", badgeLabel: "red" };
+  }
+  return {
+    bar: "bg-amber-500",
+    badge: "bg-amber-100 text-amber-700",
+    badgeLabel: "orange",
+  };
+}
+
+function shortTitle(headline: string | null): string {
+  if (!headline) return "(no headline)";
+  const words = headline.trim().split(/\s+/);
+  if (words.length <= 7) return headline;
+  return words.slice(0, 7).join(" ") + "…";
+}
+
 function ReviewCard({
   review,
   onOpen,
@@ -168,16 +203,11 @@ function ReviewCard({
   review: AgentReviewSummary;
   onOpen: () => void;
 }) {
-  const bar =
-    review.status === "pending"
-      ? "bg-gray-300"
-      : review.status === "failed"
-        ? "bg-gray-500"
-        : SEVERITY_BAR[review.severity ?? "unknown"] ?? "bg-gray-300";
+  const { bar, badge, badgeLabel } = severityClass(review);
   const reviewTypeLabel =
-    review.review_type === "pipeline_run_review_v1"
-      ? "Pipeline run review"
-      : "Cross-run review";
+    review.entity_type === "experiment" ? "Experiment review" : "Pipeline run review";
+  const isCustom =
+    review.prompt_source === "custom_saved" || review.prompt_source === "custom_one_off";
 
   return (
     <button
@@ -190,29 +220,22 @@ function ReviewCard({
           <span>{new Date(review.created_at).toLocaleString()}</span>
           <span>·</span>
           <span>{reviewTypeLabel}</span>
-          {review.severity && (
-            <span
-              className={`ml-auto px-2 py-0.5 rounded text-xs font-medium ${
-                review.severity === "red"
-                  ? "bg-red-100 text-red-700"
-                  : review.severity === "orange"
-                    ? "bg-amber-100 text-amber-700"
-                    : review.severity === "green"
-                      ? "bg-emerald-100 text-emerald-700"
-                      : "bg-gray-100 text-gray-700"
-              }`}
-            >
-              {review.severity}
-            </span>
-          )}
+          <span className={`ml-auto px-2 py-0.5 rounded text-xs font-medium ${badge}`}>
+            {badgeLabel}
+          </span>
         </div>
         <div className="mt-1 font-medium text-gray-900 truncate">
           {review.status === "pending"
             ? `Running on ${review.provider}…`
-            : (review.headline ?? "(no headline)")}
+            : shortTitle(review.headline)}
         </div>
-        <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
+        <div className="mt-1 flex items-center gap-2 text-xs text-gray-500 flex-wrap">
           <span>{review.provider} · {review.model}</span>
+          {isCustom && (
+            <span className="px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">
+              custom
+            </span>
+          )}
           {review.stale && (
             <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
               stale
@@ -234,6 +257,28 @@ function ReviewCard({
   );
 }
 
+interface SubItemLabel {
+  id: string;
+  label: string;
+  section_label: string;
+}
+
+interface SectionCatalog {
+  sections: {
+    id: string;
+    label: string;
+    sub_items: { id: string; label: string }[];
+  }[];
+}
+
+let _catalogCache: SectionCatalog | null = null;
+
+async function loadCatalog(): Promise<SectionCatalog> {
+  if (_catalogCache) return _catalogCache;
+  _catalogCache = await api.get<SectionCatalog>("/api/agent_reviews/section_catalog");
+  return _catalogCache;
+}
+
 function ReviewModal({
   reviewId,
   canDismiss,
@@ -247,6 +292,11 @@ function ReviewModal({
 }) {
   const [review, setReview] = useState<AgentReviewDetail | null>(null);
   const [busy, setBusy] = useState(false);
+  const [catalog, setCatalog] = useState<SectionCatalog | null>(null);
+
+  useEffect(() => {
+    loadCatalog().then(setCatalog).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -355,16 +405,7 @@ function ReviewModal({
                     </ul>
                   </div>
                 )}
-                {review.prompt_text && (
-                  <details className="mt-4 text-xs text-gray-500">
-                    <summary className="cursor-pointer">
-                      Prompt used (source: {review.prompt_source ?? "unknown"})
-                    </summary>
-                    <pre className="mt-1 whitespace-pre-wrap bg-gray-50 border border-gray-200 rounded p-2 max-h-72 overflow-y-auto">
-                      {review.prompt_text}
-                    </pre>
-                  </details>
-                )}
+                <PromptDetails review={review} catalog={catalog} />
               </>
             )}
 
@@ -389,5 +430,74 @@ function ReviewModal({
         )}
       </div>
     </div>
+  );
+}
+
+function PromptDetails({
+  review,
+  catalog,
+}: {
+  review: AgentReviewDetail;
+  catalog: SectionCatalog | null;
+}) {
+  if (!review.prompt_source && !review.prompt_text) return null;
+
+  const isCustom =
+    review.prompt_source === "custom_saved" || review.prompt_source === "custom_one_off";
+  const sourceLabel = isCustom
+    ? review.prompt_source === "custom_saved"
+      ? "Custom prompt (saved)"
+      : "Custom prompt (one-off)"
+    : "Standard prompt";
+
+  // Resolve sub-item ids to "Section › Item" labels via the catalog.
+  const labelsBySectionId = new Map<string, string>();
+  const subItemIndex = new Map<string, { section_label: string; label: string }>();
+  if (catalog) {
+    for (const section of catalog.sections) {
+      labelsBySectionId.set(section.id, section.label);
+      for (const si of section.sub_items) {
+        subItemIndex.set(si.id, {
+          section_label: section.label,
+          label: si.label,
+        });
+      }
+    }
+  }
+
+  return (
+    <details className="mt-4 text-sm">
+      <summary className="cursor-pointer text-gray-700 font-medium">
+        Prompt details
+      </summary>
+      <div className="mt-2 text-xs text-gray-700 border border-gray-200 rounded p-3">
+        <div className="font-medium mb-2">{sourceLabel}</div>
+        {!isCustom && review.prompt_sections && review.prompt_sections.length > 0 && (
+          <div>
+            <div className="text-gray-500 mb-1">Items requested:</div>
+            <ul className="list-disc list-inside space-y-0.5">
+              {review.prompt_sections.map((id) => {
+                const entry = subItemIndex.get(id);
+                return (
+                  <li key={id}>
+                    {entry
+                      ? `${entry.section_label} › ${entry.label}`
+                      : id}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+        {isCustom && review.prompt_text && (
+          <div>
+            <div className="text-gray-500 mb-1">Prompt body:</div>
+            <pre className="whitespace-pre-wrap bg-gray-50 border border-gray-200 rounded p-2 max-h-72 overflow-y-auto">
+              {review.prompt_text}
+            </pre>
+          </div>
+        )}
+      </div>
+    </details>
   );
 }

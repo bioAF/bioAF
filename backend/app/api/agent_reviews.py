@@ -122,6 +122,7 @@ class AgentReviewSummary(BaseModel):
     headline: str | None
     stale: bool
     dismissed: bool
+    prompt_source: str | None
     created_at: datetime
     completed_at: datetime | None
 
@@ -170,6 +171,7 @@ async def _to_summary(session: AsyncSession, review: AgentReview) -> AgentReview
         headline=review.headline,
         stale=await _is_stale(session, review),
         dismissed=review.dismissed_at is not None,
+        prompt_source=review.prompt_source,
         created_at=review.created_at,
         completed_at=review.completed_at,
     )
@@ -413,7 +415,6 @@ async def get_review(
         dismissed_by_user_id=review.dismissed_by_user_id,
         prompt_text=review.prompt_text,
         prompt_sections=review.prompt_sections,
-        prompt_source=review.prompt_source,
         prompt_custom_id=review.prompt_custom_id,
     )
 

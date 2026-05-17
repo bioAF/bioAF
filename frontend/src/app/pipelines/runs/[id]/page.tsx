@@ -371,7 +371,7 @@ export default function PipelineRunDetailPage() {
     { key: "provenance", label: "Provenance" },
     { key: "results", label: "Results" },
     { key: "review", label: "Review" },
-    { key: "agent_review", label: "Agent Review" },
+    { key: "agent_review", label: "AI Review" },
   ];
 
   return (
@@ -777,10 +777,11 @@ export default function PipelineRunDetailPage() {
             <ReviewPanel pipelineRunId={run.id} userRole={getUserRole()} onReviewSubmitted={loadRun} />
           )}
 
-          {/* Agent Review tab (ADR-055) */}
+          {/* AI Review tab (ADR-055) */}
           {activeTab === "agent_review" && (
             <div className="space-y-4">
               <AgentReviewButtons
+                mode="pipeline_run"
                 runId={run.id}
                 experimentId={run.experiment?.id ?? null}
                 pipelineStatus={run.status}
