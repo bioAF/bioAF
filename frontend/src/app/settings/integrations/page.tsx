@@ -6,14 +6,16 @@ import { Header } from "@/components/layout/Header";
 import { GcpSettingsContent } from "@/components/settings/GcpSettingsContent";
 import { SmtpSettingsContent } from "@/components/settings/SmtpSettingsContent";
 import { SlackSettingsContent } from "@/components/settings/SlackSettingsContent";
+import { LlmSettingsContent } from "@/components/settings/LlmSettingsContent";
 
-type Tab = "gcp" | "smtp" | "slack" | "seqera";
+type Tab = "gcp" | "smtp" | "slack" | "seqera" | "llms";
 
 const tabs: { key: Tab; label: string }[] = [
   { key: "gcp", label: "GCP" },
   { key: "smtp", label: "SMTP" },
   { key: "slack", label: "Slack" },
   { key: "seqera", label: "Seqera" },
+  { key: "llms", label: "LLMs" },
 ];
 
 export default function IntegrationsPage() {
@@ -56,6 +58,7 @@ export default function IntegrationsPage() {
               </p>
             </div>
           )}
+          {activeTab === "llms" && <LlmSettingsContent />}
         </main>
       </div>
     </div>

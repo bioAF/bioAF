@@ -22,6 +22,7 @@ ALL_RESOURCES_ACTIONS: dict[str, list[str]] = {
     "quotas": ["view", "configure"],
     "settings": ["view", "configure"],
     "references": ["view", "upload"],
+    "llm_integration": ["configure", "use"],
 }
 
 BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
@@ -46,6 +47,7 @@ BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
             "audit_log": ["view"],
             "cost_center": ["view"],
             "references": ["view", "upload"],
+            "llm_integration": ["use"],
         },
     ),
     "bench": (

@@ -8,6 +8,8 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { ReviewPanel } from "@/components/experiments/ReviewPanel";
 import { PipelineRunResultsTab } from "@/components/pipelines/PipelineRunResultsTab";
+import { AgentReviewTab } from "@/components/agent-reviews/AgentReviewTab";
+import { AgentReviewButtons } from "@/components/agent-reviews/AgentReviewButtons";
 import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBadge";
 import { isAuthenticated } from "@/lib/auth";
 import { getToken } from "@/lib/auth";
@@ -30,7 +32,7 @@ const STATUS_COLORS: Record<PipelineRunStatus | PipelineProcessStatus, string> =
   cached: "bg-purple-100 text-purple-700",
 };
 
-type Tab = "logs" | "report" | "parameters" | "provenance" | "results" | "review";
+type Tab = "logs" | "report" | "parameters" | "provenance" | "results" | "review" | "agent_review";
 
 interface LogResponse {
   stdout: string;
@@ -157,6 +159,7 @@ export default function PipelineRunDetailPage() {
   const [run, setRun] = useState<PipelineRunDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>("logs");
+  const [aiReviewSignal, setAiReviewSignal] = useState(0);
   const [report, setReport] = useState<string>("");
   const [reportLoading, setReportLoading] = useState(false);
   const [logs, setLogs] = useState<LogResponse>({ stdout: "", stderr: "" });
@@ -369,6 +372,7 @@ export default function PipelineRunDetailPage() {
     { key: "provenance", label: "Provenance" },
     { key: "results", label: "Results" },
     { key: "review", label: "Review" },
+    { key: "agent_review", label: "AI Review" },
   ];
 
   return (
@@ -772,6 +776,24 @@ export default function PipelineRunDetailPage() {
           {/* Review tab */}
           {activeTab === "review" && (
             <ReviewPanel pipelineRunId={run.id} userRole={getUserRole()} onReviewSubmitted={loadRun} />
+          )}
+
+          {/* AI Review tab (ADR-055) */}
+          {activeTab === "agent_review" && (
+            <div className="space-y-4">
+              <AgentReviewButtons
+                mode="pipeline_run"
+                runId={run.id}
+                experimentId={run.experiment?.id ?? null}
+                pipelineStatus={run.status}
+                onTriggered={() => setAiReviewSignal((v) => v + 1)}
+              />
+              <AgentReviewTab
+                entityType="pipeline_run"
+                entityId={run.id}
+                refreshSignal={aiReviewSignal}
+              />
+            </div>
           )}
 
           {/* References Used section — shown below active tab content */}

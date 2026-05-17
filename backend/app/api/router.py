@@ -68,6 +68,8 @@ from app.api.sheets_import import router as sheets_import_router
 from app.api.github_repos import router as github_repos_router
 from app.api.custom_pipelines import router as custom_pipelines_router
 from app.api.integrations_admin import router as integrations_admin_router
+from app.api.llm_config import router as llm_config_router
+from app.api.agent_reviews import router as agent_reviews_router
 
 api_router = APIRouter()
 
@@ -139,3 +141,5 @@ api_router.include_router(sheets_import_router)
 api_router.include_router(github_repos_router)
 api_router.include_router(custom_pipelines_router)
 api_router.include_router(integrations_admin_router)
+api_router.include_router(llm_config_router)
+api_router.include_router(agent_reviews_router)
