@@ -46,6 +46,15 @@ A human-readable event stream for the UI timeline, summarizing user-visible acti
 such as pipeline completions and snapshot creations. Distinct from [Audit Log](#audit-log)
 and [Access Log](#access-log); not a compliance or security record.
 
+### Agent Review
+
+An advisory, severity-coded note produced by an LLM in response to one of the
+standardized review buttons on a [Pipeline Run](#pipeline-run) or
+[Experiment](#experiment). Not provenance and not part of the scientific record:
+a scientist may act on a flag, but the action they take (a rerun, a sample
+reclassification) is what enters provenance. Lives in the Agent Review tab on
+the entity it pertains to.
+
 ### Analysis Snapshot
 
 _Pending definition._ A model named `AnalysisSnapshot` exists in code; the term has not
@@ -130,6 +139,23 @@ lifecycle: `registered` -> `library_prep` -> `sequencing` -> `fastq_uploaded` ->
 `processing` -> `pipeline_complete` -> `reviewed` -> `analysis` -> `complete`. The
 primary entity all other layers reference; mandatory (unlike [Project](#project)). Has
 a code, belongs to an [Organization](#organization), optionally to a Project.
+
+### LLM Provider
+
+A configured back end for [Agent Review](#agent-review) inference. Four are
+supported: OpenAI, Anthropic Claude, Google Gemini (hosted), and Gemma 4 (self-
+hosted, runs inside the bioAF GCP project). Exactly one per [Organization](#organization)
+is active at a time; switching is a settings toggle, keys for all four can
+persist simultaneously.
+
+### `.md` Review Artifact
+
+The standardized Markdown rollup of a single [Pipeline Run](#pipeline-run) (run
+record, parameters, output JSON, QC report text, sample metadata, errors) built
+on demand for [Agent Review](#agent-review) consumption and persisted in GCS
+under that pipeline run's artifact directory. The only user data that ever
+leaves the org under any LLM code path. Raw rows, FASTQ, file blobs, and
+pipeline logs are never included.
 
 ### Naming Profile
 
@@ -231,6 +257,22 @@ A sequencer-output cohort, scoped to the [Organization](#organization) (cross-ex
 tracking file-ingestion progress with its own status. Distinct from
 [Sample Batch](#sample-batch). Plain "Batch" is disallowed; always use one of the two
 specific terms.
+
+### Severity (Agent Review)
+
+The red/orange/green grading returned in the [Agent Review](#agent-review)
+response's JSON header and used to color-code the card. Red is "I found a major
+concern," orange is "something is strange here," green is "no concerns flagged."
+A fourth value, `unknown`, marks a parse failure: the response body is preserved
+but the structured header could not be read.
+
+### Stale (Agent Review)
+
+A flag on an experiment-level [Agent Review](#agent-review) indicating that the
+[Experiment](#experiment) now contains a [Pipeline Run](#pipeline-run) that was
+not in the review's included-runs list. Computed at query time, not persisted.
+Adding a [Sample](#sample) alone does not trigger stale; only adding a pipeline
+run does. Single-run reviews are never stale.
 
 ### Unclaimed
 

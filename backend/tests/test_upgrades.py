@@ -164,12 +164,14 @@ async def test_check_for_updates_detects_newer_version():
 
     _clear_version_cache()
 
+    # Mock version is comfortably greater than the current CalVer in
+    # pyproject.toml; if pyproject ever bumps past 2099, raise this.
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
-        "tag_name": "v99.0.0",
+        "tag_name": "v2099.0.0",
         "body": "## What's new\n- Big improvements",
-        "html_url": "https://github.com/bioAF/bioAF/releases/tag/v99.0.0",
+        "html_url": "https://github.com/bioAF/bioAF/releases/tag/v2099.0.0",
     }
 
     with patch("app.services.upgrade_service.httpx.AsyncClient") as mock_client_cls:
@@ -182,9 +184,9 @@ async def test_check_for_updates_detects_newer_version():
         result = await UpgradeService.check_for_updates(1)
 
     assert result["update_available"] is True
-    assert result["latest_version"] == "99.0.0"
+    assert result["latest_version"] == "2099.0.0"
     assert result["changelog"] == "## What's new\n- Big improvements"
-    assert "v99.0.0" in result["release_url"]
+    assert "v2099.0.0" in result["release_url"]
 
 
 @pytest.mark.asyncio
@@ -492,17 +494,24 @@ def test_parse_version_calver_greater_than_semver():
 
 @pytest.mark.asyncio
 async def test_check_for_updates_detects_calver_newer_than_semver():
-    """A client on SemVer must recognize a CalVer GitHub release as an available update."""
+    """The end-to-end CalVer check: a newer CalVer release surfaces as available.
+
+    Originally written during the SemVer->CalVer transition to verify the
+    parser recognized a CalVer tag as greater than the then-current SemVer.
+    Both client and server are now on CalVer; the test still pins the
+    integration path by using a CalVer tag higher than current."""
     from app.services.upgrade_service import UpgradeService, _clear_version_cache
 
     _clear_version_cache()
 
+    # Use a year ahead of the current pyproject CalVer so the tag is
+    # unambiguously newer regardless of intra-year version bumps.
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
-        "tag_name": "v2026.5.0",
-        "body": "First CalVer release",
-        "html_url": "https://github.com/bioAF/bioAF/releases/tag/v2026.5.0",
+        "tag_name": "v2099.1.0",
+        "body": "Future CalVer release",
+        "html_url": "https://github.com/bioAF/bioAF/releases/tag/v2099.1.0",
     }
 
     with patch("app.services.upgrade_service.httpx.AsyncClient") as mock_client_cls:
@@ -515,7 +524,7 @@ async def test_check_for_updates_detects_calver_newer_than_semver():
         result = await UpgradeService.check_for_updates(1)
 
     assert result["update_available"] is True
-    assert result["latest_version"] == "2026.5.0"
+    assert result["latest_version"] == "2099.1.0"
 
 
 @pytest.mark.asyncio

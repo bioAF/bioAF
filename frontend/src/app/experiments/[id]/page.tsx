@@ -23,6 +23,8 @@ import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { useFileContentUrl } from "@/hooks/useContentUrl";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
+import { AgentReviewTab } from "@/components/agent-reviews/AgentReviewTab";
+import { AgentReviewButtons } from "@/components/agent-reviews/AgentReviewButtons";
 import type {
   ExperimentDetail,
   ExperimentUpdateRequest,
@@ -50,7 +52,7 @@ import type {
   PlotArchiveListResponse,
 } from "@/lib/types";
 
-type Tab = "overview" | "samples" | "batches" | "files" | "analysis" | "pipelines" | "results" | "provenance" | "audit";
+type Tab = "overview" | "samples" | "batches" | "files" | "analysis" | "pipelines" | "results" | "provenance" | "audit" | "agent_review";
 
 export default function ExperimentDetailPage() {
   const router = useRouter();
@@ -65,6 +67,7 @@ export default function ExperimentDetailPage() {
   const [auditTotal, setAuditTotal] = useState(0);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [loading, setLoading] = useState(true);
+  const [aiReviewSignal, setAiReviewSignal] = useState(0);
 
   const [notebookSessions, setNotebookSessions] = useState<NotebookSession[]>([]);
   const [pipelineRuns, setPipelineRuns] = useState<PipelineRun[]>([]);
@@ -434,6 +437,7 @@ export default function ExperimentDetailPage() {
     { key: "results", label: "Results" },
     { key: "provenance", label: "Provenance" },
     { key: "audit", label: "Audit Trail" },
+    { key: "agent_review", label: "AI Review" },
   ];
 
   return (
@@ -1297,6 +1301,21 @@ export default function ExperimentDetailPage() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {activeTab === "agent_review" && experiment && (
+            <div className="space-y-4">
+              <AgentReviewButtons
+                mode="experiment"
+                experimentId={experiment.id}
+                onTriggered={() => setAiReviewSignal((v) => v + 1)}
+              />
+              <AgentReviewTab
+                entityType="experiment"
+                entityId={experiment.id}
+                refreshSignal={aiReviewSignal}
+              />
             </div>
           )}
           {showCsvUpload && (

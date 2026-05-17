@@ -24,6 +24,7 @@ A turnkey computational biology platform for small biotech companies (5-50 resea
 - **Audit Log** - Immutable audit trail with filtering, pagination, and human-readable descriptions
 - **GitOps** - Version-controlled platform configuration with diff and rollback
 - **Integration API** - Public, key-authenticated REST surface for LIMS and other external systems, with webhooks for event delivery
+- **AI Review (advisory)** - Per-org hosted LLM integration (OpenAI, Anthropic Claude, Google Gemini) that produces severity-coded advisory notes on completed pipeline runs and across-experiment comparisons. Output is advisory only, never enters provenance; every invocation is audited with provider, model, key prefix, and transmitted GCS artifact paths
 
 ## Architecture
 

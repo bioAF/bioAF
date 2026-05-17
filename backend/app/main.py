@@ -228,6 +228,20 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Could not resolve pending upgrades: %s", e)
 
+    # Mark any in-flight hosted LLM review jobs as failed with reason
+    # process_restart (ADR-055). Gemma jobs are owned by the orchestrator
+    # and are left in place.
+    from app.services import agent_review_job_service
+
+    try:
+        async with notif_session_factory() as orphan_session:
+            count = await agent_review_job_service.mark_orphaned_on_startup(orphan_session)
+            await orphan_session.commit()
+            if count:
+                logger.info("Marked %d orphaned LLM review jobs as failed on startup", count)
+    except Exception as e:
+        logger.warning("Could not mark orphaned LLM review jobs: %s", e)
+
     logger.info("bioAF backend started successfully")
 
     # Start background tasks
