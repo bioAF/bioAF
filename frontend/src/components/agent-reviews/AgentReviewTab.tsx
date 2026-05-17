@@ -35,6 +35,10 @@ interface AgentReviewDetail extends AgentReviewSummary {
   artifact_gcs_paths: string[];
   dismissed_at: string | null;
   dismissed_by_user_id: number | null;
+  prompt_text: string | null;
+  prompt_sections: string[] | null;
+  prompt_source: string | null;
+  prompt_custom_id: number | null;
 }
 
 interface ListResponse {
@@ -350,6 +354,16 @@ function ReviewModal({
                       ))}
                     </ul>
                   </div>
+                )}
+                {review.prompt_text && (
+                  <details className="mt-4 text-xs text-gray-500">
+                    <summary className="cursor-pointer">
+                      Prompt used (source: {review.prompt_source ?? "unknown"})
+                    </summary>
+                    <pre className="mt-1 whitespace-pre-wrap bg-gray-50 border border-gray-200 rounded p-2 max-h-72 overflow-y-auto">
+                      {review.prompt_text}
+                    </pre>
+                  </details>
                 )}
               </>
             )}
