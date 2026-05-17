@@ -124,9 +124,9 @@ export function SectionBuilderModal({
   useEffect(() => {
     if (!isExperiment || experimentId === null) return;
     api
-      .get<{ items: OtherRun[] }>(`/api/pipeline-runs?experiment_id=${experimentId}`)
+      .get<{ runs: OtherRun[] }>(`/api/pipeline-runs?experiment_id=${experimentId}`)
       .then((d) => {
-        const items = d.items ?? [];
+        const items = d.runs ?? [];
         setOtherRuns(items);
         // Experiment-page entry (no runId): preselect every visible run.
         if (runId === undefined) {

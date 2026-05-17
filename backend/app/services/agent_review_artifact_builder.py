@@ -18,6 +18,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.experiment import Experiment
 from app.models.pipeline_run import PipelineRun, PipelineRunSample
 from app.models.qc_dashboard import QCDashboard
 from app.models.sample import Sample
@@ -258,5 +259,114 @@ def render_experiment_header(
     ]
     for rid in included_run_ids:
         sections.append(f"- {rid}")
+    sections.append("")
+    return "\n".join(sections)
+
+
+def _format_experiment_metadata(exp: Experiment) -> list[str]:
+    """Surface every experiment field that helps the LLM judge cross-run design.
+
+    Sparse fields (None / empty) are omitted so the header stays scannable.
+    """
+    lines: list[str] = ["## Experiment", f"- ID: {exp.id}", f"- Name: {exp.name}"]
+    optional_fields: list[tuple[str, Any]] = [
+        ("Code", exp.code),
+        ("External ID", exp.external_id),
+        ("Status", exp.status),
+        ("Design type", exp.design_type),
+        ("Protocol version", exp.protocol_version),
+        ("Start date", exp.start_date.isoformat() if exp.start_date else None),
+        ("Expected sample count", exp.expected_sample_count),
+    ]
+    for label, value in optional_fields:
+        if value is None or value == "":
+            continue
+        lines.append(f"- {label}: {value}")
+    if exp.hypothesis:
+        lines.append("")
+        lines.append("### Hypothesis")
+        lines.append(_truncate(exp.hypothesis))
+    if exp.description:
+        lines.append("")
+        lines.append("### Description")
+        lines.append(_truncate(exp.description))
+    if exp.variables_json:
+        lines.append("")
+        lines.append("### Design variables")
+        lines.append("```json")
+        lines.append(_truncate(json.dumps(exp.variables_json, indent=2, sort_keys=True)))
+        lines.append("```")
+    return lines
+
+
+def _format_experiment_samples_table(samples: list[Sample]) -> list[str]:
+    """Wide samples table for the experiment-scope artifact.
+
+    Includes per-sample design + QC fields that a per-run review never has the
+    context to surface (cross-donor variability, treatment-arm imbalance, etc.).
+    """
+    lines = ["## Samples in this experiment"]
+    if not samples:
+        lines.append("_No samples on this experiment._")
+        return lines
+    header = (
+        "| Sample ID | External ID | Organism | Tissue | Donor | Treatment | "
+        "Viability % | Cell count | QC status | Status | Notes |"
+    )
+    divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+    rows = [header, divider]
+    for s in samples:
+        cells = [
+            str(s.id),
+            (s.external_id or "").replace("|", "\\|"),
+            (s.organism or "").replace("|", "\\|"),
+            (s.tissue_type or "").replace("|", "\\|"),
+            (s.donor_source or "").replace("|", "\\|"),
+            (s.treatment_condition or "").replace("|", "\\|"),
+            (str(s.viability_pct) if s.viability_pct is not None else ""),
+            (str(s.cell_count) if s.cell_count is not None else ""),
+            (s.qc_status or ""),
+            (s.status or ""),
+            (s.qc_notes or "").replace("\n", " ").replace("|", "\\|"),
+        ]
+        rows.append("| " + " | ".join(cells) + " |")
+    lines.extend(rows)
+    return lines
+
+
+async def build_experiment_header(
+    session: AsyncSession,
+    *,
+    experiment_id: int,
+    included_run_ids: list[int],
+) -> str:
+    """Build the experiment-scope header for a Button B review.
+
+    Loads the experiment row plus every sample scoped to that experiment so
+    the LLM can reason about design intent and per-sample context across all
+    runs, not just the subset of samples that happen to be linked to the
+    included runs. Per-run artifacts still follow this header.
+    """
+    exp_result = await session.execute(select(Experiment).where(Experiment.id == experiment_id))
+    exp = exp_result.scalar_one_or_none()
+    if exp is None:
+        raise ArtifactBuildError(f"experiment {experiment_id} not found")
+
+    samples_result = await session.execute(
+        select(Sample).where(Sample.experiment_id == experiment_id).order_by(Sample.id)
+    )
+    samples = list(samples_result.scalars().all())
+
+    sections: list[str] = ["# Experiment Run Comparison Input", ""]
+    sections.extend(_format_experiment_metadata(exp))
+    sections.append("")
+    sections.append("## Included Runs")
+    if included_run_ids:
+        for rid in included_run_ids:
+            sections.append(f"- {rid}")
+    else:
+        sections.append("_No pipeline runs selected._")
+    sections.append("")
+    sections.extend(_format_experiment_samples_table(samples))
     sections.append("")
     return "\n".join(sections)

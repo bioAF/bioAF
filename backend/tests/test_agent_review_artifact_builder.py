@@ -257,3 +257,133 @@ def test_render_never_ship_contract_no_fastq_or_logs_in_output():
     ]
     for pattern in forbidden:
         assert pattern not in md, f"never-ship pattern leaked: {pattern}"
+
+
+@pytest.mark.asyncio
+async def test_build_experiment_header_includes_experiment_metadata_and_all_samples(db_engine, admin_user):
+    """Experiment-scope artifact must surface full experiment metadata plus
+    every sample in the experiment, regardless of which runs were included.
+
+    The LLM reviewing across the experiment needs the design intent
+    (hypothesis, design_type, protocol_version) and per-sample context
+    (treatment, donor_source, viability, etc.) to spot cross-run anomalies
+    that a per-run review cannot see.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from app.services.agent_review_artifact_builder import build_experiment_header
+
+    org_id = admin_user.organization_id
+    async with _factory(db_engine)() as session:
+        exp = Experiment(
+            organization_id=org_id,
+            name="PBMC stress assay",
+            code="EXP-77",
+            external_id="ext-pbmc-77",
+            status="processing",
+            design_type="dose response",
+            hypothesis="High dose increases stress marker expression",
+            description="Comparing donor PBMCs across three doses",
+            protocol_version="v2.1",
+            start_date=date(2026, 4, 1),
+            expected_sample_count=6,
+            variables_json={"doses_uM": [0, 1, 10]},
+        )
+        session.add(exp)
+        await session.flush()
+        s_in = Sample(
+            experiment_id=exp.id,
+            external_id="PBMC-001",
+            organism="Homo sapiens",
+            tissue_type="PBMC",
+            donor_source="DONOR-A",
+            treatment_condition="vehicle",
+            viability_pct=Decimal("92.50"),
+            cell_count=480000,
+            qc_status="pass",
+            qc_notes="clean",
+            status="processed",
+        )
+        s_other = Sample(
+            experiment_id=exp.id,
+            external_id="PBMC-099",
+            organism="Homo sapiens",
+            tissue_type="PBMC",
+            donor_source="DONOR-B",
+            treatment_condition="10 uM",
+            viability_pct=Decimal("44.10"),
+            cell_count=120000,
+            qc_status="fail",
+            qc_notes="low viability after treatment",
+            status="qc_hold",
+        )
+        session.add_all([s_in, s_other])
+        await session.flush()
+        # A sample on a DIFFERENT experiment to verify scoping.
+        other_exp = Experiment(organization_id=org_id, name="Other", status="registered")
+        session.add(other_exp)
+        await session.flush()
+        s_alien = Sample(
+            experiment_id=other_exp.id,
+            external_id="ALIEN-001",
+            organism="Mus musculus",
+        )
+        session.add(s_alien)
+        await session.commit()
+        experiment_id = exp.id
+
+    async with _factory(db_engine)() as session:
+        header = await build_experiment_header(
+            session,
+            experiment_id=experiment_id,
+            included_run_ids=[101, 202],
+        )
+
+    # Experiment metadata fields surfaced.
+    assert "PBMC stress assay" in header
+    assert "EXP-77" in header
+    assert "ext-pbmc-77" in header
+    assert "dose response" in header
+    assert "High dose increases stress marker expression" in header
+    assert "Comparing donor PBMCs across three doses" in header
+    assert "v2.1" in header
+    assert "2026-04-01" in header
+    assert "doses_uM" in header
+    # Included runs surfaced.
+    assert "- 101" in header
+    assert "- 202" in header
+    # Every sample on this experiment surfaced, including ones not in any
+    # included run.
+    assert "PBMC-001" in header
+    assert "PBMC-099" in header
+    assert "DONOR-A" in header
+    assert "DONOR-B" in header
+    assert "vehicle" in header
+    assert "10 uM" in header
+    assert "low viability after treatment" in header
+    # Scoping: a sample from another experiment must NOT appear.
+    assert "ALIEN-001" not in header
+
+
+@pytest.mark.asyncio
+async def test_build_experiment_header_handles_no_samples(db_engine, admin_user):
+    """An experiment with no samples renders the section with an empty placeholder."""
+    from app.services.agent_review_artifact_builder import build_experiment_header
+
+    org_id = admin_user.organization_id
+    async with _factory(db_engine)() as session:
+        exp = Experiment(organization_id=org_id, name="Empty", status="registered")
+        session.add(exp)
+        await session.commit()
+        experiment_id = exp.id
+
+    async with _factory(db_engine)() as session:
+        header = await build_experiment_header(
+            session,
+            experiment_id=experiment_id,
+            included_run_ids=[],
+        )
+    assert "Empty" in header
+    assert "## Samples in this experiment" in header
+    assert "_No samples on this experiment._" in header

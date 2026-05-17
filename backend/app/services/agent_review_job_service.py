@@ -22,8 +22,8 @@ from app.models.llm_provider_config import LlmProviderConfig
 from app.services import audit_service, llm_provider_config_service
 from app.services.agent_review_artifact_builder import (
     ArtifactBuildError,
+    build_experiment_header,
     build_for_run,
-    render_experiment_header,
 )
 from app.services.agent_review_prompt_builder import (
     EmptySectionSelection,
@@ -326,14 +326,10 @@ async def execute_hosted(
                 assembled_payload_chunks.append(artifact.markdown)
             else:
                 # entity_type == 'experiment'
-                from app.models.experiment import Experiment
-
-                exp = (await session.execute(select(Experiment).where(Experiment.id == job.entity_id))).scalar_one()
                 run_ids = list(job.included_run_ids or [])
-                header = render_experiment_header(
-                    experiment_id=exp.id,
-                    experiment_name=exp.name,
-                    experiment_status=exp.status,
+                header = await build_experiment_header(
+                    session,
+                    experiment_id=job.entity_id,
                     included_run_ids=run_ids,
                 )
                 assembled_payload_chunks.append(header)
