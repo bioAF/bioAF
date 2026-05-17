@@ -292,6 +292,16 @@ async def execute_hosted(
             )
         ).scalar_one()
 
+        logger.info(
+            "execute_hosted start: job_id=%d provider=%s model=%s entity=%s/%d review_id=%s",
+            job.id,
+            job.provider,
+            job.model,
+            job.entity_type,
+            job.entity_id,
+            job.agent_review_id,
+        )
+
         # Move to building_artifacts. No audit row yet; the contract is
         # llm_review_submitted is written once the artifact has been built and
         # the call has been made. A pre-submission failure is reported as
@@ -341,7 +351,14 @@ async def execute_hosted(
 
             job.artifact_gcs_paths = built_paths
             await session.flush()
+            logger.info(
+                "execute_hosted artifacts built: job_id=%d count=%d paths=%s",
+                job.id,
+                len(built_paths),
+                built_paths,
+            )
         except ArtifactBuildError as exc:
+            logger.exception("execute_hosted artifact build failed: job_id=%d", job.id)
             await _write_job_terminal(
                 session,
                 job.id,
@@ -399,6 +416,14 @@ async def execute_hosted(
     prompt = job.prompt_text or get_template(job.review_type)
     payload = "\n\n".join(assembled_payload_chunks)
     submit_callable = submit_override if submit_override is not None else get_client(job.provider).submit
+    logger.info(
+        "execute_hosted submitting: job_id=%d provider=%s model=%s prompt_chars=%d payload_chars=%d",
+        job.id,
+        job.provider,
+        job.model,
+        len(prompt),
+        len(payload),
+    )
     try:
         response_text = await submit_callable(
             prompt=prompt,
@@ -407,13 +432,20 @@ async def execute_hosted(
             api_key=provider_cfg.api_key,
         )
     except ProviderError as exc:
+        logger.warning(
+            "execute_hosted provider_error: job_id=%d error_class=%s detail=%s",
+            job.id,
+            exc.error_class,
+            str(exc) or repr(exc),
+        )
+        err_text = str(exc).strip() or f"{exc.error_class} (no provider detail)"
         async with session_factory() as session:
             job = (await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))).scalar_one()
             await _write_job_terminal(
                 session,
                 job.id,
                 status="failed",
-                error_text=str(exc),
+                error_text=err_text,
                 error_class="provider_error",
             )
             await _write_review_terminal(
@@ -425,7 +457,7 @@ async def execute_hosted(
                 flags=None,
                 evidence=None,
                 body=None,
-                error_text=str(exc),
+                error_text=err_text,
                 artifact_gcs_paths=built_paths,
             )
             await audit_service.log_action(
@@ -439,7 +471,7 @@ async def execute_hosted(
                     "agent_review_id": job.agent_review_id,
                     "error_class": "provider_error",
                     "provider_error_class": exc.error_class,
-                    "error_text": str(exc)[:4000],
+                    "error_text": err_text[:4000],
                 },
             )
             await session.commit()
@@ -447,6 +479,13 @@ async def execute_hosted(
 
     # Parse and persist success.
     parsed = parse_response(response_text)
+    logger.info(
+        "execute_hosted parsed: job_id=%d severity=%s parse_failure=%s response_chars=%d",
+        job_id,
+        parsed.severity,
+        parsed.parse_failure,
+        len(response_text or ""),
+    )
     async with session_factory() as session:
         job = (await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))).scalar_one()
         await _write_review_terminal(

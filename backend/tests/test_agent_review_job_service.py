@@ -576,3 +576,133 @@ async def test_create_requires_at_least_one_prompt_source(db_engine, admin_user)
                 entity_id=run_id,
                 selected_sub_item_ids=[],
             )
+
+
+@pytest.mark.asyncio
+async def test_execute_hosted_provider_error_with_empty_message_persists_placeholder(db_engine, admin_user):
+    """An empty ProviderError message must not surface as a blank error in the UI.
+
+    The persisted error_text on both job and review rows must fall back to a
+    string that at least references the error_class, so the failed-card modal
+    is never empty. The audit row's error_text mirrors that fallback.
+    """
+
+    async def writer(path, content):
+        return None
+
+    async def submit(*, prompt, payload, model, api_key):
+        raise ProviderError("", error_class="transport")
+
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
+        run_id = await _make_pipeline_run(session, admin_user.organization_id)
+        job, review = await job_service.create(
+            session,
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            selected_sub_item_ids=["qc.metric_review"],
+        )
+        await session.commit()
+        job_id = job.id
+        review_id = review.id
+
+    factory = _factory(db_engine)
+    await job_service.execute_hosted(factory, job_id=job_id, gcs_writer=writer, submit_override=submit)
+
+    async with factory() as session:
+        loaded_job = (await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))).scalar_one()
+        loaded_review = (await session.execute(select(AgentReview).where(AgentReview.id == review_id))).scalar_one()
+        assert loaded_job.status == "failed"
+        assert loaded_job.error_text and loaded_job.error_text.strip() != ""
+        assert "transport" in loaded_job.error_text
+        assert loaded_review.status == "failed"
+        assert loaded_review.error_text and loaded_review.error_text.strip() != ""
+        assert "transport" in loaded_review.error_text
+
+        failed_audit = (
+            await session.execute(
+                select(AuditLog).where(
+                    AuditLog.entity_type == "agent_review_job",
+                    AuditLog.entity_id == job_id,
+                    AuditLog.action == "llm_review_failed",
+                )
+            )
+        ).scalar_one()
+        assert failed_audit.details_json["error_text"]
+        assert "transport" in failed_audit.details_json["error_text"]
+
+
+@pytest.mark.asyncio
+async def test_execute_hosted_emits_lifecycle_logs(db_engine, admin_user, caplog):
+    """execute_hosted must emit log records at start, submit, and parse stages.
+
+    Without these, a background-task failure is invisible in the container logs.
+    """
+    import logging
+
+    caplog.set_level(logging.INFO, logger="bioaf.agent_review_job")
+
+    async def writer(path, content):
+        return None
+
+    async def submit(*, prompt, payload, model, api_key):
+        return '```json\n{"severity": "green", "headline": "ok"}\n```\nbody'
+
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
+        run_id = await _make_pipeline_run(session, admin_user.organization_id)
+        job, _ = await job_service.create(
+            session,
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            selected_sub_item_ids=["qc.metric_review"],
+        )
+        await session.commit()
+        job_id = job.id
+
+    factory = _factory(db_engine)
+    await job_service.execute_hosted(factory, job_id=job_id, gcs_writer=writer, submit_override=submit)
+
+    messages = [r.getMessage() for r in caplog.records if r.name == "bioaf.agent_review_job"]
+    assert any("execute_hosted start" in m for m in messages), messages
+    assert any("execute_hosted submitting" in m for m in messages), messages
+    assert any("execute_hosted parsed" in m for m in messages), messages
+
+
+@pytest.mark.asyncio
+async def test_execute_hosted_logs_provider_error_with_detail(db_engine, admin_user, caplog):
+    """A ProviderError during submit must surface in the logs with the error_class."""
+    import logging
+
+    caplog.set_level(logging.WARNING, logger="bioaf.agent_review_job")
+
+    async def writer(path, content):
+        return None
+
+    async def submit(*, prompt, payload, model, api_key):
+        raise ProviderError("dns lookup failed for api.anthropic.com", error_class="transport")
+
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
+        run_id = await _make_pipeline_run(session, admin_user.organization_id)
+        job, _ = await job_service.create(
+            session,
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            selected_sub_item_ids=["qc.metric_review"],
+        )
+        await session.commit()
+        job_id = job.id
+
+    factory = _factory(db_engine)
+    await job_service.execute_hosted(factory, job_id=job_id, gcs_writer=writer, submit_override=submit)
+
+    messages = [r.getMessage() for r in caplog.records if r.name == "bioaf.agent_review_job"]
+    assert any("provider_error" in m and "transport" in m for m in messages), messages
+    assert any("dns lookup failed" in m for m in messages), messages

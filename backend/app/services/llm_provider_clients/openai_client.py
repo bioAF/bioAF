@@ -9,12 +9,21 @@ upstream SDK's version dance. We hit two endpoints:
 
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from app.services.llm_provider_clients import ProviderError
 
+logger = logging.getLogger("bioaf.llm.openai")
+
 _BASE_URL = "https://api.openai.com/v1"
 _TIMEOUT = httpx.Timeout(60.0, connect=10.0)
+
+
+def _transport_detail(exc: httpx.HTTPError) -> str:
+    text = str(exc).strip()
+    return text or repr(exc)
 
 
 async def list_models(api_key: str | None) -> list[str]:
@@ -27,7 +36,9 @@ async def list_models(api_key: str | None) -> list[str]:
                 headers={"Authorization": f"Bearer {api_key}"},
             )
     except httpx.HTTPError as exc:
-        raise ProviderError(str(exc), error_class="transport") from exc
+        detail = _transport_detail(exc)
+        logger.warning("openai list_models transport failure: %s", detail)
+        raise ProviderError(detail, error_class="transport") from exc
 
     if resp.status_code in (401, 403):
         raise ProviderError(resp.text, error_class="auth")
@@ -61,6 +72,12 @@ async def submit(
             {"role": "user", "content": payload},
         ],
     }
+    logger.info(
+        "openai submit: model=%s prompt_chars=%d payload_chars=%d",
+        model,
+        len(prompt),
+        len(payload),
+    )
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.post(
@@ -72,7 +89,13 @@ async def submit(
                 json=body,
             )
     except httpx.HTTPError as exc:
-        raise ProviderError(str(exc), error_class="transport") from exc
+        detail = _transport_detail(exc)
+        logger.warning("openai submit transport failure: %s", detail)
+        raise ProviderError(detail, error_class="transport") from exc
+
+    logger.info("openai submit response: status=%d bytes=%d", resp.status_code, len(resp.content))
+    if resp.status_code >= 400:
+        logger.warning("openai submit non-2xx body: %s", resp.text[:2000])
 
     if resp.status_code in (401, 403):
         raise ProviderError(resp.text, error_class="auth")

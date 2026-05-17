@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from app.services.llm_provider_clients import ProviderError
 
+logger = logging.getLogger("bioaf.llm.anthropic")
+
 _BASE_URL = "https://api.anthropic.com/v1"
 _TIMEOUT = httpx.Timeout(60.0, connect=10.0)
 _API_VERSION = "2023-06-01"
+
+
+def _transport_detail(exc: httpx.HTTPError) -> str:
+    text = str(exc).strip()
+    return text or repr(exc)
 
 
 def _headers(api_key: str) -> dict[str, str]:
@@ -37,7 +46,9 @@ async def list_models(api_key: str | None) -> list[str]:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.get(f"{_BASE_URL}/models", headers=_headers(api_key))
     except httpx.HTTPError as exc:
-        raise ProviderError(str(exc), error_class="transport") from exc
+        detail = _transport_detail(exc)
+        logger.warning("anthropic list_models transport failure: %s", detail)
+        raise ProviderError(detail, error_class="transport") from exc
     _raise_for_status(resp)
     try:
         data = resp.json()
@@ -61,6 +72,12 @@ async def submit(
         "system": prompt,
         "messages": [{"role": "user", "content": payload}],
     }
+    logger.info(
+        "anthropic submit: model=%s prompt_chars=%d payload_chars=%d",
+        model,
+        len(prompt),
+        len(payload),
+    )
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.post(
@@ -69,7 +86,12 @@ async def submit(
                 json=body,
             )
     except httpx.HTTPError as exc:
-        raise ProviderError(str(exc), error_class="transport") from exc
+        detail = _transport_detail(exc)
+        logger.warning("anthropic submit transport failure: %s", detail)
+        raise ProviderError(detail, error_class="transport") from exc
+    logger.info("anthropic submit response: status=%d bytes=%d", resp.status_code, len(resp.content))
+    if resp.status_code >= 400:
+        logger.warning("anthropic submit non-2xx body: %s", resp.text[:2000])
     _raise_for_status(resp)
     try:
         data = resp.json()
