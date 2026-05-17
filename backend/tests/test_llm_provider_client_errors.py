@@ -89,3 +89,26 @@ async def test_google_list_models_empty_transport_error_carries_class_name():
             await google_client.list_models("g-key")
     assert exc_info.value.error_class == "transport"
     assert "ConnectError" in str(exc_info.value)
+
+
+# --- Read-timeout defaults ---------------------------------------------------
+#
+# Real production failure 2026-05-17: an experiment-scope Claude review with
+# prompt+payload of ~17K chars consistently hit a `ReadTimeout('')` at exactly
+# 60 seconds because every hosted client's `_TIMEOUT` defaulted to
+# `httpx.Timeout(60.0, connect=10.0)`. Hosted LLM completions on richer prompts
+# routinely take longer than that. These tests pin the floor: at least 180s
+# read timeout, with the connect timeout staying short. Anyone refactoring the
+# constants below this floor will trip the test.
+
+
+def test_openai_client_read_timeout_is_at_least_180s():
+    assert openai_client._TIMEOUT.read is not None and openai_client._TIMEOUT.read >= 180.0
+
+
+def test_anthropic_client_read_timeout_is_at_least_180s():
+    assert anthropic_client._TIMEOUT.read is not None and anthropic_client._TIMEOUT.read >= 180.0
+
+
+def test_google_client_read_timeout_is_at_least_180s():
+    assert google_client._TIMEOUT.read is not None and google_client._TIMEOUT.read >= 180.0

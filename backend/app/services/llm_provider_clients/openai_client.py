@@ -18,7 +18,9 @@ from app.services.llm_provider_clients import ProviderError
 logger = logging.getLogger("bioaf.llm.openai")
 
 _BASE_URL = "https://api.openai.com/v1"
-_TIMEOUT = httpx.Timeout(60.0, connect=10.0)
+# 300s read budget covers large prompts on GPT. The default httpx 60s
+# routinely timed out experiment-scope reviews. Connect stays at 10s.
+_TIMEOUT = httpx.Timeout(300.0, connect=10.0)
 
 
 def _transport_detail(exc: httpx.HTTPError) -> str:

@@ -197,6 +197,34 @@ export function SectionBuilderModal({
     });
   }
 
+  function toggleAllRuns() {
+    if (!otherRuns) return;
+    const allOn = otherRuns.every((r) => selectedRuns.has(r.id));
+    if (allOn) {
+      // Deselect every run except the locked current run, if any.
+      setSelectedRuns(runId !== undefined ? new Set([runId]) : new Set());
+    } else {
+      setSelectedRuns(new Set(otherRuns.map((r) => r.id)));
+    }
+  }
+
+  function toggleAllHtmlReports() {
+    if (!otherRuns) return;
+    const allOn = otherRuns.every((r) => htmlReportRuns.has(r.id));
+    if (allOn) {
+      setHtmlReportRuns(new Set());
+    } else {
+      setHtmlReportRuns(new Set(otherRuns.map((r) => r.id)));
+    }
+  }
+
+  const allRunsSelected =
+    !!otherRuns && otherRuns.length > 0 && otherRuns.every((r) => selectedRuns.has(r.id));
+  const allHtmlReportsSelected =
+    !!otherRuns &&
+    otherRuns.length > 0 &&
+    otherRuns.every((r) => htmlReportRuns.has(r.id));
+
   const usingCustom = typeof mode === "object" && "customSavedId" in mode;
   const activeCustom = usingCustom
     ? savedPrompts.find((p) => p.id === mode.customSavedId)
@@ -370,6 +398,12 @@ export function SectionBuilderModal({
 
         {isExperiment && (
           <div className="mt-6">
+            <div className="mb-3 rounded border border-bioaf-200 bg-bioaf-50 p-2 text-xs text-bioaf-800">
+              Experiment metadata (name, design type, hypothesis, protocol
+              version, design variables) and every sample on this experiment
+              are automatically included with this review. The pipeline runs
+              below are added on top of that context.
+            </div>
             <h4 className="font-medium text-sm mb-2">Included pipeline runs</h4>
             {!otherRuns ? (
               <div className="text-sm text-gray-500">Loading…</div>
@@ -381,10 +415,33 @@ export function SectionBuilderModal({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-gray-500 border-b">
-                    <th className="py-1 w-8"></th>
+                    <th className="py-1 w-8">
+                      <input
+                        type="checkbox"
+                        aria-label="Select all runs"
+                        title={allRunsSelected ? "Deselect all runs" : "Select all runs"}
+                        checked={allRunsSelected}
+                        onChange={toggleAllRuns}
+                      />
+                    </th>
                     <th className="py-1">Run</th>
                     <th className="py-1">Status</th>
-                    <th className="py-1 w-28">HTML report</th>
+                    <th className="py-1 w-28">
+                      <label className="inline-flex items-center gap-1">
+                        <input
+                          type="checkbox"
+                          aria-label="Include HTML report for all runs"
+                          title={
+                            allHtmlReportsSelected
+                              ? "Exclude HTML report for all runs"
+                              : "Include HTML report for all runs"
+                          }
+                          checked={allHtmlReportsSelected}
+                          onChange={toggleAllHtmlReports}
+                        />
+                        <span>HTML report</span>
+                      </label>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
