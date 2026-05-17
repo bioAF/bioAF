@@ -58,17 +58,18 @@ The admin selects the active model; users do not pick at run time. The selected 
 
 ### Response contract
 
-Every provider response must satisfy a single contract enforced by the prompt template:
+Every provider response must satisfy a single contract enforced by the prompt template. The response begins with a fenced JSON block carrying the parsed header, followed by a free-text body:
 
-```
-```json
+```text
+````json
 {
   "severity": "red" | "orange" | "green",
   "headline": "<one-sentence summary>",
   "flags": [{"title": "...", "body": "...", "severity": "red"|"orange"|"green"}],
   "evidence": ["..."]
 }
-```
+````
+
 <free-text body>
 ```
 
