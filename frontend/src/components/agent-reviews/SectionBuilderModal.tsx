@@ -260,7 +260,12 @@ export function SectionBuilderModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+    <div
+      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onCancel();
+      }}
+    >
       <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[85vh] overflow-y-auto p-6">
         <h3 className="text-lg font-semibold">
           {isExperiment ? "Review across experiment" : "Review this pipeline run"}

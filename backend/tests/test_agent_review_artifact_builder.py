@@ -131,6 +131,72 @@ async def test_build_for_run_with_missing_qc_proceeds(db_engine, admin_user):
     assert "QC report not available" in artifact.markdown
 
 
+@pytest.mark.asyncio
+async def test_build_for_run_auto_loads_qc_dashboard_when_present(db_engine, admin_user):
+    """When no explicit qc_report_content is passed, build_for_run should
+    fall back to the QCDashboard row for the run. This was the bug behind
+    the production 'QC report not available' artifact: the API never passed
+    a qc_report_provider, so the LLM never saw the parsed metrics."""
+    from app.models.qc_dashboard import QCDashboard
+
+    async with _factory(db_engine)() as session:
+        run_id = await _make_run_with_samples(session, admin_user.organization_id)
+        session.add(
+            QCDashboard(
+                organization_id=admin_user.organization_id,
+                pipeline_run_id=run_id,
+                metrics_json={
+                    "cells": {"estimated_number_of_cells": 1158},
+                    "sequencing": {
+                        "number_of_reads": 66601887,
+                        "sequencing_saturation_pct": 69.7,
+                        "q30_bases_in_rna_read_pct": 90.2,
+                    },
+                    "mapping": {"reads_mapped_to_genome_pct": 95.6},
+                },
+                summary_text="This run produced 1,158 cells. Overall quality: excellent.",
+                status="excellent",
+            )
+        )
+        await session.commit()
+
+    async with _factory(db_engine)() as session:
+        artifact = await build_for_run(session, run_id=run_id)
+
+    assert "1,158 cells" in artifact.markdown
+    assert "### cells" in artifact.markdown
+    assert "### sequencing" in artifact.markdown
+    assert "### mapping" in artifact.markdown
+    assert "estimated_number_of_cells: 1158" in artifact.markdown
+    assert "number_of_reads: 66601887" in artifact.markdown
+    assert "sequencing_saturation_pct: 69.7" in artifact.markdown
+    assert "QC report not available" not in artifact.markdown
+
+
+@pytest.mark.asyncio
+async def test_explicit_qc_override_wins_over_dashboard(db_engine, admin_user):
+    from app.models.qc_dashboard import QCDashboard
+
+    async with _factory(db_engine)() as session:
+        run_id = await _make_run_with_samples(session, admin_user.organization_id)
+        session.add(
+            QCDashboard(
+                organization_id=admin_user.organization_id,
+                pipeline_run_id=run_id,
+                metrics_json={"cells": {"x": 1}},
+                summary_text="from dashboard",
+                status="ok",
+            )
+        )
+        await session.commit()
+
+    async with _factory(db_engine)() as session:
+        artifact = await build_for_run(session, run_id=run_id, qc_report_content="explicit override text")
+
+    assert "explicit override text" in artifact.markdown
+    assert "from dashboard" not in artifact.markdown
+
+
 def test_render_truncates_large_fields():
     big_qc = "x" * (MAX_FIELD_BYTES * 2)
     run = PipelineRun(

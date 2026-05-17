@@ -67,6 +67,7 @@ export default function ExperimentDetailPage() {
   const [auditTotal, setAuditTotal] = useState(0);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [loading, setLoading] = useState(true);
+  const [aiReviewSignal, setAiReviewSignal] = useState(0);
 
   const [notebookSessions, setNotebookSessions] = useState<NotebookSession[]>([]);
   const [pipelineRuns, setPipelineRuns] = useState<PipelineRun[]>([]);
@@ -1308,8 +1309,13 @@ export default function ExperimentDetailPage() {
               <AgentReviewButtons
                 mode="experiment"
                 experimentId={experiment.id}
+                onTriggered={() => setAiReviewSignal((v) => v + 1)}
               />
-              <AgentReviewTab entityType="experiment" entityId={experiment.id} />
+              <AgentReviewTab
+                entityType="experiment"
+                entityId={experiment.id}
+                refreshSignal={aiReviewSignal}
+              />
             </div>
           )}
           {showCsvUpload && (

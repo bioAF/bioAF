@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pipeline_run import PipelineRun, PipelineRunSample
+from app.models.qc_dashboard import QCDashboard
 from app.models.sample import Sample
 
 MAX_FIELD_BYTES = 50_000
@@ -91,6 +92,60 @@ def _format_qc(qc_content: str | None) -> str:
         return "_QC report not available._"
     stripped = _strip_html(qc_content)
     return _truncate(stripped)
+
+
+def _format_metrics_section(label: str, values: dict[str, Any]) -> list[str]:
+    """Flatten a metrics dict into '- key: value' bullets under a header."""
+    lines = [f"### {label}"]
+    if not values:
+        lines.append("_no metrics in this section_")
+        return lines
+    for k, v in values.items():
+        if isinstance(v, dict):
+            for sub_k, sub_v in v.items():
+                lines.append(f"- {k}.{sub_k}: {sub_v}")
+        else:
+            lines.append(f"- {k}: {v}")
+    return lines
+
+
+async def _load_qc_dashboard_text(session: AsyncSession, run_id: int) -> str | None:
+    """Fetch the QC dashboard for this run and serialize it as Markdown.
+
+    Returns None when no dashboard row exists; the caller then renders the
+    'QC report not available' placeholder. When a dashboard exists, returns
+    a structured Markdown block with the saved summary_text plus a flattened
+    dump of metrics_json (which is the same data the QC Dashboard UI renders).
+    """
+    result = await session.execute(select(QCDashboard).where(QCDashboard.pipeline_run_id == run_id))
+    dashboard = result.scalar_one_or_none()
+    if dashboard is None:
+        return None
+
+    parts: list[str] = []
+    if dashboard.summary_text:
+        parts.append(dashboard.summary_text.strip())
+        parts.append("")
+    if dashboard.status:
+        parts.append(f"_Dashboard status: {dashboard.status}_")
+        parts.append("")
+
+    metrics = dashboard.metrics_json or {}
+    if not metrics:
+        parts.append("_QC metrics: none captured._")
+        return "\n".join(parts).strip() or None
+
+    # If metrics is grouped (dict of dicts), emit one ### section per group.
+    # Otherwise treat the whole dict as a single flat section.
+    grouped = all(isinstance(v, dict) for v in metrics.values()) if metrics else False
+    if grouped:
+        for group, values in metrics.items():
+            parts.extend(_format_metrics_section(group, values))
+            parts.append("")
+    else:
+        parts.extend(_format_metrics_section("Metrics", metrics))
+
+    return "\n".join(parts).rstrip()
 
 
 async def _load_samples_for_run(session: AsyncSession, run_id: int) -> list[Sample]:
@@ -167,7 +222,14 @@ async def build_for_run(
         raise ArtifactBuildError(f"pipeline run {run_id} has no output JSON; cannot build artifact")
 
     samples = await _load_samples_for_run(session, run_id)
-    markdown = render_run_markdown(run=run, samples=samples, qc_report_content=qc_report_content)
+    # Auto-load the QC dashboard contents when the caller did not pass an
+    # explicit override. Without this fallback the artifact would render
+    # "QC report not available" even when a QC dashboard is sitting in the
+    # database, which is what the LLM correctly flagged on the first run.
+    resolved_qc = qc_report_content
+    if resolved_qc is None:
+        resolved_qc = await _load_qc_dashboard_text(session, run_id)
+    markdown = render_run_markdown(run=run, samples=samples, qc_report_content=resolved_qc)
 
     suffix = f"_job{job_id}" if job_id is not None else ""
     gcs_path = f"gs://bioaf-agent-reviews/pipeline_runs/{run_id}/agent_review_inputs/agent_review_input{suffix}.md"

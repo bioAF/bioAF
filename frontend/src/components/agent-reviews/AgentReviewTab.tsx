@@ -53,9 +53,16 @@ function filterKeyFor(entityType: AgentReviewEntityType, entityId: number): stri
 interface AgentReviewTabProps {
   entityType: AgentReviewEntityType;
   entityId: number;
+  /** Incremented by the parent after a new review is dispatched so the tab
+   * refetches without a page reload. */
+  refreshSignal?: number;
 }
 
-export function AgentReviewTab({ entityType, entityId }: AgentReviewTabProps) {
+export function AgentReviewTab({
+  entityType,
+  entityId,
+  refreshSignal,
+}: AgentReviewTabProps) {
   const { canAccess } = usePermissions();
   const canDismiss = canAccess("llm_integration", "use");
   const [items, setItems] = useState<AgentReviewSummary[]>([]);
@@ -95,7 +102,7 @@ export function AgentReviewTab({ entityType, entityId }: AgentReviewTabProps) {
 
   useEffect(() => {
     refresh();
-  }, [refresh]);
+  }, [refresh, refreshSignal]);
 
   // Poll while any item is still pending so the card resolves without a reload.
   useEffect(() => {
@@ -328,7 +335,12 @@ function ReviewModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+    <div
+      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto p-6">
         {!review ? (
           <div className="text-gray-500">Loading…</div>

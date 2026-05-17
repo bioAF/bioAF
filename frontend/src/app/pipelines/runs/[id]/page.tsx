@@ -159,6 +159,7 @@ export default function PipelineRunDetailPage() {
   const [run, setRun] = useState<PipelineRunDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>("logs");
+  const [aiReviewSignal, setAiReviewSignal] = useState(0);
   const [report, setReport] = useState<string>("");
   const [reportLoading, setReportLoading] = useState(false);
   const [logs, setLogs] = useState<LogResponse>({ stdout: "", stderr: "" });
@@ -785,8 +786,13 @@ export default function PipelineRunDetailPage() {
                 runId={run.id}
                 experimentId={run.experiment?.id ?? null}
                 pipelineStatus={run.status}
+                onTriggered={() => setAiReviewSignal((v) => v + 1)}
               />
-              <AgentReviewTab entityType="pipeline_run" entityId={run.id} />
+              <AgentReviewTab
+                entityType="pipeline_run"
+                entityId={run.id}
+                refreshSignal={aiReviewSignal}
+              />
             </div>
           )}
 
