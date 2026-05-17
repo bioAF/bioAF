@@ -164,21 +164,23 @@ export function AgentReviewTab({
 
 function severityClass(review: AgentReviewSummary): {
   bar: string;
-  badge: string;
-  badgeLabel: string;
+  badge: string | null;
+  badgeLabel: string | null;
 } {
-  // Always render one of red/orange/green per the user spec. Failed = red;
-  // pending and parse-failure "unknown" severities map to orange.
+  // Pending: no traffic-light flag. The card still gets a neutral bar so
+  // its outline reads consistently, but no red/orange/green is implied
+  // until the LLM has actually returned a severity.
+  if (review.status === "pending") {
+    return { bar: "bg-gray-200", badge: null, badgeLabel: null };
+  }
+  // Failed jobs always show red regardless of what severity (if any) the
+  // LLM emitted, since the run did not produce a usable advisory.
   if (review.status === "failed") {
     return { bar: "bg-red-500", badge: "bg-red-100 text-red-700", badgeLabel: "red" };
   }
-  if (review.status === "pending") {
-    return {
-      bar: "bg-amber-500",
-      badge: "bg-amber-100 text-amber-700",
-      badgeLabel: "orange",
-    };
-  }
+  // Succeeded: trust the parsed severity from the LLM response. Any value
+  // not in {red, orange, green} (parse failures land on "unknown") falls
+  // through to orange so the card is never blank.
   if (review.severity === "green") {
     return {
       bar: "bg-emerald-500",
@@ -227,9 +229,13 @@ function ReviewCard({
           <span>{new Date(review.created_at).toLocaleString()}</span>
           <span>·</span>
           <span>{reviewTypeLabel}</span>
-          <span className={`ml-auto px-2 py-0.5 rounded text-xs font-medium ${badge}`}>
-            {badgeLabel}
-          </span>
+          {badgeLabel && (
+            <span
+              className={`ml-auto px-2 py-0.5 rounded text-xs font-medium ${badge}`}
+            >
+              {badgeLabel}
+            </span>
+          )}
         </div>
         <div className="mt-1 font-medium text-gray-900 truncate">
           {review.status === "pending"
