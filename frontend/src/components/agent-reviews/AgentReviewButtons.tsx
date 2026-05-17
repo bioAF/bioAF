@@ -22,7 +22,11 @@ export function AgentReviewButtons({
 }: AgentReviewButtonsProps) {
   const { canAccess } = usePermissions();
   const canUse = canAccess("llm_integration", "use");
-  const [hasActiveProvider, setHasActiveProvider] = useState<boolean | null>(null);
+  // Track which provider is active, not just whether one exists, so we can
+  // hide the buttons when Gemma is active. The self-hosted Gemma dispatch
+  // is stubbed in v1, so triggering a review with Gemma active leaves the
+  // job in 'pending' forever. Hiding the buttons protects users from that.
+  const [activeProvider, setActiveProvider] = useState<string | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
 
@@ -30,12 +34,14 @@ export function AgentReviewButtons({
     if (!canUse) return;
     api
       .get<{ active_provider: string | null }>("/api/integrations/llm/providers")
-      .then((d) => setHasActiveProvider(d.active_provider != null))
-      .catch(() => setHasActiveProvider(false));
+      .then((d) => setActiveProvider(d.active_provider))
+      .catch(() => setActiveProvider(null));
   }, [canUse]);
 
   if (!canUse) return null;
-  if (hasActiveProvider === false) return null;
+  if (activeProvider === undefined) return null;
+  if (activeProvider === null) return null;
+  if (activeProvider === "gemma") return null;
   if (mode === "pipeline_run" && pipelineStatus !== "completed") return null;
   if (mode === "experiment" && experimentId === null) return null;
 

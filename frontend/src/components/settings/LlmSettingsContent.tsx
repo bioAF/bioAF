@@ -6,12 +6,13 @@ import { api } from "@/lib/api";
 type ProviderId = "openai" | "anthropic" | "google" | "gemma";
 
 const HOSTED: ReadonlyArray<ProviderId> = ["openai", "anthropic", "google"];
-const ALL_PROVIDERS: ReadonlyArray<ProviderId> = [
-  "openai",
-  "anthropic",
-  "google",
-  "gemma",
-];
+// Gemma is intentionally omitted: the self-hosted orchestrator integration
+// is stubbed in v1 (a Gemma-active review sits in 'pending' forever), so we
+// hide the option from the Settings page until that lands. The backend
+// "gemma" support remains; type and label below stay so the active-provider
+// banner still renders correctly for any org that activated Gemma before
+// this hide landed.
+const ALL_PROVIDERS: ReadonlyArray<ProviderId> = ["openai", "anthropic", "google"];
 
 const PROVIDER_LABEL: Record<ProviderId, string> = {
   openai: "OpenAI",
@@ -152,8 +153,7 @@ export function LlmSettingsContent() {
       <p className="text-sm text-gray-600">
         Configure an LLM provider for the Agent Review feature. Exactly one
         provider is active at a time. Hosted providers transmit pipeline output
-        to a third party; the self-hosted Gemma 4 option keeps inference inside
-        your bioAF GCP project.
+        to a third party.
       </p>
 
       {data?.active_provider && (
