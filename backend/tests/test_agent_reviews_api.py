@@ -133,7 +133,7 @@ async def test_run_returns_202_with_ids(client, admin_auth, configured_run):
         json={
             "entity_type": "pipeline_run",
             "entity_id": configured_run["run_id"],
-            "review_type": "pipeline_run_review_v1",
+            "selected_sub_item_ids": ["qc.metric_review"],
         },
         headers=admin_auth,
     )
@@ -165,7 +165,7 @@ async def test_run_returns_412_when_no_active_provider(client, admin_auth, db_en
 
     resp = await client.post(
         "/api/agent_reviews/run",
-        json={"entity_type": "pipeline_run", "entity_id": run_id, "review_type": "pipeline_run_review_v1"},
+        json={"entity_type": "pipeline_run", "entity_id": run_id, "selected_sub_item_ids": ["qc.metric_review"]},
         headers=admin_auth,
     )
     assert resp.status_code == 412
@@ -176,7 +176,7 @@ async def test_run_returns_409_on_debounce(client, admin_auth, configured_run):
     payload = {
         "entity_type": "pipeline_run",
         "entity_id": configured_run["run_id"],
-        "review_type": "pipeline_run_review_v1",
+        "selected_sub_item_ids": ["qc.metric_review"],
     }
     first = await client.post("/api/agent_reviews/run", json=payload, headers=admin_auth)
     assert first.status_code == 202
@@ -196,7 +196,7 @@ async def test_run_forbidden_for_viewer(client, viewer_auth, configured_run):
         json={
             "entity_type": "pipeline_run",
             "entity_id": configured_run["run_id"],
-            "review_type": "pipeline_run_review_v1",
+            "selected_sub_item_ids": ["qc.metric_review"],
         },
         headers=viewer_auth,
     )
@@ -210,7 +210,7 @@ async def test_list_returns_single_run_reviews(client, admin_auth, configured_ru
         json={
             "entity_type": "pipeline_run",
             "entity_id": configured_run["run_id"],
-            "review_type": "pipeline_run_review_v1",
+            "selected_sub_item_ids": ["qc.metric_review"],
         },
         headers=admin_auth,
     )
@@ -235,7 +235,7 @@ async def test_dismiss_and_undismiss_flow(client, admin_auth, configured_run, db
         json={
             "entity_type": "pipeline_run",
             "entity_id": configured_run["run_id"],
-            "review_type": "pipeline_run_review_v1",
+            "selected_sub_item_ids": ["qc.metric_review"],
         },
         headers=admin_auth,
     )
@@ -287,7 +287,7 @@ async def test_get_returns_full_detail(client, admin_auth, configured_run):
         json={
             "entity_type": "pipeline_run",
             "entity_id": configured_run["run_id"],
-            "review_type": "pipeline_run_review_v1",
+            "selected_sub_item_ids": ["qc.metric_review"],
         },
         headers=admin_auth,
     )
@@ -310,7 +310,7 @@ async def test_experiment_review_shows_up_on_pipeline_run_tab(
         json={
             "entity_type": "experiment",
             "entity_id": configured_run["experiment_id"],
-            "review_type": "experiment_run_comparison_v1",
+            "selected_sub_item_ids": ["qc.metric_review", "xsample.drift_over_time"],
             "included_run_ids": [configured_run["run_id"]],
         },
         headers=admin_auth,

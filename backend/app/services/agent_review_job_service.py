@@ -25,6 +25,11 @@ from app.services.agent_review_artifact_builder import (
     build_for_run,
     render_experiment_header,
 )
+from app.services.agent_review_prompt_builder import (
+    EmptySectionSelection,
+    assemble_prompt,
+    template_name_for_scope,
+)
 from app.services.agent_review_prompts import (
     EXPERIMENT_RUN_COMPARISON_V1_NAME,
     PIPELINE_RUN_REVIEW_V1_NAME,
@@ -75,19 +80,65 @@ async def create(
     user_id: int,
     entity_type: str,
     entity_id: int,
-    review_type: str,
+    review_type: str | None = None,
     included_run_ids: list[int] | None = None,
     include_html_report_run_ids: list[int] | None = None,
+    selected_sub_item_ids: list[str] | None = None,
+    custom_prompt_id: int | None = None,
+    custom_prompt_body: str | None = None,
 ) -> tuple[AgentReviewJob, AgentReview]:
     """Snapshot the active provider and create both rows atomically.
 
-    Returns (job, review). The review is in 'pending' status so the UI can
-    render the optimistic pending card immediately.
+    Prompt assembly is one of three modes (mutually exclusive, checked in order):
+    - custom_prompt_id: use the saved AgentReviewPrompt body verbatim.
+    - custom_prompt_body: use the one-off body verbatim (not persisted to a saved row).
+    - selected_sub_item_ids: assemble from the section catalog.
+
+    review_type is auto-derived from entity_type when omitted (the legacy v1
+    template names are retained for back-compat with any caller still passing
+    them explicitly).
     """
     if entity_type not in VALID_ENTITY_TYPES:
         raise ValueError(f"invalid entity_type: {entity_type}")
-    if review_type not in VALID_REVIEW_TYPES:
-        raise ValueError(f"invalid review_type: {review_type}")
+
+    experiment_scope = entity_type == "experiment"
+    builder_template = template_name_for_scope(experiment_scope)
+
+    # Resolve prompt source.
+    prompt_source: str
+    prompt_text: str
+    prompt_sections: list[str] | None = None
+    prompt_custom_id: int | None = None
+
+    if custom_prompt_id is not None:
+        from app.services import agent_review_prompt_service
+
+        saved = await agent_review_prompt_service.get_for_org(session, org_id, custom_prompt_id)
+        if saved is None:
+            raise ValueError(f"saved prompt {custom_prompt_id} not found in this org")
+        prompt_source = "custom_saved"
+        prompt_text = saved.body
+        prompt_custom_id = saved.id
+    elif custom_prompt_body is not None:
+        if not custom_prompt_body.strip():
+            raise ValueError("custom_prompt_body must not be empty")
+        prompt_source = "custom_one_off"
+        prompt_text = custom_prompt_body
+    else:
+        if not selected_sub_item_ids:
+            raise EmptySectionSelection("no sub-items selected for the prompt builder")
+        prompt_source = "builder"
+        prompt_text = assemble_prompt(
+            experiment_scope=experiment_scope,
+            selected_sub_item_ids=selected_sub_item_ids,
+        )
+        prompt_sections = list(selected_sub_item_ids)
+
+    resolved_review_type = review_type or builder_template
+    # The legacy v1 templates remain valid review_type values, but anything
+    # else must match the builder template name.
+    if resolved_review_type not in VALID_REVIEW_TYPES and resolved_review_type != builder_template:
+        raise ValueError(f"invalid review_type: {resolved_review_type}")
 
     active = await llm_provider_config_service.get_active(session, org_id)
     if active is None:
@@ -100,13 +151,17 @@ async def create(
         triggered_by_user_id=user_id,
         entity_type=entity_type,
         entity_id=entity_id,
-        review_type=review_type,
+        review_type=resolved_review_type,
         provider=active.provider,
         model=active.model,
-        prompt_template_version=review_type,
+        prompt_template_version=resolved_review_type,
         status="pending",
         included_run_ids=included_run_ids,
         include_html_report_run_ids=include_html_report_run_ids,
+        prompt_text=prompt_text,
+        prompt_sections=prompt_sections,
+        prompt_source=prompt_source,
+        prompt_custom_id=prompt_custom_id,
     )
     session.add(job)
     try:
@@ -114,7 +169,7 @@ async def create(
     except IntegrityError as exc:
         await session.rollback()
         # Re-query in a fresh transaction to find the existing in-flight job.
-        existing = await _get_inflight(session, entity_type, entity_id, review_type)
+        existing = await _get_inflight(session, entity_type, entity_id, resolved_review_type)
         existing_review_id = existing.agent_review_id if existing else None
         raise JobAlreadyRunning(
             existing_job_id=existing.id if existing else -1,
@@ -127,12 +182,16 @@ async def create(
         entity_type=entity_type,
         entity_id=entity_id,
         included_run_ids=included_run_ids,
-        review_type=review_type,
+        review_type=resolved_review_type,
         provider=active.provider,
         model=active.model,
-        prompt_template_version=review_type,
+        prompt_template_version=resolved_review_type,
         status="pending",
         agent_review_job_id=job.id,
+        prompt_text=prompt_text,
+        prompt_sections=prompt_sections,
+        prompt_source=prompt_source,
+        prompt_custom_id=prompt_custom_id,
     )
     session.add(review)
     await session.flush()
@@ -334,7 +393,10 @@ async def execute_hosted(
         await session.commit()
 
     # Network call happens outside any open transaction.
-    prompt = get_template(job.review_type)
+    # prompt_text is the snapshot written by create(); fall back to the legacy
+    # versioned template for any historical job that predates the section
+    # builder columns (those will be null on disk).
+    prompt = job.prompt_text or get_template(job.review_type)
     payload = "\n\n".join(assembled_payload_chunks)
     submit_callable = submit_override if submit_override is not None else get_client(job.provider).submit
     try:

@@ -23,10 +23,23 @@ from app.api.dependencies import require_permission
 from app.database import get_session, async_session_factory
 from app.models.agent_review import AgentReview
 from app.models.pipeline_run import PipelineRun
-from app.services import agent_review_job_service as job_service
+from app.models.user import User
+from app.services import (
+    agent_review_job_service as job_service,
+    agent_review_prompt_service,
+)
 from app.services.agent_review_job_service import (
     JobAlreadyRunning,
     NoActiveProvider,
+)
+from app.services.agent_review_prompt_builder import (
+    EmptySectionSelection,
+    assemble_prompt,
+)
+from app.services.agent_review_prompt_service import DuplicatePromptName
+from app.services.agent_review_section_catalog import (
+    SECTIONS,
+    default_sub_item_ids,
 )
 
 router = APIRouter(prefix="/api/agent_reviews", tags=["agent-reviews"])
@@ -35,9 +48,60 @@ router = APIRouter(prefix="/api/agent_reviews", tags=["agent-reviews"])
 class RunReviewRequest(BaseModel):
     entity_type: Literal["pipeline_run", "experiment"]
     entity_id: int
-    review_type: Literal["pipeline_run_review_v1", "experiment_run_comparison_v1"]
     included_run_ids: list[int] | None = None
     include_html_report_run_ids: list[int] | None = None
+    # Prompt source — exactly one of these three should be set. If multiple
+    # are set, custom_prompt_id wins, then custom_prompt_body, then sub-items.
+    selected_sub_item_ids: list[str] | None = None
+    custom_prompt_id: int | None = None
+    custom_prompt_body: str | None = None
+
+
+class AssemblePromptRequest(BaseModel):
+    entity_type: Literal["pipeline_run", "experiment"]
+    selected_sub_item_ids: list[str]
+
+
+class AssemblePromptResponse(BaseModel):
+    body: str
+
+
+class SubItemPayload(BaseModel):
+    id: str
+    label: str
+    default_on: bool
+    prompt_fragment: str
+
+
+class SectionPayload(BaseModel):
+    id: str
+    label: str
+    experiment_only: bool
+    sub_items: list[SubItemPayload]
+
+
+class SectionCatalogResponse(BaseModel):
+    sections: list[SectionPayload]
+    pipeline_run_defaults: list[str]
+    experiment_defaults: list[str]
+
+
+class SavedPromptPayload(BaseModel):
+    id: int
+    name: str
+    body: str
+    created_by_user_id: int
+    created_by_user_label: str
+    created_at: datetime
+
+
+class SavedPromptsResponse(BaseModel):
+    items: list[SavedPromptPayload]
+
+
+class CreateSavedPromptRequest(BaseModel):
+    name: str
+    body: str
 
 
 class RunReviewResponse(BaseModel):
@@ -70,6 +134,10 @@ class AgentReviewDetail(AgentReviewSummary):
     artifact_gcs_paths: list[str]
     dismissed_at: datetime | None
     dismissed_by_user_id: int | None
+    prompt_text: str | None = None
+    prompt_sections: list[str] | None = None
+    prompt_source: str | None = None
+    prompt_custom_id: int | None = None
 
 
 class AgentReviewListResponse(BaseModel):
@@ -124,9 +192,11 @@ async def run_review(
             user_id=user_id,
             entity_type=body.entity_type,
             entity_id=body.entity_id,
-            review_type=body.review_type,
             included_run_ids=body.included_run_ids,
             include_html_report_run_ids=body.include_html_report_run_ids,
+            selected_sub_item_ids=body.selected_sub_item_ids,
+            custom_prompt_id=body.custom_prompt_id,
+            custom_prompt_body=body.custom_prompt_body,
         )
         await session.commit()
     except NoActiveProvider as exc:
@@ -140,6 +210,8 @@ async def run_review(
                 "existing_agent_review_id": exc.existing_agent_review_id,
             },
         )
+    except EmptySectionSelection as exc:
+        raise HTTPException(400, str(exc))
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
@@ -156,6 +228,115 @@ async def run_review(
         job_id=job.id,
     )
     return RunReviewResponse(job_id=job.id, agent_review_id=review.id)
+
+
+@router.get("/section_catalog", response_model=SectionCatalogResponse)
+async def get_section_catalog(
+    current_user: dict = require_permission("llm_integration", "use"),
+):
+    """Return the section/sub-item catalog and per-scope default selections."""
+    sections = [
+        SectionPayload(
+            id=s.id,
+            label=s.label,
+            experiment_only=s.experiment_only,
+            sub_items=[
+                SubItemPayload(
+                    id=si.id,
+                    label=si.label,
+                    default_on=si.default_on,
+                    prompt_fragment=si.prompt_fragment,
+                )
+                for si in s.sub_items
+            ],
+        )
+        for s in SECTIONS
+    ]
+    return SectionCatalogResponse(
+        sections=sections,
+        pipeline_run_defaults=default_sub_item_ids(experiment_scope=False),
+        experiment_defaults=default_sub_item_ids(experiment_scope=True),
+    )
+
+
+@router.post("/assemble_prompt", response_model=AssemblePromptResponse)
+async def assemble_prompt_preview(
+    body: AssemblePromptRequest,
+    current_user: dict = require_permission("llm_integration", "use"),
+):
+    """Render the prompt the section selection would produce, for the
+    Display prompt modal. Does not start a job and writes no audit row."""
+    try:
+        text = assemble_prompt(
+            experiment_scope=body.entity_type == "experiment",
+            selected_sub_item_ids=body.selected_sub_item_ids,
+        )
+    except EmptySectionSelection as exc:
+        raise HTTPException(400, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return AssemblePromptResponse(body=text)
+
+
+async def _saved_prompt_payload(session: AsyncSession, prompt) -> SavedPromptPayload:
+    creator = (await session.execute(select(User).where(User.id == prompt.created_by_user_id))).scalar_one_or_none()
+    label = getattr(creator, "name", None) or (creator.email if creator else "unknown user")
+    return SavedPromptPayload(
+        id=prompt.id,
+        name=prompt.name,
+        body=prompt.body,
+        created_by_user_id=prompt.created_by_user_id,
+        created_by_user_label=label or "unknown user",
+        created_at=prompt.created_at,
+    )
+
+
+@router.get("/prompts", response_model=SavedPromptsResponse)
+async def list_saved_prompts(
+    current_user: dict = require_permission("llm_integration", "use"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    rows = await agent_review_prompt_service.list_for_org(session, org_id)
+    items = [await _saved_prompt_payload(session, r) for r in rows]
+    return SavedPromptsResponse(items=items)
+
+
+@router.post("/prompts", response_model=SavedPromptPayload, status_code=201)
+async def create_saved_prompt(
+    body: CreateSavedPromptRequest,
+    current_user: dict = require_permission("llm_integration", "use"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    try:
+        row = await agent_review_prompt_service.create(
+            session,
+            org_id=org_id,
+            name=body.name,
+            body=body.body,
+            created_by_user_id=user_id,
+        )
+        await session.commit()
+    except DuplicatePromptName as exc:
+        raise HTTPException(409, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return await _saved_prompt_payload(session, row)
+
+
+@router.delete("/prompts/{prompt_id}", status_code=204)
+async def delete_saved_prompt(
+    prompt_id: int,
+    current_user: dict = require_permission("llm_integration", "use"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    deleted = await agent_review_prompt_service.delete(session, org_id=org_id, prompt_id=prompt_id)
+    await session.commit()
+    if not deleted:
+        raise HTTPException(404, "saved prompt not found")
 
 
 @router.get("", response_model=AgentReviewListResponse)
@@ -230,6 +411,10 @@ async def get_review(
         artifact_gcs_paths=list(review.artifact_gcs_paths or []),
         dismissed_at=review.dismissed_at,
         dismissed_by_user_id=review.dismissed_by_user_id,
+        prompt_text=review.prompt_text,
+        prompt_sections=review.prompt_sections,
+        prompt_source=review.prompt_source,
+        prompt_custom_id=review.prompt_custom_id,
     )
 
 

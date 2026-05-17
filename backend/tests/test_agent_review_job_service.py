@@ -37,9 +37,8 @@ from app.models.pipeline_run import PipelineRun, PipelineRunSample
 from app.models.sample import Sample
 from app.services import agent_review_job_service as job_service
 from app.services import llm_provider_config_service
-from app.services.agent_review_prompts import (
-    EXPERIMENT_RUN_COMPARISON_V1_NAME,
-    PIPELINE_RUN_REVIEW_V1_NAME,
+from app.services.agent_review_prompt_builder import (
+    PIPELINE_RUN_REVIEW_V2_BUILDER_NAME,
 )
 from app.services.llm_provider_clients import ProviderError
 
@@ -99,12 +98,15 @@ async def test_create_snapshots_active_provider(db_engine, admin_user):
             user_id=admin_user.id,
             entity_type="pipeline_run",
             entity_id=run_id,
-            review_type=PIPELINE_RUN_REVIEW_V1_NAME,
+            selected_sub_item_ids=["qc.metric_review"],
         )
         await session.commit()
         assert job.provider == "openai"
         assert job.model == "openai-test-model"
-        assert job.prompt_template_version == PIPELINE_RUN_REVIEW_V1_NAME
+        assert job.prompt_template_version == PIPELINE_RUN_REVIEW_V2_BUILDER_NAME
+        assert job.prompt_source == "builder"
+        assert job.prompt_text is not None and "## Quality control" in job.prompt_text
+        assert job.prompt_sections == ["qc.metric_review"]
         assert job.status == "pending"
         assert review.status == "pending"
         assert review.agent_review_job_id == job.id
@@ -123,7 +125,7 @@ async def test_create_raises_when_no_active_provider(db_engine, admin_user):
                 user_id=admin_user.id,
                 entity_type="pipeline_run",
                 entity_id=run_id,
-                review_type=PIPELINE_RUN_REVIEW_V1_NAME,
+                selected_sub_item_ids=["qc.metric_review"],
             )
 
 
@@ -140,7 +142,7 @@ async def test_debounce_raises_job_already_running(db_engine, admin_user):
             user_id=admin_user.id,
             entity_type="pipeline_run",
             entity_id=run_id,
-            review_type=PIPELINE_RUN_REVIEW_V1_NAME,
+            selected_sub_item_ids=["qc.metric_review"],
         )
         await session.commit()
         first_id = first.id
@@ -154,7 +156,7 @@ async def test_debounce_raises_job_already_running(db_engine, admin_user):
                 user_id=admin_user.id,
                 entity_type="pipeline_run",
                 entity_id=run_id,
-                review_type=PIPELINE_RUN_REVIEW_V1_NAME,
+                selected_sub_item_ids=["qc.metric_review"],
             )
         assert exc_info.value.existing_job_id == first_id
         assert exc_info.value.existing_agent_review_id == first_review_id
@@ -173,7 +175,7 @@ async def test_debounce_releases_after_terminal(db_engine, admin_user):
             user_id=admin_user.id,
             entity_type="pipeline_run",
             entity_id=run_id,
-            review_type=PIPELINE_RUN_REVIEW_V1_NAME,
+            selected_sub_item_ids=["qc.metric_review"],
         )
         await session.commit()
         # Move it to a terminal state manually to release the debounce.
@@ -188,7 +190,7 @@ async def test_debounce_releases_after_terminal(db_engine, admin_user):
             user_id=admin_user.id,
             entity_type="pipeline_run",
             entity_id=run_id,
-            review_type=PIPELINE_RUN_REVIEW_V1_NAME,
+            selected_sub_item_ids=["qc.metric_review"],
         )
         await session.commit()
         assert job2.id != job.id
@@ -211,7 +213,7 @@ async def test_concurrent_button_a_and_button_b_allowed(db_engine, admin_user):
             user_id=admin_user.id,
             entity_type="pipeline_run",
             entity_id=run_id,
-            review_type=PIPELINE_RUN_REVIEW_V1_NAME,
+            selected_sub_item_ids=["qc.metric_review"],
         )
         b, _ = await job_service.create(
             session,
@@ -219,7 +221,7 @@ async def test_concurrent_button_a_and_button_b_allowed(db_engine, admin_user):
             user_id=admin_user.id,
             entity_type="experiment",
             entity_id=exp_id,
-            review_type=EXPERIMENT_RUN_COMPARISON_V1_NAME,
+            selected_sub_item_ids=["qc.metric_review", "xsample.drift_over_time"],
             included_run_ids=[run_id],
         )
         await session.commit()
@@ -237,7 +239,7 @@ async def test_mark_orphaned_transitions_inflight_hosted_to_failed(db_engine, ad
             user_id=admin_user.id,
             entity_type="pipeline_run",
             entity_id=run_id,
-            review_type=PIPELINE_RUN_REVIEW_V1_NAME,
+            selected_sub_item_ids=["qc.metric_review"],
         )
         await session.commit()
         job.status = "submitted"
@@ -267,7 +269,7 @@ async def test_mark_orphaned_leaves_gemma_alone(db_engine, admin_user):
             user_id=admin_user.id,
             entity_type="pipeline_run",
             entity_id=run_id,
-            review_type=PIPELINE_RUN_REVIEW_V1_NAME,
+            selected_sub_item_ids=["qc.metric_review"],
         )
         await session.commit()
         job.status = "submitted"
@@ -301,7 +303,7 @@ async def test_execute_hosted_happy_path_writes_two_audit_rows(db_engine, admin_
             user_id=admin_user.id,
             entity_type="pipeline_run",
             entity_id=run_id,
-            review_type=PIPELINE_RUN_REVIEW_V1_NAME,
+            selected_sub_item_ids=["qc.metric_review"],
         )
         await session.commit()
         job_id = job.id
@@ -364,7 +366,7 @@ async def test_execute_hosted_provider_error_writes_failed_audit(db_engine, admi
             user_id=admin_user.id,
             entity_type="pipeline_run",
             entity_id=run_id,
-            review_type=PIPELINE_RUN_REVIEW_V1_NAME,
+            selected_sub_item_ids=["qc.metric_review"],
         )
         await session.commit()
         job_id = job.id
@@ -415,7 +417,7 @@ async def test_execute_hosted_artifact_build_failure(db_engine, admin_user):
             user_id=admin_user.id,
             entity_type="pipeline_run",
             entity_id=run_id,
-            review_type=PIPELINE_RUN_REVIEW_V1_NAME,
+            selected_sub_item_ids=["qc.metric_review"],
         )
         await session.commit()
         job_id = job.id
@@ -463,7 +465,7 @@ async def test_execute_hosted_parse_failure_succeeds_with_marker(db_engine, admi
             user_id=admin_user.id,
             entity_type="pipeline_run",
             entity_id=run_id,
-            review_type=PIPELINE_RUN_REVIEW_V1_NAME,
+            selected_sub_item_ids=["qc.metric_review"],
         )
         await session.commit()
         job_id = job.id
@@ -492,3 +494,85 @@ async def test_execute_hosted_parse_failure_succeeds_with_marker(db_engine, admi
         )
         assert audits[0].details_json["parse_failure"] is True
         assert audits[0].details_json["severity"] == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_create_with_custom_prompt_id_uses_saved_body(db_engine, admin_user):
+    """custom_prompt_id resolves to the saved prompt body verbatim."""
+    from app.services import agent_review_prompt_service
+
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
+        run_id = await _make_pipeline_run(session, admin_user.organization_id)
+        saved = await agent_review_prompt_service.create(
+            session,
+            org_id=admin_user.organization_id,
+            name="Std",
+            body="--- custom saved prompt body ---",
+            created_by_user_id=admin_user.id,
+        )
+        await session.commit()
+        saved_id = saved.id
+
+    async with _factory(db_engine)() as session:
+        job, _ = await job_service.create(
+            session,
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            custom_prompt_id=saved_id,
+        )
+        await session.commit()
+        assert job.prompt_source == "custom_saved"
+        assert job.prompt_custom_id == saved_id
+        assert job.prompt_text == "--- custom saved prompt body ---"
+        assert job.prompt_sections is None
+
+
+@pytest.mark.asyncio
+async def test_create_with_custom_prompt_body_one_off(db_engine, admin_user):
+    """custom_prompt_body uses the literal body and does not persist a saved row."""
+    from app.models.agent_review_prompt import AgentReviewPrompt
+
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
+        run_id = await _make_pipeline_run(session, admin_user.organization_id)
+
+    async with _factory(db_engine)() as session:
+        job, _ = await job_service.create(
+            session,
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            custom_prompt_body="--- one-off body ---",
+        )
+        await session.commit()
+        assert job.prompt_source == "custom_one_off"
+        assert job.prompt_custom_id is None
+        assert job.prompt_text == "--- one-off body ---"
+
+        # No new AgentReviewPrompt row was created.
+        rows = (await session.execute(select(AgentReviewPrompt))).scalars().all()
+        assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_create_requires_at_least_one_prompt_source(db_engine, admin_user):
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
+        run_id = await _make_pipeline_run(session, admin_user.organization_id)
+
+    async with _factory(db_engine)() as session:
+        from app.services.agent_review_prompt_builder import EmptySectionSelection
+
+        with pytest.raises(EmptySectionSelection):
+            await job_service.create(
+                session,
+                org_id=admin_user.organization_id,
+                user_id=admin_user.id,
+                entity_type="pipeline_run",
+                entity_id=run_id,
+                selected_sub_item_ids=[],
+            )

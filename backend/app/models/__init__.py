@@ -76,6 +76,7 @@ from app.models.org_code_counter import OrgCodeCounter
 from app.models.llm_provider_config import LlmProviderConfig
 from app.models.agent_review_job import AgentReviewJob
 from app.models.agent_review import AgentReview
+from app.models.agent_review_prompt import AgentReviewPrompt
 
 __all__ = [
     "User",
@@ -163,4 +164,5 @@ __all__ = [
     "LlmProviderConfig",
     "AgentReviewJob",
     "AgentReview",
+    "AgentReviewPrompt",
 ]

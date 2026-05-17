@@ -28,6 +28,12 @@ class AgentReview(Base):
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     artifact_gcs_paths: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+    # Section-builder additions: matches the snapshot on agent_review_jobs so
+    # the modal can show the user exactly what prompt produced this card.
+    prompt_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prompt_sections: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    prompt_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    prompt_custom_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     agent_review_job_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("agent_review_jobs.id"), nullable=False, unique=True
     )

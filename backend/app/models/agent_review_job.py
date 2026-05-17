@@ -27,6 +27,14 @@ class AgentReviewJob(Base):
     pipeline_run_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     error_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_class: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Section-builder additions: the actual prompt body sent to the provider
+    # (snapshotted so the audit row is exact even after catalog updates), the
+    # selected sub-item ids, the prompt source, and an optional FK to a saved
+    # custom prompt for cross-reference.
+    prompt_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prompt_sections: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    prompt_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    prompt_custom_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
