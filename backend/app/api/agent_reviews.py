@@ -351,15 +351,11 @@ async def list_reviews(
 ):
     org_id = int(current_user["org_id"])
 
-    # The Pipeline Run tab shows single-run reviews of X UNION experiment-level
-    # reviews that included X. The Experiment tab shows only experiment-level
-    # reviews of the experiment id.
-    if entity_type == "pipeline_run":
-        run_match = (AgentReview.entity_type == "pipeline_run") & (AgentReview.entity_id == entity_id)
-        exp_match = (AgentReview.entity_type == "experiment") & (AgentReview.included_run_ids.contains([entity_id]))
-        clause = run_match | exp_match
-    else:
-        clause = (AgentReview.entity_type == "experiment") & (AgentReview.entity_id == entity_id)
+    # Each tab is strictly scoped to its own entity_type. Earlier the Pipeline
+    # Run tab unioned in experiment-level reviews via included_run_ids; user
+    # feedback was that this conflated two distinct review surfaces. An
+    # experiment-level review now appears only on the Experiment tab.
+    clause = (AgentReview.entity_type == entity_type) & (AgentReview.entity_id == entity_id)
 
     rows = (
         (

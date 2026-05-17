@@ -301,11 +301,30 @@ async def test_get_returns_full_detail(client, admin_auth, configured_run):
 
 
 @pytest.mark.asyncio
-async def test_experiment_review_shows_up_on_pipeline_run_tab(
+async def test_pipeline_run_and_experiment_tabs_are_strictly_scoped(
     client, admin_auth, configured_run, db_engine, admin_user
 ):
-    """Experiment-level review that includes Run X surfaces on Run X's tab."""
-    resp = await client.post(
+    """The Pipeline Run tab shows ONLY entity_type='pipeline_run' rows for
+    that run. The Experiment tab shows ONLY entity_type='experiment' rows for
+    that experiment. An experiment review that included Run X must NOT
+    appear on Run X's Pipeline Run tab, and a pipeline_run review of Run X
+    must NOT appear on the parent experiment's tab. Earlier the Pipeline Run
+    tab unioned in experiment reviews via included_run_ids; user feedback
+    requires the strict scoping below."""
+    # Create one pipeline_run-scope review of the run.
+    resp_run = await client.post(
+        "/api/agent_reviews/run",
+        json={
+            "entity_type": "pipeline_run",
+            "entity_id": configured_run["run_id"],
+            "selected_sub_item_ids": ["qc.metric_review"],
+        },
+        headers=admin_auth,
+    )
+    assert resp_run.status_code == 202, resp_run.text
+
+    # And one experiment-scope review of the parent experiment, with that run included.
+    resp_exp = await client.post(
         "/api/agent_reviews/run",
         json={
             "entity_type": "experiment",
@@ -315,13 +334,26 @@ async def test_experiment_review_shows_up_on_pipeline_run_tab(
         },
         headers=admin_auth,
     )
-    assert resp.status_code == 202, resp.text
+    assert resp_exp.status_code == 202, resp_exp.text
 
-    listed = (
+    # Pipeline Run tab: only pipeline_run rows.
+    run_listed = (
         await client.get(
             "/api/agent_reviews",
             params={"entity_type": "pipeline_run", "entity_id": configured_run["run_id"]},
             headers=admin_auth,
         )
     ).json()
-    assert any(item["entity_type"] == "experiment" for item in listed["items"])
+    entity_types = {item["entity_type"] for item in run_listed["items"]}
+    assert entity_types == {"pipeline_run"}, run_listed
+
+    # Experiment tab: only experiment rows.
+    exp_listed = (
+        await client.get(
+            "/api/agent_reviews",
+            params={"entity_type": "experiment", "entity_id": configured_run["experiment_id"]},
+            headers=admin_auth,
+        )
+    ).json()
+    entity_types = {item["entity_type"] for item in exp_listed["items"]}
+    assert entity_types == {"experiment"}, exp_listed
