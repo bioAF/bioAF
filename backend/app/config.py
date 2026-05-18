@@ -40,9 +40,8 @@ def validate_jwt_secret(secret: str) -> None:
 
     if len(secret) < MIN_JWT_SECRET_LENGTH:
         logger.critical(
-            "FATAL: JWT secret key is too short (%d chars, minimum %d). "
+            "FATAL: JWT secret key is too short (minimum %d chars). "
             "Set BIOAF_JWT_SECRET_KEY to a random value (e.g. `openssl rand -hex 32`).",
-            len(secret),
             MIN_JWT_SECRET_LENGTH,
         )
         sys.exit(1)
