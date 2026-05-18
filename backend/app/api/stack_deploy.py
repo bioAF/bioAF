@@ -61,8 +61,12 @@ _KNOWN_STACK_ERROR_MESSAGES = frozenset(
 
 def _safe_stack_error_message(exc: ValueError) -> str:
     msg = str(exc) if exc.args else ""
-    if msg in _KNOWN_STACK_ERROR_MESSAGES:
-        return msg
+    # Return the matched allowlist constant rather than the exception-derived
+    # `msg` so CodeQL's taint tracker sees the output as untainted. Behaviour
+    # is identical: when `msg == known`, returning either is the same string.
+    for known in _KNOWN_STACK_ERROR_MESSAGES:
+        if msg == known:
+            return known
     return "Stack operation failed. See server logs."
 
 

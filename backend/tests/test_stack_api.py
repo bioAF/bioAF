@@ -357,3 +357,36 @@ class TestSyncComputeConfigEndpoint:
             headers={"Authorization": f"Bearer {viewer_token}"},
         )
         assert response.status_code == 403
+
+
+class TestSafeStackErrorMessage:
+    """`_safe_stack_error_message` must only ever return allowlisted constants
+    or the generic fallback, never raw exception text."""
+
+    def test_known_message_returns_the_constant(self):
+        from app.api.stack_deploy import _KNOWN_STACK_ERROR_MESSAGES, _safe_stack_error_message
+
+        for known in _KNOWN_STACK_ERROR_MESSAGES:
+            assert _safe_stack_error_message(ValueError(known)) == known
+
+    def test_unknown_message_returns_generic_fallback(self):
+        from app.api.stack_deploy import _safe_stack_error_message
+
+        result = _safe_stack_error_message(ValueError("Traceback (most recent call last): ..."))
+        assert result == "Stack operation failed. See server logs."
+
+    def test_empty_exception_returns_generic_fallback(self):
+        from app.api.stack_deploy import _safe_stack_error_message
+
+        assert _safe_stack_error_message(ValueError()) == "Stack operation failed. See server logs."
+
+    def test_partial_match_returns_generic_fallback(self):
+        """A message that contains an allowlisted substring but is not an exact
+        match still gets replaced with the generic fallback."""
+        from app.api.stack_deploy import _safe_stack_error_message
+
+        # An attacker-controlled exception that embeds an allowlist string.
+        result = _safe_stack_error_message(
+            ValueError("Storage is not deployed. Internal trace: /etc/passwd contents follow...")
+        )
+        assert result == "Stack operation failed. See server logs."
