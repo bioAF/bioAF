@@ -11,6 +11,12 @@
 > changelog section. Sections below v0.15.1 remain in their original SemVer
 > format.
 
+## v2026.5.10
+
+### Security
+
+- Harden the database restore endpoint against path-traversal: the restore request now rejects any filename that isn't a real `pgdump-<timestamp>.dump` produced by the backup service. No effect on legitimate restores from the UI.
+
 ## v2026.5.9
 
 ### Internal
