@@ -490,7 +490,7 @@ class BackupService:
             await session.commit()
             return {"status": "error", "message": "pg_dump binary not found"}
         except Exception as e:
-            logger.error("pg_dump backup failed: %s", e)
+            logger.exception("pg_dump backup failed")
             # Clean up temp file on failure
             if os.path.exists(output_path):
                 os.remove(output_path)
@@ -503,7 +503,7 @@ class BackupService:
                 details={"tier": "postgres", "reason": str(e)[:500]},
             )
             await session.commit()
-            return {"status": "error", "message": str(e)[:500]}
+            return {"status": "error", "message": "Backup failed; check server logs."}
 
     @staticmethod
     async def list_tfstate_files(session: AsyncSession) -> list[dict]:
@@ -609,7 +609,7 @@ class BackupService:
             return {"status": "completed", "filename": filename, "size_bytes": size}
 
         except Exception as e:
-            logger.error("Config backup failed: %s", e)
+            logger.exception("Config backup failed")
             if os.path.exists(output_path):
                 os.remove(output_path)
             await log_action(
@@ -621,7 +621,7 @@ class BackupService:
                 details={"tier": "platform_config", "reason": str(e)[:500]},
             )
             await session.commit()
-            return {"status": "error", "message": str(e)[:500]}
+            return {"status": "error", "message": "Backup failed; check server logs."}
 
     @staticmethod
     async def get_backup_settings(session: AsyncSession) -> dict:
@@ -982,15 +982,15 @@ class RestoreService:
 
             return {"status": "reviewing", "message": f"Restore from {filename} active. You have 1 hour to review."}
 
-        except Exception as e:
-            logger.error("Restore failed: %s", e)
+        except Exception:
+            logger.exception("Restore failed")
             if os.path.exists(dump_path):
                 os.remove(dump_path)
             try:
                 await _run_admin_sql(["DROP DATABASE IF EXISTS bioaf_restore"])
             except Exception:
                 pass
-            return {"status": "error", "message": str(e)[:500]}
+            return {"status": "error", "message": "Restore failed; check server logs."}
 
     @staticmethod
     async def accept() -> dict:
@@ -1027,15 +1027,15 @@ class RestoreService:
             _restore_state["_timeout_task"] = None
             return {"status": "accepted", "message": "Restore accepted. Database has been permanently updated."}
 
-        except Exception as e:
-            logger.error("Accept restore failed: %s", e)
+        except Exception:
+            logger.exception("Accept restore failed")
             try:
                 from app.database import swap_database
 
                 await swap_database(_restore_state["original_url"])
             except Exception:
                 pass
-            return {"status": "error", "message": str(e)[:500]}
+            return {"status": "error", "message": "Accept restore failed; check server logs."}
 
     @staticmethod
     async def reject() -> dict:
@@ -1074,7 +1074,7 @@ async def _revert_restore(reason: str) -> dict:
         _restore_state["_timeout_task"] = None
         return {"status": "reverted", "message": reason}
 
-    except Exception as e:
-        logger.error("Failed to revert restore: %s", e)
+    except Exception:
+        logger.exception("Failed to revert restore")
         _restore_state["active"] = False
-        return {"status": "error", "message": str(e)[:500]}
+        return {"status": "error", "message": "Revert restore failed; check server logs."}

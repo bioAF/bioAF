@@ -247,5 +247,6 @@ class SearchService:
             return {"status": "completed", "indexed": indexed}
         except ImportError:
             return {"status": "error", "reason": "meilisearch package not installed"}
-        except Exception as e:
-            return {"status": "error", "reason": str(e)}
+        except Exception:
+            logger.exception("Search reindex failed for org %s", org_id)
+            return {"status": "error", "reason": "reindex failed"}
