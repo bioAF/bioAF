@@ -1147,7 +1147,7 @@ cmd_help() {
     echo "  ./bioaf logs backend        # Tail backend logs (last 100 lines)"
     echo "  ./bioaf logs backend -n 500 # Tail backend logs (last 500 lines)"
     echo "  ./bioaf migrate             # Run pending migrations"
-    echo "  ./bioaf seed seed_poc_data.py  # Seed demo data"
+    echo "  ./bioaf seed <script.py>    # Run a seed/data script in the backend container"
     echo "  ./bioaf shell backend       # Open shell in backend"
     echo "  ./bioaf dbshell             # Open psql session"
     echo "  ./bioaf backup              # Create database backup"

@@ -2,6 +2,7 @@
 
 from datetime import date
 from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
 from httpx import AsyncClient
@@ -51,7 +52,7 @@ async def test_billing_export_status_unconfigured(client: AsyncClient, admin_tok
     data = response.json()
     assert data["configured"] is False
     assert data["dataset_id"] == ""
-    assert "console.cloud.google.com" in data["console_url"]
+    assert urlparse(data["console_url"]).hostname == "console.cloud.google.com"
 
 
 @pytest.mark.asyncio
