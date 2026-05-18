@@ -11,6 +11,14 @@
 > changelog section. Sections below v0.15.1 remain in their original SemVer
 > format.
 
+## v2026.5.6
+
+### Stability and security
+
+- Tightened how the application reports internal errors so failures show a
+  short, friendly message in the UI while the full diagnostic detail stays in
+  the server logs for operators.
+
 ## v2026.5.5
 
 ### Security
