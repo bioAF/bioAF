@@ -21,14 +21,14 @@ class SecretsService:
         from google.cloud import secretmanager
 
         client = secretmanager.SecretManagerServiceClient()
-        for secret_name in SECRET_NAMES:
+        for entry in SECRET_NAMES:
             try:
-                name = f"projects/{self.project_id}/secrets/{secret_name}/versions/latest"
+                name = f"projects/{self.project_id}/secrets/{entry}/versions/latest"
                 response = client.access_secret_version(request={"name": name})
-                self._cache[secret_name] = response.payload.data.decode("UTF-8")
-                logger.info("Fetched secret: %s", secret_name)
-            except Exception as e:
-                logger.warning("Could not fetch secret %s: %s", secret_name, e)
+                self._cache[entry] = response.payload.data.decode("UTF-8")
+                logger.info("Fetched secret entry %s", entry)
+            except Exception:
+                logger.exception("Could not fetch secret entry %s", entry)
 
         if not self._cache:
             raise RuntimeError("No secrets could be fetched from Secret Manager")
