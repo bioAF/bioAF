@@ -24,6 +24,7 @@ from app.services.event_types import BACKUP_FAILURE
 logger = logging.getLogger("bioaf.backup_service")
 
 RESTORE_REVIEW_SECONDS = 3600  # 1 hour
+_RESTORE_TMP_DIR = "/tmp"
 
 _PG_FILENAME_RE = re.compile(r"^pgdump-(\d{8}-\d{6})\.dump$")
 _CONFIG_FILENAME_RE = re.compile(r"^config-(\d{8}-\d{6})\.json$")
@@ -913,17 +914,18 @@ class RestoreService:
         # foothold even for authenticated admins.
         if not _PG_FILENAME_RE.fullmatch(filename):
             return {"status": "error", "message": "Invalid backup filename"}
-        # `basename` is a no-op for filenames that passed the regex above (the
-        # pattern forbids slashes), but it is a CodeQL-recognised path-injection
-        # barrier. The regex provides semantic safety; this satisfies the
-        # taint-flow tracker so it stops flagging the sinks below.
-        filename = os.path.basename(filename)
 
         bucket_name = await _get_backups_bucket(session)
         if not bucket_name:
             return {"status": "error", "message": "No backups bucket configured"}
 
-        dump_path = f"/tmp/{filename}"
+        # Build the local dump path using the CodeQL-recognised normpath +
+        # startswith pattern. The regex above already guarantees no slashes
+        # or traversal sequences, so this is defense in depth and a syntactic
+        # barrier the path-injection taint tracker recognises.
+        dump_path = os.path.normpath(os.path.join(_RESTORE_TMP_DIR, filename))
+        if not dump_path.startswith(_RESTORE_TMP_DIR + os.sep):
+            return {"status": "error", "message": "Invalid backup filename"}
 
         try:
             # Download dump from GCS
