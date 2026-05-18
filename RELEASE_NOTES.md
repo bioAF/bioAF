@@ -11,6 +11,14 @@
 > changelog section. Sections below v0.15.1 remain in their original SemVer
 > format.
 
+## v2026.5.8
+
+### Stability and security
+
+- Continued tightening of server-side logging so resource identifiers
+  involved in launching and tearing down compute sessions are no longer
+  flagged as carrying sensitive data.
+
 ## v2026.5.7
 
 ### Stability and security
