@@ -11,7 +11,6 @@ gke_cluster_ca_cert) and a GCP access token from the credential injector
 
 import asyncio
 import base64
-import hashlib
 import logging
 import os
 import tempfile
@@ -28,19 +27,6 @@ from app.services.session_persistence import (
 )
 
 logger = logging.getLogger("bioaf.adapters.notebooks.k8s")
-
-
-def _log_id(value: object) -> str:
-    """Return a stable short hash of `value` for use in log lines.
-
-    Identifiers passed through here (pod / service / session names) are not
-    actually sensitive, but they flow through dicts that also carry user
-    credentials, so CodeQL marks them as tainted at every log call. Hashing
-    is a recognized sanitizer barrier and breaks the false-positive flow
-    while still letting operators correlate log lines for the same entity.
-    """
-    s = "" if value is None else str(value)
-    return hashlib.sha256(s.encode()).hexdigest()[:8]
 
 
 def _get_gcp_token(gcp_config: dict) -> str:
@@ -791,7 +777,7 @@ class KubernetesNotebookProvider(NotebookProvider):
 
         core_client = self._get_k8s_core_client()
         core_client.create_namespaced_pod(namespace=namespace, body=pod_manifest)
-        logger.info("Created pod %s in %s", _log_id(pod_name), _log_id(namespace))
+        logger.info("Created pod %s in %s", pod_name, namespace)
 
         # Create Service
         service_manifest = {
@@ -817,7 +803,7 @@ class KubernetesNotebookProvider(NotebookProvider):
             },
         }
         core_client.create_namespaced_service(namespace=namespace, body=service_manifest)
-        logger.info("Created service %s in %s", _log_id(service_name), _log_id(namespace))
+        logger.info("Created service %s in %s", service_name, namespace)
 
         # Launch background task to poll for pod readiness and LB IP,
         # then update the DB session record once both are available.
@@ -855,7 +841,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                             pod_ready = True
                             break
                     if pod.status.phase in ("Failed", "Unknown"):
-                        logger.error("Pod %s entered %s phase", _log_id(pod_name), _log_id(pod.status.phase))
+                        logger.error("Pod %s entered %s phase", pod_name, pod.status.phase)
                         await self._update_session_in_db(session_id, status="failed", access_url=None)
                         return
                 except Exception:
@@ -863,7 +849,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                 await asyncio.sleep(5)
 
             if not pod_ready:
-                logger.error("Pod %s not ready after 5 min", _log_id(pod_name))
+                logger.error("Pod %s not ready after 5 min", pod_name)
                 await self._update_session_in_db(session_id, status="failed", access_url=None)
                 return
 
@@ -1010,7 +996,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                     )
                     await db.commit()
             except Exception:
-                logger.exception("Failed to store git info for session %s", _log_id(session_id))
+                logger.exception("Failed to store git info for compute session")
 
         # Sync home directory to GCS before termination
         if gcs_home_prefix and pod_name:
@@ -1116,7 +1102,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                     from app.services.session_output_service import parse_gsutil_ls_output
 
                     output_files = parse_gsutil_ls_output(str(raw_output))
-                    logger.info("Found %d output files for session %s", len(output_files), _log_id(session_id))
+                    logger.info("Found %d output files for compute session", len(output_files))
             except Exception as e:
                 logger.warning("Output file listing failed for pod %s: %s", pod_name, e)
 
@@ -1131,9 +1117,9 @@ class KubernetesNotebookProvider(NotebookProvider):
         service_name = f"bioaf-notebook-svc-{session_id}"
         try:
             core_client.delete_namespaced_service(name=service_name, namespace=namespace)
-            logger.info("Deleted service %s", _log_id(service_name))
+            logger.info("Deleted notebook service")
         except Exception:
-            logger.exception("Failed to delete service %s", _log_id(service_name))
+            logger.exception("Failed to delete notebook service")
 
         return {
             "session_id": session_id,
@@ -1248,7 +1234,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         if session_id in _local_sessions:
             _local_sessions[session_id]["status"] = "stopped"
             _local_sessions[session_id]["stopped_at"] = datetime.now(timezone.utc).isoformat()
-        logger.info("Local mode: terminated session %s", _log_id(session_id))
+        logger.info("Local mode: terminated session")
         return {
             "session_id": session_id,
             "status": "stopped",
