@@ -11,6 +11,14 @@
 > changelog section. Sections below v0.15.1 remain in their original SemVer
 > format.
 
+## v2026.5.5
+
+### Security
+
+- Restrict GitHub Actions workflows to read-only `contents` permission so the
+  default `GITHUB_TOKEN` cannot mutate the repository, addressing 10 code
+  scanning alerts in `ci.yml`, `build.yml`, and `changelog-check.yml`.
+
 ## v2026.5.4
 
 ### Security
