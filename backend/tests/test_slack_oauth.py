@@ -102,10 +102,10 @@ async def test_slack_status_connected(client: AsyncClient, admin_token: str, adm
 @pytest.mark.asyncio
 async def test_slack_callback_exchanges_code(client: AsyncClient, admin_token: str, admin_user):
     """Callback exchanges auth code for token and stores installation."""
-    from jose import jwt as jose_jwt
+    import jwt
     from app.config import settings
 
-    state = jose_jwt.encode(
+    state = jwt.encode(
         {"org_id": admin_user.organization_id, "user_id": admin_user.id},
         settings.jwt_secret_key,
         algorithm=settings.jwt_algorithm,

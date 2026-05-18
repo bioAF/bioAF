@@ -11,8 +11,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 
+import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request
-from jose import jwt
 from pydantic import BaseModel
 
 from app.config import settings
@@ -61,11 +61,9 @@ def validate_content_token(token: str) -> dict:
 
     Returns the payload dict or raises ValueError.
     """
-    from jose import JWTError
-
     try:
         payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
-    except JWTError as e:
+    except jwt.PyJWTError as e:
         raise ValueError(f"Invalid content token: {e}") from e
 
     if payload.get("purpose") != CONTENT_TOKEN_PURPOSE:
