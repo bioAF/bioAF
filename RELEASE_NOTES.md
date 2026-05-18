@@ -11,6 +11,12 @@
 > changelog section. Sections below v0.15.1 remain in their original SemVer
 > format.
 
+## v2026.5.9
+
+### Internal
+
+- Drop the unused `scripts/seed_poc_data.py` POC seed script. The `./bioaf seed` command still works with any script you place in `scripts/`.
+
 ## v2026.5.8
 
 ### Stability and security
