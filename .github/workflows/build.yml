@@ -9,6 +9,9 @@ on:
       - "docker/Dockerfile*"
       - "docker/docker-compose*"
 
+permissions:
+  contents: read
+
 jobs:
   build-backend:
     name: Build Backend Image
