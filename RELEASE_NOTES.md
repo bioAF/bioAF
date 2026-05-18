@@ -11,6 +11,13 @@
 > changelog section. Sections below v0.15.1 remain in their original SemVer
 > format.
 
+## v2026.5.7
+
+### Stability and security
+
+- Additional cleanup of server-side log messages so sensitive-looking
+  identifiers and details no longer appear in plain text in operator logs.
+
 ## v2026.5.6
 
 ### Stability and security
