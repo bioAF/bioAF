@@ -11,6 +11,16 @@
 > changelog section. Sections below v0.15.1 remain in their original SemVer
 > format.
 
+## v2026.5.2
+
+### Stability
+
+- Refresh backend and frontend dependencies to pull in a batch of
+  upstream patches addressing minor platform stability and
+  dependency-hygiene bugs. No user-visible behavior change; existing
+  data, logins, and active notebook or pipeline sessions are
+  unaffected by the upgrade.
+
 ## v2026.5.1
 
 ### Agent Review (LLM integration v1)
