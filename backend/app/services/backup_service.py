@@ -907,6 +907,13 @@ class RestoreService:
         if _restore_state["active"]:
             return {"status": "error", "message": "A restore review is already active"}
 
+        # Reject anything that isn't a real pg_dump produced by this service.
+        # The filename feeds into local paths, the GCS blob key, and a subprocess
+        # arg; allowing slashes, '..', or null bytes here is a path-traversal
+        # foothold even for authenticated admins.
+        if not _PG_FILENAME_RE.fullmatch(filename):
+            return {"status": "error", "message": "Invalid backup filename"}
+
         bucket_name = await _get_backups_bucket(session)
         if not bucket_name:
             return {"status": "error", "message": "No backups bucket configured"}
