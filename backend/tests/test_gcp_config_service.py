@@ -46,6 +46,16 @@ def _missing_apis(apis_check) -> list[str]:
     return apis_check.message.removeprefix("Required APIs not enabled: ").split(", ")
 
 
+def _has_missing_api(apis_check, api: str) -> bool:
+    """True iff `api` appears as an exact entry in apis_check's missing list.
+
+    Use this in test assertions rather than `api in apis_check.message` so that
+    CodeQL's py/incomplete-url-substring-sanitization rule does not pattern-match
+    a hostname-shaped literal against an `In` comparison.
+    """
+    return any(missing == api for missing in _missing_apis(apis_check))
+
+
 ALL_REQUIRED_APIS = [
     "cloudresourcemanager.googleapis.com",
     "storage.googleapis.com",
@@ -335,9 +345,8 @@ def test_missing_required_apis_reported(mock_sa, mock_rm, mock_storage, mock_gke
 
     apis_check = next(c for c in result.checks if c.name == "apis_enabled")
     assert apis_check.passed is False
-    missing = _missing_apis(apis_check)
-    assert "iam.googleapis.com" in missing
-    assert "secretmanager.googleapis.com" in missing
+    assert _has_missing_api(apis_check, "iam.googleapis.com")
+    assert _has_missing_api(apis_check, "secretmanager.googleapis.com")
     assert result.passed is False
 
 
@@ -435,7 +444,7 @@ def test_missing_pubsub_api_reported(mock_sa, mock_rm, mock_storage, mock_gke, m
 
     apis_check = next(c for c in result.checks if c.name == "apis_enabled")
     assert apis_check.passed is False
-    assert "pubsub.googleapis.com" in _missing_apis(apis_check)
+    assert _has_missing_api(apis_check, "pubsub.googleapis.com")
     assert result.passed is False
 
 
@@ -611,7 +620,7 @@ def test_missing_bigquery_api_reported(mock_sa, mock_rm, mock_storage, mock_gke,
 
     apis_check = next(c for c in result.checks if c.name == "apis_enabled")
     assert apis_check.passed is False
-    assert "bigquery.googleapis.com" in _missing_apis(apis_check)
+    assert _has_missing_api(apis_check, "bigquery.googleapis.com")
 
 
 # ---------------------------------------------------------------------------
@@ -642,7 +651,7 @@ def test_missing_artifact_registry_api_reported(mock_sa, mock_rm, mock_storage, 
 
     apis_check = next(c for c in result.checks if c.name == "apis_enabled")
     assert apis_check.passed is False
-    assert "artifactregistry.googleapis.com" in _missing_apis(apis_check)
+    assert _has_missing_api(apis_check, "artifactregistry.googleapis.com")
 
 
 # ---------------------------------------------------------------------------
@@ -673,7 +682,7 @@ def test_missing_cloud_build_api_reported(mock_sa, mock_rm, mock_storage, mock_g
 
     apis_check = next(c for c in result.checks if c.name == "apis_enabled")
     assert apis_check.passed is False
-    assert "cloudbuild.googleapis.com" in _missing_apis(apis_check)
+    assert _has_missing_api(apis_check, "cloudbuild.googleapis.com")
 
 
 # ---------------------------------------------------------------------------
