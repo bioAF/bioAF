@@ -44,6 +44,28 @@ _CELLXGENE_COMPONENTS = {"cellxgene"}
 
 logger = logging.getLogger("bioaf.stack_deploy_api")
 
+# Curated user-facing messages produced by stack_deployment as ValueErrors.
+# Anything outside this set is treated as an unexpected error and the user
+# sees a generic message instead of the raw exception text.
+_KNOWN_STACK_ERROR_MESSAGES = frozenset(
+    {
+        "GCP credentials are not configured",
+        "Terraform has not been initialized",
+        "Compute stack is already deployed. Teardown first.",
+        "Compute stack is not deployed",
+        "Cannot destroy storage while compute stack is deployed. Teardown compute first.",
+        "Storage is not deployed.",
+    }
+)
+
+
+def _safe_stack_error_message(exc: ValueError) -> str:
+    msg = str(exc) if exc.args else ""
+    if msg in _KNOWN_STACK_ERROR_MESSAGES:
+        return msg
+    return "Stack operation failed. See server logs."
+
+
 router = APIRouter(tags=["stack_deploy"])
 
 
@@ -225,7 +247,8 @@ async def stack_deploy_endpoint(
                     payload["extra"] = event.extra
                 yield f"data: {json.dumps(payload)}\n\n"
         except ValueError as exc:
-            error_data = json.dumps({"event_type": "stack_error", "message": str(exc)})
+            logger.exception("Stack SSE stream failed")
+            error_data = json.dumps({"event_type": "stack_error", "message": _safe_stack_error_message(exc)})
             yield f"data: {error_data}\n\n"
         finally:
             await session.commit()
@@ -451,7 +474,8 @@ async def stack_teardown_endpoint(
                     payload["extra"] = event.extra
                 yield f"data: {json.dumps(payload)}\n\n"
         except ValueError as exc:
-            error_data = json.dumps({"event_type": "stack_error", "message": str(exc)})
+            logger.exception("Stack SSE stream failed")
+            error_data = json.dumps({"event_type": "stack_error", "message": _safe_stack_error_message(exc)})
             yield f"data: {error_data}\n\n"
         finally:
             await session.commit()
@@ -496,7 +520,8 @@ async def stack_destroy_storage_endpoint(
                     payload["extra"] = event.extra
                 yield f"data: {json.dumps(payload)}\n\n"
         except ValueError as exc:
-            error_data = json.dumps({"event_type": "stack_error", "message": str(exc)})
+            logger.exception("Stack SSE stream failed")
+            error_data = json.dumps({"event_type": "stack_error", "message": _safe_stack_error_message(exc)})
             yield f"data: {error_data}\n\n"
         finally:
             await session.commit()
