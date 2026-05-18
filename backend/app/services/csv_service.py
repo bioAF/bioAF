@@ -1,9 +1,14 @@
 import csv
 import io
+import logging
 from datetime import datetime
 from typing import Any
 
+from pydantic import ValidationError
+
 from app.schemas.sample import SampleCreate
+
+logger = logging.getLogger("bioaf.csv_service")
 
 # All user-facing sample fields (excludes internal fields like id, status, experiment_id)
 SAMPLE_FIELDS = [
@@ -318,13 +323,18 @@ def parse_sample_csv(
 
     samples = []
     for i, sample_data in enumerate(sample_dicts):
+        row_num = i + 2  # CSV row numbers start at 2 (after header)
         try:
             sample = SampleCreate(**sample_data)
             samples.append(sample)
-        except Exception as e:
-            row_num = i + 2  # CSV row numbers start at 2 (after header)
-            errors.append(f"Row {row_num}: {str(e)}")
-            # Remove corresponding custom fields row so indexes stay aligned
+        except ValidationError as ve:
+            field_msgs = "; ".join(f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in ve.errors())
+            errors.append(f"Row {row_num}: {field_msgs}")
+            if i < len(custom_field_rows):
+                custom_field_rows[i] = {}
+        except Exception:
+            logger.exception("Unexpected error parsing CSV row %d", row_num)
+            errors.append(f"Row {row_num}: could not be parsed")
             if i < len(custom_field_rows):
                 custom_field_rows[i] = {}
 
