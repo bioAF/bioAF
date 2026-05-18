@@ -181,7 +181,7 @@ async def test_create_admin_blocked_after_cli_setup(client, session):
     # Get a setup token (even though admin exists, we need one to test the 409 path)
     from datetime import datetime, timedelta, timezone
 
-    from jose import jwt
+    import jwt
 
     from app.config import settings
 

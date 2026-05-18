@@ -5,7 +5,6 @@ asyncpg>=0.29
 alembic>=1.13
 pydantic[email]>=2.6
 pydantic-settings>=2.1
-python-jose[cryptography]>=3.3
 # Data-at-rest column encryption (Fernet / MultiFernet).
 cryptography>=42
 bcrypt>=4.1
