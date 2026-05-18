@@ -913,6 +913,11 @@ class RestoreService:
         # foothold even for authenticated admins.
         if not _PG_FILENAME_RE.fullmatch(filename):
             return {"status": "error", "message": "Invalid backup filename"}
+        # `basename` is a no-op for filenames that passed the regex above (the
+        # pattern forbids slashes), but it is a CodeQL-recognised path-injection
+        # barrier. The regex provides semantic safety; this satisfies the
+        # taint-flow tracker so it stops flagging the sinks below.
+        filename = os.path.basename(filename)
 
         bucket_name = await _get_backups_bucket(session)
         if not bucket_name:
