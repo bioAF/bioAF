@@ -6,6 +6,9 @@ on:
       - main
     types: [opened, synchronize, reopened, labeled, unlabeled]
 
+permissions:
+  contents: read
+
 jobs:
   check:
     name: Verify changelog entry
