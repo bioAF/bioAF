@@ -3,7 +3,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
-from jose import JWTError, jwt
+import jwt
 
 from app.config import settings
 
@@ -41,7 +41,7 @@ class AuthService:
         try:
             payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
             return payload
-        except JWTError as e:
+        except jwt.PyJWTError as e:
             raise ValueError(f"Invalid token: {e}") from e
 
     @staticmethod
@@ -72,5 +72,5 @@ class AuthService:
             if payload.get("purpose") != "invite":
                 raise ValueError("Not an invite token")
             return payload
-        except JWTError as e:
+        except jwt.PyJWTError as e:
             raise ValueError(f"Invalid invite token: {e}") from e

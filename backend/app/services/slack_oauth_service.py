@@ -4,7 +4,7 @@ import logging
 from urllib.parse import urlencode
 
 import httpx
-from jose import JWTError, jwt
+import jwt
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,7 +46,7 @@ class SlackOAuthService:
                 settings.jwt_secret_key,
                 algorithms=[settings.jwt_algorithm],
             )
-        except JWTError as e:
+        except jwt.PyJWTError as e:
             raise ValueError(f"Invalid state token: {e}") from e
 
     @staticmethod

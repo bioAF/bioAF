@@ -1,8 +1,8 @@
 import logging
 from datetime import datetime, timedelta, timezone
 
+import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request
-from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,7 +60,7 @@ def _validate_setup_token(request: Request) -> dict:
         if payload.get("purpose") != "setup":
             raise HTTPException(status_code=401, detail="Not a setup token")
         return payload
-    except JWTError:
+    except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired setup token")
 
 
