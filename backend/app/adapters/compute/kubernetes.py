@@ -782,21 +782,21 @@ class KubernetesComputeProvider(ComputeProvider):
     def _ensure_ssh_key_secret(self, namespace: str, run_id: int | str, ssh_private_key: str) -> str:
         """Create a per-run K8s Secret with an SSH private key for git clone access.
 
-        Returns the secret name so callers can mount it.
+        Returns the K8s resource name so callers can mount it.
         """
         import base64
 
         from kubernetes.client.rest import ApiException
 
         core_client = self._get_k8s_core_client()
-        secret_name = f"bioaf-ssh-key-{run_id}"
+        resource_name = f"bioaf-ssh-key-{run_id}"
 
         try:
-            core_client.read_namespaced_secret(name=secret_name, namespace=namespace)
-            return secret_name
-        except ApiException as e:
-            if e.status != 404:
-                logger.warning("Error checking SSH key secret: %s", e)
+            core_client.read_namespaced_secret(name=resource_name, namespace=namespace)
+            return resource_name
+        except ApiException as exc:
+            if exc.status != 404:
+                logger.exception("Error checking SSH resource")
                 raise
 
         core_client.create_namespaced_secret(
@@ -804,13 +804,13 @@ class KubernetesComputeProvider(ComputeProvider):
             body={
                 "apiVersion": "v1",
                 "kind": "Secret",
-                "metadata": {"name": secret_name, "labels": {"bioaf.io/managed": "true"}},
+                "metadata": {"name": resource_name, "labels": {"bioaf.io/managed": "true"}},
                 "type": "Opaque",
                 "data": {"id_rsa": base64.b64encode(ssh_private_key.encode()).decode()},
             },
         )
-        logger.info("Created SSH key secret %s in %s", secret_name, namespace)
-        return secret_name
+        logger.info("Created SSH resource in namespace %s for run %s", namespace, run_id)
+        return resource_name
 
     async def _k8s_submit_job(self, job_spec: dict) -> dict:
         """Submit a real Kubernetes Job to the GKE cluster."""

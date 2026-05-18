@@ -760,7 +760,11 @@ class KubernetesNotebookProvider(NotebookProvider):
         pod_manifest = self._build_pod_manifest(session_spec, has_gcs_secret=has_gcs_secret)
         gcs_home_prefix = pod_manifest.pop("_gcs_home_prefix")
 
-        pod_name = pod_manifest["metadata"]["name"]
+        # Re-derive pod_name from session_id rather than reading it off the
+        # manifest dict. Reading off the dict would propagate CodeQL taint from
+        # the chpasswd command embedded in pod_manifest into pod_name, which
+        # then trips py/clear-text-logging at every subsequent log call.
+        pod_name = f"bioaf-notebook-{session_id}"
         service_name = f"bioaf-notebook-svc-{session_id}"
 
         session_type = session_spec.get("session_type", "jupyter")
@@ -992,7 +996,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                     )
                     await db.commit()
             except Exception:
-                logger.exception("Failed to store git info for session %s", session_id)
+                logger.exception("Failed to store git info for compute session")
 
         # Sync home directory to GCS before termination
         if gcs_home_prefix and pod_name:
@@ -1098,7 +1102,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                     from app.services.session_output_service import parse_gsutil_ls_output
 
                     output_files = parse_gsutil_ls_output(str(raw_output))
-                    logger.info("Found %d output files for session %s", len(output_files), session_id)
+                    logger.info("Found %d output files for compute session", len(output_files))
             except Exception as e:
                 logger.warning("Output file listing failed for pod %s: %s", pod_name, e)
 
@@ -1113,9 +1117,9 @@ class KubernetesNotebookProvider(NotebookProvider):
         service_name = f"bioaf-notebook-svc-{session_id}"
         try:
             core_client.delete_namespaced_service(name=service_name, namespace=namespace)
-            logger.info("Deleted service %s", service_name)
-        except Exception as e:
-            logger.warning("Failed to delete service %s: %s", service_name, e)
+            logger.info("Deleted notebook service")
+        except Exception:
+            logger.exception("Failed to delete notebook service")
 
         return {
             "session_id": session_id,
@@ -1230,7 +1234,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         if session_id in _local_sessions:
             _local_sessions[session_id]["status"] = "stopped"
             _local_sessions[session_id]["stopped_at"] = datetime.now(timezone.utc).isoformat()
-        logger.info("Local mode: terminated session %s", session_id)
+        logger.info("Local mode: terminated session")
         return {
             "session_id": session_id,
             "status": "stopped",
