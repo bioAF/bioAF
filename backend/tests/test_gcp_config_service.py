@@ -41,6 +41,11 @@ def _mock_iam_response(permissions: list[str]) -> MagicMock:
     return resp
 
 
+def _missing_apis(apis_check) -> list[str]:
+    """Parse the structured "Required APIs not enabled: a, b, c" message into a list."""
+    return apis_check.message.removeprefix("Required APIs not enabled: ").split(", ")
+
+
 ALL_REQUIRED_APIS = [
     "cloudresourcemanager.googleapis.com",
     "storage.googleapis.com",
@@ -330,8 +335,9 @@ def test_missing_required_apis_reported(mock_sa, mock_rm, mock_storage, mock_gke
 
     apis_check = next(c for c in result.checks if c.name == "apis_enabled")
     assert apis_check.passed is False
-    assert "iam.googleapis.com" in apis_check.message
-    assert "secretmanager.googleapis.com" in apis_check.message
+    missing = _missing_apis(apis_check)
+    assert "iam.googleapis.com" in missing
+    assert "secretmanager.googleapis.com" in missing
     assert result.passed is False
 
 
@@ -429,7 +435,7 @@ def test_missing_pubsub_api_reported(mock_sa, mock_rm, mock_storage, mock_gke, m
 
     apis_check = next(c for c in result.checks if c.name == "apis_enabled")
     assert apis_check.passed is False
-    assert "pubsub.googleapis.com" in apis_check.message
+    assert "pubsub.googleapis.com" in _missing_apis(apis_check)
     assert result.passed is False
 
 
@@ -605,7 +611,7 @@ def test_missing_bigquery_api_reported(mock_sa, mock_rm, mock_storage, mock_gke,
 
     apis_check = next(c for c in result.checks if c.name == "apis_enabled")
     assert apis_check.passed is False
-    assert "bigquery.googleapis.com" in apis_check.message
+    assert "bigquery.googleapis.com" in _missing_apis(apis_check)
 
 
 # ---------------------------------------------------------------------------
@@ -636,7 +642,7 @@ def test_missing_artifact_registry_api_reported(mock_sa, mock_rm, mock_storage, 
 
     apis_check = next(c for c in result.checks if c.name == "apis_enabled")
     assert apis_check.passed is False
-    assert "artifactregistry.googleapis.com" in apis_check.message
+    assert "artifactregistry.googleapis.com" in _missing_apis(apis_check)
 
 
 # ---------------------------------------------------------------------------
@@ -667,7 +673,7 @@ def test_missing_cloud_build_api_reported(mock_sa, mock_rm, mock_storage, mock_g
 
     apis_check = next(c for c in result.checks if c.name == "apis_enabled")
     assert apis_check.passed is False
-    assert "cloudbuild.googleapis.com" in apis_check.message
+    assert "cloudbuild.googleapis.com" in _missing_apis(apis_check)
 
 
 # ---------------------------------------------------------------------------
