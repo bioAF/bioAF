@@ -11,28 +11,6 @@
 > changelog section. Sections below v0.15.1 remain in their original SemVer
 > format.
 
-## v2026.5.2
-
-### Dependency security bumps
-
-- Closes 28 Dependabot alerts via lockfile updates to vulnerable
-  transitive packages. No application code or API surface changes.
-- **Backend (Python, [backend/uv.lock](backend/uv.lock)):** `pyasn1`
-  0.6.2 -> 0.6.3, `requests` 2.32.5 -> 2.34.2, `ecdsa` 0.19.1 -> 0.19.2
-  (resolves the DoS via DER length validation; the unfixed Minerva
-  P-256 timing alert is tracked separately), `cryptography` 46.0.5 ->
-  48.0.0, `urllib3` 2.6.3 -> 2.7.0, `python-multipart` 0.0.22 ->
-  0.0.29, `Mako` 1.3.10 -> 1.3.12.
-- **Frontend (npm, [frontend/package.json](frontend/package.json) +
-  [frontend/package-lock.json](frontend/package-lock.json)):** `postcss`
-  bumped to `^8.5.10` directly; `handlebars` (>= 4.7.9), `dompurify`
-  (>= 3.4.0), `flatted` (>= 3.4.2), `picomatch` (>= 2.3.2 for the 2.x
-  branch and >= 4.0.4 for the 4.x branch), and `glob` (>= 10.5.0)
-  pinned via `overrides` so transitive bumps do not force breaking
-  major-version upgrades on chokidar, eslint, or ts-jest.
-- The remaining 14 Next.js alerts require a Next 14 -> 15 major bump
-  and are tracked in a separate change.
-
 ## v2026.5.1
 
 ### Agent Review (LLM integration v1)
