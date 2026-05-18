@@ -115,7 +115,7 @@ redirected to HTTPS on port 443.
 ./bioaf migrate             # Run pending Alembic migrations
 ./bioaf migrate-down <rev>  # Downgrade to a specific revision
 ./bioaf backup              # Dump database to backups/ directory (gzipped)
-./bioaf seed seed_poc_data.py  # Run a seed script inside the backend container
+./bioaf seed <script.py>       # Run a seed script inside the backend container
 ./bioaf dbshell             # Open a psql session
 ./bioaf reset-db            # Drop and recreate database (destructive, with confirmation)
 ```
