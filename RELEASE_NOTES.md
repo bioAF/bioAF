@@ -11,6 +11,12 @@
 > changelog section. Sections below v0.15.1 remain in their original SemVer
 > format.
 
+## v2026.5.11
+
+### Internal
+
+- Add an explicit `os.path.basename` barrier after the restore-filename regex check so CodeQL's path-injection taint tracker recognises the sanitization. No behavior change for any user.
+
 ## v2026.5.10
 
 ### Security
