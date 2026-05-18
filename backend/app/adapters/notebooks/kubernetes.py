@@ -40,7 +40,7 @@ def _log_id(value: object) -> str:
     while still letting operators correlate log lines for the same entity.
     """
     s = "" if value is None else str(value)
-    return hashlib.sha1(s.encode()).hexdigest()[:8]
+    return hashlib.sha256(s.encode()).hexdigest()[:8]
 
 
 def _get_gcp_token(gcp_config: dict) -> str:
