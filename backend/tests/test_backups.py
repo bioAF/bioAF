@@ -377,6 +377,64 @@ async def test_restore_forbidden_for_viewer(client: AsyncClient, viewer_token: s
     assert response.status_code == 403
 
 
+# --- RestoreService.start filename validation tests ---
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad_filename",
+    [
+        "../etc/passwd",
+        "pgdump-20260403-030000.dump/../etc/passwd",
+        "subdir/pgdump-20260403-030000.dump",
+        "pgdump-20260403-030000.tar",
+        "pgdump-bad.dump",
+        "",
+        "pgdump-20260403-030000.dump\x00.evil",
+    ],
+)
+async def test_restore_start_rejects_unsafe_filename(session, bad_filename):
+    """Filenames that don't match the pgdump pattern are rejected before any I/O."""
+    from app.services import backup_service
+    from app.services.backup_service import RestoreService
+
+    backup_service._restore_state["active"] = False
+
+    with (
+        patch("app.services.backup_service._get_backups_bucket", new_callable=AsyncMock) as mock_bucket,
+        patch("app.services.backup_service._get_gcs_credentials", new_callable=AsyncMock) as mock_creds,
+        patch("app.services.backup_service._get_gcs_client") as mock_client,
+    ):
+        result = await RestoreService.start(session, org_id=1, filename=bad_filename)
+
+    assert result["status"] == "error"
+    assert "filename" in result["message"].lower()
+    mock_bucket.assert_not_called()
+    mock_creds.assert_not_called()
+    mock_client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_restore_start_accepts_valid_pgdump_filename(session):
+    """A real pgdump-<timestamp>.dump filename passes validation and proceeds past it."""
+    from app.services import backup_service
+    from app.services.backup_service import RestoreService
+
+    backup_service._restore_state["active"] = False
+
+    with patch(
+        "app.services.backup_service._get_backups_bucket",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        result = await RestoreService.start(session, org_id=1, filename="pgdump-20260403-030000.dump")
+
+    # Validation passed and execution reached the bucket check, which we stubbed
+    # to return None so the call exits with the bucket-not-configured error.
+    assert result["status"] == "error"
+    assert "bucket" in result["message"].lower()
+
+
 # --- _build_restore_url tests ---
 
 
