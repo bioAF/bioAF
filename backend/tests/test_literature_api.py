@@ -101,17 +101,134 @@ async def test_paper_update_and_audit(client, admin_token):
 
 @pytest.mark.asyncio
 async def test_paper_delete(client, admin_token):
+    """Deleting a paper purges its files and dismisses it; the row remains so
+    its abstract, metadata, and history survive (it just leaves the active
+    Library view and future recommendations)."""
     headers = {"Authorization": f"Bearer {admin_token}"}
     r1 = await client.post(
         "/api/literature/papers",
-        json={"title": "To delete", "authors": [{"given": "A", "family": "B"}], "doi": "10.d/1"},
+        json={
+            "title": "To delete",
+            "authors": [{"given": "A", "family": "B"}],
+            "doi": "10.d/1",
+            "abstract": "Keep this abstract.",
+        },
         headers=headers,
     )
     pid = r1.json()["id"]
     r2 = await client.delete(f"/api/literature/papers/{pid}", headers=headers)
     assert r2.status_code == 204
     r3 = await client.get(f"/api/literature/papers/{pid}", headers=headers)
-    assert r3.status_code == 404
+    assert r3.status_code == 200
+    body = r3.json()
+    assert body["dismissed"] is True
+    assert body["has_pdf"] is False
+    assert body["abstract"] == "Keep this abstract."
+
+
+@pytest.mark.asyncio
+async def test_delete_purges_pdf_refs_and_dismisses(client, admin_token, session):
+    """A paper with a stored PDF loses its file references on delete and is
+    dismissed. (No GCS bucket is provisioned in tests, so the purge is a
+    no-op, but the row's file fields are still cleared.)"""
+    from sqlalchemy import text
+
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    r1 = await client.post(
+        "/api/literature/papers",
+        json={"title": "Has a PDF", "authors": [{"given": "A", "family": "B"}], "doi": "10.pdf/1"},
+        headers=headers,
+    )
+    pid = r1.json()["id"]
+    await session.execute(
+        text(
+            "UPDATE literature_papers SET gcs_pdf_uri = 'gs://b/papers/x/original.pdf', "
+            "has_full_text = true WHERE id = :id"
+        ).bindparams(id=pid)
+    )
+    await session.commit()
+
+    r_before = await client.get(f"/api/literature/papers/{pid}", headers=headers)
+    assert r_before.json()["has_pdf"] is True
+
+    r2 = await client.delete(f"/api/literature/papers/{pid}", headers=headers)
+    assert r2.status_code == 204
+
+    r3 = await client.get(f"/api/literature/papers/{pid}", headers=headers)
+    body = r3.json()
+    assert body["has_pdf"] is False
+    assert body["has_full_text"] is False
+    assert body["dismissed"] is True
+
+
+@pytest.mark.asyncio
+async def test_delete_paper_with_recommendation_keeps_history(
+    client, admin_token, admin_user, session
+):
+    """Deleting an AI-recommended paper must not fail on the non-cascading
+    recommendation FK: the row stays (dismissed), and the AI note still
+    resolves."""
+    from sqlalchemy import text
+
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    rp = await client.post(
+        "/api/literature/papers",
+        json={"title": "Recommended", "authors": [{"given": "A", "family": "B"}], "doi": "10.rec/1"},
+        headers=headers,
+    )
+    pid = rp.json()["id"]
+
+    exp = await session.execute(
+        text(
+            "INSERT INTO experiments (name, status, organization_id, owner_user_id, project_id) "
+            "VALUES ('E', 'registered', :org, :uid, NULL) RETURNING id"
+        ).bindparams(org=admin_user.organization_id, uid=admin_user.id)
+    )
+    experiment_id = exp.scalar_one()
+    run = await session.execute(
+        text(
+            "INSERT INTO literature_review_runs "
+            "(organization_id, experiment_id, triggered_by_user_id, status, llm_provider, llm_model) "
+            "VALUES (:org, :eid, :uid, 'complete', 'anthropic', 'claude') RETURNING id"
+        ).bindparams(org=admin_user.organization_id, eid=experiment_id, uid=admin_user.id)
+    )
+    run_id = run.scalar_one()
+    await session.execute(
+        text(
+            "INSERT INTO literature_recommendations "
+            "(organization_id, paper_id, experiment_id, review_run_id, relevance_score, relevance_bucket, status) "
+            "VALUES (:org, :pid, :eid, :rid, 0.8, 'high', 'accepted')"
+        ).bindparams(org=admin_user.organization_id, pid=pid, eid=experiment_id, rid=run_id)
+    )
+    await session.commit()
+
+    r2 = await client.delete(f"/api/literature/papers/{pid}", headers=headers)
+    assert r2.status_code == 204
+
+    r3 = await client.get(f"/api/literature/papers/{pid}", headers=headers)
+    assert r3.status_code == 200
+    assert r3.json()["dismissed"] is True
+
+    notes = await client.get(
+        f"/api/literature/papers/{pid}/recommendation-notes", headers=headers
+    )
+    assert any(n["experiment_id"] == experiment_id for n in notes.json())
+
+
+@pytest.mark.asyncio
+async def test_viewer_cannot_delete_paper(client, admin_token, viewer_token):
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    r1 = await client.post(
+        "/api/literature/papers",
+        json={"title": "Locked", "authors": [{"given": "A", "family": "B"}], "doi": "10.lock/1"},
+        headers=headers,
+    )
+    pid = r1.json()["id"]
+    r2 = await client.delete(
+        f"/api/literature/papers/{pid}",
+        headers={"Authorization": f"Bearer {viewer_token}"},
+    )
+    assert r2.status_code == 403
 
 
 @pytest.mark.asyncio

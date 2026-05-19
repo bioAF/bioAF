@@ -20,6 +20,13 @@ async def get_literature_bucket(session: AsyncSession) -> str | None:
     return val
 
 
+def paper_blob_prefix(paper_id: int) -> str:
+    """GCS object prefix holding every file for a paper (PDF, extracted text,
+    page images, thumbnail). Deleting the prefix frees all of a paper's
+    storage."""
+    return f"papers/{paper_id}/"
+
+
 def pdf_blob_path(paper_id: int) -> str:
     return f"papers/{paper_id}/original.pdf"
 

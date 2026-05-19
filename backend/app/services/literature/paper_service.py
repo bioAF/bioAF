@@ -267,13 +267,42 @@ async def delete_paper(
     paper: LiteraturePaper,
     user_id: int,
     api_key_id: int | None = None,
+    reason: str | None = None,
 ) -> None:
-    """Hard delete a Paper. Cascade removes comments, associations, reading
-    statuses, dismissals, search-result rows, and recommendations are
-    blocked by FK so we orphan-protect via the caller checking."""
+    """"Delete" a paper from the Library: purge its stored files from GCS and
+    dismiss it org-wide.
+
+    The row itself is kept, along with its abstract, metadata, comments, and
+    AI Lit Review notes. Keeping the row preserves dedup history and the
+    non-cascading recommendation / search-result references, and leaves the
+    paper in the same state as any paper that was found and then dismissed:
+    out of the default Library view and excluded from future recommendations.
+    Reversing the dismissal restores the paper, but not the deleted PDF.
+
+    GCS deletion is best-effort; the file references are cleared regardless so
+    the app stops offering a PDF that may already be gone."""
+    from app.services.literature import dismissal_service, upload_service
+
     paper_id = paper.id
-    await session.delete(paper)
+
+    await upload_service.delete_paper_files(session, paper_id=paper_id)
+
+    paper.gcs_pdf_uri = None
+    paper.extracted_text_uri = None
+    paper.has_full_text = False
+    paper.extraction_status = EXTRACTION_NONE
+    paper.extraction_error = None
     await session.flush()
+
+    await dismissal_service.dismiss(
+        session,
+        paper_id=paper_id,
+        org_id=paper.organization_id,
+        user_id=user_id,
+        reason=reason or "deleted from Library",
+        api_key_id=api_key_id,
+    )
+
     await audit_service.log_action(
         session,
         user_id=user_id,
@@ -281,6 +310,7 @@ async def delete_paper(
         entity_type="literature_paper",
         entity_id=paper_id,
         action="delete",
+        details={"purged_files": True},
     )
 
 

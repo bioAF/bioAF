@@ -213,3 +213,42 @@ async def test_upload_pdf_doi_conflict_prompts_then_merges(
     # B is gone.
     gone = await client.get(f"/api/literature/papers/{b_id}", headers=headers)
     assert gone.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_paper_files_targets_paper_prefix(session, monkeypatch):
+    """delete_paper_files runs a prefix-delete pass over papers/{id}/ when a
+    Literature bucket is provisioned."""
+    from app.services import gcs_storage
+    from app.services.literature import storage, upload_service
+
+    async def fake_bucket(_s):
+        return "test-bucket"
+
+    async def fake_creds(_s):
+        return None
+
+    calls: list[tuple[str, str]] = []
+
+    def fake_delete_prefix(_credentials, bucket, prefix):
+        calls.append((bucket, prefix))
+
+    monkeypatch.setattr(storage, "get_literature_bucket", fake_bucket)
+    monkeypatch.setattr(gcs_storage.GcsStorageService, "get_credentials", fake_creds)
+    monkeypatch.setattr(upload_service, "_delete_prefix", fake_delete_prefix)
+
+    ran = await upload_service.delete_paper_files(session, paper_id=123)
+    assert ran is True
+    assert calls == [("test-bucket", "papers/123/")]
+
+
+@pytest.mark.asyncio
+async def test_delete_paper_files_noop_without_bucket(session, monkeypatch):
+    from app.services.literature import storage, upload_service
+
+    async def fake_bucket(_s):
+        return None
+
+    monkeypatch.setattr(storage, "get_literature_bucket", fake_bucket)
+    ran = await upload_service.delete_paper_files(session, paper_id=1)
+    assert ran is False

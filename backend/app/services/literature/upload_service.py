@@ -70,6 +70,41 @@ async def upload_pdf_to_gcs(
         return None
 
 
+def _delete_prefix(credentials, bucket: str, prefix: str) -> None:
+    """Delete every blob under `prefix` in `bucket`. Runs in a thread
+    executor; isolated as a seam so the deletion can be exercised in tests
+    without the google.cloud.storage client."""
+    from google.cloud import storage as gcs
+
+    client = gcs.Client(credentials=credentials)
+    bucket_obj = client.bucket(bucket)
+    for blob in client.list_blobs(bucket_obj, prefix=prefix):
+        blob.delete()
+
+
+async def delete_paper_files(session: AsyncSession, *, paper_id: int) -> bool:
+    """Best-effort deletion of every GCS object under papers/{paper_id}/.
+
+    Returns True when a delete pass ran against a provisioned bucket, False
+    when no Literature bucket is configured (dev install / storage stack not
+    deployed). Never raises: a GCS failure is logged and the caller proceeds,
+    so a paper is never left undeletable because storage is unavailable."""
+    bucket = await storage.get_literature_bucket(session)
+    if not bucket:
+        return False
+    prefix = storage.paper_blob_prefix(paper_id)
+    from app.services.gcs_storage import GcsStorageService
+
+    try:
+        credentials = await GcsStorageService.get_credentials(session)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _delete_prefix, credentials, bucket, prefix)
+        return True
+    except Exception as e:
+        logger.warning("Failed to delete GCS objects for paper %s: %s", paper_id, e)
+        return False
+
+
 async def upload_extracted_text_to_gcs(
     session: AsyncSession,
     *,
