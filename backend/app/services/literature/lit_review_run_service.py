@@ -38,7 +38,7 @@ from app.models.literature import (
     LiteratureReviewRun,
     LiteratureSourcesConfig,
     PROVENANCE_LIT_REVIEW_RUN,
-    REC_PENDING,
+    REC_ACCEPTED,
     SCOPE_EXPERIMENT,
     SEARCH_COMPLETE,
     SEARCH_FAILED,
@@ -52,7 +52,7 @@ from app.services.event_types import (
     LITERATURE_REVIEW_RUN_COMPLETED,
     LITERATURE_REVIEW_RUN_FAILED,
 )
-from app.services.literature import paper_service
+from app.services.literature import association_service, paper_service
 from app.services.literature.sources import PaperRecord, get_adapter
 from app.services.llm_provider_clients import ProviderError, get_client
 
@@ -272,7 +272,10 @@ async def _do_run(run_id: int) -> None:
         await _mark_failed(run_id, f"llm_ranking: {e}")
         return
 
-    # 5. Persist recommendations.
+    # 5. Persist recommendations. Each surviving candidate is auto-accepted:
+    # the paper is added to the Library, associated with the source experiment,
+    # and recorded as a recommendation with status='accepted'. The reasoning
+    # is surfaced on the paper detail page as an AI Lit Review note.
     async with factory() as s:  # type: ignore[misc]
         run = await _load_run(s, run_id)
         run.candidate_count = len(candidates)
@@ -281,6 +284,7 @@ async def _do_run(run_id: int) -> None:
         scored_sorted = sorted(scored, key=lambda x: x[1], reverse=True)
         kept = [tup for tup in scored_sorted if tup[1] >= run.score_threshold][: run.max_recommendations]
         rec_count = 0
+        decided_at = datetime.now(UTC)
         for candidate, score, reasoning in kept:
             paper_id = await _upsert_lit_review_paper(
                 s, org_id=run.organization_id, user_id=run.triggered_by_user_id, rec=candidate
@@ -305,8 +309,20 @@ async def _do_run(run_id: int) -> None:
                     relevance_score=score,
                     relevance_bucket=derive_bucket(score),
                     reasoning=reasoning,
-                    status=REC_PENDING,
+                    status=REC_ACCEPTED,
+                    decided_by_user_id=run.triggered_by_user_id,
+                    decided_at=decided_at,
                 )
+            )
+            paper = await paper_service.get_paper(s, run.organization_id, paper_id)
+            if not paper.in_library:
+                paper.in_library = True
+            await association_service.get_or_create(
+                s,
+                paper=paper,
+                user_id=run.triggered_by_user_id,
+                scope_type=SCOPE_EXPERIMENT,
+                scope_id=run.experiment_id,
             )
             rec_count += 1
 
@@ -512,8 +528,13 @@ def _parse_scoring_response(text: str) -> list[dict[str, Any]]:
 
 
 async def _exclude_library_and_dismissed(run_id: int, candidates: list[PaperRecord]) -> list[PaperRecord]:
-    """Drop candidates that already exist in the org's literature library
-    (any provenance) or that are actively dismissed."""
+    """Drop candidates already in the org's Literature Library or dismissed.
+
+    Papers that exist in literature_papers but only as cached search results
+    (in_library=false) remain eligible: the LLM can still surface them and
+    we want the user to see the AI's pick on the paper detail page even if
+    a prior search already cached the metadata.
+    """
     if not candidates:
         return []
     factory = _database.async_session_factory
@@ -528,6 +549,7 @@ async def _exclude_library_and_dismissed(run_id: int, candidates: list[PaperReco
         rs = await s.execute(
             select(LiteraturePaper.doi).where(
                 LiteraturePaper.organization_id == run.organization_id,
+                LiteraturePaper.in_library.is_(True),
                 LiteraturePaper.doi.in_(dois),
             )
         )
@@ -573,6 +595,7 @@ async def _upsert_lit_review_paper(
         abstract=rec.abstract,
         provenance=PROVENANCE_LIT_REVIEW_RUN,
         source=rec.source,
+        in_library=True,
     )
     return paper.id
 

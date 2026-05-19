@@ -154,9 +154,14 @@ async def test_lit_review_run_creates_pending_recommendations(
     items = recs.json()["items"]
     assert len(items) == 1
     item = items[0]
-    assert item["status"] == "pending"
+    # Lit Review Runs auto-accept: the paper is added to the library and the
+    # recommendation lands as 'accepted', associated with the source experiment.
+    assert item["status"] == "accepted"
     assert item["relevance_bucket"] == "high"
     assert item["paper"]["title"] == candidate.title
+    assert item["paper"]["in_library"] is True
+    scopes = [(a["scope_type"], a["scope_id"]) for a in item["paper"]["associations"]]
+    assert ("experiment", eid) in scopes
 
 
 @pytest.mark.asyncio
