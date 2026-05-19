@@ -1,5 +1,6 @@
 import {
   uploadPdfToPaper,
+  fetchPaperPdfObjectUrl,
   DoiConflictError,
   type Paper,
 } from "./literature";
@@ -98,4 +99,41 @@ test("throws a plain error on other failures", async () => {
     fakeResponse(400, { detail: "only PDF uploads are supported" }),
   );
   await expect(uploadPdfToPaper(1, file)).rejects.toThrow(/only PDF/);
+});
+
+describe("fetchPaperPdfObjectUrl", () => {
+  const realCreate = global.URL.createObjectURL;
+
+  beforeEach(() => {
+    global.URL.createObjectURL = jest.fn(() => "blob:fake-url");
+  });
+  afterEach(() => {
+    global.URL.createObjectURL = realCreate;
+  });
+
+  test("fetches the PDF endpoint with auth and returns an object URL", async () => {
+    const blob = { type: "application/pdf" };
+    fetchMock.mockResolvedValue({
+      status: 200,
+      ok: true,
+      blob: async () => blob,
+    });
+    const url = await fetchPaperPdfObjectUrl(42);
+    expect(url).toBe("blob:fake-url");
+    const [calledUrl, init] = fetchMock.mock.calls[0];
+    expect(calledUrl).toContain("/api/literature/papers/42/pdf");
+    expect((init as RequestInit).headers).toMatchObject({
+      Authorization: "Bearer test-token",
+    });
+    expect(global.URL.createObjectURL).toHaveBeenCalledWith(blob);
+  });
+
+  test("throws when the paper has no PDF (404)", async () => {
+    fetchMock.mockResolvedValue({
+      status: 404,
+      ok: false,
+      blob: async () => ({}),
+    });
+    await expect(fetchPaperPdfObjectUrl(42)).rejects.toThrow();
+  });
 });

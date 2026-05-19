@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { getCurrentUser, isAuthenticated } from "@/lib/auth";
+import { PaperPdfViewer } from "@/components/literature/PaperPdfViewer";
 import {
   cleanText,
   DoiConflictError,
@@ -285,6 +286,15 @@ export default function PaperDetailPage() {
                   </p>
                 </div>
               )}
+              {paper.has_pdf && (
+                <div className="bg-white rounded shadow p-4">
+                  <h2 className="font-semibold mb-2">Paper PDF</h2>
+                  <PaperPdfViewer
+                    paperId={paper.id}
+                    filename={`${cleanText(paper.title).slice(0, 80) || "paper"}.pdf`}
+                  />
+                </div>
+              )}
               <div className="bg-white rounded shadow p-4">
                 <h2 className="font-semibold mb-2">Comments ({paper.comment_count})</h2>
                 {canComment && (
@@ -398,14 +408,9 @@ export default function PaperDetailPage() {
                     />
                   </label>
                   {paper.has_pdf && (
-                    <a
-                      href={`/api/literature/papers/${paper.id}/pdf`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block text-bioaf-700 hover:underline text-sm mt-2"
-                    >
-                      View current PDF
-                    </a>
+                    <p className="text-xs text-gray-500 mt-2">
+                      The current PDF is shown in the viewer on the left.
+                    </p>
                   )}
                   {pdfError && (
                     <div className="text-xs text-red-700 mt-2">{pdfError}</div>

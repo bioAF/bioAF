@@ -116,6 +116,24 @@ export async function uploadPdfToPaper(
   return resp.json();
 }
 
+// Fetch the paper's PDF as an authenticated blob and return an object URL
+// suitable for an <iframe> src or a download link. The PDF endpoint requires
+// a Bearer token, so a plain <a href> navigation would 401; this routes the
+// bytes through fetch with the auth header instead. Callers must revoke the
+// returned URL when done.
+export async function fetchPaperPdfObjectUrl(paperId: number): Promise<string> {
+  const resp = await fetch(`${API_URL}/api/literature/papers/${paperId}/pdf`, {
+    headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+  });
+  if (!resp.ok) {
+    throw new Error(
+      resp.status === 404 ? "No PDF attached to this paper." : "Could not load the PDF.",
+    );
+  }
+  const blob = await resp.blob();
+  return URL.createObjectURL(blob);
+}
+
 export interface RecommendationNote {
   review_run_id: number;
   experiment_id: number;
