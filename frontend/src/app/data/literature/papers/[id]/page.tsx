@@ -8,9 +8,12 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { getCurrentUser, isAuthenticated } from "@/lib/auth";
 import {
   cleanText,
+  DoiConflictError,
   formatAssociation,
   literature,
+  uploadPdfToPaper,
   type Comment,
+  type DoiConflict,
   type Paper,
   type ReadingStatusValue,
   type RecommendationNote,
@@ -41,6 +44,10 @@ export default function PaperDetailPage() {
   const [replyBody, setReplyBody] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [addingToLibrary, setAddingToLibrary] = useState(false);
+  const [uploadingPdf, setUploadingPdf] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+  const [pendingPdf, setPendingPdf] = useState<File | null>(null);
+  const [conflict, setConflict] = useState<DoiConflict | null>(null);
 
   function refresh() {
     setLoading(true);
@@ -66,6 +73,37 @@ export default function PaperDetailPage() {
     } finally {
       setAddingToLibrary(false);
     }
+  }
+
+  async function doUpload(file: File, confirmMerge: boolean) {
+    setUploadingPdf(true);
+    setPdfError(null);
+    try {
+      await uploadPdfToPaper(paperId, file, confirmMerge);
+      setPendingPdf(null);
+      setConflict(null);
+      refresh();
+    } catch (e) {
+      if (e instanceof DoiConflictError) {
+        setPendingPdf(file);
+        setConflict(e.conflict);
+      } else {
+        setPdfError(e instanceof Error ? e.message : "Upload failed.");
+      }
+    } finally {
+      setUploadingPdf(false);
+    }
+  }
+
+  function onPdfSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      setPdfError("Only PDF files are supported.");
+      return;
+    }
+    doUpload(file, false);
   }
 
   useEffect(() => {
@@ -329,6 +367,52 @@ export default function PaperDetailPage() {
             </section>
 
             <aside className="space-y-4">
+              {canComment && (
+                <div className="bg-white rounded shadow p-4">
+                  <h3 className="font-semibold mb-2">Full paper</h3>
+                  <p className="text-sm text-gray-600 mb-2">
+                    {paper.has_pdf
+                      ? "A PDF is attached. Upload a new file to replace it."
+                      : "No PDF attached yet. Upload the full paper to replace this abstract-only entry."}
+                  </p>
+                  <label className="inline-block">
+                    <span
+                      className={`inline-block px-3 py-1.5 rounded text-sm cursor-pointer ${
+                        uploadingPdf
+                          ? "bg-gray-200 text-gray-500"
+                          : "bg-bioaf-600 text-white hover:bg-bioaf-700"
+                      }`}
+                    >
+                      {uploadingPdf
+                        ? "Uploading..."
+                        : paper.has_pdf
+                          ? "Replace PDF"
+                          : "Upload full paper"}
+                    </span>
+                    <input
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      className="hidden"
+                      disabled={uploadingPdf}
+                      onChange={onPdfSelected}
+                    />
+                  </label>
+                  {paper.has_pdf && (
+                    <a
+                      href={`/api/literature/papers/${paper.id}/pdf`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block text-bioaf-700 hover:underline text-sm mt-2"
+                    >
+                      View current PDF
+                    </a>
+                  )}
+                  {pdfError && (
+                    <div className="text-xs text-red-700 mt-2">{pdfError}</div>
+                  )}
+                </div>
+              )}
+
               <div className="bg-white rounded shadow p-4">
                 <h3 className="font-semibold mb-2">Metadata</h3>
                 <dl className="text-sm space-y-1">
@@ -468,6 +552,41 @@ export default function PaperDetailPage() {
           </div>
         </main>
       </div>
+
+      {conflict && pendingPdf && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-[28rem]">
+            <h3 className="font-semibold mb-2">A paper with this DOI exists</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Another library entry already uses DOI{" "}
+              <span className="font-mono">{conflict.doi}</span>:{" "}
+              <span className="font-medium">{conflict.other_paper_title}</span>.
+              Replacing will merge that entry&apos;s comments, AI Lit Review
+              notes, and associations into this paper, attach the uploaded PDF
+              here, and delete the duplicate. This cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setConflict(null);
+                  setPendingPdf(null);
+                }}
+                disabled={uploadingPdf}
+                className="px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => doUpload(pendingPdf, true)}
+                disabled={uploadingPdf}
+                className="px-3 py-1.5 bg-red-600 text-white rounded text-sm hover:bg-red-700 disabled:opacity-50"
+              >
+                {uploadingPdf ? "Merging..." : "Replace and merge"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

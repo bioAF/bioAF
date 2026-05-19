@@ -56,38 +56,43 @@ async def find_duplicate(
     doi: str | None,
     title: str,
     authors: list[dict] | None,
+    exclude_paper_id: int | None = None,
 ) -> LiteraturePaper | None:
     """Return an existing paper that matches the org-scoped dedup keys, or None.
 
     DOI is the strong key (case-insensitive, prefix-stripped via lower()).
     Fallback uses normalized title plus first/last author keys, all scoped
-    to the organization.
+    to the organization. Pass exclude_paper_id to skip a known row (used when
+    checking whether a PDF upload to paper X collides with a *different*
+    paper).
     """
     title_norm = normalize_title(title)
     first_key, last_key = first_and_last_author_keys(authors)
 
     if doi:
         doi_clean = doi.strip().lower()
-        result = await session.execute(
-            select(LiteraturePaper).where(
-                LiteraturePaper.organization_id == org_id,
-                LiteraturePaper.doi == doi_clean,
-            )
-        )
-        existing = result.scalar_one_or_none()
+        conditions = [
+            LiteraturePaper.organization_id == org_id,
+            LiteraturePaper.doi == doi_clean,
+        ]
+        if exclude_paper_id is not None:
+            conditions.append(LiteraturePaper.id != exclude_paper_id)
+        result = await session.execute(select(LiteraturePaper).where(*conditions))
+        existing = result.scalars().first()
         if existing is not None:
             return existing
 
     if title_norm and first_key:
-        result = await session.execute(
-            select(LiteraturePaper).where(
-                LiteraturePaper.organization_id == org_id,
-                LiteraturePaper.title_normalized == title_norm,
-                LiteraturePaper.first_author_key == first_key,
-                LiteraturePaper.last_author_key == last_key,
-            )
-        )
-        existing = result.scalar_one_or_none()
+        conditions = [
+            LiteraturePaper.organization_id == org_id,
+            LiteraturePaper.title_normalized == title_norm,
+            LiteraturePaper.first_author_key == first_key,
+            LiteraturePaper.last_author_key == last_key,
+        ]
+        if exclude_paper_id is not None:
+            conditions.append(LiteraturePaper.id != exclude_paper_id)
+        result = await session.execute(select(LiteraturePaper).where(*conditions))
+        existing = result.scalars().first()
         if existing is not None:
             return existing
 
@@ -277,6 +282,152 @@ async def delete_paper(
         entity_id=paper_id,
         action="delete",
     )
+
+
+async def merge_papers(
+    session: AsyncSession,
+    *,
+    survivor: LiteraturePaper,
+    duplicate: LiteraturePaper,
+    user_id: int,
+    api_key_id: int | None = None,
+) -> LiteraturePaper:
+    """Fold `duplicate` into `survivor`, then delete `duplicate`.
+
+    Comments, AI Lit Review recommendations/notes, associations, reading
+    statuses, and search-result rows move to the survivor. Rows that would
+    violate a uniqueness constraint on the survivor (a recommendation for the
+    same experiment, an association for the same scope, a reading status for
+    the same user) are dropped from the duplicate rather than reassigned. An
+    active dismissal transfers only if the survivor has none.
+    """
+    from sqlalchemy import update
+
+    from app.models.literature import (
+        LiteratureAssociation,
+        LiteraturePaperComment,
+        LiteraturePaperDismissal,
+        LiteraturePaperReadingStatus,
+        LiteratureRecommendation,
+        LiteratureSearchResult,
+    )
+
+    if survivor.id == duplicate.id:
+        return survivor
+
+    # Comments: no per-paper uniqueness, reassign wholesale.
+    await session.execute(
+        update(LiteraturePaperComment)
+        .where(LiteraturePaperComment.paper_id == duplicate.id)
+        .values(paper_id=survivor.id)
+    )
+
+    # Recommendations: unique on (org, paper, experiment). Drop a duplicate's
+    # rec if the survivor already has one for that experiment.
+    surv_recs = (
+        await session.execute(
+            select(LiteratureRecommendation.experiment_id).where(
+                LiteratureRecommendation.paper_id == survivor.id
+            )
+        )
+    ).scalars().all()
+    surv_rec_exps = set(surv_recs)
+    dup_recs = (
+        await session.execute(
+            select(LiteratureRecommendation).where(LiteratureRecommendation.paper_id == duplicate.id)
+        )
+    ).scalars().all()
+    for rec in dup_recs:
+        if rec.experiment_id in surv_rec_exps:
+            await session.delete(rec)
+        else:
+            rec.paper_id = survivor.id
+
+    # Associations: unique active index on (paper, scope_type, scope_id).
+    surv_assocs = (
+        await session.execute(
+            select(LiteratureAssociation).where(
+                LiteratureAssociation.paper_id == survivor.id,
+                LiteratureAssociation.removed_at.is_(None),
+            )
+        )
+    ).scalars().all()
+    surv_assoc_keys = {(a.scope_type, a.scope_id) for a in surv_assocs}
+    dup_assocs = (
+        await session.execute(
+            select(LiteratureAssociation).where(LiteratureAssociation.paper_id == duplicate.id)
+        )
+    ).scalars().all()
+    for a in dup_assocs:
+        if a.removed_at is None and (a.scope_type, a.scope_id) in surv_assoc_keys:
+            await session.delete(a)
+        else:
+            a.paper_id = survivor.id
+
+    # Reading status: PK (paper, user). Keep the survivor's where they collide.
+    surv_rs_users = set(
+        (
+            await session.execute(
+                select(LiteraturePaperReadingStatus.user_id).where(
+                    LiteraturePaperReadingStatus.paper_id == survivor.id
+                )
+            )
+        ).scalars().all()
+    )
+    dup_rs = (
+        await session.execute(
+            select(LiteraturePaperReadingStatus).where(
+                LiteraturePaperReadingStatus.paper_id == duplicate.id
+            )
+        )
+    ).scalars().all()
+    for rs_row in dup_rs:
+        if rs_row.user_id in surv_rs_users:
+            await session.delete(rs_row)
+        else:
+            rs_row.paper_id = survivor.id
+
+    # Search results: no uniqueness, reassign wholesale.
+    await session.execute(
+        update(LiteratureSearchResult)
+        .where(LiteratureSearchResult.paper_id == duplicate.id)
+        .values(paper_id=survivor.id)
+    )
+
+    # Dismissals: PK is paper_id. Transfer an active duplicate dismissal only
+    # if the survivor has none; otherwise let it cascade-delete with the row.
+    surv_dismissal = (
+        await session.execute(
+            select(LiteraturePaperDismissal).where(LiteraturePaperDismissal.paper_id == survivor.id)
+        )
+    ).scalar_one_or_none()
+    if surv_dismissal is None:
+        dup_dismissal = (
+            await session.execute(
+                select(LiteraturePaperDismissal).where(
+                    LiteraturePaperDismissal.paper_id == duplicate.id
+                )
+            )
+        ).scalar_one_or_none()
+        if dup_dismissal is not None:
+            dup_dismissal.paper_id = survivor.id
+
+    await session.flush()
+
+    dup_id = duplicate.id
+    await session.delete(duplicate)
+    await session.flush()
+
+    await audit_service.log_action(
+        session,
+        user_id=user_id,
+        api_key_id=api_key_id,
+        entity_type="literature_paper",
+        entity_id=survivor.id,
+        action="merge",
+        details={"merged_from_paper_id": dup_id},
+    )
+    return survivor
 
 
 async def list_papers(

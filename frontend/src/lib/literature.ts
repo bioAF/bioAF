@@ -67,6 +67,55 @@ export interface Paper {
   updated_at: string;
 }
 
+export interface DoiConflict {
+  error: string;
+  other_paper_id: number;
+  other_paper_title: string;
+  doi: string;
+}
+
+export class DoiConflictError extends Error {
+  conflict: DoiConflict;
+  constructor(conflict: DoiConflict) {
+    super("doi_conflict");
+    this.name = "DoiConflictError";
+    this.conflict = conflict;
+  }
+}
+
+// Attach a full-text PDF to an existing paper. On a DOI collision with a
+// different paper, the backend returns 409 with the other paper; this
+// surfaces as a DoiConflictError so the UI can prompt to merge. Calling
+// again with confirmMerge=true folds the other paper in and attaches the PDF.
+export async function uploadPdfToPaper(
+  paperId: number,
+  file: File,
+  confirmMerge = false,
+): Promise<Paper> {
+  const form = new FormData();
+  form.append("file", file);
+  const qs = confirmMerge ? "?confirm_merge=true" : "";
+  const resp = await fetch(
+    `${API_URL}/api/literature/papers/${paperId}/upload-pdf${qs}`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      body: form,
+    },
+  );
+  if (resp.status === 409) {
+    const body = await resp.json().catch(() => ({}));
+    throw new DoiConflictError(body.detail as DoiConflict);
+  }
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({ detail: "Upload failed" }));
+    const detail =
+      typeof body.detail === "string" ? body.detail : "Upload failed";
+    throw new Error(detail);
+  }
+  return resp.json();
+}
+
 export interface RecommendationNote {
   review_run_id: number;
   experiment_id: number;

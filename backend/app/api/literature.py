@@ -459,6 +459,81 @@ async def re_extract_paper_endpoint(
     return await _serialize_paper(session, paper, int(current_user["sub"]))
 
 
+@router.post("/papers/{paper_id}/upload-pdf", response_model=PaperResponse)
+async def upload_pdf_to_paper_endpoint(
+    paper_id: int,
+    response: Response,
+    file: UploadFile = File(...),
+    confirm_merge: bool = Query(False),
+    current_user: dict = require_permission("literature", "upload"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Attach a full-text PDF to an existing (often abstract-only) paper.
+
+    The PDF's DOI backfills the paper when it has none. If that DOI already
+    belongs to a *different* paper in the org, the first call returns 409 with
+    that paper's id and title; calling again with confirm_merge=true folds the
+    other paper (its comments, AI notes, associations, reading statuses) into
+    this one and deletes it before attaching the PDF.
+    """
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(400, "only PDF uploads are supported")
+    pdf_bytes = await file.read()
+    if not pdf_bytes:
+        raise HTTPException(400, "uploaded file is empty")
+
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    try:
+        paper = await paper_service.get_paper(session, org_id, paper_id)
+    except PaperNotFound:
+        raise HTTPException(404, "paper not found")
+
+    extracted = upload_service.synchronous_extract_basic(pdf_bytes)
+    effective_doi = paper.doi or extracted.get("doi")
+
+    if effective_doi:
+        conflict = await paper_service.find_duplicate(
+            session,
+            org_id=org_id,
+            doi=effective_doi,
+            title=paper.title,
+            authors=paper.authors_json,
+            exclude_paper_id=paper.id,
+        )
+        if conflict is not None:
+            if not confirm_merge:
+                raise HTTPException(
+                    409,
+                    detail={
+                        "error": "doi_conflict",
+                        "other_paper_id": conflict.id,
+                        "other_paper_title": conflict.title,
+                        "doi": effective_doi,
+                    },
+                )
+            await paper_service.merge_papers(
+                session, survivor=paper, duplicate=conflict, user_id=user_id
+            )
+
+    # Backfill the DOI on the target if it lacked one.
+    if not paper.doi and extracted.get("doi"):
+        await paper_service.update_paper_metadata(
+            session, paper=paper, user_id=user_id, fields={"doi": extracted["doi"]}
+        )
+
+    uri = await upload_service.upload_pdf_to_gcs(session, paper_id=paper.id, pdf_bytes=pdf_bytes)
+    if uri:
+        paper.gcs_pdf_uri = uri
+    await upload_service.mark_extraction_pending(session, paper=paper, user_id=user_id)
+    await session.commit()
+
+    await upload_service.schedule_extraction(paper_id=paper.id, pdf_bytes=pdf_bytes, user_id=user_id)
+    await session.refresh(paper)
+    response.status_code = 200
+    return await _serialize_paper(session, paper, user_id)
+
+
 async def _download_pdf_bytes(session: AsyncSession, gcs_uri: str) -> bytes | None:
     import asyncio
 
