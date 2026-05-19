@@ -530,3 +530,22 @@ async def scope_name_for(session: AsyncSession, scope_type: str, scope_id: int |
         result = await session.execute(select(Experiment.name).where(Experiment.id == scope_id))
         return result.scalar_one_or_none()
     return None
+
+
+async def parent_project_for(
+    session: AsyncSession, scope_type: str, scope_id: int | None
+) -> tuple[int | None, str | None]:
+    """For an experiment-scope association, return (project_id, project_name)
+    of the parent project if one exists. Returns (None, None) for any other
+    scope or when the experiment has no parent."""
+    if scope_type != "experiment" or scope_id is None:
+        return None, None
+    result = await session.execute(
+        select(Project.id, Project.name)
+        .join(Experiment, Experiment.project_id == Project.id)
+        .where(Experiment.id == scope_id)
+    )
+    row = result.first()
+    if row is None:
+        return None, None
+    return int(row[0]), row[1]

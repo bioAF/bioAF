@@ -144,6 +144,75 @@ async def test_associations_create_and_remove(client, admin_token):
 
 
 @pytest.mark.asyncio
+async def test_experiment_association_carries_parent_project_breadcrumb(
+    client, admin_token, admin_user, session
+):
+    """An experiment-scope association should expose its parent project so
+    the UI can render the breadcrumb Project > Experiment. A project-scope
+    association does not need parent metadata."""
+    from sqlalchemy import text
+
+    proj = await session.execute(
+        text(
+            "INSERT INTO projects (name, organization_id, owner_user_id) "
+            "VALUES ('Atlas of TGF-beta', :org, :uid) RETURNING id"
+        ).bindparams(org=admin_user.organization_id, uid=admin_user.id)
+    )
+    project_id = proj.scalar_one()
+    exp = await session.execute(
+        text(
+            "INSERT INTO experiments (name, status, organization_id, owner_user_id, project_id) "
+            "VALUES ('Exp One', 'registered', :org, :uid, :pid) RETURNING id"
+        ).bindparams(
+            org=admin_user.organization_id,
+            uid=admin_user.id,
+            pid=project_id,
+        )
+    )
+    experiment_id = exp.scalar_one()
+    await session.commit()
+
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    r = await client.post(
+        "/api/literature/papers",
+        json={"title": "BC", "authors": [{"given": "A", "family": "B"}], "doi": "10.bc/1"},
+        headers=headers,
+    )
+    pid = r.json()["id"]
+
+    exp_assoc = await client.post(
+        f"/api/literature/papers/{pid}/associations",
+        json={"scope_type": "experiment", "scope_id": experiment_id},
+        headers=headers,
+    )
+    assert exp_assoc.status_code == 200
+    payload = exp_assoc.json()
+    assert payload["scope_type"] == "experiment"
+    assert payload["scope_id"] == experiment_id
+    assert payload["scope_name"] == "Exp One"
+    # New: parent project metadata travels with the experiment association.
+    assert payload["parent_project_id"] == project_id
+    assert payload["parent_project_name"] == "Atlas of TGF-beta"
+
+    proj_assoc = await client.post(
+        f"/api/literature/papers/{pid}/associations",
+        json={"scope_type": "project", "scope_id": project_id},
+        headers=headers,
+    )
+    proj_payload = proj_assoc.json()
+    assert proj_payload["scope_type"] == "project"
+    # No parent for project-scope rows.
+    assert proj_payload.get("parent_project_id") is None
+    assert proj_payload.get("parent_project_name") is None
+
+    # The associations are also reflected on the paper response.
+    paper = await client.get(f"/api/literature/papers/{pid}", headers=headers)
+    by_scope = {a["scope_type"]: a for a in paper.json()["associations"]}
+    assert by_scope["experiment"]["parent_project_name"] == "Atlas of TGF-beta"
+    assert by_scope["project"]["parent_project_id"] is None
+
+
+@pytest.mark.asyncio
 async def test_comments_create_reply_delete(client, admin_token):
     headers = {"Authorization": f"Bearer {admin_token}"}
     r = await client.post(

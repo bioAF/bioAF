@@ -67,6 +67,8 @@ class AssociationPayload(BaseModel):
     scope_type: str
     scope_id: int | None
     scope_name: str | None
+    parent_project_id: int | None = None
+    parent_project_name: str | None = None
     added_by_user_id: int
     added_at: datetime
 
@@ -207,12 +209,17 @@ async def _serialize_paper(session: AsyncSession, paper: LiteraturePaper, user_i
     associations = []
     for a in associations_rows:
         scope_name = await paper_service.scope_name_for(session, a.scope_type, a.scope_id)
+        parent_pid, parent_pname = await paper_service.parent_project_for(
+            session, a.scope_type, a.scope_id
+        )
         associations.append(
             AssociationPayload(
                 id=a.id,
                 scope_type=a.scope_type,
                 scope_id=a.scope_id,
                 scope_name=scope_name,
+                parent_project_id=parent_pid,
+                parent_project_name=parent_pname,
                 added_by_user_id=a.added_by_user_id,
                 added_at=a.added_at,
             )
@@ -732,12 +739,17 @@ async def list_associations_endpoint(
     items = []
     for a in await association_service.list_for_paper(session, paper_id):
         scope_name = await paper_service.scope_name_for(session, a.scope_type, a.scope_id)
+        parent_pid, parent_pname = await paper_service.parent_project_for(
+            session, a.scope_type, a.scope_id
+        )
         items.append(
             AssociationPayload(
                 id=a.id,
                 scope_type=a.scope_type,
                 scope_id=a.scope_id,
                 scope_name=scope_name,
+                parent_project_id=parent_pid,
+                parent_project_name=parent_pname,
                 added_by_user_id=a.added_by_user_id,
                 added_at=a.added_at,
             )
@@ -769,11 +781,16 @@ async def create_association_endpoint(
         raise HTTPException(400, str(e))
     await session.commit()
     scope_name = await paper_service.scope_name_for(session, assoc.scope_type, assoc.scope_id)
+    parent_pid, parent_pname = await paper_service.parent_project_for(
+        session, assoc.scope_type, assoc.scope_id
+    )
     return AssociationPayload(
         id=assoc.id,
         scope_type=assoc.scope_type,
         scope_id=assoc.scope_id,
         scope_name=scope_name,
+        parent_project_id=parent_pid,
+        parent_project_name=parent_pname,
         added_by_user_id=assoc.added_by_user_id,
         added_at=assoc.added_at,
     )

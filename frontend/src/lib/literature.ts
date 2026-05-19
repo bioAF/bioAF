@@ -36,6 +36,8 @@ export interface Association {
   scope_type: ScopeType;
   scope_id: number | null;
   scope_name: string | null;
+  parent_project_id: number | null;
+  parent_project_name: string | null;
   added_by_user_id: number;
   added_at: string;
 }
@@ -332,6 +334,25 @@ export function formatAuthors(authors: Author[]): string {
 export function formatYear(date: string | null): string {
   if (!date) return "";
   return date.slice(0, 4);
+}
+
+// Render an association as a single-line breadcrumb:
+//   project:    "Atlas of TGF-beta"
+//   experiment with parent project: "Atlas of TGF-beta > Exp One"
+//   experiment without parent project: "Exp One"
+//   global: "Global"
+export function formatAssociation(a: Association): string {
+  if (a.scope_type === "global" || a.scope_id === null) {
+    return "Global";
+  }
+  if (a.scope_type === "project") {
+    return a.scope_name ?? `Project #${a.scope_id}`;
+  }
+  const expLabel = a.scope_name ?? `Experiment #${a.scope_id}`;
+  if (a.parent_project_name) {
+    return `${a.parent_project_name} > ${expLabel}`;
+  }
+  return expLabel;
 }
 
 const _HTML_ENTITIES: Record<string, string> = {

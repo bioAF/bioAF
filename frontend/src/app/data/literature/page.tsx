@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import {
   cleanText,
+  formatAssociation,
   formatAuthors,
   formatYear,
   literature,
@@ -263,9 +264,7 @@ export default function LiteratureLibraryPage() {
             key={a.id}
             className="px-1.5 py-0.5 text-xs rounded bg-indigo-50 text-indigo-800"
           >
-            {a.scope_type === "global"
-              ? "Global"
-              : `${a.scope_type === "project" ? "Project" : "Experiment"}: ${a.scope_name ?? `#${a.scope_id}`}`}
+            {formatAssociation(a)}
           </span>
         ))}
         <button

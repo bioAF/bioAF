@@ -8,6 +8,7 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { getCurrentUser, isAuthenticated } from "@/lib/auth";
 import {
   cleanText,
+  formatAssociation,
   literature,
   type Comment,
   type Paper,
@@ -387,7 +388,7 @@ export default function PaperDetailPage() {
                             }
                             className="text-bioaf-700 hover:underline"
                           >
-                            {a.scope_name ?? `#${a.scope_id}`}
+                            {formatAssociation(a)}
                           </a>
                         )}
                         {(user?.id === a.added_by_user_id ||
