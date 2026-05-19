@@ -272,6 +272,43 @@ async def test_bench_role_has_basic_actions(session: AsyncSession, admin_user):
     assert not await role_service.has_permission(session, role_id, "literature", "run_lit_review")
 
 
+def test_migration_084_qualifies_ambiguous_columns():
+    """Migration 084's UPDATE joins two tables that both define created_at.
+
+    Asserts the SQL qualifies created_at (and other join-table columns) so
+    Postgres does not raise AmbiguousColumnError. Catches the exact class of
+    bug seen on the demo instance when 083 -> 084 ran.
+    """
+    import re
+    from pathlib import Path
+
+    text = (
+        Path(__file__).resolve().parent.parent
+        / "alembic"
+        / "versions"
+        / "084_literature_in_library.py"
+    ).read_text()
+
+    # Pull the UPDATE block that joins literature_recommendations and
+    # literature_review_runs (the one that backfills 'accepted').
+    update_re = re.compile(
+        r"UPDATE\s+literature_recommendations[\s\S]+?literature_review_runs[\s\S]+?status\s*=\s*'pending'",
+        re.IGNORECASE,
+    )
+    matches = update_re.findall(text)
+    assert matches, "migration 084 should contain the recommendations backfill UPDATE"
+    sql = matches[0]
+
+    # Any reference to a column defined on both tables must be qualified.
+    # created_at exists on both literature_recommendations and literature_review_runs.
+    bare_created_at = re.search(r"(?<![\w.])created_at(?![\w.])", sql)
+    assert bare_created_at is None, (
+        "migration 084 has an unqualified 'created_at' reference; both tables "
+        "in the UPDATE define this column and Postgres will raise "
+        "AmbiguousColumnError. Use literature_recommendations.created_at."
+    )
+
+
 @pytest.mark.asyncio
 async def test_sources_config_api_key_encrypted(session: AsyncSession, admin_user):
     cfg = LiteratureSourcesConfig(

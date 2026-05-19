@@ -62,8 +62,11 @@ def upgrade() -> None:
         """
         UPDATE literature_recommendations
         SET status = 'accepted',
-            decided_by_user_id = triggered_by_user_id,
-            decided_at = COALESCE(decided_at, created_at)
+            decided_by_user_id = literature_review_runs.triggered_by_user_id,
+            decided_at = COALESCE(
+                literature_recommendations.decided_at,
+                literature_recommendations.created_at
+            )
         FROM literature_review_runs
         WHERE literature_recommendations.review_run_id = literature_review_runs.id
           AND literature_recommendations.status = 'pending'
