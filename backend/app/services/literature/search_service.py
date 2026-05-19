@@ -104,7 +104,6 @@ async def _run_search(search_id: int, user_id: int, max_per_source: int) -> None
         sources = list(search.sources_json or [])
         api_keys = await _load_api_keys(s, search.organization_id, sources)
         query_text = search.query_text
-        org_id = search.organization_id
         search.status = SEARCH_RUNNING
         search.started_at = datetime.now(UTC)
         await s.commit()
@@ -112,9 +111,7 @@ async def _run_search(search_id: int, user_id: int, max_per_source: int) -> None
     # Run all source coroutines in their own fresh session to avoid contention.
     results: dict[str, list[PaperRecord] | Exception] = {}
     tasks = {
-        src: asyncio.create_task(
-            _run_source_with_timeout(src, query_text, api_keys.get(src), max_per_source)
-        )
+        src: asyncio.create_task(_run_source_with_timeout(src, query_text, api_keys.get(src), max_per_source))
         for src in sources
     }
     for src, task in tasks.items():
@@ -178,9 +175,7 @@ async def _run_search(search_id: int, user_id: int, max_per_source: int) -> None
             logger.exception("event_bus emit failed for search %s", search_id)
 
 
-async def _run_source_with_timeout(
-    src: str, query: str, api_key: str | None, max_per_source: int
-) -> list[PaperRecord]:
+async def _run_source_with_timeout(src: str, query: str, api_key: str | None, max_per_source: int) -> list[PaperRecord]:
     adapter = get_adapter(src)
     try:
         return await asyncio.wait_for(
@@ -191,9 +186,7 @@ async def _run_source_with_timeout(
         raise TimeoutError(f"source {src} exceeded {_PER_SOURCE_TIMEOUT_SECONDS}s") from e
 
 
-async def _load_api_keys(
-    session: AsyncSession, org_id: int, sources: list[str]
-) -> dict[str, str | None]:
+async def _load_api_keys(session: AsyncSession, org_id: int, sources: list[str]) -> dict[str, str | None]:
     result = await session.execute(
         select(LiteratureSourcesConfig).where(
             LiteratureSourcesConfig.organization_id == org_id,

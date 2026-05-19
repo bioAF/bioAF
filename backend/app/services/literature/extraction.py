@@ -50,9 +50,7 @@ def parse_authors(pdf_authors: str | None) -> list[dict]:
         else:
             tokens = raw.strip().split()
             if len(tokens) >= 2:
-                authors.append(
-                    {"given": " ".join(tokens[:-1]), "family": tokens[-1]}
-                )
+                authors.append({"given": " ".join(tokens[:-1]), "family": tokens[-1]})
             elif tokens:
                 authors.append({"given": "", "family": tokens[0]})
     return authors

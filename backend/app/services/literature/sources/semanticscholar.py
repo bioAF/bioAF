@@ -43,9 +43,7 @@ async def fetch_by_doi(doi: str, api_key: str | None) -> PaperRecord | None:
     headers = {"x-api-key": api_key} if api_key else {}
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
-            r = await client.get(
-                f"{_BASE}/paper/DOI:{doi}", params={"fields": _FIELDS}, headers=headers
-            )
+            r = await client.get(f"{_BASE}/paper/DOI:{doi}", params={"fields": _FIELDS}, headers=headers)
             r.raise_for_status()
             return _parse_result(r.json())
         except (httpx.HTTPError, ValueError) as e:

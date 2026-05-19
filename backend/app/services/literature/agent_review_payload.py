@@ -11,6 +11,7 @@ toggles_applied) for the audit log."""
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Iterable
 
@@ -27,7 +28,6 @@ from app.models.literature import (
     PROVENANCE_LIT_REVIEW_RUN,
     PROVENANCE_SOURCE_SEARCH,
     PROVENANCE_USER_UPLOAD,
-    REC_ACCEPTED,
     SCOPE_EXPERIMENT,
     SCOPE_PROJECT,
 )
@@ -98,9 +98,7 @@ async def resolve_toggles(
 
 
 async def _experiment_project_id(session: AsyncSession, experiment_id: int) -> int | None:
-    rs = await session.execute(
-        select(Experiment.project_id).where(Experiment.id == experiment_id)
-    )
+    rs = await session.execute(select(Experiment.project_id).where(Experiment.id == experiment_id))
     return rs.scalar_one_or_none()
 
 
@@ -229,7 +227,7 @@ def _render_paper(
         lines.append(f"Title: {paper.title}")
         if paper.authors_json:
             authors_str = ", ".join(
-                f"{a.get('given','').strip()} {a.get('family','').strip()}".strip()
+                f"{a.get('given', '').strip()} {a.get('family', '').strip()}".strip()
                 for a in paper.authors_json
                 if a.get("family") or a.get("given")
             )
@@ -266,9 +264,7 @@ async def build_literature_payload(
     scope_id: int,
     expand_to_project: bool = False,
 ) -> LiteraturePayloadResult:
-    toggles = await resolve_toggles(
-        session, org_id=org_id, scope_type=scope_type, scope_id=scope_id
-    )
+    toggles = await resolve_toggles(session, org_id=org_id, scope_type=scope_type, scope_id=scope_id)
     toggles_applied = {
         "abstracts_enabled": toggles.abstracts_enabled,
         "comments_enabled": toggles.comments_enabled,
@@ -290,9 +286,7 @@ async def build_literature_payload(
         return LiteraturePayloadResult(markdown="", toggles_applied=toggles_applied)
 
     comments_by_paper = (
-        await load_comments_for_papers(session, [p.id for p in papers])
-        if toggles.comments_enabled
-        else {}
+        await load_comments_for_papers(session, [p.id for p in papers]) if toggles.comments_enabled else {}
     )
     full_text_by_paper: dict[int, str] = {}
     if toggles.full_text_enabled:
@@ -358,8 +352,6 @@ async def build_literature_payload(
 # ---------------------------------------------------------------------------
 # DOI link post-processor
 # ---------------------------------------------------------------------------
-
-import re
 
 _DOI_RE = re.compile(r"\b10\.\d{4,9}/[^\s\"<>]+", re.IGNORECASE)
 

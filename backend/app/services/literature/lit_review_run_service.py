@@ -31,7 +31,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import app.database as _database
 from app.models.experiment import Experiment
 from app.models.literature import (
-    EXTRACTION_NONE,
     LiteratureAssociation,
     LiteraturePaper,
     LiteraturePaperDismissal,
@@ -41,7 +40,6 @@ from app.models.literature import (
     PROVENANCE_LIT_REVIEW_RUN,
     REC_PENDING,
     SCOPE_EXPERIMENT,
-    SCOPE_PROJECT,
     SEARCH_COMPLETE,
     SEARCH_FAILED,
     SEARCH_PARTIAL,
@@ -172,9 +170,7 @@ async def _do_run(run_id: int) -> None:
             return
 
         context_block = await _build_experiment_context(s, run, experiment)
-        provider_cfg = await llm_provider_config_service.get_for_provider(
-            s, run.organization_id, run.llm_provider
-        )
+        provider_cfg = await llm_provider_config_service.get_for_provider(s, run.organization_id, run.llm_provider)
         if provider_cfg is None:
             run.status = SEARCH_FAILED
             run.error_message = "llm provider configuration disappeared"
@@ -184,13 +180,17 @@ async def _do_run(run_id: int) -> None:
         api_key = provider_cfg.api_key
 
         sources_cfg = (
-            await s.execute(
-                select(LiteratureSourcesConfig).where(
-                    LiteratureSourcesConfig.organization_id == run.organization_id,
-                    LiteratureSourcesConfig.enabled == True,  # noqa: E712
+            (
+                await s.execute(
+                    select(LiteratureSourcesConfig).where(
+                        LiteratureSourcesConfig.organization_id == run.organization_id,
+                        LiteratureSourcesConfig.enabled == True,  # noqa: E712
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         sources_by_name = {row.source: row for row in sources_cfg}
 
     # 1. LLM generates expansion queries.
@@ -222,9 +222,7 @@ async def _do_run(run_id: int) -> None:
     seen_keys: set[str] = set()
     for q in queries:
         per_query_tasks = {
-            src: asyncio.create_task(
-                _safe_source_search(src, q, sources_by_name[src].api_key)
-            )
+            src: asyncio.create_task(_safe_source_search(src, q, sources_by_name[src].api_key))
             for src in sources_by_name
         }
         for src, t in per_query_tasks.items():
@@ -281,9 +279,7 @@ async def _do_run(run_id: int) -> None:
 
         # Sort by score desc, keep those above threshold, cap at max_recommendations.
         scored_sorted = sorted(scored, key=lambda x: x[1], reverse=True)
-        kept = [tup for tup in scored_sorted if tup[1] >= run.score_threshold][
-            : run.max_recommendations
-        ]
+        kept = [tup for tup in scored_sorted if tup[1] >= run.score_threshold][: run.max_recommendations]
         rec_count = 0
         for candidate, score, reasoning in kept:
             paper_id = await _upsert_lit_review_paper(
@@ -353,9 +349,7 @@ async def _safe_source_search(src: str, query: str, api_key: str | None) -> list
     )
 
 
-async def _build_experiment_context(
-    session: AsyncSession, run: LiteratureReviewRun, experiment: Experiment
-) -> str:
+async def _build_experiment_context(session: AsyncSession, run: LiteratureReviewRun, experiment: Experiment) -> str:
     """Return a Markdown context block summarizing the experiment plus up to
     30 papers already associated with it."""
     parts: list[str] = []
@@ -405,9 +399,7 @@ async def _build_experiment_context(
     return "\n".join(parts)
 
 
-async def _llm_generate_queries(
-    provider: str, model: str, api_key: str | None, context_block: str
-) -> list[str]:
+async def _llm_generate_queries(provider: str, model: str, api_key: str | None, context_block: str) -> list[str]:
     system = (
         "You are a research librarian assisting a computational biology team. "
         "Generate exactly five concise scientific search queries (one per line, "
@@ -449,25 +441,23 @@ async def _llm_score_candidates(
         first_author = ""
         if c.authors:
             f = c.authors[0]
-            first_author = f"{f.get('family','')}".strip()
+            first_author = f"{f.get('family', '')}".strip()
         title = c.title.replace("\n", " ")[:300]
         abstract = (c.abstract or "")[:600]
-        summaries.append(
-            f"[{i}] {title} | first_author={first_author} | doi={c.doi or 'n/a'}\nAbstract: {abstract}"
-        )
+        summaries.append(f"[{i}] {title} | first_author={first_author} | doi={c.doi or 'n/a'}\nAbstract: {abstract}")
     candidate_block = "\n\n".join(summaries)
 
     system = (
         "You are a research librarian. Score each candidate paper 0.0 to 1.0 on "
         "relevance to the experiment context. Respond with valid JSON only: a "
-        "list of objects {\"index\": int, \"score\": float, \"reasoning\": str}. "
+        'list of objects {"index": int, "score": float, "reasoning": str}. '
         "Use one short sentence for reasoning. Do not include any text outside "
         "the JSON. Omit clearly irrelevant candidates."
     )
     payload = (
         f"Experiment context:\n\n{context_block}\n\n"
         f"Candidate papers:\n\n{candidate_block}\n\n"
-        "Return a JSON array. Example: [{\"index\": 0, \"score\": 0.82, \"reasoning\": \"...\"}]"
+        'Return a JSON array. Example: [{"index": 0, "score": 0.82, "reasoning": "..."}]'
     )
     client = get_client(provider)
     output = await client.submit(prompt=system, payload=payload, model=model, api_key=api_key)
@@ -521,9 +511,7 @@ def _parse_scoring_response(text: str) -> list[dict[str, Any]]:
     return []
 
 
-async def _exclude_library_and_dismissed(
-    run_id: int, candidates: list[PaperRecord]
-) -> list[PaperRecord]:
+async def _exclude_library_and_dismissed(run_id: int, candidates: list[PaperRecord]) -> list[PaperRecord]:
     """Drop candidates that already exist in the org's literature library
     (any provenance) or that are actively dismissed."""
     if not candidates:
@@ -590,9 +578,7 @@ async def _upsert_lit_review_paper(
 
 
 async def _load_run(session: AsyncSession, run_id: int) -> LiteratureReviewRun | None:
-    rs = await session.execute(
-        select(LiteratureReviewRun).where(LiteratureReviewRun.id == run_id)
-    )
+    rs = await session.execute(select(LiteratureReviewRun).where(LiteratureReviewRun.id == run_id))
     return rs.scalar_one_or_none()
 
 
@@ -630,9 +616,7 @@ async def list_runs_for_experiment(
     return list(rs.scalars().all())
 
 
-async def get_run(
-    session: AsyncSession, *, org_id: int, run_id: int
-) -> LiteratureReviewRun | None:
+async def get_run(session: AsyncSession, *, org_id: int, run_id: int) -> LiteratureReviewRun | None:
     rs = await session.execute(
         select(LiteratureReviewRun).where(
             LiteratureReviewRun.id == run_id,

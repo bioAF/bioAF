@@ -10,7 +10,7 @@ import logging
 from datetime import date
 from typing import Any
 
-from sqlalchemy import and_, exists, or_, select
+from sqlalchemy import and_, exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.experiment import Experiment
@@ -116,9 +116,7 @@ async def create_paper(
     if provenance not in ALL_PROVENANCES:
         raise ValueError(f"invalid provenance: {provenance}")
 
-    existing = await find_duplicate(
-        session, org_id=org_id, doi=doi, title=title, authors=authors
-    )
+    existing = await find_duplicate(session, org_id=org_id, doi=doi, title=title, authors=authors)
     if existing is not None:
         raise DuplicatePaper(existing.id)
 
@@ -221,9 +219,7 @@ async def update_paper_metadata(
     if "publication_date" in fields:
         new_date = fields["publication_date"]
         if new_date != paper.publication_date:
-            previous["publication_date"] = (
-                paper.publication_date.isoformat() if paper.publication_date else None
-            )
+            previous["publication_date"] = paper.publication_date.isoformat() if paper.publication_date else None
             paper.publication_date = new_date
             changed_keys.append("publication_date")
 
@@ -370,9 +366,7 @@ async def comment_count(session: AsyncSession, paper_id: int) -> int:
     return len(result.fetchall())
 
 
-async def reading_status_for(
-    session: AsyncSession, paper_id: int, user_id: int
-) -> str | None:
+async def reading_status_for(session: AsyncSession, paper_id: int, user_id: int) -> str | None:
     result = await session.execute(
         select(LiteraturePaperReadingStatus.status).where(
             LiteraturePaperReadingStatus.paper_id == paper_id,
@@ -382,9 +376,7 @@ async def reading_status_for(
     return result.scalar_one_or_none()
 
 
-async def scope_name_for(
-    session: AsyncSession, scope_type: str, scope_id: int | None
-) -> str | None:
+async def scope_name_for(session: AsyncSession, scope_type: str, scope_id: int | None) -> str | None:
     if scope_id is None or scope_type == "global":
         return None
     if scope_type == "project":

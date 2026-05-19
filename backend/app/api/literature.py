@@ -23,15 +23,11 @@ from app.database import get_session
 from app.models.literature import (
     AgentReviewLiteratureConfig,
     ALL_PROVENANCES,
-    ALL_READING_STATUSES,
     ALL_SCOPES,
     EXTERNAL_SOURCES,
-    LiteratureAssociation,
     LiteraturePaper,
     LiteraturePaperComment,
-    LiteraturePaperDismissal,
 )
-from app.models.user import User
 from app.services import role_service
 from app.services.literature import (
     association_service,
@@ -44,7 +40,6 @@ from app.services.literature import (
     recommendation_service,
     search_service,
     sources_config_service,
-    storage,
     upload_service,
 )
 from app.services.literature.comment_service import (
@@ -194,9 +189,7 @@ class CitationBulkRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-async def _serialize_paper(
-    session: AsyncSession, paper: LiteraturePaper, user_id: int
-) -> PaperResponse:
+async def _serialize_paper(session: AsyncSession, paper: LiteraturePaper, user_id: int) -> PaperResponse:
     associations_rows = await association_service.list_for_paper(session, paper.id)
     associations = []
     for a in associations_rows:
@@ -371,9 +364,7 @@ async def upload_paper_pdf_endpoint(
     await session.commit()
 
     # Fire and forget the heavy extraction (full text + persistence).
-    await upload_service.schedule_extraction(
-        paper_id=paper.id, pdf_bytes=pdf_bytes, user_id=user_id
-    )
+    await upload_service.schedule_extraction(paper_id=paper.id, pdf_bytes=pdf_bytes, user_id=user_id)
 
     response.status_code = 201
     await session.refresh(paper)
@@ -398,13 +389,9 @@ async def re_extract_paper_endpoint(
     if pdf_bytes is None:
         raise HTTPException(500, "could not download paper PDF")
 
-    await upload_service.mark_extraction_pending(
-        session, paper=paper, user_id=int(current_user["sub"])
-    )
+    await upload_service.mark_extraction_pending(session, paper=paper, user_id=int(current_user["sub"]))
     await session.commit()
-    await upload_service.schedule_extraction(
-        paper_id=paper_id, pdf_bytes=pdf_bytes, user_id=int(current_user["sub"])
-    )
+    await upload_service.schedule_extraction(paper_id=paper_id, pdf_bytes=pdf_bytes, user_id=int(current_user["sub"]))
     await session.refresh(paper)
     return await _serialize_paper(session, paper, int(current_user["sub"]))
 
@@ -527,9 +514,7 @@ async def update_paper_endpoint(
     if "authors" in fields and fields["authors"] is not None:
         fields["authors"] = [a if isinstance(a, dict) else a.model_dump(exclude_none=True) for a in fields["authors"]]
     try:
-        await paper_service.update_paper_metadata(
-            session, paper=paper, user_id=user_id, fields=fields
-        )
+        await paper_service.update_paper_metadata(session, paper=paper, user_id=user_id, fields=fields)
     except ValueError as e:
         raise HTTPException(400, str(e))
     await session.commit()
@@ -595,9 +580,7 @@ async def reverse_dismissal_endpoint(
     except PaperNotFound:
         raise HTTPException(404, "paper not found")
     try:
-        dismissal = await dismissal_service.reverse(
-            session, paper_id=paper_id, user_id=int(current_user["sub"])
-        )
+        dismissal = await dismissal_service.reverse(session, paper_id=paper_id, user_id=int(current_user["sub"]))
     except Exception:
         raise HTTPException(404, "no active dismissal")
     await session.commit()
@@ -691,9 +674,7 @@ async def delete_association_endpoint(
     except PaperNotFound:
         raise HTTPException(404, "paper not found")
     try:
-        await association_service.soft_remove(
-            session, association_id=association_id, user_id=int(current_user["sub"])
-        )
+        await association_service.soft_remove(session, association_id=association_id, user_id=int(current_user["sub"]))
     except association_service.AssociationNotFound:
         raise HTTPException(404, "association not found")
     await session.commit()
@@ -835,9 +816,7 @@ async def set_reading_status_endpoint(
     except PaperNotFound:
         raise HTTPException(404, "paper not found")
     user_id = int(current_user["sub"])
-    row = await reading_status_service.set_status(
-        session, paper_id=paper_id, user_id=user_id, status=body.status
-    )
+    row = await reading_status_service.set_status(session, paper_id=paper_id, user_id=user_id, status=body.status)
     await session.commit()
     return ReadingStatusResponse(paper_id=paper_id, user_id=user_id, status=row.status)
 
@@ -1050,9 +1029,7 @@ async def get_search_endpoint(
     session: AsyncSession = Depends(get_session),
 ):
     try:
-        row = await search_service.get_search(
-            session, org_id=int(current_user["org_id"]), search_id=search_id
-        )
+        row = await search_service.get_search(session, org_id=int(current_user["org_id"]), search_id=search_id)
     except search_service.SearchNotFound:
         raise HTTPException(404, "search not found")
     return _serialize_search(row)
@@ -1065,9 +1042,7 @@ async def get_search_results_endpoint(
     session: AsyncSession = Depends(get_session),
 ):
     try:
-        await search_service.get_search(
-            session, org_id=int(current_user["org_id"]), search_id=search_id
-        )
+        await search_service.get_search(session, org_id=int(current_user["org_id"]), search_id=search_id)
     except search_service.SearchNotFound:
         raise HTTPException(404, "search not found")
     pairs = await search_service.list_search_results(session, search_id=search_id)
@@ -1169,9 +1144,7 @@ async def get_scoped_literature_config_endpoint(
     if scope_type not in {"experiment", "project"}:
         raise HTTPException(400, "scope_type must be experiment or project")
     org_id = int(current_user["org_id"])
-    row = await _get_literature_config(
-        session, org_id=org_id, scope_type=scope_type, scope_id=scope_id
-    )
+    row = await _get_literature_config(session, org_id=org_id, scope_type=scope_type, scope_id=scope_id)
     return _serialize_literature_config(row, scope_type=scope_type, scope_id=scope_id)
 
 
@@ -1206,9 +1179,7 @@ async def _upsert_literature_config(
 
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
-    row = await _get_literature_config(
-        session, org_id=org_id, scope_type=scope_type, scope_id=scope_id
-    )
+    row = await _get_literature_config(session, org_id=org_id, scope_type=scope_type, scope_id=scope_id)
     previous = None
     if row is None:
         row = AgentReviewLiteratureConfig(
@@ -1358,9 +1329,7 @@ async def get_lit_review_run_endpoint(
     current_user: dict = require_permission("literature", "view"),
     session: AsyncSession = Depends(get_session),
 ):
-    row = await lit_review_run_service.get_run(
-        session, org_id=int(current_user["org_id"]), run_id=run_id
-    )
+    row = await lit_review_run_service.get_run(session, org_id=int(current_user["org_id"]), run_id=run_id)
     if row is None:
         raise HTTPException(404, "lit review run not found")
     return _serialize_run(row)
@@ -1385,9 +1354,7 @@ class RecommendationListResponse(BaseModel):
     total: int
 
 
-async def _serialize_recommendation(
-    session: AsyncSession, rec, user_id: int
-) -> RecommendationPayload:
+async def _serialize_recommendation(session: AsyncSession, rec, user_id: int) -> RecommendationPayload:
     paper = await paper_service.get_paper(session, rec.organization_id, rec.paper_id)
     return RecommendationPayload(
         id=rec.id,

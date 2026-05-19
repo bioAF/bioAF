@@ -102,16 +102,12 @@ async def upload_extracted_text_to_gcs(
         return None
 
 
-async def schedule_extraction(
-    *, paper_id: int, pdf_bytes: bytes, user_id: int, api_key_id: int | None = None
-) -> None:
+async def schedule_extraction(*, paper_id: int, pdf_bytes: bytes, user_id: int, api_key_id: int | None = None) -> None:
     """Spawn an asyncio task that re-extracts and persists in a fresh session."""
     asyncio.create_task(_extract_and_persist(paper_id, pdf_bytes, user_id, api_key_id))
 
 
-async def _extract_and_persist(
-    paper_id: int, pdf_bytes: bytes, user_id: int, api_key_id: int | None
-) -> None:
+async def _extract_and_persist(paper_id: int, pdf_bytes: bytes, user_id: int, api_key_id: int | None) -> None:
     factory = _database.async_session_factory
     if factory is None:
         return

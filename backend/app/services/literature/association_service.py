@@ -97,9 +97,7 @@ async def soft_remove(
     user_id: int,
     api_key_id: int | None = None,
 ) -> LiteratureAssociation:
-    result = await session.execute(
-        select(LiteratureAssociation).where(LiteratureAssociation.id == association_id)
-    )
+    result = await session.execute(select(LiteratureAssociation).where(LiteratureAssociation.id == association_id))
     assoc = result.scalar_one_or_none()
     if assoc is None:
         raise AssociationNotFound(f"association {association_id} not found")

@@ -27,9 +27,7 @@ async def list_for_org(session: AsyncSession, org_id: int) -> list[LiteratureSou
     return list(result.scalars().all())
 
 
-async def get_or_create(
-    session: AsyncSession, org_id: int, source: str
-) -> LiteratureSourcesConfig:
+async def get_or_create(session: AsyncSession, org_id: int, source: str) -> LiteratureSourcesConfig:
     if source not in EXTERNAL_SOURCES:
         raise UnknownSource(f"unknown source: {source}")
     result = await session.execute(

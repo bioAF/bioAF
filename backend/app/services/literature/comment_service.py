@@ -35,9 +35,7 @@ async def create(
         parent = await get(session, parent_id)
         if parent.paper_id != paper_id:
             raise ValueError("parent comment belongs to a different paper")
-    comment = LiteraturePaperComment(
-        paper_id=paper_id, user_id=user_id, body=body.strip(), parent_id=parent_id
-    )
+    comment = LiteraturePaperComment(paper_id=paper_id, user_id=user_id, body=body.strip(), parent_id=parent_id)
     session.add(comment)
     await session.flush()
     await audit_service.log_action(
@@ -53,9 +51,7 @@ async def create(
 
 
 async def get(session: AsyncSession, comment_id: int) -> LiteraturePaperComment:
-    result = await session.execute(
-        select(LiteraturePaperComment).where(LiteraturePaperComment.id == comment_id)
-    )
+    result = await session.execute(select(LiteraturePaperComment).where(LiteraturePaperComment.id == comment_id))
     comment = result.scalar_one_or_none()
     if comment is None:
         raise CommentNotFound(f"comment {comment_id} not found")

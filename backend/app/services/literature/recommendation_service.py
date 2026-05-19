@@ -35,31 +35,21 @@ async def list_for_org(
     page: int = 1,
     page_size: int = 50,
 ) -> tuple[list[LiteratureRecommendation], int]:
-    query = select(LiteratureRecommendation).where(
-        LiteratureRecommendation.organization_id == org_id
-    )
+    query = select(LiteratureRecommendation).where(LiteratureRecommendation.organization_id == org_id)
     if experiment_id is not None:
         query = query.where(LiteratureRecommendation.experiment_id == experiment_id)
     if status:
         query = query.where(LiteratureRecommendation.status == status)
-    query = query.order_by(
-        LiteratureRecommendation.experiment_id, LiteratureRecommendation.relevance_score.desc()
-    )
+    query = query.order_by(LiteratureRecommendation.experiment_id, LiteratureRecommendation.relevance_score.desc())
     from sqlalchemy import func as sa_func
 
-    total = int(
-        (
-            await session.execute(select(sa_func.count()).select_from(query.subquery()))
-        ).scalar_one()
-    )
+    total = int((await session.execute(select(sa_func.count()).select_from(query.subquery()))).scalar_one())
     offset = (max(page, 1) - 1) * max(page_size, 1)
     rs = await session.execute(query.limit(page_size).offset(offset))
     return list(rs.scalars().all()), total
 
 
-async def get_recommendation(
-    session: AsyncSession, *, org_id: int, recommendation_id: int
-) -> LiteratureRecommendation:
+async def get_recommendation(session: AsyncSession, *, org_id: int, recommendation_id: int) -> LiteratureRecommendation:
     rs = await session.execute(
         select(LiteratureRecommendation).where(
             LiteratureRecommendation.id == recommendation_id,
