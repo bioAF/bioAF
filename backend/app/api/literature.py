@@ -90,9 +90,21 @@ class PaperResponse(BaseModel):
     comment_count: int
     reading_status: str | None
     dismissed: bool
+    in_library: bool
     associations: list[AssociationPayload]
     created_at: datetime
     updated_at: datetime
+
+
+class RecommendationNotePayload(BaseModel):
+    review_run_id: int
+    experiment_id: int
+    relevance_score: float
+    relevance_bucket: str
+    reasoning: str | None
+    llm_provider: str
+    llm_model: str
+    created_at: datetime
 
 
 class PaperListResponse(BaseModel):
@@ -224,6 +236,7 @@ async def _serialize_paper(session: AsyncSession, paper: LiteraturePaper, user_i
         comment_count=await paper_service.comment_count(session, paper.id),
         reading_status=await paper_service.reading_status_for(session, paper.id, user_id),
         dismissed=await paper_service.is_dismissed(session, paper.id),
+        in_library=paper.in_library,
         associations=associations,
         created_at=paper.created_at,
         updated_at=paper.updated_at,
@@ -260,13 +273,18 @@ async def list_papers_endpoint(
     session: AsyncSession = Depends(get_session),
     scope_type: str | None = Query(None),
     scope_id: int | None = Query(None),
+    project_id: int | None = Query(None),
+    experiment_id: int | None = Query(None),
     provenance: str | None = Query(None),
     added_by_user_id: int | None = Query(None),
     has_full_text: bool | None = Query(None),
     source: str | None = Query(None),
     year_min: int | None = Query(None),
     year_max: int | None = Query(None),
-    show_dismissed: bool = Query(False),
+    in_library: bool | None = Query(True),
+    include_active: bool = Query(True),
+    include_dismissed: bool = Query(False),
+    reading_status: list[str] | None = Query(None),
     sort: str = Query("added"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
@@ -276,23 +294,33 @@ async def list_papers_endpoint(
     if provenance and provenance not in ALL_PROVENANCES:
         raise HTTPException(400, "invalid provenance")
 
+    user_id = int(current_user["sub"])
+    reading_filter: tuple[str, ...] | None = None
+    if reading_status is not None:
+        reading_filter = tuple(reading_status)
+
     papers, total = await paper_service.list_papers(
         session,
         org_id=int(current_user["org_id"]),
+        user_id=user_id,
         scope_type=scope_type,
         scope_id=scope_id,
+        project_id=project_id,
+        experiment_id=experiment_id,
         provenance=provenance,
         added_by_user_id=added_by_user_id,
         has_full_text=has_full_text,
         source=source,
         year_min=year_min,
         year_max=year_max,
-        show_dismissed=show_dismissed,
+        in_library=in_library,
+        include_active=include_active,
+        include_dismissed=include_dismissed,
+        reading_statuses=reading_filter,
         page=page,
         page_size=page_size,
         sort=sort,
     )
-    user_id = int(current_user["sub"])
     items = [await _serialize_paper(session, p, user_id) for p in papers]
     return PaperListResponse(items=items, total=total, page=page, page_size=page_size)
 
@@ -495,6 +523,72 @@ async def get_paper_endpoint(
     except PaperNotFound:
         raise HTTPException(404, "paper not found")
     return await _serialize_paper(session, paper, int(current_user["sub"]))
+
+
+@router.get(
+    "/papers/{paper_id}/recommendation-notes",
+    response_model=list[RecommendationNotePayload],
+)
+async def list_recommendation_notes_endpoint(
+    paper_id: int,
+    current_user: dict = require_permission("literature", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    try:
+        await paper_service.get_paper(session, int(current_user["org_id"]), paper_id)
+    except PaperNotFound:
+        raise HTTPException(404, "paper not found")
+    notes = await paper_service.list_recommendation_notes(session, paper_id)
+    return [RecommendationNotePayload(**n) for n in notes]
+
+
+@router.post("/papers/{paper_id}/add-to-library", response_model=PaperResponse)
+async def add_paper_to_library_endpoint(
+    paper_id: int,
+    current_user: dict = require_permission("literature", "upload"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    try:
+        paper = await paper_service.get_paper(session, org_id, paper_id)
+    except PaperNotFound:
+        raise HTTPException(404, "paper not found")
+    await paper_service.add_to_library(session, paper=paper, user_id=user_id)
+    await session.commit()
+    await session.refresh(paper)
+    return await _serialize_paper(session, paper, user_id)
+
+
+class BulkAddToLibraryRequest(BaseModel):
+    paper_ids: list[int]
+
+
+class BulkAddToLibraryResponse(BaseModel):
+    added: list[int]
+    not_found: list[int]
+
+
+@router.post("/papers/bulk-add-to-library", response_model=BulkAddToLibraryResponse)
+async def bulk_add_to_library_endpoint(
+    body: BulkAddToLibraryRequest,
+    current_user: dict = require_permission("literature", "upload"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    added: list[int] = []
+    not_found: list[int] = []
+    for pid in body.paper_ids:
+        try:
+            paper = await paper_service.get_paper(session, org_id, pid)
+        except PaperNotFound:
+            not_found.append(pid)
+            continue
+        await paper_service.add_to_library(session, paper=paper, user_id=user_id)
+        added.append(pid)
+    await session.commit()
+    return BulkAddToLibraryResponse(added=added, not_found=not_found)
 
 
 @router.patch("/papers/{paper_id}", response_model=PaperResponse)
