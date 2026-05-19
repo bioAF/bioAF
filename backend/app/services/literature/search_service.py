@@ -233,6 +233,7 @@ async def _ingest_records(
                     abstract=rec.abstract,
                     provenance=PROVENANCE_SOURCE_SEARCH,
                     source=source_name,
+                    in_library=False,
                 )
             except paper_service.DuplicatePaper as e:
                 paper = await paper_service.get_paper(session, org_id, e.existing_paper_id)
