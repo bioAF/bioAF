@@ -284,3 +284,38 @@ async def test_no_active_llm_provider_fails_creation(
         f"/api/literature/experiments/{eid}/lit-review-runs", json={}, headers=headers
     )
     assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_lit_review_run_uses_org_relevance_threshold_by_default(
+    client, admin_token, admin_user, session
+):
+    """When the launch body omits score_threshold, the run is created with
+    the org's configured lit_review_relevance_threshold (default 0.65)."""
+    await _seed_llm_provider(session, admin_user)
+    eid = await _make_experiment(session, admin_user)
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # Bump the org default to 0.5 first so the assertion is not coincidental.
+    await client.put(
+        "/api/literature/settings/lit-review",
+        json={"relevance_threshold": 0.5},
+        headers=headers,
+    )
+
+    resp = await client.post(
+        f"/api/literature/experiments/{eid}/lit-review-runs",
+        json={},  # no score_threshold override
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["score_threshold"] == 0.5
+
+    # A per-run override still wins.
+    resp2 = await client.post(
+        f"/api/literature/experiments/{eid}/lit-review-runs",
+        json={"score_threshold": 0.9},
+        headers=headers,
+    )
+    assert resp2.status_code == 201
+    assert resp2.json()["score_threshold"] == 0.9

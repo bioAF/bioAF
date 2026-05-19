@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -27,5 +27,8 @@ class Organization(Base):
     setup_code_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, default=None)
     setup_code_expires_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
+    )
+    lit_review_relevance_threshold: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.65, server_default="0.65"
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

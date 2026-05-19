@@ -459,6 +459,43 @@ async def test_reading_status_toggle_filters(client, admin_token):
     assert ids[2] not in rs_ids
 
 
+@pytest.mark.asyncio
+async def test_lit_review_settings_default_and_update(client, admin_token, viewer_token):
+    """The org's Lit Review relevance threshold defaults to 0.65 and is
+    settable by admins between 0.0 and 1.0 inclusive."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    resp = await client.get(
+        "/api/literature/settings/lit-review", headers=headers
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["relevance_threshold"] == 0.65
+
+    upd = await client.put(
+        "/api/literature/settings/lit-review",
+        json={"relevance_threshold": 0.4},
+        headers=headers,
+    )
+    assert upd.status_code == 200
+    assert upd.json()["relevance_threshold"] == 0.4
+
+    # Out of range rejected.
+    bad = await client.put(
+        "/api/literature/settings/lit-review",
+        json={"relevance_threshold": 1.5},
+        headers=headers,
+    )
+    assert bad.status_code == 400
+
+    # Non-admin (viewer) cannot configure.
+    v = await client.put(
+        "/api/literature/settings/lit-review",
+        json={"relevance_threshold": 0.5},
+        headers={"Authorization": f"Bearer {viewer_token}"},
+    )
+    assert v.status_code == 403
+
+
 def test_sanitize_source_text_decodes_and_strips():
     """The source-text sanitizer decodes HTML entities and strips inline tags."""
     from app.services.literature.sources import sanitize_source_text

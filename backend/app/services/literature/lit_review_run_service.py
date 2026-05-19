@@ -79,11 +79,16 @@ async def create_run(
     experiment_id: int,
     triggered_by_user_id: int,
     max_recommendations: int = 10,
-    score_threshold: float = 0.33,
+    score_threshold: float | None = None,
     api_key_id: int | None = None,
 ) -> LiteratureReviewRun:
     """Insert a new LiteratureReviewRun row and audit log entry. The caller
-    commits and then calls schedule_run()."""
+    commits and then calls schedule_run().
+
+    If score_threshold is None, fall back to the org's
+    lit_review_relevance_threshold (default 0.65). This is the
+    admin-controlled lower bound set via Settings > Integrations > LLMs.
+    """
     cfg = await llm_provider_config_service.get_active(session, org_id)
     if cfg is None:
         raise NoActiveLlmProvider("org has no active LLM provider")
@@ -92,6 +97,15 @@ async def create_run(
     experiment = rs.scalar_one_or_none()
     if experiment is None or experiment.organization_id != org_id:
         raise ReviewRunFailed("experiment not found in this org")
+
+    if score_threshold is None:
+        from app.models.organization import Organization
+
+        org_rs = await session.execute(
+            select(Organization.lit_review_relevance_threshold).where(Organization.id == org_id)
+        )
+        threshold = org_rs.scalar_one_or_none()
+        score_threshold = float(threshold) if threshold is not None else 0.65
 
     run = LiteratureReviewRun(
         organization_id=org_id,

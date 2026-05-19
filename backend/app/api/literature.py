@@ -591,6 +591,14 @@ async def add_paper_to_library_endpoint(
     return await _serialize_paper(session, paper, user_id)
 
 
+class LitReviewSettingsPayload(BaseModel):
+    relevance_threshold: float
+
+
+class LitReviewSettingsUpdateRequest(BaseModel):
+    relevance_threshold: float
+
+
 class BulkAddToLibraryRequest(BaseModel):
     paper_ids: list[int]
 
@@ -598,6 +606,56 @@ class BulkAddToLibraryRequest(BaseModel):
 class BulkAddToLibraryResponse(BaseModel):
     added: list[int]
     not_found: list[int]
+
+
+@router.get("/settings/lit-review", response_model=LitReviewSettingsPayload)
+async def get_lit_review_settings_endpoint(
+    current_user: dict = require_permission("literature", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    from app.models.organization import Organization
+
+    org_id = int(current_user["org_id"])
+    rs = await session.execute(
+        select(Organization.lit_review_relevance_threshold).where(Organization.id == org_id)
+    )
+    value = rs.scalar_one_or_none()
+    if value is None:
+        value = 0.65
+    return LitReviewSettingsPayload(relevance_threshold=float(value))
+
+
+@router.put("/settings/lit-review", response_model=LitReviewSettingsPayload)
+async def update_lit_review_settings_endpoint(
+    body: LitReviewSettingsUpdateRequest,
+    current_user: dict = require_permission("literature", "configure_sources"),
+    session: AsyncSession = Depends(get_session),
+):
+    from app.models.organization import Organization
+    from app.services import audit_service
+
+    threshold = body.relevance_threshold
+    if not (0.0 <= threshold <= 1.0):
+        raise HTTPException(400, "relevance_threshold must be between 0.0 and 1.0")
+
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    rs = await session.execute(select(Organization).where(Organization.id == org_id))
+    org = rs.scalar_one()
+    previous = org.lit_review_relevance_threshold
+    org.lit_review_relevance_threshold = threshold
+    await session.flush()
+    await audit_service.log_action(
+        session,
+        user_id=user_id,
+        entity_type="organization",
+        entity_id=org_id,
+        action="update_lit_review_threshold",
+        details={"relevance_threshold": threshold},
+        previous_value={"relevance_threshold": previous},
+    )
+    await session.commit()
+    return LitReviewSettingsPayload(relevance_threshold=threshold)
 
 
 @router.post("/papers/bulk-add-to-library", response_model=BulkAddToLibraryResponse)
@@ -1396,7 +1454,8 @@ class LitReviewRunListResponse(BaseModel):
 
 class CreateLitReviewRunRequest(BaseModel):
     max_recommendations: int = 10
-    score_threshold: float = 0.33
+    # When omitted, the org's lit_review_relevance_threshold is used.
+    score_threshold: float | None = None
 
 
 def _serialize_run(r) -> LitReviewRunPayload:

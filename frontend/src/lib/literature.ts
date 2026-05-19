@@ -318,6 +318,14 @@ export const literature = {
   getOrgConfig: () => api.get<LiteratureConfig>("/api/literature/agent-review-config"),
   updateOrgConfig: (body: Partial<LiteratureConfig>) =>
     api.put<LiteratureConfig>("/api/literature/agent-review-config", body),
+
+  getLitReviewSettings: () =>
+    api.get<{ relevance_threshold: number }>("/api/literature/settings/lit-review"),
+  updateLitReviewSettings: (relevance_threshold: number) =>
+    api.put<{ relevance_threshold: number }>(
+      "/api/literature/settings/lit-review",
+      { relevance_threshold },
+    ),
 };
 
 export function formatAuthors(authors: Author[]): string {

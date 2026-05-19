@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { literature } from "@/lib/literature";
 
 type ProviderId = "openai" | "anthropic" | "google" | "gemma";
 
@@ -170,6 +171,9 @@ export function LlmSettingsContent() {
           </button>
         </div>
       )}
+
+      <LitReviewThresholdSection />
+
 
       <div className="space-y-4">
         {ALL_PROVIDERS.map((provider) => (
@@ -421,6 +425,89 @@ function DataEgressWarningModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function LitReviewThresholdSection() {
+  const [value, setValue] = useState<number | null>(null);
+  const [input, setInput] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    literature
+      .getLitReviewSettings()
+      .then((s) => {
+        if (cancelled) return;
+        setValue(s.relevance_threshold);
+        setInput(String(s.relevance_threshold));
+      })
+      .catch((e) => setError((e as Error).message));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function save() {
+    setError(null);
+    setSaved(false);
+    const parsed = Number(input);
+    if (Number.isNaN(parsed) || parsed < 0 || parsed > 1) {
+      setError("Enter a number between 0.0 and 1.0.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const next = await literature.updateLitReviewSettings(parsed);
+      setValue(next.relevance_threshold);
+      setInput(String(next.relevance_threshold));
+      setSaved(true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (value === null && !error) {
+    return null;
+  }
+
+  return (
+    <div className="bg-white border border-gray-200 rounded p-4 space-y-2">
+      <h3 className="font-semibold text-sm">
+        AI Literature Review Relevance Lower Bound
+      </h3>
+      <p className="text-xs text-gray-500">
+        Papers scored below this threshold by the LLM are not added to the
+        Library. Default 0.65. Set higher for stricter filtering, lower to see
+        more candidates.
+      </p>
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          min={0}
+          max={1}
+          step={0.01}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          className="border border-gray-300 rounded px-3 py-1.5 text-sm w-28"
+        />
+        <button
+          onClick={save}
+          disabled={saving}
+          className="bg-bioaf-600 text-white px-3 py-1.5 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
+        >
+          {saving ? "Saving..." : "Save"}
+        </button>
+        {saved && !error && (
+          <span className="text-xs text-green-700">Saved.</span>
+        )}
+      </div>
+      {error && <div className="text-xs text-red-700">{error}</div>}
     </div>
   );
 }
