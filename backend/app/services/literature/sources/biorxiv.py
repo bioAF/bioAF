@@ -13,7 +13,7 @@ from datetime import date, timedelta
 
 import httpx
 
-from app.services.literature.sources import PaperRecord, RateLimit
+from app.services.literature.sources import PaperRecord, RateLimit, sanitize_source_text
 
 logger = logging.getLogger("bioaf.literature.biorxiv")
 
@@ -75,9 +75,9 @@ async def fetch_by_doi(doi: str, api_key: str | None) -> PaperRecord | None:
 
 
 def _build_record(entry: dict) -> PaperRecord:
-    title = (entry.get("title") or "").strip()
+    title = sanitize_source_text((entry.get("title") or "").strip()) or ""
     doi = (entry.get("doi") or "").strip().lower() or None
-    abstract = entry.get("abstract") or None
+    abstract = sanitize_source_text(entry.get("abstract") or None)
     pdf_url = None
     if doi:
         pdf_url = f"https://www.biorxiv.org/content/{doi}.full.pdf"

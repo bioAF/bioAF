@@ -7,7 +7,7 @@ from datetime import date
 
 import httpx
 
-from app.services.literature.sources import PaperRecord, RateLimit
+from app.services.literature.sources import PaperRecord, RateLimit, sanitize_source_text
 
 logger = logging.getLogger("bioaf.literature.europepmc")
 
@@ -40,11 +40,13 @@ async def fetch_by_doi(doi: str, api_key: str | None) -> PaperRecord | None:
 
 
 def _parse_result(item: dict) -> PaperRecord:
-    title = (item.get("title") or "").strip()
+    title = sanitize_source_text((item.get("title") or "").strip()) or ""
     doi = (item.get("doi") or "").strip().lower() or None
     pmid = item.get("pmid") or None
-    abstract = item.get("abstractText") or None
-    journal = (item.get("journalTitle") or item.get("journalInfo", {}).get("journal", {}).get("title")) or None
+    abstract = sanitize_source_text(item.get("abstractText") or None)
+    journal = sanitize_source_text(
+        (item.get("journalTitle") or item.get("journalInfo", {}).get("journal", {}).get("title")) or None
+    )
     pub_date_str = item.get("firstPublicationDate") or item.get("electronicPublicationDate")
     pub_date = None
     if pub_date_str:

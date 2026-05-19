@@ -8,7 +8,7 @@ from datetime import date
 
 import httpx
 
-from app.services.literature.sources import PaperRecord, RateLimit
+from app.services.literature.sources import PaperRecord, RateLimit, sanitize_source_text
 
 logger = logging.getLogger("bioaf.literature.pubmed")
 
@@ -76,7 +76,7 @@ def _parse_efetch_xml(xml_text: str) -> list[PaperRecord]:
         logger.warning("PubMed efetch parse error: %s", e)
         return results
     for article in root.findall(".//PubmedArticle"):
-        title = _text(article.find(".//ArticleTitle")) or ""
+        title = sanitize_source_text(_text(article.find(".//ArticleTitle"))) or ""
         if not title:
             continue
         pmid = _text(article.find(".//PMID"))
@@ -87,7 +87,7 @@ def _parse_efetch_xml(xml_text: str) -> list[PaperRecord]:
                 break
         abstract_parts = []
         for ab in article.findall(".//Abstract/AbstractText"):
-            t = _text(ab)
+            t = sanitize_source_text(_text(ab))
             if t:
                 abstract_parts.append(t)
         abstract = "\n".join(abstract_parts) or None
@@ -99,7 +99,9 @@ def _parse_efetch_xml(xml_text: str) -> list[PaperRecord]:
             if family or given:
                 authors.append({"family": family, "given": given})
 
-        journal = _text(article.find(".//Journal/Title")) or _text(article.find(".//ISOAbbreviation"))
+        journal = sanitize_source_text(
+            _text(article.find(".//Journal/Title")) or _text(article.find(".//ISOAbbreviation"))
+        )
         pub_date = _parse_pubmed_date(article)
         results.append(
             PaperRecord(

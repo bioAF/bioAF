@@ -13,9 +13,36 @@ Adapters never write to the database; the search coordinator does.
 
 from __future__ import annotations
 
+import html
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Protocol
+
+
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def sanitize_source_text(value: str | None) -> str | None:
+    """Strip HTML tags and decode HTML entities from source-returned text.
+
+    Sources sometimes embed inline markup (`<i>`, `<sup>`, `<sub>`) and
+    HTML-entity-encode special characters (`&amp;`, `&lt;`, `&gt;`). When the
+    payload ends up in JSON metadata or rendered as plain text we want the
+    decoded, tag-free form so titles and abstracts read cleanly without a
+    second pass on the frontend.
+    """
+    if value is None:
+        return None
+    decoded = html.unescape(value)
+    # Some sources double-encode (`&amp;lt;sup&amp;gt;`); unescape twice to
+    # cover that case before stripping tags.
+    if "&" in decoded:
+        decoded = html.unescape(decoded)
+    cleaned = _TAG_RE.sub("", decoded)
+    # Collapse runs of whitespace introduced by removed tags.
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned or None
 
 
 @dataclass(frozen=True)
