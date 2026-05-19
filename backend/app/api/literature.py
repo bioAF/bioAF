@@ -37,8 +37,10 @@ from app.services.literature import (
     citation_service,
     comment_service,
     dismissal_service,
+    lit_review_run_service,
     paper_service,
     reading_status_service,
+    recommendation_service,
     search_service,
     sources_config_service,
     storage,
@@ -1077,6 +1079,213 @@ async def get_search_results_endpoint(
         seen.add(paper.id)
         items.append(await _serialize_paper(session, paper, user_id))
     return PaperListResponse(items=items, total=len(items), page=1, page_size=len(items) or 1)
+
+
+class LitReviewRunPayload(BaseModel):
+    id: int
+    experiment_id: int
+    triggered_by_user_id: int
+    status: str
+    llm_provider: str
+    llm_model: str
+    expansion_queries_json: list[str] | None
+    candidate_count: int | None
+    recommendation_count: int | None
+    max_recommendations: int
+    score_threshold: float
+    started_at: datetime | None
+    completed_at: datetime | None
+    error_message: str | None
+    created_at: datetime
+
+
+class LitReviewRunListResponse(BaseModel):
+    items: list[LitReviewRunPayload]
+
+
+class CreateLitReviewRunRequest(BaseModel):
+    max_recommendations: int = 10
+    score_threshold: float = 0.33
+
+
+def _serialize_run(r) -> LitReviewRunPayload:
+    return LitReviewRunPayload(
+        id=r.id,
+        experiment_id=r.experiment_id,
+        triggered_by_user_id=r.triggered_by_user_id,
+        status=r.status,
+        llm_provider=r.llm_provider,
+        llm_model=r.llm_model,
+        expansion_queries_json=r.expansion_queries_json,
+        candidate_count=r.candidate_count,
+        recommendation_count=r.recommendation_count,
+        max_recommendations=r.max_recommendations,
+        score_threshold=r.score_threshold,
+        started_at=r.started_at,
+        completed_at=r.completed_at,
+        error_message=r.error_message,
+        created_at=r.created_at,
+    )
+
+
+@router.post(
+    "/experiments/{experiment_id}/lit-review-runs",
+    response_model=LitReviewRunPayload,
+    status_code=201,
+)
+async def create_lit_review_run_endpoint(
+    experiment_id: int,
+    body: CreateLitReviewRunRequest = Body(default_factory=CreateLitReviewRunRequest),
+    current_user: dict = require_permission("literature", "run_lit_review"),
+    session: AsyncSession = Depends(get_session),
+):
+    try:
+        run = await lit_review_run_service.create_run(
+            session,
+            org_id=int(current_user["org_id"]),
+            experiment_id=experiment_id,
+            triggered_by_user_id=int(current_user["sub"]),
+            max_recommendations=body.max_recommendations,
+            score_threshold=body.score_threshold,
+        )
+    except lit_review_run_service.NoActiveLlmProvider:
+        raise HTTPException(409, "no_active_llm_provider")
+    except lit_review_run_service.ReviewRunFailed as e:
+        raise HTTPException(400, str(e))
+    await session.commit()
+    await lit_review_run_service.schedule_run(run_id=run.id)
+    return _serialize_run(run)
+
+
+@router.get(
+    "/experiments/{experiment_id}/lit-review-runs",
+    response_model=LitReviewRunListResponse,
+)
+async def list_lit_review_runs_endpoint(
+    experiment_id: int,
+    current_user: dict = require_permission("literature", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    rows = await lit_review_run_service.list_runs_for_experiment(
+        session, org_id=int(current_user["org_id"]), experiment_id=experiment_id
+    )
+    return LitReviewRunListResponse(items=[_serialize_run(r) for r in rows])
+
+
+@router.get("/lit-review-runs/{run_id}", response_model=LitReviewRunPayload)
+async def get_lit_review_run_endpoint(
+    run_id: int,
+    current_user: dict = require_permission("literature", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    row = await lit_review_run_service.get_run(
+        session, org_id=int(current_user["org_id"]), run_id=run_id
+    )
+    if row is None:
+        raise HTTPException(404, "lit review run not found")
+    return _serialize_run(row)
+
+
+class RecommendationPayload(BaseModel):
+    id: int
+    paper: PaperResponse
+    experiment_id: int
+    review_run_id: int
+    relevance_score: float
+    relevance_bucket: str
+    reasoning: str | None
+    status: str
+    decided_by_user_id: int | None
+    decided_at: datetime | None
+    created_at: datetime
+
+
+class RecommendationListResponse(BaseModel):
+    items: list[RecommendationPayload]
+    total: int
+
+
+async def _serialize_recommendation(
+    session: AsyncSession, rec, user_id: int
+) -> RecommendationPayload:
+    paper = await paper_service.get_paper(session, rec.organization_id, rec.paper_id)
+    return RecommendationPayload(
+        id=rec.id,
+        paper=await _serialize_paper(session, paper, user_id),
+        experiment_id=rec.experiment_id,
+        review_run_id=rec.review_run_id,
+        relevance_score=rec.relevance_score,
+        relevance_bucket=rec.relevance_bucket,
+        reasoning=rec.reasoning,
+        status=rec.status,
+        decided_by_user_id=rec.decided_by_user_id,
+        decided_at=rec.decided_at,
+        created_at=rec.created_at,
+    )
+
+
+@router.get("/recommendations", response_model=RecommendationListResponse)
+async def list_recommendations_endpoint(
+    current_user: dict = require_permission("literature", "view"),
+    session: AsyncSession = Depends(get_session),
+    experiment_id: int | None = Query(None),
+    status: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+):
+    rows, total = await recommendation_service.list_for_org(
+        session,
+        org_id=int(current_user["org_id"]),
+        experiment_id=experiment_id,
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
+    user_id = int(current_user["sub"])
+    items = [await _serialize_recommendation(session, r, user_id) for r in rows]
+    return RecommendationListResponse(items=items, total=total)
+
+
+@router.post("/recommendations/{recommendation_id}/accept", response_model=RecommendationPayload)
+async def accept_recommendation_endpoint(
+    recommendation_id: int,
+    current_user: dict = require_permission("literature", "run_lit_review"),
+    session: AsyncSession = Depends(get_session),
+):
+    try:
+        rec = await recommendation_service.accept(
+            session,
+            org_id=int(current_user["org_id"]),
+            recommendation_id=recommendation_id,
+            user_id=int(current_user["sub"]),
+        )
+    except recommendation_service.RecommendationNotFound:
+        raise HTTPException(404, "recommendation not found")
+    except recommendation_service.RecommendationAlreadyDecided as e:
+        raise HTTPException(409, str(e))
+    await session.commit()
+    return await _serialize_recommendation(session, rec, int(current_user["sub"]))
+
+
+@router.post("/recommendations/{recommendation_id}/dismiss", response_model=RecommendationPayload)
+async def dismiss_recommendation_endpoint(
+    recommendation_id: int,
+    current_user: dict = require_permission("literature", "dismiss"),
+    session: AsyncSession = Depends(get_session),
+):
+    try:
+        rec = await recommendation_service.dismiss(
+            session,
+            org_id=int(current_user["org_id"]),
+            recommendation_id=recommendation_id,
+            user_id=int(current_user["sub"]),
+        )
+    except recommendation_service.RecommendationNotFound:
+        raise HTTPException(404, "recommendation not found")
+    except recommendation_service.RecommendationAlreadyDecided as e:
+        raise HTTPException(409, str(e))
+    await session.commit()
+    return await _serialize_recommendation(session, rec, int(current_user["sub"]))
 
 
 @router.post("/citations/bulk", response_class=PlainTextResponse)
