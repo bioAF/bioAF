@@ -139,6 +139,7 @@ class CommentPayload(BaseModel):
     id: int
     paper_id: int
     user_id: int
+    user_name: str | None
     parent_id: int | None
     body: str | None
     deleted: bool
@@ -243,11 +244,12 @@ async def _serialize_paper(session: AsyncSession, paper: LiteraturePaper, user_i
     )
 
 
-def _serialize_comment(c: LiteraturePaperComment) -> CommentPayload:
+def _serialize_comment(c: LiteraturePaperComment, *, user_name: str | None = None) -> CommentPayload:
     return CommentPayload(
         id=c.id,
         paper_id=c.paper_id,
         user_id=c.user_id,
+        user_name=user_name,
         parent_id=c.parent_id,
         body=None if c.deleted_at is not None else c.body,
         deleted=c.deleted_at is not None,
@@ -255,6 +257,28 @@ def _serialize_comment(c: LiteraturePaperComment) -> CommentPayload:
         created_at=c.created_at,
         updated_at=c.updated_at,
     )
+
+
+async def _resolve_user_label(session: AsyncSession, user_id: int) -> str | None:
+    from app.models.user import User
+
+    rs = await session.execute(select(User.name, User.email).where(User.id == user_id))
+    row = rs.first()
+    if row is None:
+        return None
+    name, email = row
+    return name or email
+
+
+async def _user_labels(session: AsyncSession, user_ids: set[int]) -> dict[int, str]:
+    from app.models.user import User
+
+    if not user_ids:
+        return {}
+    rs = await session.execute(
+        select(User.id, User.name, User.email).where(User.id.in_(user_ids))
+    )
+    return {uid: (name or email) for (uid, name, email) in rs.all()}
 
 
 async def _can_delete_any_comment(session: AsyncSession, current_user: dict) -> bool:
@@ -791,7 +815,10 @@ async def list_comments_endpoint(
     except PaperNotFound:
         raise HTTPException(404, "paper not found")
     rows = await comment_service.list_for_paper(session, paper_id)
-    return CommentListResponse(items=[_serialize_comment(c) for c in rows])
+    labels = await _user_labels(session, {c.user_id for c in rows})
+    return CommentListResponse(
+        items=[_serialize_comment(c, user_name=labels.get(c.user_id)) for c in rows]
+    )
 
 
 @router.post("/papers/{paper_id}/comments", response_model=CommentPayload, status_code=201)
@@ -817,7 +844,8 @@ async def create_comment_endpoint(
     except ValueError as e:
         raise HTTPException(400, str(e))
     await session.commit()
-    return _serialize_comment(comment)
+    user_name = await _resolve_user_label(session, comment.user_id)
+    return _serialize_comment(comment, user_name=user_name)
 
 
 @router.patch("/comments/{comment_id}", response_model=CommentPayload)
@@ -848,7 +876,8 @@ async def update_comment_endpoint(
     except ValueError as e:
         raise HTTPException(400, str(e))
     await session.commit()
-    return _serialize_comment(updated)
+    user_name = await _resolve_user_label(session, updated.user_id)
+    return _serialize_comment(updated, user_name=user_name)
 
 
 @router.delete("/comments/{comment_id}", status_code=204)

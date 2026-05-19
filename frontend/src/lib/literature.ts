@@ -87,6 +87,7 @@ export interface Comment {
   id: number;
   paper_id: number;
   user_id: number;
+  user_name: string | null;
   parent_id: number | null;
   body: string | null;
   deleted: boolean;

@@ -473,9 +473,12 @@ function CommentCard({
   return (
     <div className="text-sm">
       <div className="flex justify-between items-center mb-1">
-        <span className="text-gray-500 text-xs">
-          {new Date(c.created_at).toLocaleString()}
-        </span>
+        <div className="text-xs text-gray-500">
+          <span className="font-medium text-gray-700">
+            {c.user_name ?? `User #${c.user_id}`}
+          </span>
+          <span className="ml-2">{new Date(c.created_at).toLocaleString()}</span>
+        </div>
         <div className="flex gap-2">
           {canComment && !c.deleted && (
             <button

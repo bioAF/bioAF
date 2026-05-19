@@ -181,6 +181,39 @@ async def test_comments_create_reply_delete(client, admin_token):
 
 
 @pytest.mark.asyncio
+async def test_comment_response_includes_author_attribution(client, admin_token, admin_user):
+    """Each comment payload exposes the author so the UI can attribute it.
+
+    Without an attribution field the UI ends up showing "anonymous"
+    timestamps for every reply, which is what the demo surfaced.
+    """
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    r = await client.post(
+        "/api/literature/papers",
+        json={"title": "CA", "authors": [{"given": "A", "family": "B"}], "doi": "10.attr/1"},
+        headers=headers,
+    )
+    pid = r.json()["id"]
+    rc = await client.post(
+        f"/api/literature/papers/{pid}/comments",
+        json={"body": "hello"},
+        headers=headers,
+    )
+    assert rc.status_code == 201
+    body = rc.json()
+    assert body["user_id"] == admin_user.id
+    # Author label resolves the user; falls back to email if name is unset.
+    assert body.get("user_name") == (admin_user.name or admin_user.email)
+
+    listing = await client.get(
+        f"/api/literature/papers/{pid}/comments", headers=headers
+    )
+    items = listing.json()["items"]
+    assert len(items) == 1
+    assert items[0]["user_name"] == (admin_user.name or admin_user.email)
+
+
+@pytest.mark.asyncio
 async def test_reading_status_default_and_set(client, admin_token):
     headers = {"Authorization": f"Bearer {admin_token}"}
     r = await client.post(
