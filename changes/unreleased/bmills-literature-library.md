@@ -27,3 +27,15 @@
   large libraries do not blow up the review.
 - Export citations as BibTeX or RIS from any paper detail page; bulk
   export covers all papers in the current filter or scope.
+- Read uploaded PDFs in the app: the paper detail page now has a
+  paginated reader that shows one page at a time with Prev / Next and a
+  page counter, plus a Download link. Your reading status advances as you
+  read: reaching the second page marks a paper Reading and reaching the
+  last page marks it Read (it only ever moves forward, so it never undoes
+  a status you set by hand).
+- Delete a paper from the Library (admin / comp_bio): this removes the
+  uploaded PDF and any stored files from cloud storage to free space, and
+  dismisses the paper so it leaves your active Library and future AI
+  Literature Review. Its abstract, metadata, comments, and history are
+  kept, and an admin can reverse the dismissal later (the PDF would need
+  to be uploaded again).
