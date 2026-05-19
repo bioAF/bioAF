@@ -27,7 +27,7 @@ type StatusFlag = "active" | "dismissed" | "unread" | "reading" | "read";
 const PROVENANCE_LABELS: Record<Provenance, string> = {
   user_upload: "Uploaded",
   source_search: "From search",
-  lit_review_run: "Lit Review",
+  lit_review_run: "AI Lit Review",
 };
 
 const PROVENANCE_BADGE: Record<Provenance, string> = {
@@ -372,7 +372,7 @@ export default function LiteratureLibraryPage() {
                 <option value="">All</option>
                 <option value="user_upload">Uploaded by humans</option>
                 <option value="source_search">From searches</option>
-                <option value="lit_review_run">From Lit Review</option>
+                <option value="lit_review_run">From AI Lit Review</option>
               </select>
             </div>
             <div>

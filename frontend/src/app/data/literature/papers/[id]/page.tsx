@@ -363,36 +363,33 @@ export default function PaperDetailPage() {
               </div>
 
               <div className="bg-white rounded shadow p-4">
-                <div className="flex justify-between items-center mb-2">
-                  <h3 className="font-semibold">Associations</h3>
-                  {canComment && (
-                    <button
-                      onClick={() =>
-                        router.push(
-                          `/data/literature?associate=${paper.id}`,
-                        )
-                      }
-                      className="text-xs text-blue-600 hover:underline"
-                    >
-                      Manage in Library
-                    </button>
-                  )}
-                </div>
+                <h3 className="font-semibold mb-2">Associations</h3>
                 {paper.associations.length === 0 ? (
                   <div className="text-sm text-gray-500">
                     No associations. Manage from the Library to link this paper
                     to a project or experiment.
                   </div>
                 ) : (
-                  <ul className="space-y-1 text-sm">
+                  <ul className="space-y-2 text-sm">
                     {paper.associations.map((a) => (
-                      <li key={a.id} className="flex justify-between">
-                        <span>
-                          {a.scope_type}
-                          {a.scope_id !== null && a.scope_name
-                            ? `: ${a.scope_name}`
-                            : ""}
-                        </span>
+                      <li
+                        key={a.id}
+                        className="flex justify-between items-center"
+                      >
+                        {a.scope_type === "global" || a.scope_id === null ? (
+                          <span>Global</span>
+                        ) : (
+                          <a
+                            href={
+                              a.scope_type === "project"
+                                ? `/projects/${a.scope_id}`
+                                : `/experiments/${a.scope_id}`
+                            }
+                            className="text-bioaf-700 hover:underline"
+                          >
+                            {a.scope_name ?? `#${a.scope_id}`}
+                          </a>
+                        )}
                         {(user?.id === a.added_by_user_id ||
                           canDismiss ||
                           user?.role_name === "admin") && (
@@ -402,9 +399,9 @@ export default function PaperDetailPage() {
                               await literature.deleteAssociation(paper.id, a.id);
                               refresh();
                             }}
-                            className="text-red-700 text-xs hover:underline"
+                            className="border border-red-300 text-red-700 px-2 py-0.5 rounded text-xs hover:bg-red-50"
                           >
-                            remove
+                            Remove
                           </button>
                         )}
                       </li>
