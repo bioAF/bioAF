@@ -288,6 +288,7 @@ async def list_papers(
     scope_id: int | None = None,
     project_id: int | None = None,
     experiment_id: int | None = None,
+    include_parent_project: bool = False,
     provenance: str | None = None,
     added_by_user_id: int | None = None,
     has_full_text: bool | None = None,
@@ -371,7 +372,30 @@ async def list_papers(
             LiteratureAssociation.scope_id == experiment_id,
             LiteratureAssociation.removed_at.is_(None),
         )
-        query = query.where(exists().where(exp_filter))
+        if include_parent_project:
+            # Resolve the experiment's parent project once and OR the two
+            # association predicates: papers tied to the experiment, plus
+            # papers tied to its parent project (if any).
+            parent_rs = await session.execute(
+                select(Experiment.project_id).where(Experiment.id == experiment_id)
+            )
+            parent_pid = parent_rs.scalar_one_or_none()
+            if parent_pid is not None:
+                parent_filter = and_(
+                    LiteratureAssociation.paper_id == LiteraturePaper.id,
+                    LiteratureAssociation.scope_type == "project",
+                    LiteratureAssociation.scope_id == parent_pid,
+                    LiteratureAssociation.removed_at.is_(None),
+                )
+                from sqlalchemy import or_
+
+                query = query.where(
+                    or_(exists().where(exp_filter), exists().where(parent_filter))
+                )
+            else:
+                query = query.where(exists().where(exp_filter))
+        else:
+            query = query.where(exists().where(exp_filter))
 
     dismissed_filter = and_(
         LiteraturePaperDismissal.paper_id == LiteraturePaper.id,

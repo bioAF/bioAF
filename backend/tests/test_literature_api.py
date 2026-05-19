@@ -496,6 +496,100 @@ async def test_lit_review_settings_default_and_update(client, admin_token, viewe
     assert v.status_code == 403
 
 
+@pytest.mark.asyncio
+async def test_experiment_filter_includes_parent_project_papers(
+    client, admin_token, admin_user, session
+):
+    """The Experiment detail Literature tab needs to surface papers
+    associated with the experiment itself AND with its parent project. The
+    GET /papers endpoint exposes include_parent_project=true to do this in
+    one request."""
+    from sqlalchemy import text
+
+    proj = await session.execute(
+        text(
+            "INSERT INTO projects (name, organization_id, owner_user_id) "
+            "VALUES ('PJ', :org, :uid) RETURNING id"
+        ).bindparams(org=admin_user.organization_id, uid=admin_user.id)
+    )
+    project_id = proj.scalar_one()
+    exp = await session.execute(
+        text(
+            "INSERT INTO experiments (name, status, organization_id, owner_user_id, project_id) "
+            "VALUES ('EX', 'registered', :org, :uid, :pid) RETURNING id"
+        ).bindparams(
+            org=admin_user.organization_id,
+            uid=admin_user.id,
+            pid=project_id,
+        )
+    )
+    experiment_id = exp.scalar_one()
+    await session.commit()
+
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # Paper A: associated only with the project.
+    a = await client.post(
+        "/api/literature/papers",
+        json={
+            "title": "OnlyProj",
+            "authors": [{"given": "A", "family": "B"}],
+            "doi": "10.lit-tab/proj",
+            "associations": [{"scope_type": "project", "scope_id": project_id}],
+        },
+        headers=headers,
+    )
+    a_id = a.json()["id"]
+
+    # Paper B: associated only with the experiment.
+    b = await client.post(
+        "/api/literature/papers",
+        json={
+            "title": "OnlyExp",
+            "authors": [{"given": "C", "family": "D"}],
+            "doi": "10.lit-tab/exp",
+            "associations": [{"scope_type": "experiment", "scope_id": experiment_id}],
+        },
+        headers=headers,
+    )
+    b_id = b.json()["id"]
+
+    # Paper C: not associated with either.
+    c = await client.post(
+        "/api/literature/papers",
+        json={
+            "title": "Floating",
+            "authors": [{"given": "E", "family": "F"}],
+            "doi": "10.lit-tab/none",
+        },
+        headers=headers,
+    )
+    c_id = c.json()["id"]
+
+    # experiment_id alone returns only paper B.
+    only_exp = await client.get(
+        f"/api/literature/papers?experiment_id={experiment_id}", headers=headers
+    )
+    ids = {p["id"] for p in only_exp.json()["items"]}
+    assert ids == {b_id}
+
+    # experiment_id + include_parent_project returns A and B.
+    union = await client.get(
+        f"/api/literature/papers?experiment_id={experiment_id}&include_parent_project=true",
+        headers=headers,
+    )
+    ids = {p["id"] for p in union.json()["items"]}
+    assert ids == {a_id, b_id}
+    assert c_id not in ids
+
+    # project_id alone returns only paper A.
+    only_proj = await client.get(
+        f"/api/literature/papers?project_id={project_id}", headers=headers
+    )
+    ids = {p["id"] for p in only_proj.json()["items"]}
+    assert ids == {a_id}
+
+
 def test_sanitize_source_text_decodes_and_strips():
     """The source-text sanitizer decodes HTML entities and strips inline tags."""
     from app.services.literature.sources import sanitize_source_text

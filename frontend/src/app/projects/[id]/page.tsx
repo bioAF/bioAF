@@ -12,13 +12,21 @@ import { ProvenanceDAGComponent } from "@/components/provenance/ProvenanceDAG";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportPanel";
 import { FileBrowser } from "@/components/files/FileBrowser";
+import { LiteratureTabPanel } from "@/components/literature/LiteratureTabPanel";
 import { ProjectExportModal } from "@/components/projects/ProjectExportModal";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
 import type { ProjectDetailResponse, ProjectSampleResponse, ProvenanceDAG, QCStatus } from "@/lib/types";
 
-type Tab = "experiments" | "samples" | "runs" | "analysis" | "provenance" | "data";
+type Tab =
+  | "experiments"
+  | "samples"
+  | "runs"
+  | "analysis"
+  | "provenance"
+  | "data"
+  | "literature";
 
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -178,6 +186,7 @@ export default function ProjectDetailPage() {
     { key: "analysis", label: "Analysis" },
     { key: "provenance", label: "Provenance" },
     { key: "data", label: "Data" },
+    { key: "literature", label: "Literature" },
   ];
 
   if (loading) {
@@ -484,6 +493,14 @@ export default function ProjectDetailPage() {
             <div>
               <h2 className="text-lg font-semibold mb-4">Files</h2>
               <FileBrowser projectId={project.id} />
+            </div>
+          )}
+
+          {/* Literature Tab */}
+          {activeTab === "literature" && (
+            <div>
+              <h2 className="text-lg font-semibold mb-4">Literature</h2>
+              <LiteratureTabPanel projectId={project.id} />
             </div>
           )}
         </main>
