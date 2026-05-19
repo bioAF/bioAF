@@ -8,6 +8,7 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { getCurrentUser, isAuthenticated } from "@/lib/auth";
 import { PaperPdfViewer } from "@/components/literature/PaperPdfViewer";
 import {
+  advanceReadingStatus,
   cleanText,
   DoiConflictError,
   formatAssociation,
@@ -35,6 +36,8 @@ export default function PaperDetailPage() {
   const canDismiss =
     user?.role_name === "admin" || user?.role_name === "comp_bio";
   const canReverseDismiss = user?.role_name === "admin";
+  const canDeletePaper =
+    user?.role_name === "admin" || user?.role_name === "comp_bio";
 
   const [paper, setPaper] = useState<Paper | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -49,6 +52,8 @@ export default function PaperDetailPage() {
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [pendingPdf, setPendingPdf] = useState<File | null>(null);
   const [conflict, setConflict] = useState<DoiConflict | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   function refresh() {
     setLoading(true);
@@ -137,6 +142,31 @@ export default function PaperDetailPage() {
   async function setReading(status: ReadingStatusValue) {
     await literature.setReadingStatus(paperId, status);
     refresh();
+  }
+  // Advance reading status from how far the reader has scrolled: page 2 implies
+  // Reading, the last page implies Read. Forward-only, so it never undoes a
+  // manual status. Updates locally and persists in the background.
+  async function handleReachPage(page: number, totalPages: number) {
+    if (!paper) return;
+    const next = advanceReadingStatus(paper.reading_status, page, totalPages);
+    if (!next) return;
+    setPaper({ ...paper, reading_status: next });
+    try {
+      await literature.setReadingStatus(paperId, next);
+    } catch {
+      // Best-effort: the manual reading-status buttons remain available.
+    }
+  }
+  async function deletePaper() {
+    setDeleting(true);
+    try {
+      await literature.deletePaper(paperId);
+      router.push("/data/literature");
+    } catch (e) {
+      setDeleting(false);
+      setConfirmingDelete(false);
+      alert(e instanceof Error ? e.message : "Delete failed.");
+    }
   }
   async function dismiss() {
     const reason = prompt(
@@ -292,6 +322,7 @@ export default function PaperDetailPage() {
                   <PaperPdfViewer
                     paperId={paper.id}
                     filename={`${cleanText(paper.title).slice(0, 80) || "paper"}.pdf`}
+                    onReachPage={handleReachPage}
                   />
                 </div>
               )}
@@ -532,31 +563,72 @@ export default function PaperDetailPage() {
                 </div>
               </div>
 
-              {(canDismiss || canReverseDismiss) && (
+              {(canDismiss || canReverseDismiss || canDeletePaper) && (
                 <div className="bg-white rounded shadow p-4">
                   <h3 className="font-semibold mb-2">Admin</h3>
-                  {!paper.dismissed && canDismiss && (
-                    <button
-                      onClick={dismiss}
-                      className="border border-red-300 text-red-700 px-3 py-1 rounded text-sm hover:bg-red-50"
-                    >
-                      Dismiss org-wide
-                    </button>
-                  )}
-                  {paper.dismissed && canReverseDismiss && (
-                    <button
-                      onClick={reverseDismiss}
-                      className="border border-bioaf-300 text-bioaf-700 px-3 py-1 rounded text-sm hover:bg-bioaf-50"
-                    >
-                      Reverse dismissal
-                    </button>
-                  )}
+                  <div className="flex flex-col items-start gap-2">
+                    {!paper.dismissed && canDismiss && (
+                      <button
+                        onClick={dismiss}
+                        className="border border-red-300 text-red-700 px-3 py-1 rounded text-sm hover:bg-red-50"
+                      >
+                        Dismiss org-wide
+                      </button>
+                    )}
+                    {paper.dismissed && canReverseDismiss && (
+                      <button
+                        onClick={reverseDismiss}
+                        className="border border-bioaf-300 text-bioaf-700 px-3 py-1 rounded text-sm hover:bg-bioaf-50"
+                      >
+                        Reverse dismissal
+                      </button>
+                    )}
+                    {canDeletePaper && (
+                      <button
+                        onClick={() => setConfirmingDelete(true)}
+                        className="border border-red-300 text-red-700 px-3 py-1 rounded text-sm hover:bg-red-50"
+                      >
+                        Delete paper
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </aside>
           </div>
         </main>
       </div>
+
+      {confirmingDelete && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-[28rem]">
+            <h3 className="font-semibold mb-2">Delete this paper?</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              This deletes the uploaded PDF and any stored files from cloud
+              storage, and dismisses the paper org-wide. It leaves your active
+              Library and is excluded from AI Literature Review. The abstract,
+              metadata, comments, and history are kept; an admin can reverse the
+              dismissal, but the deleted PDF would need to be uploaded again.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmingDelete(false)}
+                disabled={deleting}
+                className="px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={deletePaper}
+                disabled={deleting}
+                className="px-3 py-1.5 bg-red-600 text-white rounded text-sm hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleting ? "Deleting..." : "Delete paper"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {conflict && pendingPdf && (
         <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
