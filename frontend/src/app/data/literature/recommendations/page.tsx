@@ -14,6 +14,7 @@ import {
   type Recommendation,
   type RecommendationStatus,
 } from "@/lib/literature";
+import { AiLitReviewLauncher } from "@/components/literature/AiLitReviewLauncher";
 
 const BUCKET_COLORS: Record<string, string> = {
   high: "bg-green-100 text-green-800",
@@ -30,10 +31,6 @@ export default function LiteratureRecommendationsPage() {
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [status, setStatus] = useState<RecommendationStatus>("accepted");
   const [loading, setLoading] = useState(true);
-  const [runExperimentId, setRunExperimentId] = useState("");
-  const [runMessage, setRunMessage] = useState<string | null>(null);
-  const [runError, setRunError] = useState<string | null>(null);
-  const [running, setRunning] = useState(false);
 
   function refresh() {
     setLoading(true);
@@ -51,45 +48,6 @@ export default function LiteratureRecommendationsPage() {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
-
-  async function triggerRun() {
-    const eid = Number(runExperimentId);
-    if (!eid) {
-      setRunError("Enter an experiment ID.");
-      return;
-    }
-    setRunning(true);
-    setRunMessage(null);
-    setRunError(null);
-    try {
-      const run = await literature.runLitReview(eid);
-      setRunMessage(
-        `Lit Review Run ${run.id} queued for experiment ${eid}. ` +
-          `Recommended papers will be added to the Library with an AI note as the run completes.`,
-      );
-      setRunExperimentId("");
-      for (let i = 0; i < 60; i++) {
-        await new Promise((r) => setTimeout(r, 1000));
-        const r2 = await literature.getRun(run.id);
-        if (
-          r2.status === "complete" ||
-          r2.status === "partial" ||
-          r2.status === "failed"
-        ) {
-          setRunMessage(
-            `Lit Review Run ${run.id} ${r2.status}; ${r2.recommendation_count ?? 0} papers added to the Library.`,
-          );
-          break;
-        }
-      }
-      refresh();
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Run failed.";
-      setRunError(message);
-    } finally {
-      setRunning(false);
-    }
-  }
 
   async function dismiss(r: Recommendation) {
     if (!confirm(`Dismiss "${cleanText(r.paper.title)}" org-wide?`)) return;
@@ -110,7 +68,7 @@ export default function LiteratureRecommendationsPage() {
             &larr; Back to library
           </button>
           <div className="flex justify-between items-center mb-6">
-            <h1 className="text-2xl font-bold">Literature Recommendations</h1>
+            <h1 className="text-2xl font-bold">AI Literature Review</h1>
             <div>
               <label className="text-xs text-gray-500 mr-2">Status</label>
               <select
@@ -125,49 +83,15 @@ export default function LiteratureRecommendationsPage() {
           </div>
 
           <div className="bg-purple-50 border border-purple-200 rounded p-3 mb-6 text-sm text-purple-900">
-            Lit Review Runs add recommended papers to the Library automatically
-            with an AI Lit Review Bot note on each paper detail explaining the
-            recommendation. Use this page to review what the LLM picked or to
-            dismiss a recommendation org-wide.
+            AI Literature Review adds recommended papers to the Library
+            automatically with an AI Lit Review Bot note on each paper detail
+            explaining the recommendation. Use this page to review what the
+            LLM picked or to dismiss a recommendation org-wide.
           </div>
 
           {canDecide && (
-            <div className="bg-white rounded shadow p-4 mb-6">
-              <h2 className="font-semibold mb-2">Run a Lit Review</h2>
-              <p className="text-xs text-gray-500 mb-3">
-                Runs require an active LLM Provider for the org. The run uses
-                the experiment context plus existing library papers to ask the
-                LLM for adjacent searches, then scores candidates 0.0 to 1.0.
-                Accepted papers go straight into the Library, associated with
-                the experiment.
-              </p>
-              <div className="flex gap-2 items-end">
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">
-                    Experiment ID
-                  </label>
-                  <input
-                    type="number"
-                    value={runExperimentId}
-                    onChange={(e) => setRunExperimentId(e.target.value)}
-                    className="border border-gray-300 rounded px-3 py-2 w-32"
-                    placeholder="e.g. 42"
-                  />
-                </div>
-                <button
-                  onClick={triggerRun}
-                  disabled={running || !runExperimentId}
-                  className="bg-bioaf-600 text-white px-4 py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
-                >
-                  {running ? "Running..." : "Run Lit Review"}
-                </button>
-              </div>
-              {runMessage && (
-                <div className="text-sm text-green-700 mt-2">{runMessage}</div>
-              )}
-              {runError && (
-                <div className="text-sm text-red-700 mt-2">{runError}</div>
-              )}
+            <div className="mb-6">
+              <AiLitReviewLauncher onSubmitted={() => refresh()} />
             </div>
           )}
 
@@ -176,7 +100,8 @@ export default function LiteratureRecommendationsPage() {
           ) : recommendations.length === 0 ? (
             <div className="border border-dashed border-gray-300 rounded p-12 text-center text-gray-500">
               No {status === "accepted" ? "active" : "dismissed"} recommendations.
-              Trigger a Lit Review Run from an experiment to generate some.
+              Run AI Literature Review from the form above (or from an
+              experiment&apos;s Literature tab) to generate some.
             </div>
           ) : (
             <ul className="space-y-4">

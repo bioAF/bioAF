@@ -293,7 +293,7 @@ export default function LiteratureLibraryPage() {
                 onClick={() => router.push("/data/literature/recommendations")}
                 className="border border-gray-300 px-4 py-2 rounded-md hover:bg-gray-50"
               >
-                Recommendations
+                AI Literature Review
               </button>
               <button
                 onClick={() => router.push("/data/literature/searches")}
