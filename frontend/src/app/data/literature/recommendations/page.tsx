@@ -7,11 +7,12 @@ import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { getCurrentUser, isAuthenticated } from "@/lib/auth";
 import {
+  cleanText,
+  formatAuthors,
+  formatYear,
   literature,
   type Recommendation,
   type RecommendationStatus,
-  formatAuthors,
-  formatYear,
 } from "@/lib/literature";
 
 const BUCKET_COLORS: Record<string, string> = {
@@ -27,7 +28,7 @@ export default function LiteratureRecommendationsPage() {
     user?.role_name === "admin" || user?.role_name === "comp_bio";
 
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
-  const [status, setStatus] = useState<RecommendationStatus>("pending");
+  const [status, setStatus] = useState<RecommendationStatus>("accepted");
   const [loading, setLoading] = useState(true);
   const [runExperimentId, setRunExperimentId] = useState("");
   const [runMessage, setRunMessage] = useState<string | null>(null);
@@ -64,16 +65,19 @@ export default function LiteratureRecommendationsPage() {
       const run = await literature.runLitReview(eid);
       setRunMessage(
         `Lit Review Run ${run.id} queued for experiment ${eid}. ` +
-          `Recommendations will appear here as the run completes.`,
+          `Recommended papers will be added to the Library with an AI note as the run completes.`,
       );
       setRunExperimentId("");
-      // Poll briefly for the run to finish.
       for (let i = 0; i < 60; i++) {
         await new Promise((r) => setTimeout(r, 1000));
         const r2 = await literature.getRun(run.id);
-        if (r2.status === "complete" || r2.status === "partial" || r2.status === "failed") {
+        if (
+          r2.status === "complete" ||
+          r2.status === "partial" ||
+          r2.status === "failed"
+        ) {
           setRunMessage(
-            `Lit Review Run ${run.id} ${r2.status}; ${r2.recommendation_count ?? 0} new recommendations.`,
+            `Lit Review Run ${run.id} ${r2.status}; ${r2.recommendation_count ?? 0} papers added to the Library.`,
           );
           break;
         }
@@ -87,12 +91,8 @@ export default function LiteratureRecommendationsPage() {
     }
   }
 
-  async function accept(r: Recommendation) {
-    await literature.acceptRecommendation(r.id);
-    refresh();
-  }
   async function dismiss(r: Recommendation) {
-    if (!confirm(`Dismiss "${r.paper.title}" org-wide?`)) return;
+    if (!confirm(`Dismiss "${cleanText(r.paper.title)}" org-wide?`)) return;
     await literature.dismissRecommendation(r.id);
     refresh();
   }
@@ -107,7 +107,7 @@ export default function LiteratureRecommendationsPage() {
             onClick={() => router.push("/data/literature")}
             className="text-bioaf-700 hover:underline text-sm mb-4"
           >
-            ← Back to library
+            &larr; Back to library
           </button>
           <div className="flex justify-between items-center mb-6">
             <h1 className="text-2xl font-bold">Literature Recommendations</h1>
@@ -118,11 +118,17 @@ export default function LiteratureRecommendationsPage() {
                 onChange={(e) => setStatus(e.target.value as RecommendationStatus)}
                 className="border border-gray-300 rounded px-3 py-2"
               >
-                <option value="pending">Pending</option>
-                <option value="accepted">Accepted</option>
+                <option value="accepted">Active in Library</option>
                 <option value="dismissed">Dismissed</option>
               </select>
             </div>
+          </div>
+
+          <div className="bg-purple-50 border border-purple-200 rounded p-3 mb-6 text-sm text-purple-900">
+            Lit Review Runs add recommended papers to the Library automatically
+            with an AI Lit Review Bot note on each paper detail explaining the
+            recommendation. Use this page to review what the LLM picked or to
+            dismiss a recommendation org-wide.
           </div>
 
           {canDecide && (
@@ -132,6 +138,8 @@ export default function LiteratureRecommendationsPage() {
                 Runs require an active LLM Provider for the org. The run uses
                 the experiment context plus existing library papers to ask the
                 LLM for adjacent searches, then scores candidates 0.0 to 1.0.
+                Accepted papers go straight into the Library, associated with
+                the experiment.
               </p>
               <div className="flex gap-2 items-end">
                 <div>
@@ -167,8 +175,8 @@ export default function LiteratureRecommendationsPage() {
             <LoadingSpinner />
           ) : recommendations.length === 0 ? (
             <div className="border border-dashed border-gray-300 rounded p-12 text-center text-gray-500">
-              No {status} recommendations. Trigger a Lit Review Run from an
-              experiment page to generate some.
+              No {status === "accepted" ? "active" : "dismissed"} recommendations.
+              Trigger a Lit Review Run from an experiment to generate some.
             </div>
           ) : (
             <ul className="space-y-4">
@@ -177,24 +185,26 @@ export default function LiteratureRecommendationsPage() {
                   <div className="flex justify-between items-start">
                     <div className="flex-1">
                       <button
-                        onClick={() => router.push(`/data/literature/papers/${r.paper.id}`)}
+                        onClick={() =>
+                          router.push(`/data/literature/papers/${r.paper.id}`)
+                        }
                         className="text-lg font-medium text-bioaf-700 hover:underline text-left"
                       >
-                        {r.paper.title}
+                        {cleanText(r.paper.title)}
                       </button>
                       <div className="text-sm text-gray-600 mt-1">
-                        {formatAuthors(r.paper.authors)} ·{" "}
-                        {formatYear(r.paper.publication_date)} ·{" "}
-                        {r.paper.journal ?? ""}
+                        {formatAuthors(r.paper.authors)} &middot;{" "}
+                        {formatYear(r.paper.publication_date)} &middot;{" "}
+                        {cleanText(r.paper.journal)}
                       </div>
                       {r.paper.abstract && (
                         <p className="text-sm text-gray-700 mt-2 line-clamp-3">
-                          {r.paper.abstract}
+                          {cleanText(r.paper.abstract)}
                         </p>
                       )}
                       {r.reasoning && (
                         <div className="text-sm italic text-gray-600 mt-2">
-                          {r.reasoning}
+                          AI: {r.reasoning}
                         </div>
                       )}
                       <div className="flex gap-2 mt-3 text-xs">
@@ -211,14 +221,8 @@ export default function LiteratureRecommendationsPage() {
                         </span>
                       </div>
                     </div>
-                    {status === "pending" && canDecide && (
+                    {status === "accepted" && canDecide && (
                       <div className="flex flex-col gap-2 ml-4">
-                        <button
-                          onClick={() => accept(r)}
-                          className="bg-bioaf-600 text-white px-3 py-1 rounded text-sm hover:bg-bioaf-700"
-                        >
-                          Accept
-                        </button>
                         <button
                           onClick={() => dismiss(r)}
                           className="border border-red-300 text-red-700 px-3 py-1 rounded text-sm hover:bg-red-50"

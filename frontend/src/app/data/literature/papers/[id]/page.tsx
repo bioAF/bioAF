@@ -7,10 +7,12 @@ import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { getCurrentUser, isAuthenticated } from "@/lib/auth";
 import {
+  cleanText,
   literature,
   type Comment,
   type Paper,
   type ReadingStatusValue,
+  type RecommendationNote,
   formatAuthors,
   formatYear,
 } from "@/lib/literature";
@@ -31,24 +33,38 @@ export default function PaperDetailPage() {
 
   const [paper, setPaper] = useState<Paper | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [notes, setNotes] = useState<RecommendationNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [commentBody, setCommentBody] = useState("");
   const [replyToId, setReplyToId] = useState<number | null>(null);
   const [replyBody, setReplyBody] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [addingToLibrary, setAddingToLibrary] = useState(false);
 
   function refresh() {
     setLoading(true);
     Promise.all([
       literature.getPaper(paperId),
       literature.listComments(paperId),
+      literature.recommendationNotes(paperId).catch(() => []),
     ])
-      .then(([p, c]) => {
+      .then(([p, c, n]) => {
         setPaper(p);
         setComments(c.items);
+        setNotes(n);
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
+  }
+
+  async function addToLibrary() {
+    setAddingToLibrary(true);
+    try {
+      await literature.addToLibrary(paperId);
+      refresh();
+    } finally {
+      setAddingToLibrary(false);
+    }
   }
 
   useEffect(() => {
@@ -148,14 +164,61 @@ export default function PaperDetailPage() {
           >
             ← Back to library
           </button>
-          <h1 className="text-2xl font-bold mb-2">{paper.title}</h1>
+          <h1 className="text-2xl font-bold mb-2">{cleanText(paper.title)}</h1>
           <div className="text-gray-600 mb-4">
             {formatAuthors(paper.authors)} · {formatYear(paper.publication_date)} ·{" "}
-            {paper.journal ?? ""}
+            {cleanText(paper.journal)}
           </div>
           {paper.dismissed && (
             <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-2 rounded mb-4">
               This paper is dismissed org-wide and excluded from Agent Review.
+            </div>
+          )}
+          {!paper.in_library && (
+            <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-2 rounded mb-4 flex items-center justify-between">
+              <span>
+                This paper appears in your search history but has not been added
+                to the Library. Add it to track comments, reading status, and
+                associations.
+              </span>
+              {canComment && (
+                <button
+                  onClick={addToLibrary}
+                  disabled={addingToLibrary}
+                  className="ml-4 bg-amber-600 text-white px-3 py-1.5 rounded text-sm hover:bg-amber-700 disabled:opacity-50"
+                >
+                  {addingToLibrary ? "Adding..." : "Add to Library"}
+                </button>
+              )}
+            </div>
+          )}
+
+          {notes.length > 0 && (
+            <div className="bg-purple-50 border border-purple-200 rounded mb-4 p-4">
+              <h2 className="font-semibold text-purple-900 mb-2 flex items-center gap-2">
+                <span className="inline-block w-6 h-6 rounded-full bg-purple-600 text-white text-xs flex items-center justify-center">
+                  AI
+                </span>
+                Lit Review Bot notes
+              </h2>
+              <ul className="space-y-3">
+                {notes.map((n, i) => (
+                  <li key={i} className="text-sm">
+                    <div className="text-xs text-purple-700 mb-1">
+                      Run #{n.review_run_id} for experiment #{n.experiment_id} &middot;{" "}
+                      relevance {n.relevance_score.toFixed(2)} ({n.relevance_bucket})
+                      {" · "}
+                      {n.llm_provider}
+                      {n.llm_model ? `/${n.llm_model}` : ""}
+                      {" · "}
+                      {new Date(n.created_at).toLocaleString()}
+                    </div>
+                    <div className="text-purple-900 whitespace-pre-wrap">
+                      {n.reasoning ?? "(no reasoning recorded)"}
+                    </div>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 
@@ -164,7 +227,9 @@ export default function PaperDetailPage() {
               {paper.abstract && (
                 <div className="bg-white rounded shadow p-4">
                   <h2 className="font-semibold mb-2">Abstract</h2>
-                  <p className="text-sm whitespace-pre-wrap">{paper.abstract}</p>
+                  <p className="text-sm whitespace-pre-wrap">
+                    {cleanText(paper.abstract)}
+                  </p>
                 </div>
               )}
               <div className="bg-white rounded shadow p-4">
@@ -298,9 +363,26 @@ export default function PaperDetailPage() {
               </div>
 
               <div className="bg-white rounded shadow p-4">
-                <h3 className="font-semibold mb-2">Associations</h3>
+                <div className="flex justify-between items-center mb-2">
+                  <h3 className="font-semibold">Associations</h3>
+                  {canComment && (
+                    <button
+                      onClick={() =>
+                        router.push(
+                          `/data/literature?associate=${paper.id}`,
+                        )
+                      }
+                      className="text-xs text-blue-600 hover:underline"
+                    >
+                      Manage in Library
+                    </button>
+                  )}
+                </div>
                 {paper.associations.length === 0 ? (
-                  <div className="text-sm text-gray-500">None.</div>
+                  <div className="text-sm text-gray-500">
+                    No associations. Manage from the Library to link this paper
+                    to a project or experiment.
+                  </div>
                 ) : (
                   <ul className="space-y-1 text-sm">
                     {paper.associations.map((a) => (
