@@ -19,7 +19,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import async_session_factory
+import app.database as _database
 from app.models.literature import (
     EXTRACTION_COMPLETE,
     EXTRACTION_FAILED,
@@ -112,7 +112,7 @@ async def schedule_extraction(
 async def _extract_and_persist(
     paper_id: int, pdf_bytes: bytes, user_id: int, api_key_id: int | None
 ) -> None:
-    factory = async_session_factory
+    factory = _database.async_session_factory
     if factory is None:
         return
     async with factory() as s:  # type: ignore[misc]
