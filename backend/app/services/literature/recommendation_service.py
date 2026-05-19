@@ -11,7 +11,6 @@ from app.models.literature import (
     LiteratureRecommendation,
     REC_ACCEPTED,
     REC_DISMISSED,
-    REC_PENDING,
     SCOPE_EXPERIMENT,
 )
 from app.services import audit_service
@@ -70,20 +69,24 @@ async def accept(
     user_id: int,
     api_key_id: int | None = None,
 ) -> LiteratureRecommendation:
-    """Mark a recommendation accepted and add an experiment-scope association
-    for its Paper. Returns the updated recommendation."""
+    """Idempotent: mark accepted, ensure the paper is in the library, and
+    ensure the experiment association exists. Lit Review Runs auto-accept
+    on creation; this endpoint exists so the recommendation queue UI can
+    still reconcile any old pending rows."""
     rec = await get_recommendation(session, org_id=org_id, recommendation_id=recommendation_id)
-    if rec.status != REC_PENDING:
+    if rec.status == REC_DISMISSED:
         raise RecommendationAlreadyDecided(f"recommendation already {rec.status}")
-    rec.status = REC_ACCEPTED
-    rec.decided_by_user_id = user_id
-    rec.decided_at = datetime.now(UTC)
+    if rec.status != REC_ACCEPTED:
+        rec.status = REC_ACCEPTED
+        rec.decided_by_user_id = user_id
+        rec.decided_at = datetime.now(UTC)
     await session.flush()
 
-    # Auto-associate the paper with the experiment.
     from app.services.literature import paper_service
 
     paper = await paper_service.get_paper(session, org_id, rec.paper_id)
+    if not paper.in_library:
+        await paper_service.add_to_library(session, paper=paper, user_id=user_id)
     await association_service.get_or_create(
         session,
         paper=paper,
@@ -112,8 +115,10 @@ async def dismiss(
     user_id: int,
     api_key_id: int | None = None,
 ) -> LiteratureRecommendation:
+    """Dismiss a recommendation. Works whether the recommendation is pending
+    (legacy) or accepted (default for auto-accepted Lit Review Runs)."""
     rec = await get_recommendation(session, org_id=org_id, recommendation_id=recommendation_id)
-    if rec.status != REC_PENDING:
+    if rec.status == REC_DISMISSED:
         raise RecommendationAlreadyDecided(f"recommendation already {rec.status}")
     rec.status = REC_DISMISSED
     rec.decided_by_user_id = user_id

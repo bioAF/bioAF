@@ -220,8 +220,11 @@ async def test_dismissal_and_reverse(client, admin_token):
     lst = await client.get("/api/literature/papers", headers=headers)
     assert all(p["id"] != pid for p in lst.json()["items"])
 
-    # show_dismissed surfaces them.
-    lst2 = await client.get("/api/literature/papers?show_dismissed=true", headers=headers)
+    # include_dismissed surfaces them.
+    lst2 = await client.get(
+        "/api/literature/papers?include_dismissed=true",
+        headers=headers,
+    )
     assert any(p["id"] == pid for p in lst2.json()["items"])
 
     # Admin reverses.
@@ -298,3 +301,86 @@ async def test_viewer_cannot_comment(client, viewer_token, admin_token):
         headers=headers_viewer,
     )
     assert r2.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_reading_status_toggle_filters(client, admin_token):
+    """Verify the new reading_status[] list filter on /papers."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    ids = []
+    for i, title in enumerate(["RS-A", "RS-B", "RS-C"]):
+        r = await client.post(
+            "/api/literature/papers",
+            json={"title": title, "authors": [{"given": "X", "family": f"Y{i}"}], "doi": f"10.rs/{i}"},
+            headers=headers,
+        )
+        ids.append(r.json()["id"])
+
+    await client.put(
+        f"/api/literature/papers/{ids[0]}/reading-status",
+        json={"status": "reading"},
+        headers=headers,
+    )
+    await client.put(
+        f"/api/literature/papers/{ids[1]}/reading-status",
+        json={"status": "read"},
+        headers=headers,
+    )
+    # ids[2] stays unread (no row -> default unread)
+
+    # reading_status=reading should yield only the first
+    only_reading = await client.get(
+        "/api/literature/papers?reading_status=reading", headers=headers
+    )
+    rs_ids = [p["id"] for p in only_reading.json()["items"]]
+    assert ids[0] in rs_ids
+    assert ids[1] not in rs_ids
+    assert ids[2] not in rs_ids
+
+    # reading_status=unread should include the third (no row) and exclude the others
+    only_unread = await client.get(
+        "/api/literature/papers?reading_status=unread", headers=headers
+    )
+    rs_ids = [p["id"] for p in only_unread.json()["items"]]
+    assert ids[2] in rs_ids
+    assert ids[0] not in rs_ids
+    assert ids[1] not in rs_ids
+
+    # reading_status=reading&reading_status=read yields the two with rows
+    pair = await client.get(
+        "/api/literature/papers?reading_status=reading&reading_status=read",
+        headers=headers,
+    )
+    rs_ids = [p["id"] for p in pair.json()["items"]]
+    assert ids[0] in rs_ids
+    assert ids[1] in rs_ids
+    assert ids[2] not in rs_ids
+
+
+def test_sanitize_source_text_decodes_and_strips():
+    """The source-text sanitizer decodes HTML entities and strips inline tags."""
+    from app.services.literature.sources import sanitize_source_text
+
+    raw = (
+        "Stiff matrix promotes lung cancer cell migration through down-regulating "
+        "the Piezo1 channel expression to facilitate Ca&lt;sup&gt;2+&lt;/sup&gt;"
+        "-dependent filopodia formation."
+    )
+    cleaned = sanitize_source_text(raw)
+    assert cleaned is not None
+    assert "<" not in cleaned
+    assert "&lt;" not in cleaned
+    assert "Ca2+" in cleaned
+
+    # Double-encoded payload should still come out clean.
+    double = "alpha &amp;amp; beta &amp;lt;sub&amp;gt;x&amp;lt;/sub&amp;gt;"
+    cleaned2 = sanitize_source_text(double)
+    assert cleaned2 == "alpha & beta x"
+
+    # Inline tags stripped.
+    tagged = "<i>italic</i> & <sup>2+</sup> after"
+    cleaned3 = sanitize_source_text(tagged)
+    assert cleaned3 == "italic & 2+ after"
+
+    assert sanitize_source_text(None) is None
+    assert sanitize_source_text("") is None

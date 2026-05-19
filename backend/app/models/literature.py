@@ -115,6 +115,7 @@ class LiteraturePaper(Base):
     provenance: Mapped[str] = mapped_column(String(32), nullable=False)
     added_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    in_library: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -133,6 +134,7 @@ class LiteraturePaper(Base):
         Index("ix_literature_papers_doi", "doi"),
         Index("ix_literature_papers_org_provenance", "organization_id", "provenance"),
         Index("ix_literature_papers_org_pubdate", "organization_id", "publication_date"),
+        Index("ix_literature_papers_org_in_library", "organization_id", "in_library"),
     )
 
 
