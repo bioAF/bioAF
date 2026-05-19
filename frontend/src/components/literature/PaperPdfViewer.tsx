@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
+import type { PDFDocumentProxy } from "pdfjs-dist";
 import { fetchPaperPdfBlob } from "@/lib/literature";
 
 // pdf.js renders on a web worker. The bundler (Next/webpack) resolves this URL
@@ -28,8 +29,7 @@ const RENDER_SCALE = 1.4;
 // app can observe page turns and drive reading status from them.
 export function PaperPdfViewer({ paperId, filename, onReachPage }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const pdfRef = useRef<any>(null);
+  const pdfRef = useRef<PDFDocumentProxy | null>(null);
   const onReachRef = useRef(onReachPage);
   onReachRef.current = onReachPage;
 
@@ -91,7 +91,7 @@ export function PaperPdfViewer({ paperId, filename, onReachPage }: Props) {
       canvas.height = viewport.height;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
-      await pdfPage.render({ canvasContext: ctx, viewport }).promise;
+      await pdfPage.render({ canvas, canvasContext: ctx, viewport }).promise;
     })();
     return () => {
       cancelled = true;
