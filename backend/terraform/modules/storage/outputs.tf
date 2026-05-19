@@ -23,6 +23,11 @@ output "references_bucket_name" {
   value       = google_storage_bucket.references.name
 }
 
+output "literature_bucket_name" {
+  description = "Name of the Literature GCS bucket (Paper PDFs, extracted text, page images)"
+  value       = google_storage_bucket.literature.name
+}
+
 output "config_backups_bucket_name" {
   description = "Name of the config backups GCS bucket"
   value       = google_storage_bucket.config_backups.name

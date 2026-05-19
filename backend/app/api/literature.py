@@ -12,8 +12,8 @@ from __future__ import annotations
 from datetime import date as date_type, datetime
 from typing import Literal
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
-from fastapi.responses import PlainTextResponse
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Response, UploadFile
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +39,8 @@ from app.services.literature import (
     dismissal_service,
     paper_service,
     reading_status_service,
+    storage,
+    upload_service,
 )
 from app.services.literature.comment_service import (
     CommentNotFound,
@@ -295,6 +297,156 @@ async def list_papers_endpoint(
     user_id = int(current_user["sub"])
     items = [await _serialize_paper(session, p, user_id) for p in papers]
     return PaperListResponse(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.post("/papers/upload", response_model=PaperResponse)
+async def upload_paper_pdf_endpoint(
+    response: Response,
+    file: UploadFile = File(...),
+    title: str | None = Form(None),
+    authors_json: str | None = Form(None),
+    doi: str | None = Form(None),
+    journal: str | None = Form(None),
+    abstract: str | None = Form(None),
+    current_user: dict = require_permission("literature", "upload"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Upload a PDF, extract metadata synchronously for the pre-fill form, and
+    create the Paper row. Full-text extraction runs as an asyncio background
+    task and updates the row when it completes."""
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(400, "only PDF uploads are supported")
+    pdf_bytes = await file.read()
+    if not pdf_bytes:
+        raise HTTPException(400, "uploaded file is empty")
+
+    extracted = upload_service.synchronous_extract_basic(pdf_bytes)
+
+    import json as _json
+
+    parsed_authors: list[dict] | None = None
+    if authors_json:
+        try:
+            parsed_authors = _json.loads(authors_json)
+        except _json.JSONDecodeError:
+            raise HTTPException(400, "authors_json must be valid JSON")
+
+    resolved_title = title or extracted.get("title") or file.filename
+    resolved_authors = parsed_authors if parsed_authors is not None else extracted.get("authors") or []
+    resolved_doi = doi or extracted.get("doi")
+    resolved_journal = journal or extracted.get("journal")
+    resolved_abstract = abstract or extracted.get("abstract")
+    resolved_pub_date = extracted.get("publication_date")
+
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    try:
+        paper = await paper_service.create_paper(
+            session,
+            org_id=org_id,
+            user_id=user_id,
+            title=resolved_title,
+            authors=resolved_authors,
+            doi=resolved_doi,
+            journal=resolved_journal,
+            publication_date=resolved_pub_date,
+            abstract=resolved_abstract,
+            provenance="user_upload",
+            source="upload",
+        )
+    except DuplicatePaper as e:
+        existing = await paper_service.get_paper(session, org_id, e.existing_paper_id)
+        response.status_code = 200
+        return await _serialize_paper(session, existing, user_id)
+
+    uri = await upload_service.upload_pdf_to_gcs(session, paper_id=paper.id, pdf_bytes=pdf_bytes)
+    if uri:
+        paper.gcs_pdf_uri = uri
+    await upload_service.mark_extraction_pending(session, paper=paper, user_id=user_id)
+    await session.commit()
+
+    # Fire and forget the heavy extraction (full text + persistence).
+    await upload_service.schedule_extraction(
+        paper_id=paper.id, pdf_bytes=pdf_bytes, user_id=user_id
+    )
+
+    response.status_code = 201
+    await session.refresh(paper)
+    return await _serialize_paper(session, paper, user_id)
+
+
+@router.post("/papers/{paper_id}/extract", response_model=PaperResponse)
+async def re_extract_paper_endpoint(
+    paper_id: int,
+    current_user: dict = require_permission("literature", "upload"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    try:
+        paper = await paper_service.get_paper(session, org_id, paper_id)
+    except PaperNotFound:
+        raise HTTPException(404, "paper not found")
+    if not paper.gcs_pdf_uri:
+        raise HTTPException(400, "paper has no PDF to extract")
+
+    pdf_bytes = await _download_pdf_bytes(session, paper.gcs_pdf_uri)
+    if pdf_bytes is None:
+        raise HTTPException(500, "could not download paper PDF")
+
+    await upload_service.mark_extraction_pending(
+        session, paper=paper, user_id=int(current_user["sub"])
+    )
+    await session.commit()
+    await upload_service.schedule_extraction(
+        paper_id=paper_id, pdf_bytes=pdf_bytes, user_id=int(current_user["sub"])
+    )
+    await session.refresh(paper)
+    return await _serialize_paper(session, paper, int(current_user["sub"]))
+
+
+async def _download_pdf_bytes(session: AsyncSession, gcs_uri: str) -> bytes | None:
+    import asyncio
+
+    from app.services.gcs_storage import GcsStorageService
+
+    try:
+        credentials = await GcsStorageService.get_credentials(session)
+        from google.cloud import storage as gcs
+
+        loop = asyncio.get_running_loop()
+
+        def _download() -> bytes:
+            client = gcs.Client(credentials=credentials)
+            parts = gcs_uri.replace("gs://", "").split("/", 1)
+            bucket = client.bucket(parts[0])
+            return bucket.blob(parts[1]).download_as_bytes()
+
+        return await loop.run_in_executor(None, _download)
+    except Exception:
+        return None
+
+
+@router.get("/papers/{paper_id}/pdf")
+async def download_pdf_endpoint(
+    paper_id: int,
+    current_user: dict = require_permission("literature", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    try:
+        paper = await paper_service.get_paper(session, org_id, paper_id)
+    except PaperNotFound:
+        raise HTTPException(404, "paper not found")
+    if not paper.gcs_pdf_uri:
+        raise HTTPException(404, "no PDF uploaded for this paper")
+    data = await _download_pdf_bytes(session, paper.gcs_pdf_uri)
+    if data is None:
+        raise HTTPException(500, "could not fetch PDF")
+
+    def stream():
+        yield data
+
+    return StreamingResponse(stream(), media_type="application/pdf")
 
 
 @router.post("/papers", response_model=PaperResponse)
