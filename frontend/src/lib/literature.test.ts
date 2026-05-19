@@ -1,6 +1,8 @@
 import {
   uploadPdfToPaper,
   fetchPaperPdfObjectUrl,
+  fetchPaperPdfBlob,
+  advanceReadingStatus,
   DoiConflictError,
   type Paper,
 } from "./literature";
@@ -135,5 +137,56 @@ describe("fetchPaperPdfObjectUrl", () => {
       blob: async () => ({}),
     });
     await expect(fetchPaperPdfObjectUrl(42)).rejects.toThrow();
+  });
+});
+
+describe("fetchPaperPdfBlob", () => {
+  test("fetches the PDF endpoint with auth and returns the blob", async () => {
+    const blob = { type: "application/pdf" };
+    fetchMock.mockResolvedValue({ status: 200, ok: true, blob: async () => blob });
+    const result = await fetchPaperPdfBlob(7);
+    expect(result).toBe(blob);
+    const [calledUrl, init] = fetchMock.mock.calls[0];
+    expect(calledUrl).toContain("/api/literature/papers/7/pdf");
+    expect((init as RequestInit).headers).toMatchObject({
+      Authorization: "Bearer test-token",
+    });
+  });
+
+  test("throws a 'no PDF' message on 404", async () => {
+    fetchMock.mockResolvedValue({ status: 404, ok: false, blob: async () => ({}) });
+    await expect(fetchPaperPdfBlob(7)).rejects.toThrow(/no pdf/i);
+  });
+});
+
+describe("advanceReadingStatus", () => {
+  test("page 1 of a multi-page document implies no progress", () => {
+    expect(advanceReadingStatus("unread", 1, 10)).toBeNull();
+    expect(advanceReadingStatus(null, 1, 10)).toBeNull();
+  });
+
+  test("reaching page 2 advances unread to reading", () => {
+    expect(advanceReadingStatus("unread", 2, 10)).toBe("reading");
+    expect(advanceReadingStatus(null, 2, 10)).toBe("reading");
+  });
+
+  test("reaching the last page advances to read", () => {
+    expect(advanceReadingStatus("reading", 10, 10)).toBe("read");
+    expect(advanceReadingStatus("unread", 10, 10)).toBe("read");
+  });
+
+  test("a single-page document goes straight to read on open", () => {
+    expect(advanceReadingStatus("unread", 1, 1)).toBe("read");
+    expect(advanceReadingStatus(null, 1, 1)).toBe("read");
+  });
+
+  test("never downgrades or overrides a higher status", () => {
+    expect(advanceReadingStatus("read", 2, 10)).toBeNull();
+    expect(advanceReadingStatus("read", 10, 10)).toBeNull();
+    expect(advanceReadingStatus("reading", 3, 10)).toBeNull();
+  });
+
+  test("returns null when the page count is unknown", () => {
+    expect(advanceReadingStatus("unread", 1, 0)).toBeNull();
   });
 });

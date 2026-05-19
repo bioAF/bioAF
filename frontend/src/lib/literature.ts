@@ -116,12 +116,11 @@ export async function uploadPdfToPaper(
   return resp.json();
 }
 
-// Fetch the paper's PDF as an authenticated blob and return an object URL
-// suitable for an <iframe> src or a download link. The PDF endpoint requires
-// a Bearer token, so a plain <a href> navigation would 401; this routes the
-// bytes through fetch with the auth header instead. Callers must revoke the
-// returned URL when done.
-export async function fetchPaperPdfObjectUrl(paperId: number): Promise<string> {
+// Fetch the paper's PDF as an authenticated blob. The PDF endpoint requires a
+// Bearer token, so a plain <a href> navigation would 401; this routes the bytes
+// through fetch with the auth header instead. The paginated reader feeds the
+// bytes to pdf.js; the download link uses an object URL built from the blob.
+export async function fetchPaperPdfBlob(paperId: number): Promise<Blob> {
   const resp = await fetch(`${API_URL}/api/literature/papers/${paperId}/pdf`, {
     headers: { Authorization: `Bearer ${getToken() ?? ""}` },
   });
@@ -130,8 +129,40 @@ export async function fetchPaperPdfObjectUrl(paperId: number): Promise<string> {
       resp.status === 404 ? "No PDF attached to this paper." : "Could not load the PDF.",
     );
   }
-  const blob = await resp.blob();
+  return resp.blob();
+}
+
+// Convenience wrapper returning an object URL for the PDF blob. Callers must
+// revoke the returned URL when done.
+export async function fetchPaperPdfObjectUrl(paperId: number): Promise<string> {
+  const blob = await fetchPaperPdfBlob(paperId);
   return URL.createObjectURL(blob);
+}
+
+const READING_RANK: Record<ReadingStatusValue, number> = {
+  unread: 0,
+  reading: 1,
+  read: 2,
+};
+
+// Forward-only reading-status progression driven by the page the reader has
+// reached. Reaching page 2 implies Reading; reaching the last page implies
+// Read. Returns the new status only when it strictly advances the current one,
+// otherwise null (no change): it never downgrades a paper and never overrides a
+// manually-set higher status. A single-page PDF (page 1 is also the last page)
+// advances straight to Read.
+export function advanceReadingStatus(
+  current: ReadingStatusValue | null,
+  page: number,
+  totalPages: number,
+): ReadingStatusValue | null {
+  if (totalPages <= 0) return null;
+  let target: ReadingStatusValue;
+  if (page >= totalPages) target = "read";
+  else if (page >= 2) target = "reading";
+  else return null; // page 1 of a multi-page document implies no progress yet
+  const cur = current ?? "unread";
+  return READING_RANK[target] > READING_RANK[cur] ? target : null;
 }
 
 export interface RecommendationNote {
