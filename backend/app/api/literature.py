@@ -101,6 +101,8 @@ class PaperResponse(BaseModel):
 class RecommendationNotePayload(BaseModel):
     review_run_id: int
     experiment_id: int
+    experiment_name: str | None = None
+    project_name: str | None = None
     relevance_score: float
     relevance_bucket: str
     reasoning: str | None

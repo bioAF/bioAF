@@ -70,6 +70,8 @@ export interface Paper {
 export interface RecommendationNote {
   review_run_id: number;
   experiment_id: number;
+  experiment_name: string | null;
+  project_name: string | null;
   relevance_score: number;
   relevance_bucket: RelevanceBucket;
   reasoning: string | null;

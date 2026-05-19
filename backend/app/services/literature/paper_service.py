@@ -515,24 +515,34 @@ async def list_recommendation_notes(
 ) -> list[dict[str, Any]]:
     """Return the LLM-authored Lit Review Run reasonings tied to a paper.
 
-    Each entry includes the run id, experiment id, relevance score and
-    bucket, and the reasoning string. Rendered on the paper detail page as
-    an "AI Lit Review Notes" panel; not a row in literature_paper_comments.
+    Each entry includes the run id, experiment id and name, parent project
+    name, relevance score and bucket, and the reasoning string. Rendered on
+    the paper detail page as an "AI Lit Review Notes" panel; not a row in
+    literature_paper_comments.
     """
     from app.models.literature import LiteratureRecommendation, LiteratureReviewRun
 
     rs = await session.execute(
-        select(LiteratureRecommendation, LiteratureReviewRun)
+        select(
+            LiteratureRecommendation,
+            LiteratureReviewRun,
+            Experiment.name,
+            Project.name,
+        )
         .join(LiteratureReviewRun, LiteratureRecommendation.review_run_id == LiteratureReviewRun.id)
+        .join(Experiment, Experiment.id == LiteratureRecommendation.experiment_id)
+        .outerjoin(Project, Project.id == Experiment.project_id)
         .where(LiteratureRecommendation.paper_id == paper_id)
         .order_by(LiteratureRecommendation.created_at.desc())
     )
     notes: list[dict[str, Any]] = []
-    for rec, run in rs.all():
+    for rec, run, experiment_name, project_name in rs.all():
         notes.append(
             {
                 "review_run_id": rec.review_run_id,
                 "experiment_id": rec.experiment_id,
+                "experiment_name": experiment_name,
+                "project_name": project_name,
                 "relevance_score": rec.relevance_score,
                 "relevance_bucket": rec.relevance_bucket,
                 "reasoning": rec.reasoning,

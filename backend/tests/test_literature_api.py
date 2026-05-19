@@ -590,6 +590,72 @@ async def test_experiment_filter_includes_parent_project_papers(
     assert ids == {a_id}
 
 
+@pytest.mark.asyncio
+async def test_recommendation_notes_include_experiment_and_project_names(
+    client, admin_token, admin_user, session
+):
+    """AI Lit Review notes must name the experiment (and its project) they
+    were generated for, not just the numeric id."""
+    from sqlalchemy import text
+
+    proj = await session.execute(
+        text(
+            "INSERT INTO projects (name, organization_id, owner_user_id) "
+            "VALUES ('Mechanobiology Atlas', :org, :uid) RETURNING id"
+        ).bindparams(org=admin_user.organization_id, uid=admin_user.id)
+    )
+    project_id = proj.scalar_one()
+    exp = await session.execute(
+        text(
+            "INSERT INTO experiments (name, status, organization_id, owner_user_id, project_id) "
+            "VALUES ('Stiffness screen', 'registered', :org, :uid, :pid) RETURNING id"
+        ).bindparams(org=admin_user.organization_id, uid=admin_user.id, pid=project_id)
+    )
+    experiment_id = exp.scalar_one()
+    await session.commit()
+
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    r = await client.post(
+        "/api/literature/papers",
+        json={"title": "RecNote", "authors": [{"given": "A", "family": "B"}], "doi": "10.note/1"},
+        headers=headers,
+    )
+    paper_id = r.json()["id"]
+
+    run = await session.execute(
+        text(
+            "INSERT INTO literature_review_runs "
+            "(organization_id, experiment_id, triggered_by_user_id, status, llm_provider, llm_model) "
+            "VALUES (:org, :eid, :uid, 'complete', 'anthropic', 'claude-sonnet-4-6') RETURNING id"
+        ).bindparams(org=admin_user.organization_id, eid=experiment_id, uid=admin_user.id)
+    )
+    run_id = run.scalar_one()
+    await session.execute(
+        text(
+            "INSERT INTO literature_recommendations "
+            "(organization_id, paper_id, experiment_id, review_run_id, relevance_score, relevance_bucket, reasoning, status) "
+            "VALUES (:org, :pid, :eid, :rid, 0.92, 'high', 'directly on point', 'accepted')"
+        ).bindparams(
+            org=admin_user.organization_id,
+            pid=paper_id,
+            eid=experiment_id,
+            rid=run_id,
+        )
+    )
+    await session.commit()
+
+    notes = await client.get(
+        f"/api/literature/papers/{paper_id}/recommendation-notes", headers=headers
+    )
+    assert notes.status_code == 200
+    items = notes.json()
+    assert len(items) == 1
+    note = items[0]
+    assert note["experiment_id"] == experiment_id
+    assert note["experiment_name"] == "Stiffness screen"
+    assert note["project_name"] == "Mechanobiology Atlas"
+
+
 def test_sanitize_source_text_decodes_and_strips():
     """The source-text sanitizer decodes HTML entities and strips inline tags."""
     from app.services.literature.sources import sanitize_source_text

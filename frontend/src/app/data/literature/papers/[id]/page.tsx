@@ -203,22 +203,36 @@ export default function PaperDetailPage() {
                 Lit Review Bot notes
               </h2>
               <ul className="space-y-3">
-                {notes.map((n, i) => (
-                  <li key={i} className="text-sm">
-                    <div className="text-xs text-purple-700 mb-1">
-                      Run #{n.review_run_id} for experiment #{n.experiment_id} &middot;{" "}
-                      relevance {n.relevance_score.toFixed(2)} ({n.relevance_bucket})
-                      {" · "}
-                      {n.llm_provider}
-                      {n.llm_model ? `/${n.llm_model}` : ""}
-                      {" · "}
-                      {new Date(n.created_at).toLocaleString()}
-                    </div>
-                    <div className="text-purple-900 whitespace-pre-wrap">
-                      {n.reasoning ?? "(no reasoning recorded)"}
-                    </div>
-                  </li>
-                ))}
+                {notes.map((n, i) => {
+                  const expLabel = n.experiment_name
+                    ? n.project_name
+                      ? `${n.project_name} > ${n.experiment_name}`
+                      : n.experiment_name
+                    : `experiment #${n.experiment_id}`;
+                  return (
+                    <li key={i} className="text-sm">
+                      <div className="text-xs text-purple-700 mb-1">
+                        Recommended for{" "}
+                        <a
+                          href={`/experiments/${n.experiment_id}`}
+                          className="font-medium hover:underline"
+                        >
+                          {expLabel}
+                        </a>
+                        {" · "}
+                        relevance {n.relevance_score.toFixed(2)} ({n.relevance_bucket})
+                        {" · "}
+                        {n.llm_provider}
+                        {n.llm_model ? `/${n.llm_model}` : ""}
+                        {" · "}
+                        {new Date(n.created_at).toLocaleString()}
+                      </div>
+                      <div className="text-purple-900 whitespace-pre-wrap">
+                        {n.reasoning ?? "(no reasoning recorded)"}
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
