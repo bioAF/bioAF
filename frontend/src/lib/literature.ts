@@ -59,9 +59,21 @@ export interface Paper {
   comment_count: number;
   reading_status: ReadingStatusValue | null;
   dismissed: boolean;
+  in_library: boolean;
   associations: Association[];
   created_at: string;
   updated_at: string;
+}
+
+export interface RecommendationNote {
+  review_run_id: number;
+  experiment_id: number;
+  relevance_score: number;
+  relevance_bucket: RelevanceBucket;
+  reasoning: string | null;
+  llm_provider: string;
+  llm_model: string;
+  created_at: string;
 }
 
 export interface PaperListResponse {
@@ -149,13 +161,18 @@ export interface LiteratureConfig {
 export interface PaperFilters {
   scope_type?: ScopeType;
   scope_id?: number;
+  project_id?: number;
+  experiment_id?: number;
   provenance?: Provenance;
   added_by_user_id?: number;
   has_full_text?: boolean;
   source?: string;
   year_min?: number;
   year_max?: number;
-  show_dismissed?: boolean;
+  in_library?: boolean | null;
+  include_active?: boolean;
+  include_dismissed?: boolean;
+  reading_status?: ReadingStatusValue[];
   sort?: "title" | "year" | "added" | "comments";
   page?: number;
   page_size?: number;
@@ -165,6 +182,13 @@ function buildQuery(params: PaperFilters | Record<string, unknown>): string {
   const entries: string[] = [];
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === null || v === "") continue;
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (item === undefined || item === null || item === "") continue;
+        entries.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(item))}`);
+      }
+      continue;
+    }
     entries.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
   }
   return entries.length ? `?${entries.join("&")}` : "";
@@ -195,6 +219,17 @@ export const literature = {
     api.post<unknown>(`/api/literature/papers/${id}/dismiss`, { reason }),
   reverseDismiss: (id: number) =>
     api.post<unknown>(`/api/literature/papers/${id}/dismiss/reverse`),
+  addToLibrary: (id: number) =>
+    api.post<Paper>(`/api/literature/papers/${id}/add-to-library`),
+  bulkAddToLibrary: (paper_ids: number[]) =>
+    api.post<{ added: number[]; not_found: number[] }>(
+      "/api/literature/papers/bulk-add-to-library",
+      { paper_ids },
+    ),
+  recommendationNotes: (id: number) =>
+    api.get<RecommendationNote[]>(
+      `/api/literature/papers/${id}/recommendation-notes`,
+    ),
 
   listAssociations: (paperId: number) =>
     api.get<Association[]>(`/api/literature/papers/${paperId}/associations`),
@@ -296,4 +331,33 @@ export function formatAuthors(authors: Author[]): string {
 export function formatYear(date: string | null): string {
   if (!date) return "";
   return date.slice(0, 4);
+}
+
+const _HTML_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+};
+
+// Defensive fallback for any rows that were stored before the backend
+// adapters started stripping HTML on ingestion. Decodes named/numeric
+// entities and strips inline tags. New records arrive clean from the
+// backend; this is a one-time bridge.
+export function cleanText(value: string | null | undefined): string {
+  if (!value) return "";
+  const decoded = value.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (m, body) => {
+    if (body.startsWith("#x") || body.startsWith("#X")) {
+      const cp = parseInt(body.slice(2), 16);
+      return Number.isFinite(cp) ? String.fromCodePoint(cp) : m;
+    }
+    if (body.startsWith("#")) {
+      const cp = parseInt(body.slice(1), 10);
+      return Number.isFinite(cp) ? String.fromCodePoint(cp) : m;
+    }
+    return _HTML_ENTITIES[body] ?? m;
+  });
+  return decoded.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 }
