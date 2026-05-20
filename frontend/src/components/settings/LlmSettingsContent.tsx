@@ -522,10 +522,30 @@ const CADENCE_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: "monthly", label: "Monthly" },
 ];
 
+// Convert an ISO timestamp to the local "YYYY-MM-DDTHH:MM" a datetime-local
+// input expects.
+function toLocalInput(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+    d.getHours(),
+  )}:${pad(d.getMinutes())}`;
+}
+
+// Sensible default first-run when none is scheduled yet: one cadence from now.
+function defaultFirstRunLocal(cadence: string): string {
+  const d = new Date();
+  if (cadence === "daily") d.setDate(d.getDate() + 1);
+  else if (cadence === "monthly") d.setMonth(d.getMonth() + 1);
+  else d.setDate(d.getDate() + 7);
+  return toLocalInput(d.toISOString());
+}
+
 export function AutoLitReviewSection() {
   const [enabled, setEnabled] = useState(false);
   const [cadence, setCadence] = useState("weekly");
   const [maxRuns, setMaxRuns] = useState("5");
+  const [firstRun, setFirstRun] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -540,6 +560,9 @@ export function AutoLitReviewSection() {
         setEnabled(s.auto_enabled);
         setCadence(s.auto_cadence);
         setMaxRuns(String(s.max_runs_per_tick));
+        setFirstRun(
+          s.next_run ? toLocalInput(s.next_run) : defaultFirstRunLocal(s.auto_cadence),
+        );
         setLoaded(true);
       })
       .catch((e) => setError((e as Error).message));
@@ -556,16 +579,27 @@ export function AutoLitReviewSection() {
       setError("Max experiments per run must be a whole number of at least 1.");
       return;
     }
+    let firstRunIso: string | undefined;
+    if (enabled) {
+      const when = new Date(firstRun);
+      if (!firstRun || Number.isNaN(when.getTime())) {
+        setError("Pick a valid first-run date and time.");
+        return;
+      }
+      firstRunIso = when.toISOString();
+    }
     setSaving(true);
     try {
       const next = await literature.updateLitReviewSettings({
         auto_enabled: enabled,
         auto_cadence: cadence,
         max_runs_per_tick: cap,
+        ...(firstRunIso ? { first_run: firstRunIso } : {}),
       });
       setEnabled(next.auto_enabled);
       setCadence(next.auto_cadence);
       setMaxRuns(String(next.max_runs_per_tick));
+      if (next.next_run) setFirstRun(toLocalInput(next.next_run));
       setSaved(true);
     } catch (e) {
       setError((e as Error).message);
@@ -613,6 +647,18 @@ export function AutoLitReviewSection() {
               </option>
             ))}
           </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">
+            First run
+          </label>
+          <input
+            type="datetime-local"
+            value={firstRun}
+            onChange={(e) => setFirstRun(e.target.value)}
+            disabled={!enabled}
+            className="border border-gray-300 rounded px-3 py-1.5 text-sm disabled:bg-gray-100"
+          />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1">

@@ -97,6 +97,18 @@ async def schedule_from_now(session: AsyncSession, org_id: int, *, now: datetime
     await PlatformConfigService.set(session, NEXT_RUN_KEY, next_run.isoformat())
 
 
+async def set_next_run(session: AsyncSession, when: datetime) -> None:
+    """Pin the next run to an explicit moment (the admin's chosen first-run time).
+    A time in the past simply means the loop fires on its next tick."""
+    aware = _aware(when)
+    assert aware is not None
+    await PlatformConfigService.set(session, NEXT_RUN_KEY, aware.isoformat())
+
+
+async def get_next_run(session: AsyncSession) -> datetime | None:
+    return await _get_next_run(session)
+
+
 async def clear_schedule(session: AsyncSession) -> None:
     await PlatformConfigService.set(session, NEXT_RUN_KEY, None)
 

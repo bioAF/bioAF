@@ -497,3 +497,30 @@ async def test_auto_schedule_seeded_on_enable_and_cleared_on_disable(session, ad
     await lit_review_auto_service.clear_schedule(session)
     await session.commit()
     assert await PlatformConfigService.get(session, lit_review_auto_service.NEXT_RUN_KEY) is None
+
+
+@pytest.mark.asyncio
+async def test_lit_review_auto_first_run_sets_next_run(client, admin_token):
+    """Enabling automation with an explicit first_run pins next_run to it; GET
+    returns it; an invalid first_run is rejected."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    first = "2099-01-02T09:30:00+00:00"
+
+    r = await client.put(
+        "/api/literature/settings/lit-review",
+        json={"auto_enabled": True, "auto_cadence": "weekly", "first_run": first},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["next_run"] is not None
+    assert datetime.fromisoformat(r.json()["next_run"]) == datetime.fromisoformat(first)
+
+    g = await client.get("/api/literature/settings/lit-review", headers=headers)
+    assert datetime.fromisoformat(g.json()["next_run"]) == datetime.fromisoformat(first)
+
+    bad = await client.put(
+        "/api/literature/settings/lit-review",
+        json={"auto_enabled": True, "first_run": "not-a-date"},
+        headers=headers,
+    )
+    assert bad.status_code == 400

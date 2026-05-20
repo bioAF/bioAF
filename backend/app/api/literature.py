@@ -9,7 +9,7 @@ construction.
 
 from __future__ import annotations
 
-from datetime import date as date_type, datetime
+from datetime import UTC, date as date_type, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Response, UploadFile
@@ -696,6 +696,9 @@ class LitReviewSettingsPayload(BaseModel):
     auto_enabled: bool
     auto_cadence: str
     max_runs_per_tick: int
+    # ISO 8601 timestamp of the next scheduled automated run (null when
+    # automation is off or unscheduled). The UI prefills the first-run picker.
+    next_run: str | None = None
 
 
 class LitReviewSettingsUpdateRequest(BaseModel):
@@ -705,6 +708,9 @@ class LitReviewSettingsUpdateRequest(BaseModel):
     auto_enabled: bool | None = None
     auto_cadence: str | None = None
     max_runs_per_tick: int | None = None
+    # ISO 8601 timestamp for when automation should first run; it then repeats
+    # every cadence. A past/now value means it runs on the next tick.
+    first_run: str | None = None
 
 
 class BulkAddToLibraryRequest(BaseModel):
@@ -732,6 +738,7 @@ async def get_lit_review_settings_endpoint(
     session: AsyncSession = Depends(get_session),
 ):
     from app.models.organization import Organization
+    from app.services.literature import lit_review_auto_service
 
     org_id = int(current_user["org_id"])
     rs = await session.execute(
@@ -747,11 +754,13 @@ async def get_lit_review_settings_endpoint(
         return LitReviewSettingsPayload(
             relevance_threshold=0.65, auto_enabled=False, auto_cadence="weekly", max_runs_per_tick=5
         )
+    next_run = await lit_review_auto_service.get_next_run(session)
     return LitReviewSettingsPayload(
         relevance_threshold=float(row[0] if row[0] is not None else 0.65),
         auto_enabled=bool(row[1]),
         auto_cadence=row[2] or "weekly",
         max_runs_per_tick=int(row[3] or 5),
+        next_run=next_run.isoformat() if next_run else None,
     )
 
 
@@ -784,9 +793,20 @@ async def update_lit_review_settings_endpoint(
         org.lit_review_relevance_threshold = body.relevance_threshold
         changes["relevance_threshold"] = body.relevance_threshold
 
-    # Toggling enable or changing cadence (re)starts the schedule timer; changing
-    # only the cap does not reset the timer.
-    reschedule = False
+    # Parse the optional explicit first-run time.
+    first_run_dt: datetime | None = None
+    if body.first_run is not None and body.first_run.strip():
+        try:
+            first_run_dt = datetime.fromisoformat(body.first_run.strip().replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(400, "first_run must be an ISO 8601 datetime")
+        if first_run_dt.tzinfo is None:
+            first_run_dt = first_run_dt.replace(tzinfo=UTC)
+        changes["first_run"] = first_run_dt.isoformat()
+
+    # Toggling enable, changing cadence, or setting a first-run time (re)schedules
+    # the timer; changing only the cap does not.
+    reschedule = first_run_dt is not None
     if body.auto_cadence is not None:
         if body.auto_cadence not in lit_review_auto_service.VALID_CADENCES:
             raise HTTPException(400, f"auto_cadence must be one of {lit_review_auto_service.VALID_CADENCES}")
@@ -807,7 +827,12 @@ async def update_lit_review_settings_endpoint(
 
     if reschedule:
         if org.lit_review_auto_enabled:
-            await lit_review_auto_service.schedule_from_now(session, org_id)
+            # Use the admin's chosen first-run time when given; otherwise fall
+            # back to one cadence from now.
+            if first_run_dt is not None:
+                await lit_review_auto_service.set_next_run(session, first_run_dt)
+            else:
+                await lit_review_auto_service.schedule_from_now(session, org_id)
         else:
             await lit_review_auto_service.clear_schedule(session)
 
@@ -821,11 +846,13 @@ async def update_lit_review_settings_endpoint(
         previous_value=previous,
     )
     await session.commit()
+    next_run = await lit_review_auto_service.get_next_run(session)
     return LitReviewSettingsPayload(
         relevance_threshold=float(org.lit_review_relevance_threshold),
         auto_enabled=bool(org.lit_review_auto_enabled),
         auto_cadence=org.lit_review_auto_cadence,
         max_runs_per_tick=int(org.lit_review_max_runs_per_tick),
+        next_run=next_run.isoformat() if next_run else None,
     )
 
 

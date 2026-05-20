@@ -266,9 +266,15 @@ export interface LitReviewSettings {
   auto_enabled: boolean;
   auto_cadence: string;
   max_runs_per_tick: number;
+  next_run: string | null;
 }
 
-export type LitReviewSettingsUpdate = Partial<LitReviewSettings>;
+export type LitReviewSettingsUpdate = Partial<
+  Omit<LitReviewSettings, "next_run">
+> & {
+  // ISO 8601 first-run time; the schedule then repeats every cadence.
+  first_run?: string;
+};
 
 export interface PaperFilters {
   scope_type?: ScopeType;

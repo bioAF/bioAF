@@ -33,6 +33,7 @@ const settings = {
   auto_enabled: false,
   auto_cadence: "weekly",
   max_runs_per_tick: 5,
+  next_run: null,
 };
 
 test("loads and renders current automation settings", async () => {
@@ -46,13 +47,14 @@ test("loads and renders current automation settings", async () => {
   expect((screen.getByDisplayValue("Weekly") as HTMLOptionElement)).toBeTruthy();
 });
 
-test("saving sends the edited enable, cadence, and cap", async () => {
+test("saving sends the edited enable, cadence, cap, and first_run", async () => {
   mockGet.mockResolvedValue(settings);
   mockUpdate.mockResolvedValue({
     ...settings,
     auto_enabled: true,
     auto_cadence: "daily",
     max_runs_per_tick: 3,
+    next_run: "2099-01-02T09:30:00+00:00",
   });
   render(<AutoLitReviewSection />);
   await waitFor(() => expect(mockGet).toHaveBeenCalled());
@@ -65,11 +67,22 @@ test("saving sends the edited enable, cadence, and cap", async () => {
   await userEvent.click(screen.getByRole("button", { name: /save/i }));
 
   await waitFor(() => expect(mockUpdate).toHaveBeenCalled());
-  expect(mockUpdate).toHaveBeenCalledWith({
+  const payload = mockUpdate.mock.calls[0][0];
+  expect(payload).toMatchObject({
     auto_enabled: true,
     auto_cadence: "daily",
     max_runs_per_tick: 3,
   });
+  // When enabled, an ISO first_run is included from the date/time picker.
+  expect(typeof payload.first_run).toBe("string");
+  expect(() => new Date(payload.first_run).toISOString()).not.toThrow();
+});
+
+test("renders a first-run datetime picker", async () => {
+  mockGet.mockResolvedValue({ ...settings, auto_enabled: true });
+  render(<AutoLitReviewSection />);
+  await waitFor(() => expect(mockGet).toHaveBeenCalled());
+  expect(screen.getByText("First run")).toBeInTheDocument();
 });
 
 test("rejects a cap below 1 without calling the API", async () => {
