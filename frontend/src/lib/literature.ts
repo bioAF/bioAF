@@ -329,6 +329,11 @@ export const literature = {
     api.post<Paper>(`/api/literature/papers/${id}/extract`),
   dismissPaper: (id: number, reason?: string) =>
     api.post<unknown>(`/api/literature/papers/${id}/dismiss`, { reason }),
+  bulkDismiss: (paperIds: number[], reason?: string) =>
+    api.post<{ dismissed: number[]; not_found: number[] }>(
+      "/api/literature/papers/bulk-dismiss",
+      { paper_ids: paperIds, reason },
+    ),
   reverseDismiss: (id: number) =>
     api.post<unknown>(`/api/literature/papers/${id}/dismiss/reverse`),
   addToLibrary: (id: number) =>

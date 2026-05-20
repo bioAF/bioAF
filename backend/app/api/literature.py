@@ -716,6 +716,16 @@ class BulkAddToLibraryResponse(BaseModel):
     not_found: list[int]
 
 
+class BulkDismissRequest(BaseModel):
+    paper_ids: list[int]
+    reason: str | None = None
+
+
+class BulkDismissResponse(BaseModel):
+    dismissed: list[int]
+    not_found: list[int]
+
+
 @router.get("/settings/lit-review", response_model=LitReviewSettingsPayload)
 async def get_lit_review_settings_endpoint(
     current_user: dict = require_permission("literature", "view"),
@@ -839,6 +849,31 @@ async def bulk_add_to_library_endpoint(
         added.append(pid)
     await session.commit()
     return BulkAddToLibraryResponse(added=added, not_found=not_found)
+
+
+@router.post("/papers/bulk-dismiss", response_model=BulkDismissResponse)
+async def bulk_dismiss_endpoint(
+    body: BulkDismissRequest,
+    current_user: dict = require_permission("literature", "dismiss"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Dismiss several papers at once (org-wide, idempotent). Used by the
+    Library's bulk Dismiss action when a user recognizes selected papers are not
+    relevant. Dismissal is reversible by an admin, same as a single dismiss."""
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    dismissed: list[int] = []
+    not_found: list[int] = []
+    for pid in body.paper_ids:
+        try:
+            await paper_service.get_paper(session, org_id, pid)
+        except PaperNotFound:
+            not_found.append(pid)
+            continue
+        await dismissal_service.dismiss(session, paper_id=pid, org_id=org_id, user_id=user_id, reason=body.reason)
+        dismissed.append(pid)
+    await session.commit()
+    return BulkDismissResponse(dismissed=dismissed, not_found=not_found)
 
 
 @router.patch("/papers/{paper_id}", response_model=PaperResponse)

@@ -88,6 +88,7 @@ export default function LiteratureLibraryPage() {
   const [linkExperimentId, setLinkExperimentId] = useState("");
   const [linkExperiments, setLinkExperiments] = useState<{ id: number; name: string }[]>([]);
   const [linkBusy, setLinkBusy] = useState(false);
+  const [dismissBusy, setDismissBusy] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -237,6 +238,26 @@ export default function LiteratureLibraryPage() {
       refresh();
     } finally {
       setLinkBusy(false);
+    }
+  };
+
+  const performBulkDismiss = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    const plural = ids.length === 1 ? "paper" : "papers";
+    if (
+      !confirm(
+        `Dismiss ${ids.length} ${plural}? They leave your active Library and are ` +
+          `excluded from future AI Literature Review. An admin can reverse this later.`,
+      )
+    )
+      return;
+    setDismissBusy(true);
+    try {
+      await literature.bulkDismiss(ids);
+      refresh();
+    } finally {
+      setDismissBusy(false);
     }
   };
 
@@ -445,6 +466,13 @@ export default function LiteratureLibraryPage() {
                 className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
               >
                 Associate
+              </button>
+              <button
+                onClick={performBulkDismiss}
+                disabled={dismissBusy}
+                className="px-3 py-1.5 bg-amber-600 text-white rounded-md text-sm hover:bg-amber-700 disabled:opacity-50"
+              >
+                {dismissBusy ? "Dismissing..." : "Dismiss"}
               </button>
               <button
                 onClick={() => setSelectedIds(new Set())}

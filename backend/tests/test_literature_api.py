@@ -769,3 +769,53 @@ def test_sanitize_source_text_decodes_and_strips():
 
     assert sanitize_source_text(None) is None
     assert sanitize_source_text("") is None
+
+
+@pytest.mark.asyncio
+async def test_bulk_dismiss_papers(client, admin_token, viewer_token):
+    """Admin can bulk-dismiss selected papers; viewers cannot. Dismissed papers
+    drop out of the default (active) listing."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    ids = []
+    for i in range(2):
+        r = await client.post(
+            "/api/literature/papers",
+            json={
+                "title": f"Bulk Dismiss {i}",
+                "authors": [{"given": "A", "family": "B"}],
+                "doi": f"10.bulkdis/{i}",
+            },
+            headers=headers,
+        )
+        assert r.status_code == 201, r.text
+        ids.append(r.json()["id"])
+
+    # Viewer cannot bulk dismiss.
+    v = await client.post(
+        "/api/literature/papers/bulk-dismiss",
+        json={"paper_ids": ids},
+        headers={"Authorization": f"Bearer {viewer_token}"},
+    )
+    assert v.status_code == 403
+
+    # Admin bulk dismiss, including one unknown id.
+    resp = await client.post(
+        "/api/literature/papers/bulk-dismiss",
+        json={"paper_ids": ids + [99999], "reason": "off topic"},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert sorted(body["dismissed"]) == sorted(ids)
+    assert body["not_found"] == [99999]
+
+    # Each paper now reports dismissed.
+    for pid in ids:
+        p = await client.get(f"/api/literature/papers/{pid}", headers=headers)
+        assert p.json()["dismissed"] is True
+
+    # Default listing (active only) excludes them.
+    lst = await client.get("/api/literature/papers", headers=headers)
+    listed = {p["id"] for p in lst.json()["items"]}
+    assert not (set(ids) & listed)
