@@ -745,6 +745,7 @@ _BUCKET_CONFIG_KEYS = [
     "raw_bucket_name",
     "working_bucket_name",
     "results_bucket_name",
+    "references_bucket_name",
     "literature_bucket_name",
     "config_backups_bucket_name",
 ]
@@ -892,6 +893,8 @@ _STORAGE_BUCKET_OUTPUT_KEYS = [
     "raw_bucket_name",
     "working_bucket_name",
     "results_bucket_name",
+    "references_bucket_name",
+    "literature_bucket_name",
     "config_backups_bucket_name",
 ]
 

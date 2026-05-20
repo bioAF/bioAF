@@ -159,8 +159,13 @@ def _fake_run_plan(plans: dict[str, dict]):
     return run_plan
 
 
+async def _noop_persist(*_args, **_kwargs):
+    return None
+
+
 @pytest.mark.asyncio
 async def test_check_realigns_then_reports_additive_literature(session, admin_user, monkeypatch):
+    monkeypatch.setattr(infra_update_service, "_persist_module_outputs", _noop_persist)
     await _seed(
         session,
         terraform_initialized="true",
@@ -191,6 +196,7 @@ async def test_check_realigns_then_reports_additive_literature(session, admin_us
 
 @pytest.mark.asyncio
 async def test_check_reports_destructive_and_requires_approval(session, admin_user, monkeypatch):
+    monkeypatch.setattr(infra_update_service, "_persist_module_outputs", _noop_persist)
     await _seed(
         session,
         terraform_initialized="true",
@@ -216,6 +222,40 @@ async def test_check_reports_destructive_and_requires_approval(session, admin_us
     assert result["requires_approval"] is True
     dest = {r["address"]: r for r in result["destructive_resources"]}
     assert dest["module.storage.google_storage_bucket.raw"]["stateful"] is True
+
+
+@pytest.mark.asyncio
+async def test_check_self_heals_storage_bucket_names(session, admin_user, monkeypatch):
+    """A bucket that exists in state but was never recorded (e.g. literature)
+    gets persisted to platform_config during the check, so uploads work and the
+    Components view lists every bucket."""
+    await _seed(
+        session,
+        terraform_initialized="true",
+        storage_deployed="true",
+        raw_bucket_name="bioaf-raw-bioaf-co-4bd459",
+    )
+    monkeypatch.setattr(TerraformExecutor, "run_plan", _fake_run_plan({"storage": _plan([])}))
+
+    async def fake_outputs(_session, _module):
+        return {
+            "literature_bucket_name": {"value": "bioaf-literature-bioaf-co-4bd459"},
+            "references_bucket_name": {"value": "bioaf-references-bioaf-co-4bd459"},
+            "raw_bucket_name": {"value": "bioaf-raw-bioaf-co-4bd459"},
+        }
+
+    monkeypatch.setattr(TerraformExecutor, "read_module_outputs", fake_outputs)
+
+    await infra_update_service.check_for_updates(session, admin_user.id)
+
+    assert (
+        await PlatformConfigService.get(session, "literature_bucket_name")
+        == "bioaf-literature-bioaf-co-4bd459"
+    )
+    assert (
+        await PlatformConfigService.get(session, "references_bucket_name")
+        == "bioaf-references-bioaf-co-4bd459"
+    )
 
 
 @pytest.mark.asyncio

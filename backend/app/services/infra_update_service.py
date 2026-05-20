@@ -211,6 +211,11 @@ async def check_for_updates(session: AsyncSession, user_id: int) -> dict:
     realigned = None
     if "storage" in modules:
         realigned = await realign_storage_naming(session)
+        # Persist current storage bucket names from live state so platform_config
+        # reflects what is actually deployed. This self-heals an instance whose
+        # bucket (e.g. literature) exists but whose name was never recorded, so
+        # uploads work and the Components view lists every bucket. Best-effort.
+        await _persist_module_outputs(session, "storage")
 
     module_results: list[dict] = []
     modules_with_additive: list[str] = []
@@ -263,6 +268,21 @@ async def check_for_updates(session: AsyncSession, user_id: int) -> dict:
     }
 
 
+async def _persist_module_outputs(session: AsyncSession, module: str) -> None:
+    """Read the module's Terraform outputs and write them to platform_config so
+    the app knows about newly created resources (e.g. a bucket name). Best-effort:
+    a failure here must never break the check or apply."""
+    try:
+        from app.services.stack_deployment import sync_compute_config, sync_storage_config
+
+        if module == "storage":
+            await sync_storage_config(session)
+        elif module == "compute":
+            await sync_compute_config(session)
+    except Exception as exc:
+        logger.warning("Persisting %s Terraform outputs failed: %s", module, exc)
+
+
 async def apply_modules_sequentially(modules: list[str], user_id: int) -> None:
     """Re-plan each module and apply ONLY its additive resources (targeted),
     one module at a time to completion. Never applies a delete/replace."""
@@ -288,6 +308,10 @@ async def apply_modules_sequentially(modules: list[str], user_id: int) -> None:
                 await s.flush()
                 async for _event in TerraformExecutor.run_apply(s, run.id, user_id, targets=targets):
                     pass
+                # Persist new resource names (e.g. the literature bucket) so the
+                # app can use them. Only on a clean apply.
+                if run.status == "completed":
+                    await _persist_module_outputs(s, module)
                 await s.commit()
             except Exception:
                 logger.exception("Infrastructure update apply failed for module %s", module)

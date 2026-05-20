@@ -68,6 +68,10 @@ def _fake_run_plan(plans: dict[str, dict]):
     return run_plan
 
 
+async def _noop_persist(*_args, **_kwargs):
+    return None
+
+
 CHECK = "/api/v1/infrastructure/stack/check-updates"
 APPLY = "/api/v1/infrastructure/stack/apply-updates"
 LIT = _resource("module.storage.google_storage_bucket.literature", "google_storage_bucket", "create")
@@ -89,6 +93,7 @@ async def test_check_updates_additive_auto_applies(client, admin_token, session,
         compute_deployed="true",
         raw_bucket_name="bioaf-raw-bioaf-co-41aae5",
     )
+    monkeypatch.setattr(infra_update_service, "_persist_module_outputs", _noop_persist)
     monkeypatch.setattr(
         TerraformExecutor, "run_plan", _fake_run_plan({"storage": _plan([LIT]), "compute": _plan([])})
     )
@@ -120,6 +125,7 @@ async def test_check_updates_destructive_not_auto_applied(client, admin_token, s
         deploy_suffix="41aae5",
         raw_bucket_name="bioaf-raw-bioaf-co-41aae5",
     )
+    monkeypatch.setattr(infra_update_service, "_persist_module_outputs", _noop_persist)
     monkeypatch.setattr(
         TerraformExecutor, "run_plan", _fake_run_plan({"storage": _plan([LIT, RAW_DELETE])})
     )
