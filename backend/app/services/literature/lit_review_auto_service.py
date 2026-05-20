@@ -183,11 +183,9 @@ async def due_experiments(session: AsyncSession, org_id: int) -> list[int]:
 
     due: list[tuple[datetime, int]] = []
     for eid in exp_ids:
-        activities = [
-            _aware(sample_activity.get(eid)),
-            _aware(run_activity.get(eid)),
+        activities: list[datetime] = [
+            a for a in (_aware(sample_activity.get(eid)), _aware(run_activity.get(eid))) if a is not None
         ]
-        activities = [a for a in activities if a is not None]
         if not activities:
             continue
         latest = max(activities)
