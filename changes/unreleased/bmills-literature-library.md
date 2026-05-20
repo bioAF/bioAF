@@ -39,3 +39,14 @@
   Literature Review. Its abstract, metadata, comments, and history are
   kept, and an admin can reverse the dismissal later (the PDF would need
   to be uploaded again).
+
+### Fixes
+
+- Infrastructure > Components now lists every provisioned GCS bucket. The
+  references and literature buckets were missing because the metrics read
+  path queried an incomplete set of bucket-name keys; it now derives the
+  keys from the same source the listing iterates, so the view reflects
+  what is actually deployed.
+- The paper-detail PDF reader no longer compresses pages vertically. The
+  page now keeps its true aspect ratio instead of being squished to fit
+  the viewer height.
