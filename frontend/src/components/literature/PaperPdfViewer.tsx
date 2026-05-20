@@ -143,13 +143,14 @@ export function PaperPdfViewer({ paperId, filename, onReachPage }: Props) {
         )}
       </div>
       <div
-        className="overflow-auto border border-gray-200 rounded bg-gray-50 flex justify-center items-start"
-        style={{ maxHeight: "80vh" }}
+        className="overflow-auto border border-gray-200 rounded bg-gray-50 flex items-center justify-center"
+        style={{ height: "85vh" }}
       >
-        {/* h-auto + items-start keep the page's aspect ratio: without them the
-            flex container stretches the canvas to its cross-size while max-width
-            shrinks the width, compressing the page vertically. */}
-        <canvas ref={canvasRef} className="max-w-full h-auto" />
+        {/* Fit the whole page inside the frame: max-w-full + max-h-full with the
+            page's intrinsic ratio scale it down to fit both bounds, so a portrait
+            page shows in full on a laptop or external display without an inner
+            scrollbar. Sized for desktop; small screens are not a target. */}
+        <canvas ref={canvasRef} className="max-w-full max-h-full" />
       </div>
     </div>
   );
