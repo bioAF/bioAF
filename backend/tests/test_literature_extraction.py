@@ -73,3 +73,30 @@ def test_extract_pdf_metadata_round_trip():
     assert "tumour heterogeneity" in result["abstract"].lower()
     assert result["page_count"] == 1
     assert result["full_text"] is not None
+    # Page markers preserve boundaries so the Agent Review can cite the page.
+    assert "[Page 1]" in result["full_text"]
+
+
+def test_extract_pdf_metadata_inserts_page_markers_per_page():
+    pytest.importorskip("fitz")
+    import fitz  # type: ignore
+
+    doc = fitz.open()
+    p1 = doc.new_page()
+    p1.insert_text((72, 72), "First page content about alpha results.")
+    p2 = doc.new_page()
+    p2.insert_text((72, 72), "Second page content about beta results.")
+    p3 = doc.new_page()
+    p3.insert_text((72, 72), "Third page content about gamma results.")
+    out = doc.tobytes()
+    doc.close()
+
+    result = extraction.extract_pdf_metadata(out)
+    assert result["page_count"] == 3
+    text = result["full_text"]
+    assert "[Page 1]" in text
+    assert "[Page 2]" in text
+    assert "[Page 3]" in text
+    # Markers are ordered and precede their page's text.
+    assert text.index("[Page 1]") < text.index("[Page 2]") < text.index("[Page 3]")
+    assert text.index("[Page 2]") < text.index("beta results")

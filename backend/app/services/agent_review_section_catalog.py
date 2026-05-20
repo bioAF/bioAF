@@ -243,6 +243,25 @@ SECTIONS: list[Section] = [
             ),
         ],
     ),
+    Section(
+        id="literature",
+        label="Associated literature",
+        experiment_only=False,
+        sub_items=[
+            SubItem(
+                id="literature.results_consistency",
+                label="Results vs associated literature",
+                default_on=True,
+                prompt_fragment=(
+                    "If an Associated Literature section is provided, check the run's results and QC "
+                    "against that prior work. Explicitly flag any result that is unexpected or that "
+                    "contradicts the associated literature, and note notable agreement. When you "
+                    "reference a paper cite it by title or DOI; when full text with page markers "
+                    '(shown as "[Page N]") is provided, cite the specific page (for example, "p. 4").'
+                ),
+            ),
+        ],
+    ),
 ]
 
 

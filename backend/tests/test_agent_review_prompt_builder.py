@@ -36,6 +36,30 @@ def test_sub_item_ids_unique_across_catalog():
     assert len(flat) == len(catalog), "duplicate sub-item id in catalog"
 
 
+def test_literature_results_consistency_subitem_default_on_both_scopes():
+    """The literature-vs-results check is a default-on sub-item available to
+    both the pipeline-run (Button A) and experiment (Button B) reviews."""
+    catalog = all_sub_items()
+    assert "literature.results_consistency" in catalog
+    si = catalog["literature.results_consistency"]
+    assert si.default_on is True
+    # Available (default-on) in both scopes: the section is not experiment_only.
+    assert "literature.results_consistency" in default_sub_item_ids(experiment_scope=False)
+    assert "literature.results_consistency" in default_sub_item_ids(experiment_scope=True)
+
+
+def test_literature_subitem_fragment_directs_flagging_and_page_citation():
+    prompt = assemble_prompt(
+        experiment_scope=False,
+        selected_sub_item_ids=["literature.results_consistency"],
+    )
+    lowered = prompt.lower()
+    assert "unexpected" in lowered
+    assert "contradict" in lowered
+    assert "cite" in lowered
+    assert "page" in lowered
+
+
 def test_every_subitem_has_label_and_fragment():
     for sec in SECTIONS:
         for si in sec.sub_items:

@@ -251,7 +251,7 @@ def _render_paper(
             lines.append(f"- Comment by {user_label} on {date_str}: {comment.body}")
     if toggles.full_text_enabled and full_text:
         lines.append("")
-        lines.append("Full text:")
+        lines.append('Full text (page markers shown as "[Page N]"; cite the page when referencing this paper):')
         lines.append(full_text)
     return "\n".join(lines)
 
@@ -307,9 +307,10 @@ async def build_literature_payload(
 
     header = (
         "## Associated Literature\n\n"
-        "The following papers are associated with this experiment.\n"
-        "When you note consistency or contradiction with prior work,\n"
-        "cite the specific paper and quote.\n"
+        "The following papers are associated with this experiment. Check the run's\n"
+        "results against this prior work and flag any result that is unexpected or\n"
+        "contradicts it. When you cite a paper, name it by title or DOI; when full\n"
+        'text with page markers ("[Page N]") is shown, cite the specific page.\n'
     )
 
     sections: list[str] = []

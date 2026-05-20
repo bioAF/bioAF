@@ -62,7 +62,8 @@ def extract_pdf_metadata(pdf_bytes: bytes) -> dict[str, Any]:
 
     The result dict can include:
       title, authors, doi, journal, publication_date, abstract,
-      full_text (the concatenated text of the first ~20 pages),
+      full_text (the first ~20 pages, each prefixed with a "[Page N]" marker so
+      page boundaries survive into the stored blob),
       page_count.
     """
     result: dict[str, Any] = {
@@ -96,10 +97,16 @@ def extract_pdf_metadata(pdf_bytes: bytes) -> dict[str, Any]:
                         pass
 
             # Scan first two pages for DOI + abstract. Full text from first 20.
+            # head_text is the raw concatenation used for DOI/abstract detection;
+            # marked_pages carries a "[Page N]" delimiter before each page so the
+            # stored full text preserves page boundaries and the Agent Review can
+            # cite the page when full text is included (ADR-057 / spec-automation).
             head_pages = []
+            marked_pages = []
             for i, page in enumerate(doc):
                 page_text = page.get_text("text") or ""
                 head_pages.append(page_text)
+                marked_pages.append(f"[Page {i + 1}]\n{page_text}")
                 if i >= 19:
                     break
             head_text = "\n".join(head_pages)
@@ -109,7 +116,7 @@ def extract_pdf_metadata(pdf_bytes: bytes) -> dict[str, Any]:
                     result["doi"] = doi
             if not result["abstract"]:
                 result["abstract"] = _extract_abstract(head_text)
-            result["full_text"] = head_text.strip() or None
+            result["full_text"] = "\n\n".join(marked_pages).strip() or None
     except Exception as e:  # pragma: no cover - defensive
         logger.warning("PDF metadata extraction failed: %s", e)
     return result

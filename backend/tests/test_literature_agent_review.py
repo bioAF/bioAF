@@ -213,6 +213,45 @@ async def test_payload_builder_truncates_at_token_cap(session, admin_user):
 
 
 @pytest.mark.asyncio
+async def test_payload_full_text_shows_page_marker_note(session, admin_user, monkeypatch):
+    """When full text is enabled, the rendered block tells the LLM how page
+    markers work so it can cite the page (spec-automation, Feature C)."""
+    eid = await _make_experiment(session, admin_user)
+    paper = await _add_paper(session, admin_user, title="Full Text Paper", doi="10.1/ft")
+    await _associate(session, paper, eid, admin_user)
+
+    session.add(
+        AgentReviewLiteratureConfig(
+            organization_id=admin_user.organization_id,
+            scope_type="org",
+            scope_id=None,
+            abstracts_enabled=True,
+            comments_enabled=True,
+            full_text_enabled=True,
+            updated_by_user_id=admin_user.id,
+        )
+    )
+    await session.commit()
+
+    async def fake_full_text(_session, _paper):
+        return "[Page 1]\nIntro text.\n\n[Page 2]\nResults that matter."
+
+    monkeypatch.setattr(agent_review_payload, "_load_full_text", fake_full_text)
+
+    result = await agent_review_payload.build_literature_payload(
+        session,
+        org_id=admin_user.organization_id,
+        scope_type="experiment",
+        scope_id=eid,
+    )
+    assert "[Page N]" in result.markdown
+    assert "cite the page" in result.markdown.lower()
+    assert "[Page 2]" in result.markdown
+    # The header also instructs flagging unexpected/contradictory results.
+    assert "unexpected" in result.markdown.lower()
+
+
+@pytest.mark.asyncio
 async def test_doi_rewrite_to_library_links(session, admin_user):
     paper = await _add_paper(session, admin_user, title="Cited Paper", doi="10.1038/s41592-cite-1")
     text_in = (
