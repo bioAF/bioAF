@@ -173,6 +173,29 @@ async def client(db_engine):
         yield c
     main_module.app.dependency_overrides.clear()
     main_module.app.router.lifespan_context = original_lifespan
+
+    # Cancel detached background tasks the test spawned via endpoints (e.g. the
+    # lit-review-run `_execute_run` task fired by `schedule_run`). Done while the
+    # test session factory is still active and BEFORE the worker schema is
+    # dropped, so a leaked task cannot (a) keep a transaction open and deadlock
+    # DROP SCHEMA, or (b) fall back to the restored production factory and fail
+    # auth. Only our own app-code coroutines are cancelled; pytest/asyncio
+    # internals are left alone.
+    import asyncio as _asyncio
+
+    lingering = []
+    for _t in _asyncio.all_tasks():
+        if _t is _asyncio.current_task() or _t.done():
+            continue
+        _code = getattr(_t.get_coro(), "cr_code", None)
+        _file = getattr(_code, "co_filename", "") or ""
+        if f"{os.sep}app{os.sep}" in _file:
+            lingering.append(_t)
+    for _t in lingering:
+        _t.cancel()
+    if lingering:
+        await _asyncio.gather(*lingering, return_exceptions=True)
+
     database_module.async_session_factory = original_session_factory  # type: ignore[assignment]
 
 

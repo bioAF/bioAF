@@ -266,12 +266,24 @@ async def test_no_active_llm_provider_fails_creation(client, admin_token, admin_
 
 
 @pytest.mark.asyncio
-async def test_lit_review_run_uses_org_relevance_threshold_by_default(client, admin_token, admin_user, session):
+async def test_lit_review_run_uses_org_relevance_threshold_by_default(
+    client, admin_token, admin_user, session, monkeypatch
+):
     """When the launch body omits score_threshold, the run is created with
     the org's configured lit_review_relevance_threshold (default 0.65)."""
     await _seed_llm_provider(session, admin_user)
     eid = await _make_experiment(session, admin_user)
     headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # This test only checks the created run's score_threshold, not execution.
+    # Stub schedule_run so no detached _execute_run task (with real LLM/source
+    # calls) is spawned and left running past the test.
+    from app.services.literature import lit_review_run_service
+
+    async def _no_schedule(*, run_id):
+        return None
+
+    monkeypatch.setattr(lit_review_run_service, "schedule_run", _no_schedule)
 
     # Bump the org default to 0.5 first so the assertion is not coincidental.
     await client.put(
