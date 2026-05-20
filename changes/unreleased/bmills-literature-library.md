@@ -66,11 +66,14 @@
 ### Fixes
 
 - Agent Review no longer gets stuck after a failed run. If a review job hit an
-  unexpected error while preparing its input or calling the LLM, it could be
-  left in an "in progress" state, after which every new review attempt failed
-  silently with "Request failed". Such errors now mark the job failed with the
-  real reason shown on the card, and an "already in progress" attempt shows a
-  clear message instead of the generic one.
+  unexpected error while preparing its input or calling the LLM (or its worker
+  stopped), it could be left in an "in progress" state, after which every new
+  review attempt failed silently with "Request failed". Now: unexpected errors
+  mark the job failed with the real reason shown on the card; a genuinely
+  in-progress review shows a clear "already in progress" message instead of the
+  generic one; and a review left in-progress past the longest plausible run is
+  automatically reaped on the next attempt, so a stranded review can no longer
+  block all future reviews until a restart.
 - Infrastructure > Components now lists every provisioned GCS bucket. The
   references and literature buckets were missing because the metrics read
   path queried an incomplete set of bucket-name keys; it now derives the

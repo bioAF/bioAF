@@ -741,12 +741,8 @@ async def test_execute_hosted_unexpected_error_does_not_strand_job(db_engine, ad
     await job_service.execute_hosted(factory, job_id=job_id, gcs_writer=writer, submit_override=submit)
 
     async with factory() as session:
-        loaded_job = (
-            await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))
-        ).scalar_one()
-        loaded_review = (
-            await session.execute(select(AgentReview).where(AgentReview.id == review_id))
-        ).scalar_one()
+        loaded_job = (await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))).scalar_one()
+        loaded_review = (await session.execute(select(AgentReview).where(AgentReview.id == review_id))).scalar_one()
         assert loaded_job.status == "failed"
         assert loaded_job.status not in job_service.IN_FLIGHT_STATUSES
         assert loaded_review.status == "failed"
@@ -764,3 +760,83 @@ async def test_execute_hosted_unexpected_error_does_not_strand_job(db_engine, ad
         )
         await session.commit()
         assert job2.id != job_id
+
+
+@pytest.mark.asyncio
+async def test_create_reaps_stale_in_flight_job(db_engine, admin_user):
+    """A stranded in-flight job (worker died, never terminal) is reaped on the
+    next create instead of blocking it with a 409 forever. Recovery for the
+    'review_in_progress' lockout without needing an API restart."""
+    from datetime import UTC, datetime, timedelta
+
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
+        run_id = await _make_pipeline_run(session, admin_user.organization_id)
+        first, first_review = await job_service.create(
+            session,
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            selected_sub_item_ids=["qc.metric_review"],
+        )
+        await session.commit()
+        first_id = first.id
+        first_review_id = first_review.id
+
+    # Age the in-flight job well past the stale threshold.
+    async with _factory(db_engine)() as session:
+        job = (await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == first_id))).scalar_one()
+        job.created_at = datetime.now(UTC) - timedelta(minutes=20)
+        job.submitted_at = None
+        await session.commit()
+
+    # The next create reaps it and succeeds rather than raising JobAlreadyRunning.
+    async with _factory(db_engine)() as session:
+        second, _ = await job_service.create(
+            session,
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            selected_sub_item_ids=["qc.metric_review"],
+        )
+        await session.commit()
+        assert second.id != first_id
+
+    async with _factory(db_engine)() as session:
+        reaped = (await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == first_id))).scalar_one()
+        assert reaped.status == "failed"
+        reaped_review = (
+            await session.execute(select(AgentReview).where(AgentReview.id == first_review_id))
+        ).scalar_one()
+        assert reaped_review.status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_create_does_not_reap_recent_in_flight_job(db_engine, admin_user):
+    """A recent in-flight job is a legitimate concurrent review and still wins
+    the debounce (409), not reaped."""
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
+        run_id = await _make_pipeline_run(session, admin_user.organization_id)
+        await job_service.create(
+            session,
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            selected_sub_item_ids=["qc.metric_review"],
+        )
+        await session.commit()
+
+    async with _factory(db_engine)() as session:
+        with pytest.raises(job_service.JobAlreadyRunning):
+            await job_service.create(
+                session,
+                org_id=admin_user.organization_id,
+                user_id=admin_user.id,
+                entity_type="pipeline_run",
+                entity_id=run_id,
+                selected_sub_item_ids=["qc.metric_review"],
+            )

@@ -10,7 +10,7 @@ return 409 with the existing job id.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -44,6 +44,22 @@ VALID_ENTITY_TYPES = {"pipeline_run", "experiment"}
 VALID_REVIEW_TYPES = {PIPELINE_RUN_REVIEW_V1_NAME, EXPERIMENT_RUN_COMPARISON_V1_NAME}
 
 IN_FLIGHT_STATUSES = ("pending", "building_artifacts", "submitted")
+
+# A hosted job still in-flight this long after it started is treated as dead
+# (its background worker stopped without reaching a terminal state) and is
+# reaped on the next create so it cannot block new reviews with a 409 forever.
+# Comfortably longer than the longest plausible build + LLM call.
+STALE_IN_FLIGHT_AFTER = timedelta(minutes=15)
+
+
+def _is_stale_in_flight(job: AgentReviewJob, *, now: datetime | None = None) -> bool:
+    now = now or datetime.now(UTC)
+    ref = job.submitted_at or job.created_at
+    if ref is None:
+        return False
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=UTC)
+    return now - ref >= STALE_IN_FLIGHT_AFTER
 
 
 class JobAlreadyRunning(Exception):
@@ -145,6 +161,34 @@ async def create(
         raise NoActiveProvider("no active LLM provider configured for this org")
     if not active.model:
         raise NoActiveProvider("active provider has no model configured")
+
+    # Reap a stale in-flight job for this entity before inserting, so a review
+    # whose worker died without reaching a terminal state cannot block new
+    # reviews forever with a 409 (it would otherwise only clear on API restart).
+    # Gemma jobs are owned by the orchestrator; leave them alone.
+    existing = await _get_inflight(session, entity_type, entity_id, resolved_review_type)
+    if existing is not None and existing.provider != "gemma" and _is_stale_in_flight(existing):
+        await _write_job_terminal(
+            session,
+            existing.id,
+            status="failed",
+            error_text="Review did not finish (its worker stopped or timed out); superseded by a new review.",
+            error_class="stale_in_flight",
+        )
+        if existing.agent_review_id is not None:
+            await _write_review_terminal(
+                session,
+                existing.agent_review_id,
+                status="failed",
+                severity=None,
+                headline="Review did not finish",
+                flags=None,
+                evidence=None,
+                body=None,
+                error_text="Review did not finish (its worker stopped or timed out).",
+                artifact_gcs_paths=[],
+            )
+        await session.flush()
 
     job = AgentReviewJob(
         organization_id=org_id,
