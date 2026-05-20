@@ -52,6 +52,10 @@
   appears next to Associate and Clear so you can dismiss several at once when
   you immediately recognize they won't fit. Dismissal is org-wide and
   reversible by an admin, same as dismissing a single paper.
+- Associate a paper from its detail page: the Associations card now has an
+  Associate button (the same Project / Experiment picker as the Library), so
+  you can link a paper to your work while you're reading it instead of going
+  back to the Library list.
 - Agent Review of a pipeline run now checks the results against the
   experiment's associated literature and flags results that are unexpected
   or contradict prior work (a default-on, admin-toggleable review topic).

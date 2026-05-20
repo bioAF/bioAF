@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { AssociatePaperModal } from "@/components/literature/AssociatePaperModal";
 import { api } from "@/lib/api";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import {
@@ -82,12 +83,8 @@ export default function LiteratureLibraryPage() {
   const [experiments, setExperiments] = useState<{ id: number; name: string }[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
-  // Associate modal state
+  // Associate modal state (the picker lives in AssociatePaperModal).
   const [linkingPaperIds, setLinkingPaperIds] = useState<number[]>([]);
-  const [linkProjectId, setLinkProjectId] = useState("");
-  const [linkExperimentId, setLinkExperimentId] = useState("");
-  const [linkExperiments, setLinkExperiments] = useState<{ id: number; name: string }[]>([]);
-  const [linkBusy, setLinkBusy] = useState(false);
   const [dismissBusy, setDismissBusy] = useState(false);
 
   useEffect(() => {
@@ -111,20 +108,6 @@ export default function LiteratureLibraryPage() {
       )
       .catch(() => {});
   }, []);
-
-  useEffect(() => {
-    if (!linkProjectId) {
-      setLinkExperiments([]);
-      setLinkExperimentId("");
-      return;
-    }
-    api
-      .get<ExperimentListResponse>(`/api/experiments?project_id=${linkProjectId}&page_size=100`)
-      .then((data) =>
-        setLinkExperiments(data.experiments.map((e) => ({ id: e.id, name: e.name }))),
-      )
-      .catch(() => setLinkExperiments([]));
-  }, [linkProjectId]);
 
   const readingSelection = useMemo<ReadingStatusValue[]>(() => {
     const out: ReadingStatusValue[] = [];
@@ -205,41 +188,9 @@ export default function LiteratureLibraryPage() {
   const openAssociate = (paperIds: number[]) => {
     if (paperIds.length === 0) return;
     setLinkingPaperIds(paperIds);
-    setLinkProjectId("");
-    setLinkExperimentId("");
   };
 
-  const closeAssociate = () => {
-    setLinkingPaperIds([]);
-    setLinkProjectId("");
-    setLinkExperimentId("");
-  };
-
-  const performAssociate = async () => {
-    if (linkingPaperIds.length === 0) return;
-    if (!linkProjectId && !linkExperimentId) return;
-    setLinkBusy(true);
-    try {
-      for (const pid of linkingPaperIds) {
-        if (linkExperimentId) {
-          await literature.addAssociation(pid, {
-            scope_type: "experiment",
-            scope_id: Number(linkExperimentId),
-          });
-        }
-        if (linkProjectId && !linkExperimentId) {
-          await literature.addAssociation(pid, {
-            scope_type: "project",
-            scope_id: Number(linkProjectId),
-          });
-        }
-      }
-      closeAssociate();
-      refresh();
-    } finally {
-      setLinkBusy(false);
-    }
-  };
+  const closeAssociate = () => setLinkingPaperIds([]);
 
   const performBulkDismiss = async () => {
     const ids = Array.from(selectedIds);
@@ -601,70 +552,11 @@ export default function LiteratureLibraryPage() {
             </div>
           )}
 
-          {linkingPaperIds.length > 0 && (
-            <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg shadow-xl p-6 w-96">
-                <h3 className="font-semibold mb-3">
-                  Associate {linkingPaperIds.length === 1 ? "paper" : `${linkingPaperIds.length} papers`}
-                </h3>
-                <div className="mb-3">
-                  <label className="block text-xs text-gray-500 mb-1">
-                    Project
-                  </label>
-                  <select
-                    value={linkProjectId}
-                    onChange={(e) => setLinkProjectId(e.target.value)}
-                    className="w-full border border-gray-300 rounded px-3 py-2"
-                  >
-                    <option value="">Select project</option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={String(p.id)}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="mb-4">
-                  <label className="block text-xs text-gray-500 mb-1">
-                    Experiment (optional)
-                  </label>
-                  <select
-                    value={linkExperimentId}
-                    onChange={(e) => setLinkExperimentId(e.target.value)}
-                    className="w-full border border-gray-300 rounded px-3 py-2"
-                    disabled={!linkProjectId}
-                  >
-                    <option value="">No experiment</option>
-                    {linkExperiments.map((e) => (
-                      <option key={e.id} value={String(e.id)}>
-                        {e.name}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-gray-400 mt-1">
-                    Choosing an experiment associates with the experiment scope; choosing only a project associates with the project scope.
-                  </p>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <button
-                    onClick={closeAssociate}
-                    className="px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50 text-sm"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={performAssociate}
-                    disabled={
-                      linkBusy || (!linkProjectId && !linkExperimentId)
-                    }
-                    className="px-3 py-1.5 bg-bioaf-600 text-white rounded hover:bg-bioaf-700 text-sm disabled:opacity-50"
-                  >
-                    {linkBusy ? "Associating..." : "Associate"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+          <AssociatePaperModal
+            paperIds={linkingPaperIds}
+            onClose={closeAssociate}
+            onAssociated={refresh}
+          />
         </main>
       </div>
     </div>

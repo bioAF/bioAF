@@ -7,6 +7,7 @@ import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { getCurrentUser, isAuthenticated } from "@/lib/auth";
 import { PaperPdfViewer } from "@/components/literature/PaperPdfViewer";
+import { AssociatePaperModal } from "@/components/literature/AssociatePaperModal";
 import {
   advanceReadingStatus,
   cleanText,
@@ -33,6 +34,10 @@ export default function PaperDetailPage() {
     user?.role_name === "admin" ||
     user?.role_name === "comp_bio" ||
     user?.role_name === "bench";
+  const canAssociate =
+    user?.role_name === "admin" ||
+    user?.role_name === "comp_bio" ||
+    user?.role_name === "bench";
   const canDismiss =
     user?.role_name === "admin" || user?.role_name === "comp_bio";
   const canReverseDismiss = user?.role_name === "admin";
@@ -54,6 +59,7 @@ export default function PaperDetailPage() {
   const [conflict, setConflict] = useState<DoiConflict | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [associating, setAssociating] = useState(false);
 
   function refresh() {
     setLoading(true);
@@ -498,11 +504,23 @@ export default function PaperDetailPage() {
               </div>
 
               <div className="bg-white rounded shadow p-4">
-                <h3 className="font-semibold mb-2">Associations</h3>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-semibold">Associations</h3>
+                  {canAssociate && (
+                    <button
+                      onClick={() => setAssociating(true)}
+                      className="text-bioaf-700 hover:underline text-sm"
+                    >
+                      + Associate
+                    </button>
+                  )}
+                </div>
                 {paper.associations.length === 0 ? (
                   <div className="text-sm text-gray-500">
-                    No associations. Manage from the Library to link this paper
-                    to a project or experiment.
+                    No associations yet.
+                    {canAssociate
+                      ? " Use Associate to link this paper to a project or experiment."
+                      : ""}
                   </div>
                 ) : (
                   <ul className="space-y-2 text-sm">
@@ -598,6 +616,12 @@ export default function PaperDetailPage() {
           </div>
         </main>
       </div>
+
+      <AssociatePaperModal
+        paperIds={associating ? [paper.id] : []}
+        onClose={() => setAssociating(false)}
+        onAssociated={refresh}
+      />
 
       {confirmingDelete && (
         <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
