@@ -703,10 +703,18 @@ async def add_paper_to_library_endpoint(
 
 class LitReviewSettingsPayload(BaseModel):
     relevance_threshold: float
+    auto_enabled: bool
+    auto_cadence: str
+    max_runs_per_tick: int
 
 
 class LitReviewSettingsUpdateRequest(BaseModel):
-    relevance_threshold: float
+    # All optional so the relevance-threshold panel and the automation panel can
+    # save independently; only provided fields are changed.
+    relevance_threshold: float | None = None
+    auto_enabled: bool | None = None
+    auto_cadence: str | None = None
+    max_runs_per_tick: int | None = None
 
 
 class BulkAddToLibraryRequest(BaseModel):
@@ -727,12 +735,24 @@ async def get_lit_review_settings_endpoint(
 
     org_id = int(current_user["org_id"])
     rs = await session.execute(
-        select(Organization.lit_review_relevance_threshold).where(Organization.id == org_id)
+        select(
+            Organization.lit_review_relevance_threshold,
+            Organization.lit_review_auto_enabled,
+            Organization.lit_review_auto_cadence,
+            Organization.lit_review_max_runs_per_tick,
+        ).where(Organization.id == org_id)
     )
-    value = rs.scalar_one_or_none()
-    if value is None:
-        value = 0.65
-    return LitReviewSettingsPayload(relevance_threshold=float(value))
+    row = rs.one_or_none()
+    if row is None:
+        return LitReviewSettingsPayload(
+            relevance_threshold=0.65, auto_enabled=False, auto_cadence="weekly", max_runs_per_tick=5
+        )
+    return LitReviewSettingsPayload(
+        relevance_threshold=float(row[0] if row[0] is not None else 0.65),
+        auto_enabled=bool(row[1]),
+        auto_cadence=row[2] or "weekly",
+        max_runs_per_tick=int(row[3] or 5),
+    )
 
 
 @router.put("/settings/lit-review", response_model=LitReviewSettingsPayload)
@@ -743,29 +763,70 @@ async def update_lit_review_settings_endpoint(
 ):
     from app.models.organization import Organization
     from app.services import audit_service
-
-    threshold = body.relevance_threshold
-    if not (0.0 <= threshold <= 1.0):
-        raise HTTPException(400, "relevance_threshold must be between 0.0 and 1.0")
+    from app.services.literature import lit_review_auto_service
 
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
     rs = await session.execute(select(Organization).where(Organization.id == org_id))
     org = rs.scalar_one()
-    previous = org.lit_review_relevance_threshold
-    org.lit_review_relevance_threshold = threshold
+
+    previous = {
+        "relevance_threshold": org.lit_review_relevance_threshold,
+        "auto_enabled": org.lit_review_auto_enabled,
+        "auto_cadence": org.lit_review_auto_cadence,
+        "max_runs_per_tick": org.lit_review_max_runs_per_tick,
+    }
+    changes: dict = {}
+
+    if body.relevance_threshold is not None:
+        if not (0.0 <= body.relevance_threshold <= 1.0):
+            raise HTTPException(400, "relevance_threshold must be between 0.0 and 1.0")
+        org.lit_review_relevance_threshold = body.relevance_threshold
+        changes["relevance_threshold"] = body.relevance_threshold
+
+    # Toggling enable or changing cadence (re)starts the schedule timer; changing
+    # only the cap does not reset the timer.
+    reschedule = False
+    if body.auto_cadence is not None:
+        if body.auto_cadence not in lit_review_auto_service.VALID_CADENCES:
+            raise HTTPException(400, f"auto_cadence must be one of {lit_review_auto_service.VALID_CADENCES}")
+        org.lit_review_auto_cadence = body.auto_cadence
+        changes["auto_cadence"] = body.auto_cadence
+        reschedule = True
+    if body.max_runs_per_tick is not None:
+        if body.max_runs_per_tick < 1:
+            raise HTTPException(400, "max_runs_per_tick must be at least 1")
+        org.lit_review_max_runs_per_tick = body.max_runs_per_tick
+        changes["max_runs_per_tick"] = body.max_runs_per_tick
+    if body.auto_enabled is not None:
+        org.lit_review_auto_enabled = body.auto_enabled
+        changes["auto_enabled"] = body.auto_enabled
+        reschedule = True
+
     await session.flush()
+
+    if reschedule:
+        if org.lit_review_auto_enabled:
+            await lit_review_auto_service.schedule_from_now(session, org_id)
+        else:
+            await lit_review_auto_service.clear_schedule(session)
+
     await audit_service.log_action(
         session,
         user_id=user_id,
         entity_type="organization",
         entity_id=org_id,
-        action="update_lit_review_threshold",
-        details={"relevance_threshold": threshold},
-        previous_value={"relevance_threshold": previous},
+        action="update_lit_review_settings",
+        details=changes,
+        previous_value=previous,
     )
     await session.commit()
-    return LitReviewSettingsPayload(relevance_threshold=threshold)
+    return LitReviewSettingsPayload(
+        relevance_threshold=float(org.lit_review_relevance_threshold),
+        auto_enabled=bool(org.lit_review_auto_enabled),
+        auto_cadence=org.lit_review_auto_cadence,
+        max_runs_per_tick=int(org.lit_review_max_runs_per_tick),
+    )
 
 
 @router.post("/papers/bulk-add-to-library", response_model=BulkAddToLibraryResponse)

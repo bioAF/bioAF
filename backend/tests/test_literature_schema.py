@@ -272,6 +272,33 @@ async def test_bench_role_has_basic_actions(session: AsyncSession, admin_user):
     assert not await role_service.has_permission(session, role_id, "literature", "run_lit_review")
 
 
+def test_migration_086_adds_automation_columns_and_seeds_rule():
+    """086 adds the run trigger + the three org cadence columns and seeds an
+    in-app notification rule for the auto-review event, with a clean downgrade."""
+    from pathlib import Path
+
+    text = (
+        Path(__file__).resolve().parent.parent
+        / "alembic"
+        / "versions"
+        / "086_literature_automation.py"
+    ).read_text()
+
+    # Upgrade adds every column.
+    assert 'add_column(\n        "literature_review_runs"' in text or "literature_review_runs" in text
+    assert "trigger" in text
+    assert "lit_review_auto_enabled" in text
+    assert "lit_review_auto_cadence" in text
+    assert "lit_review_max_runs_per_tick" in text
+    # Seeds the in-app rule for the auto-review event for existing orgs.
+    assert "literature.auto_review_recommendations" in text
+    assert "notification_rules" in text
+    assert "'in_app'" in text
+    # Downgrade reverses both the columns and the rule.
+    assert "drop_column" in text
+    assert "DELETE FROM notification_rules" in text
+
+
 def test_migration_084_qualifies_ambiguous_columns():
     """Migration 084's UPDATE joins two tables that both define created_at.
 

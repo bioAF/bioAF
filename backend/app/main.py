@@ -257,6 +257,7 @@ async def lifespan(app: FastAPI):
     background_tasks.append(asyncio.create_task(_backup_health_check_loop()))
     background_tasks.append(asyncio.create_task(_postgres_backup_loop()))
     background_tasks.append(asyncio.create_task(_config_backup_loop()))
+    background_tasks.append(asyncio.create_task(_lit_review_auto_loop()))
     background_tasks.append(asyncio.create_task(_cost_billing_sync_loop()))
     background_tasks.append(asyncio.create_task(_version_check_loop()))
     background_tasks.append(asyncio.create_task(_review_reminder_loop()))
@@ -530,6 +531,36 @@ async def _config_backup_loop():
             break
         except Exception as e:
             logger.error("Config backup loop error: %s", e)
+
+
+async def _lit_review_auto_loop():
+    """Check every 60s whether the automated AI Lit Review cadence is due and,
+    if so, sweep experiments with new activity (capped per tick)."""
+    from app.database import async_session_factory
+    from app.services.literature import lit_review_auto_service
+
+    while True:
+        try:
+            await asyncio.sleep(60)
+            async with async_session_factory() as session:
+                await lit_review_auto_service.ensure_next_run_seeded(session, org_id=1)
+                due = await lit_review_auto_service.is_tick_due(session, org_id=1)
+                await session.commit()
+            if not due:
+                continue
+            async with async_session_factory() as session:
+                result = await lit_review_auto_service.run_due_sweep(session, org_id=1)
+                await lit_review_auto_service.advance_next_run(session, org_id=1)
+                await session.commit()
+                logger.info(
+                    "Automated AI Lit Review tick: ran %d experiment(s)%s",
+                    len(result.get("ran", [])),
+                    f" (skipped: {result['skipped_reason']})" if result.get("skipped_reason") else "",
+                )
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error("Lit review auto loop error: %s", e)
 
 
 async def _cost_billing_sync_loop():

@@ -44,11 +44,14 @@ from app.models.literature import (
     SEARCH_FAILED,
     SEARCH_PARTIAL,
     SEARCH_RUNNING,
+    TRIGGER_MANUAL,
+    TRIGGER_SCHEDULED,
     derive_bucket,
 )
 from app.services import audit_service, llm_provider_config_service
 from app.services.event_bus import event_bus
 from app.services.event_types import (
+    LITERATURE_AUTO_REVIEW_RECOMMENDATIONS,
     LITERATURE_REVIEW_RUN_COMPLETED,
     LITERATURE_REVIEW_RUN_FAILED,
 )
@@ -81,6 +84,7 @@ async def create_run(
     max_recommendations: int = 10,
     score_threshold: float | None = None,
     api_key_id: int | None = None,
+    trigger: str = TRIGGER_MANUAL,
 ) -> LiteratureReviewRun:
     """Insert a new LiteratureReviewRun row and audit log entry. The caller
     commits and then calls schedule_run().
@@ -88,6 +92,9 @@ async def create_run(
     If score_threshold is None, fall back to the org's
     lit_review_relevance_threshold (default 0.65). This is the
     admin-controlled lower bound set via Settings > Integrations > LLMs.
+
+    trigger is 'manual' for on-demand runs and 'scheduled' for runs started by
+    the automated cadence loop.
     """
     cfg = await llm_provider_config_service.get_active(session, org_id)
     if cfg is None:
@@ -111,6 +118,7 @@ async def create_run(
         organization_id=org_id,
         experiment_id=experiment_id,
         triggered_by_user_id=triggered_by_user_id,
+        trigger=trigger,
         status="queued",
         llm_provider=cfg.provider,
         llm_model=cfg.model or "",
@@ -350,6 +358,14 @@ async def _do_run(run_id: int) -> None:
             run.status = SEARCH_COMPLETE
         run.completed_at = datetime.now(UTC)
 
+        # Capture fields for the per-user notification before the session closes.
+        run_trigger = run.trigger
+        run_org_id = run.organization_id
+        run_experiment_id = run.experiment_id
+        experiment_name = (
+            await s.execute(select(Experiment.name).where(Experiment.id == run.experiment_id))
+        ).scalar_one_or_none() or f"experiment #{run.experiment_id}"
+
         await audit_service.log_action(
             s,
             user_id=run.triggered_by_user_id,
@@ -369,6 +385,33 @@ async def _do_run(run_id: int) -> None:
         LITERATURE_REVIEW_RUN_COMPLETED,
         {"run_id": run_id, "recommendation_count": rec_count},
     )
+
+    # Automated cadence runs surface their picks as a per-user in-app
+    # notification (the notification router fans this out to all active users
+    # via the seeded in_app rule). Manual runs are surfaced in the UI the user
+    # is already looking at, so they emit nothing extra. A zero-pick run is
+    # silent either way.
+    if run_trigger == TRIGGER_SCHEDULED and rec_count > 0:
+        plural = "s" if rec_count != 1 else ""
+        await event_bus.emit(
+            LITERATURE_AUTO_REVIEW_RECOMMENDATIONS,
+            {
+                "event_type": LITERATURE_AUTO_REVIEW_RECOMMENDATIONS,
+                "org_id": run_org_id,
+                "title": f"AI Lit Review added {rec_count} paper{plural} to {experiment_name}",
+                "message": (
+                    f"An automated AI Literature Review added {rec_count} new paper{plural} "
+                    f"to the Library for {experiment_name}."
+                ),
+                "entity_type": "literature_review_run",
+                "entity_id": run_id,
+                "metadata": {
+                    "experiment_id": run_experiment_id,
+                    "run_id": run_id,
+                    "recommendation_count": rec_count,
+                },
+            },
+        )
 
 
 async def _safe_source_search(src: str, query: str, api_key: str | None) -> list[PaperRecord]:

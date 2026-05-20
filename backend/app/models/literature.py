@@ -68,6 +68,11 @@ REC_ACCEPTED = "accepted"
 REC_DISMISSED = "dismissed"
 ALL_REC_STATUSES = (REC_PENDING, REC_ACCEPTED, REC_DISMISSED)
 
+# How a Lit Review Run was started: by a person on demand, or by the cadence loop.
+TRIGGER_MANUAL = "manual"
+TRIGGER_SCHEDULED = "scheduled"
+ALL_REVIEW_RUN_TRIGGERS = (TRIGGER_MANUAL, TRIGGER_SCHEDULED)
+
 BUCKET_HIGH = "high"
 BUCKET_MEDIUM = "medium"
 BUCKET_LOW = "low"
@@ -291,6 +296,9 @@ class LiteratureReviewRun(Base):
     organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     experiment_id: Mapped[int] = mapped_column(Integer, ForeignKey("experiments.id"), nullable=False)
     triggered_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    trigger: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=TRIGGER_MANUAL, server_default=TRIGGER_MANUAL
+    )
     status: Mapped[str] = mapped_column(String(16), nullable=False, default=SEARCH_QUEUED, server_default=SEARCH_QUEUED)
     llm_provider: Mapped[str] = mapped_column(String(32), nullable=False)
     llm_model: Mapped[str] = mapped_column(String(255), nullable=False)
