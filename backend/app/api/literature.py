@@ -40,6 +40,7 @@ from app.services.literature import (
     recommendation_service,
     search_service,
     sources_config_service,
+    storage,
     upload_service,
 )
 from app.services.literature.comment_service import (
@@ -49,6 +50,14 @@ from app.services.literature.comment_service import (
 from app.services.literature.paper_service import DuplicatePaper, PaperNotFound
 
 router = APIRouter(prefix="/api/literature", tags=["literature"])
+
+# Shown when a PDF upload is attempted before the org's Literature GCS bucket
+# exists. The upload is rejected rather than silently stored nowhere.
+_NO_LITERATURE_STORAGE = (
+    "Literature storage is not provisioned, so the file cannot be stored. "
+    'Ask an admin to deploy it from Infrastructure > Components using '
+    '"Check for Infrastructure Updates".'
+)
 
 
 # ---------------------------------------------------------------------------
@@ -381,6 +390,9 @@ async def upload_paper_pdf_endpoint(
     if not pdf_bytes:
         raise HTTPException(400, "uploaded file is empty")
 
+    if not await storage.get_literature_bucket(session):
+        raise HTTPException(503, _NO_LITERATURE_STORAGE)
+
     extracted = upload_service.synchronous_extract_basic(pdf_bytes)
 
     import json as _json
@@ -488,6 +500,9 @@ async def upload_pdf_to_paper_endpoint(
         paper = await paper_service.get_paper(session, org_id, paper_id)
     except PaperNotFound:
         raise HTTPException(404, "paper not found")
+
+    if not await storage.get_literature_bucket(session):
+        raise HTTPException(503, _NO_LITERATURE_STORAGE)
 
     extracted = upload_service.synchronous_extract_basic(pdf_bytes)
     effective_doi = paper.doi or extracted.get("doi")

@@ -29,8 +29,77 @@ def _build_test_pdf() -> bytes:
     return out
 
 
+@pytest.fixture
+def fake_literature_bucket(monkeypatch):
+    """Provision a Literature bucket for the success-path upload tests.
+
+    Uploads now require a provisioned bucket; tests don't run a real GCS, so
+    this stubs the bucket lookup and the GCS writes. New rejection tests omit
+    this fixture (or override the bucket back to None) to exercise the
+    no-storage path."""
+    from app.services.literature import storage, upload_service
+
+    async def fake_bucket(_session):
+        return "bioaf-literature-test"
+
+    async def fake_pdf_upload(_session, *, paper_id, pdf_bytes):
+        return f"gs://bioaf-literature-test/papers/{paper_id}/original.pdf"
+
+    async def fake_text_upload(_session, *, paper_id, text):
+        return None
+
+    monkeypatch.setattr(storage, "get_literature_bucket", fake_bucket)
+    monkeypatch.setattr(upload_service, "upload_pdf_to_gcs", fake_pdf_upload)
+    monkeypatch.setattr(upload_service, "upload_extracted_text_to_gcs", fake_text_upload)
+
+
 @pytest.mark.asyncio
-async def test_upload_pdf_creates_paper_with_extracted_metadata(client, admin_token):
+async def test_upload_rejected_when_no_literature_bucket(client, admin_token):
+    """With no Literature bucket provisioned, an upload must fail loudly and
+    create no paper, rather than appearing to succeed with nowhere to store
+    the file."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    pdf = _build_test_pdf()
+    files = {"file": ("paper.pdf", pdf, "application/pdf")}
+    data = {"title": "Should Not Persist 8f3a"}
+    resp = await client.post(
+        "/api/literature/papers/upload", files=files, data=data, headers=headers
+    )
+    assert resp.status_code == 503, resp.text
+    assert "storage" in resp.json()["detail"].lower()
+
+    listing = await client.get("/api/literature/papers", headers=headers)
+    assert all(
+        p["title"] != "Should Not Persist 8f3a" for p in listing.json()["items"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_attach_pdf_rejected_when_no_literature_bucket(client, admin_token):
+    """Attaching a PDF to an existing paper is rejected when storage is not
+    provisioned; the paper is left unchanged (no stored PDF)."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    r = await client.post(
+        "/api/literature/papers",
+        json={"title": "Abstract only", "authors": [{"given": "A", "family": "B"}], "doi": "10.nb/1"},
+        headers=headers,
+    )
+    pid = r.json()["id"]
+    pdf = _build_test_pdf()
+    files = {"file": ("full.pdf", pdf, "application/pdf")}
+    resp = await client.post(
+        f"/api/literature/papers/{pid}/upload-pdf", files=files, headers=headers
+    )
+    assert resp.status_code == 503, resp.text
+
+    after = await client.get(f"/api/literature/papers/{pid}", headers=headers)
+    assert after.json()["has_pdf"] is False
+
+
+@pytest.mark.asyncio
+async def test_upload_pdf_creates_paper_with_extracted_metadata(
+    client, admin_token, fake_literature_bucket
+):
     headers = {"Authorization": f"Bearer {admin_token}"}
     pdf = _build_test_pdf()
     files = {"file": ("paper.pdf", pdf, "application/pdf")}
@@ -55,7 +124,9 @@ async def test_upload_rejects_non_pdf(client, admin_token):
 
 
 @pytest.mark.asyncio
-async def test_upload_uses_explicit_metadata_over_extracted(client, admin_token):
+async def test_upload_uses_explicit_metadata_over_extracted(
+    client, admin_token, fake_literature_bucket
+):
     headers = {"Authorization": f"Bearer {admin_token}"}
     pdf = _build_test_pdf()
     files = {"file": ("paper.pdf", pdf, "application/pdf")}
@@ -86,7 +157,9 @@ async def test_re_extract_returns_404_when_no_pdf(client, admin_token):
 
 
 @pytest.mark.asyncio
-async def test_upload_pdf_to_existing_paper_without_conflict(client, admin_token):
+async def test_upload_pdf_to_existing_paper_without_conflict(
+    client, admin_token, fake_literature_bucket
+):
     """Attaching a PDF to an abstract-only paper upgrades it in place: no
     second row, extraction queued, DOI backfilled from the PDF if absent."""
     headers = {"Authorization": f"Bearer {admin_token}"}
@@ -113,7 +186,7 @@ async def test_upload_pdf_to_existing_paper_without_conflict(client, admin_token
 
 @pytest.mark.asyncio
 async def test_upload_pdf_doi_conflict_prompts_then_merges(
-    client, admin_token, admin_user, session
+    client, admin_token, admin_user, session, fake_literature_bucket
 ):
     """When the uploaded PDF's DOI matches a different existing paper, the
     first call returns 409 with the other paper; confirming the merge moves
