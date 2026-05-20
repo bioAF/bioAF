@@ -39,6 +39,20 @@
   Literature Review. Its abstract, metadata, comments, and history are
   kept, and an admin can reverse the dismissal later (the PDF would need
   to be uploaded again).
+- Automated AI Literature Review (Settings > Integrations > LLMs): turn on
+  a daily, weekly, or monthly cadence and bioAF runs Lit Review on its own
+  for experiments that gained new samples or pipeline runs since their last
+  automated review. New papers land in the Library with the AI note;
+  dismissed papers and papers below the relevance lower bound are never
+  re-recommended. A configurable cap limits how many experiments run per
+  cadence (oldest activity first; the rest roll to the next run). When an
+  automated run adds papers, the affected users get an in-app notification.
+- Agent Review of a pipeline run now checks the results against the
+  experiment's associated literature and flags results that are unexpected
+  or contradict prior work (a default-on, admin-toggleable review topic).
+  When a paper's full text is included in the review, the assistant cites
+  the page; uploaded PDFs are now stored with page markers so those
+  citations resolve.
 
 ### Fixes
 
