@@ -1,7 +1,7 @@
 """Tests for GCS Storage Service.
 
 Tests:
-6. get_bucket_metrics returns all 5 buckets
+6. get_bucket_metrics returns all 7 buckets
 7. get_bucket_metrics requires storage_deployed
 8. move_file copies then deletes source
 9. move_file does NOT delete on copy failure
@@ -15,7 +15,11 @@ from sqlalchemy import text
 
 @pytest.mark.asyncio
 async def test_get_bucket_metrics_returns_all_buckets(session):
-    """Mock GCS client. Assert 5 bucket metrics returned with correct purposes."""
+    """Mock GCS client. Assert all 7 bucket metrics returned with correct purposes.
+
+    references and literature must appear: a partial read-key list previously
+    dropped them from the Components view even when their names were persisted.
+    """
     # Seed platform_config with deployed state and bucket names
     for key, value in [
         ("storage_deployed", "true"),
@@ -23,6 +27,8 @@ async def test_get_bucket_metrics_returns_all_buckets(session):
         ("raw_bucket_name", "bioaf-raw-demo"),
         ("working_bucket_name", "bioaf-working-demo"),
         ("results_bucket_name", "bioaf-results-demo"),
+        ("references_bucket_name", "bioaf-references-demo"),
+        ("literature_bucket_name", "bioaf-literature-demo"),
         ("config_backups_bucket_name", "bioaf-config-backups-demo"),
     ]:
         await session.execute(
@@ -53,9 +59,17 @@ async def test_get_bucket_metrics_returns_all_buckets(session):
 
         metrics = await GcsStorageService.get_bucket_metrics(session)
 
-    assert len(metrics) == 5
+    assert len(metrics) == 7
     purposes = {m.purpose for m in metrics}
-    assert purposes == {"ingest", "raw", "working", "results", "config_backups"}
+    assert purposes == {
+        "ingest",
+        "raw",
+        "working",
+        "results",
+        "references",
+        "literature",
+        "config_backups",
+    }
 
 
 @pytest.mark.asyncio
