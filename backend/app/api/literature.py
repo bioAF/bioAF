@@ -428,8 +428,24 @@ async def upload_paper_pdf_endpoint(
             source="upload",
         )
     except DuplicatePaper as e:
+        # The paper is already in this org (commonly an abstract-only entry
+        # from a search or AI recommendation). Attach the uploaded PDF to that
+        # entry and pull it into the Library, rather than dropping the file and
+        # silently sending the user to a paper with no PDF.
         existing = await paper_service.get_paper(session, org_id, e.existing_paper_id)
+        uri = await upload_service.upload_pdf_to_gcs(
+            session, paper_id=existing.id, pdf_bytes=pdf_bytes
+        )
+        if uri:
+            existing.gcs_pdf_uri = uri
+        await paper_service.add_to_library(session, paper=existing, user_id=user_id)
+        await upload_service.mark_extraction_pending(session, paper=existing, user_id=user_id)
+        await session.commit()
+        await upload_service.schedule_extraction(
+            paper_id=existing.id, pdf_bytes=pdf_bytes, user_id=user_id
+        )
         response.status_code = 200
+        await session.refresh(existing)
         return await _serialize_paper(session, existing, user_id)
 
     uri = await upload_service.upload_pdf_to_gcs(session, paper_id=paper.id, pdf_bytes=pdf_bytes)

@@ -50,3 +50,8 @@
 - The paper-detail PDF reader no longer compresses pages vertically. The
   page now keeps its true aspect ratio instead of being squished to fit
   the viewer height.
+- Uploading a paper that already exists in the Library (for example one
+  added earlier from a search or AI recommendation) now attaches the PDF
+  to that existing entry instead of just taking you to it with no file
+  saved. The matched paper is also pulled into the Library if it was not
+  already there.

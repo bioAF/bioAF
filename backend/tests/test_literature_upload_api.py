@@ -113,6 +113,43 @@ async def test_upload_pdf_creates_paper_with_extracted_metadata(
 
 
 @pytest.mark.asyncio
+async def test_upload_attaches_pdf_to_existing_library_paper(
+    client, admin_token, fake_literature_bucket
+):
+    """Uploading a paper that already exists in the Library (matched by DOI,
+    e.g. previously added from a search or AI recommendation) attaches the PDF
+    to that entry instead of dropping the file.
+
+    Regression: the duplicate branch used to return the existing paper with no
+    PDF stored, so the upload "succeeded" but no file was saved."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    # Pre-existing abstract-only entry sharing the DOI the test PDF embeds.
+    r = await client.post(
+        "/api/literature/papers",
+        json={
+            "title": "Embedded PDAC Study",
+            "authors": [{"given": "Sarah", "family": "Chen"}],
+            "doi": "10.1038/s41592-uptest-1",
+        },
+        headers=headers,
+    )
+    pid = r.json()["id"]
+    assert r.json()["has_pdf"] is False
+
+    pdf = _build_test_pdf()
+    files = {"file": ("full.pdf", pdf, "application/pdf")}
+    resp = await client.post(
+        "/api/literature/papers/upload", files=files, headers=headers
+    )
+    # Duplicate detected: returns the existing entry (200), now with the PDF.
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["id"] == pid
+    assert body["has_pdf"] is True
+    assert body["in_library"] is True
+
+
+@pytest.mark.asyncio
 async def test_upload_rejects_non_pdf(client, admin_token):
     headers = {"Authorization": f"Bearer {admin_token}"}
     resp = await client.post(
