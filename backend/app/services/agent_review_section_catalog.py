@@ -115,7 +115,7 @@ SECTIONS: list[Section] = [
             SubItem(
                 id="bio.bulk_rnaseq",
                 label="Bulk RNA-seq",
-                default_on=False,
+                default_on=True,
                 prompt_fragment=(
                     "If this looks like a bulk RNA-seq run, comment on rRNA contamination, strand "
                     "specificity, gene body coverage uniformity, exonic vs intronic ratios, top "
@@ -125,7 +125,7 @@ SECTIONS: list[Section] = [
             SubItem(
                 id="bio.single_cell",
                 label="Single-cell",
-                default_on=False,
+                default_on=True,
                 prompt_fragment=(
                     "If this looks like a single-cell run, comment on cells per sample vs expected, "
                     "median genes/UMIs per cell, mitochondrial percentage distributions, doublet "
@@ -136,7 +136,7 @@ SECTIONS: list[Section] = [
             SubItem(
                 id="bio.variant_calling",
                 label="Variant calling / WGS / WES",
-                default_on=False,
+                default_on=True,
                 prompt_fragment=(
                     "If this is variant calling / WGS / WES, comment on Ti/Tv ratios, het/hom "
                     "ratios, novel vs known variant proportions, coverage uniformity, contamination "
@@ -146,7 +146,7 @@ SECTIONS: list[Section] = [
             SubItem(
                 id="bio.atac_chip",
                 label="ATAC-seq / ChIP-seq",
-                default_on=False,
+                default_on=True,
                 prompt_fragment=(
                     "If this is ATAC-seq or ChIP-seq, comment on TSS enrichment, FRiP scores, peak "
                     "counts and reproducibility, fragment size distributions, and blacklist region "
@@ -156,7 +156,7 @@ SECTIONS: list[Section] = [
             SubItem(
                 id="bio.methylation",
                 label="Methylation",
-                default_on=False,
+                default_on=True,
                 prompt_fragment=(
                     "If this is methylation data, comment on bisulfite conversion rates, CpG "
                     "coverage distribution, and methylation level distributions vs expected."
@@ -165,7 +165,7 @@ SECTIONS: list[Section] = [
             SubItem(
                 id="bio.proteomics",
                 label="Proteomics / mass spec",
-                default_on=False,
+                default_on=True,
                 prompt_fragment=(
                     "If this is proteomics / mass spec, comment on ID rates, missed cleavages, "
                     "mass accuracy drift, and contaminant proteins."

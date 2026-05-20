@@ -65,6 +65,8 @@
 
 ### Fixes
 
+- Agent Review's "Pipeline-specific biological signals" section is now selected
+  by default (all of its assay-specific topics), matching the other sections.
 - Agent Review no longer gets stuck after a failed run. If a review job hit an
   unexpected error while preparing its input or calling the LLM (or its worker
   stopped), it could be left in an "in progress" state, after which every new
