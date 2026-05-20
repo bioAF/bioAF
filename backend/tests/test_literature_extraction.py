@@ -50,12 +50,7 @@ def test_extract_pdf_metadata_round_trip():
         "We find that subclonal populations differ in their response to TGF-beta "
         "signalling, suggesting therapeutic windows for combination targeting."
     )
-    body = (
-        "Title page contents.\n"
-        "doi.org/10.1038/s41592-2026-test\n"
-        f"{abstract}\n"
-        "Introduction follows here..."
-    )
+    body = f"Title page contents.\ndoi.org/10.1038/s41592-2026-test\n{abstract}\nIntroduction follows here..."
     page.insert_text((72, 72), body)
     doc.set_metadata({"title": "Tumour heterogeneity in PDAC", "author": "Chen, Sarah; Mills, Brent"})
     out = doc.tobytes()

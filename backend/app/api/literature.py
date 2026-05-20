@@ -55,7 +55,7 @@ router = APIRouter(prefix="/api/literature", tags=["literature"])
 # exists. The upload is rejected rather than silently stored nowhere.
 _NO_LITERATURE_STORAGE = (
     "Literature storage is not provisioned, so the file cannot be stored. "
-    'Ask an admin to deploy it from Infrastructure > Components using '
+    "Ask an admin to deploy it from Infrastructure > Components using "
     '"Check for Infrastructure Updates".'
 )
 
@@ -220,9 +220,7 @@ async def _serialize_paper(session: AsyncSession, paper: LiteraturePaper, user_i
     associations = []
     for a in associations_rows:
         scope_name = await paper_service.scope_name_for(session, a.scope_type, a.scope_id)
-        parent_pid, parent_pname = await paper_service.parent_project_for(
-            session, a.scope_type, a.scope_id
-        )
+        parent_pid, parent_pname = await paper_service.parent_project_for(session, a.scope_type, a.scope_id)
         associations.append(
             AssociationPayload(
                 id=a.id,
@@ -293,9 +291,7 @@ async def _user_labels(session: AsyncSession, user_ids: set[int]) -> dict[int, s
 
     if not user_ids:
         return {}
-    rs = await session.execute(
-        select(User.id, User.name, User.email).where(User.id.in_(user_ids))
-    )
+    rs = await session.execute(select(User.id, User.name, User.email).where(User.id.in_(user_ids)))
     return {uid: (name or email) for (uid, name, email) in rs.all()}
 
 
@@ -433,17 +429,13 @@ async def upload_paper_pdf_endpoint(
         # entry and pull it into the Library, rather than dropping the file and
         # silently sending the user to a paper with no PDF.
         existing = await paper_service.get_paper(session, org_id, e.existing_paper_id)
-        uri = await upload_service.upload_pdf_to_gcs(
-            session, paper_id=existing.id, pdf_bytes=pdf_bytes
-        )
+        uri = await upload_service.upload_pdf_to_gcs(session, paper_id=existing.id, pdf_bytes=pdf_bytes)
         if uri:
             existing.gcs_pdf_uri = uri
         await paper_service.add_to_library(session, paper=existing, user_id=user_id)
         await upload_service.mark_extraction_pending(session, paper=existing, user_id=user_id)
         await session.commit()
-        await upload_service.schedule_extraction(
-            paper_id=existing.id, pdf_bytes=pdf_bytes, user_id=user_id
-        )
+        await upload_service.schedule_extraction(paper_id=existing.id, pdf_bytes=pdf_bytes, user_id=user_id)
         response.status_code = 200
         await session.refresh(existing)
         return await _serialize_paper(session, existing, user_id)
@@ -543,9 +535,7 @@ async def upload_pdf_to_paper_endpoint(
                         "doi": effective_doi,
                     },
                 )
-            await paper_service.merge_papers(
-                session, survivor=paper, duplicate=conflict, user_id=user_id
-            )
+            await paper_service.merge_papers(session, survivor=paper, duplicate=conflict, user_id=user_id)
 
     # Backfill the DOI on the target if it lacked one.
     if not paper.doi and extracted.get("doi"):
@@ -968,9 +958,7 @@ async def list_associations_endpoint(
     items = []
     for a in await association_service.list_for_paper(session, paper_id):
         scope_name = await paper_service.scope_name_for(session, a.scope_type, a.scope_id)
-        parent_pid, parent_pname = await paper_service.parent_project_for(
-            session, a.scope_type, a.scope_id
-        )
+        parent_pid, parent_pname = await paper_service.parent_project_for(session, a.scope_type, a.scope_id)
         items.append(
             AssociationPayload(
                 id=a.id,
@@ -1010,9 +998,7 @@ async def create_association_endpoint(
         raise HTTPException(400, str(e))
     await session.commit()
     scope_name = await paper_service.scope_name_for(session, assoc.scope_type, assoc.scope_id)
-    parent_pid, parent_pname = await paper_service.parent_project_for(
-        session, assoc.scope_type, assoc.scope_id
-    )
+    parent_pid, parent_pname = await paper_service.parent_project_for(session, assoc.scope_type, assoc.scope_id)
     return AssociationPayload(
         id=assoc.id,
         scope_type=assoc.scope_type,
@@ -1062,9 +1048,7 @@ async def list_comments_endpoint(
         raise HTTPException(404, "paper not found")
     rows = await comment_service.list_for_paper(session, paper_id)
     labels = await _user_labels(session, {c.user_id for c in rows})
-    return CommentListResponse(
-        items=[_serialize_comment(c, user_name=labels.get(c.user_id)) for c in rows]
-    )
+    return CommentListResponse(items=[_serialize_comment(c, user_name=labels.get(c.user_id)) for c in rows])
 
 
 @router.post("/papers/{paper_id}/comments", response_model=CommentPayload, status_code=201)

@@ -92,9 +92,7 @@ async def test_paper_update_and_audit(client, admin_token):
         headers=headers,
     )
     pid = r1.json()["id"]
-    r2 = await client.patch(
-        f"/api/literature/papers/{pid}", json={"title": "New"}, headers=headers
-    )
+    r2 = await client.patch(f"/api/literature/papers/{pid}", json={"title": "New"}, headers=headers)
     assert r2.status_code == 200
     assert r2.json()["title"] == "New"
 
@@ -162,9 +160,7 @@ async def test_delete_purges_pdf_refs_and_dismisses(client, admin_token, session
 
 
 @pytest.mark.asyncio
-async def test_delete_paper_with_recommendation_keeps_history(
-    client, admin_token, admin_user, session
-):
+async def test_delete_paper_with_recommendation_keeps_history(client, admin_token, admin_user, session):
     """Deleting an AI-recommended paper must not fail on the non-cascading
     recommendation FK: the row stays (dismissed), and the AI note still
     resolves."""
@@ -209,9 +205,7 @@ async def test_delete_paper_with_recommendation_keeps_history(
     assert r3.status_code == 200
     assert r3.json()["dismissed"] is True
 
-    notes = await client.get(
-        f"/api/literature/papers/{pid}/recommendation-notes", headers=headers
-    )
+    notes = await client.get(f"/api/literature/papers/{pid}/recommendation-notes", headers=headers)
     assert any(n["experiment_id"] == experiment_id for n in notes.json())
 
 
@@ -254,16 +248,12 @@ async def test_associations_create_and_remove(client, admin_token):
         headers=headers,
     )
     assert r3.json()["id"] == aid
-    r4 = await client.delete(
-        f"/api/literature/papers/{pid}/associations/{aid}", headers=headers
-    )
+    r4 = await client.delete(f"/api/literature/papers/{pid}/associations/{aid}", headers=headers)
     assert r4.status_code == 204
 
 
 @pytest.mark.asyncio
-async def test_experiment_association_carries_parent_project_breadcrumb(
-    client, admin_token, admin_user, session
-):
+async def test_experiment_association_carries_parent_project_breadcrumb(client, admin_token, admin_user, session):
     """An experiment-scope association should expose its parent project so
     the UI can render the breadcrumb Project > Experiment. A project-scope
     association does not need parent metadata."""
@@ -391,9 +381,7 @@ async def test_comment_response_includes_author_attribution(client, admin_token,
     # Author label resolves the user; falls back to email if name is unset.
     assert body.get("user_name") == (admin_user.name or admin_user.email)
 
-    listing = await client.get(
-        f"/api/literature/papers/{pid}/comments", headers=headers
-    )
+    listing = await client.get(f"/api/literature/papers/{pid}/comments", headers=headers)
     items = listing.json()["items"]
     assert len(items) == 1
     assert items[0]["user_name"] == (admin_user.name or admin_user.email)
@@ -447,9 +435,7 @@ async def test_dismissal_and_reverse(client, admin_token):
     assert any(p["id"] == pid for p in lst2.json()["items"])
 
     # Admin reverses.
-    r2 = await client.post(
-        f"/api/literature/papers/{pid}/dismiss/reverse", headers=headers
-    )
+    r2 = await client.post(f"/api/literature/papers/{pid}/dismiss/reverse", headers=headers)
     assert r2.status_code == 200
     assert r2.json()["reversed_at"] is not None
 
@@ -548,18 +534,14 @@ async def test_reading_status_toggle_filters(client, admin_token):
     # ids[2] stays unread (no row -> default unread)
 
     # reading_status=reading should yield only the first
-    only_reading = await client.get(
-        "/api/literature/papers?reading_status=reading", headers=headers
-    )
+    only_reading = await client.get("/api/literature/papers?reading_status=reading", headers=headers)
     rs_ids = [p["id"] for p in only_reading.json()["items"]]
     assert ids[0] in rs_ids
     assert ids[1] not in rs_ids
     assert ids[2] not in rs_ids
 
     # reading_status=unread should include the third (no row) and exclude the others
-    only_unread = await client.get(
-        "/api/literature/papers?reading_status=unread", headers=headers
-    )
+    only_unread = await client.get("/api/literature/papers?reading_status=unread", headers=headers)
     rs_ids = [p["id"] for p in only_unread.json()["items"]]
     assert ids[2] in rs_ids
     assert ids[0] not in rs_ids
@@ -581,9 +563,7 @@ async def test_lit_review_settings_default_and_update(client, admin_token, viewe
     """The org's Lit Review relevance threshold defaults to 0.65 and is
     settable by admins between 0.0 and 1.0 inclusive."""
     headers = {"Authorization": f"Bearer {admin_token}"}
-    resp = await client.get(
-        "/api/literature/settings/lit-review", headers=headers
-    )
+    resp = await client.get("/api/literature/settings/lit-review", headers=headers)
     assert resp.status_code == 200
     body = resp.json()
     assert body["relevance_threshold"] == 0.65
@@ -614,9 +594,7 @@ async def test_lit_review_settings_default_and_update(client, admin_token, viewe
 
 
 @pytest.mark.asyncio
-async def test_experiment_filter_includes_parent_project_papers(
-    client, admin_token, admin_user, session
-):
+async def test_experiment_filter_includes_parent_project_papers(client, admin_token, admin_user, session):
     """The Experiment detail Literature tab needs to surface papers
     associated with the experiment itself AND with its parent project. The
     GET /papers endpoint exposes include_parent_project=true to do this in
@@ -625,8 +603,7 @@ async def test_experiment_filter_includes_parent_project_papers(
 
     proj = await session.execute(
         text(
-            "INSERT INTO projects (name, organization_id, owner_user_id) "
-            "VALUES ('PJ', :org, :uid) RETURNING id"
+            "INSERT INTO projects (name, organization_id, owner_user_id) VALUES ('PJ', :org, :uid) RETURNING id"
         ).bindparams(org=admin_user.organization_id, uid=admin_user.id)
     )
     project_id = proj.scalar_one()
@@ -684,9 +661,7 @@ async def test_experiment_filter_includes_parent_project_papers(
     c_id = c.json()["id"]
 
     # experiment_id alone returns only paper B.
-    only_exp = await client.get(
-        f"/api/literature/papers?experiment_id={experiment_id}", headers=headers
-    )
+    only_exp = await client.get(f"/api/literature/papers?experiment_id={experiment_id}", headers=headers)
     ids = {p["id"] for p in only_exp.json()["items"]}
     assert ids == {b_id}
 
@@ -700,17 +675,13 @@ async def test_experiment_filter_includes_parent_project_papers(
     assert c_id not in ids
 
     # project_id alone returns only paper A.
-    only_proj = await client.get(
-        f"/api/literature/papers?project_id={project_id}", headers=headers
-    )
+    only_proj = await client.get(f"/api/literature/papers?project_id={project_id}", headers=headers)
     ids = {p["id"] for p in only_proj.json()["items"]}
     assert ids == {a_id}
 
 
 @pytest.mark.asyncio
-async def test_recommendation_notes_include_experiment_and_project_names(
-    client, admin_token, admin_user, session
-):
+async def test_recommendation_notes_include_experiment_and_project_names(client, admin_token, admin_user, session):
     """AI Lit Review notes must name the experiment (and its project) they
     were generated for, not just the numeric id."""
     from sqlalchemy import text
@@ -761,9 +732,7 @@ async def test_recommendation_notes_include_experiment_and_project_names(
     )
     await session.commit()
 
-    notes = await client.get(
-        f"/api/literature/papers/{paper_id}/recommendation-notes", headers=headers
-    )
+    notes = await client.get(f"/api/literature/papers/{paper_id}/recommendation-notes", headers=headers)
     assert notes.status_code == 200
     items = notes.json()
     assert len(items) == 1

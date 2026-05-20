@@ -86,9 +86,7 @@ async def test_comment_thread(session: AsyncSession, admin_user):
     parent = LiteraturePaperComment(paper_id=paper.id, user_id=admin_user.id, body="top level")
     session.add(parent)
     await session.flush()
-    reply = LiteraturePaperComment(
-        paper_id=paper.id, user_id=admin_user.id, parent_id=parent.id, body="a reply"
-    )
+    reply = LiteraturePaperComment(paper_id=paper.id, user_id=admin_user.id, parent_id=parent.id, body="a reply")
     session.add(reply)
     await session.commit()
     assert reply.parent_id == parent.id
@@ -277,10 +275,7 @@ def test_migration_086_adds_automation_columns_and_seeds_rule():
     from pathlib import Path
 
     text = (
-        Path(__file__).resolve().parent.parent
-        / "alembic"
-        / "versions"
-        / "086_literature_automation.py"
+        Path(__file__).resolve().parent.parent / "alembic" / "versions" / "086_literature_automation.py"
     ).read_text()
 
     # Upgrade adds every column.
@@ -309,10 +304,7 @@ def test_migration_084_qualifies_ambiguous_columns():
     from pathlib import Path
 
     text = (
-        Path(__file__).resolve().parent.parent
-        / "alembic"
-        / "versions"
-        / "084_literature_in_library.py"
+        Path(__file__).resolve().parent.parent / "alembic" / "versions" / "084_literature_in_library.py"
     ).read_text()
 
     # Pull the UPDATE block that joins literature_recommendations and

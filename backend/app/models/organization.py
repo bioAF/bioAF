@@ -40,7 +40,5 @@ class Organization(Base):
     lit_review_auto_cadence: Mapped[str] = mapped_column(
         String(16), nullable=False, default="weekly", server_default="weekly"
     )
-    lit_review_max_runs_per_tick: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=5, server_default="5"
-    )
+    lit_review_max_runs_per_tick: Mapped[int] = mapped_column(Integer, nullable=False, default=5, server_default="5")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

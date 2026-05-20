@@ -72,9 +72,7 @@ async def test_payload_builder_renders_papers_and_comments(session, admin_user):
     eid = await _make_experiment(session, admin_user)
     paper = await _add_paper(session, admin_user, title="TGF-beta in TNBC", doi="10.1/lit-1")
     await _associate(session, paper, eid, admin_user)
-    session.add(
-        LiteraturePaperComment(paper_id=paper.id, user_id=admin_user.id, body="Worth re-reading.")
-    )
+    session.add(LiteraturePaperComment(paper_id=paper.id, user_id=admin_user.id, body="Worth re-reading."))
     await session.commit()
 
     result = await agent_review_payload.build_literature_payload(
@@ -105,11 +103,7 @@ async def test_payload_builder_orders_uploaded_with_comments_first(session, admi
     await _associate(session, commented_upload, eid, admin_user)
     await _associate(session, from_run, eid, admin_user)
 
-    session.add(
-        LiteraturePaperComment(
-            paper_id=commented_upload.id, user_id=admin_user.id, body="annotated"
-        )
-    )
+    session.add(LiteraturePaperComment(paper_id=commented_upload.id, user_id=admin_user.id, body="annotated"))
     await session.commit()
 
     result = await agent_review_payload.build_literature_payload(
@@ -120,9 +114,7 @@ async def test_payload_builder_orders_uploaded_with_comments_first(session, admi
     )
     assert result.included_paper_ids[0] == commented_upload.id
     # plain_upload is tier 2; from_run is tier 4
-    assert result.included_paper_ids.index(plain_upload.id) < result.included_paper_ids.index(
-        from_run.id
-    )
+    assert result.included_paper_ids.index(plain_upload.id) < result.included_paper_ids.index(from_run.id)
 
 
 @pytest.mark.asyncio

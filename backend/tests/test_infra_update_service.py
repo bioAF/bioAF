@@ -84,9 +84,7 @@ def test_additive_resources_excludes_destructive_and_data_sources():
 
 
 def test_parse_bucket_name():
-    assert infra_update_service._parse_bucket_name(
-        "bioaf-raw-bioaf-co-41aae5", "raw"
-    ) == ("bioaf-co", "41aae5")
+    assert infra_update_service._parse_bucket_name("bioaf-raw-bioaf-co-41aae5", "raw") == ("bioaf-co", "41aae5")
     # Old-style name without a six-hex suffix is rejected (caller falls back).
     assert infra_update_service._parse_bucket_name("bioaf-raw-bioaf-co", "raw") is None
     assert infra_update_service._parse_bucket_name("something-else", "raw") is None
@@ -248,14 +246,8 @@ async def test_check_self_heals_storage_bucket_names(session, admin_user, monkey
 
     await infra_update_service.check_for_updates(session, admin_user.id)
 
-    assert (
-        await PlatformConfigService.get(session, "literature_bucket_name")
-        == "bioaf-literature-bioaf-co-4bd459"
-    )
-    assert (
-        await PlatformConfigService.get(session, "references_bucket_name")
-        == "bioaf-references-bioaf-co-4bd459"
-    )
+    assert await PlatformConfigService.get(session, "literature_bucket_name") == "bioaf-literature-bioaf-co-4bd459"
+    assert await PlatformConfigService.get(session, "references_bucket_name") == "bioaf-references-bioaf-co-4bd459"
 
 
 @pytest.mark.asyncio

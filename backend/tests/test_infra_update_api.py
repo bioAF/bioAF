@@ -94,9 +94,7 @@ async def test_check_updates_additive_auto_applies(client, admin_token, session,
         raw_bucket_name="bioaf-raw-bioaf-co-41aae5",
     )
     monkeypatch.setattr(infra_update_service, "_persist_module_outputs", _noop_persist)
-    monkeypatch.setattr(
-        TerraformExecutor, "run_plan", _fake_run_plan({"storage": _plan([LIT]), "compute": _plan([])})
-    )
+    monkeypatch.setattr(TerraformExecutor, "run_plan", _fake_run_plan({"storage": _plan([LIT]), "compute": _plan([])}))
     launched: dict = {}
     monkeypatch.setattr(
         infra_update_service,
@@ -126,9 +124,7 @@ async def test_check_updates_destructive_not_auto_applied(client, admin_token, s
         raw_bucket_name="bioaf-raw-bioaf-co-41aae5",
     )
     monkeypatch.setattr(infra_update_service, "_persist_module_outputs", _noop_persist)
-    monkeypatch.setattr(
-        TerraformExecutor, "run_plan", _fake_run_plan({"storage": _plan([LIT, RAW_DELETE])})
-    )
+    monkeypatch.setattr(TerraformExecutor, "run_plan", _fake_run_plan({"storage": _plan([LIT, RAW_DELETE])}))
     calls = {"n": 0}
     monkeypatch.setattr(
         infra_update_service,
@@ -175,7 +171,5 @@ async def test_apply_updates_launches_valid_modules(client, admin_token, monkeyp
 
 @pytest.mark.asyncio
 async def test_apply_updates_rejects_no_valid_modules(client, admin_token):
-    r = await client.post(
-        APPLY, json={"modules": ["bogus"]}, headers={"Authorization": f"Bearer {admin_token}"}
-    )
+    r = await client.post(APPLY, json={"modules": ["bogus"]}, headers={"Authorization": f"Bearer {admin_token}"})
     assert r.status_code == 400

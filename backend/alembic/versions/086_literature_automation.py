@@ -87,9 +87,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(
-        sa.text("DELETE FROM notification_rules WHERE event_type = :event").bindparams(event=AUTO_REVIEW_EVENT)
-    )
+    op.execute(sa.text("DELETE FROM notification_rules WHERE event_type = :event").bindparams(event=AUTO_REVIEW_EVENT))
     op.drop_column("organizations", "lit_review_max_runs_per_tick")
     op.drop_column("organizations", "lit_review_auto_cadence")
     op.drop_column("organizations", "lit_review_auto_enabled")

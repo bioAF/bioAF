@@ -269,7 +269,7 @@ async def delete_paper(
     api_key_id: int | None = None,
     reason: str | None = None,
 ) -> None:
-    """"Delete" a paper from the Library: purge its stored files from GCS and
+    """ "Delete" a paper from the Library: purge its stored files from GCS and
     dismiss it org-wide.
 
     The row itself is kept, along with its abstract, metadata, comments, and
@@ -355,18 +355,24 @@ async def merge_papers(
     # Recommendations: unique on (org, paper, experiment). Drop a duplicate's
     # rec if the survivor already has one for that experiment.
     surv_recs = (
-        await session.execute(
-            select(LiteratureRecommendation.experiment_id).where(
-                LiteratureRecommendation.paper_id == survivor.id
+        (
+            await session.execute(
+                select(LiteratureRecommendation.experiment_id).where(LiteratureRecommendation.paper_id == survivor.id)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     surv_rec_exps = set(surv_recs)
     dup_recs = (
-        await session.execute(
-            select(LiteratureRecommendation).where(LiteratureRecommendation.paper_id == duplicate.id)
+        (
+            await session.execute(
+                select(LiteratureRecommendation).where(LiteratureRecommendation.paper_id == duplicate.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for rec in dup_recs:
         if rec.experiment_id in surv_rec_exps:
             await session.delete(rec)
@@ -375,19 +381,23 @@ async def merge_papers(
 
     # Associations: unique active index on (paper, scope_type, scope_id).
     surv_assocs = (
-        await session.execute(
-            select(LiteratureAssociation).where(
-                LiteratureAssociation.paper_id == survivor.id,
-                LiteratureAssociation.removed_at.is_(None),
+        (
+            await session.execute(
+                select(LiteratureAssociation).where(
+                    LiteratureAssociation.paper_id == survivor.id,
+                    LiteratureAssociation.removed_at.is_(None),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     surv_assoc_keys = {(a.scope_type, a.scope_id) for a in surv_assocs}
     dup_assocs = (
-        await session.execute(
-            select(LiteratureAssociation).where(LiteratureAssociation.paper_id == duplicate.id)
-        )
-    ).scalars().all()
+        (await session.execute(select(LiteratureAssociation).where(LiteratureAssociation.paper_id == duplicate.id)))
+        .scalars()
+        .all()
+    )
     for a in dup_assocs:
         if a.removed_at is None and (a.scope_type, a.scope_id) in surv_assoc_keys:
             await session.delete(a)
@@ -398,19 +408,21 @@ async def merge_papers(
     surv_rs_users = set(
         (
             await session.execute(
-                select(LiteraturePaperReadingStatus.user_id).where(
-                    LiteraturePaperReadingStatus.paper_id == survivor.id
-                )
-            )
-        ).scalars().all()
-    )
-    dup_rs = (
-        await session.execute(
-            select(LiteraturePaperReadingStatus).where(
-                LiteraturePaperReadingStatus.paper_id == duplicate.id
+                select(LiteraturePaperReadingStatus.user_id).where(LiteraturePaperReadingStatus.paper_id == survivor.id)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
+    dup_rs = (
+        (
+            await session.execute(
+                select(LiteraturePaperReadingStatus).where(LiteraturePaperReadingStatus.paper_id == duplicate.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     for rs_row in dup_rs:
         if rs_row.user_id in surv_rs_users:
             await session.delete(rs_row)
@@ -427,16 +439,12 @@ async def merge_papers(
     # Dismissals: PK is paper_id. Transfer an active duplicate dismissal only
     # if the survivor has none; otherwise let it cascade-delete with the row.
     surv_dismissal = (
-        await session.execute(
-            select(LiteraturePaperDismissal).where(LiteraturePaperDismissal.paper_id == survivor.id)
-        )
+        await session.execute(select(LiteraturePaperDismissal).where(LiteraturePaperDismissal.paper_id == survivor.id))
     ).scalar_one_or_none()
     if surv_dismissal is None:
         dup_dismissal = (
             await session.execute(
-                select(LiteraturePaperDismissal).where(
-                    LiteraturePaperDismissal.paper_id == duplicate.id
-                )
+                select(LiteraturePaperDismissal).where(LiteraturePaperDismissal.paper_id == duplicate.id)
             )
         ).scalar_one_or_none()
         if dup_dismissal is not None:
@@ -557,9 +565,7 @@ async def list_papers(
             # Resolve the experiment's parent project once and OR the two
             # association predicates: papers tied to the experiment, plus
             # papers tied to its parent project (if any).
-            parent_rs = await session.execute(
-                select(Experiment.project_id).where(Experiment.id == experiment_id)
-            )
+            parent_rs = await session.execute(select(Experiment.project_id).where(Experiment.id == experiment_id))
             parent_pid = parent_rs.scalar_one_or_none()
             if parent_pid is not None:
                 parent_filter = and_(
@@ -570,9 +576,7 @@ async def list_papers(
                 )
                 from sqlalchemy import or_
 
-                query = query.where(
-                    or_(exists().where(exp_filter), exists().where(parent_filter))
-                )
+                query = query.where(or_(exists().where(exp_filter), exists().where(parent_filter)))
             else:
                 query = query.where(exists().where(exp_filter))
         else:
@@ -691,9 +695,7 @@ async def add_to_library(
     return paper
 
 
-async def list_recommendation_notes(
-    session: AsyncSession, paper_id: int
-) -> list[dict[str, Any]]:
+async def list_recommendation_notes(session: AsyncSession, paper_id: int) -> list[dict[str, Any]]:
     """Return the LLM-authored Lit Review Run reasonings tied to a paper.
 
     Each entry includes the run id, experiment id and name, parent project

@@ -215,10 +215,10 @@ async def test_run_due_sweep_caps_and_rolls_over(session, admin_user, monkeypatc
     assert result["ran"] == [e1, e2]  # oldest-activity-first, capped at 2
 
     runs = (
-        await session.execute(
-            select(LiteratureReviewRun).where(LiteratureReviewRun.trigger == TRIGGER_SCHEDULED)
-        )
-    ).scalars().all()
+        (await session.execute(select(LiteratureReviewRun).where(LiteratureReviewRun.trigger == TRIGGER_SCHEDULED)))
+        .scalars()
+        .all()
+    )
     assert len(runs) == 2
 
     # Second sweep: e1/e2 now have a recent scheduled run, only e3 remains due.
@@ -340,9 +340,7 @@ async def _run_scheduled(session, admin_user, monkeypatch, *, score: float):
         abstract="abstract",
     )
     _patch_sources(monkeypatch, [candidate])
-    fake_client = _FakeLlmClient(
-        ["q1\nq2", json.dumps([{"index": 0, "score": score, "reasoning": "ok"}])]
-    )
+    fake_client = _FakeLlmClient(["q1\nq2", json.dumps([{"index": 0, "score": score, "reasoning": "ok"}])])
     monkeypatch.setattr(lit_review_run_service, "get_client", lambda provider: fake_client)
 
     emitted: list[tuple[str, dict]] = []
@@ -388,9 +386,7 @@ async def test_scheduled_run_silent_when_no_papers_added(session, admin_user, mo
 
 
 @pytest.mark.asyncio
-async def test_notification_router_delivers_in_app_to_all_active_users(
-    session, admin_user, viewer_user
-):
+async def test_notification_router_delivers_in_app_to_all_active_users(session, admin_user, viewer_user):
     import app.database as _database
     from app.models.notification import Notification, NotificationRule
     from app.services.event_types import LITERATURE_AUTO_REVIEW_RECOMMENDATIONS
@@ -422,12 +418,14 @@ async def test_notification_router_delivers_in_app_to_all_active_users(
     )
 
     rows = (
-        await session.execute(
-            select(Notification).where(
-                Notification.event_type == LITERATURE_AUTO_REVIEW_RECOMMENDATIONS
+        (
+            await session.execute(
+                select(Notification).where(Notification.event_type == LITERATURE_AUTO_REVIEW_RECOMMENDATIONS)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     user_ids = {r.user_id for r in rows}
     assert admin_user.id in user_ids
     assert viewer_user.id in user_ids
@@ -439,9 +437,7 @@ async def test_notification_router_delivers_in_app_to_all_active_users(
 
 
 @pytest.mark.asyncio
-async def test_lit_review_auto_settings_default_update_and_validation(
-    client, admin_token, viewer_token
-):
+async def test_lit_review_auto_settings_default_update_and_validation(client, admin_token, viewer_token):
     headers = {"Authorization": f"Bearer {admin_token}"}
 
     r = await client.get("/api/literature/settings/lit-review", headers=headers)
@@ -470,9 +466,7 @@ async def test_lit_review_auto_settings_default_update_and_validation(
         "/api/literature/settings/lit-review", json={"auto_cadence": "hourly"}, headers=headers
     )
     assert bad_cadence.status_code == 400
-    bad_cap = await client.put(
-        "/api/literature/settings/lit-review", json={"max_runs_per_tick": 0}, headers=headers
-    )
+    bad_cap = await client.put("/api/literature/settings/lit-review", json={"max_runs_per_tick": 0}, headers=headers)
     assert bad_cap.status_code == 400
 
     # Viewer cannot configure.
@@ -484,9 +478,7 @@ async def test_lit_review_auto_settings_default_update_and_validation(
     assert v.status_code == 403
 
     # Disabling round-trips.
-    r4 = await client.put(
-        "/api/literature/settings/lit-review", json={"auto_enabled": False}, headers=headers
-    )
+    r4 = await client.put("/api/literature/settings/lit-review", json={"auto_enabled": False}, headers=headers)
     assert r4.json()["auto_enabled"] is False
 
 

@@ -84,17 +84,14 @@ class _FakeLlmClient:
     def __init__(self, responses: list[str]):
         self._responses = list(responses)
 
-    async def submit(self, prompt: str, payload: str, model: str, api_key: str | None,
-                     attachments=None) -> str:
+    async def submit(self, prompt: str, payload: str, model: str, api_key: str | None, attachments=None) -> str:
         if not self._responses:
             return ""
         return self._responses.pop(0)
 
 
 @pytest.mark.asyncio
-async def test_lit_review_run_creates_pending_recommendations(
-    client, admin_token, admin_user, session, monkeypatch
-):
+async def test_lit_review_run_creates_pending_recommendations(client, admin_token, admin_user, session, monkeypatch):
     from app.services.bootstrap_literature import seed_literature_sources
 
     await seed_literature_sources(session, admin_user.organization_id)
@@ -165,9 +162,7 @@ async def test_lit_review_run_creates_pending_recommendations(
 
 
 @pytest.mark.asyncio
-async def test_accept_recommendation_associates_with_experiment(
-    client, admin_token, admin_user, session, monkeypatch
-):
+async def test_accept_recommendation_associates_with_experiment(client, admin_token, admin_user, session, monkeypatch):
     from app.services.bootstrap_literature import seed_literature_sources
 
     await seed_literature_sources(session, admin_user.organization_id)
@@ -195,9 +190,7 @@ async def test_accept_recommendation_associates_with_experiment(
     monkeypatch.setattr(lit_review_run_service, "get_client", lambda provider: fake_client)
 
     headers = {"Authorization": f"Bearer {admin_token}"}
-    resp = await client.post(
-        f"/api/literature/experiments/{eid}/lit-review-runs", json={}, headers=headers
-    )
+    resp = await client.post(f"/api/literature/experiments/{eid}/lit-review-runs", json={}, headers=headers)
     run_id = resp.json()["id"]
     for _ in range(80):
         await asyncio.sleep(0.1)
@@ -209,9 +202,7 @@ async def test_accept_recommendation_associates_with_experiment(
     rec_id = recs.json()["items"][0]["id"]
     paper_id = recs.json()["items"][0]["paper"]["id"]
 
-    accept = await client.post(
-        f"/api/literature/recommendations/{rec_id}/accept", headers=headers
-    )
+    accept = await client.post(f"/api/literature/recommendations/{rec_id}/accept", headers=headers)
     assert accept.status_code == 200
     assert accept.json()["status"] == "accepted"
 
@@ -222,9 +213,7 @@ async def test_accept_recommendation_associates_with_experiment(
 
 
 @pytest.mark.asyncio
-async def test_dismiss_recommendation_dismisses_paper(
-    client, admin_token, admin_user, session, monkeypatch
-):
+async def test_dismiss_recommendation_dismisses_paper(client, admin_token, admin_user, session, monkeypatch):
     from app.services.bootstrap_literature import seed_literature_sources
 
     await seed_literature_sources(session, admin_user.organization_id)
@@ -241,17 +230,13 @@ async def test_dismiss_recommendation_dismisses_paper(
         abstract="abstract",
     )
     _patch_sources(monkeypatch, [candidate])
-    fake_client = _FakeLlmClient(
-        ["q1\nq2", json.dumps([{"index": 0, "score": 0.7, "reasoning": "ok"}])]
-    )
+    fake_client = _FakeLlmClient(["q1\nq2", json.dumps([{"index": 0, "score": 0.7, "reasoning": "ok"}])])
     from app.services.literature import lit_review_run_service
 
     monkeypatch.setattr(lit_review_run_service, "get_client", lambda provider: fake_client)
 
     headers = {"Authorization": f"Bearer {admin_token}"}
-    resp = await client.post(
-        f"/api/literature/experiments/{eid}/lit-review-runs", json={}, headers=headers
-    )
+    resp = await client.post(f"/api/literature/experiments/{eid}/lit-review-runs", json={}, headers=headers)
     run_id = resp.json()["id"]
     for _ in range(80):
         await asyncio.sleep(0.1)
@@ -263,9 +248,7 @@ async def test_dismiss_recommendation_dismisses_paper(
     rec_id = recs.json()["items"][0]["id"]
     paper_id = recs.json()["items"][0]["paper"]["id"]
 
-    dismiss = await client.post(
-        f"/api/literature/recommendations/{rec_id}/dismiss", headers=headers
-    )
+    dismiss = await client.post(f"/api/literature/recommendations/{rec_id}/dismiss", headers=headers)
     assert dismiss.status_code == 200
     assert dismiss.json()["status"] == "dismissed"
 
@@ -274,22 +257,16 @@ async def test_dismiss_recommendation_dismisses_paper(
 
 
 @pytest.mark.asyncio
-async def test_no_active_llm_provider_fails_creation(
-    client, admin_token, admin_user, session
-):
+async def test_no_active_llm_provider_fails_creation(client, admin_token, admin_user, session):
     """Without an active provider, the run cannot be created."""
     eid = await _make_experiment(session, admin_user)
     headers = {"Authorization": f"Bearer {admin_token}"}
-    resp = await client.post(
-        f"/api/literature/experiments/{eid}/lit-review-runs", json={}, headers=headers
-    )
+    resp = await client.post(f"/api/literature/experiments/{eid}/lit-review-runs", json={}, headers=headers)
     assert resp.status_code == 409
 
 
 @pytest.mark.asyncio
-async def test_lit_review_run_uses_org_relevance_threshold_by_default(
-    client, admin_token, admin_user, session
-):
+async def test_lit_review_run_uses_org_relevance_threshold_by_default(client, admin_token, admin_user, session):
     """When the launch body omits score_threshold, the run is created with
     the org's configured lit_review_relevance_threshold (default 0.65)."""
     await _seed_llm_provider(session, admin_user)

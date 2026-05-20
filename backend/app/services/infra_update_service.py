@@ -124,7 +124,7 @@ def _parse_bucket_name(name: str, purpose: str) -> tuple[str, str] | None:
     prefix = f"bioaf-{purpose}-"
     if not name.startswith(prefix):
         return None
-    rest = name[len(prefix):]
+    rest = name[len(prefix) :]
     if "-" not in rest:
         return None
     org_slug, stack_uid = rest.rsplit("-", 1)

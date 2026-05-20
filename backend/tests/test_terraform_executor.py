@@ -206,9 +206,7 @@ def test_write_tfvars_uses_per_module_stack_uid(tmp_path):
     assert compute["stack_uid"] == "41aae5"
 
     # Fallback to deploy_suffix when the module-specific key is absent.
-    fallback = TerraformExecutor._write_tfvars(
-        tmp_path, "storage", {**config, "storage_stack_uid": None}
-    )
+    fallback = TerraformExecutor._write_tfvars(tmp_path, "storage", {**config, "storage_stack_uid": None})
     assert fallback["stack_uid"] == "41aae5"
 
 
@@ -220,9 +218,7 @@ def test_build_apply_args_plain_and_targeted():
         "-json",
         "-no-color",
     ]
-    args = TerraformExecutor._build_apply_args(
-        ["google_storage_bucket.literature", 'm.iam["literature"]']
-    )
+    args = TerraformExecutor._build_apply_args(["google_storage_bucket.literature", 'm.iam["literature"]'])
     assert args[-2:] == [
         "-target=google_storage_bucket.literature",
         '-target=m.iam["literature"]',

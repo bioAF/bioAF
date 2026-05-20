@@ -21,9 +21,7 @@ async def test_list_sources_returns_seeded_four(client, admin_token, admin_user,
     await seed_literature_sources(session, admin_user.organization_id)
     await session.commit()
 
-    resp = await client.get(
-        "/api/literature/sources", headers={"Authorization": f"Bearer {admin_token}"}
-    )
+    resp = await client.get("/api/literature/sources", headers={"Authorization": f"Bearer {admin_token}"})
     assert resp.status_code == 200
     items = resp.json()["items"]
     sources = {i["source"] for i in items}
@@ -68,9 +66,7 @@ async def test_viewer_cannot_configure_sources(client, viewer_token, admin_user,
 
 
 @pytest.mark.asyncio
-async def test_search_end_to_end_with_monkeypatched_sources(
-    client, admin_token, admin_user, session, monkeypatch
-):
+async def test_search_end_to_end_with_monkeypatched_sources(client, admin_token, admin_user, session, monkeypatch):
     """Submit a search, let the background coroutine run, then poll for results.
 
     All four adapters are replaced with deterministic in-process fakes so this
@@ -124,9 +120,7 @@ async def test_search_end_to_end_with_monkeypatched_sources(
 
     # Search results are visible from the search detail endpoint but do
     # not enter the Library until the user adds them.
-    results = await client.get(
-        f"/api/literature/searches/{search_id}/results", headers=headers
-    )
+    results = await client.get(f"/api/literature/searches/{search_id}/results", headers=headers)
     assert results.status_code == 200
     items = results.json()["items"]
     assert len(items) == 1
@@ -196,9 +190,7 @@ async def test_bulk_add_to_library(client, admin_token, admin_user, session, mon
         if s.json()["status"] in {"complete", "partial", "failed"}:
             break
 
-    results = await client.get(
-        f"/api/literature/searches/{sid}/results", headers=headers
-    )
+    results = await client.get(f"/api/literature/searches/{sid}/results", headers=headers)
     ids = [p["id"] for p in results.json()["items"]]
     assert len(ids) == 2
 
@@ -219,9 +211,7 @@ async def test_bulk_add_to_library(client, admin_token, admin_user, session, mon
 
 
 @pytest.mark.asyncio
-async def test_search_failed_status_when_all_sources_fail(
-    client, admin_token, admin_user, session, monkeypatch
-):
+async def test_search_failed_status_when_all_sources_fail(client, admin_token, admin_user, session, monkeypatch):
     from app.services.bootstrap_literature import seed_literature_sources
 
     await seed_literature_sources(session, admin_user.organization_id)

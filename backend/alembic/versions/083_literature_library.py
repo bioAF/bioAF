@@ -230,7 +230,10 @@ def upgrade() -> None:
         sa.Column("user_id", sa.Integer(), nullable=False),
         sa.Column("query_text", sa.Text(), nullable=False),
         sa.Column(
-            "sources_json", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'[]'::jsonb")
+            "sources_json",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=False,
+            server_default=sa.text("'[]'::jsonb"),
         ),
         sa.Column(
             "per_source_status",
@@ -297,7 +300,9 @@ def upgrade() -> None:
     op.create_index(
         "ix_literature_review_runs_experiment_created", "literature_review_runs", ["experiment_id", "created_at"]
     )
-    op.create_index("ix_literature_review_runs_org_created", "literature_review_runs", ["organization_id", "created_at"])
+    op.create_index(
+        "ix_literature_review_runs_org_created", "literature_review_runs", ["organization_id", "created_at"]
+    )
 
     # literature_recommendations
     op.create_table(

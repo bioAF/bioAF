@@ -61,16 +61,12 @@ async def test_upload_rejected_when_no_literature_bucket(client, admin_token):
     pdf = _build_test_pdf()
     files = {"file": ("paper.pdf", pdf, "application/pdf")}
     data = {"title": "Should Not Persist 8f3a"}
-    resp = await client.post(
-        "/api/literature/papers/upload", files=files, data=data, headers=headers
-    )
+    resp = await client.post("/api/literature/papers/upload", files=files, data=data, headers=headers)
     assert resp.status_code == 503, resp.text
     assert "storage" in resp.json()["detail"].lower()
 
     listing = await client.get("/api/literature/papers", headers=headers)
-    assert all(
-        p["title"] != "Should Not Persist 8f3a" for p in listing.json()["items"]
-    )
+    assert all(p["title"] != "Should Not Persist 8f3a" for p in listing.json()["items"])
 
 
 @pytest.mark.asyncio
@@ -86,9 +82,7 @@ async def test_attach_pdf_rejected_when_no_literature_bucket(client, admin_token
     pid = r.json()["id"]
     pdf = _build_test_pdf()
     files = {"file": ("full.pdf", pdf, "application/pdf")}
-    resp = await client.post(
-        f"/api/literature/papers/{pid}/upload-pdf", files=files, headers=headers
-    )
+    resp = await client.post(f"/api/literature/papers/{pid}/upload-pdf", files=files, headers=headers)
     assert resp.status_code == 503, resp.text
 
     after = await client.get(f"/api/literature/papers/{pid}", headers=headers)
@@ -96,9 +90,7 @@ async def test_attach_pdf_rejected_when_no_literature_bucket(client, admin_token
 
 
 @pytest.mark.asyncio
-async def test_upload_pdf_creates_paper_with_extracted_metadata(
-    client, admin_token, fake_literature_bucket
-):
+async def test_upload_pdf_creates_paper_with_extracted_metadata(client, admin_token, fake_literature_bucket):
     headers = {"Authorization": f"Bearer {admin_token}"}
     pdf = _build_test_pdf()
     files = {"file": ("paper.pdf", pdf, "application/pdf")}
@@ -112,9 +104,7 @@ async def test_upload_pdf_creates_paper_with_extracted_metadata(
 
 
 @pytest.mark.asyncio
-async def test_upload_attaches_pdf_to_existing_library_paper(
-    client, admin_token, fake_literature_bucket
-):
+async def test_upload_attaches_pdf_to_existing_library_paper(client, admin_token, fake_literature_bucket):
     """Uploading a paper that already exists in the Library (matched by DOI,
     e.g. previously added from a search or AI recommendation) attaches the PDF
     to that entry instead of dropping the file.
@@ -137,9 +127,7 @@ async def test_upload_attaches_pdf_to_existing_library_paper(
 
     pdf = _build_test_pdf()
     files = {"file": ("full.pdf", pdf, "application/pdf")}
-    resp = await client.post(
-        "/api/literature/papers/upload", files=files, headers=headers
-    )
+    resp = await client.post("/api/literature/papers/upload", files=files, headers=headers)
     # Duplicate detected: returns the existing entry (200), now with the PDF.
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -160,9 +148,7 @@ async def test_upload_rejects_non_pdf(client, admin_token):
 
 
 @pytest.mark.asyncio
-async def test_upload_uses_explicit_metadata_over_extracted(
-    client, admin_token, fake_literature_bucket
-):
+async def test_upload_uses_explicit_metadata_over_extracted(client, admin_token, fake_literature_bucket):
     headers = {"Authorization": f"Bearer {admin_token}"}
     pdf = _build_test_pdf()
     files = {"file": ("paper.pdf", pdf, "application/pdf")}
@@ -193,9 +179,7 @@ async def test_re_extract_returns_404_when_no_pdf(client, admin_token):
 
 
 @pytest.mark.asyncio
-async def test_upload_pdf_to_existing_paper_without_conflict(
-    client, admin_token, fake_literature_bucket
-):
+async def test_upload_pdf_to_existing_paper_without_conflict(client, admin_token, fake_literature_bucket):
     """Attaching a PDF to an abstract-only paper upgrades it in place: no
     second row, extraction queued, DOI backfilled from the PDF if absent."""
     headers = {"Authorization": f"Bearer {admin_token}"}
@@ -209,9 +193,7 @@ async def test_upload_pdf_to_existing_paper_without_conflict(
 
     pdf = _build_test_pdf()
     files = {"file": ("full.pdf", pdf, "application/pdf")}
-    resp = await client.post(
-        f"/api/literature/papers/{pid}/upload-pdf", files=files, headers=headers
-    )
+    resp = await client.post(f"/api/literature/papers/{pid}/upload-pdf", files=files, headers=headers)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["id"] == pid
@@ -286,9 +268,7 @@ async def test_upload_pdf_doi_conflict_prompts_then_merges(
 
     # First call (no confirmation) surfaces the conflict.
     files = {"file": ("full.pdf", pdf, "application/pdf")}
-    conflict = await client.post(
-        f"/api/literature/papers/{a_id}/upload-pdf", files=files, headers=headers
-    )
+    conflict = await client.post(f"/api/literature/papers/{a_id}/upload-pdf", files=files, headers=headers)
     assert conflict.status_code == 409, conflict.text
     detail = conflict.json()["detail"]
     assert detail["other_paper_id"] == b_id
@@ -307,16 +287,12 @@ async def test_upload_pdf_doi_conflict_prompts_then_merges(
     assert body["doi"] == "10.1038/s41592-uptest-1"
 
     # B's comment is now on A.
-    a_comments = await client.get(
-        f"/api/literature/papers/{a_id}/comments", headers=headers
-    )
+    a_comments = await client.get(f"/api/literature/papers/{a_id}/comments", headers=headers)
     bodies = [c["body"] for c in a_comments.json()["items"]]
     assert "Sarah's note on the duplicate" in bodies
 
     # B's AI note is now on A.
-    a_notes = await client.get(
-        f"/api/literature/papers/{a_id}/recommendation-notes", headers=headers
-    )
+    a_notes = await client.get(f"/api/literature/papers/{a_id}/recommendation-notes", headers=headers)
     assert any(n["experiment_id"] == experiment_id for n in a_notes.json())
 
     # B is gone.

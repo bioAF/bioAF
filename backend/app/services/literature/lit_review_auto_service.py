@@ -142,9 +142,7 @@ async def due_experiments(session: AsyncSession, org_id: int) -> list[int]:
     automated review, ordered oldest-activity-first. Experiments that have never
     had an automated review are due if they have any sample or run at all."""
     exp_ids = list(
-        (
-            await session.execute(select(Experiment.id).where(Experiment.organization_id == org_id))
-        ).scalars().all()
+        (await session.execute(select(Experiment.id).where(Experiment.organization_id == org_id))).scalars().all()
     )
     if not exp_ids:
         return []
@@ -223,10 +221,7 @@ async def resolve_actor_user_id(session: AsyncSession, org_id: int) -> int | Non
         return admin
     return (
         await session.execute(
-            select(User.id)
-            .where(User.organization_id == org_id, User.status == "active")
-            .order_by(User.id)
-            .limit(1)
+            select(User.id).where(User.organization_id == org_id, User.status == "active").order_by(User.id).limit(1)
         )
     ).scalar_one_or_none()
 
