@@ -440,7 +440,7 @@ async def test_notification_router_delivers_in_app_to_all_active_users(
 
 @pytest.mark.asyncio
 async def test_lit_review_auto_settings_default_update_and_validation(
-    client, admin_token, viewer_token, session
+    client, admin_token, viewer_token
 ):
     headers = {"Authorization": f"Bearer {admin_token}"}
 
@@ -460,9 +460,6 @@ async def test_lit_review_auto_settings_default_update_and_validation(
     assert r2.json()["auto_enabled"] is True
     assert r2.json()["auto_cadence"] == "daily"
     assert r2.json()["max_runs_per_tick"] == 3
-
-    # Enabling schedules the next run.
-    assert await PlatformConfigService.get(session, lit_review_auto_service.NEXT_RUN_KEY) is not None
 
     # GET reflects the update.
     r3 = await client.get("/api/literature/settings/lit-review", headers=headers)
@@ -486,9 +483,25 @@ async def test_lit_review_auto_settings_default_update_and_validation(
     )
     assert v.status_code == 403
 
-    # Disabling clears the schedule.
+    # Disabling round-trips.
     r4 = await client.put(
         "/api/literature/settings/lit-review", json={"auto_enabled": False}, headers=headers
     )
     assert r4.json()["auto_enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_auto_schedule_seeded_on_enable_and_cleared_on_disable(session, admin_user):
+    """The scheduling primitives the settings endpoint uses: enabling seeds a
+    next_run one cadence out; disabling clears it. Service-level (no client) so
+    it does not mix the session fixture with HTTP requests."""
+    org_id = admin_user.organization_id
+    await _set_auto_config(session, org_id, enabled=True, cadence="daily")
+
+    await lit_review_auto_service.schedule_from_now(session, org_id)
+    await session.commit()
+    assert await PlatformConfigService.get(session, lit_review_auto_service.NEXT_RUN_KEY) is not None
+
+    await lit_review_auto_service.clear_schedule(session)
+    await session.commit()
     assert await PlatformConfigService.get(session, lit_review_auto_service.NEXT_RUN_KEY) is None

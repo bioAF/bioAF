@@ -7,7 +7,6 @@ PyMuPDF. PyMuPDF is already a dependency of the project (thumbnail_service).
 
 from __future__ import annotations
 
-from datetime import date
 
 import pytest
 

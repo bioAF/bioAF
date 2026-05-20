@@ -13,7 +13,6 @@ from sqlalchemy import text
 from app.models.literature import (
     AgentReviewLiteratureConfig,
     LiteratureAssociation,
-    LiteraturePaper,
     LiteraturePaperComment,
     LiteraturePaperDismissal,
     PROVENANCE_LIT_REVIEW_RUN,

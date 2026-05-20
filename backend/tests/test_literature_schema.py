@@ -27,7 +27,6 @@ from app.models.literature import (
     PROVENANCE_USER_UPLOAD,
     READING_READING,
     READING_READ,
-    SCOPE_EXPERIMENT,
     SCOPE_GLOBAL,
     SOURCE_PUBMED,
     derive_bucket,

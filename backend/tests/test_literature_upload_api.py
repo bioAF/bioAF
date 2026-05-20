@@ -3,7 +3,6 @@ path and verifies the resulting Paper has the right metadata."""
 
 from __future__ import annotations
 
-import asyncio
 
 import pytest
 
