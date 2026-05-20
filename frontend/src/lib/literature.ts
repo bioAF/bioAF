@@ -261,6 +261,15 @@ export interface LiteratureConfig {
   max_tokens: number;
 }
 
+export interface LitReviewSettings {
+  relevance_threshold: number;
+  auto_enabled: boolean;
+  auto_cadence: string;
+  max_runs_per_tick: number;
+}
+
+export type LitReviewSettingsUpdate = Partial<LitReviewSettings>;
+
 export interface PaperFilters {
   scope_type?: ScopeType;
   scope_id?: number;
@@ -420,12 +429,9 @@ export const literature = {
     api.put<LiteratureConfig>("/api/literature/agent-review-config", body),
 
   getLitReviewSettings: () =>
-    api.get<{ relevance_threshold: number }>("/api/literature/settings/lit-review"),
-  updateLitReviewSettings: (relevance_threshold: number) =>
-    api.put<{ relevance_threshold: number }>(
-      "/api/literature/settings/lit-review",
-      { relevance_threshold },
-    ),
+    api.get<LitReviewSettings>("/api/literature/settings/lit-review"),
+  updateLitReviewSettings: (patch: LitReviewSettingsUpdate) =>
+    api.put<LitReviewSettings>("/api/literature/settings/lit-review", patch),
 };
 
 export function formatAuthors(authors: Author[]): string {
