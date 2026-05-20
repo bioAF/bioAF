@@ -136,15 +136,32 @@ class TerraformExecutor:
         return run
 
     @staticmethod
+    def _build_apply_args(targets: list[str] | None = None) -> list[str]:
+        """Build the `terraform apply` argv. When targets are given, append a
+        -target flag per address so only those resources (and their deps) are
+        applied; this is how the infrastructure-update flow applies additive
+        resources without touching anything marked for replace/delete."""
+        args = ["terraform", "apply", "-auto-approve", "-json", "-no-color"]
+        for target in targets or []:
+            args.append(f"-target={target}")
+        return args
+
+    @staticmethod
     async def run_apply(
         session: AsyncSession,
         run_id: int,
         user_id: int,
+        targets: list[str] | None = None,
     ) -> AsyncIterator[TerraformProgressEvent]:
         """Apply an approved plan, yielding progress events.
 
         Yields TerraformProgressEvent objects as Terraform processes each resource.
         Updates resources_completed in the DB as resources complete.
+
+        When `targets` is given, only those resource addresses (and their
+        dependencies) are applied (`terraform apply -target=...`). The
+        infrastructure-update flow uses this to apply additive resources only,
+        never the resources a plan marks for replace/delete.
         """
         result = await session.execute(select(TerraformRun).where(TerraformRun.id == run_id))
         run = result.scalar_one_or_none()
@@ -185,11 +202,7 @@ class TerraformExecutor:
             await TerraformExecutor._run_init(work_dir, env, config, module_name=module_name)
 
             process = await asyncio.create_subprocess_exec(
-                "terraform",
-                "apply",
-                "-auto-approve",
-                "-json",
-                "-no-color",
+                *TerraformExecutor._build_apply_args(targets),
                 cwd=str(work_dir),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

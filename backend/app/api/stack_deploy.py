@@ -600,11 +600,15 @@ async def stack_status_endpoint(
 # -----------------------------------------------------------------------
 
 
-class StatefulResourceInfo(BaseModel):
+class ResourceInfo(BaseModel):
     address: str
     type: str
     action: str
     description: str
+
+
+class DestructiveResourceInfo(ResourceInfo):
+    stateful: bool
 
 
 class ModuleUpdateInfo(BaseModel):
@@ -617,11 +621,15 @@ class ModuleUpdateInfo(BaseModel):
 
 class CheckUpdatesResponse(BaseModel):
     has_changes: bool
+    has_additive: bool
+    has_destructive: bool
     requires_approval: bool
     applying: bool
-    modules_with_changes: list[str]
+    realigned: dict | None
+    modules_with_additive: list[str]
     modules: list[ModuleUpdateInfo]
-    destructive_resources: list[StatefulResourceInfo]
+    additive_resources: list[ResourceInfo]
+    destructive_resources: list[DestructiveResourceInfo]
 
 
 class ApplyUpdatesRequest(BaseModel):
@@ -631,9 +639,12 @@ class ApplyUpdatesRequest(BaseModel):
 def _to_check_response(result: dict, *, applying: bool) -> CheckUpdatesResponse:
     return CheckUpdatesResponse(
         has_changes=result["has_changes"],
+        has_additive=result["has_additive"],
+        has_destructive=result["has_destructive"],
         requires_approval=result["requires_approval"],
         applying=applying,
-        modules_with_changes=result["modules_with_changes"],
+        realigned=result["realigned"],
+        modules_with_additive=result["modules_with_additive"],
         modules=[
             ModuleUpdateInfo(
                 module=m["module"],
@@ -644,12 +655,22 @@ def _to_check_response(result: dict, *, applying: bool) -> CheckUpdatesResponse:
             )
             for m in result["modules"]
         ],
-        destructive_resources=[
-            StatefulResourceInfo(
+        additive_resources=[
+            ResourceInfo(
                 address=r["address"],
                 type=r["type"],
                 action=r["action"],
                 description=r.get("description", ""),
+            )
+            for r in result["additive_resources"]
+        ],
+        destructive_resources=[
+            DestructiveResourceInfo(
+                address=r["address"],
+                type=r["type"],
+                action=r["action"],
+                description=r.get("description", ""),
+                stateful=bool(r.get("stateful")),
             )
             for r in result["destructive_resources"]
         ],
@@ -661,11 +682,14 @@ async def check_infra_updates_endpoint(
     current_user: dict = require_permission("infrastructure", "deploy"),
     session: AsyncSession = Depends(get_session),
 ) -> CheckUpdatesResponse:
-    """Re-plan every deployed module and report pending changes.
+    """Re-align deployed naming, re-plan every deployed module, and report the
+    pending changes split into additive vs destructive.
 
-    Additive-only changes (no destroy/replace of a stateful resource) start
-    applying immediately in the background. A stateful destroy/replace is held
-    and surfaced for explicit approval via /apply-updates.
+    When there are additive changes and no destructive (delete/replace) ones,
+    the additive resources start applying immediately in the background. When
+    a destructive change is present, nothing is auto-applied; the caller can
+    apply the additive subset via /apply-updates (which only ever targets
+    additive resources).
     """
     user_id = int(current_user["sub"])
     try:
@@ -686,8 +710,8 @@ async def check_infra_updates_endpoint(
         raise HTTPException(status_code=400, detail="Could not check for infrastructure updates. See server logs.")
 
     applying = False
-    if result["has_changes"] and not result["requires_approval"]:
-        infra_update_service.launch_background_apply(result["modules_with_changes"], user_id)
+    if result["has_additive"] and not result["has_destructive"]:
+        infra_update_service.launch_background_apply(result["modules_with_additive"], user_id)
         applying = True
 
     await session.commit()
@@ -700,8 +724,11 @@ async def apply_infra_updates_endpoint(
     current_user: dict = require_permission("infrastructure", "deploy"),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Apply the named modules in the background (used after the user approves
-    a destructive update). Re-plans each module and applies it sequentially."""
+    """Apply the named modules in the background, additive-only.
+
+    Used after the user reviews a plan that also contains destructive changes:
+    each module is re-planned and only its create/update resources are applied
+    (targeted), so a delete/replace is never carried out by this flow."""
     user_id = int(current_user["sub"])
     allowed = {module for module, _flag in infra_update_service._CANDIDATE_MODULES}
     modules = [m for m in body.modules if m in allowed]

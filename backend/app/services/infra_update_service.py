@@ -3,21 +3,33 @@
 Backs the "Check for Infrastructure Updates" action. It re-plans every
 deployed Terraform module against the current module code (the normal deploy
 flow skips already-deployed modules, so a newly added resource such as the
-Literature bucket is never created by re-deploying). Changes that only create
-or update resources are applied automatically; a delete or replace of a
-stateful (data-bearing) resource is flagged and held for explicit approval.
+Literature bucket is never created by re-deploying).
+
+Two safety properties:
+
+1. Re-align first. Bucket names embed org_slug + stack_uid, both immutable.
+   If those drifted from the live deployment, a plan would try to *rename*
+   (i.e. replace = destroy + recreate) every existing bucket. Before planning,
+   we read a real deployed bucket name and restore the matching org_slug /
+   stack_uid, so the plan stops trying to rename existing resources and a
+   newly added resource shows up as the only change.
+
+2. Additive-only apply. The apply only ever targets resources the plan would
+   create or update (`terraform apply -target=...`). A delete or replace is
+   never applied by this flow, so existing data buckets cannot be destroyed
+   even if a plan still wants to.
 
 Lifecycle note: TerraformExecutor.run_plan recovers "stale" runs by failing
 any non-terminal run that has no live process. So the check phase retires
 each plan run as soon as it has read the plan, and the apply phase re-plans
-and applies one module at a time to completion, never leaving a second
-module's plan lingering while another is in flight.
+one module at a time to completion.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 
 from sqlalchemy import text
@@ -27,9 +39,7 @@ from app.services.terraform_executor import TerraformExecutor
 
 logger = logging.getLogger("bioaf.infra_update_service")
 
-# Resource types whose delete or replace destroys persistent data. A plan that
-# touches one of these with a destroy/replace must be approved by a human
-# before it is applied; everything else applies automatically.
+# Resource types whose delete or replace destroys persistent data.
 STATEFUL_RESOURCE_TYPES = frozenset(
     {
         "google_storage_bucket",
@@ -42,6 +52,7 @@ STATEFUL_RESOURCE_TYPES = frozenset(
 )
 
 DESTRUCTIVE_ACTIONS = frozenset({"delete", "replace"})
+ADDITIVE_ACTIONS = frozenset({"create", "update"})
 
 # Modules the check covers, in apply order. Storage first so data buckets
 # (e.g. the Literature bucket) land before compute changes.
@@ -50,10 +61,17 @@ _CANDIDATE_MODULES: tuple[tuple[str, str], ...] = (
     ("compute", "compute_deployed"),
 )
 
+# Terraform-generated stack uid is secrets.token_hex(3): six lowercase hex.
+_STACK_UID_RE = re.compile(r"^[0-9a-f]{6}$")
+
+
+# ---------------------------------------------------------------------------
+# Pure plan helpers
+# ---------------------------------------------------------------------------
+
 
 def classify_destructive(plan_json: dict | None) -> list[dict]:
-    """Return the planned changes that would destroy or replace a stateful
-    resource. An empty list means the plan is safe to apply automatically."""
+    """Planned changes that would destroy or replace a *stateful* resource."""
     if not plan_json:
         return []
     return [
@@ -61,6 +79,99 @@ def classify_destructive(plan_json: dict | None) -> list[dict]:
         for r in plan_json.get("resources", [])
         if r.get("action") in DESTRUCTIVE_ACTIONS and r.get("type") in STATEFUL_RESOURCE_TYPES
     ]
+
+
+def list_destructive(plan_json: dict | None) -> list[dict]:
+    """Every delete/replace in the plan, each annotated with whether it is a
+    stateful (data-bearing) resource."""
+    if not plan_json:
+        return []
+    out: list[dict] = []
+    for r in plan_json.get("resources", []):
+        if r.get("action") in DESTRUCTIVE_ACTIONS:
+            out.append({**r, "stateful": r.get("type") in STATEFUL_RESOURCE_TYPES})
+    return out
+
+
+def additive_resources(plan_json: dict | None) -> list[dict]:
+    """Plan changes that create or update a resource (never destructive).
+    Data-source reads (address starts with 'data.') are excluded."""
+    if not plan_json:
+        return []
+    return [
+        r
+        for r in plan_json.get("resources", [])
+        if r.get("action") in ADDITIVE_ACTIONS and not str(r.get("address", "")).startswith("data.")
+    ]
+
+
+def additive_addresses(plan_json: dict | None) -> list[str]:
+    return [r["address"] for r in additive_resources(plan_json)]
+
+
+# ---------------------------------------------------------------------------
+# Re-align deployed naming
+# ---------------------------------------------------------------------------
+
+
+def _parse_bucket_name(name: str, purpose: str) -> tuple[str, str] | None:
+    """Parse `bioaf-{purpose}-{org_slug}-{stack_uid}` into (org_slug, stack_uid).
+
+    org_slug may contain hyphens; stack_uid is the trailing six-hex segment.
+    Returns None when the name does not match the current naming scheme (e.g.
+    an older deployment without a stack_uid suffix), so the caller can fall
+    back to the additive-only apply instead of guessing."""
+    prefix = f"bioaf-{purpose}-"
+    if not name.startswith(prefix):
+        return None
+    rest = name[len(prefix):]
+    if "-" not in rest:
+        return None
+    org_slug, stack_uid = rest.rsplit("-", 1)
+    if not org_slug or not _STACK_UID_RE.match(stack_uid):
+        return None
+    return org_slug, stack_uid
+
+
+async def realign_storage_naming(session: AsyncSession) -> dict | None:
+    """Restore org_slug / deploy_suffix in platform_config to match the live
+    deployed buckets, so a storage plan does not try to rename (replace) them.
+
+    Reads a known deployed bucket name (raw) from platform_config, falling back
+    to live Terraform outputs. Returns the values it changed, or None when
+    nothing needed changing or the name could not be parsed."""
+    from app.services.platform_config_service import PlatformConfigService
+
+    name = await PlatformConfigService.get(session, "raw_bucket_name")
+    if not name or name == "null":
+        try:
+            outputs = await TerraformExecutor.read_module_outputs(session, "storage")
+            entry = outputs.get("raw_bucket_name") or {}
+            name = entry.get("value") if isinstance(entry, dict) else None
+        except Exception as exc:  # pragma: no cover - depends on live state
+            logger.warning("realign: could not read storage outputs: %s", exc)
+            name = None
+    if not name or name == "null":
+        return None
+
+    parsed = _parse_bucket_name(name, "raw")
+    if not parsed:
+        return None
+    org_slug, stack_uid = parsed
+
+    changed: dict[str, str] = {}
+    if (await PlatformConfigService.get(session, "org_slug")) != org_slug:
+        await PlatformConfigService.set(session, "org_slug", org_slug)
+        changed["org_slug"] = org_slug
+    if (await PlatformConfigService.get(session, "deploy_suffix")) != stack_uid:
+        await PlatformConfigService.set(session, "deploy_suffix", stack_uid)
+        changed["stack_uid"] = stack_uid
+    return changed or None
+
+
+# ---------------------------------------------------------------------------
+# Check + apply orchestration
+# ---------------------------------------------------------------------------
 
 
 async def _deployed_modules(session: AsyncSession) -> list[str]:
@@ -82,18 +193,23 @@ async def _deployed_modules(session: AsyncSession) -> list[str]:
 
 
 async def check_for_updates(session: AsyncSession, user_id: int) -> dict:
-    """Plan every deployed module and report what would change.
+    """Re-align naming, plan every deployed module, and report what would change.
 
-    Returns a dict with the per-module summary, the aggregate destructive
-    resource list, whether there are any changes, and whether approval is
-    required (a stateful destroy/replace is present). Does not apply anything;
-    the caller decides whether to launch the apply.
+    The apply (when launched) only ever applies additive resources, so the
+    report separates additive changes (which can be applied) from destructive
+    ones (delete/replace, which this flow never applies).
     """
     modules = await _deployed_modules(session)
 
+    realigned = None
+    if "storage" in modules:
+        realigned = await realign_storage_naming(session)
+
     module_results: list[dict] = []
-    modules_with_changes: list[str] = []
+    modules_with_additive: list[str] = []
+    additive: list[dict] = []
     destructive: list[dict] = []
+    stateful_destructive_present = False
 
     for module in modules:
         run = await TerraformExecutor.run_plan(session, user_id, module_name=module)
@@ -102,7 +218,8 @@ async def check_for_updates(session: AsyncSession, user_id: int) -> dict:
 
         plan = run.plan_json or {}
         total = plan.get("total", 0)
-        mod_destructive = classify_destructive(plan)
+        mod_additive = additive_resources(plan)
+        mod_destructive = list_destructive(plan)
         module_results.append(
             {
                 "module": module,
@@ -110,36 +227,38 @@ async def check_for_updates(session: AsyncSession, user_id: int) -> dict:
                 "change_count": plan.get("change_count", 0),
                 "destroy_count": plan.get("destroy_count", 0),
                 "has_changes": total > 0,
-                "destructive_resources": mod_destructive,
             }
         )
-        if total > 0:
-            modules_with_changes.append(module)
+        if mod_additive:
+            modules_with_additive.append(module)
+            additive.extend(mod_additive)
+        if mod_destructive:
             destructive.extend(mod_destructive)
+            if any(d["stateful"] for d in mod_destructive):
+                stateful_destructive_present = True
 
-        # Retire the plan run immediately: it has served its purpose (we read
-        # plan_json), and leaving it non-terminal would let the next module's
-        # plan recovery fail it. The apply phase re-plans from scratch.
+        # Retire the plan run immediately: leaving it non-terminal would let the
+        # next module's plan recovery fail it. The apply phase re-plans.
         run.status = "cancelled"
         run.completed_at = datetime.now(timezone.utc)
         await session.flush()
 
     return {
-        "has_changes": bool(modules_with_changes),
-        "requires_approval": bool(destructive),
+        "realigned": realigned,
+        "has_changes": bool(additive or destructive),
+        "has_additive": bool(additive),
+        "has_destructive": bool(destructive),
+        "requires_approval": stateful_destructive_present,
         "modules": module_results,
-        "modules_with_changes": modules_with_changes,
+        "modules_with_additive": modules_with_additive,
+        "additive_resources": additive,
         "destructive_resources": destructive,
     }
 
 
 async def apply_modules_sequentially(modules: list[str], user_id: int) -> None:
-    """Re-plan and apply each module to completion, one at a time.
-
-    Each module gets its own session and reaches a terminal state before the
-    next is planned, so run_plan's stale-run recovery never trips on an
-    in-flight sibling. Failures are logged; remaining modules still run.
-    """
+    """Re-plan each module and apply ONLY its additive resources (targeted),
+    one module at a time to completion. Never applies a delete/replace."""
     from app.database import async_session_factory
 
     if async_session_factory is None:  # pragma: no cover - app not initialized
@@ -152,15 +271,15 @@ async def apply_modules_sequentially(modules: list[str], user_id: int) -> None:
                 if run.status != "awaiting_confirmation":
                     await s.commit()
                     continue
-                if not (run.plan_json and run.plan_json.get("total", 0) > 0):
-                    # Nothing to do for this module anymore; retire the run.
+                targets = additive_addresses(run.plan_json)
+                if not targets:
                     run.status = "cancelled"
                     run.completed_at = datetime.now(timezone.utc)
                     await s.commit()
                     continue
                 run.status = "applying"
                 await s.flush()
-                async for _event in TerraformExecutor.run_apply(s, run.id, user_id):
+                async for _event in TerraformExecutor.run_apply(s, run.id, user_id, targets=targets):
                     pass
                 await s.commit()
             except Exception:
@@ -169,6 +288,6 @@ async def apply_modules_sequentially(modules: list[str], user_id: int) -> None:
 
 
 def launch_background_apply(modules: list[str], user_id: int) -> None:
-    """Kick off the sequential apply in the background. Isolated as a seam so
-    endpoints can trigger it and tests can assert it was scheduled."""
+    """Kick off the additive-only apply in the background. Isolated as a seam
+    so endpoints can trigger it and tests can assert it was scheduled."""
     asyncio.create_task(apply_modules_sequentially(modules, user_id))

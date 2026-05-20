@@ -188,6 +188,23 @@ async def _seed_user(session):
 # ---------------------------------------------------------------------------
 
 
+def test_build_apply_args_plain_and_targeted():
+    assert TerraformExecutor._build_apply_args() == [
+        "terraform",
+        "apply",
+        "-auto-approve",
+        "-json",
+        "-no-color",
+    ]
+    args = TerraformExecutor._build_apply_args(
+        ["google_storage_bucket.literature", 'm.iam["literature"]']
+    )
+    assert args[-2:] == [
+        "-target=google_storage_bucket.literature",
+        '-target=m.iam["literature"]',
+    ]
+
+
 @pytest.mark.asyncio
 async def test_run_plan_creates_run_record(session):
     """run_plan() creates a terraform_runs record with status=completed after success."""

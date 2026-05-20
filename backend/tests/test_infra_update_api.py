@@ -1,8 +1,9 @@
 """API tests for the infrastructure-update check / apply endpoints.
 
-TerraformExecutor.run_plan is monkeypatched to return controlled plans, and
+TerraformExecutor.run_plan is monkeypatched to return controlled plans and
 the background apply launcher is replaced with a recorder, so no real
-Terraform runs.
+Terraform runs. raw_bucket_name is seeded so re-align parses it without
+touching live state.
 """
 
 from __future__ import annotations
@@ -69,6 +70,8 @@ def _fake_run_plan(plans: dict[str, dict]):
 
 CHECK = "/api/v1/infrastructure/stack/check-updates"
 APPLY = "/api/v1/infrastructure/stack/apply-updates"
+LIT = _resource("module.storage.google_storage_bucket.literature", "google_storage_bucket", "create")
+RAW_DELETE = _resource("module.storage.google_storage_bucket.raw", "google_storage_bucket", "delete")
 
 
 @pytest.mark.asyncio
@@ -78,41 +81,48 @@ async def test_check_updates_requires_permission(client, viewer_token):
 
 
 @pytest.mark.asyncio
-async def test_check_updates_safe_auto_applies(client, admin_token, session, monkeypatch):
-    await _seed(session, terraform_initialized="true", storage_deployed="true", compute_deployed="true")
-    plans = {
-        "storage": _plan(
-            [_resource("module.storage.google_storage_bucket.literature", "google_storage_bucket", "create")]
-        ),
-        "compute": _plan([]),
-    }
-    monkeypatch.setattr(TerraformExecutor, "run_plan", _fake_run_plan(plans))
+async def test_check_updates_additive_auto_applies(client, admin_token, session, monkeypatch):
+    await _seed(
+        session,
+        terraform_initialized="true",
+        storage_deployed="true",
+        compute_deployed="true",
+        raw_bucket_name="bioaf-raw-bioaf-co-41aae5",
+    )
+    monkeypatch.setattr(
+        TerraformExecutor, "run_plan", _fake_run_plan({"storage": _plan([LIT]), "compute": _plan([])})
+    )
     launched: dict = {}
     monkeypatch.setattr(
         infra_update_service,
         "launch_background_apply",
-        lambda modules, user_id: launched.update(modules=modules, user_id=user_id),
+        lambda modules, user_id: launched.update(modules=modules),
     )
 
     r = await client.post(CHECK, headers={"Authorization": f"Bearer {admin_token}"})
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["has_changes"] is True
-    assert body["requires_approval"] is False
+    assert body["has_additive"] is True
+    assert body["has_destructive"] is False
     assert body["applying"] is True
-    assert body["modules_with_changes"] == ["storage"]
+    assert body["modules_with_additive"] == ["storage"]
+    assert any("literature" in r["address"] for r in body["additive_resources"])
     assert launched["modules"] == ["storage"]
 
 
 @pytest.mark.asyncio
-async def test_check_updates_destructive_holds_for_approval(client, admin_token, session, monkeypatch):
-    await _seed(session, terraform_initialized="true", storage_deployed="true")
-    plans = {
-        "storage": _plan(
-            [_resource("module.storage.google_storage_bucket.raw", "google_storage_bucket", "delete")]
-        )
-    }
-    monkeypatch.setattr(TerraformExecutor, "run_plan", _fake_run_plan(plans))
+async def test_check_updates_destructive_not_auto_applied(client, admin_token, session, monkeypatch):
+    await _seed(
+        session,
+        terraform_initialized="true",
+        storage_deployed="true",
+        org_slug="bioaf-co",
+        deploy_suffix="41aae5",
+        raw_bucket_name="bioaf-raw-bioaf-co-41aae5",
+    )
+    monkeypatch.setattr(
+        TerraformExecutor, "run_plan", _fake_run_plan({"storage": _plan([LIT, RAW_DELETE])})
+    )
     calls = {"n": 0}
     monkeypatch.setattr(
         infra_update_service,
@@ -123,10 +133,14 @@ async def test_check_updates_destructive_holds_for_approval(client, admin_token,
     r = await client.post(CHECK, headers={"Authorization": f"Bearer {admin_token}"})
     assert r.status_code == 200, r.text
     body = r.json()
+    assert body["has_additive"] is True
+    assert body["has_destructive"] is True
     assert body["requires_approval"] is True
     assert body["applying"] is False
-    assert len(body["destructive_resources"]) == 1
-    assert body["destructive_resources"][0]["action"] == "delete"
+    # Literature create is visible alongside the flagged destructive bucket.
+    assert any("literature" in r["address"] for r in body["additive_resources"])
+    dest = {r["address"]: r for r in body["destructive_resources"]}
+    assert dest["module.storage.google_storage_bucket.raw"]["stateful"] is True
     assert calls["n"] == 0
 
 
@@ -146,9 +160,7 @@ async def test_apply_updates_launches_valid_modules(client, admin_token, monkeyp
         lambda modules, user_id: launched.update(modules=modules),
     )
     r = await client.post(
-        APPLY,
-        json={"modules": ["storage", "bogus"]},
-        headers={"Authorization": f"Bearer {admin_token}"},
+        APPLY, json={"modules": ["storage", "bogus"]}, headers={"Authorization": f"Bearer {admin_token}"}
     )
     assert r.status_code == 200, r.text
     assert r.json()["modules"] == ["storage"]
