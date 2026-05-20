@@ -143,10 +143,13 @@ export function PaperPdfViewer({ paperId, filename, onReachPage }: Props) {
         )}
       </div>
       <div
-        className="overflow-auto border border-gray-200 rounded bg-gray-50 flex justify-center"
+        className="overflow-auto border border-gray-200 rounded bg-gray-50 flex justify-center items-start"
         style={{ maxHeight: "80vh" }}
       >
-        <canvas ref={canvasRef} className="max-w-full" />
+        {/* h-auto + items-start keep the page's aspect ratio: without them the
+            flex container stretches the canvas to its cross-size while max-width
+            shrinks the width, compressing the page vertically. */}
+        <canvas ref={canvasRef} className="max-w-full h-auto" />
       </div>
     </div>
   );
