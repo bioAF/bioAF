@@ -26,6 +26,7 @@ from app.api.dependencies import require_permission
 from app.database import async_session_factory, get_session
 from app.services.audit_service import log_action
 from app.services.notebook_image_service import build_notebook_image, cancel_build
+from app.services import infra_update_service
 from app.services.stack_deployment import (
     StackStatus,
     deploy_stack,
@@ -592,6 +593,122 @@ async def stack_status_endpoint(
 ) -> StackStatus:
     """Return current stack and cluster status."""
     return await get_cluster_status(session)
+
+
+# -----------------------------------------------------------------------
+# Infrastructure updates (re-plan deployed modules, apply additive changes)
+# -----------------------------------------------------------------------
+
+
+class StatefulResourceInfo(BaseModel):
+    address: str
+    type: str
+    action: str
+    description: str
+
+
+class ModuleUpdateInfo(BaseModel):
+    module: str
+    add_count: int
+    change_count: int
+    destroy_count: int
+    has_changes: bool
+
+
+class CheckUpdatesResponse(BaseModel):
+    has_changes: bool
+    requires_approval: bool
+    applying: bool
+    modules_with_changes: list[str]
+    modules: list[ModuleUpdateInfo]
+    destructive_resources: list[StatefulResourceInfo]
+
+
+class ApplyUpdatesRequest(BaseModel):
+    modules: list[str]
+
+
+def _to_check_response(result: dict, *, applying: bool) -> CheckUpdatesResponse:
+    return CheckUpdatesResponse(
+        has_changes=result["has_changes"],
+        requires_approval=result["requires_approval"],
+        applying=applying,
+        modules_with_changes=result["modules_with_changes"],
+        modules=[
+            ModuleUpdateInfo(
+                module=m["module"],
+                add_count=m["add_count"],
+                change_count=m["change_count"],
+                destroy_count=m["destroy_count"],
+                has_changes=m["has_changes"],
+            )
+            for m in result["modules"]
+        ],
+        destructive_resources=[
+            StatefulResourceInfo(
+                address=r["address"],
+                type=r["type"],
+                action=r["action"],
+                description=r.get("description", ""),
+            )
+            for r in result["destructive_resources"]
+        ],
+    )
+
+
+@router.post("/api/v1/infrastructure/stack/check-updates", response_model=CheckUpdatesResponse)
+async def check_infra_updates_endpoint(
+    current_user: dict = require_permission("infrastructure", "deploy"),
+    session: AsyncSession = Depends(get_session),
+) -> CheckUpdatesResponse:
+    """Re-plan every deployed module and report pending changes.
+
+    Additive-only changes (no destroy/replace of a stateful resource) start
+    applying immediately in the background. A stateful destroy/replace is held
+    and surfaced for explicit approval via /apply-updates.
+    """
+    user_id = int(current_user["sub"])
+    try:
+        result = await infra_update_service.check_for_updates(session, user_id)
+    except ValueError as exc:
+        msg = str(exc)
+        if msg in ("Terraform has not been initialized", "No infrastructure is deployed"):
+            await session.rollback()
+            raise HTTPException(status_code=400, detail=msg)
+        if msg.startswith("Another Terraform operation is in progress"):
+            await session.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Another Terraform operation is in progress. Try again when it finishes.",
+            )
+        logger.error("check_for_updates failed: %s", msg, exc_info=True)
+        await session.rollback()
+        raise HTTPException(status_code=400, detail="Could not check for infrastructure updates. See server logs.")
+
+    applying = False
+    if result["has_changes"] and not result["requires_approval"]:
+        infra_update_service.launch_background_apply(result["modules_with_changes"], user_id)
+        applying = True
+
+    await session.commit()
+    return _to_check_response(result, applying=applying)
+
+
+@router.post("/api/v1/infrastructure/stack/apply-updates")
+async def apply_infra_updates_endpoint(
+    body: ApplyUpdatesRequest,
+    current_user: dict = require_permission("infrastructure", "deploy"),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Apply the named modules in the background (used after the user approves
+    a destructive update). Re-plans each module and applies it sequentially."""
+    user_id = int(current_user["sub"])
+    allowed = {module for module, _flag in infra_update_service._CANDIDATE_MODULES}
+    modules = [m for m in body.modules if m in allowed]
+    if not modules:
+        raise HTTPException(status_code=400, detail="No valid modules to apply")
+    infra_update_service.launch_background_apply(modules, user_id)
+    return {"applying": True, "modules": modules}
 
 
 # -----------------------------------------------------------------------
