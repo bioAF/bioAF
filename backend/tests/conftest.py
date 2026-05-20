@@ -48,12 +48,22 @@ async def db_engine(worker_id):
 
     schema = _worker_schema(worker_id)
 
+    # For per-worker (xdist) schemas, pin search_path at the asyncpg protocol
+    # level via connect_args so EVERY connection lands in the worker schema. The
+    # "connect" event listener below sets it too, but that runs a SET through the
+    # greenlet bridge and can miss a freshly-created connection under concurrent
+    # connection creation (e.g. tests that spawn a background DB task during a
+    # request); that connection then resolves tables in the wrong schema and
+    # raises "relation ... does not exist". server_settings is race-free.
+    connect_args = {} if schema == "public" else {"server_settings": {"search_path": schema}}
+
     engine = create_async_engine(
         TEST_DATABASE_URL,
         echo=False,
         pool_pre_ping=True,
         pool_size=5,
         max_overflow=5,
+        connect_args=connect_args,
     )
 
     if schema != "public":
