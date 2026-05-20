@@ -274,6 +274,81 @@ async def execute_hosted(
     qc_report_provider=None,
     submit_override=None,
 ) -> None:
+    """Run a hosted LLM review job to completion, guarding against stranding.
+
+    The implementation only catches ArtifactBuildError (during artifact build)
+    and ProviderError (during the LLM call). Any other exception would unwind
+    out of this background task, roll back the in-flight status, and leave the
+    job in IN_FLIGHT_STATUSES forever -- which then blocks every future review
+    for that entity with a 409 ("review already in progress"). This wrapper is
+    the last-resort guard: on any unexpected error it marks the job + review
+    terminally failed so the real error surfaces on the card and nothing strands.
+    """
+    try:
+        await _execute_hosted_inner(
+            session_factory,
+            job_id=job_id,
+            gcs_writer=gcs_writer,
+            qc_report_provider=qc_report_provider,
+            submit_override=submit_override,
+        )
+    except Exception as exc:  # noqa: BLE001 - last-resort guard; nothing re-raised
+        logger.exception("execute_hosted unhandled error: job_id=%d", job_id)
+        await _fail_job_unexpected(session_factory, job_id, exc)
+
+
+async def _fail_job_unexpected(session_factory, job_id: int, exc: Exception) -> None:
+    """Mark a still-in-flight job + its review terminally failed in a fresh
+    session, so an unexpected crash never leaves the job blocking new reviews."""
+    try:
+        async with session_factory() as session:
+            job = (
+                await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))
+            ).scalar_one_or_none()
+            if job is None or job.status not in IN_FLIGHT_STATUSES:
+                return
+            err_text = f"Unexpected error: {exc}"[:4000]
+            await _write_job_terminal(
+                session, job.id, status="failed", error_text=err_text, error_class="internal_error"
+            )
+            await _write_review_terminal(
+                session,
+                job.agent_review_id,
+                status="failed",
+                severity=None,
+                headline="Review failed unexpectedly",
+                flags=None,
+                evidence=None,
+                body=None,
+                error_text=err_text,
+                artifact_gcs_paths=list(job.artifact_gcs_paths or []),
+            )
+            await audit_service.log_action(
+                session,
+                user_id=job.triggered_by_user_id,
+                entity_type="agent_review_job",
+                entity_id=job.id,
+                action="llm_review_failed",
+                details={
+                    "agent_review_job_id": job.id,
+                    "agent_review_id": job.agent_review_id,
+                    "error_class": "internal_error",
+                    "error_text": err_text,
+                },
+            )
+            await session.commit()
+    except Exception:  # noqa: BLE001 - never raise from the guard
+        logger.exception("failed to mark job terminal after unexpected error: job_id=%d", job_id)
+
+
+async def _execute_hosted_inner(
+    session_factory,
+    *,
+    job_id: int,
+    gcs_writer=None,
+    qc_report_provider=None,
+    submit_override=None,
+) -> None:
     """Run a hosted LLM review job to completion.
 
     Owns its own DB session (so it can run as a FastAPI BackgroundTasks task

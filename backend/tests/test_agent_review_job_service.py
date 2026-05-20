@@ -706,3 +706,61 @@ async def test_execute_hosted_logs_provider_error_with_detail(db_engine, admin_u
     messages = [r.getMessage() for r in caplog.records if r.name == "bioaf.agent_review_job"]
     assert any("provider_error" in m and "transport" in m for m in messages), messages
     assert any("dns lookup failed" in m for m in messages), messages
+
+
+@pytest.mark.asyncio
+async def test_execute_hosted_unexpected_error_does_not_strand_job(db_engine, admin_user):
+    """A non-ProviderError/non-ArtifactBuildError crash must still mark the job
+    + review terminally failed, never leaving the job in an in-flight status
+    (which would block every future review with a 409). Regression for the
+    "Request failed" / nothing-happens bug."""
+
+    async def writer(path, content):
+        return None
+
+    async def submit(*, prompt, payload, model, api_key):
+        raise RuntimeError("kaboom: not a ProviderError")
+
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
+        run_id = await _make_pipeline_run(session, admin_user.organization_id)
+        job, review = await job_service.create(
+            session,
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            selected_sub_item_ids=["qc.metric_review"],
+        )
+        await session.commit()
+        job_id = job.id
+        review_id = review.id
+
+    factory = _factory(db_engine)
+    # Must not raise out of the background task.
+    await job_service.execute_hosted(factory, job_id=job_id, gcs_writer=writer, submit_override=submit)
+
+    async with factory() as session:
+        loaded_job = (
+            await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))
+        ).scalar_one()
+        loaded_review = (
+            await session.execute(select(AgentReview).where(AgentReview.id == review_id))
+        ).scalar_one()
+        assert loaded_job.status == "failed"
+        assert loaded_job.status not in job_service.IN_FLIGHT_STATUSES
+        assert loaded_review.status == "failed"
+
+    # The debounce is released: a new review for the same run can be created.
+    async with factory() as session:
+        run_again = await _make_pipeline_run(session, admin_user.organization_id)
+        job2, _ = await job_service.create(
+            session,
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_again,
+            selected_sub_item_ids=["qc.metric_review"],
+        )
+        await session.commit()
+        assert job2.id != job_id
