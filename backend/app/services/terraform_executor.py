@@ -889,6 +889,13 @@ class TerraformExecutor:
         # and Terraform uses the default from variables.tf. Terraform
         # destroy works from state, not from the variable value.
         deploy_suffix = config.get("deploy_suffix") or ""
+        # Storage and compute can carry different stack uids: each module is
+        # deployed independently and gets its own secrets.token_hex(3) suffix at
+        # deploy time, so a single shared deploy_suffix cannot reproduce both
+        # sets of resource names. Prefer the module-specific key, falling back to
+        # deploy_suffix for installs where they are the same (the common case).
+        storage_suffix = config.get("storage_stack_uid") or deploy_suffix
+        compute_suffix = config.get("compute_stack_uid") or deploy_suffix
         state_bucket = config.get("terraform_state_bucket") or f"bioaf-tfstate-{project_id}"
 
         # Common variables shared by all modules
@@ -901,8 +908,8 @@ class TerraformExecutor:
             tfvars["state_bucket_name"] = state_bucket
         elif module_name == "storage":
             tfvars["org_slug"] = org_slug
-            if deploy_suffix:
-                tfvars["stack_uid"] = deploy_suffix
+            if storage_suffix:
+                tfvars["stack_uid"] = storage_suffix
             tfvars["backend_service_account_email"] = config.get("backend_service_account_email") or ""
             # SA hardening: pass the bioaf-app SA email through so the module
             # creates per-subscription roles/pubsub.subscriber bindings.
@@ -912,8 +919,8 @@ class TerraformExecutor:
         elif module_name == "compute":
             tfvars["zone"] = zone
             tfvars["org_slug"] = org_slug
-            if deploy_suffix:
-                tfvars["stack_uid"] = deploy_suffix
+            if compute_suffix:
+                tfvars["stack_uid"] = compute_suffix
             # Multi-zone node placement: derive all zones in the region so
             # the autoscaler can fall back when a machine type is unavailable
             # in the primary zone (e.g. GCE capacity exhaustion).
@@ -1029,6 +1036,8 @@ class TerraformExecutor:
             "bioaf_app_sa_email",
             "org_slug",
             "deploy_suffix",
+            "storage_stack_uid",
+            "compute_stack_uid",
             "terraform_initialized",
             "terraform_state_bucket",
             "backend_service_account_email",

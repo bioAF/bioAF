@@ -109,11 +109,19 @@ async def _seed(session, **kv):
 
 
 @pytest.mark.asyncio
-async def test_realign_restores_org_slug_and_suffix(session):
-    await _seed(session, raw_bucket_name="bioaf-raw-bioaf-co-41aae5")
+async def test_realign_sets_storage_suffix_not_shared_deploy_suffix(session):
+    # Storage buckets at -4bd459 while the shared deploy_suffix is the compute
+    # value -41aae5. Re-align must pin storage_stack_uid and leave deploy_suffix
+    # alone, so compute plans are not pushed into a cluster replace.
+    await _seed(
+        session,
+        raw_bucket_name="bioaf-raw-bioaf-co-4bd459",
+        deploy_suffix="41aae5",
+    )
     changed = await infra_update_service.realign_storage_naming(session)
-    assert changed == {"org_slug": "bioaf-co", "stack_uid": "41aae5"}
-    assert await PlatformConfigService.get(session, "org_slug") == "bioaf-co"
+    assert changed == {"org_slug": "bioaf-co", "stack_uid": "4bd459"}
+    assert await PlatformConfigService.get(session, "storage_stack_uid") == "4bd459"
+    # The shared deploy_suffix (compute's) is untouched.
     assert await PlatformConfigService.get(session, "deploy_suffix") == "41aae5"
 
 
@@ -123,7 +131,7 @@ async def test_realign_noop_when_already_aligned(session):
         session,
         raw_bucket_name="bioaf-raw-bioaf-co-41aae5",
         org_slug="bioaf-co",
-        deploy_suffix="41aae5",
+        storage_stack_uid="41aae5",
     )
     assert await infra_update_service.realign_storage_naming(session) is None
 

@@ -134,8 +134,15 @@ def _parse_bucket_name(name: str, purpose: str) -> tuple[str, str] | None:
 
 
 async def realign_storage_naming(session: AsyncSession) -> dict | None:
-    """Restore org_slug / deploy_suffix in platform_config to match the live
-    deployed buckets, so a storage plan does not try to rename (replace) them.
+    """Pin storage_stack_uid in platform_config to match the live deployed
+    buckets, so a storage plan does not try to rename (replace) them.
+
+    Critically, this writes the storage-specific key (storage_stack_uid), NOT
+    the shared deploy_suffix. Storage and compute can carry different suffixes
+    (e.g. buckets at -4bd459 while the GKE cluster is at -41aae5); clobbering
+    the shared deploy_suffix with the storage value would make compute plans
+    want to replace the live cluster. org_slug is shared and identical for both,
+    so it is safe to align.
 
     Reads a known deployed bucket name (raw) from platform_config, falling back
     to live Terraform outputs. Returns the values it changed, or None when
@@ -163,8 +170,8 @@ async def realign_storage_naming(session: AsyncSession) -> dict | None:
     if (await PlatformConfigService.get(session, "org_slug")) != org_slug:
         await PlatformConfigService.set(session, "org_slug", org_slug)
         changed["org_slug"] = org_slug
-    if (await PlatformConfigService.get(session, "deploy_suffix")) != stack_uid:
-        await PlatformConfigService.set(session, "deploy_suffix", stack_uid)
+    if (await PlatformConfigService.get(session, "storage_stack_uid")) != stack_uid:
+        await PlatformConfigService.set(session, "storage_stack_uid", stack_uid)
         changed["stack_uid"] = stack_uid
     return changed or None
 
