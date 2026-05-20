@@ -495,5 +495,17 @@ export function cleanText(value: string | null | undefined): string {
     }
     return _HTML_ENTITIES[body] ?? m;
   });
-  return decoded.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  // Strip things that look like HTML tags: "<" or "</" followed by a letter.
+  // Requiring a leading letter leaves standalone "<"/">" used as math (e.g.
+  // "p < 0.05 and FC > 2" in an abstract) intact. Repeat until the string stops
+  // changing so a nested or split tag (e.g. "<scr<script>ipt>") cannot
+  // reconstruct a live one after a single pass. Output is only ever rendered as
+  // React text (auto-escaped), so this is defense-in-depth, not the primary guard.
+  let stripped = decoded;
+  let previous = "";
+  while (stripped !== previous) {
+    previous = stripped;
+    stripped = stripped.replace(/<\/?[a-zA-Z][^>]*>/g, "");
+  }
+  return stripped.replace(/\s+/g, " ").trim();
 }

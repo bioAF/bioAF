@@ -3,6 +3,7 @@ import {
   fetchPaperPdfObjectUrl,
   fetchPaperPdfBlob,
   advanceReadingStatus,
+  cleanText,
   DoiConflictError,
   type Paper,
 } from "./literature";
@@ -188,5 +189,31 @@ describe("advanceReadingStatus", () => {
 
   test("returns null when the page count is unknown", () => {
     expect(advanceReadingStatus("unread", 1, 0)).toBeNull();
+  });
+});
+
+describe("cleanText", () => {
+  test("strips simple inline tags", () => {
+    expect(cleanText("Ca<sup>2+</sup> signalling")).toBe("Ca2+ signalling");
+  });
+
+  test("fully strips nested/split tags (no live tag survives a single pass)", () => {
+    expect(cleanText("<scr<script>ipt>alert(1)")).not.toContain("<script");
+    expect(cleanText("<scr<script>ipt>alert(1)")).not.toContain("<");
+  });
+
+  test("preserves standalone angle brackets used as math", () => {
+    expect(cleanText("expression p < 0.05 and FC > 2")).toBe(
+      "expression p < 0.05 and FC > 2",
+    );
+  });
+
+  test("decodes entities before stripping", () => {
+    expect(cleanText("Ca&lt;sup&gt;2+&lt;/sup&gt;")).toBe("Ca2+");
+  });
+
+  test("handles null/undefined", () => {
+    expect(cleanText(null)).toBe("");
+    expect(cleanText(undefined)).toBe("");
   });
 });
