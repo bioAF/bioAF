@@ -54,7 +54,7 @@ three Literature input toggles are off for the scope being reviewed.
 The section is appended to the prompt after the existing experiment-
 and run-context sections. Its template (Markdown):
 
-```
+```markdown
 ## Associated Literature
 
 The following papers are associated with this experiment.
@@ -186,7 +186,7 @@ optionally PMIDs) and, for each that matches an active
 `literature_papers.doi` row in the org, rewrites the reference into a
 Markdown link to the paper detail view:
 
-```
+```text
 [10.1038/s41592-024-00000-0](/data/literature/papers/12345)
 ```
 

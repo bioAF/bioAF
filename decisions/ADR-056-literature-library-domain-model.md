@@ -48,37 +48,37 @@ The following terms are added as level-3 glossary entries. They are
 used consistently in the rewritten `local/Literature/` documents.
 
 - **Paper.** A scholarly publication tracked in the
-  [Literature Library](#literature-library), identified by DOI (primary)
+  Literature Library, identified by DOI (primary)
   or normalized title plus first-author and last-author keys (fallback).
   Org-scoped, org-readable; immutable identifier, mutable metadata.
   Not a [Reference Dataset](../decisions/ADR-017-reference-data-management.md)
   (those are curated biological references such as genomes, annotations,
   indexes). May be associated with one or more
-  [Experiments](#experiment), [Projects](#project), or globally to the
-  [Organization](#organization).
+  Experiments, Projects, or globally to the
+  Organization.
 
 - **Literature Library.** The org-scoped collection of
-  [Papers](#paper), their associations, comments, reading status, and
-  dismissals. Distinct from the [Reference Dataset](#reference-dataset)
+  Papers, their associations, comments, reading status, and
+  dismissals. Distinct from the Reference Dataset
   registry; distinct from the file/document subsystem (papers live in a
   dedicated GCS bucket and a dedicated set of tables).
 
 - **Lit Review Run.** A single execution of an LLM-driven paper
-  recommendation job scoped to an [Experiment](#experiment). Uses the
-  org's active [LLM Provider](#llm-provider) to generate source queries
+  recommendation job scoped to an Experiment. Uses the
+  org's active LLM Provider to generate source queries
   and rank candidates, producing
-  [Literature Recommendations](#literature-recommendation).
+  Literature Recommendations.
   On demand in v1; scheduled in v2. Not an
-  [Agent Review](#agent-review): different output shape
+  Agent Review: different output shape
   (queue of recommendations vs severity-coded advisory note), different
   lifecycle, different table.
 
 - **Literature Recommendation.** A single LLM-scored paper produced by
-  a [Lit Review Run](#lit-review-run), with a continuous relevance
+  a Lit Review Run, with a continuous relevance
   score (0.0 to 1.0) and one-sentence reasoning. Lifecycle:
   `pending -> accepted` (paper joins library, associated with the
   scope) or `pending -> dismissed` (paper is dismissed org-wide via
-  [Literature Dismissal](#literature-dismissal)).
+  Literature Dismissal).
 
 - **Literature Source.** An external bibliographic data source the
   bioAF Literature Library can query. Four in v1: PubMed (NCBI),
@@ -88,13 +88,13 @@ used consistently in the rewritten `local/Literature/` documents.
   [ADR-047](../decisions/ADR-047-data-at-rest-encryption.md).
 
 - **Literature Dismissal.** An org-wide signal that a
-  [Paper](#paper) should be excluded from default library views, future
-  [Lit Review Runs](#lit-review-run), and any
-  [Agent Review](#agent-review) literature payload. Created by `admin`
+  Paper should be excluded from default library views, future
+  Lit Review Runs, and any
+  Agent Review literature payload. Created by `admin`
   or `comp_bio`. Reversible by `admin` only.
 
 The existing **Agent Review** glossary entry gains a one-line note that
-"abstracts and comments from associated [Papers](#paper) may be bundled
+"abstracts and comments from associated Papers may be bundled
 into the Agent Review's prompt artifact when the org's Literature
 inputs are enabled." See [ADR-057](ADR-057-literature-as-input-to-agent-review.md).
 
@@ -126,7 +126,7 @@ delete protection on, standard storage class.
 
 GCS layout:
 
-```
+```text
 bioaf-literature-{org}/
   papers/
     {paper_id}/
@@ -190,7 +190,7 @@ A single new resource `literature` is registered in
 (per [ADR-032](../decisions/ADR-032-custom-rbac.md)) with twelve
 sub-actions:
 
-```
+```text
 literature: [
   view, upload, comment, associate,
   delete_own_comment, delete_any_comment, delete_paper,
