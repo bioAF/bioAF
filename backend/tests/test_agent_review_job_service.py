@@ -840,3 +840,51 @@ async def test_create_does_not_reap_recent_in_flight_job(db_engine, admin_user):
                 entity_id=run_id,
                 selected_sub_item_ids=["qc.metric_review"],
             )
+
+
+@pytest.mark.asyncio
+async def test_create_reaps_stale_gemma_zombie_job(db_engine, admin_user):
+    """A stranded Gemma review job (dispatch stubbed -> sits in 'pending'
+    forever, and mark_orphaned_on_startup skips Gemma) must still be reaped on
+    create. Otherwise a legacy Gemma job permanently 409-blocks every review for
+    the entity, surviving even a restart. Mirrors the demo's wedged job."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.services.agent_review_prompt_builder import template_name_for_scope
+
+    review_type = template_name_for_scope(False)
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
+        run_id = await _make_pipeline_run(session, admin_user.organization_id)
+        zombie = AgentReviewJob(
+            organization_id=admin_user.organization_id,
+            triggered_by_user_id=admin_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            review_type=review_type,
+            provider="gemma",
+            model="gemma-stub",
+            prompt_template_version=review_type,
+            status="pending",
+            prompt_text="stub",
+            created_at=datetime.now(UTC) - timedelta(minutes=30),
+        )
+        session.add(zombie)
+        await session.commit()
+        zombie_id = zombie.id
+
+    async with _factory(db_engine)() as session:
+        new_job, _ = await job_service.create(
+            session,
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            selected_sub_item_ids=["qc.metric_review"],
+        )
+        await session.commit()
+        assert new_job.id != zombie_id
+
+    async with _factory(db_engine)() as session:
+        reaped = (await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == zombie_id))).scalar_one()
+        assert reaped.status == "failed"

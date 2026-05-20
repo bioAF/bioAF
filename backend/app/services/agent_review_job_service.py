@@ -163,11 +163,15 @@ async def create(
         raise NoActiveProvider("active provider has no model configured")
 
     # Reap a stale in-flight job for this entity before inserting, so a review
-    # whose worker died without reaching a terminal state cannot block new
-    # reviews forever with a 409 (it would otherwise only clear on API restart).
-    # Gemma jobs are owned by the orchestrator; leave them alone.
+    # that never reached a terminal state cannot block new reviews forever with a
+    # 409. This deliberately includes Gemma jobs: Gemma review dispatch is stubbed
+    # in v1, so a Gemma review sits in 'pending' forever and is skipped by
+    # mark_orphaned_on_startup (which leaves Gemma for its orchestrator). At
+    # create time the only thing that matters is that a *stale* in-flight job is
+    # blocking a new review; a Gemma job past the threshold is a dead zombie and
+    # must be cleared or it permanently locks every review for this entity.
     existing = await _get_inflight(session, entity_type, entity_id, resolved_review_type)
-    if existing is not None and existing.provider != "gemma" and _is_stale_in_flight(existing):
+    if existing is not None and _is_stale_in_flight(existing):
         await _write_job_terminal(
             session,
             existing.id,
