@@ -56,6 +56,15 @@ resource "google_container_cluster" "bioaf" {
     managed_by = "bioaf"
     org        = var.org_slug
   }
+
+  # node_locations only constrains the throwaway default pool at create time
+  # (see the comment above). A regional cluster picks its own three control
+  # plane zones, so after creation the live value rarely matches the requested
+  # one. Reconciling it post-create would relocate cluster nodes, so ignore
+  # drift here: the field has done its job once the cluster exists.
+  lifecycle {
+    ignore_changes = [node_locations]
+  }
 }
 
 # --- Pipeline Node Pool ---
@@ -90,6 +99,16 @@ resource "google_container_node_pool" "pipelines" {
     # required. The label + nodeSelector on the head Job still directs
     # orchestrator pods here; other pools' taints prevent Nextflow
     # process pods from landing elsewhere.
+  }
+
+  # node_locations requests every zone in the region, but a node pool can only
+  # place nodes in the cluster's (three) zones, so GKE drops the extras and the
+  # requested set never matches state: a perpetual no-op "update" diff that the
+  # additive-update flow keeps re-applying until GKE rejects it with
+  # "Must specify a field to update". Ignore the drift; multi-zone fallback
+  # still works across whatever zones the cluster actually spans.
+  lifecycle {
+    ignore_changes = [node_locations]
   }
 }
 
@@ -146,6 +165,12 @@ resource "google_container_node_pool" "system" {
       "bioaf.io/pool" = "system"
     }
   }
+
+  # See bioaf-pipelines: node_locations drifts against the cluster's zones, so
+  # ignore it to avoid a perpetual no-op "update".
+  lifecycle {
+    ignore_changes = [node_locations]
+  }
 }
 
 # --- Interactive Node Pool ---
@@ -180,6 +205,12 @@ resource "google_container_node_pool" "interactive" {
       value  = "interactive"
       effect = "NO_SCHEDULE"
     }
+  }
+
+  # See bioaf-pipelines: node_locations drifts against the cluster's zones, so
+  # ignore it to avoid a perpetual no-op "update".
+  lifecycle {
+    ignore_changes = [node_locations]
   }
 }
 
@@ -226,6 +257,12 @@ resource "google_container_node_pool" "pipeline_head" {
       value  = "pipeline-head"
       effect = "NO_SCHEDULE"
     }
+  }
+
+  # See bioaf-pipelines: node_locations drifts against the cluster's zones, so
+  # ignore it to avoid a perpetual no-op "update".
+  lifecycle {
+    ignore_changes = [node_locations]
   }
 }
 

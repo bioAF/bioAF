@@ -36,6 +36,29 @@ function formatDate(iso: string): string {
   }
 }
 
+// "cancelled" is the catch-all the backend records both for runs a user
+// abandoned and for the plan checks the update flow retires once it has read
+// them. Bare "cancelled" hides the reason, so spell out the outcome.
+function describeStatus(run: TerraformRun): { label: string; title?: string } {
+  if (run.status !== "cancelled") {
+    return { label: run.status };
+  }
+  if (run.error_message) {
+    // e.g. "Abandoned by user".
+    return { label: "Cancelled", title: run.error_message };
+  }
+  if (run.resources_planned === 0) {
+    return { label: "No changes", title: "The plan found nothing to change." };
+  }
+  if (run.resources_planned !== null && run.resources_planned > 0) {
+    return {
+      label: "Not applied",
+      title: "The plan found changes that this operation did not apply.",
+    };
+  }
+  return { label: "Cancelled" };
+}
+
 export function TerraformRunHistory({ runs }: TerraformRunHistoryProps) {
   if (runs.length === 0) {
     return (
@@ -58,16 +81,19 @@ export function TerraformRunHistory({ runs }: TerraformRunHistoryProps) {
         </tr>
       </thead>
       <tbody>
-        {runs.map((run) => (
+        {runs.map((run) => {
+          const status = describeStatus(run);
+          return (
           <tr key={run.id} className="border-b hover:bg-gray-50 align-top">
             <td className="py-2 pr-4 text-gray-400">#{run.id}</td>
             <td className="py-2 pr-4 font-mono text-xs">{run.action}</td>
             <td className="py-2 pr-4 text-gray-600">{run.module_name ?? "-"}</td>
             <td className="py-2 pr-4">
               <span
+                title={status.title}
                 className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[run.status] ?? "text-gray-700 bg-gray-50"}`}
               >
-                {run.status}
+                {status.label}
               </span>
               {run.status === "failed" && run.error_message && (
                 <p className="mt-1 text-xs text-red-600 max-w-md break-words">{run.error_message}</p>
@@ -80,7 +106,8 @@ export function TerraformRunHistory({ runs }: TerraformRunHistoryProps) {
             </td>
             <td className="py-2 text-gray-500 text-xs">{formatDate(run.started_at)}</td>
           </tr>
-        ))}
+          );
+        })}
       </tbody>
     </table>
   );

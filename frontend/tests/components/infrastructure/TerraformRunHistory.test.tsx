@@ -58,3 +58,45 @@ test("TerraformRunHistory shows empty state when no runs", () => {
 
   expect(screen.getByTestId("run-history-empty")).toBeInTheDocument();
 });
+
+function cancelledRun(overrides: Partial<(typeof mockRuns)[number]>) {
+  return {
+    id: 99,
+    action: "plan",
+    module_name: "compute",
+    status: "cancelled",
+    resources_planned: 0,
+    resources_completed: 0,
+    triggered_by_user_id: 1,
+    started_at: "2026-05-21T08:51:57Z",
+    completed_at: "2026-05-21T08:51:58Z",
+    error_message: null,
+    plan_json: null,
+    terraform_state_url: null,
+    ...overrides,
+  };
+}
+
+test("cancelled plan with no planned changes reads 'No changes'", () => {
+  render(<TerraformRunHistory runs={[cancelledRun({ resources_planned: 0 })]} />);
+
+  expect(screen.getByText("No changes")).toBeInTheDocument();
+  expect(screen.queryByText("cancelled")).not.toBeInTheDocument();
+});
+
+test("cancelled plan that found but did not apply changes reads 'Not applied'", () => {
+  render(<TerraformRunHistory runs={[cancelledRun({ resources_planned: 1 })]} />);
+
+  expect(screen.getByText("Not applied")).toBeInTheDocument();
+});
+
+test("user-abandoned run shows the reason as a tooltip", () => {
+  render(
+    <TerraformRunHistory
+      runs={[cancelledRun({ action: "apply", error_message: "Abandoned by user" })]}
+    />,
+  );
+
+  const badge = screen.getByText("Cancelled");
+  expect(badge).toHaveAttribute("title", "Abandoned by user");
+});

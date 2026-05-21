@@ -161,6 +161,33 @@ async def _noop_persist(*_args, **_kwargs):
     return None
 
 
+class _PersistSpy:
+    """Records the modules whose outputs were persisted after an apply."""
+
+    def __init__(self) -> None:
+        self.modules: list[str] = []
+
+    async def __call__(self, _session, module: str) -> None:
+        self.modules.append(module)
+
+
+def _fake_run_apply(outcomes: dict[str, tuple[str, str | None]]):
+    """Fake TerraformExecutor.run_apply: set the run's final status/error from
+    the single target, mirroring how the real apply records its result."""
+
+    async def run_apply(session, run_id, user_id, targets=None):
+        run = (await session.execute(select(TerraformRun).where(TerraformRun.id == run_id))).scalar_one()
+        addr = (targets or [None])[0]
+        status, err = outcomes.get(addr, ("completed", None))
+        run.status = status
+        run.error_message = err
+        await session.flush()
+        if False:  # pragma: no cover - makes this an async generator
+            yield
+
+    return run_apply
+
+
 @pytest.mark.asyncio
 async def test_check_realigns_then_reports_additive_literature(session, admin_user, monkeypatch):
     monkeypatch.setattr(infra_update_service, "_persist_module_outputs", _noop_persist)
@@ -248,6 +275,91 @@ async def test_check_self_heals_storage_bucket_names(session, admin_user, monkey
 
     assert await PlatformConfigService.get(session, "literature_bucket_name") == "bioaf-literature-bioaf-co-4bd459"
     assert await PlatformConfigService.get(session, "references_bucket_name") == "bioaf-references-bioaf-co-4bd459"
+
+
+# ---------------------------------------------------------------------------
+# apply_modules_sequentially: per-target apply + benign no-op handling
+# ---------------------------------------------------------------------------
+
+
+def test_is_benign_apply_error():
+    assert infra_update_service._is_benign_apply_error(
+        "googleapi: Error 400: Must specify a field to update., badRequest"
+    )
+    assert not infra_update_service._is_benign_apply_error("Error: quota exceeded")
+    assert not infra_update_service._is_benign_apply_error(None)
+
+
+@pytest.mark.asyncio
+async def test_apply_skips_benign_noop_and_lands_real_create(session, admin_user, monkeypatch):
+    """A no-op update GCP rejects with 'Must specify a field to update' must not
+    abort the batch: the real new resource still applies and is persisted."""
+    spy = _PersistSpy()
+    monkeypatch.setattr(infra_update_service, "_persist_module_outputs", spy)
+    plan = _plan(
+        [
+            _resource("module.compute.google_storage_bucket.lit", "google_storage_bucket", "create"),
+            _resource("module.compute.google_container_node_pool.pipelines", "google_container_node_pool", "update"),
+        ]
+    )
+    monkeypatch.setattr(TerraformExecutor, "run_plan", _fake_run_plan({"compute": plan}))
+    monkeypatch.setattr(
+        TerraformExecutor,
+        "run_apply",
+        _fake_run_apply(
+            {
+                "module.compute.google_storage_bucket.lit": ("completed", None),
+                "module.compute.google_container_node_pool.pipelines": (
+                    "failed",
+                    "googleapi: Error 400: Must specify a field to update., badRequest",
+                ),
+            }
+        ),
+    )
+
+    await infra_update_service.apply_modules_sequentially(["compute"], admin_user.id)
+
+    # The real create landed, so outputs were persisted exactly once.
+    assert spy.modules == ["compute"]
+    # The benign-failed run was reconciled to completed, not left failed.
+    failed = (await session.execute(select(TerraformRun).where(TerraformRun.status == "failed"))).scalars().all()
+    assert failed == []
+
+
+@pytest.mark.asyncio
+async def test_apply_does_not_swallow_real_failure(session, admin_user, monkeypatch):
+    """A genuine apply failure stays failed and does not persist outputs."""
+    spy = _PersistSpy()
+    monkeypatch.setattr(infra_update_service, "_persist_module_outputs", spy)
+    plan = _plan(
+        [_resource("module.compute.google_container_node_pool.pipelines", "google_container_node_pool", "update")]
+    )
+    monkeypatch.setattr(TerraformExecutor, "run_plan", _fake_run_plan({"compute": plan}))
+    monkeypatch.setattr(
+        TerraformExecutor,
+        "run_apply",
+        _fake_run_apply({"module.compute.google_container_node_pool.pipelines": ("failed", "Error: quota exceeded")}),
+    )
+
+    await infra_update_service.apply_modules_sequentially(["compute"], admin_user.id)
+
+    assert spy.modules == []
+    failed = (await session.execute(select(TerraformRun).where(TerraformRun.status == "failed"))).scalars().all()
+    assert len(failed) == 1
+    assert "quota" in (failed[0].error_message or "")
+
+
+@pytest.mark.asyncio
+async def test_apply_noop_when_no_additive_targets(session, admin_user, monkeypatch):
+    """A module whose plan has no additive resources applies nothing."""
+    spy = _PersistSpy()
+    monkeypatch.setattr(infra_update_service, "_persist_module_outputs", spy)
+    monkeypatch.setattr(TerraformExecutor, "run_plan", _fake_run_plan({"compute": _plan([])}))
+    monkeypatch.setattr(TerraformExecutor, "run_apply", _fake_run_apply({}))
+
+    await infra_update_service.apply_modules_sequentially(["compute"], admin_user.id)
+
+    assert spy.modules == []
 
 
 @pytest.mark.asyncio
