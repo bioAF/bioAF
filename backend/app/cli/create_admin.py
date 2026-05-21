@@ -66,6 +66,11 @@ async def create_admin_user(
 
     role_map = await seed_builtin_roles(session, org.id)
 
+    # Seed default Literature Sources for the new org.
+    from app.services.bootstrap_literature import seed_literature_sources
+
+    await seed_literature_sources(session, org.id)
+
     # Create admin user with bcrypt-hashed password
     password_hash = AuthService.hash_password(password)
     user = User(

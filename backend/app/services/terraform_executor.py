@@ -136,15 +136,32 @@ class TerraformExecutor:
         return run
 
     @staticmethod
+    def _build_apply_args(targets: list[str] | None = None) -> list[str]:
+        """Build the `terraform apply` argv. When targets are given, append a
+        -target flag per address so only those resources (and their deps) are
+        applied; this is how the infrastructure-update flow applies additive
+        resources without touching anything marked for replace/delete."""
+        args = ["terraform", "apply", "-auto-approve", "-json", "-no-color"]
+        for target in targets or []:
+            args.append(f"-target={target}")
+        return args
+
+    @staticmethod
     async def run_apply(
         session: AsyncSession,
         run_id: int,
         user_id: int,
+        targets: list[str] | None = None,
     ) -> AsyncIterator[TerraformProgressEvent]:
         """Apply an approved plan, yielding progress events.
 
         Yields TerraformProgressEvent objects as Terraform processes each resource.
         Updates resources_completed in the DB as resources complete.
+
+        When `targets` is given, only those resource addresses (and their
+        dependencies) are applied (`terraform apply -target=...`). The
+        infrastructure-update flow uses this to apply additive resources only,
+        never the resources a plan marks for replace/delete.
         """
         result = await session.execute(select(TerraformRun).where(TerraformRun.id == run_id))
         run = result.scalar_one_or_none()
@@ -185,11 +202,7 @@ class TerraformExecutor:
             await TerraformExecutor._run_init(work_dir, env, config, module_name=module_name)
 
             process = await asyncio.create_subprocess_exec(
-                "terraform",
-                "apply",
-                "-auto-approve",
-                "-json",
-                "-no-color",
+                *TerraformExecutor._build_apply_args(targets),
                 cwd=str(work_dir),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -876,6 +889,13 @@ class TerraformExecutor:
         # and Terraform uses the default from variables.tf. Terraform
         # destroy works from state, not from the variable value.
         deploy_suffix = config.get("deploy_suffix") or ""
+        # Storage and compute can carry different stack uids: each module is
+        # deployed independently and gets its own secrets.token_hex(3) suffix at
+        # deploy time, so a single shared deploy_suffix cannot reproduce both
+        # sets of resource names. Prefer the module-specific key, falling back to
+        # deploy_suffix for installs where they are the same (the common case).
+        storage_suffix = config.get("storage_stack_uid") or deploy_suffix
+        compute_suffix = config.get("compute_stack_uid") or deploy_suffix
         state_bucket = config.get("terraform_state_bucket") or f"bioaf-tfstate-{project_id}"
 
         # Common variables shared by all modules
@@ -888,8 +908,8 @@ class TerraformExecutor:
             tfvars["state_bucket_name"] = state_bucket
         elif module_name == "storage":
             tfvars["org_slug"] = org_slug
-            if deploy_suffix:
-                tfvars["stack_uid"] = deploy_suffix
+            if storage_suffix:
+                tfvars["stack_uid"] = storage_suffix
             tfvars["backend_service_account_email"] = config.get("backend_service_account_email") or ""
             # SA hardening: pass the bioaf-app SA email through so the module
             # creates per-subscription roles/pubsub.subscriber bindings.
@@ -899,8 +919,8 @@ class TerraformExecutor:
         elif module_name == "compute":
             tfvars["zone"] = zone
             tfvars["org_slug"] = org_slug
-            if deploy_suffix:
-                tfvars["stack_uid"] = deploy_suffix
+            if compute_suffix:
+                tfvars["stack_uid"] = compute_suffix
             # Multi-zone node placement: derive all zones in the region so
             # the autoscaler can fall back when a machine type is unavailable
             # in the primary zone (e.g. GCE capacity exhaustion).
@@ -1016,6 +1036,8 @@ class TerraformExecutor:
             "bioaf_app_sa_email",
             "org_slug",
             "deploy_suffix",
+            "storage_stack_uid",
+            "compute_stack_uid",
             "terraform_initialized",
             "terraform_state_bucket",
             "backend_service_account_email",

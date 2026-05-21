@@ -182,13 +182,15 @@ class TestStorageBucketsEndpoint:
         assert response.status_code == 400
 
     @pytest.mark.asyncio
-    async def test_returns_five_buckets_when_deployed(self, client, admin_token, session):
+    async def test_returns_all_buckets_when_deployed(self, client, admin_token, session):
         for key, value in [
             ("storage_deployed", "true"),
             ("ingest_bucket_name", "bioaf-ingest-demo"),
             ("raw_bucket_name", "bioaf-raw-demo"),
             ("working_bucket_name", "bioaf-working-demo"),
             ("results_bucket_name", "bioaf-results-demo"),
+            ("references_bucket_name", "bioaf-references-demo"),
+            ("literature_bucket_name", "bioaf-literature-demo"),
             ("config_backups_bucket_name", "bioaf-config-backups-demo"),
         ]:
             await session.execute(
@@ -211,7 +213,15 @@ class TestStorageBucketsEndpoint:
                 versioning_enabled=True,
                 lifecycle_rules=[],
             )
-            for p in ["ingest", "raw", "working", "results", "config_backups"]
+            for p in [
+                "ingest",
+                "raw",
+                "working",
+                "results",
+                "references",
+                "literature",
+                "config_backups",
+            ]
         ]
 
         with patch("app.api.storage_deploy.GcsStorageService") as mock_svc:
@@ -224,7 +234,10 @@ class TestStorageBucketsEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert "buckets" in data
-        assert len(data["buckets"]) == 5
+        assert len(data["buckets"]) == 7
+        purposes = {b["purpose"] for b in data["buckets"]}
+        assert "references" in purposes
+        assert "literature" in purposes
 
     @pytest.mark.asyncio
     async def test_each_bucket_has_required_fields(self, client, admin_token, session):
@@ -234,6 +247,8 @@ class TestStorageBucketsEndpoint:
             ("raw_bucket_name", "bioaf-raw-demo"),
             ("working_bucket_name", "bioaf-working-demo"),
             ("results_bucket_name", "bioaf-results-demo"),
+            ("references_bucket_name", "bioaf-references-demo"),
+            ("literature_bucket_name", "bioaf-literature-demo"),
             ("config_backups_bucket_name", "bioaf-config-backups-demo"),
         ]:
             await session.execute(
@@ -256,7 +271,15 @@ class TestStorageBucketsEndpoint:
                 versioning_enabled=True,
                 lifecycle_rules=[],
             )
-            for p in ["ingest", "raw", "working", "results", "config_backups"]
+            for p in [
+                "ingest",
+                "raw",
+                "working",
+                "results",
+                "references",
+                "literature",
+                "config_backups",
+            ]
         ]
 
         with patch("app.api.storage_deploy.GcsStorageService") as mock_svc:

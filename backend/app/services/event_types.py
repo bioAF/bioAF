@@ -92,6 +92,16 @@ TERRAFORM_APPLY_FAILURE = "terraform.apply_failure"
 # Environment build events
 ENVIRONMENT_BUILD_COMPLETED = "environment.build.completed"
 
+# Literature events (ADR-056)
+LITERATURE_PAPER_UPLOADED = "literature.paper_uploaded"
+LITERATURE_SEARCH_COMPLETED = "literature.search_completed"
+LITERATURE_SEARCH_FAILED = "literature.search_failed"
+LITERATURE_REVIEW_RUN_COMPLETED = "literature.review_run_completed"
+LITERATURE_REVIEW_RUN_FAILED = "literature.review_run_failed"
+LITERATURE_AUTO_REVIEW_RECOMMENDATIONS = "literature.auto_review_recommendations"
+LITERATURE_COMMENT_REPLIED = "literature.comment_replied"
+LITERATURE_PAPER_DISMISSED = "literature.paper_dismissed"
+
 # Public LIMS integration events (ADR-051). Project events are internal-only
 # in v1; webhook subscribers only see the experiment/sample/file vocabulary.
 INTEGRATION_PROJECT_CREATED = "integration.project.created"
@@ -173,6 +183,14 @@ ALL_EVENT_TYPES = [
     AUTO_RUN_BUDGET_DISABLED,
     AUTO_RUN_LAUNCHED,
     AUTO_RUN_CANCELLED,
+    LITERATURE_PAPER_UPLOADED,
+    LITERATURE_SEARCH_COMPLETED,
+    LITERATURE_SEARCH_FAILED,
+    LITERATURE_REVIEW_RUN_COMPLETED,
+    LITERATURE_REVIEW_RUN_FAILED,
+    LITERATURE_AUTO_REVIEW_RECOMMENDATIONS,
+    LITERATURE_COMMENT_REPLIED,
+    LITERATURE_PAPER_DISMISSED,
 ]
 
 # Severity mapping for event types
@@ -225,4 +243,12 @@ EVENT_SEVERITY = {
     AUTO_RUN_LAUNCHED: "info",
     AUTO_RUN_CANCELLED: "warning",
     ENVIRONMENT_BUILD_COMPLETED: "info",
+    LITERATURE_PAPER_UPLOADED: "info",
+    LITERATURE_SEARCH_COMPLETED: "info",
+    LITERATURE_SEARCH_FAILED: "warning",
+    LITERATURE_REVIEW_RUN_COMPLETED: "info",
+    LITERATURE_REVIEW_RUN_FAILED: "warning",
+    LITERATURE_AUTO_REVIEW_RECOMMENDATIONS: "info",
+    LITERATURE_COMMENT_REPLIED: "info",
+    LITERATURE_PAPER_DISMISSED: "info",
 }

@@ -15,6 +15,7 @@ import { ExportPdfButton } from "@/components/shared/ExportPdfButton";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportPanel";
 import { FileBrowser } from "@/components/files/FileBrowser";
+import { LiteratureTabPanel } from "@/components/literature/LiteratureTabPanel";
 import { VocabularySelect } from "@/components/shared/VocabularySelect";
 import { CsvUploadModal } from "@/components/experiments/CsvUploadModal";
 import { AutoRunConfigSection } from "@/components/experiments/AutoRunConfigSection";
@@ -52,7 +53,18 @@ import type {
   PlotArchiveListResponse,
 } from "@/lib/types";
 
-type Tab = "overview" | "samples" | "batches" | "files" | "analysis" | "pipelines" | "results" | "provenance" | "audit" | "agent_review";
+type Tab =
+  | "overview"
+  | "samples"
+  | "batches"
+  | "files"
+  | "literature"
+  | "analysis"
+  | "pipelines"
+  | "results"
+  | "provenance"
+  | "audit"
+  | "agent_review";
 
 export default function ExperimentDetailPage() {
   const router = useRouter();
@@ -432,6 +444,7 @@ export default function ExperimentDetailPage() {
     { key: "samples", label: `Samples (${experiment.sample_count})` },
     { key: "batches", label: "Batches" },
     { key: "files", label: "Files" },
+    { key: "literature", label: "Literature" },
     { key: "analysis", label: "Analysis" },
     { key: "pipelines", label: "Pipeline Runs" },
     { key: "results", label: "Results" },
@@ -1128,6 +1141,13 @@ export default function ExperimentDetailPage() {
             <div>
               <h2 className="text-lg font-semibold mb-4">Files</h2>
               <FileBrowser experimentId={Number(id)} showSearch showUpload />
+            </div>
+          )}
+
+          {activeTab === "literature" && (
+            <div>
+              <h2 className="text-lg font-semibold mb-4">Literature</h2>
+              <LiteratureTabPanel experimentId={Number(id)} />
             </div>
           )}
 

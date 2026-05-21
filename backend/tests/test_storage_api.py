@@ -143,7 +143,7 @@ async def test_get_buckets_requires_storage_deployed(client, session, admin_user
 
 @pytest.mark.asyncio
 async def test_get_buckets_returns_live_data(client, session, admin_user, admin_token):
-    """Mock GCS service, call endpoint. Assert 200 with 5 buckets."""
+    """Mock GCS service, call endpoint. Assert 200 with all 7 buckets."""
     await _seed_platform_config(
         session,
         {
@@ -152,6 +152,8 @@ async def test_get_buckets_returns_live_data(client, session, admin_user, admin_
             "raw_bucket_name": "bioaf-raw-demo",
             "working_bucket_name": "bioaf-working-demo",
             "results_bucket_name": "bioaf-results-demo",
+            "references_bucket_name": "bioaf-references-demo",
+            "literature_bucket_name": "bioaf-literature-demo",
             "config_backups_bucket_name": "bioaf-config-backups-demo",
         },
     )
@@ -168,7 +170,15 @@ async def test_get_buckets_returns_live_data(client, session, admin_user, admin_
             versioning_enabled=True,
             lifecycle_rules=[],
         )
-        for p in ["ingest", "raw", "working", "results", "config_backups"]
+        for p in [
+            "ingest",
+            "raw",
+            "working",
+            "results",
+            "references",
+            "literature",
+            "config_backups",
+        ]
     ]
 
     with patch("app.api.storage_deploy.GcsStorageService") as mock_svc:
@@ -180,7 +190,7 @@ async def test_get_buckets_returns_live_data(client, session, admin_user, admin_
 
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data["buckets"]) == 5
+    assert len(data["buckets"]) == 7
 
 
 @pytest.mark.asyncio

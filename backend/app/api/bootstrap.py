@@ -159,6 +159,12 @@ async def create_admin(body: CreateAdminRequest, request: Request, session: Asyn
 
     role_map = await seed_builtin_roles(session, org.id)
 
+    # Seed default Literature Sources (PubMed, bioRxiv, Europe PMC,
+    # Semantic Scholar) so the lab can search immediately.
+    from app.services.bootstrap_literature import seed_literature_sources
+
+    await seed_literature_sources(session, org.id)
+
     # Create admin user
     user = await UserService.create_user(
         session,

@@ -188,6 +188,43 @@ async def _seed_user(session):
 # ---------------------------------------------------------------------------
 
 
+def test_write_tfvars_uses_per_module_stack_uid(tmp_path):
+    """Storage and compute draw their stack_uid from module-specific keys,
+    falling back to the shared deploy_suffix. This keeps a re-aligned storage
+    suffix from leaking into compute (which would replace the live cluster)."""
+    config = {
+        "gcp_project_id": "proj",
+        "gcp_region": "us-central1",
+        "org_slug": "bioaf-co",
+        "deploy_suffix": "41aae5",
+        "storage_stack_uid": "4bd459",
+        "compute_stack_uid": "41aae5",
+    }
+    storage = TerraformExecutor._write_tfvars(tmp_path, "storage", config)
+    compute = TerraformExecutor._write_tfvars(tmp_path, "compute", config)
+    assert storage["stack_uid"] == "4bd459"
+    assert compute["stack_uid"] == "41aae5"
+
+    # Fallback to deploy_suffix when the module-specific key is absent.
+    fallback = TerraformExecutor._write_tfvars(tmp_path, "storage", {**config, "storage_stack_uid": None})
+    assert fallback["stack_uid"] == "41aae5"
+
+
+def test_build_apply_args_plain_and_targeted():
+    assert TerraformExecutor._build_apply_args() == [
+        "terraform",
+        "apply",
+        "-auto-approve",
+        "-json",
+        "-no-color",
+    ]
+    args = TerraformExecutor._build_apply_args(["google_storage_bucket.literature", 'm.iam["literature"]'])
+    assert args[-2:] == [
+        "-target=google_storage_bucket.literature",
+        '-target=m.iam["literature"]',
+    ]
+
+
 @pytest.mark.asyncio
 async def test_run_plan_creates_run_record(session):
     """run_plan() creates a terraform_runs record with status=completed after success."""

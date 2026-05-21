@@ -128,6 +128,36 @@ resource "google_storage_bucket" "references" {
   }
 }
 
+# Literature bucket -- backing store for Paper PDFs, extracted text, page
+# images, and thumbnails (ADR-056). Object versioning is on so accidental
+# deletes can be recovered; lifecycle to NEARLINE after 180 days because
+# papers are read-heavy in their first months and then mostly archived.
+resource "google_storage_bucket" "literature" {
+  name          = "${local.bucket_prefix}-literature-${var.org_slug}-${var.stack_uid}"
+  project       = var.project_id
+  location      = var.region
+  storage_class = "STANDARD"
+
+  uniform_bucket_level_access = true
+  versioning { enabled = true }
+  force_destroy = false
+
+  lifecycle_rule {
+    condition {
+      age = 180
+    }
+    action {
+      type          = "SetStorageClass"
+      storage_class = "NEARLINE"
+    }
+  }
+
+  labels = {
+    managed_by = "bioaf"
+    purpose    = "literature"
+  }
+}
+
 # DEPRECATED: Backups now go to the persistent backups bucket in the
 # foundation module (bioaf-backups-{project_id}). This bucket is kept for
 # backward compatibility with existing deployments but will be removed in
@@ -166,6 +196,7 @@ locals {
     working        = google_storage_bucket.working.name
     results        = google_storage_bucket.results.name
     references     = google_storage_bucket.references.name
+    literature     = google_storage_bucket.literature.name
     config_backups = google_storage_bucket.config_backups.name
   }
 }

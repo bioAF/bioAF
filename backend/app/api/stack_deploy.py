@@ -26,6 +26,7 @@ from app.api.dependencies import require_permission
 from app.database import async_session_factory, get_session
 from app.services.audit_service import log_action
 from app.services.notebook_image_service import build_notebook_image, cancel_build
+from app.services import infra_update_service
 from app.services.stack_deployment import (
     StackStatus,
     deploy_stack,
@@ -592,6 +593,149 @@ async def stack_status_endpoint(
 ) -> StackStatus:
     """Return current stack and cluster status."""
     return await get_cluster_status(session)
+
+
+# -----------------------------------------------------------------------
+# Infrastructure updates (re-plan deployed modules, apply additive changes)
+# -----------------------------------------------------------------------
+
+
+class ResourceInfo(BaseModel):
+    address: str
+    type: str
+    action: str
+    description: str
+
+
+class DestructiveResourceInfo(ResourceInfo):
+    stateful: bool
+
+
+class ModuleUpdateInfo(BaseModel):
+    module: str
+    add_count: int
+    change_count: int
+    destroy_count: int
+    has_changes: bool
+
+
+class CheckUpdatesResponse(BaseModel):
+    has_changes: bool
+    has_additive: bool
+    has_destructive: bool
+    requires_approval: bool
+    applying: bool
+    realigned: dict | None
+    modules_with_additive: list[str]
+    modules: list[ModuleUpdateInfo]
+    additive_resources: list[ResourceInfo]
+    destructive_resources: list[DestructiveResourceInfo]
+
+
+class ApplyUpdatesRequest(BaseModel):
+    modules: list[str]
+
+
+def _to_check_response(result: dict, *, applying: bool) -> CheckUpdatesResponse:
+    return CheckUpdatesResponse(
+        has_changes=result["has_changes"],
+        has_additive=result["has_additive"],
+        has_destructive=result["has_destructive"],
+        requires_approval=result["requires_approval"],
+        applying=applying,
+        realigned=result["realigned"],
+        modules_with_additive=result["modules_with_additive"],
+        modules=[
+            ModuleUpdateInfo(
+                module=m["module"],
+                add_count=m["add_count"],
+                change_count=m["change_count"],
+                destroy_count=m["destroy_count"],
+                has_changes=m["has_changes"],
+            )
+            for m in result["modules"]
+        ],
+        additive_resources=[
+            ResourceInfo(
+                address=r["address"],
+                type=r["type"],
+                action=r["action"],
+                description=r.get("description", ""),
+            )
+            for r in result["additive_resources"]
+        ],
+        destructive_resources=[
+            DestructiveResourceInfo(
+                address=r["address"],
+                type=r["type"],
+                action=r["action"],
+                description=r.get("description", ""),
+                stateful=bool(r.get("stateful")),
+            )
+            for r in result["destructive_resources"]
+        ],
+    )
+
+
+@router.post("/api/v1/infrastructure/stack/check-updates", response_model=CheckUpdatesResponse)
+async def check_infra_updates_endpoint(
+    current_user: dict = require_permission("infrastructure", "deploy"),
+    session: AsyncSession = Depends(get_session),
+) -> CheckUpdatesResponse:
+    """Re-align deployed naming, re-plan every deployed module, and report the
+    pending changes split into additive vs destructive.
+
+    When there are additive changes and no destructive (delete/replace) ones,
+    the additive resources start applying immediately in the background. When
+    a destructive change is present, nothing is auto-applied; the caller can
+    apply the additive subset via /apply-updates (which only ever targets
+    additive resources).
+    """
+    user_id = int(current_user["sub"])
+    try:
+        result = await infra_update_service.check_for_updates(session, user_id)
+    except ValueError as exc:
+        msg = str(exc)
+        if msg in ("Terraform has not been initialized", "No infrastructure is deployed"):
+            await session.rollback()
+            raise HTTPException(status_code=400, detail=msg)
+        if msg.startswith("Another Terraform operation is in progress"):
+            await session.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Another Terraform operation is in progress. Try again when it finishes.",
+            )
+        logger.error("check_for_updates failed: %s", msg, exc_info=True)
+        await session.rollback()
+        raise HTTPException(status_code=400, detail="Could not check for infrastructure updates. See server logs.")
+
+    applying = False
+    if result["has_additive"] and not result["has_destructive"]:
+        infra_update_service.launch_background_apply(result["modules_with_additive"], user_id)
+        applying = True
+
+    await session.commit()
+    return _to_check_response(result, applying=applying)
+
+
+@router.post("/api/v1/infrastructure/stack/apply-updates")
+async def apply_infra_updates_endpoint(
+    body: ApplyUpdatesRequest,
+    current_user: dict = require_permission("infrastructure", "deploy"),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Apply the named modules in the background, additive-only.
+
+    Used after the user reviews a plan that also contains destructive changes:
+    each module is re-planned and only its create/update resources are applied
+    (targeted), so a delete/replace is never carried out by this flow."""
+    user_id = int(current_user["sub"])
+    allowed = {module for module, _flag in infra_update_service._CANDIDATE_MODULES}
+    modules = [m for m in body.modules if m in allowed]
+    if not modules:
+        raise HTTPException(status_code=400, detail="No valid modules to apply")
+    infra_update_service.launch_background_apply(modules, user_id)
+    return {"applying": True, "modules": modules}
 
 
 # -----------------------------------------------------------------------

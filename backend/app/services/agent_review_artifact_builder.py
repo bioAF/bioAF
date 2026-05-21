@@ -209,6 +209,7 @@ async def build_for_run(
     qc_report_content: str | None = None,
     gcs_writer: Any | None = None,
     job_id: int | None = None,
+    expand_literature_to_project: bool = False,
 ) -> BuiltArtifact:
     """Build the .md artifact for a single pipeline run.
 
@@ -231,6 +232,21 @@ async def build_for_run(
     if resolved_qc is None:
         resolved_qc = await _load_qc_dashboard_text(session, run_id)
     markdown = render_run_markdown(run=run, samples=samples, qc_report_content=resolved_qc)
+
+    # ADR-057: append the Literature section when configured. The pipeline run's
+    # owning experiment is the scope; toggles per org/project/experiment override.
+    if run.experiment_id is not None:
+        from app.services.literature.agent_review_payload import build_literature_payload
+
+        payload = await build_literature_payload(
+            session,
+            org_id=run.organization_id,
+            scope_type="experiment",
+            scope_id=run.experiment_id,
+            expand_to_project=expand_literature_to_project,
+        )
+        if payload.markdown:
+            markdown = markdown + "\n" + payload.markdown
 
     suffix = f"_job{job_id}" if job_id is not None else ""
     gcs_path = f"gs://bioaf-agent-reviews/pipeline_runs/{run_id}/agent_review_inputs/agent_review_input{suffix}.md"
@@ -339,6 +355,7 @@ async def build_experiment_header(
     *,
     experiment_id: int,
     included_run_ids: list[int],
+    expand_literature_to_project: bool = False,
 ) -> str:
     """Build the experiment-scope header for a Button B review.
 
@@ -369,4 +386,18 @@ async def build_experiment_header(
     sections.append("")
     sections.extend(_format_experiment_samples_table(samples))
     sections.append("")
+
+    # ADR-057: append the Literature section when configured.
+    from app.services.literature.agent_review_payload import build_literature_payload
+
+    payload = await build_literature_payload(
+        session,
+        org_id=exp.organization_id,
+        scope_type="experiment",
+        scope_id=experiment_id,
+        expand_to_project=expand_literature_to_project,
+    )
+    if payload.markdown:
+        sections.append(payload.markdown)
+
     return "\n".join(sections)
