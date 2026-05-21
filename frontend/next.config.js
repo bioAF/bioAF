@@ -21,8 +21,8 @@ const nextConfig = {
       // Compute -> Infrastructure compute
       { source: "/compute", destination: "/infrastructure/compute", permanent: true },
       { source: "/compute/cluster", destination: "/infrastructure/compute", permanent: true },
-      { source: "/compute/jobs", destination: "/infrastructure/compute", permanent: true },
-      { source: "/compute/quotas", destination: "/infrastructure/compute", permanent: true },
+      // Note: /compute/jobs (Job Browser) and /compute/quotas (Quotas) are live
+      // pages reached from the Infrastructure > Compute buttons; do not redirect them.
       // Environment -> Infrastructure
       { source: "/environment/components", destination: "/infrastructure/components", permanent: true },
       { source: "/components", destination: "/infrastructure/components", permanent: true },
@@ -39,6 +39,10 @@ const nextConfig = {
       { source: "/admin/settings", destination: "/settings/info", permanent: true },
       { source: "/admin/naming-profiles", destination: "/settings/naming-profiles", permanent: true },
       { source: "/admin/templates", destination: "/projects/experiment-templates", permanent: true },
+      // Notebook settings merged into Workbench Settings (the Work Nodes page)
+      { source: "/settings/notebooks", destination: "/settings/work-nodes", permanent: true },
+      // Slack settings live in Settings > Integrations (Slack tab)
+      { source: "/settings/slack", destination: "/settings/integrations", permanent: true },
       // Old experiment templates path
       { source: "/notebooks/templates", destination: "/projects/experiment-templates", permanent: true },
       // Experiment routes moved under /projects/
@@ -47,6 +51,8 @@ const nextConfig = {
       { source: "/experiments", destination: "/projects/experiments", permanent: true },
       // Old pipeline paths
       { source: "/pipelines", destination: "/pipelines/catalog", permanent: true },
+      // Auto-run config now lives per-experiment (experiment detail > Pipeline Runs tab)
+      { source: "/pipelines/triggers", destination: "/pipelines/runs", permanent: true },
       // Old data paths
       { source: "/data", destination: "/data/browser", permanent: true },
       // Old references path

@@ -179,7 +179,7 @@ export function SlackSettingsContent() {
     const params = new URLSearchParams(window.location.search);
     if (params.get("connected") === "true") {
       setMessage("Slack connected successfully");
-      window.history.replaceState({}, "", "/settings/slack");
+      window.history.replaceState({}, "", "/settings/integrations?tab=slack");
       loadStatus().then((st) => {
         if (st?.connected) {
           loadChannels();

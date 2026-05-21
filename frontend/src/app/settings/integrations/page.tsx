@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { GcpSettingsContent } from "@/components/settings/GcpSettingsContent";
@@ -20,6 +20,14 @@ const tabs: { key: Tab; label: string }[] = [
 
 export default function IntegrationsPage() {
   const [activeTab, setActiveTab] = useState<Tab>("gcp");
+
+  // Honor ?tab= so deep links (and the Slack OAuth return) open the right tab.
+  useEffect(() => {
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    if (tab && tabs.some((t) => t.key === tab)) {
+      setActiveTab(tab as Tab);
+    }
+  }, []);
 
   return (
     <div className="flex h-screen">

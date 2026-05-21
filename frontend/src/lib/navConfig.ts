@@ -106,7 +106,7 @@ export const navConfig: NavSection[] = [
       { label: "Roles & Permissions", path: "/settings/roles", permission: { resource: "roles", action: "view" } },
       { label: "Audit Log", path: "/settings/audit-log", permission: { resource: "audit_log", action: "view" } },
       { label: "Integrations", path: "/settings/integrations", permission: { resource: "infrastructure", action: "configure" } },
-      { label: "Work Nodes", path: "/settings/work-nodes", permission: { resource: "work_nodes", action: "configure" } },
+      { label: "Workbench Settings", path: "/settings/work-nodes", permission: { resource: "work_nodes", action: "configure" } },
       { label: "Information", path: "/settings/info", permission: { resource: "infrastructure", action: "view" } },
     ],
   },

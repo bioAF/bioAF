@@ -76,7 +76,7 @@ export default function JobBrowserPage() {
         <Header />
         <main className="flex-1 overflow-y-auto p-6">
           <div className="flex items-center gap-4 mb-6">
-            <Link href="/compute" className="text-gray-500 hover:text-gray-700">← Cluster</Link>
+            <Link href="/infrastructure/compute" className="text-gray-500 hover:text-gray-700">← Cluster</Link>
             <h1 className="text-2xl font-bold">Job Browser</h1>
             <span className="text-sm text-gray-500">({total} jobs)</span>
           </div>
