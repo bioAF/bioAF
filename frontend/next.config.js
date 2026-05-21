@@ -51,6 +51,8 @@ const nextConfig = {
       { source: "/experiments", destination: "/projects/experiments", permanent: true },
       // Old pipeline paths
       { source: "/pipelines", destination: "/pipelines/catalog", permanent: true },
+      // Auto-run config now lives per-experiment (experiment detail > Pipeline Runs tab)
+      { source: "/pipelines/triggers", destination: "/pipelines/runs", permanent: true },
       // Old data paths
       { source: "/data", destination: "/data/browser", permanent: true },
       // Old references path
