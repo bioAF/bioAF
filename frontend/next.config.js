@@ -39,6 +39,8 @@ const nextConfig = {
       { source: "/admin/settings", destination: "/settings/info", permanent: true },
       { source: "/admin/naming-profiles", destination: "/settings/naming-profiles", permanent: true },
       { source: "/admin/templates", destination: "/projects/experiment-templates", permanent: true },
+      // Notebook settings merged into Workbench Settings (the Work Nodes page)
+      { source: "/settings/notebooks", destination: "/settings/work-nodes", permanent: true },
       // Old experiment templates path
       { source: "/notebooks/templates", destination: "/projects/experiment-templates", permanent: true },
       // Experiment routes moved under /projects/

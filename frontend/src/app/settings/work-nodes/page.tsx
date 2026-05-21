@@ -13,40 +13,101 @@ interface WorkNodeConfig {
   idle_timeout_hours: number;
 }
 
-export default function WorkNodeSettingsPage() {
+interface NotebookConfig {
+  idle_timeout_hours: number;
+  idle_warning_minutes: number;
+  max_sessions_per_user: number;
+}
+
+function SaveBanner({ message }: { message: string }) {
+  if (!message) return null;
+  const ok = message === "Settings saved";
+  return (
+    <div
+      className={`p-3 rounded text-sm ${
+        ok
+          ? "bg-green-50 border border-green-200 text-green-700"
+          : "bg-red-50 border border-red-200 text-red-700"
+      }`}
+    >
+      {message}
+    </div>
+  );
+}
+
+export default function WorkbenchSettingsPage() {
   const router = useRouter();
   const { canAccess, loading: permLoading } = usePermissions();
-  const [config, setConfig] = useState<WorkNodeConfig>({
+
+  const [workNodes, setWorkNodes] = useState<WorkNodeConfig>({
     max_nodes_per_user: 2,
     idle_timeout_hours: 24,
   });
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState("");
+  const [savingWorkNodes, setSavingWorkNodes] = useState(false);
+  const [workNodeMessage, setWorkNodeMessage] = useState("");
+
+  // idle_warning_minutes is loaded and preserved on save, but intentionally not
+  // shown here; warning-before-shutdown does not belong in these admin limits.
+  const [notebooks, setNotebooks] = useState<NotebookConfig>({
+    idle_timeout_hours: 4,
+    idle_warning_minutes: 15,
+    max_sessions_per_user: 2,
+  });
+  const [savingNotebooks, setSavingNotebooks] = useState(false);
+  const [notebookMessage, setNotebookMessage] = useState("");
 
   useEffect(() => {
-    if (!isAuthenticated()) { router.push("/login"); return; }
+    if (!isAuthenticated()) {
+      router.push("/login");
+      return;
+    }
     if (permLoading) return;
-    if (!canAccess("work_nodes", "configure")) { router.push("/dashboard"); return; }
-    loadConfig();
+    if (!canAccess("work_nodes", "configure")) {
+      router.push("/dashboard");
+      return;
+    }
+    loadConfigs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router, permLoading, canAccess]);
 
-  async function loadConfig() {
+  async function loadConfigs() {
     try {
       const data = await api.get<WorkNodeConfig>("/api/v1/settings/work-nodes");
-      setConfig(data);
+      setWorkNodes(data);
+    } catch {}
+    try {
+      const data = await api.get<NotebookConfig>("/api/v1/settings/notebooks");
+      setNotebooks((prev) => ({ ...prev, ...data }));
     } catch {}
   }
 
-  async function handleSave() {
-    setSaving(true);
-    setMessage("");
+  async function saveWorkNodes() {
+    setSavingWorkNodes(true);
+    setWorkNodeMessage("");
     try {
-      await api.put("/api/v1/settings/work-nodes", config);
-      setMessage("Settings saved");
+      await api.put("/api/v1/settings/work-nodes", workNodes);
+      setWorkNodeMessage("Settings saved");
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Failed to save settings");
+      setWorkNodeMessage(err instanceof Error ? err.message : "Failed to save settings");
     } finally {
-      setSaving(false);
+      setSavingWorkNodes(false);
+    }
+  }
+
+  async function saveNotebooks() {
+    setSavingNotebooks(true);
+    setNotebookMessage("");
+    try {
+      await api.put("/api/v1/settings/notebooks", {
+        idle_timeout_hours: notebooks.idle_timeout_hours,
+        idle_warning_minutes: notebooks.idle_warning_minutes,
+        max_sessions_per_user: notebooks.max_sessions_per_user,
+      });
+      setNotebookMessage("Settings saved");
+    } catch (err) {
+      setNotebookMessage(err instanceof Error ? err.message : "Failed to save settings");
+    } finally {
+      setSavingNotebooks(false);
     }
   }
 
@@ -56,58 +117,113 @@ export default function WorkNodeSettingsPage() {
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header />
         <main className="flex-1 overflow-y-auto p-6">
-          <h1 className="text-2xl font-bold mb-6">Work Node Settings</h1>
+          <h1 className="text-2xl font-bold mb-6">Workbench Settings</h1>
 
-          {message && (
-            <div className={`mb-4 p-3 rounded text-sm ${message === "Settings saved" ? "bg-green-50 border border-green-200 text-green-700" : "bg-red-50 border border-red-200 text-red-700"}`}>
-              {message}
-            </div>
-          )}
+          <div className="max-w-2xl space-y-8">
+            {/* Work Nodes */}
+            <section className="bg-white rounded-lg shadow p-6 space-y-6">
+              <div>
+                <h2 className="text-lg font-semibold">Work Nodes</h2>
+                <p className="text-sm text-gray-500">Limits for GCE work-node sessions.</p>
+              </div>
 
-          <div className="bg-white rounded-lg shadow p-6 max-w-2xl space-y-6">
-            <div>
-              <label htmlFor="max-nodes" className="block text-sm font-medium text-gray-700 mb-1">
-                Max Work Nodes Per User
-              </label>
-              <input
-                id="max-nodes"
-                type="number"
-                min={1}
-                max={50}
-                value={config.max_nodes_per_user}
-                onChange={(e) => setConfig({ ...config, max_nodes_per_user: Number(e.target.value) })}
-                className="border rounded px-3 py-2 text-sm w-32"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Maximum concurrent SSH sessions a single user can run (1-50)
-              </p>
-            </div>
+              <SaveBanner message={workNodeMessage} />
 
-            <div>
-              <label htmlFor="idle-timeout" className="block text-sm font-medium text-gray-700 mb-1">
-                Idle Timeout (hours)
-              </label>
-              <input
-                id="idle-timeout"
-                type="number"
-                min={1}
-                max={720}
-                value={config.idle_timeout_hours}
-                onChange={(e) => setConfig({ ...config, idle_timeout_hours: Number(e.target.value) })}
-                className="border rounded px-3 py-2 text-sm w-32"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Auto-stop nodes with no heartbeat after this many hours (1-720)
-              </p>
-            </div>
+              <div>
+                <label htmlFor="wn-max-nodes" className="block text-sm font-medium text-gray-700 mb-1">
+                  Max Work Nodes Per User
+                </label>
+                <input
+                  id="wn-max-nodes"
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={workNodes.max_nodes_per_user}
+                  onChange={(e) => setWorkNodes({ ...workNodes, max_nodes_per_user: Number(e.target.value) })}
+                  className="border rounded px-3 py-2 text-sm w-32"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Maximum concurrent SSH sessions a single user can run (1-50)
+                </p>
+              </div>
 
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
-            >
-              {saving ? "Saving..." : "Save"}
-            </button>
+              <div>
+                <label htmlFor="wn-idle" className="block text-sm font-medium text-gray-700 mb-1">
+                  Idle Timeout (hours)
+                </label>
+                <input
+                  id="wn-idle"
+                  type="number"
+                  min={1}
+                  max={720}
+                  value={workNodes.idle_timeout_hours}
+                  onChange={(e) => setWorkNodes({ ...workNodes, idle_timeout_hours: Number(e.target.value) })}
+                  className="border rounded px-3 py-2 text-sm w-32"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Auto-stop nodes with no heartbeat after this many hours (1-720)
+                </p>
+              </div>
+
+              <button
+                onClick={saveWorkNodes}
+                disabled={savingWorkNodes}
+                className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
+              >
+                {savingWorkNodes ? "Saving..." : "Save"}
+              </button>
+            </section>
+
+            {/* Notebooks */}
+            <section className="bg-white rounded-lg shadow p-6 space-y-6">
+              <div>
+                <h2 className="text-lg font-semibold">Notebooks</h2>
+                <p className="text-sm text-gray-500">Limits for JupyterHub and RStudio sessions.</p>
+              </div>
+
+              <SaveBanner message={notebookMessage} />
+
+              <div>
+                <label htmlFor="nb-idle" className="block text-sm font-medium text-gray-700 mb-1">
+                  Idle Timeout (hours)
+                </label>
+                <input
+                  id="nb-idle"
+                  type="number"
+                  min={1}
+                  max={12}
+                  value={notebooks.idle_timeout_hours}
+                  onChange={(e) => setNotebooks({ ...notebooks, idle_timeout_hours: Number(e.target.value) })}
+                  className="border rounded px-3 py-2 text-sm w-32"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Sessions idle longer than this will be auto-terminated (1-12 hours)
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="nb-max-sessions" className="block text-sm font-medium text-gray-700 mb-1">
+                  Max Sessions Per User
+                </label>
+                <input
+                  id="nb-max-sessions"
+                  type="number"
+                  min={1}
+                  max={5}
+                  value={notebooks.max_sessions_per_user}
+                  onChange={(e) => setNotebooks({ ...notebooks, max_sessions_per_user: Number(e.target.value) })}
+                  className="border rounded px-3 py-2 text-sm w-32"
+                />
+              </div>
+
+              <button
+                onClick={saveNotebooks}
+                disabled={savingNotebooks}
+                className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
+              >
+                {savingNotebooks ? "Saving..." : "Save"}
+              </button>
+            </section>
           </div>
         </main>
       </div>
