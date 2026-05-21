@@ -89,6 +89,26 @@ describe("StorageSection", () => {
         created_at: null,
       },
       {
+        bucket_name: "bioaf-references-demo",
+        purpose: "references",
+        size_bytes: 4096,
+        object_count: 12,
+        storage_class: "STANDARD",
+        versioning_enabled: true,
+        lifecycle_rules: [],
+        created_at: null,
+      },
+      {
+        bucket_name: "bioaf-literature-demo",
+        purpose: "literature",
+        size_bytes: 8192,
+        object_count: 8,
+        storage_class: "STANDARD",
+        versioning_enabled: true,
+        lifecycle_rules: [],
+        created_at: null,
+      },
+      {
         bucket_name: "bioaf-config-backups-demo",
         purpose: "config_backups",
         size_bytes: 256,
@@ -116,6 +136,8 @@ describe("StorageSection", () => {
       expect(screen.getByText("bioaf-raw-demo")).toBeInTheDocument();
       expect(screen.getByText("bioaf-working-demo")).toBeInTheDocument();
       expect(screen.getByText("bioaf-results-demo")).toBeInTheDocument();
+      expect(screen.getByText("bioaf-references-demo")).toBeInTheDocument();
+      expect(screen.getByText("bioaf-literature-demo")).toBeInTheDocument();
       expect(
         screen.getByText("bioaf-config-backups-demo")
       ).toBeInTheDocument();

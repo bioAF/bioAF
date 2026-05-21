@@ -23,6 +23,20 @@ ALL_RESOURCES_ACTIONS: dict[str, list[str]] = {
     "settings": ["view", "configure"],
     "references": ["view", "upload"],
     "llm_integration": ["configure", "use"],
+    "literature": [
+        "view",
+        "upload",
+        "comment",
+        "associate",
+        "delete_own_comment",
+        "delete_any_comment",
+        "delete_paper",
+        "dismiss",
+        "reverse_dismiss",
+        "run_search",
+        "run_lit_review",
+        "configure_sources",
+    ],
 }
 
 BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
@@ -48,6 +62,18 @@ BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
             "cost_center": ["view"],
             "references": ["view", "upload"],
             "llm_integration": ["use"],
+            "literature": [
+                "view",
+                "upload",
+                "comment",
+                "associate",
+                "delete_own_comment",
+                "delete_paper",
+                "dismiss",
+                "run_search",
+                "run_lit_review",
+                "configure_sources",
+            ],
         },
     ),
     "bench": (
@@ -62,6 +88,14 @@ BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
             "files": ["view", "upload"],
             "projects": ["view"],
             "references": ["view"],
+            "literature": [
+                "view",
+                "upload",
+                "comment",
+                "associate",
+                "delete_own_comment",
+                "run_search",
+            ],
         },
     ),
     "viewer": (
@@ -74,6 +108,7 @@ BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
             "files": ["view"],
             "projects": ["view"],
             "references": ["view"],
+            "literature": ["view"],
         },
     ),
 }

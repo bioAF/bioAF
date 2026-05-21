@@ -36,6 +36,7 @@ _BUCKET_CONFIG_KEYS = {
     "working_bucket_name": "working",
     "results_bucket_name": "results",
     "references_bucket_name": "references",
+    "literature_bucket_name": "literature",
     "config_backups_bucket_name": "config_backups",
 }
 
@@ -186,15 +187,14 @@ class GcsStorageService:
 
     @staticmethod
     async def _read_storage_config(session: AsyncSession) -> dict[str, str]:
-        """Read storage-related keys from platform_config."""
-        keys = [
-            "storage_deployed",
-            "ingest_bucket_name",
-            "raw_bucket_name",
-            "working_bucket_name",
-            "results_bucket_name",
-            "config_backups_bucket_name",
-        ]
+        """Read storage-related keys from platform_config.
+
+        The bucket-name keys are derived from _BUCKET_CONFIG_KEYS so the read
+        path can never drift from the set get_bucket_metrics iterates over. A
+        partial list here is what previously hid the references and literature
+        buckets from the Components view even after their names were persisted.
+        """
+        keys = ["storage_deployed", *_BUCKET_CONFIG_KEYS.keys()]
         rows = (
             await session.execute(
                 text("SELECT key, value FROM platform_config WHERE key = ANY(:keys)").bindparams(keys=keys)

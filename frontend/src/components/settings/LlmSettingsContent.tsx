@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { literature } from "@/lib/literature";
 
 type ProviderId = "openai" | "anthropic" | "google" | "gemma";
 
@@ -170,6 +171,11 @@ export function LlmSettingsContent() {
           </button>
         </div>
       )}
+
+      <LitReviewThresholdSection />
+
+      <AutoLitReviewSection />
+
 
       <div className="space-y-4">
         {ALL_PROVIDERS.map((provider) => (
@@ -421,6 +427,263 @@ function DataEgressWarningModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function LitReviewThresholdSection() {
+  const [value, setValue] = useState<number | null>(null);
+  const [input, setInput] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    literature
+      .getLitReviewSettings()
+      .then((s) => {
+        if (cancelled) return;
+        setValue(s.relevance_threshold);
+        setInput(String(s.relevance_threshold));
+      })
+      .catch((e) => setError((e as Error).message));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function save() {
+    setError(null);
+    setSaved(false);
+    const parsed = Number(input);
+    if (Number.isNaN(parsed) || parsed < 0 || parsed > 1) {
+      setError("Enter a number between 0.0 and 1.0.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const next = await literature.updateLitReviewSettings({
+        relevance_threshold: parsed,
+      });
+      setValue(next.relevance_threshold);
+      setInput(String(next.relevance_threshold));
+      setSaved(true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (value === null && !error) {
+    return null;
+  }
+
+  return (
+    <div className="bg-white border border-gray-200 rounded p-4 space-y-2">
+      <h3 className="font-semibold text-sm">
+        AI Literature Review Relevance Lower Bound
+      </h3>
+      <p className="text-xs text-gray-500">
+        Papers scored below this threshold by the LLM are not added to the
+        Library. Default 0.65. Set higher for stricter filtering, lower to see
+        more candidates.
+      </p>
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          min={0}
+          max={1}
+          step={0.01}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          className="border border-gray-300 rounded px-3 py-1.5 text-sm w-28"
+        />
+        <button
+          onClick={save}
+          disabled={saving}
+          className="bg-bioaf-600 text-white px-3 py-1.5 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
+        >
+          {saving ? "Saving..." : "Save"}
+        </button>
+        {saved && !error && (
+          <span className="text-xs text-green-700">Saved.</span>
+        )}
+      </div>
+      {error && <div className="text-xs text-red-700">{error}</div>}
+    </div>
+  );
+}
+
+const CADENCE_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+];
+
+// Convert an ISO timestamp to the local "YYYY-MM-DDTHH:MM" a datetime-local
+// input expects.
+function toLocalInput(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+    d.getHours(),
+  )}:${pad(d.getMinutes())}`;
+}
+
+// Sensible default first-run when none is scheduled yet: one cadence from now.
+function defaultFirstRunLocal(cadence: string): string {
+  const d = new Date();
+  if (cadence === "daily") d.setDate(d.getDate() + 1);
+  else if (cadence === "monthly") d.setMonth(d.getMonth() + 1);
+  else d.setDate(d.getDate() + 7);
+  return toLocalInput(d.toISOString());
+}
+
+export function AutoLitReviewSection() {
+  const [enabled, setEnabled] = useState(false);
+  const [cadence, setCadence] = useState("weekly");
+  const [maxRuns, setMaxRuns] = useState("5");
+  const [firstRun, setFirstRun] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    literature
+      .getLitReviewSettings()
+      .then((s) => {
+        if (cancelled) return;
+        setEnabled(s.auto_enabled);
+        setCadence(s.auto_cadence);
+        setMaxRuns(String(s.max_runs_per_tick));
+        setFirstRun(
+          s.next_run ? toLocalInput(s.next_run) : defaultFirstRunLocal(s.auto_cadence),
+        );
+        setLoaded(true);
+      })
+      .catch((e) => setError((e as Error).message));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function save() {
+    setError(null);
+    setSaved(false);
+    const cap = Number(maxRuns);
+    if (!Number.isInteger(cap) || cap < 1) {
+      setError("Max experiments per run must be a whole number of at least 1.");
+      return;
+    }
+    let firstRunIso: string | undefined;
+    if (enabled) {
+      const when = new Date(firstRun);
+      if (!firstRun || Number.isNaN(when.getTime())) {
+        setError("Pick a valid first-run date and time.");
+        return;
+      }
+      firstRunIso = when.toISOString();
+    }
+    setSaving(true);
+    try {
+      const next = await literature.updateLitReviewSettings({
+        auto_enabled: enabled,
+        auto_cadence: cadence,
+        max_runs_per_tick: cap,
+        ...(firstRunIso ? { first_run: firstRunIso } : {}),
+      });
+      setEnabled(next.auto_enabled);
+      setCadence(next.auto_cadence);
+      setMaxRuns(String(next.max_runs_per_tick));
+      if (next.next_run) setFirstRun(toLocalInput(next.next_run));
+      setSaved(true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!loaded && !error) return null;
+
+  return (
+    <div className="bg-white border border-gray-200 rounded p-4 space-y-3">
+      <h3 className="font-semibold text-sm">Automated AI Literature Review</h3>
+      <p className="text-xs text-gray-500">
+        When enabled, bioAF runs AI Literature Review on its own for experiments
+        with new samples or pipeline runs since their last automated review. New
+        papers land in the Library with an AI note (dismissed papers and papers
+        below the relevance lower bound are never re-recommended), and the
+        affected users get an in-app notification.
+      </p>
+
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => setEnabled(e.target.checked)}
+        />
+        Run AI Literature Review automatically
+      </label>
+
+      <div className="flex flex-wrap items-end gap-4">
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">
+            Cadence
+          </label>
+          <select
+            value={cadence}
+            onChange={(e) => setCadence(e.target.value)}
+            disabled={!enabled}
+            className="border border-gray-300 rounded px-3 py-1.5 text-sm disabled:bg-gray-100"
+          >
+            {CADENCE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">
+            First run
+          </label>
+          <input
+            type="datetime-local"
+            value={firstRun}
+            onChange={(e) => setFirstRun(e.target.value)}
+            disabled={!enabled}
+            className="border border-gray-300 rounded px-3 py-1.5 text-sm disabled:bg-gray-100"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">
+            Max experiments per run
+          </label>
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={maxRuns}
+            onChange={(e) => setMaxRuns(e.target.value)}
+            disabled={!enabled}
+            className="border border-gray-300 rounded px-3 py-1.5 text-sm w-28 disabled:bg-gray-100"
+          />
+        </div>
+        <button
+          onClick={save}
+          disabled={saving}
+          className="bg-bioaf-600 text-white px-3 py-1.5 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
+        >
+          {saving ? "Saving..." : "Save"}
+        </button>
+        {saved && !error && <span className="text-xs text-green-700">Saved.</span>}
+      </div>
+      {error && <div className="text-xs text-red-700">{error}</div>}
     </div>
   );
 }

@@ -10,7 +10,7 @@ return 409 with the existing job id.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -44,6 +44,22 @@ VALID_ENTITY_TYPES = {"pipeline_run", "experiment"}
 VALID_REVIEW_TYPES = {PIPELINE_RUN_REVIEW_V1_NAME, EXPERIMENT_RUN_COMPARISON_V1_NAME}
 
 IN_FLIGHT_STATUSES = ("pending", "building_artifacts", "submitted")
+
+# A hosted job still in-flight this long after it started is treated as dead
+# (its background worker stopped without reaching a terminal state) and is
+# reaped on the next create so it cannot block new reviews with a 409 forever.
+# Comfortably longer than the longest plausible build + LLM call.
+STALE_IN_FLIGHT_AFTER = timedelta(minutes=15)
+
+
+def _is_stale_in_flight(job: AgentReviewJob, *, now: datetime | None = None) -> bool:
+    now = now or datetime.now(UTC)
+    ref = job.submitted_at or job.created_at
+    if ref is None:
+        return False
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=UTC)
+    return now - ref >= STALE_IN_FLIGHT_AFTER
 
 
 class JobAlreadyRunning(Exception):
@@ -145,6 +161,38 @@ async def create(
         raise NoActiveProvider("no active LLM provider configured for this org")
     if not active.model:
         raise NoActiveProvider("active provider has no model configured")
+
+    # Reap a stale in-flight job for this entity before inserting, so a review
+    # that never reached a terminal state cannot block new reviews forever with a
+    # 409. This deliberately includes Gemma jobs: Gemma review dispatch is stubbed
+    # in v1, so a Gemma review sits in 'pending' forever and is skipped by
+    # mark_orphaned_on_startup (which leaves Gemma for its orchestrator). At
+    # create time the only thing that matters is that a *stale* in-flight job is
+    # blocking a new review; a Gemma job past the threshold is a dead zombie and
+    # must be cleared or it permanently locks every review for this entity.
+    existing = await _get_inflight(session, entity_type, entity_id, resolved_review_type)
+    if existing is not None and _is_stale_in_flight(existing):
+        await _write_job_terminal(
+            session,
+            existing.id,
+            status="failed",
+            error_text="Review did not finish (its worker stopped or timed out); superseded by a new review.",
+            error_class="stale_in_flight",
+        )
+        if existing.agent_review_id is not None:
+            await _write_review_terminal(
+                session,
+                existing.agent_review_id,
+                status="failed",
+                severity=None,
+                headline="Review did not finish",
+                flags=None,
+                evidence=None,
+                body=None,
+                error_text="Review did not finish (its worker stopped or timed out).",
+                artifact_gcs_paths=[],
+            )
+        await session.flush()
 
     job = AgentReviewJob(
         organization_id=org_id,
@@ -267,6 +315,81 @@ def _audit_details_submitted(job: AgentReviewJob, key_prefix_last5: str | None) 
 
 
 async def execute_hosted(
+    session_factory,
+    *,
+    job_id: int,
+    gcs_writer=None,
+    qc_report_provider=None,
+    submit_override=None,
+) -> None:
+    """Run a hosted LLM review job to completion, guarding against stranding.
+
+    The implementation only catches ArtifactBuildError (during artifact build)
+    and ProviderError (during the LLM call). Any other exception would unwind
+    out of this background task, roll back the in-flight status, and leave the
+    job in IN_FLIGHT_STATUSES forever -- which then blocks every future review
+    for that entity with a 409 ("review already in progress"). This wrapper is
+    the last-resort guard: on any unexpected error it marks the job + review
+    terminally failed so the real error surfaces on the card and nothing strands.
+    """
+    try:
+        await _execute_hosted_inner(
+            session_factory,
+            job_id=job_id,
+            gcs_writer=gcs_writer,
+            qc_report_provider=qc_report_provider,
+            submit_override=submit_override,
+        )
+    except Exception as exc:  # noqa: BLE001 - last-resort guard; nothing re-raised
+        logger.exception("execute_hosted unhandled error: job_id=%d", job_id)
+        await _fail_job_unexpected(session_factory, job_id, exc)
+
+
+async def _fail_job_unexpected(session_factory, job_id: int, exc: Exception) -> None:
+    """Mark a still-in-flight job + its review terminally failed in a fresh
+    session, so an unexpected crash never leaves the job blocking new reviews."""
+    try:
+        async with session_factory() as session:
+            job = (
+                await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))
+            ).scalar_one_or_none()
+            if job is None or job.status not in IN_FLIGHT_STATUSES:
+                return
+            err_text = f"Unexpected error: {exc}"[:4000]
+            await _write_job_terminal(
+                session, job.id, status="failed", error_text=err_text, error_class="internal_error"
+            )
+            await _write_review_terminal(
+                session,
+                job.agent_review_id,
+                status="failed",
+                severity=None,
+                headline="Review failed unexpectedly",
+                flags=None,
+                evidence=None,
+                body=None,
+                error_text=err_text,
+                artifact_gcs_paths=list(job.artifact_gcs_paths or []),
+            )
+            await audit_service.log_action(
+                session,
+                user_id=job.triggered_by_user_id,
+                entity_type="agent_review_job",
+                entity_id=job.id,
+                action="llm_review_failed",
+                details={
+                    "agent_review_job_id": job.id,
+                    "agent_review_id": job.agent_review_id,
+                    "error_class": "internal_error",
+                    "error_text": err_text,
+                },
+            )
+            await session.commit()
+    except Exception:  # noqa: BLE001 - never raise from the guard
+        logger.exception("failed to mark job terminal after unexpected error: job_id=%d", job_id)
+
+
+async def _execute_hosted_inner(
     session_factory,
     *,
     job_id: int,

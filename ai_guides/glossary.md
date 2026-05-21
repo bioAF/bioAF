@@ -53,7 +53,9 @@ standardized review buttons on a [Pipeline Run](#pipeline-run) or
 [Experiment](#experiment). Not provenance and not part of the scientific record:
 a scientist may act on a flag, but the action they take (a rerun, a sample
 reclassification) is what enters provenance. Lives in the Agent Review tab on
-the entity it pertains to.
+the entity it pertains to. Abstracts and comments from associated [Papers](#paper)
+may be bundled into the Agent Review's prompt artifact when the org's
+Literature inputs are enabled (see [ADR-057](../decisions/ADR-057-literature-as-input-to-agent-review.md)).
 
 ### Analysis Snapshot
 
@@ -148,6 +150,49 @@ hosted, runs inside the bioAF GCP project). Exactly one per [Organization](#orga
 is active at a time; switching is a settings toggle, keys for all four can
 persist simultaneously.
 
+### Lit Review Run
+
+A single execution of an LLM-driven paper recommendation job scoped to an
+[Experiment](#experiment). Uses the org's active [LLM Provider](#llm-provider) to
+generate expansion queries and rank candidate papers, producing a queue of
+[Literature Recommendations](#literature-recommendation). On demand in v1;
+scheduled cadences are deferred to v2. Not an [Agent Review](#agent-review):
+different output shape (queue of recommendations vs severity-coded advisory
+note), different lifecycle, different table. See [ADR-056](../decisions/ADR-056-literature-library-domain-model.md).
+
+### Literature Dismissal
+
+An org-wide signal that a [Paper](#paper) should be excluded from default
+[Literature Library](#literature-library) views, future [Lit Review Runs](#lit-review-run),
+and any [Agent Review](#agent-review) Literature payload. Created by `admin` or
+`comp_bio`. Reversible by `admin` only. See [ADR-056](../decisions/ADR-056-literature-library-domain-model.md).
+
+### Literature Library
+
+The org-scoped collection of [Papers](#paper) and their associations, comments,
+reading status, and dismissals. Distinct from the [Reference Dataset](#reference-dataset)
+registry; distinct from the file/document subsystem (papers live in a
+dedicated per-org GCS bucket `bioaf-literature-{org}` and a dedicated set of
+tables). See [ADR-056](../decisions/ADR-056-literature-library-domain-model.md).
+
+### Literature Recommendation
+
+A single LLM-scored paper produced by a [Lit Review Run](#lit-review-run),
+with a continuous relevance score (0.0 to 1.0) and one-sentence reasoning.
+Lifecycle: `pending -> accepted` (paper joins the [Literature Library](#literature-library)
+associated with the scope) or `pending -> dismissed` (paper is dismissed
+org-wide via [Literature Dismissal](#literature-dismissal)). See
+[ADR-056](../decisions/ADR-056-literature-library-domain-model.md).
+
+### Literature Source
+
+An external bibliographic data source the [Literature Library](#literature-library)
+can query. Four in v1: PubMed (NCBI), bioRxiv, Europe PMC, Semantic Scholar.
+Per-org configuration of enablement and API key. API keys are stored
+encrypted at rest via the `EncryptedString` pattern from
+[ADR-047](../decisions/ADR-047-data-at-rest-encryption.md). See
+[ADR-056](../decisions/ADR-056-literature-library-domain-model.md).
+
 ### `.md` Review Artifact
 
 The standardized Markdown rollup of a single [Pipeline Run](#pipeline-run) (run
@@ -180,6 +225,16 @@ yet explicitly grilled with the domain owner. Use with care until confirmed here
 A per-[Organization](#organization) auto-increment sequence generator. Maintains the
 next value per code kind (e.g. project code, experiment code) so that human-readable
 entity codes are unique and sequential within an Organization.
+
+### Paper
+
+A scholarly publication tracked in the [Literature Library](#literature-library),
+identified by DOI (primary) or normalized title plus first-author and
+last-author keys (fallback). Org-scoped, org-readable; immutable identifier,
+mutable metadata. Not a [Reference Dataset](#reference-dataset) (those are
+curated biological references such as genomes, annotations, indexes). May be
+associated with one or more [Experiments](#experiment), [Projects](#project),
+or globally to the [Organization](#organization). See [ADR-056](../decisions/ADR-056-literature-library-domain-model.md).
 
 ### Pipeline Catalog Entry
 

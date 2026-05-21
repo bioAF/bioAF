@@ -706,3 +706,185 @@ async def test_execute_hosted_logs_provider_error_with_detail(db_engine, admin_u
     messages = [r.getMessage() for r in caplog.records if r.name == "bioaf.agent_review_job"]
     assert any("provider_error" in m and "transport" in m for m in messages), messages
     assert any("dns lookup failed" in m for m in messages), messages
+
+
+@pytest.mark.asyncio
+async def test_execute_hosted_unexpected_error_does_not_strand_job(db_engine, admin_user):
+    """A non-ProviderError/non-ArtifactBuildError crash must still mark the job
+    + review terminally failed, never leaving the job in an in-flight status
+    (which would block every future review with a 409). Regression for the
+    "Request failed" / nothing-happens bug."""
+
+    async def writer(path, content):
+        return None
+
+    async def submit(*, prompt, payload, model, api_key):
+        raise RuntimeError("kaboom: not a ProviderError")
+
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
+        run_id = await _make_pipeline_run(session, admin_user.organization_id)
+        job, review = await job_service.create(
+            session,
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            selected_sub_item_ids=["qc.metric_review"],
+        )
+        await session.commit()
+        job_id = job.id
+        review_id = review.id
+
+    factory = _factory(db_engine)
+    # Must not raise out of the background task.
+    await job_service.execute_hosted(factory, job_id=job_id, gcs_writer=writer, submit_override=submit)
+
+    async with factory() as session:
+        loaded_job = (await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == job_id))).scalar_one()
+        loaded_review = (await session.execute(select(AgentReview).where(AgentReview.id == review_id))).scalar_one()
+        assert loaded_job.status == "failed"
+        assert loaded_job.status not in job_service.IN_FLIGHT_STATUSES
+        assert loaded_review.status == "failed"
+
+    # The debounce is released: a new review for the same run can be created.
+    async with factory() as session:
+        run_again = await _make_pipeline_run(session, admin_user.organization_id)
+        job2, _ = await job_service.create(
+            session,
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_again,
+            selected_sub_item_ids=["qc.metric_review"],
+        )
+        await session.commit()
+        assert job2.id != job_id
+
+
+@pytest.mark.asyncio
+async def test_create_reaps_stale_in_flight_job(db_engine, admin_user):
+    """A stranded in-flight job (worker died, never terminal) is reaped on the
+    next create instead of blocking it with a 409 forever. Recovery for the
+    'review_in_progress' lockout without needing an API restart."""
+    from datetime import UTC, datetime, timedelta
+
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
+        run_id = await _make_pipeline_run(session, admin_user.organization_id)
+        first, first_review = await job_service.create(
+            session,
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            selected_sub_item_ids=["qc.metric_review"],
+        )
+        await session.commit()
+        first_id = first.id
+        first_review_id = first_review.id
+
+    # Age the in-flight job well past the stale threshold.
+    async with _factory(db_engine)() as session:
+        job = (await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == first_id))).scalar_one()
+        job.created_at = datetime.now(UTC) - timedelta(minutes=20)
+        job.submitted_at = None
+        await session.commit()
+
+    # The next create reaps it and succeeds rather than raising JobAlreadyRunning.
+    async with _factory(db_engine)() as session:
+        second, _ = await job_service.create(
+            session,
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            selected_sub_item_ids=["qc.metric_review"],
+        )
+        await session.commit()
+        assert second.id != first_id
+
+    async with _factory(db_engine)() as session:
+        reaped = (await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == first_id))).scalar_one()
+        assert reaped.status == "failed"
+        reaped_review = (
+            await session.execute(select(AgentReview).where(AgentReview.id == first_review_id))
+        ).scalar_one()
+        assert reaped_review.status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_create_does_not_reap_recent_in_flight_job(db_engine, admin_user):
+    """A recent in-flight job is a legitimate concurrent review and still wins
+    the debounce (409), not reaped."""
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
+        run_id = await _make_pipeline_run(session, admin_user.organization_id)
+        await job_service.create(
+            session,
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            selected_sub_item_ids=["qc.metric_review"],
+        )
+        await session.commit()
+
+    async with _factory(db_engine)() as session:
+        with pytest.raises(job_service.JobAlreadyRunning):
+            await job_service.create(
+                session,
+                org_id=admin_user.organization_id,
+                user_id=admin_user.id,
+                entity_type="pipeline_run",
+                entity_id=run_id,
+                selected_sub_item_ids=["qc.metric_review"],
+            )
+
+
+@pytest.mark.asyncio
+async def test_create_reaps_stale_gemma_zombie_job(db_engine, admin_user):
+    """A stranded Gemma review job (dispatch stubbed -> sits in 'pending'
+    forever, and mark_orphaned_on_startup skips Gemma) must still be reaped on
+    create. Otherwise a legacy Gemma job permanently 409-blocks every review for
+    the entity, surviving even a restart. Mirrors the demo's wedged job."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.services.agent_review_prompt_builder import template_name_for_scope
+
+    review_type = template_name_for_scope(False)
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
+        run_id = await _make_pipeline_run(session, admin_user.organization_id)
+        zombie = AgentReviewJob(
+            organization_id=admin_user.organization_id,
+            triggered_by_user_id=admin_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            review_type=review_type,
+            provider="gemma",
+            model="gemma-stub",
+            prompt_template_version=review_type,
+            status="pending",
+            prompt_text="stub",
+            created_at=datetime.now(UTC) - timedelta(minutes=30),
+        )
+        session.add(zombie)
+        await session.commit()
+        zombie_id = zombie.id
+
+    async with _factory(db_engine)() as session:
+        new_job, _ = await job_service.create(
+            session,
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            selected_sub_item_ids=["qc.metric_review"],
+        )
+        await session.commit()
+        assert new_job.id != zombie_id
+
+    async with _factory(db_engine)() as session:
+        reaped = (await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == zombie_id))).scalar_one()
+        assert reaped.status == "failed"

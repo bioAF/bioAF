@@ -65,6 +65,26 @@ const bucketsResponse = {
       created_at: null,
     },
     {
+      bucket_name: "bioaf-references-test-org",
+      purpose: "references",
+      size_bytes: 524288000,
+      object_count: 12,
+      storage_class: "STANDARD",
+      versioning_enabled: true,
+      lifecycle_rules: [],
+      created_at: null,
+    },
+    {
+      bucket_name: "bioaf-literature-test-org",
+      purpose: "literature",
+      size_bytes: 134217728,
+      object_count: 8,
+      storage_class: "STANDARD",
+      versioning_enabled: true,
+      lifecycle_rules: [],
+      created_at: null,
+    },
+    {
       bucket_name: "bioaf-config-backups-test-org",
       purpose: "config_backups",
       size_bytes: 10737418,
@@ -83,7 +103,7 @@ describe("StorageSection", () => {
     mockApiGet.mockResolvedValue(bucketsResponse);
   });
 
-  it("renders 5 bucket cards when deployed", async () => {
+  it("renders all bucket cards when deployed", async () => {
     render(
       <StorageSection
         storageDeployed={true}
@@ -97,6 +117,8 @@ describe("StorageSection", () => {
       expect(screen.getByText("bioaf-raw-test-org")).toBeInTheDocument();
       expect(screen.getByText("bioaf-working-test-org")).toBeInTheDocument();
       expect(screen.getByText("bioaf-results-test-org")).toBeInTheDocument();
+      expect(screen.getByText("bioaf-references-test-org")).toBeInTheDocument();
+      expect(screen.getByText("bioaf-literature-test-org")).toBeInTheDocument();
       expect(screen.getByText("bioaf-config-backups-test-org")).toBeInTheDocument();
     });
   });

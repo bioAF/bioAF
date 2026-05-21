@@ -13,12 +13,29 @@ class ApiError extends Error {
   }
 }
 
-function extractErrorMessage(body: { detail?: unknown }): string {
-  if (typeof body.detail === "string") return body.detail;
+// Map known structured error codes to a readable sentence.
+const ERROR_CODE_MESSAGES: Record<string, string> = {
+  review_in_progress:
+    "A review is already in progress for this. Wait for it to finish (or refresh) before starting another.",
+};
+
+export function extractErrorMessage(body: { detail?: unknown }): string {
+  if (typeof body.detail === "string") {
+    return ERROR_CODE_MESSAGES[body.detail] ?? body.detail;
+  }
   if (Array.isArray(body.detail)) {
     return body.detail
       .map((e: { msg?: string }) => e.msg ?? "Validation error")
       .join("; ");
+  }
+  // Object-shaped detail (e.g. structured 409 conflicts carry a nested code
+  // plus extra fields). Prefer the nested code's friendly message, then the
+  // raw nested string, before falling back to the generic message.
+  if (body.detail && typeof body.detail === "object") {
+    const nested = (body.detail as { detail?: unknown }).detail;
+    if (typeof nested === "string") {
+      return ERROR_CODE_MESSAGES[nested] ?? nested;
+    }
   }
   return "Request failed";
 }

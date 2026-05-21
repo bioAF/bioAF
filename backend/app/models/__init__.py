@@ -77,6 +77,19 @@ from app.models.llm_provider_config import LlmProviderConfig
 from app.models.agent_review_job import AgentReviewJob
 from app.models.agent_review import AgentReview
 from app.models.agent_review_prompt import AgentReviewPrompt
+from app.models.literature import (
+    AgentReviewLiteratureConfig,
+    LiteratureAssociation,
+    LiteraturePaper,
+    LiteraturePaperComment,
+    LiteraturePaperDismissal,
+    LiteraturePaperReadingStatus,
+    LiteratureRecommendation,
+    LiteratureReviewRun,
+    LiteratureSearch,
+    LiteratureSearchResult,
+    LiteratureSourcesConfig,
+)
 
 __all__ = [
     "User",
@@ -165,4 +178,15 @@ __all__ = [
     "AgentReviewJob",
     "AgentReview",
     "AgentReviewPrompt",
+    "AgentReviewLiteratureConfig",
+    "LiteratureAssociation",
+    "LiteraturePaper",
+    "LiteraturePaperComment",
+    "LiteraturePaperDismissal",
+    "LiteraturePaperReadingStatus",
+    "LiteratureRecommendation",
+    "LiteratureReviewRun",
+    "LiteratureSearch",
+    "LiteratureSearchResult",
+    "LiteratureSourcesConfig",
 ]

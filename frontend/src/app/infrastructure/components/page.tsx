@@ -11,6 +11,7 @@ import { DeployProgressModal } from "@/components/infrastructure/DeployProgressM
 import { TerraformRunHistory } from "@/components/infrastructure/TerraformRunHistory";
 import { OrphanedResourcesCard } from "@/components/infrastructure/OrphanedResourcesCard";
 import { DeployRecoveryModal } from "@/components/infrastructure/DeployRecoveryModal";
+import { InfraUpdatesCard } from "@/components/infrastructure/InfraUpdatesCard";
 import { useDeploymentProgress } from "@/hooks/useDeploymentProgress";
 import { isAuthenticated } from "@/lib/auth";
 import { GCP_REGIONS, zonesForRegion } from "@/lib/gcp-regions";
@@ -555,6 +556,12 @@ export default function InfraComponentsPage() {
               gcpCredentialsConfigured={tfStatus.gcp_credentials_configured}
               onBootstrapStart={() => setShowBootstrapModal(true)}
             />
+          )}
+
+          {/* Check for infrastructure updates: re-plan deployed modules and
+              apply additive changes (e.g. a newly added storage bucket). */}
+          {tfInitialized && (isDeployed || stackStatus?.storage_deployed) && (
+            <InfraUpdatesCard onApplyStarted={() => setRefreshKey((k) => k + 1)} />
           )}
 
           {/* Storage destroy section: compute is down but storage is still provisioned */}

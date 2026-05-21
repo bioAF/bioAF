@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -28,4 +28,17 @@ class Organization(Base):
     setup_code_expires_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
+    lit_review_relevance_threshold: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.65, server_default="0.65"
+    )
+    # Automated AI Lit Review cadence (Settings > Integrations > LLMs). When
+    # enabled, a background loop runs Lit Review Runs for experiments with new
+    # activity since their last automated run, at most max_runs_per_tick per tick.
+    lit_review_auto_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    lit_review_auto_cadence: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="weekly", server_default="weekly"
+    )
+    lit_review_max_runs_per_tick: Mapped[int] = mapped_column(Integer, nullable=False, default=5, server_default="5")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
