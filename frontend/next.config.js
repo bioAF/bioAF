@@ -21,8 +21,8 @@ const nextConfig = {
       // Compute -> Infrastructure compute
       { source: "/compute", destination: "/infrastructure/compute", permanent: true },
       { source: "/compute/cluster", destination: "/infrastructure/compute", permanent: true },
-      { source: "/compute/jobs", destination: "/infrastructure/compute", permanent: true },
-      { source: "/compute/quotas", destination: "/infrastructure/compute", permanent: true },
+      // Note: /compute/jobs (Job Browser) and /compute/quotas (Quotas) are live
+      // pages reached from the Infrastructure > Compute buttons; do not redirect them.
       // Environment -> Infrastructure
       { source: "/environment/components", destination: "/infrastructure/components", permanent: true },
       { source: "/components", destination: "/infrastructure/components", permanent: true },

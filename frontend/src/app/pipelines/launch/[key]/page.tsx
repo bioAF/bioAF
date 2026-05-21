@@ -156,7 +156,7 @@ export default function PipelineLauncherPage() {
           ) : pipeline && (
           <>
           <div className="flex items-center gap-4 mb-6">
-            <button onClick={() => router.push("/pipelines")} className="text-gray-500 hover:text-gray-700">← Back</button>
+            <button onClick={() => router.push("/pipelines/catalog")} className="text-gray-500 hover:text-gray-700">← Back</button>
             <h1 className="text-2xl font-bold">Launch {pipeline.name}</h1>
           </div>
 
