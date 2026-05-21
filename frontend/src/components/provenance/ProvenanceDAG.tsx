@@ -70,7 +70,7 @@ function getNavigationUrl(node: ProvenanceNode): string | null {
     case "project": return `/projects/${id}`;
     case "experiment": return `/experiments/${id}`;
     case "pipeline_run": return `/pipelines/runs/${id}`;
-    case "reference": return `/references/${id}`;
+    case "reference": return `/data/references/${id}`;
     default: return null;
   }
 }

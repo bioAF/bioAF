@@ -184,14 +184,14 @@ async def oauth_callback(
     await SlackOAuthService.save_installation(session, org_id, user_id, token_data)
     await session.commit()
 
-    # Redirect browser back to the Slack settings page
+    # Redirect browser back to the Slack settings (the Slack tab in Settings > Integrations)
     callback_path = "/api/notifications/slack/callback"
     request_url = str(request.url).split("?")[0]
     if request_url.endswith(callback_path):
         origin = request_url[: -len(callback_path)]
     else:
         origin = str(request.base_url).rstrip("/")
-    return RedirectResponse(url=f"{origin}/settings/slack?connected=true")
+    return RedirectResponse(url=f"{origin}/settings/integrations?tab=slack&connected=true")
 
 
 @router.get("/status", response_model=SlackStatusResponse)
