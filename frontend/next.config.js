@@ -41,6 +41,8 @@ const nextConfig = {
       { source: "/admin/templates", destination: "/projects/experiment-templates", permanent: true },
       // Notebook settings merged into Workbench Settings (the Work Nodes page)
       { source: "/settings/notebooks", destination: "/settings/work-nodes", permanent: true },
+      // Slack settings live in Settings > Integrations (Slack tab)
+      { source: "/settings/slack", destination: "/settings/integrations", permanent: true },
       // Old experiment templates path
       { source: "/notebooks/templates", destination: "/projects/experiment-templates", permanent: true },
       // Experiment routes moved under /projects/
