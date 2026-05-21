@@ -54,6 +54,14 @@ STATEFUL_RESOURCE_TYPES = frozenset(
 DESTRUCTIVE_ACTIONS = frozenset({"delete", "replace"})
 ADDITIVE_ACTIONS = frozenset({"create", "update"})
 
+# A targeted apply of an in-place "update" can reduce to a no-op at the GCP API
+# (e.g. a perpetual provider diff such as a node pool's node_locations being
+# normalised back to the cluster's zones). GCP rejects the empty update with
+# HTTP 400 "Must specify a field to update". The update changes nothing, so the
+# apply flow treats this as a benign no-op rather than a failure that would
+# abort the rest of the batch and recur on every subsequent check.
+_BENIGN_APPLY_DIAGNOSTICS: tuple[str, ...] = ("Must specify a field to update",)
+
 # Modules the check covers, in apply order. Storage first so data buckets
 # (e.g. the Literature bucket) land before compute changes.
 _CANDIDATE_MODULES: tuple[tuple[str, str], ...] = (
@@ -283,39 +291,101 @@ async def _persist_module_outputs(session: AsyncSession, module: str) -> None:
         logger.warning("Persisting %s Terraform outputs failed: %s", module, exc)
 
 
+def _is_benign_apply_error(message: str | None) -> bool:
+    """True when an apply 'failure' applied no change: a no-op in-place update
+    GCP rejected with a 400 (see _BENIGN_APPLY_DIAGNOSTICS). Such a result must
+    not abort the rest of the batch."""
+    if not message:
+        return False
+    return any(token in message for token in _BENIGN_APPLY_DIAGNOSTICS)
+
+
 async def apply_modules_sequentially(modules: list[str], user_id: int) -> None:
-    """Re-plan each module and apply ONLY its additive resources (targeted),
-    one module at a time to completion. Never applies a delete/replace."""
+    """Re-plan each module and apply ONLY its additive resources, one resource
+    at a time (targeted), one module at a time. Never applies a delete/replace.
+
+    Applying each additive resource on its own run isolates failures: a single
+    benign no-op update (which GCP rejects with "Must specify a field to update")
+    is logged and skipped, so the real new resources still land and the batch is
+    never aborted or stranded by it."""
     from app.database import async_session_factory
 
     if async_session_factory is None:  # pragma: no cover - app not initialized
         return
 
     for module in modules:
+        # Plan once to enumerate the additive resources, then retire the run.
         async with async_session_factory() as s:  # type: ignore[misc]
             try:
                 run = await TerraformExecutor.run_plan(s, user_id, module_name=module)
-                if run.status != "awaiting_confirmation":
-                    await s.commit()
-                    continue
-                targets = additive_addresses(run.plan_json)
-                if not targets:
-                    run.status = "cancelled"
-                    run.completed_at = datetime.now(timezone.utc)
-                    await s.commit()
-                    continue
-                run.status = "applying"
-                await s.flush()
-                async for _event in TerraformExecutor.run_apply(s, run.id, user_id, targets=targets):
-                    pass
-                # Persist new resource names (e.g. the literature bucket) so the
-                # app can use them. Only on a clean apply.
-                if run.status == "completed":
-                    await _persist_module_outputs(s, module)
+                targets = additive_addresses(run.plan_json) if run.status == "awaiting_confirmation" else []
+                run.status = "cancelled"
+                run.completed_at = datetime.now(timezone.utc)
                 await s.commit()
             except Exception:
-                logger.exception("Infrastructure update apply failed for module %s", module)
+                logger.exception("Infrastructure update plan failed for module %s", module)
                 await s.rollback()
+                continue
+
+        applied_any = False
+        for target in targets:
+            applied_any = await _apply_one_target(module, target, user_id) or applied_any
+
+        # Persist new resource names (e.g. the literature bucket) once a real
+        # change landed. Best-effort.
+        if applied_any:
+            async with async_session_factory() as s:  # type: ignore[misc]
+                try:
+                    await _persist_module_outputs(s, module)
+                    await s.commit()
+                except Exception:
+                    logger.exception("Persisting %s outputs after apply failed", module)
+                    await s.rollback()
+
+
+async def _apply_one_target(module: str, target: str, user_id: int) -> bool:
+    """Re-plan the module and apply a single additive target. Returns True when a
+    real change was applied.
+
+    A benign no-op update (GCP "Must specify a field to update") is logged and
+    treated as applied-nothing (returns False) instead of failing, so it cannot
+    abort the surrounding batch or strand the module."""
+    from app.database import async_session_factory
+
+    if async_session_factory is None:  # pragma: no cover - app not initialized
+        return False
+
+    async with async_session_factory() as s:  # type: ignore[misc]
+        try:
+            run = await TerraformExecutor.run_plan(s, user_id, module_name=module)
+            # The target may have already been applied (or turned destructive)
+            # since enumeration; only apply it while it is still additive.
+            if run.status != "awaiting_confirmation" or target not in set(additive_addresses(run.plan_json)):
+                run.status = "cancelled"
+                run.completed_at = datetime.now(timezone.utc)
+                await s.commit()
+                return False
+            run.status = "applying"
+            await s.flush()
+            async for _event in TerraformExecutor.run_apply(s, run.id, user_id, targets=[target]):
+                pass
+            if run.status == "failed" and _is_benign_apply_error(run.error_message):
+                logger.info(
+                    "Infrastructure update: skipping no-op update for %s (%s)",
+                    target,
+                    run.error_message,
+                )
+                run.status = "completed"
+                run.error_message = None
+                await s.commit()
+                return False
+            applied = run.status == "completed"
+            await s.commit()
+            return applied
+        except Exception:
+            logger.exception("Infrastructure update apply failed for target %s", target)
+            await s.rollback()
+            return False
 
 
 def launch_background_apply(modules: list[str], user_id: int) -> None:
