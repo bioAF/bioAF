@@ -129,9 +129,9 @@ async def test_slack_callback_exchanges_code(client: AsyncClient, admin_token: s
             follow_redirects=False,
         )
 
-    # Callback redirects browser back to the Slack settings page
+    # Callback redirects browser back to the Slack settings (Integrations > Slack tab)
     assert response.status_code == 307
-    assert "/settings/slack?connected=true" in response.headers["location"]
+    assert "/settings/integrations?tab=slack&connected=true" in response.headers["location"]
 
 
 @pytest.mark.asyncio
