@@ -254,6 +254,43 @@ async def test_full_search_file_snippet_carries_run_and_sample_context(session, 
 
 
 @pytest.mark.asyncio
+async def test_full_search_experiment_snippet_has_project_counts_and_activity(session, admin_user):
+    org_id = admin_user.organization_id
+    project = Project(organization_id=org_id, name="Oncology")
+    session.add(project)
+    await session.flush()
+    exp = Experiment(organization_id=org_id, name="Delta Study", project_id=project.id)
+    session.add(exp)
+    await session.flush()
+    session.add_all(
+        [
+            Sample(experiment_id=exp.id, external_id="D-1"),
+            Sample(experiment_id=exp.id, external_id="D-2"),
+            File(
+                organization_id=org_id,
+                experiment_id=exp.id,
+                gcs_uri="gs://b/d.txt",
+                filename="d.txt",
+                file_type="txt",
+            ),
+            PipelineRun(organization_id=org_id, experiment_id=exp.id, pipeline_name="dr1"),
+            PipelineRun(organization_id=org_id, experiment_id=exp.id, pipeline_name="dr2"),
+            PipelineRun(organization_id=org_id, experiment_id=exp.id, pipeline_name="dr3"),
+        ]
+    )
+    await session.commit()
+
+    hits, _, _ = await SearchService.full_search(session, org_id, "Delta Study", entity_types=["experiment"])
+    exp_hit = next(h for h in hits if h["entity_id"] == exp.id)
+    snippet = exp_hit["snippet"] or ""
+    assert "Oncology" in snippet  # parent project
+    assert "2 samples" in snippet
+    assert "1 file" in snippet  # singular, not "1 files"
+    assert "3 runs" in snippet
+    assert "Updated" in snippet  # last activity date
+
+
+@pytest.mark.asyncio
 async def test_full_search_matches_literature_content_fields(session, admin_user):
     org_id = admin_user.organization_id
     paper = LiteraturePaper(

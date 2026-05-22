@@ -44,6 +44,10 @@ def _join(parts: list[str | None]) -> str | None:
     return " · ".join(kept) if kept else None
 
 
+def _plural(n: int, noun: str) -> str:
+    return f"{n} {noun}" + ("" if n == 1 else "s")
+
+
 class SearchService:
     @staticmethod
     async def quick_search(
@@ -180,8 +184,6 @@ class SearchService:
         for t in result_types:
             raw.extend(await builders[t](session, org_id, pattern))
 
-        await SearchService._enrich_snippets(session, raw)
-
         q_lower = q.lower()
 
         def sort_key(h: dict) -> tuple[int, float]:
@@ -202,6 +204,9 @@ class SearchService:
 
         start = (max(page, 1) - 1) * page_size
         page_hits = merged[start : start + page_size]
+        # Context lines are looked up from related rows, so enrich only the page we
+        # return (not the full merged set).
+        await SearchService._enrich_snippets(session, page_hits)
         results = [{k: v for k, v in h.items() if not k.startswith("_")} for h in page_hits]
         return results, total, counts
 
@@ -287,12 +292,15 @@ class SearchService:
                 "entity_type": "experiment",
                 "entity_id": e.id,
                 "title": e.name,
-                "snippet": e.status or None,
+                # Filled in during enrichment: project, sample/file/run counts, activity.
+                "snippet": None,
                 "url": f"/experiments/{e.id}",
                 "experiment_id": e.id,
                 "relevance_score": None,
                 "_match_name": e.name,
                 "_recency": _ts(e.created_at),
+                "_project_id": e.project_id,
+                "_updated": e.updated_at,
             }
             for e in rows
         ]
@@ -496,17 +504,43 @@ class SearchService:
         return {r[0]: r[1] for r in rows}
 
     @staticmethod
-    async def _enrich_snippets(session: AsyncSession, raw: list[dict]) -> None:
-        """Fill the context line for sample / pipeline_run / file hits, which need
-        names looked up from related rows. Batched to avoid per-hit queries."""
-        exp_ids = {h["_exp_id"] for h in raw if h.get("_exp_id")}
-        proj_ids = {h["_project_id"] for h in raw if h.get("_project_id")}
-        run_ids = {h["_run_id"] for h in raw if h.get("_run_id")}
-        file_ids = {h["_file_id"] for h in raw if h.get("_file_id")}
+    async def _count_and_latest(
+        session: AsyncSession, group_col, time_col, ids: set[int]
+    ) -> dict[int, tuple[int, datetime | None]]:
+        """Per-group ``(count, max(time_col))`` for the rows whose ``group_col`` is in
+        ``ids``. One grouped query feeds both the experiment counts and last-activity."""
+        if not ids:
+            return {}
+        rows = (
+            await session.execute(
+                select(group_col, func.count(), func.max(time_col)).where(group_col.in_(ids)).group_by(group_col)
+            )
+        ).all()
+        return {r[0]: (r[1], r[2]) for r in rows}
+
+    @staticmethod
+    async def _enrich_snippets(session: AsyncSession, hits: list[dict]) -> None:
+        """Fill the context line for experiment / sample / pipeline_run / file hits,
+        which need names and roll-ups looked up from related rows. Batched to avoid
+        per-hit queries; called only on the page of hits being returned."""
+        exp_ids = {h["_exp_id"] for h in hits if h.get("_exp_id")}
+        proj_ids = {h["_project_id"] for h in hits if h.get("_project_id")}
+        run_ids = {h["_run_id"] for h in hits if h.get("_run_id")}
+        file_ids = {h["_file_id"] for h in hits if h.get("_file_id")}
+        exp_hit_ids = {h["entity_id"] for h in hits if h["entity_type"] == "experiment"}
 
         exp_names = await SearchService._name_map(session, Experiment.id, Experiment.name, exp_ids)
         proj_names = await SearchService._name_map(session, Project.id, Project.name, proj_ids)
         run_names = await SearchService._name_map(session, PipelineRun.id, PipelineRun.pipeline_name, run_ids)
+
+        # Roll-ups for experiment cards: counts and last activity per experiment.
+        sample_stats = await SearchService._count_and_latest(
+            session, Sample.experiment_id, Sample.updated_at, exp_hit_ids
+        )
+        file_stats = await SearchService._count_and_latest(session, File.experiment_id, File.created_at, exp_hit_ids)
+        run_stats = await SearchService._count_and_latest(
+            session, PipelineRun.experiment_id, PipelineRun.created_at, exp_hit_ids
+        )
 
         file_samples: dict[int, list[str]] = {}
         if file_ids:
@@ -519,9 +553,24 @@ class SearchService:
             for fid, ext in (await session.execute(q)).all():
                 file_samples.setdefault(fid, []).append(ext or "Sample")
 
-        for h in raw:
+        for h in hits:
             t = h["entity_type"]
-            if t == "sample":
+            if t == "experiment":
+                eid = h["entity_id"]
+                s_count, s_latest = sample_stats.get(eid, (0, None))
+                f_count, f_latest = file_stats.get(eid, (0, None))
+                r_count, r_latest = run_stats.get(eid, (0, None))
+                latest = max([d for d in (h.get("_updated"), s_latest, f_latest, r_latest) if d], default=None)
+                h["snippet"] = _join(
+                    [
+                        proj_names.get(h.get("_project_id")),
+                        _plural(s_count, "sample"),
+                        _plural(f_count, "file"),
+                        _plural(r_count, "run"),
+                        f"Updated {latest.strftime('%b %d, %Y')}" if latest else None,
+                    ]
+                )
+            elif t == "sample":
                 h["snippet"] = _join([exp_names.get(h.get("_exp_id")), h.get("_organism"), h.get("_tissue")])
             elif t == "pipeline_run":
                 h["snippet"] = _join([h.get("_status"), exp_names.get(h.get("_exp_id"))])
