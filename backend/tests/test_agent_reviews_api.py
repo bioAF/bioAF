@@ -523,3 +523,59 @@ async def test_filter_all_includes_dismissed(client, admin_auth, configured_run)
     ).json()
     assert len(all_after["items"]) == 1
     assert all_after["items"][0]["dismissed"] is True
+
+
+# --- AI availability (is an active, usable LLM provider configured?) ---
+
+
+@pytest_asyncio.fixture
+async def gemma_active(db_engine, admin_user):
+    async with _factory(db_engine)() as session:
+        await llm_provider_config_service.upsert(
+            session,
+            org_id=admin_user.organization_id,
+            provider="gemma",
+            api_key=None,
+            model="gemma-2-9b",
+            actor_user_id=admin_user.id,
+        )
+        await llm_provider_config_service.set_active(
+            session,
+            org_id=admin_user.organization_id,
+            provider="gemma",
+            actor_user_id=admin_user.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_availability_true_with_active_provider(client, admin_auth, configured_run):
+    resp = await client.get("/api/agent_reviews/availability", headers=admin_auth)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"enabled": True}
+
+
+@pytest.mark.asyncio
+async def test_availability_false_without_provider(client, admin_auth, admin_user):
+    resp = await client.get("/api/agent_reviews/availability", headers=admin_auth)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"enabled": False}
+
+
+@pytest.mark.asyncio
+async def test_availability_false_with_gemma(client, admin_auth, gemma_active):
+    resp = await client.get("/api/agent_reviews/availability", headers=admin_auth)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"enabled": False}
+
+
+@pytest.mark.asyncio
+async def test_availability_visible_to_viewer_without_llm_use(client, viewer_auth, configured_run):
+    resp = await client.get("/api/agent_reviews/availability", headers=viewer_auth)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"enabled": True}
+
+
+@pytest.mark.asyncio
+async def test_availability_forbidden_without_results_view(client, no_results_auth, configured_run):
+    resp = await client.get("/api/agent_reviews/availability", headers=no_results_auth)
+    assert resp.status_code == 403
