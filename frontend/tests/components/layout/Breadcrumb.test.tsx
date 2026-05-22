@@ -29,7 +29,8 @@ describe("Breadcrumb", () => {
     mockPathname.mockReturnValue("/projects/experiments");
     render(<Breadcrumb entityName="Experiment 123" />);
     const breadcrumb = screen.getByTestId("breadcrumb");
-    expect(breadcrumb).toHaveTextContent("Projects");
+    // The top-level section was renamed from "Projects" to "Experiments".
+    expect(breadcrumb).toHaveTextContent("Experiments");
     expect(breadcrumb).toHaveTextContent("Experiment List");
     expect(breadcrumb).toHaveTextContent("Experiment 123");
   });
@@ -51,11 +52,11 @@ describe("Breadcrumb", () => {
     expect(current.tagName).toBe("SPAN");
   });
 
-  it("shows Projects as top breadcrumb segment when on experiment detail page", () => {
+  it("shows Experiments as top breadcrumb segment when on experiment detail page", () => {
     mockPathname.mockReturnValue("/projects/experiments/42");
     render(<Breadcrumb entityName="My Experiment" />);
     const breadcrumb = screen.getByTestId("breadcrumb");
-    expect(breadcrumb).toHaveTextContent("Projects");
+    expect(breadcrumb).toHaveTextContent("Experiments");
     expect(breadcrumb).toHaveTextContent("Experiment List");
     expect(breadcrumb).toHaveTextContent("My Experiment");
   });

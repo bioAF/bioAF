@@ -7,6 +7,17 @@ jest.mock("@/lib/api", () => ({
   },
 }));
 
+let mockRunParam: string | null = null;
+jest.mock("next/navigation", () => ({
+  useSearchParams: () => ({ get: (key: string) => (key === "run" ? mockRunParam : null) }),
+}));
+
+jest.mock("next/link", () => {
+  return function MockLink({ href, children }: { href: string; children: React.ReactNode }) {
+    return <a href={typeof href === "string" ? href : "#"}>{children}</a>;
+  };
+});
+
 jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => null }));
 jest.mock("@/components/layout/Header", () => ({ Header: () => null }));
 jest.mock("@/components/shared/ContentLoading", () => ({ ContentLoading: () => null }));
@@ -25,6 +36,7 @@ const mockGet = api.get as jest.Mock;
 
 beforeEach(() => {
   mockGet.mockReset();
+  mockRunParam = null;
 });
 
 describe("QCDashboardsPage list view", () => {
@@ -77,5 +89,62 @@ describe("QCDashboardsPage list view", () => {
     await waitFor(() => expect(screen.queryByText("Run #7")).toBeTruthy());
     // Should not crash; missing context should not produce literal "null" strings.
     expect(screen.queryByText("null")).toBeNull();
+  });
+});
+
+describe("QCDashboardsPage deep link", () => {
+  test("?run= opens the dashboard for that run directly", async () => {
+    mockRunParam = "42";
+    mockGet.mockImplementation((url: string) => {
+      if (url.includes("/by-run/42")) {
+        return Promise.resolve({
+          pipeline_run_id: 42,
+          metrics: { quality_rating: "good" },
+          plots: [],
+        });
+      }
+      return Promise.resolve([]); // list
+    });
+
+    render(<QCDashboardsPage />);
+
+    // Detail view opened: it shows the "Back to list" control and the run link.
+    await waitFor(() => expect(screen.queryByText("Back to list")).toBeTruthy());
+    expect(screen.getByRole("link", { name: /Run #42/i })).toHaveAttribute(
+      "href",
+      "/pipelines/runs/42",
+    );
+    expect(mockGet).toHaveBeenCalledWith("/api/qc-dashboards/by-run/42");
+  });
+
+  test("without ?run= it shows the list, not a detail", async () => {
+    mockGet.mockResolvedValue([]);
+    render(<QCDashboardsPage />);
+    await waitFor(() => expect(screen.queryByText("QC Dashboards")).toBeTruthy());
+    expect(screen.queryByText(/Run #\d+/)).toBeNull();
+  });
+
+  test("the detail names the report by context and links back to the run", async () => {
+    mockRunParam = "42";
+    mockGet.mockImplementation((url: string) => {
+      if (url.includes("/by-run/42")) {
+        return Promise.resolve({
+          pipeline_run_id: 42,
+          project_name: "Project Aardvark",
+          experiment_name: "Experiment Beluga",
+          pipeline_name: "nf-core/scrnaseq",
+          pipeline_version: "2.6.0",
+          metrics: { quality_rating: "good" },
+          plots: [],
+        });
+      }
+      return Promise.resolve([]);
+    });
+
+    render(<QCDashboardsPage />);
+
+    const runLink = await screen.findByRole("link", { name: /Run #42/i });
+    expect(runLink).toHaveAttribute("href", "/pipelines/runs/42");
+    expect(screen.getByText(/Project Aardvark \/ Experiment Beluga \/ nf-core\/scrnaseq v2\.6\.0/)).toBeInTheDocument();
   });
 });

@@ -15,3 +15,14 @@ class SearchResult(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class QuickSearchHit(BaseModel):
+    entity_type: str
+    entity_id: int
+    name: str
+    experiment_id: int | None = None
+
+
+class QuickSearchResult(BaseModel):
+    results: list[QuickSearchHit]

@@ -13,6 +13,7 @@ interface Notification {
   severity: string;
   read: boolean;
   created_at: string;
+  metadata_json?: Record<string, unknown> | null;
 }
 
 interface Props {
@@ -85,6 +86,7 @@ export function NotificationDropdown({ onClose, onCountChange }: Props) {
               key={n.id}
               notification={n}
               onMarkRead={() => handleMarkRead(n.id)}
+              onNavigate={onClose}
             />
           ))
         )}

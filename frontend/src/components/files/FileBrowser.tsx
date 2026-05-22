@@ -37,6 +37,8 @@ interface Props {
   showExperimentFilter?: boolean;
   showReconcile?: boolean;
   showUpload?: boolean;
+  /** Open this file's detail directly on load (e.g. from a notification deep link). */
+  focusFileId?: number;
 }
 
 export function FileBrowser({
@@ -47,6 +49,7 @@ export function FileBrowser({
   showExperimentFilter = false,
   showReconcile = false,
   showUpload = false,
+  focusFileId,
 }: Props) {
   const [files, setFiles] = useState<FileResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -138,6 +141,18 @@ export function FileBrowser({
     fetchFiles();
     fetchMeta();
   }, [fetchFiles, fetchMeta]);
+
+  // Deep link: open a specific file's detail directly (e.g. a notification for a
+  // file lands here). Fetched by id so it works regardless of the current page.
+  useEffect(() => {
+    if (focusFileId == null) return;
+    api
+      .get<FileResponse>(`/api/files/${focusFileId}`)
+      .then((f) => setViewingFile(f))
+      .catch(() => {
+        // ignore - the list remains visible
+      });
+  }, [focusFileId]);
 
   // Fetch samples when viewing files for an experiment
   useEffect(() => {

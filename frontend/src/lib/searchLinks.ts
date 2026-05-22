@@ -1,0 +1,41 @@
+/** A single hit from the header quick-search (`GET /api/search/quick`). */
+export interface QuickSearchHit {
+  entity_type: string;
+  entity_id: number;
+  name: string;
+  experiment_id?: number | null;
+}
+
+/** The in-app route to jump to for a quick-search hit. */
+export function searchHitHref(hit: QuickSearchHit): string {
+  switch (hit.entity_type) {
+    case "experiment":
+      return `/experiments/${hit.entity_id}`;
+    case "sample":
+      return hit.experiment_id != null
+        ? `/experiments/${hit.experiment_id}?tab=samples`
+        : "/experiments";
+    case "pipeline_run":
+      return `/pipelines/runs/${hit.entity_id}`;
+    case "file":
+      return `/data/files?file=${hit.entity_id}`;
+    default:
+      return "/dashboard";
+  }
+}
+
+/** Human label for a hit's entity type, shown as a small badge in results. */
+export function searchHitTypeLabel(entityType: string): string {
+  switch (entityType) {
+    case "experiment":
+      return "Experiment";
+    case "sample":
+      return "Sample";
+    case "pipeline_run":
+      return "Run";
+    case "file":
+      return "File";
+    default:
+      return entityType;
+  }
+}

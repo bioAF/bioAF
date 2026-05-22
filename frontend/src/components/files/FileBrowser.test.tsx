@@ -159,6 +159,26 @@ test("renders search input when showSearch is set", async () => {
   });
 });
 
+test("focusFileId opens that file's detail directly", async () => {
+  mockGet.mockImplementation((url: string) => {
+    if (url.includes("/api/projects")) return Promise.resolve({ projects: [] });
+    if (url.includes("/api/experiments")) return Promise.resolve({ experiments: [] });
+    if (/\/api\/files\/\d+$/.test(url)) {
+      return Promise.resolve(makeFile({ id: 77, filename: "focused.fastq.gz" }));
+    }
+    return Promise.resolve({ files: [], total: 0, page: 1, page_size: 25 });
+  });
+
+  render(<FileBrowser focusFileId={77} />);
+
+  await waitFor(() => {
+    // "View Provenance" only renders inside the file detail modal.
+    expect(screen.getByText("View Provenance")).toBeInTheDocument();
+  });
+  expect(screen.getByText("focused.fastq.gz")).toBeInTheDocument();
+  expect(mockGet).toHaveBeenCalledWith("/api/files/77");
+});
+
 test("renders provenance breadcrumb when API returns provenance", async () => {
   mockGet.mockImplementation((url: string) => {
     if (url.includes("/api/projects")) return Promise.resolve({ projects: [] });

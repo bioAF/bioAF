@@ -7,6 +7,8 @@ import { clearPermissionsCache } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { DeploymentBanner } from "@/components/infrastructure/DeploymentBanner";
+import { GlobalSearch } from "@/components/layout/GlobalSearch";
+import { QuickCreateMenu } from "@/components/layout/QuickCreateMenu";
 
 export function Header() {
   const router = useRouter();
@@ -30,11 +32,14 @@ export function Header() {
   return (
     <>
     <DeploymentBanner />
-    <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6">
-      <div />
+    <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between gap-4 px-6">
+      <div className="flex-1 max-w-md">
+        {user && <GlobalSearch />}
+      </div>
       <div className="flex items-center gap-4">
         {user && (
           <>
+            <QuickCreateMenu />
             <NotificationBell />
             <span className="text-sm text-gray-600">
               {(user.email as string) || "User"}
