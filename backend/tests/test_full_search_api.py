@@ -98,3 +98,7 @@ async def test_full_search_endpoint_entity_types_filter(session, admin_user, cli
     assert resp.status_code == 200
     data = resp.json()
     assert {hit["entity_type"] for hit in data["results"]} == {"file"}
+    # Counts still cover every permitted type so the dropdown stays complete while
+    # results are narrowed to one type.
+    assert data["type_counts"]["experiment"] >= 1
+    assert data["type_counts"]["file"] >= 1

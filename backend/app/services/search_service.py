@@ -135,27 +135,37 @@ class SearchService:
         entity_types: list[str] | None = None,
         page: int = 1,
         page_size: int = 25,
+        count_types: list[str] | None = None,
     ) -> tuple[list[dict], int, dict[str, int]]:
         """Full search for the dedicated results page.
 
-        Substring (ILIKE) match over each type's name AND content fields, across the
-        types in ``entity_types`` (default: all). The caller is responsible for
-        restricting ``entity_types`` to those the user may view. Results are a single
-        ranked list ordered by match quality (exact name > prefix > substring >
-        content-only) then recency. Up to ``_PER_TYPE_FETCH`` rows per type are
-        fetched and merged; the merged list is capped at ``_MAX_RESULTS`` and then
-        paginated.
+        Substring (ILIKE) match over each type's name AND content fields. Results
+        cover the types in ``entity_types`` (default: all). Per-type ``type_counts``
+        cover ``count_types`` (default: the result types) so the type filter can show
+        a count for every type the user may view even while results are narrowed to
+        one. The caller restricts both lists to types the user may view.
+
+        Results are a single ranked list ordered by match quality (exact name >
+        prefix > substring > content-only) then recency. Up to ``_PER_TYPE_FETCH``
+        rows per type are fetched and merged; the merged list is capped at
+        ``_MAX_RESULTS`` and then paginated.
 
         Returns ``(results, total, type_counts)`` where ``total`` is the capped
-        merged count and ``type_counts`` are the accurate per-type match counts
-        (used to label the type filter; may exceed the cap).
+        merged count (so it never exceeds ``_MAX_RESULTS``) and ``type_counts`` are
+        the accurate per-type match counts (which may exceed the cap).
         """
         q = (query or "").strip()
         if not q:
             return [], 0, {}
 
-        types = [t for t in (entity_types or FULL_SEARCH_TYPES) if t in FULL_SEARCH_TYPES]
+        result_types = [t for t in (entity_types or FULL_SEARCH_TYPES) if t in FULL_SEARCH_TYPES]
+        cnt_types = [t for t in (count_types or result_types) if t in FULL_SEARCH_TYPES]
         pattern = f"%{q}%"
+
+        counts: dict[str, int] = {}
+        for t in cnt_types:
+            model, where = SearchService._type_where(t, org_id, pattern)
+            counts[t] = await SearchService._count(session, model, where)
 
         builders = {
             "experiment": SearchService._experiment_hits,
@@ -166,13 +176,9 @@ class SearchService:
             "pipeline_definition": SearchService._pipeline_definition_hits,
             "literature_paper": SearchService._literature_hits,
         }
-
         raw: list[dict] = []
-        counts: dict[str, int] = {}
-        for t in types:
-            hits, count = await builders[t](session, org_id, pattern)
-            counts[t] = count
-            raw.extend(hits)
+        for t in result_types:
+            raw.extend(await builders[t](session, org_id, pattern))
 
         await SearchService._enrich_snippets(session, raw)
 
@@ -199,35 +205,84 @@ class SearchService:
         results = [{k: v for k, v in h.items() if not k.startswith("_")} for h in page_hits]
         return results, total, counts
 
-    # --- per-type builders: each returns (raw_hits, total_count) ---------------
+    # --- shared WHERE so results and counts for a type never diverge -----------
+
+    @staticmethod
+    def _type_where(t: str, org_id: int, pattern: str):
+        if t == "experiment":
+            return Experiment, and_(
+                Experiment.organization_id == org_id,
+                or_(
+                    Experiment.name.ilike(pattern),
+                    Experiment.description.ilike(pattern),
+                    Experiment.hypothesis.ilike(pattern),
+                ),
+            )
+        if t == "sample":
+            org_exps = select(Experiment.id).where(Experiment.organization_id == org_id)
+            return Sample, and_(
+                Sample.experiment_id.in_(org_exps),
+                or_(
+                    Sample.external_id.ilike(pattern),
+                    Sample.organism.ilike(pattern),
+                    Sample.tissue_type.ilike(pattern),
+                ),
+            )
+        if t == "pipeline_run":
+            return PipelineRun, and_(PipelineRun.organization_id == org_id, PipelineRun.pipeline_name.ilike(pattern))
+        if t == "file":
+            return File, and_(File.organization_id == org_id, File.filename.ilike(pattern))
+        if t == "project":
+            return Project, and_(
+                Project.organization_id == org_id,
+                or_(
+                    Project.name.ilike(pattern),
+                    Project.description.ilike(pattern),
+                    Project.hypothesis.ilike(pattern),
+                ),
+            )
+        if t == "pipeline_definition":
+            return PipelineCatalogEntry, and_(
+                PipelineCatalogEntry.organization_id == org_id,
+                PipelineCatalogEntry.enabled.is_(True),
+                or_(
+                    PipelineCatalogEntry.name.ilike(pattern),
+                    PipelineCatalogEntry.pipeline_key.ilike(pattern),
+                    PipelineCatalogEntry.description.ilike(pattern),
+                ),
+            )
+        if t == "literature_paper":
+            return LiteraturePaper, and_(
+                LiteraturePaper.organization_id == org_id,
+                LiteraturePaper.in_library.is_(True),
+                or_(
+                    LiteraturePaper.title.ilike(pattern),
+                    LiteraturePaper.journal.ilike(pattern),
+                    LiteraturePaper.abstract.ilike(pattern),
+                    cast(LiteraturePaper.authors_json, Text).ilike(pattern),
+                ),
+            )
+        raise ValueError(f"unknown search type: {t}")
 
     @staticmethod
     async def _count(session: AsyncSession, model, where) -> int:
         return int(await session.scalar(select(func.count()).select_from(model).where(where)) or 0)
 
+    # --- per-type builders: each returns the raw hits (with private fields) -----
+
     @staticmethod
-    async def _experiment_hits(session: AsyncSession, org_id: int, pattern: str):
-        where = and_(
-            Experiment.organization_id == org_id,
-            or_(
-                Experiment.name.ilike(pattern),
-                Experiment.description.ilike(pattern),
-                Experiment.hypothesis.ilike(pattern),
-            ),
-        )
+    async def _experiment_hits(session: AsyncSession, org_id: int, pattern: str) -> list[dict]:
+        model, where = SearchService._type_where("experiment", org_id, pattern)
         rows = (
             (
                 await session.execute(
-                    select(Experiment)
-                    .where(where)
-                    .order_by(Experiment.created_at.desc(), Experiment.id.desc())
-                    .limit(_PER_TYPE_FETCH)
+                    select(model).where(where).order_by(model.created_at.desc(), model.id.desc()).limit(_PER_TYPE_FETCH)
                 )
             )
             .scalars()
             .all()
         )
-        hits = [
+        return [
             {
                 "entity_type": "experiment",
                 "entity_id": e.id,
@@ -241,28 +296,20 @@ class SearchService:
             }
             for e in rows
         ]
-        return hits, await SearchService._count(session, Experiment, where)
 
     @staticmethod
-    async def _sample_hits(session: AsyncSession, org_id: int, pattern: str):
-        org_exps = select(Experiment.id).where(Experiment.organization_id == org_id)
-        where = and_(
-            Sample.experiment_id.in_(org_exps),
-            or_(Sample.external_id.ilike(pattern), Sample.organism.ilike(pattern), Sample.tissue_type.ilike(pattern)),
-        )
+    async def _sample_hits(session: AsyncSession, org_id: int, pattern: str) -> list[dict]:
+        model, where = SearchService._type_where("sample", org_id, pattern)
         rows = (
             (
                 await session.execute(
-                    select(Sample)
-                    .where(where)
-                    .order_by(Sample.created_at.desc(), Sample.id.desc())
-                    .limit(_PER_TYPE_FETCH)
+                    select(model).where(where).order_by(model.created_at.desc(), model.id.desc()).limit(_PER_TYPE_FETCH)
                 )
             )
             .scalars()
             .all()
         )
-        hits = [
+        return [
             {
                 "entity_type": "sample",
                 "entity_id": s.id,
@@ -279,24 +326,20 @@ class SearchService:
             }
             for s in rows
         ]
-        return hits, await SearchService._count(session, Sample, where)
 
     @staticmethod
-    async def _pipeline_run_hits(session: AsyncSession, org_id: int, pattern: str):
-        where = and_(PipelineRun.organization_id == org_id, PipelineRun.pipeline_name.ilike(pattern))
+    async def _pipeline_run_hits(session: AsyncSession, org_id: int, pattern: str) -> list[dict]:
+        model, where = SearchService._type_where("pipeline_run", org_id, pattern)
         rows = (
             (
                 await session.execute(
-                    select(PipelineRun)
-                    .where(where)
-                    .order_by(PipelineRun.created_at.desc(), PipelineRun.id.desc())
-                    .limit(_PER_TYPE_FETCH)
+                    select(model).where(where).order_by(model.created_at.desc(), model.id.desc()).limit(_PER_TYPE_FETCH)
                 )
             )
             .scalars()
             .all()
         )
-        hits = [
+        return [
             {
                 "entity_type": "pipeline_run",
                 "entity_id": r.id,
@@ -312,21 +355,20 @@ class SearchService:
             }
             for r in rows
         ]
-        return hits, await SearchService._count(session, PipelineRun, where)
 
     @staticmethod
-    async def _file_hits(session: AsyncSession, org_id: int, pattern: str):
-        where = and_(File.organization_id == org_id, File.filename.ilike(pattern))
+    async def _file_hits(session: AsyncSession, org_id: int, pattern: str) -> list[dict]:
+        model, where = SearchService._type_where("file", org_id, pattern)
         rows = (
             (
                 await session.execute(
-                    select(File).where(where).order_by(File.created_at.desc(), File.id.desc()).limit(_PER_TYPE_FETCH)
+                    select(model).where(where).order_by(model.created_at.desc(), model.id.desc()).limit(_PER_TYPE_FETCH)
                 )
             )
             .scalars()
             .all()
         )
-        hits = [
+        return [
             {
                 "entity_type": "file",
                 "entity_id": f.id,
@@ -345,27 +387,20 @@ class SearchService:
             }
             for f in rows
         ]
-        return hits, await SearchService._count(session, File, where)
 
     @staticmethod
-    async def _project_hits(session: AsyncSession, org_id: int, pattern: str):
-        where = and_(
-            Project.organization_id == org_id,
-            or_(Project.name.ilike(pattern), Project.description.ilike(pattern), Project.hypothesis.ilike(pattern)),
-        )
+    async def _project_hits(session: AsyncSession, org_id: int, pattern: str) -> list[dict]:
+        model, where = SearchService._type_where("project", org_id, pattern)
         rows = (
             (
                 await session.execute(
-                    select(Project)
-                    .where(where)
-                    .order_by(Project.created_at.desc(), Project.id.desc())
-                    .limit(_PER_TYPE_FETCH)
+                    select(model).where(where).order_by(model.created_at.desc(), model.id.desc()).limit(_PER_TYPE_FETCH)
                 )
             )
             .scalars()
             .all()
         )
-        hits = [
+        return [
             {
                 "entity_type": "project",
                 "entity_id": p.id,
@@ -379,26 +414,14 @@ class SearchService:
             }
             for p in rows
         ]
-        return hits, await SearchService._count(session, Project, where)
 
     @staticmethod
-    async def _pipeline_definition_hits(session: AsyncSession, org_id: int, pattern: str):
-        where = and_(
-            PipelineCatalogEntry.organization_id == org_id,
-            PipelineCatalogEntry.enabled.is_(True),
-            or_(
-                PipelineCatalogEntry.name.ilike(pattern),
-                PipelineCatalogEntry.pipeline_key.ilike(pattern),
-                PipelineCatalogEntry.description.ilike(pattern),
-            ),
-        )
+    async def _pipeline_definition_hits(session: AsyncSession, org_id: int, pattern: str) -> list[dict]:
+        model, where = SearchService._type_where("pipeline_definition", org_id, pattern)
         rows = (
             (
                 await session.execute(
-                    select(PipelineCatalogEntry)
-                    .where(where)
-                    .order_by(PipelineCatalogEntry.created_at.desc(), PipelineCatalogEntry.id.desc())
-                    .limit(_PER_TYPE_FETCH)
+                    select(model).where(where).order_by(model.created_at.desc(), model.id.desc()).limit(_PER_TYPE_FETCH)
                 )
             )
             .scalars()
@@ -425,48 +448,34 @@ class SearchService:
                     "_recency": _ts(c.created_at),
                 }
             )
-        return hits, await SearchService._count(session, PipelineCatalogEntry, where)
+        return hits
 
     @staticmethod
-    async def _literature_hits(session: AsyncSession, org_id: int, pattern: str):
-        where = and_(
-            LiteraturePaper.organization_id == org_id,
-            LiteraturePaper.in_library.is_(True),
-            or_(
-                LiteraturePaper.title.ilike(pattern),
-                LiteraturePaper.journal.ilike(pattern),
-                LiteraturePaper.abstract.ilike(pattern),
-                cast(LiteraturePaper.authors_json, Text).ilike(pattern),
-            ),
-        )
+    async def _literature_hits(session: AsyncSession, org_id: int, pattern: str) -> list[dict]:
+        model, where = SearchService._type_where("literature_paper", org_id, pattern)
         rows = (
             (
                 await session.execute(
-                    select(LiteraturePaper)
-                    .where(where)
-                    .order_by(LiteraturePaper.created_at.desc(), LiteraturePaper.id.desc())
-                    .limit(_PER_TYPE_FETCH)
+                    select(model).where(where).order_by(model.created_at.desc(), model.id.desc()).limit(_PER_TYPE_FETCH)
                 )
             )
             .scalars()
             .all()
         )
-        hits = []
-        for paper in rows:
-            hits.append(
-                {
-                    "entity_type": "literature_paper",
-                    "entity_id": paper.id,
-                    "title": paper.title,
-                    "snippet": SearchService._paper_snippet(paper),
-                    "url": f"/data/literature/papers/{paper.id}",
-                    "experiment_id": None,
-                    "relevance_score": None,
-                    "_match_name": paper.title,
-                    "_recency": _ts(paper.created_at),
-                }
-            )
-        return hits, await SearchService._count(session, LiteraturePaper, where)
+        return [
+            {
+                "entity_type": "literature_paper",
+                "entity_id": paper.id,
+                "title": paper.title,
+                "snippet": SearchService._paper_snippet(paper),
+                "url": f"/data/literature/papers/{paper.id}",
+                "experiment_id": None,
+                "relevance_score": None,
+                "_match_name": paper.title,
+                "_recency": _ts(paper.created_at),
+            }
+            for paper in rows
+        ]
 
     @staticmethod
     def _paper_snippet(paper: LiteraturePaper) -> str | None:

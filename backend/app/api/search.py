@@ -92,7 +92,7 @@ async def unified_search(
         return empty
 
     results, total, counts = await SearchService.full_search(
-        session, org_id, query, entity_types=types, page=page, page_size=page_size
+        session, org_id, query, entity_types=types, page=page, page_size=page_size, count_types=permitted
     )
 
     return SearchResult(
