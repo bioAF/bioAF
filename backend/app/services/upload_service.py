@@ -125,6 +125,35 @@ class UploadService:
         }
 
     @staticmethod
+    def _data_uploaded_event(
+        *,
+        org_id: int,
+        user_id: int,
+        file_id: int,
+        filename: str,
+        file_type: str,
+        experiment_id: int | None,
+    ) -> dict:
+        """Build the DATA_UPLOADED event payload. When the file was uploaded into
+        an experiment, the experiment id rides along in metadata so the resulting
+        notification can deep-link to that experiment's Files tab; a standalone
+        upload carries none and falls back to the Data & Files page."""
+        metadata: dict = {}
+        if experiment_id is not None:
+            metadata["experiment_id"] = experiment_id
+        return {
+            "event_type": DATA_UPLOADED,
+            "org_id": org_id,
+            "user_id": user_id,
+            "entity_type": "file",
+            "entity_id": file_id,
+            "title": f"File uploaded: {filename}",
+            "message": f"File '{filename}' ({file_type}) uploaded successfully",
+            "summary": f"File '{filename}' uploaded",
+            "metadata": metadata,
+        }
+
+    @staticmethod
     async def complete_upload(
         session: AsyncSession,
         org_id: int,
@@ -186,16 +215,14 @@ class UploadService:
         asyncio.create_task(
             event_bus.emit(
                 DATA_UPLOADED,
-                {
-                    "event_type": DATA_UPLOADED,
-                    "org_id": org_id,
-                    "user_id": pending["user_id"],
-                    "entity_type": "file",
-                    "entity_id": file.id,
-                    "title": f"File uploaded: {filename}",
-                    "message": f"File '{filename}' ({file_type}) uploaded successfully",
-                    "summary": f"File '{filename}' uploaded",
-                },
+                UploadService._data_uploaded_event(
+                    org_id=org_id,
+                    user_id=pending["user_id"],
+                    file_id=file.id,
+                    filename=filename,
+                    file_type=file_type,
+                    experiment_id=experiment_id,
+                ),
             )
         )
 
