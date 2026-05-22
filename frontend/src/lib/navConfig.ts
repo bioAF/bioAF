@@ -30,12 +30,13 @@ export interface NavSection {
 export const navConfig: NavSection[] = [
   { label: "Dashboard", path: "/dashboard", icon: "home" },
   {
-    label: "Results",
-    icon: "chart",
+    label: "Experiments",
+    icon: "folder",
     children: [
-      { label: "QC Dashboards", path: "/results/qc-dashboards", permission: { resource: "experiments", action: "view" }, componentGate: { keys: ["qc_dashboard"] } },
-      { label: "Cellxgene", path: "/results/cellxgene", permission: { resource: "experiments", action: "view" }, componentGate: { keys: ["cellxgene"] } },
-      { label: "Plot Archive", path: "/results/plot-archive", permission: { resource: "experiments", action: "view" } },
+      { label: "Project List", path: "/projects", permission: { resource: "projects", action: "view" } },
+      { label: "Experiment Templates", path: "/projects/experiment-templates", permission: { resource: "experiments", action: "view" } },
+      { label: "Experiment List", path: "/projects/experiments", permission: { resource: "experiments", action: "view" } },
+      { label: "Dataset Browser", path: "/data/browser", permission: { resource: "experiments", action: "view" } },
     ],
   },
   {
@@ -46,17 +47,16 @@ export const navConfig: NavSection[] = [
       { label: "Pipeline Catalog", path: "/pipelines/catalog", permission: { resource: "pipelines", action: "view" } },
       { label: "Custom Pipelines", path: "/pipelines/custom", permission: { resource: "custom_pipelines", action: "view" } },
       { label: "Pipeline Runs", path: "/pipelines/runs", permission: { resource: "pipelines", action: "view" } },
-      { label: "Environments", path: "/pipelines/environments", permission: { resource: "environments", action: "view" } },
+      { label: "Pipeline Environments", path: "/pipelines/environments", permission: { resource: "environments", action: "view" } },
     ],
   },
   {
-    label: "Projects",
-    icon: "folder",
+    label: "Results",
+    icon: "chart",
     children: [
-      { label: "Project List", path: "/projects", permission: { resource: "projects", action: "view" } },
-      { label: "Experiment Templates", path: "/projects/experiment-templates", permission: { resource: "experiments", action: "view" } },
-      { label: "Experiment List", path: "/projects/experiments", permission: { resource: "experiments", action: "view" } },
-      { label: "Dataset Browser", path: "/data/browser", permission: { resource: "experiments", action: "view" } },
+      { label: "QC Dashboards", path: "/results/qc-dashboards", permission: { resource: "experiments", action: "view" }, componentGate: { keys: ["qc_dashboard"] } },
+      { label: "Cellxgene", path: "/results/cellxgene", permission: { resource: "experiments", action: "view" }, componentGate: { keys: ["cellxgene"] } },
+      { label: "Plot Archive", path: "/results/plot-archive", permission: { resource: "experiments", action: "view" } },
     ],
   },
   {
@@ -65,7 +65,7 @@ export const navConfig: NavSection[] = [
     children: [
       { label: "Notebooks", path: "/notebooks", permission: { resource: "notebooks", action: "view" }, componentGate: { keys: ["jupyterhub", "rstudio"] } },
       { label: "Work Nodes", path: "/workbench/work-nodes", permission: { resource: "notebooks", action: "view" } },
-      { label: "Environments", path: "/environments", permission: { resource: "environments", action: "view" } },
+      { label: "Compute Environments", path: "/environments", permission: { resource: "environments", action: "view" } },
     ],
   },
   {
@@ -80,6 +80,14 @@ export const navConfig: NavSection[] = [
     ],
   },
   {
+    label: "Profile",
+    icon: "user",
+    children: [
+      { label: "Account & Credentials", path: "/profile" },
+      { label: "Notifications", path: "/profile/notifications", permission: { resource: "notifications", action: "view" } },
+    ],
+  },
+  {
     label: "Infrastructure",
     icon: "server",
     children: [
@@ -87,14 +95,6 @@ export const navConfig: NavSection[] = [
       { label: "Compute", path: "/infrastructure/compute", permission: { resource: "infrastructure", action: "view" } },
       { label: "Cost Center", path: "/infrastructure/cost-center", permission: { resource: "cost_center", action: "view" } },
       { label: "Backup & Recovery", path: "/infrastructure/backup", permission: { resource: "backups", action: "view" } },
-    ],
-  },
-  {
-    label: "Profile",
-    icon: "user",
-    children: [
-      { label: "Account & Credentials", path: "/profile" },
-      { label: "Notifications", path: "/profile/notifications", permission: { resource: "notifications", action: "view" } },
     ],
   },
   {

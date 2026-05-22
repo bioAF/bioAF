@@ -1,6 +1,13 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { NotificationItem } from "@/components/notifications/NotificationItem";
 
+// NotificationItem now resolves a deep link and navigates on click, so it uses
+// the router. These fixtures carry no entity reference, so they resolve to no
+// link and clicking only marks them read (the behavior asserted below).
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: jest.fn() }),
+}));
+
 const baseNotification = {
   id: 1,
   event_type: "pipeline_completed",

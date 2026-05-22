@@ -4,6 +4,7 @@ import ExperimentDetailPage from "@/app/experiments/[id]/page";
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: jest.fn() }),
   useParams: () => ({ id: "1" }),
+  useSearchParams: () => ({ get: () => null }),
 }));
 
 jest.mock("@/components/layout/Sidebar", () => ({

@@ -1219,6 +1219,10 @@ export interface QCDashboardResponse {
   id: number;
   pipeline_run_id: number;
   experiment_id: number | null;
+  pipeline_name: string | null;
+  pipeline_version: string | null;
+  project_name: string | null;
+  experiment_name: string | null;
   metrics: QCMetrics;
   raw_metrics: Record<string, unknown>;
   qc_config: QCDashboardConfig;

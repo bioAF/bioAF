@@ -3,10 +3,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import get_session
-from app.schemas.search import SearchHit, SearchResult
+from app.schemas.search import QuickSearchHit, QuickSearchResult, SearchHit, SearchResult
 from app.services.search_service import SearchService
 
 router = APIRouter(prefix="/api/search", tags=["search"])
+
+
+@router.get("/quick", response_model=QuickSearchResult)
+async def quick_search(
+    request: Request,
+    q: str = "",
+    session: AsyncSession = Depends(get_session),
+):
+    """Name-only "jump to" search for the header (experiments, samples, runs, files)."""
+    current_user = request.state.current_user
+    org_id = int(current_user["org_id"])
+
+    if not q.strip():
+        return QuickSearchResult(results=[])
+
+    hits = await SearchService.quick_search(session, org_id, q)
+    return QuickSearchResult(results=[QuickSearchHit(**h) for h in hits])
 
 
 @router.get("", response_model=SearchResult)

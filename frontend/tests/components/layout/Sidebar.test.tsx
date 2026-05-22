@@ -59,12 +59,12 @@ describe("Sidebar", () => {
   it("renders all 9 top-level items for admin user", () => {
     render(<Sidebar />);
     const nav = screen.getByTestId("sidebar-nav");
-    // 9 top-level sections: Dashboard, Results, Pipelines, Projects,
-    // Workbench, Data & Files, Infrastructure, Profile, Settings
+    // 9 top-level sections: Dashboard, Experiments, Pipelines, Results,
+    // Workbench, Data & Files, Profile, Infrastructure, Settings
     expect(nav).toHaveTextContent("Dashboard");
-    expect(nav).toHaveTextContent("Results");
+    expect(nav).toHaveTextContent("Experiments");
     expect(nav).toHaveTextContent("Pipelines");
-    expect(nav).toHaveTextContent("Projects");
+    expect(nav).toHaveTextContent("Results");
     expect(nav).toHaveTextContent("Workbench");
     expect(nav).toHaveTextContent("Data & Files");
     expect(nav).toHaveTextContent("Infrastructure");
@@ -72,13 +72,14 @@ describe("Sidebar", () => {
     expect(nav).toHaveTextContent("Settings");
   });
 
-  it("does not render Experiments as a top-level nav item", () => {
+  it("renders Experiments as a top-level nav item (renamed from Projects)", () => {
     render(<Sidebar />);
     const nav = screen.getByTestId("sidebar-nav");
-    // Experiments should only appear as a child of Projects, not as a top-level button
     const buttons = Array.from(nav.querySelectorAll("button"));
-    const experimentButton = buttons.find((b) => b.textContent?.trim() === "Experiments");
-    expect(experimentButton).toBeUndefined();
+    // The section is now surfaced as a top-level "Experiments" button, and the
+    // old "Projects" top-level label is gone.
+    expect(buttons.find((b) => b.textContent?.trim() === "Experiments")).toBeDefined();
+    expect(buttons.find((b) => b.textContent?.trim() === "Projects")).toBeUndefined();
   });
 
   it("hides Settings when user role is not admin", () => {
@@ -112,9 +113,9 @@ describe("Sidebar", () => {
     expect(nav).toHaveTextContent("Settings");
   });
 
-  it("renders Projects as an expandable section with 3 children", () => {
+  it("renders Experiments as an expandable section with its children", () => {
     render(<Sidebar />);
-    fireEvent.click(screen.getByText("Projects"));
+    fireEvent.click(screen.getByText("Experiments"));
     expect(screen.getByText("Project List")).toBeInTheDocument();
     expect(screen.getByText("Experiment Templates")).toBeInTheDocument();
     expect(screen.getByText("Experiment List")).toBeInTheDocument();
@@ -122,30 +123,30 @@ describe("Sidebar", () => {
 
   it("Project List child navigates to /projects", () => {
     render(<Sidebar />);
-    fireEvent.click(screen.getByText("Projects"));
+    fireEvent.click(screen.getByText("Experiments"));
     const projectListLink = screen.getByText("Project List").closest("a");
     expect(projectListLink).toHaveAttribute("href", "/projects");
   });
 
   it("Experiment Templates child navigates to /projects/experiment-templates", () => {
     render(<Sidebar />);
-    fireEvent.click(screen.getByText("Projects"));
+    fireEvent.click(screen.getByText("Experiments"));
     const templatesLink = screen.getByText("Experiment Templates").closest("a");
     expect(templatesLink).toHaveAttribute("href", "/projects/experiment-templates");
   });
 
   it("Experiment List child navigates to /projects/experiments", () => {
     render(<Sidebar />);
-    fireEvent.click(screen.getByText("Projects"));
+    fireEvent.click(screen.getByText("Experiments"));
     const listLink = screen.getByText("Experiment List").closest("a");
     expect(listLink).toHaveAttribute("href", "/projects/experiments");
   });
 
-  it("highlights Projects section and auto-expands when on an experiment page", () => {
+  it("highlights Experiments section and auto-expands when on an experiment page", () => {
     mockPathname.mockReturnValue("/projects/experiments");
     render(<Sidebar />);
-    const projectsButton = screen.getByText("Projects").closest("button");
-    expect(projectsButton?.className).toContain("bg-gray-800");
+    const experimentsButton = screen.getByText("Experiments").closest("button");
+    expect(experimentsButton?.className).toContain("bg-gray-800");
     expect(screen.getByText("Experiment List")).toBeInTheDocument();
   });
 
@@ -198,11 +199,11 @@ describe("Sidebar", () => {
     expect(screen.getByText("Backup & Recovery")).toBeInTheDocument();
   });
 
-  it("shows Workbench children: Notebooks, Work Nodes, Environments", () => {
+  it("shows Workbench children: Notebooks, Work Nodes, Compute Environments", () => {
     render(<Sidebar />);
     fireEvent.click(screen.getByText("Workbench"));
     expect(screen.getByText("Notebooks")).toBeInTheDocument();
     expect(screen.getByText("Work Nodes")).toBeInTheDocument();
-    expect(screen.getByText("Environments")).toBeInTheDocument();
+    expect(screen.getByText("Compute Environments")).toBeInTheDocument();
   });
 });

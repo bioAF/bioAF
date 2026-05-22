@@ -82,6 +82,11 @@ class QCDashboardResponse(BaseModel):
     id: int
     pipeline_run_id: int
     experiment_id: int | None
+    # Context for naming the report and linking back to its pipeline run.
+    pipeline_name: str | None = None
+    pipeline_version: str | None = None
+    project_name: str | None = None
+    experiment_name: str | None = None
     metrics: QCMetrics
     raw_metrics: dict[str, Any] = {}
     summary_text: str

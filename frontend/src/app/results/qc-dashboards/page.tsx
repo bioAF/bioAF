@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { PlotModal } from "@/components/shared/PlotModal";
@@ -52,6 +54,12 @@ function DashboardDetail({ dashboard, onBack, onRegenerate, regenerating, onExpa
   onExpandPlot: (url: string, title: string) => void;
 }) {
   const rating = dashboard.metrics.quality_rating;
+  const pipelineLabel = dashboard.pipeline_name
+    ? `${dashboard.pipeline_name}${dashboard.pipeline_version ? ` v${dashboard.pipeline_version}` : ""}`
+    : null;
+  const contextParts = [dashboard.project_name, dashboard.experiment_name, pipelineLabel].filter(
+    Boolean,
+  );
 
   return (
     <div className="space-y-6">
@@ -66,8 +74,19 @@ function DashboardDetail({ dashboard, onBack, onRegenerate, regenerating, onExpa
       </div>
 
       <div id="qc-dashboard-content" className="bg-white rounded-lg shadow p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-bold">QC Dashboard - Run #{dashboard.pipeline_run_id}</h2>
+        <div className="flex items-start justify-between mb-6">
+          <div>
+            <h2 className="text-lg font-bold">QC Dashboard</h2>
+            <p className="text-sm text-gray-600 mt-0.5">
+              {contextParts.length > 0 && <span>{contextParts.join(" / ")} / </span>}
+              <Link
+                href={`/pipelines/runs/${dashboard.pipeline_run_id}`}
+                className="text-blue-600 hover:underline"
+              >
+                Run #{dashboard.pipeline_run_id}
+              </Link>
+            </p>
+          </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => onRegenerate(dashboard.pipeline_run_id)}
@@ -124,11 +143,20 @@ function QualityBadge({ rating }: { rating: string }) {
 }
 
 export default function QCDashboardsPage() {
+  return (
+    <Suspense fallback={null}>
+      <QCDashboardsPageInner />
+    </Suspense>
+  );
+}
+
+function QCDashboardsPageInner() {
   const [dashboards, setDashboards] = useState<QCDashboardSummary[]>([]);
   const [selected, setSelected] = useState<QCDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
   const [expandedPlot, setExpandedPlot] = useState<{ url: string; title: string } | null>(null);
+  const searchParams = useSearchParams();
 
   useEffect(() => {
     (async () => {
@@ -142,6 +170,21 @@ export default function QCDashboardsPage() {
       }
     })();
   }, []);
+
+  // Deep link: ?run=<id> opens that run's dashboard directly. This is where the
+  // "results ready" notification lands. Falls back to the list if there is none.
+  useEffect(() => {
+    const run = searchParams?.get("run");
+    if (!run) return;
+    (async () => {
+      try {
+        const data = await api.get<QCDashboardResponse>(`/api/qc-dashboards/by-run/${run}`);
+        setSelected(data);
+      } catch {
+        // ignore - the list remains visible
+      }
+    })();
+  }, [searchParams]);
 
   const viewDashboard = async (id: number) => {
     try {
