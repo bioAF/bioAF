@@ -9,6 +9,7 @@ import { PlotModal } from "@/components/shared/PlotModal";
 import { ExportPdfButton } from "@/components/shared/ExportPdfButton";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { GenericQCDashboard } from "@/components/qc/GenericQCDashboard";
+import { QCAiReviewSection } from "@/components/qc/QCAiReviewSection";
 import { api } from "@/lib/api";
 import { useFileContentUrl } from "@/hooks/useContentUrl";
 import type { QCDashboardSummary, QCDashboardResponse } from "@/lib/types";
@@ -98,6 +99,10 @@ function DashboardDetail({ dashboard, onBack, onRegenerate, regenerating, onExpa
             </button>
             <QualityBadge rating={rating} />
           </div>
+        </div>
+
+        <div data-html2canvas-ignore="true">
+          <QCAiReviewSection pipelineRunId={dashboard.pipeline_run_id} />
         </div>
 
         <GenericQCDashboard dashboard={dashboard} />

@@ -24,6 +24,11 @@ jest.mock("@/components/shared/ContentLoading", () => ({ ContentLoading: () => n
 jest.mock("@/components/shared/PlotModal", () => ({ PlotModal: () => null }));
 jest.mock("@/components/shared/ExportPdfButton", () => ({ ExportPdfButton: () => null }));
 jest.mock("@/components/qc/GenericQCDashboard", () => ({ GenericQCDashboard: () => null }));
+jest.mock("@/components/qc/QCAiReviewSection", () => ({
+  QCAiReviewSection: (props: { pipelineRunId: number }) => (
+    <div data-testid="qc-ai-section">ai:{props.pipelineRunId}</div>
+  ),
+}));
 jest.mock("@/hooks/useContentUrl", () => ({
   useFileContentUrl: () => "blob:fake",
   usePlotThumbnailContentUrl: () => "blob:fake",
@@ -115,6 +120,8 @@ describe("QCDashboardsPage deep link", () => {
       "/pipelines/runs/42",
     );
     expect(mockGet).toHaveBeenCalledWith("/api/qc-dashboards/by-run/42");
+    // The AI Review section is surfaced on the report for that run.
+    expect(screen.getByTestId("qc-ai-section")).toHaveTextContent("ai:42");
   });
 
   test("without ?run= it shows the list, not a detail", async () => {
