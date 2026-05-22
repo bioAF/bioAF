@@ -312,11 +312,7 @@ async def test_in_app_notification_carries_entity_reference(session, admin_user)
     )
 
     rows = (
-        (
-            await session.execute(
-                select(Notification).where(Notification.event_type == PIPELINE_COMPLETED)
-            )
-        )
+        (await session.execute(select(Notification).where(Notification.event_type == PIPELINE_COMPLETED)))
         .scalars()
         .all()
     )
@@ -375,13 +371,7 @@ async def test_in_app_notification_preserves_explicit_metadata(session, admin_us
     )
 
     rows = (
-        (
-            await session.execute(
-                select(Notification).where(Notification.event_type == FILES_CATALOGED)
-            )
-        )
-        .scalars()
-        .all()
+        (await session.execute(select(Notification).where(Notification.event_type == FILES_CATALOGED))).scalars().all()
     )
     n = next(r for r in rows if r.user_id == admin_user.id)
     assert n.metadata_json.get("file_id") == 99

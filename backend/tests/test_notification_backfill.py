@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import select
 
 from app.models.activity_feed import ActivityFeedEntry
 from app.models.notification import Notification

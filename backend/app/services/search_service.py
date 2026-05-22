@@ -40,9 +40,7 @@ class SearchService:
             .limit(limit_per_type)
         )
         for e in exp_rows.scalars():
-            results.append(
-                {"entity_type": "experiment", "entity_id": e.id, "name": e.name, "experiment_id": e.id}
-            )
+            results.append({"entity_type": "experiment", "entity_id": e.id, "name": e.name, "experiment_id": e.id})
 
         sample_rows = await session.execute(
             select(Sample)

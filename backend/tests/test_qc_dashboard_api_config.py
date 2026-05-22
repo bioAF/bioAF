@@ -125,9 +125,7 @@ async def test_get_dashboard_includes_run_context(client, admin_token, session, 
     proj = Project(organization_id=org_id, name="Project Aardvark")
     session.add(proj)
     await session.flush()
-    exp = Experiment(
-        organization_id=org_id, name="Experiment Beluga", owner_user_id=admin_user.id, status="processing"
-    )
+    exp = Experiment(organization_id=org_id, name="Experiment Beluga", owner_user_id=admin_user.id, status="processing")
     session.add(exp)
     await session.flush()
     run = PipelineRun(
