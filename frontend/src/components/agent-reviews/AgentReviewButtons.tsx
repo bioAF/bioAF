@@ -22,26 +22,25 @@ export function AgentReviewButtons({
 }: AgentReviewButtonsProps) {
   const { canAccess } = usePermissions();
   const canUse = canAccess("llm_integration", "use");
-  // Track which provider is active, not just whether one exists, so we can
-  // hide the buttons when Gemma is active. The self-hosted Gemma dispatch
-  // is stubbed in v1, so triggering a review with Gemma active leaves the
-  // job in 'pending' forever. Hiding the buttons protects users from that.
-  const [activeProvider, setActiveProvider] = useState<string | null | undefined>(undefined);
+  // Whether AI Review can actually run for this org (an active, non-gemma
+  // provider with a model). Sourced from the availability endpoint, which is
+  // readable by anyone who can use AI Review, unlike the admin-only providers
+  // endpoint. undefined while loading.
+  const [enabled, setEnabled] = useState<boolean | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     if (!canUse) return;
     api
-      .get<{ active_provider: string | null }>("/api/integrations/llm/providers")
-      .then((d) => setActiveProvider(d.active_provider))
-      .catch(() => setActiveProvider(null));
+      .get<{ enabled: boolean }>("/api/agent_reviews/availability")
+      .then((d) => setEnabled(d.enabled))
+      .catch(() => setEnabled(false));
   }, [canUse]);
 
   if (!canUse) return null;
-  if (activeProvider === undefined) return null;
-  if (activeProvider === null) return null;
-  if (activeProvider === "gemma") return null;
+  if (enabled === undefined) return null;
+  if (!enabled) return null;
   if (mode === "pipeline_run" && pipelineStatus !== "completed") return null;
   if (mode === "experiment" && experimentId === null) return null;
 
