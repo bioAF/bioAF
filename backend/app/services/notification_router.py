@@ -26,6 +26,24 @@ from app.services.notification_channels.slack_adapter import SlackChannel
 logger = logging.getLogger("bioaf.notification_router")
 
 
+def build_notification_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    """Compose the metadata persisted on an in-app notification.
+
+    The frontend deep-links a notification to its associated item using the
+    entity reference, so every notification carries ``entity_type`` and
+    ``entity_id`` in ``metadata_json``. Any explicit ``metadata`` on the event
+    is preserved and takes precedence over the top-level entity reference.
+    """
+    metadata = dict(payload.get("metadata") or {})
+    entity_type = payload.get("entity_type")
+    entity_id = payload.get("entity_id")
+    if entity_type is not None:
+        metadata.setdefault("entity_type", entity_type)
+    if entity_id is not None:
+        metadata.setdefault("entity_id", entity_id)
+    return metadata
+
+
 class NotificationRouter:
     """Routes platform events to notification channels based on rules and preferences."""
 
@@ -52,6 +70,10 @@ class NotificationRouter:
         entity_type = payload.get("entity_type")
         entity_id = payload.get("entity_id")
         summary = payload.get("summary", title)
+        # Notifications deep-link to their associated item, so persist the entity
+        # reference alongside any explicit metadata (the activity feed keeps its
+        # own entity_type/entity_id columns and uses the raw metadata).
+        notification_metadata = build_notification_metadata(payload)
 
         async with self._session_factory() as session:
             # Write activity feed entry
@@ -92,7 +114,7 @@ class NotificationRouter:
                     title=title,
                     message=message,
                     severity=severity,
-                    metadata=metadata,
+                    metadata=notification_metadata,
                 )
                 if first_notification_id is None:
                     first_notification_id = notification.id

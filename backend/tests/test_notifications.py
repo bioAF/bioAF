@@ -287,6 +287,86 @@ async def test_test_delivery(client: AsyncClient, admin_token: str):
 
 
 @pytest.mark.asyncio
+async def test_in_app_notification_carries_entity_reference(session, admin_user):
+    """An in-app notification must carry the associated entity in metadata_json so
+    the UI can deep-link to it, even when the event sets no explicit metadata."""
+    import app.database as _database
+    from sqlalchemy import select
+
+    from app.models.notification import Notification
+    from app.services.event_types import PIPELINE_COMPLETED
+    from app.services.notification_router import NotificationRouter
+
+    org_id = admin_user.organization_id
+    router = NotificationRouter(_database.async_session_factory)
+    await router._handle_event(
+        {
+            "event_type": PIPELINE_COMPLETED,
+            "org_id": org_id,
+            "target_user_id": admin_user.id,
+            "entity_type": "pipeline_run",
+            "entity_id": 4242,
+            "title": "Pipeline 'scrnaseq' completed",
+            "message": "Run 4242 finished successfully",
+        }
+    )
+
+    rows = (
+        (
+            await session.execute(
+                select(Notification).where(Notification.event_type == PIPELINE_COMPLETED)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) >= 1
+    n = next(r for r in rows if r.user_id == admin_user.id)
+    assert n.metadata_json.get("entity_type") == "pipeline_run"
+    assert n.metadata_json.get("entity_id") == 4242
+
+
+@pytest.mark.asyncio
+async def test_in_app_notification_preserves_explicit_metadata(session, admin_user):
+    """Enriching with the entity reference must not drop explicit metadata keys."""
+    import app.database as _database
+    from sqlalchemy import select
+
+    from app.models.notification import Notification
+    from app.services.event_types import FILES_CATALOGED
+    from app.services.notification_router import NotificationRouter
+
+    org_id = admin_user.organization_id
+    router = NotificationRouter(_database.async_session_factory)
+    await router._handle_event(
+        {
+            "event_type": FILES_CATALOGED,
+            "org_id": org_id,
+            "target_user_id": admin_user.id,
+            "entity_type": "ingest_event",
+            "entity_id": 7,
+            "metadata": {"file_id": 99, "file_type": "fastq"},
+            "title": "File cataloged: sample_R1.fastq.gz",
+        }
+    )
+
+    rows = (
+        (
+            await session.execute(
+                select(Notification).where(Notification.event_type == FILES_CATALOGED)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    n = next(r for r in rows if r.user_id == admin_user.id)
+    assert n.metadata_json.get("file_id") == 99
+    assert n.metadata_json.get("file_type") == "fastq"
+    assert n.metadata_json.get("entity_type") == "ingest_event"
+    assert n.metadata_json.get("entity_id") == 7
+
+
+@pytest.mark.asyncio
 async def test_filter_notifications(client: AsyncClient, admin_token: str, admin_user, session):
     from app.models.notification import Notification
 
