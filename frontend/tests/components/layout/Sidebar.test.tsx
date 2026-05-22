@@ -206,4 +206,26 @@ describe("Sidebar", () => {
     expect(screen.getByText("Work Nodes")).toBeInTheDocument();
     expect(screen.getByText("Compute Environments")).toBeInTheDocument();
   });
+
+  it("shows Results to a role with only pipelines:view (View Results via OR)", () => {
+    mockRoleName.mockReturnValue("custom");
+    mockCanAccess.mockImplementation(
+      (resource: string, action: string) => resource === "pipelines" && action === "view",
+    );
+    render(<Sidebar />);
+    const nav = screen.getByTestId("sidebar-nav");
+    expect(nav).toHaveTextContent("Results");
+    fireEvent.click(screen.getByText("Results"));
+    expect(screen.getByText("QC Dashboards")).toBeInTheDocument();
+  });
+
+  it("hides Results from a role with neither experiments nor pipelines view", () => {
+    mockRoleName.mockReturnValue("custom");
+    mockCanAccess.mockImplementation(
+      (resource: string, action: string) => resource === "samples" && action === "view",
+    );
+    render(<Sidebar />);
+    const nav = screen.getByTestId("sidebar-nav");
+    expect(nav).not.toHaveTextContent("Results");
+  });
 });

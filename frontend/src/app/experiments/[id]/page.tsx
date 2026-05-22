@@ -21,6 +21,7 @@ import { AutoRunConfigSection } from "@/components/experiments/AutoRunConfigSect
 import { ExtensibleVocabularySelect } from "@/components/shared/ExtensibleVocabularySelect";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useFileContentUrl } from "@/hooks/useContentUrl";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
 import { AgentReviewTab } from "@/components/agent-reviews/AgentReviewTab";
@@ -67,7 +68,10 @@ function ExperimentDetailPageInner() {
   const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams();
+  const { canAccess } = usePermissions();
   const id = params.id as string;
+  const canViewResults =
+    canAccess("experiments", "view") || canAccess("pipelines", "view");
 
   const [experiment, setExperiment] = useState<ExperimentDetail | null>(null);
   const [samples, setSamples] = useState<Sample[]>([]);
@@ -445,7 +449,7 @@ function ExperimentDetailPageInner() {
     { key: "literature", label: "Literature" },
     { key: "analysis", label: "Analysis" },
     { key: "pipelines", label: "Pipeline Runs" },
-    { key: "results", label: "Results" },
+    ...(canViewResults ? [{ key: "results" as Tab, label: "Results" }] : []),
     { key: "provenance", label: "Provenance" },
     { key: "audit", label: "Audit Trail" },
     { key: "agent_review", label: "AI Review" },

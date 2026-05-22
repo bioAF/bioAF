@@ -21,7 +21,8 @@ jest.mock("@/components/SnapshotTimeline", () => ({ __esModule: true, default: (
 jest.mock("@/components/provenance/ProvenanceReportPanel", () => ({
   ProvenanceReportPanel: () => <div />,
 }));
-jest.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ canAccess: () => true }) }));
+const mockCanAccess = jest.fn(() => true);
+jest.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ canAccess: mockCanAccess }) }));
 jest.mock("@/lib/auth", () => ({
   isAuthenticated: () => true,
   getToken: () => "test-token",
@@ -72,6 +73,7 @@ jest.mock("@/lib/api", () => ({
 }));
 
 beforeEach(() => {
+  mockCanAccess.mockReturnValue(true);
   mockGet.mockReset();
   mockGet.mockImplementation((path: string) => {
     if (path === "/api/experiments/1") return Promise.resolve(mockExperiment);
@@ -102,5 +104,12 @@ describe("Experiment Detail - Results Tab", () => {
     fireEvent.click(screen.getByText("Run #42"));
 
     expect(await screen.findByTestId("qc-report-modal-stub")).toHaveTextContent("dash:9");
+  });
+
+  it("hides the Results tab when the user cannot view Results", async () => {
+    mockCanAccess.mockReturnValue(false);
+    render(<ExperimentDetailPage />);
+    await waitFor(() => screen.getByText("Test Experiment"));
+    expect(screen.queryByRole("button", { name: "Results" })).not.toBeInTheDocument();
   });
 });
