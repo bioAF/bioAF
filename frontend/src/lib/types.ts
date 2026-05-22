@@ -1276,6 +1276,8 @@ export interface SearchHit {
   entity_id: number;
   title: string;
   snippet: string | null;
+  /** Server-computed in-app destination for this hit. */
+  url: string;
   experiment_id: number | null;
   relevance_score: number | null;
 }
@@ -1285,6 +1287,8 @@ export interface SearchResult {
   total: number;
   page: number;
   page_size: number;
+  /** Per-type match counts for the searched types, for the type filter. */
+  type_counts: Record<string, number>;
 }
 
 export interface ProvenanceNode {

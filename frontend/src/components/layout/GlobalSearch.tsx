@@ -69,12 +69,24 @@ export function GlobalSearch({ debounceMs = DEFAULT_DEBOUNCE_MS }: { debounceMs?
     router.push(searchHitHref(hit));
   };
 
+  // Enter on a non-empty query opens the full search results page (`/search`),
+  // instead of forcing the user to pick one of the dropdown hits. The term is
+  // left in the box; the search page pre-fills from it.
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter") return;
+    const q = query.trim();
+    if (!q) return;
+    setOpen(false);
+    router.push(`/search?q=${encodeURIComponent(q)}`);
+  };
+
   return (
     <div className="relative w-full max-w-md" ref={containerRef}>
       <input
         type="search"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={onKeyDown}
         onFocus={() => {
           if (results.length > 0) setOpen(true);
         }}

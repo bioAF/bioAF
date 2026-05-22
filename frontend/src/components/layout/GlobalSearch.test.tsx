@@ -53,3 +53,24 @@ test("shows a no-matches message when nothing is found", async () => {
   fireEvent.change(screen.getByRole("searchbox"), { target: { value: "zzz" } });
   expect(await screen.findByText(/no matches/i)).toBeInTheDocument();
 });
+
+test("pressing Enter on a non-empty query opens the full search page", () => {
+  mockGet.mockResolvedValue({ results: [] });
+  render(<GlobalSearch debounceMs={10} />);
+  const input = screen.getByRole("searchbox");
+
+  fireEvent.change(input, { target: { value: "common term" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+
+  expect(mockPush).toHaveBeenCalledWith("/search?q=common%20term");
+});
+
+test("pressing Enter on a blank query does not navigate", () => {
+  render(<GlobalSearch debounceMs={10} />);
+  const input = screen.getByRole("searchbox");
+
+  fireEvent.change(input, { target: { value: "   " } });
+  fireEvent.keyDown(input, { key: "Enter" });
+
+  expect(mockPush).not.toHaveBeenCalled();
+});

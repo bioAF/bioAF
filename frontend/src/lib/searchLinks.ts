@@ -35,6 +35,12 @@ export function searchHitTypeLabel(entityType: string): string {
       return "Run";
     case "file":
       return "File";
+    case "project":
+      return "Project";
+    case "pipeline_definition":
+      return "Pipeline";
+    case "literature_paper":
+      return "Paper";
     default:
       return entityType;
   }
