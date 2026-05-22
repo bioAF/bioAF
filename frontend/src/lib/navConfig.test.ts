@@ -75,3 +75,19 @@ describe("Experiments surfaced as a top-level section", () => {
     ]);
   });
 });
+
+describe("top-level nav order", () => {
+  it("lists sections in the intended order", () => {
+    expect(navConfig.map((s) => s.label)).toEqual([
+      "Dashboard",
+      "Experiments",
+      "Pipelines",
+      "Results",
+      "Workbench",
+      "Data & Files",
+      "Profile",
+      "Infrastructure",
+      "Settings",
+    ]);
+  });
+});
