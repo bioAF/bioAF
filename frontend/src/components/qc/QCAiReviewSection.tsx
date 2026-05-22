@@ -46,7 +46,7 @@ export function QCAiReviewSection({ pipelineRunId }: { pipelineRunId: number }) 
     // list error does not also hide the surface via a falsey "enabled".
     try {
       const avail = await api.get<{ enabled: boolean }>("/api/agent_reviews/availability");
-      setEnabled(avail.enabled);
+      setEnabled(avail?.enabled === true);
     } catch {
       setEnabled(false);
     }
@@ -55,7 +55,7 @@ export function QCAiReviewSection({ pipelineRunId }: { pipelineRunId: number }) 
       const list = await api.get<ListResponse>(
         `/api/agent_reviews?entity_type=pipeline_run&entity_id=${pipelineRunId}&filter=all`,
       );
-      setItems(list.items);
+      setItems(Array.isArray(list?.items) ? list.items : []);
     } catch (e) {
       setError((e as Error).message);
     }

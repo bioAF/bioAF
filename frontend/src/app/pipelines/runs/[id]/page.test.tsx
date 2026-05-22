@@ -36,6 +36,9 @@ jest.mock("@/hooks/useContentUrl", () => ({
   useFileContentUrl: () => "blob:fake-file",
   usePlotThumbnailContentUrl: () => "blob:fake-thumb",
 }));
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({ canAccess: () => true, roleName: "admin", loading: false, permissions: new Set() }),
+}));
 
 import PipelineRunDetailPage from "./page";
 import { api } from "@/lib/api";
