@@ -1,17 +1,40 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { PlotThumbnail } from "./PlotThumbnail";
-import type { PlotArchiveResponse } from "@/lib/types";
+import type { FileResponse, PlotArchiveResponse } from "@/lib/types";
 
 jest.mock("@/hooks/useContentUrl", () => ({
   useFileContentUrl: (id: number | null) => (id ? `file-url-${id}` : null),
   usePlotThumbnailContentUrl: (id: number | null) => (id ? `thumb-url-${id}` : null),
 }));
 
+function fileStub(overrides: Partial<FileResponse> = {}): FileResponse {
+  return {
+    id: 7,
+    filename: "plot.png",
+    gcs_uri: "gs://bucket/plot.png",
+    size_bytes: 1024,
+    md5_checksum: "abc",
+    file_type: "png",
+    tags: [],
+    uploader: null,
+    project_id: null,
+    experiment_id: 1,
+    sample_ids: [],
+    source_type: "pipeline",
+    source_pipeline_run_id: null,
+    source_notebook_session_id: null,
+    storage_deleted: false,
+    upload_timestamp: "2026-05-14T00:00:00Z",
+    created_at: "2026-05-14T00:00:00Z",
+    ...overrides,
+  };
+}
+
 function plot(overrides: Partial<PlotArchiveResponse> = {}): PlotArchiveResponse {
   return {
     id: 1,
     title: "UMAP",
-    file: { id: 7, file_type: "png", storage_deleted: false },
+    file: fileStub(),
     experiment_id: 1,
     experiment_name: null,
     project_name: null,
@@ -39,7 +62,7 @@ it("renders an image preview from file content for a non-PDF plot", () => {
 it("renders the generated thumbnail for a PDF plot that has one", () => {
   render(
     <PlotThumbnail
-      plot={plot({ file: { id: 7, file_type: "pdf", storage_deleted: false }, thumbnail_url: "x" })}
+      plot={plot({ file: fileStub({ file_type: "pdf" }), thumbnail_url: "x" })}
       onClick={jest.fn()}
     />,
   );
@@ -51,7 +74,7 @@ it("shows a PDF icon (still clickable) when a PDF has no thumbnail", () => {
   const onClick = jest.fn();
   render(
     <PlotThumbnail
-      plot={plot({ file: { id: 7, file_type: "pdf", storage_deleted: false }, thumbnail_url: null })}
+      plot={plot({ file: fileStub({ file_type: "pdf" }), thumbnail_url: null })}
       onClick={onClick}
     />,
   );
