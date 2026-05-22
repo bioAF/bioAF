@@ -11,7 +11,6 @@ import { DataExportModal } from "@/components/experiments/DataExportModal";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { PlotModal } from "@/components/shared/PlotModal";
 import { DetailModal } from "@/components/shared/DetailModal";
-import { ExportPdfButton } from "@/components/shared/ExportPdfButton";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportPanel";
 import { FileBrowser } from "@/components/files/FileBrowser";
@@ -21,11 +20,14 @@ import { CsvUploadModal } from "@/components/experiments/CsvUploadModal";
 import { AutoRunConfigSection } from "@/components/experiments/AutoRunConfigSection";
 import { ExtensibleVocabularySelect } from "@/components/shared/ExtensibleVocabularySelect";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
-import { api } from "@/lib/api";
-import { useFileContentUrl } from "@/hooks/useContentUrl";
+import { api, fileContentUrl, plotThumbnailContentUrl } from "@/lib/api";
+import { usePermissions } from "@/hooks/usePermissions";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
 import { AgentReviewTab } from "@/components/agent-reviews/AgentReviewTab";
 import { AgentReviewButtons } from "@/components/agent-reviews/AgentReviewButtons";
+import { QCReportModal } from "@/components/qc/QCReportModal";
+import { QCDashboardListItem } from "@/components/qc/QCDashboardListItem";
+import { PlotThumbnail, StorageDeletedPlaceholder } from "@/components/plots/PlotThumbnail";
 import { ExperimentTabKey, resolveExperimentTab } from "@/lib/experimentTabs";
 import type {
   ExperimentDetail,
@@ -48,7 +50,6 @@ import type {
   PipelineRunListResponse,
   PipelineRunStatus,
   QCDashboardSummary,
-  QCDashboardResponse,
   CellxgenePublicationResponse,
   PlotArchiveResponse,
   PlotArchiveListResponse,
@@ -68,7 +69,10 @@ function ExperimentDetailPageInner() {
   const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams();
+  const { canAccess } = usePermissions();
   const id = params.id as string;
+  const canViewResults =
+    canAccess("experiments", "view") || canAccess("pipelines", "view");
 
   const [experiment, setExperiment] = useState<ExperimentDetail | null>(null);
   const [samples, setSamples] = useState<Sample[]>([]);
@@ -446,7 +450,7 @@ function ExperimentDetailPageInner() {
     { key: "literature", label: "Literature" },
     { key: "analysis", label: "Analysis" },
     { key: "pipelines", label: "Pipeline Runs" },
-    { key: "results", label: "Results" },
+    ...(canViewResults ? [{ key: "results" as Tab, label: "Results" }] : []),
     { key: "provenance", label: "Provenance" },
     { key: "audit", label: "Audit Trail" },
     { key: "agent_review", label: "AI Review" },
@@ -1397,67 +1401,15 @@ function ExperimentDetailPageInner() {
 
 /* ─── Experiment Results Tab ─── */
 
-function ResultsPlotImage({ fileId, title, onExpand }: { fileId: number; title: string; onExpand: (url: string) => void }) {
-  const [error, setError] = useState(false);
-  const url = useFileContentUrl(fileId);
-
-  return (
-    <div className="relative bg-gray-100 rounded min-h-[10rem] flex items-center justify-center group">
-      {error ? (
-        <span className="text-gray-400 text-sm">Failed to load plot</span>
-      ) : !url ? (
-        <span className="text-gray-400 text-sm">Loading...</span>
-      ) : (
-        <>
-          <img src={url} alt={title} className="w-full rounded" onError={() => setError(true)} />
-          <button
-            onClick={() => onExpand(url)}
-            className="absolute top-2 right-2 p-1.5 bg-white/80 rounded shadow opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white"
-            title="Expand plot"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5" />
-            </svg>
-          </button>
-        </>
-      )}
-    </div>
-  );
-}
-
-function ExperimentPlotThumbnail({
-  fileId,
-  title,
-  onExpand,
-}: {
-  fileId: number;
-  title: string;
-  onExpand: (url: string) => void;
-}) {
-  const [error, setError] = useState(false);
-  const url = useFileContentUrl(fileId);
-
-  if (error) return <span className="text-gray-400 text-xs">Failed to load</span>;
-  if (!url) return <span className="text-gray-400 text-xs">Loading...</span>;
-  return (
-    <img
-      src={url}
-      alt={title}
-      className="w-full h-full object-cover cursor-pointer"
-      onClick={() => onExpand(url)}
-      onError={() => setError(true)}
-    />
-  );
-}
-
 function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
   const [qcDashboards, setQcDashboards] = useState<QCDashboardSummary[]>([]);
-  const [selectedQc, setSelectedQc] = useState<QCDashboardResponse | null>(null);
-  const [regenerating, setRegenerating] = useState(false);
+  const [modalDashboardId, setModalDashboardId] = useState<number | null>(null);
   const [cellxgenePubs, setCellxgenePubs] = useState<CellxgenePublicationResponse[]>([]);
   const [plots, setPlots] = useState<PlotArchiveResponse[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expandedPlot, setExpandedPlot] = useState<{ url: string; title: string } | null>(null);
+  const [expandedUrl, setExpandedUrl] = useState<string | null>(null);
+  const [expandedTitle, setExpandedTitle] = useState("");
+  const [expandedPlot, setExpandedPlot] = useState<PlotArchiveResponse | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -1478,44 +1430,17 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
     })();
   }, [experimentId]);
 
-  const viewQcDashboard = async (id: number) => {
-    try {
-      const data = await api.get<QCDashboardResponse>(`/api/qc-dashboards/${id}`);
-      setSelectedQc(data);
-    } catch {
-      // Dashboard may have been regenerated (old ID deleted). Refresh the list.
-      try {
-        const updated = await api.get<QCDashboardSummary[]>(`/api/qc-dashboards?experiment_id=${experimentId}`);
-        setQcDashboards(updated);
-      } catch {
-        // ignore
-      }
-    }
-  };
-
-  const regenerateQc = async (runId: number) => {
-    setRegenerating(true);
-    try {
-      const data = await api.post<QCDashboardResponse>(`/api/qc-dashboards/regenerate/${runId}`, {});
-      setSelectedQc(data);
-      // Refresh the list
-      const updated = await api.get<QCDashboardSummary[]>(`/api/qc-dashboards?experiment_id=${experimentId}`);
-      setQcDashboards(updated);
-    } catch {
-      // ignore
-    } finally {
-      setRegenerating(false);
-    }
-  };
-
-  const qualityColor = (rating: string) => {
-    switch (rating) {
-      case "excellent": return "bg-green-100 text-green-700";
-      case "good": return "bg-blue-100 text-blue-700";
-      case "acceptable": return "bg-yellow-100 text-yellow-700";
-      case "pending_review": return "bg-gray-100 text-gray-700";
-      default: return "bg-red-100 text-red-700";
-    }
+  const handleExpand = async (plot: PlotArchiveResponse) => {
+    const isPdf = plot.file?.file_type?.toLowerCase() === "pdf";
+    const url =
+      isPdf && plot.thumbnail_url
+        ? await plotThumbnailContentUrl(plot.id)
+        : plot.file
+          ? await fileContentUrl(plot.file.id)
+          : "";
+    setExpandedUrl(url);
+    setExpandedTitle(plot.title ?? "Plot");
+    setExpandedPlot(plot);
   };
 
   if (loading) return <p className="text-gray-400 text-sm">Loading results...</p>;
@@ -1525,100 +1450,16 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
       {/* QC Dashboards */}
       <section>
         <h2 className="text-lg font-semibold mb-3">QC Dashboards</h2>
-        {selectedQc ? (
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <button onClick={() => setSelectedQc(null)} className="text-blue-600 text-sm hover:underline">
-                Back to list
-              </button>
-              <ExportPdfButton
-                targetId="experiment-qc-content"
-                filename={`qc-dashboard-run-${selectedQc.pipeline_run_id}.pdf`}
-              />
-            </div>
-            <div id="experiment-qc-content" className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-bold">Run #{selectedQc.pipeline_run_id}</h3>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => regenerateQc(selectedQc.pipeline_run_id)}
-                    disabled={regenerating}
-                    className="px-3 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200 disabled:opacity-50"
-                  >
-                    {regenerating ? "Regenerating..." : "Regenerate"}
-                  </button>
-                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${qualityColor(selectedQc.metrics.quality_rating)}`}>
-                    {selectedQc.metrics.quality_rating}
-                  </span>
-                </div>
-              </div>
-              {selectedQc.summary_text && <p className="text-sm text-gray-600 mb-4" dangerouslySetInnerHTML={{ __html: selectedQc.summary_text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>") }} />}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-                {selectedQc.metrics.cell_count != null && (
-                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Cell Count</p><p className="font-semibold">{selectedQc.metrics.cell_count.toLocaleString()}</p></div>
-                )}
-                {selectedQc.metrics.median_genes_per_cell != null && (
-                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Median Genes/Cell</p><p className="font-semibold">{selectedQc.metrics.median_genes_per_cell.toLocaleString()}</p></div>
-                )}
-                {selectedQc.metrics.median_umi_per_cell != null && (
-                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Median UMI/Cell</p><p className="font-semibold">{selectedQc.metrics.median_umi_per_cell.toLocaleString()}</p></div>
-                )}
-                {selectedQc.metrics.mito_pct_median != null && (
-                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Mito %</p><p className="font-semibold">{selectedQc.metrics.mito_pct_median.toFixed(1)}%</p></div>
-                )}
-                {selectedQc.metrics.median_reads_per_cell != null && (
-                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Median Reads/Cell</p><p className="font-semibold">{selectedQc.metrics.median_reads_per_cell.toLocaleString()}</p></div>
-                )}
-                {selectedQc.metrics.saturation != null && (
-                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Saturation</p><p className="font-semibold">{(selectedQc.metrics.saturation * 100).toFixed(1)}%</p></div>
-                )}
-                {selectedQc.metrics.total_sequences != null && (
-                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Total Sequences</p><p className="font-semibold">{selectedQc.metrics.total_sequences.toLocaleString()}</p></div>
-                )}
-                {selectedQc.metrics.total_samples != null && (
-                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Samples</p><p className="font-semibold">{selectedQc.metrics.total_samples}</p></div>
-                )}
-                {selectedQc.metrics.percent_duplicates != null && (
-                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Duplication</p><p className="font-semibold">{selectedQc.metrics.percent_duplicates.toFixed(1)}%</p></div>
-                )}
-                {selectedQc.metrics.percent_gc != null && (
-                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">GC Content</p><p className="font-semibold">{selectedQc.metrics.percent_gc.toFixed(0)}%</p></div>
-                )}
-                {selectedQc.metrics.avg_sequence_length != null && (
-                  <div className="bg-gray-50 rounded p-3"><p className="text-xs text-gray-500">Avg Read Length</p><p className="font-semibold">{selectedQc.metrics.avg_sequence_length.toFixed(0)} bp</p></div>
-                )}
-              </div>
-              {selectedQc.plots.length > 0 && (
-                <div>
-                  <h4 className="font-medium mb-3">Plots</h4>
-                  <div className="grid grid-cols-2 gap-4">
-                    {selectedQc.plots.map((plot, i) => (
-                      <div key={i} className="border rounded-lg p-3">
-                        <p className="text-sm font-medium mb-2">{plot.title}</p>
-                        <ResultsPlotImage
-                          fileId={plot.file_id}
-                          title={plot.title}
-                          onExpand={(url) => setExpandedPlot({ url, title: plot.title })}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : qcDashboards.length === 0 ? (
+        {qcDashboards.length === 0 ? (
           <p className="text-gray-400 text-sm">No QC dashboards for this experiment.</p>
         ) : (
           <div className="bg-white rounded-lg shadow divide-y divide-gray-200">
             {qcDashboards.map((d) => (
-              <div key={d.id} onClick={() => viewQcDashboard(d.id)} className="p-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer">
-                <div>
-                  <p className="font-medium text-sm">Run #{d.pipeline_run_id}</p>
-                  <p className="text-xs text-gray-400">{d.cell_count != null ? `${d.cell_count.toLocaleString()} cells` : ""}</p>
-                </div>
-                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${qualityColor(d.quality_rating)}`}>{d.quality_rating}</span>
-              </div>
+              <QCDashboardListItem
+                key={d.id}
+                dashboard={d}
+                onClick={() => setModalDashboardId(d.id)}
+              />
             ))}
           </div>
         )}
@@ -1653,33 +1494,81 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
           <p className="text-gray-400 text-sm">No plots for this experiment.</p>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {plots.map((plot) => (
-              <div key={plot.id} className="bg-white rounded-lg shadow overflow-hidden">
-                <div className="aspect-square bg-gray-100 flex items-center justify-center">
-                  {plot.file ? (
-                    <ExperimentPlotThumbnail
-                      fileId={plot.file.id}
-                      title={plot.title ?? "Plot"}
-                      onExpand={(url) => setExpandedPlot({ url, title: plot.title ?? "Plot" })}
-                    />
-                  ) : (
-                    <span className="text-gray-400 text-xs">No preview</span>
-                  )}
+            {plots.map((plot) => {
+              const deleted = plot.file?.storage_deleted === true;
+              return (
+                <div
+                  key={plot.id}
+                  className={`bg-white rounded-lg shadow overflow-hidden transition-shadow ${deleted ? "opacity-60" : "hover:shadow-md"}`}
+                >
+                  <div className="aspect-square bg-gray-100 flex items-center justify-center relative">
+                    {deleted ? (
+                      <StorageDeletedPlaceholder />
+                    ) : plot.file ? (
+                      <PlotThumbnail plot={plot} onClick={() => handleExpand(plot)} />
+                    ) : (
+                      <span className="text-gray-400 text-xs">No preview</span>
+                    )}
+                    {plot.file && (
+                      <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 bg-black/50 text-white text-[10px] font-semibold uppercase rounded">
+                        {plot.file.file_type}
+                      </span>
+                    )}
+                  </div>
+                  <div className="p-2">
+                    <p
+                      className={`text-[11px] leading-tight font-medium line-clamp-2 ${deleted ? "text-gray-400" : ""}`}
+                      title={plot.title ?? undefined}
+                    >
+                      {plot.title}
+                    </p>
+                    {plot.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {plot.tags.slice(0, 3).map((tag) => (
+                          <span
+                            key={tag}
+                            className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px]"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="p-2">
-                  <p className="text-xs font-medium truncate">{plot.title}</p>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
 
-      {expandedPlot && (
+      {modalDashboardId !== null && (
+        <QCReportModal
+          dashboardId={modalDashboardId}
+          onClose={() => setModalDashboardId(null)}
+        />
+      )}
+
+      {expandedUrl && expandedPlot && (
         <PlotModal
-          url={expandedPlot.url}
-          title={expandedPlot.title}
-          onClose={() => setExpandedPlot(null)}
+          url={expandedUrl}
+          title={expandedTitle}
+          metadata={{
+            experimentName: expandedPlot.experiment_name,
+            projectName: expandedPlot.project_name,
+            pipelineRunId: expandedPlot.pipeline_run_id,
+            pipelineRunName: expandedPlot.pipeline_run_name,
+            notebookSessionId: expandedPlot.notebook_session_id,
+            notebookSessionType: expandedPlot.notebook_session_type,
+            sourceType: expandedPlot.source_type,
+            tags: expandedPlot.tags,
+            indexedAt: expandedPlot.indexed_at,
+            file: expandedPlot.file,
+          }}
+          onClose={() => {
+            setExpandedUrl(null);
+            setExpandedPlot(null);
+          }}
         />
       )}
     </div>

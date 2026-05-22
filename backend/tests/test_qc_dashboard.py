@@ -189,6 +189,60 @@ async def test_get_qc_dashboard_not_found(client, admin_token):
     assert resp.status_code == 404
 
 
+# --- Read access gating (View Results = experiments:view OR pipelines:view) ---
+
+
+@pytest_asyncio.fixture
+async def viewer_auth(viewer_token):
+    return {"Authorization": f"Bearer {viewer_token}"}
+
+
+@pytest_asyncio.fixture
+async def no_results_auth(session, admin_user):
+    """A role with neither experiments:view nor pipelines:view."""
+    from app.models.user import User
+    from app.services import role_service
+    from app.services.auth_service import AuthService
+
+    role = await role_service.create_role(
+        session,
+        admin_user.organization_id,
+        name="no_results_qc",
+        description="test no results",
+        permissions=[("samples", "view")],
+    )
+    await session.flush()
+    user = User(
+        email="no_results_qc@test.com",
+        password_hash=AuthService.hash_password("custompass123"),
+        role_id=role.id,
+        organization_id=admin_user.organization_id,
+        status="active",
+    )
+    session.add(user)
+    await session.flush()
+    await session.commit()
+    role_service.invalidate_cache()
+    token = AuthService.create_token(user.id, user.email, user.role_id, user.organization_id, role_name=role.name)
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.mark.asyncio
+async def test_qc_reads_visible_to_experiments_viewer(client, viewer_auth, qc_dashboard, experiment_with_run):
+    _, run = experiment_with_run
+    assert (await client.get("/api/qc-dashboards", headers=viewer_auth)).status_code == 200
+    assert (await client.get(f"/api/qc-dashboards/{qc_dashboard.id}", headers=viewer_auth)).status_code == 200
+    assert (await client.get(f"/api/qc-dashboards/by-run/{run.id}", headers=viewer_auth)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_qc_reads_forbidden_without_results_view(client, no_results_auth, qc_dashboard, experiment_with_run):
+    _, run = experiment_with_run
+    assert (await client.get("/api/qc-dashboards", headers=no_results_auth)).status_code == 403
+    assert (await client.get(f"/api/qc-dashboards/{qc_dashboard.id}", headers=no_results_auth)).status_code == 403
+    assert (await client.get(f"/api/qc-dashboards/by-run/{run.id}", headers=no_results_auth)).status_code == 403
+
+
 # --- Service unit tests ---
 
 
