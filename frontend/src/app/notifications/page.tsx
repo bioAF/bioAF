@@ -18,6 +18,7 @@ interface Notification {
   severity: string;
   read: boolean;
   created_at: string;
+  metadata_json?: Record<string, unknown> | null;
 }
 
 export default function NotificationsPage() {

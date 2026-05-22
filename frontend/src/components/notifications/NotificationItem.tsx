@@ -1,5 +1,8 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+import { notificationHref } from "@/lib/notificationLinks";
+
 interface Notification {
   id: number;
   event_type: string;
@@ -8,6 +11,7 @@ interface Notification {
   severity: string;
   read: boolean;
   created_at: string;
+  metadata_json?: Record<string, unknown> | null;
 }
 
 interface Props {
@@ -15,6 +19,8 @@ interface Props {
   onMarkRead: () => void;
   showActions?: boolean;
   onDelete?: () => void;
+  /** Called right before navigating, e.g. to close the dropdown. */
+  onNavigate?: () => void;
 }
 
 const severityColors: Record<string, string> = {
@@ -34,15 +40,25 @@ function timeAgo(dateStr: string): string {
   return `${days}d ago`;
 }
 
-export function NotificationItem({ notification, onMarkRead, showActions, onDelete }: Props) {
+export function NotificationItem({ notification, onMarkRead, showActions, onDelete, onNavigate }: Props) {
   const n = notification;
+  const router = useRouter();
+  const href = notificationHref(n);
+
+  const handleClick = () => {
+    if (!n.read) onMarkRead();
+    if (href) {
+      onNavigate?.();
+      router.push(href);
+    }
+  };
 
   return (
     <div
       className={`px-4 py-3 border-b border-gray-50 hover:bg-gray-50 cursor-pointer ${
         !n.read ? "bg-blue-50/50" : ""
       }`}
-      onClick={() => !n.read && onMarkRead()}
+      onClick={handleClick}
     >
       <div className="flex items-start gap-3">
         <span
