@@ -327,6 +327,30 @@ async def test_in_app_notification_carries_entity_reference(session, admin_user)
 
 
 @pytest.mark.asyncio
+async def test_notification_response_serializes_entity_reference():
+    """The API schema must expose metadata_json (with the entity reference) so the
+    frontend can build the deep link."""
+    from types import SimpleNamespace
+    from datetime import datetime, timezone
+
+    from app.schemas.notification import NotificationResponse
+
+    row = SimpleNamespace(
+        id=1,
+        event_type="pipeline.completed",
+        title="Pipeline 'scrnaseq' completed",
+        message="Run 555 finished",
+        severity="info",
+        read=False,
+        read_at=None,
+        metadata_json={"entity_type": "pipeline_run", "entity_id": 555},
+        created_at=datetime.now(timezone.utc),
+    )
+    resp = NotificationResponse.model_validate(row)
+    assert resp.metadata_json == {"entity_type": "pipeline_run", "entity_id": 555}
+
+
+@pytest.mark.asyncio
 async def test_in_app_notification_preserves_explicit_metadata(session, admin_user):
     """Enriching with the entity reference must not drop explicit metadata keys."""
     import app.database as _database
