@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { PlotModal } from "@/components/shared/PlotModal";
@@ -53,6 +54,12 @@ function DashboardDetail({ dashboard, onBack, onRegenerate, regenerating, onExpa
   onExpandPlot: (url: string, title: string) => void;
 }) {
   const rating = dashboard.metrics.quality_rating;
+  const pipelineLabel = dashboard.pipeline_name
+    ? `${dashboard.pipeline_name}${dashboard.pipeline_version ? ` v${dashboard.pipeline_version}` : ""}`
+    : null;
+  const contextParts = [dashboard.project_name, dashboard.experiment_name, pipelineLabel].filter(
+    Boolean,
+  );
 
   return (
     <div className="space-y-6">
@@ -67,8 +74,19 @@ function DashboardDetail({ dashboard, onBack, onRegenerate, regenerating, onExpa
       </div>
 
       <div id="qc-dashboard-content" className="bg-white rounded-lg shadow p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-bold">QC Dashboard - Run #{dashboard.pipeline_run_id}</h2>
+        <div className="flex items-start justify-between mb-6">
+          <div>
+            <h2 className="text-lg font-bold">QC Dashboard</h2>
+            <p className="text-sm text-gray-600 mt-0.5">
+              {contextParts.length > 0 && <span>{contextParts.join(" / ")} / </span>}
+              <Link
+                href={`/pipelines/runs/${dashboard.pipeline_run_id}`}
+                className="text-blue-600 hover:underline"
+              >
+                Run #{dashboard.pipeline_run_id}
+              </Link>
+            </p>
+          </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => onRegenerate(dashboard.pipeline_run_id)}

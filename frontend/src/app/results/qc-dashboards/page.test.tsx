@@ -12,6 +12,12 @@ jest.mock("next/navigation", () => ({
   useSearchParams: () => ({ get: (key: string) => (key === "run" ? mockRunParam : null) }),
 }));
 
+jest.mock("next/link", () => {
+  return function MockLink({ href, children }: { href: string; children: React.ReactNode }) {
+    return <a href={typeof href === "string" ? href : "#"}>{children}</a>;
+  };
+});
+
 jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => null }));
 jest.mock("@/components/layout/Header", () => ({ Header: () => null }));
 jest.mock("@/components/shared/ContentLoading", () => ({ ContentLoading: () => null }));
@@ -102,7 +108,12 @@ describe("QCDashboardsPage deep link", () => {
 
     render(<QCDashboardsPage />);
 
-    await waitFor(() => expect(screen.queryByText("QC Dashboard - Run #42")).toBeTruthy());
+    // Detail view opened: it shows the "Back to list" control and the run link.
+    await waitFor(() => expect(screen.queryByText("Back to list")).toBeTruthy());
+    expect(screen.getByRole("link", { name: /Run #42/i })).toHaveAttribute(
+      "href",
+      "/pipelines/runs/42",
+    );
     expect(mockGet).toHaveBeenCalledWith("/api/qc-dashboards/by-run/42");
   });
 
@@ -110,6 +121,30 @@ describe("QCDashboardsPage deep link", () => {
     mockGet.mockResolvedValue([]);
     render(<QCDashboardsPage />);
     await waitFor(() => expect(screen.queryByText("QC Dashboards")).toBeTruthy());
-    expect(screen.queryByText(/QC Dashboard - Run #/)).toBeNull();
+    expect(screen.queryByText(/Run #\d+/)).toBeNull();
+  });
+
+  test("the detail names the report by context and links back to the run", async () => {
+    mockRunParam = "42";
+    mockGet.mockImplementation((url: string) => {
+      if (url.includes("/by-run/42")) {
+        return Promise.resolve({
+          pipeline_run_id: 42,
+          project_name: "Project Aardvark",
+          experiment_name: "Experiment Beluga",
+          pipeline_name: "nf-core/scrnaseq",
+          pipeline_version: "2.6.0",
+          metrics: { quality_rating: "good" },
+          plots: [],
+        });
+      }
+      return Promise.resolve([]);
+    });
+
+    render(<QCDashboardsPage />);
+
+    const runLink = await screen.findByRole("link", { name: /Run #42/i });
+    expect(runLink).toHaveAttribute("href", "/pipelines/runs/42");
+    expect(screen.getByText(/Project Aardvark \/ Experiment Beluga \/ nf-core\/scrnaseq v2\.6\.0/)).toBeInTheDocument();
   });
 });
