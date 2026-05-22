@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useEffect, useState, Suspense } from "react";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { ExperimentStatusBadge } from "@/components/experiments/ExperimentStatusBadge";
@@ -26,6 +26,7 @@ import { useFileContentUrl } from "@/hooks/useContentUrl";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
 import { AgentReviewTab } from "@/components/agent-reviews/AgentReviewTab";
 import { AgentReviewButtons } from "@/components/agent-reviews/AgentReviewButtons";
+import { ExperimentTabKey, resolveExperimentTab } from "@/lib/experimentTabs";
 import type {
   ExperimentDetail,
   ExperimentUpdateRequest,
@@ -53,22 +54,20 @@ import type {
   PlotArchiveListResponse,
 } from "@/lib/types";
 
-type Tab =
-  | "overview"
-  | "samples"
-  | "batches"
-  | "files"
-  | "literature"
-  | "analysis"
-  | "pipelines"
-  | "results"
-  | "provenance"
-  | "audit"
-  | "agent_review";
+type Tab = ExperimentTabKey;
 
 export default function ExperimentDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <ExperimentDetailPageInner />
+    </Suspense>
+  );
+}
+
+function ExperimentDetailPageInner() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const id = params.id as string;
 
   const [experiment, setExperiment] = useState<ExperimentDetail | null>(null);
@@ -77,7 +76,7 @@ export default function ExperimentDetailPage() {
   const [seqBatches, setSeqBatches] = useState<SequencingBatch[]>([]);
   const [auditEntries, setAuditEntries] = useState<AuditLogEntry[]>([]);
   const [auditTotal, setAuditTotal] = useState(0);
-  const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [activeTab, setActiveTab] = useState<Tab>(() => resolveExperimentTab(searchParams?.get("tab")));
   const [loading, setLoading] = useState(true);
   const [aiReviewSignal, setAiReviewSignal] = useState(0);
 
