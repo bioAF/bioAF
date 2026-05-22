@@ -96,9 +96,7 @@ async def persist_app_sa_from_metadata(session: AsyncSession) -> bool:
 
     await session.execute(
         text(
-            "INSERT INTO platform_config (key, value) VALUES "
-            "('bioaf_app_sa_email', :v) "
-            "ON CONFLICT (key) DO NOTHING"
+            "INSERT INTO platform_config (key, value) VALUES ('bioaf_app_sa_email', :v) ON CONFLICT (key) DO NOTHING"
         ).bindparams(v=email)
     )
     await session.commit()

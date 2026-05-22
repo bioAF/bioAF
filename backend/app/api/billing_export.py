@@ -206,8 +206,7 @@ async def billing_export_verify(
             raise HTTPException(
                 status_code=500,
                 detail=(
-                    "Could not reconcile billing export permissions: "
-                    f"{heal.get('message') or 'Terraform apply failed'}"
+                    f"Could not reconcile billing export permissions: {heal.get('message') or 'Terraform apply failed'}"
                 ),
             )
         try:

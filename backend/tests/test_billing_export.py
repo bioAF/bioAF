@@ -222,9 +222,7 @@ async def test_billing_export_verify_self_heals_on_forbidden(client: AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_billing_export_verify_returns_500_when_heal_fails(
-    client: AsyncClient, admin_token: str, session
-):
+async def test_billing_export_verify_returns_500_when_heal_fails(client: AsyncClient, admin_token: str, session):
     """If the reconcile apply fails, surface a clear 500 rather than a raw 403."""
     await _seed_platform_config(session, {"billing_export_dataset": "billing_export"})
 

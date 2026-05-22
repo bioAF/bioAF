@@ -784,10 +784,7 @@ def test_resolve_runtime_sa_email_from_service_account_key():
         "gcp_credential_source": "service_account_key",
         "gcp_service_account_key": key,
     }
-    assert (
-        TerraformExecutor._resolve_runtime_sa_email(config)
-        == "bioaf-app@my-project.iam.gserviceaccount.com"
-    )
+    assert TerraformExecutor._resolve_runtime_sa_email(config) == "bioaf-app@my-project.iam.gserviceaccount.com"
 
 
 def test_resolve_runtime_sa_email_empty_when_unknown():
