@@ -6,12 +6,97 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.document import Document
 from app.models.experiment import Experiment
 from app.models.file import File
+from app.models.pipeline_run import PipelineRun
 from app.models.sample import Sample
 
 logger = logging.getLogger("bioaf.search_service")
 
 
 class SearchService:
+    @staticmethod
+    async def quick_search(
+        session: AsyncSession,
+        org_id: int,
+        query: str,
+        limit_per_type: int = 5,
+    ) -> list[dict]:
+        """Name-only "jump to" search for the header.
+
+        Matches by display name (case-insensitive substring) across experiments,
+        samples, pipeline runs, and files, scoped to the org. Returns at most
+        ``limit_per_type`` hits per entity type. Unlike the unified full-text
+        search, this only looks at each entity's name, never its other fields.
+        """
+        q = query.strip()
+        if not q:
+            return []
+        pattern = f"%{q}%"
+        results: list[dict] = []
+
+        exp_rows = await session.execute(
+            select(Experiment)
+            .where(Experiment.organization_id == org_id, Experiment.name.ilike(pattern))
+            .order_by(Experiment.name)
+            .limit(limit_per_type)
+        )
+        for e in exp_rows.scalars():
+            results.append(
+                {"entity_type": "experiment", "entity_id": e.id, "name": e.name, "experiment_id": e.id}
+            )
+
+        sample_rows = await session.execute(
+            select(Sample)
+            .where(
+                Sample.experiment_id.in_(select(Experiment.id).where(Experiment.organization_id == org_id)),
+                Sample.external_id.ilike(pattern),
+            )
+            .order_by(Sample.external_id)
+            .limit(limit_per_type)
+        )
+        for s in sample_rows.scalars():
+            results.append(
+                {
+                    "entity_type": "sample",
+                    "entity_id": s.id,
+                    "name": s.external_id or f"Sample {s.id}",
+                    "experiment_id": s.experiment_id,
+                }
+            )
+
+        run_rows = await session.execute(
+            select(PipelineRun)
+            .where(PipelineRun.organization_id == org_id, PipelineRun.pipeline_name.ilike(pattern))
+            .order_by(PipelineRun.id.desc())
+            .limit(limit_per_type)
+        )
+        for r in run_rows.scalars():
+            results.append(
+                {
+                    "entity_type": "pipeline_run",
+                    "entity_id": r.id,
+                    "name": f"{r.pipeline_name} (Run #{r.id})",
+                    "experiment_id": r.experiment_id,
+                }
+            )
+
+        file_rows = await session.execute(
+            select(File)
+            .where(File.organization_id == org_id, File.filename.ilike(pattern))
+            .order_by(File.filename)
+            .limit(limit_per_type)
+        )
+        for f in file_rows.scalars():
+            results.append(
+                {
+                    "entity_type": "file",
+                    "entity_id": f.id,
+                    "name": f.filename,
+                    "experiment_id": f.experiment_id,
+                }
+            )
+
+        return results
+
     @staticmethod
     async def search(
         session: AsyncSession,
