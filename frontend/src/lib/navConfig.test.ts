@@ -1,4 +1,4 @@
-import { isChildActive, NavChild } from "./navConfig";
+import { isChildActive, NavChild, navConfig } from "./navConfig";
 
 const projectChildren: NavChild[] = [
   { label: "Project List", path: "/projects" },
@@ -30,5 +30,31 @@ describe("isChildActive", () => {
 
   it("does not match unrelated paths", () => {
     expect(isChildActive("/pipelines/runs", projectChildren[0], projectChildren)).toBe(false);
+  });
+});
+
+const allChildren = (): NavChild[] => navConfig.flatMap((s) => s.children ?? []);
+
+describe("navConfig disambiguated labels", () => {
+  it("renames the two 'Environments' entries so each says what it is", () => {
+    const pipelines = navConfig.find((s) => s.label === "Pipelines");
+    const workbench = navConfig.find((s) => s.label === "Workbench");
+
+    expect(pipelines?.children?.find((c) => c.label === "Pipeline Environments")?.path).toBe(
+      "/pipelines/environments",
+    );
+    expect(workbench?.children?.find((c) => c.label === "Compute Environments")?.path).toBe(
+      "/environments",
+    );
+  });
+
+  it("has no bare 'Environments' label left to collide", () => {
+    expect(allChildren().some((c) => c.label === "Environments")).toBe(false);
+  });
+
+  it("has no two nav children sharing the same label", () => {
+    const labels = allChildren().map((c) => c.label);
+    const duplicates = labels.filter((l, i) => labels.indexOf(l) !== i);
+    expect(duplicates).toEqual([]);
   });
 });

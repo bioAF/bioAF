@@ -46,7 +46,7 @@ export const navConfig: NavSection[] = [
       { label: "Pipeline Catalog", path: "/pipelines/catalog", permission: { resource: "pipelines", action: "view" } },
       { label: "Custom Pipelines", path: "/pipelines/custom", permission: { resource: "custom_pipelines", action: "view" } },
       { label: "Pipeline Runs", path: "/pipelines/runs", permission: { resource: "pipelines", action: "view" } },
-      { label: "Environments", path: "/pipelines/environments", permission: { resource: "environments", action: "view" } },
+      { label: "Pipeline Environments", path: "/pipelines/environments", permission: { resource: "environments", action: "view" } },
     ],
   },
   {
@@ -65,7 +65,7 @@ export const navConfig: NavSection[] = [
     children: [
       { label: "Notebooks", path: "/notebooks", permission: { resource: "notebooks", action: "view" }, componentGate: { keys: ["jupyterhub", "rstudio"] } },
       { label: "Work Nodes", path: "/workbench/work-nodes", permission: { resource: "notebooks", action: "view" } },
-      { label: "Environments", path: "/environments", permission: { resource: "environments", action: "view" } },
+      { label: "Compute Environments", path: "/environments", permission: { resource: "environments", action: "view" } },
     ],
   },
   {
