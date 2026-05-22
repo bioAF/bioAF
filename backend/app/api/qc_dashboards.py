@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import delete as sa_delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_permission
+from app.api.dependencies import require_permission, require_results_view
 from app.database import get_session
 from app.models.experiment import Experiment
 from app.models.file import File
@@ -182,6 +182,7 @@ async def _dashboard_context(session: AsyncSession, org_id: int, d) -> dict:
 async def list_dashboards(
     request: Request,
     experiment_id: int | None = None,
+    _user: dict = require_results_view(),
     session: AsyncSession = Depends(get_session),
 ):
     current_user = request.state.current_user
@@ -206,6 +207,7 @@ async def list_dashboards(
 async def get_dashboard(
     dashboard_id: int,
     request: Request,
+    _user: dict = require_results_view(),
     session: AsyncSession = Depends(get_session),
 ):
     current_user = request.state.current_user
@@ -223,6 +225,7 @@ async def get_dashboard(
 async def get_dashboard_by_run(
     pipeline_run_id: int,
     request: Request,
+    _user: dict = require_results_view(),
     session: AsyncSession = Depends(get_session),
 ):
     current_user = request.state.current_user

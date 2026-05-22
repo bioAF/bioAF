@@ -14,6 +14,9 @@ export interface NavChild {
   label: string;
   path: string;
   permission?: PermissionRef;
+  /** Shown if the user holds ANY of these permissions. Combined with
+   * `permission` (which still must pass if set). */
+  anyPermissions?: PermissionRef[];
   componentGate?: ComponentGate;
 }
 
@@ -24,6 +27,7 @@ export interface NavSection {
   children?: NavChild[];
   adminOnly?: boolean;
   permission?: PermissionRef;
+  anyPermissions?: PermissionRef[];
   componentGate?: ComponentGate;
 }
 
@@ -54,9 +58,9 @@ export const navConfig: NavSection[] = [
     label: "Results",
     icon: "chart",
     children: [
-      { label: "QC Dashboards", path: "/results/qc-dashboards", permission: { resource: "experiments", action: "view" }, componentGate: { keys: ["qc_dashboard"] } },
-      { label: "Cellxgene", path: "/results/cellxgene", permission: { resource: "experiments", action: "view" }, componentGate: { keys: ["cellxgene"] } },
-      { label: "Plot Archive", path: "/results/plot-archive", permission: { resource: "experiments", action: "view" } },
+      { label: "QC Dashboards", path: "/results/qc-dashboards", anyPermissions: [{ resource: "experiments", action: "view" }, { resource: "pipelines", action: "view" }], componentGate: { keys: ["qc_dashboard"] } },
+      { label: "Cellxgene", path: "/results/cellxgene", anyPermissions: [{ resource: "experiments", action: "view" }, { resource: "pipelines", action: "view" }], componentGate: { keys: ["cellxgene"] } },
+      { label: "Plot Archive", path: "/results/plot-archive", anyPermissions: [{ resource: "experiments", action: "view" }, { resource: "pipelines", action: "view" }] },
     ],
   },
   {

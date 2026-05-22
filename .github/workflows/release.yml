@@ -27,10 +27,19 @@ jobs:
           token: ${{ secrets.RELEASE_PAT }}
           persist-credentials: true
 
-      - name: Configure git identity
-        run: |
-          git config user.name "bioaf-release-bot"
-          git config user.email "bioaf-release-bot@users.noreply.github.com"
+      # Imports the maintainer's GPG key so the release commit and tag are
+      # signed and show as Verified on GitHub. The action also sets the git
+      # committer identity to the key's UID (Brent Mills
+      # <brent.c.mills@gmail.com>); that email must stay a verified email on
+      # the account, or signatures will show Unverified.
+      - name: Import GPG signing key
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+          git_user_signingkey: true
+          git_commit_gpgsign: true
+          git_tag_gpgsign: true
 
       - name: Check for changelog entries
         id: check_entries
@@ -139,8 +148,11 @@ jobs:
           TAG: ${{ steps.compute.outputs.tag }}
         run: |
           git add backend/pyproject.toml cli/pyproject.toml frontend/package.json RELEASE_NOTES.md changes/unreleased
-          git commit -m "chore: release ${TAG} [skip ci]"
-          git tag "$TAG"
+          # -S signs the commit; -s makes a signed annotated tag (-m avoids the
+          # editor in CI). Both also follow from commit.gpgsign/tag.gpgsign set
+          # by the import step, but the explicit flags keep the intent clear.
+          git commit -S -m "chore: release ${TAG} [skip ci]"
+          git tag -s "$TAG" -m "Release ${TAG}"
           # Push the commit and the tag atomically. If the push is rejected
           # (concurrent merge raced us), the workflow fails and the next push
           # to main will re-run this job with a fresh N.

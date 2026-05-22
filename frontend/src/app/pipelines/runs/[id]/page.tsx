@@ -11,6 +11,7 @@ import { PipelineRunResultsTab } from "@/components/pipelines/PipelineRunResults
 import { AgentReviewTab } from "@/components/agent-reviews/AgentReviewTab";
 import { AgentReviewButtons } from "@/components/agent-reviews/AgentReviewButtons";
 import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBadge";
+import { usePermissions } from "@/hooks/usePermissions";
 import { isAuthenticated } from "@/lib/auth";
 import { getToken } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -154,7 +155,10 @@ function getUserRole(): string {
 export default function PipelineRunDetailPage() {
   const router = useRouter();
   const params = useParams();
+  const { canAccess } = usePermissions();
   const runId = params.id as string;
+  const canViewResults =
+    canAccess("experiments", "view") || canAccess("pipelines", "view");
 
   const [run, setRun] = useState<PipelineRunDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -370,7 +374,7 @@ export default function PipelineRunDetailPage() {
     ...(showReportTab ? [{ key: "report" as Tab, label: "Report" }] : []),
     { key: "parameters", label: "Parameters" },
     { key: "provenance", label: "Provenance" },
-    { key: "results", label: "Results" },
+    ...(canViewResults ? [{ key: "results" as Tab, label: "Results" }] : []),
     { key: "review", label: "Review" },
     { key: "agent_review", label: "AI Review" },
   ];

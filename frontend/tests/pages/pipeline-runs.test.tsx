@@ -29,6 +29,10 @@ jest.mock("@/hooks/useComponents", () => ({
   useComponents: () => ({ components: [], loading: false, refetch: jest.fn() }),
 }));
 
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({ canAccess: () => true, roleName: "admin", loading: false, permissions: new Set() }),
+}));
+
 // Mock API
 const mockApiGet = jest.fn();
 const mockApiPost = jest.fn();

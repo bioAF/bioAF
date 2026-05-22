@@ -9,6 +9,9 @@ import { PlotModal } from "@/components/shared/PlotModal";
 import { ExportPdfButton } from "@/components/shared/ExportPdfButton";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { GenericQCDashboard } from "@/components/qc/GenericQCDashboard";
+import { QCAiReviewSection } from "@/components/qc/QCAiReviewSection";
+import { QualityBadge } from "@/components/qc/QualityBadge";
+import { QCDashboardListItem } from "@/components/qc/QCDashboardListItem";
 import { api } from "@/lib/api";
 import { useFileContentUrl } from "@/hooks/useContentUrl";
 import type { QCDashboardSummary, QCDashboardResponse } from "@/lib/types";
@@ -100,6 +103,10 @@ function DashboardDetail({ dashboard, onBack, onRegenerate, regenerating, onExpa
           </div>
         </div>
 
+        <div data-html2canvas-ignore="true">
+          <QCAiReviewSection pipelineRunId={dashboard.pipeline_run_id} />
+        </div>
+
         <GenericQCDashboard dashboard={dashboard} />
 
         {dashboard.plots.length > 0 && (
@@ -121,24 +128,6 @@ function DashboardDetail({ dashboard, onBack, onRegenerate, regenerating, onExpa
         )}
       </div>
     </div>
-  );
-}
-
-function QualityBadge({ rating }: { rating: string }) {
-  const colorClass = (() => {
-    switch (rating) {
-      case "excellent": return "bg-green-100 text-green-700";
-      case "good": return "bg-blue-100 text-blue-700";
-      case "acceptable": return "bg-yellow-100 text-yellow-700";
-      case "pending_review": return "bg-gray-100 text-gray-700";
-      default: return "bg-red-100 text-red-700";
-    }
-  })();
-
-  return (
-    <span className={`px-3 py-1 rounded-full text-sm font-medium ${colorClass}`}>
-      {rating}
-    </span>
   );
 }
 
@@ -237,58 +226,9 @@ function QCDashboardsPageInner() {
             </p>
           ) : (
             <div className="bg-white rounded-lg shadow divide-y divide-gray-200">
-              {dashboards.map((d) => {
-                const samples = d.sample_external_ids ?? [];
-                const sampleDisplay =
-                  samples.length === 0
-                    ? null
-                    : samples.length <= 3
-                      ? samples.join(", ")
-                      : `${samples.slice(0, 3).join(", ")} +${samples.length - 3} more`;
-                return (
-                  <div
-                    key={d.id}
-                    onClick={() => viewDashboard(d.id)}
-                    className="p-4 flex items-start justify-between gap-4 hover:bg-gray-50 cursor-pointer"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline gap-2 flex-wrap">
-                        <p className="font-medium text-sm">Run #{d.pipeline_run_id}</p>
-                        {d.pipeline_name && (
-                          <span className="text-xs text-gray-600">
-                            {`${d.pipeline_name}${d.pipeline_version ? ` v${d.pipeline_version}` : ""}`}
-                          </span>
-                        )}
-                      </div>
-                      <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1 text-xs text-gray-600">
-                        {d.project_name && (
-                          <div>
-                            <span className="text-gray-400">Project:</span>{" "}
-                            <span className="text-gray-700">{d.project_name}</span>
-                          </div>
-                        )}
-                        {d.experiment_name && (
-                          <div>
-                            <span className="text-gray-400">Experiment:</span>{" "}
-                            <span className="text-gray-700">{d.experiment_name}</span>
-                          </div>
-                        )}
-                        {sampleDisplay && (
-                          <div className="sm:col-span-2 lg:col-span-1">
-                            <span className="text-gray-400">Samples:</span>{" "}
-                            <span className="text-gray-700">{sampleDisplay}</span>
-                          </div>
-                        )}
-                      </div>
-                      <p className="text-xs text-gray-400 mt-1">
-                        Generated {d.generated_at ? new Date(d.generated_at).toLocaleDateString() : "N/A"}
-                        {d.cell_count != null && ` | ${d.cell_count.toLocaleString()} cells`}
-                      </p>
-                    </div>
-                    <QualityBadge rating={d.quality_rating} />
-                  </div>
-                );
-              })}
+              {dashboards.map((d) => (
+                <QCDashboardListItem key={d.id} dashboard={d} onClick={() => viewDashboard(d.id)} />
+              ))}
             </div>
           )}
         </main>

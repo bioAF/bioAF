@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { GenericQCDashboard } from "@/components/qc/GenericQCDashboard";
+import { QCAiReviewSection } from "@/components/qc/QCAiReviewSection";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { PlotModal } from "@/components/shared/PlotModal";
 import { api, fileContentUrl, plotThumbnailContentUrl } from "@/lib/api";
@@ -198,6 +199,7 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
             Open in QC Dashboards
           </Link>
         </div>
+        <QCAiReviewSection pipelineRunId={pipelineRunId} />
         {dashboardLoading ? (
           <div className="flex items-center gap-2 text-gray-400">
             <LoadingSpinner size="sm" />
