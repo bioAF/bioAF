@@ -13,6 +13,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from google.api_core.exceptions import Forbidden
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -185,7 +186,42 @@ async def billing_export_verify(
     except Exception:
         logger.exception("Failed to load GCP credentials for BQ verification")
         creds = None
-    result = await BillingExportService.verify_dataset(project_id, dataset_id, credentials=creds)
+
+    try:
+        result = await BillingExportService.verify_dataset(project_id, dataset_id, credentials=creds)
+    except Forbidden:
+        # The dataset exists but the backend SA cannot read it. This is the
+        # pre-fix state where the dataViewer grant landed on the project's
+        # default compute SA instead of the runtime SA (ADR-028). Re-apply the
+        # billing_export module (as the impersonated bootstrap SA, which owns
+        # the dataset) to move the grant onto the runtime SA, then retry once.
+        logger.warning(
+            "BQ verify denied on %s.%s; re-applying billing_export to reconcile dataset IAM",
+            project_id,
+            dataset_id,
+        )
+        user_id = int(current_user["sub"])
+        heal = await deploy_billing_export_module(session, user_id)
+        if heal.get("status") != "completed":
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Could not reconcile billing export permissions: "
+                    f"{heal.get('message') or 'Terraform apply failed'}"
+                ),
+            )
+        try:
+            result = await BillingExportService.verify_dataset(project_id, dataset_id, credentials=creds)
+        except Forbidden:
+            logger.exception("BQ verify still denied after reconciling dataset IAM")
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Reconciled billing export permissions, but the dataset is not yet "
+                    "readable. IAM changes can take a few seconds to propagate; click "
+                    "Verify again shortly."
+                ),
+            )
 
     if not result["found"]:
         return BillingExportVerifyResponse(

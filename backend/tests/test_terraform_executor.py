@@ -764,6 +764,39 @@ def test_write_tfvars_compute_with_suffix():
     assert tfvars["stack_uid"] == "d4e5f6"
 
 
+def test_write_tfvars_billing_export_grants_runtime_app_sa():
+    """billing_export grants dataset read to the runtime SA (bioaf-app), not the
+    project's default compute SA (ADR-028)."""
+    tmp = Path(tempfile.mkdtemp(prefix="tf_test_"))
+    config = {
+        "gcp_project_id": "my-project",
+        "gcp_region": "us-central1",
+        "bioaf_app_sa_email": "bioaf-app@my-project.iam.gserviceaccount.com",
+    }
+    tfvars = TerraformExecutor._write_tfvars(tmp, "billing_export", config)
+    assert tfvars["backend_service_account_email"] == "bioaf-app@my-project.iam.gserviceaccount.com"
+
+
+def test_resolve_runtime_sa_email_from_service_account_key():
+    """service_account_key installs resolve the grantee from the key's client_email."""
+    key = json.dumps({"client_email": "bioaf-app@my-project.iam.gserviceaccount.com"})
+    config = {
+        "gcp_credential_source": "service_account_key",
+        "gcp_service_account_key": key,
+    }
+    assert (
+        TerraformExecutor._resolve_runtime_sa_email(config)
+        == "bioaf-app@my-project.iam.gserviceaccount.com"
+    )
+
+
+def test_resolve_runtime_sa_email_empty_when_unknown():
+    """No app SA and no key -> empty string, so the module keeps its default
+    compute SA fallback rather than granting a bogus member."""
+    assert TerraformExecutor._resolve_runtime_sa_email({}) == ""
+    assert TerraformExecutor._resolve_runtime_sa_email({"gcp_credential_source": "vm_default"}) == ""
+
+
 def test_write_tfvars_defaults():
     """_write_tfvars uses sensible defaults for missing config values."""
     tmp = Path(tempfile.mkdtemp(prefix="tf_test_"))

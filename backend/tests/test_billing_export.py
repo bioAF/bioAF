@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import urlparse
 
 import pytest
+from google.api_core.exceptions import Forbidden
 from httpx import AsyncClient
 from sqlalchemy import text
 
@@ -187,6 +188,61 @@ async def test_billing_export_verify_no_dataset(client: AsyncClient, admin_token
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_billing_export_verify_self_heals_on_forbidden(client: AsyncClient, admin_token: str, session):
+    """A 403 on the first read re-applies the module to fix the dataset grant,
+    then verify succeeds on retry (ADR-028 self-heal)."""
+    await _seed_platform_config(session, {"billing_export_dataset": "billing_export"})
+
+    heal = AsyncMock(return_value={"status": "completed"})
+    verify = AsyncMock(
+        side_effect=[
+            Forbidden("denied"),
+            {"found": True, "table_id": "gcp_billing_export_v1_ABC123"},
+        ]
+    )
+
+    with (
+        patch("app.api.billing_export.deploy_billing_export_module", heal),
+        patch("app.api.billing_export.BillingExportService.verify_dataset", verify),
+    ):
+        response = await client.post(
+            "/api/v1/infrastructure/billing-export/verify",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["configured"] is True
+    assert data["table_id"] == "gcp_billing_export_v1_ABC123"
+    heal.assert_awaited_once()
+    assert verify.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_billing_export_verify_returns_500_when_heal_fails(
+    client: AsyncClient, admin_token: str, session
+):
+    """If the reconcile apply fails, surface a clear 500 rather than a raw 403."""
+    await _seed_platform_config(session, {"billing_export_dataset": "billing_export"})
+
+    heal = AsyncMock(return_value={"status": "failed", "message": "apply boom"})
+    verify = AsyncMock(side_effect=Forbidden("denied"))
+
+    with (
+        patch("app.api.billing_export.deploy_billing_export_module", heal),
+        patch("app.api.billing_export.BillingExportService.verify_dataset", verify),
+    ):
+        response = await client.post(
+            "/api/v1/infrastructure/billing-export/verify",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+    assert response.status_code == 500
+    assert "apply boom" in response.json()["detail"]
+    heal.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
