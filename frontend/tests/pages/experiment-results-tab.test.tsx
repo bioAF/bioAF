@@ -70,6 +70,12 @@ jest.mock("@/lib/api", () => ({
     delete: jest.fn(),
   },
   fileContentUrl: (fileId: number) => `http://localhost:8000/api/files/${fileId}/content`,
+  plotThumbnailContentUrl: (id: number) => `http://localhost:8000/api/plots/${id}/thumbnail`,
+}));
+
+jest.mock("@/hooks/useContentUrl", () => ({
+  useFileContentUrl: (id: number | null) => (id ? `file-url-${id}` : null),
+  usePlotThumbnailContentUrl: (id: number | null) => (id ? `thumb-url-${id}` : null),
 }));
 
 beforeEach(() => {
@@ -79,11 +85,47 @@ beforeEach(() => {
     if (path === "/api/experiments/1") return Promise.resolve(mockExperiment);
     if (path.includes("/api/qc-dashboards") && path.includes("experiment_id=1")) {
       return Promise.resolve([
-        { id: 9, pipeline_run_id: 42, quality_rating: "good", cell_count: 5000 },
+        {
+          id: 9,
+          pipeline_run_id: 42,
+          quality_rating: "good",
+          cell_count: 5000,
+          status: "ready",
+          generated_at: "2026-05-14T00:00:00Z",
+          project_name: "Project Alpha",
+          experiment_name: "Alpha Exp 1",
+          pipeline_name: "nf-core/scrnaseq",
+          pipeline_version: "2.6.0",
+          sample_external_ids: ["SAMPLE-001"],
+        },
       ]);
     }
     if (path.includes("/api/cellxgene")) return Promise.resolve([]);
-    if (path.includes("/api/plots")) return Promise.resolve({ plots: [] });
+    if (path.includes("/api/plots")) {
+      return Promise.resolve({
+        plots: [
+          {
+            id: 1,
+            title: "UMAP plot",
+            file: { id: 7, file_type: "png", storage_deleted: false },
+            experiment_id: 1,
+            experiment_name: "Alpha Exp 1",
+            project_name: "Project Alpha",
+            pipeline_run_id: 42,
+            pipeline_run_name: null,
+            notebook_session_id: null,
+            notebook_session_type: null,
+            source_type: "pipeline",
+            tags: [],
+            thumbnail_url: null,
+            indexed_at: "2026-05-14T00:00:00Z",
+          },
+        ],
+        total: 1,
+        page: 1,
+        page_size: 12,
+      });
+    }
     if (path.includes("/api/projects")) return Promise.resolve({ projects: [] });
     if (path.includes("/api/experiments")) return Promise.resolve({ experiments: [] });
     return Promise.resolve({ entries: [], total: 0, files: [], page: 1, page_size: 25 });
@@ -104,6 +146,22 @@ describe("Experiment Detail - Results Tab", () => {
     fireEvent.click(screen.getByText("Run #42"));
 
     expect(await screen.findByTestId("qc-report-modal-stub")).toHaveTextContent("dash:9");
+  });
+
+  it("shows rich QC cards and working plot previews matching the canonical pages", async () => {
+    render(<ExperimentDetailPage />);
+    await waitFor(() => screen.getByText("Test Experiment"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Results" }));
+
+    // QC card carries the same context the Results > QC Dashboards page shows.
+    expect(await screen.findByText(/nf-core\/scrnaseq v2\.6\.0/)).toBeInTheDocument();
+    expect(screen.getByText("Project Alpha")).toBeInTheDocument();
+    expect(screen.getByText("Alpha Exp 1")).toBeInTheDocument();
+
+    // Plot preview renders a real image rather than failing to load.
+    const img = (await screen.findByAltText("UMAP plot")) as HTMLImageElement;
+    expect(img.src).toContain("file-url-7");
   });
 
   it("hides the Results tab when the user cannot view Results", async () => {
