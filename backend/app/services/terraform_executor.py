@@ -873,6 +873,30 @@ class TerraformExecutor:
         return tmp
 
     @staticmethod
+    def _resolve_runtime_sa_email(config: dict) -> str:
+        """Resolve the service account the backend queries BigQuery as.
+
+        This is the identity that must hold dataset read on the billing export
+        dataset (ADR-028). On a vm_default install it is the VM's attached SA
+        (bioaf-app), persisted to platform_config as bioaf_app_sa_email on
+        startup. On a service_account_key install it is the key's client_email.
+        Falls back to an explicit backend_service_account_email override, then
+        "" (which makes the Terraform module fall back to the default compute
+        SA, the pre-fix behaviour).
+        """
+        explicit = config.get("bioaf_app_sa_email") or config.get("backend_service_account_email")
+        if explicit:
+            return explicit
+        if config.get("gcp_credential_source") == "service_account_key":
+            key_json = config.get("gcp_service_account_key")
+            if key_json:
+                try:
+                    return json.loads(key_json).get("client_email", "") or ""
+                except (json.JSONDecodeError, TypeError):
+                    return ""
+        return ""
+
+    @staticmethod
     def _write_tfvars(work_dir: Path, module_name: str, config: dict) -> dict:
         """Write terraform.tfvars.json into work_dir from platform_config values.
 
@@ -915,7 +939,10 @@ class TerraformExecutor:
             # creates per-subscription roles/pubsub.subscriber bindings.
             tfvars["bioaf_app_sa_email"] = config.get("bioaf_app_sa_email") or ""
         elif module_name == "billing_export":
-            tfvars["backend_service_account_email"] = config.get("backend_service_account_email") or ""
+            # The dataset read grant must land on the SA the backend actually
+            # queries BQ as, not the project's default compute SA (the module's
+            # fallback). See ADR-028.
+            tfvars["backend_service_account_email"] = TerraformExecutor._resolve_runtime_sa_email(config)
         elif module_name == "compute":
             tfvars["zone"] = zone
             tfvars["org_slug"] = org_slug
