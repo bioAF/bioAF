@@ -7,6 +7,11 @@ jest.mock("@/lib/api", () => ({
   },
 }));
 
+let mockRunParam: string | null = null;
+jest.mock("next/navigation", () => ({
+  useSearchParams: () => ({ get: (key: string) => (key === "run" ? mockRunParam : null) }),
+}));
+
 jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => null }));
 jest.mock("@/components/layout/Header", () => ({ Header: () => null }));
 jest.mock("@/components/shared/ContentLoading", () => ({ ContentLoading: () => null }));
@@ -25,6 +30,7 @@ const mockGet = api.get as jest.Mock;
 
 beforeEach(() => {
   mockGet.mockReset();
+  mockRunParam = null;
 });
 
 describe("QCDashboardsPage list view", () => {
@@ -77,5 +83,33 @@ describe("QCDashboardsPage list view", () => {
     await waitFor(() => expect(screen.queryByText("Run #7")).toBeTruthy());
     // Should not crash; missing context should not produce literal "null" strings.
     expect(screen.queryByText("null")).toBeNull();
+  });
+});
+
+describe("QCDashboardsPage deep link", () => {
+  test("?run= opens the dashboard for that run directly", async () => {
+    mockRunParam = "42";
+    mockGet.mockImplementation((url: string) => {
+      if (url.includes("/by-run/42")) {
+        return Promise.resolve({
+          pipeline_run_id: 42,
+          metrics: { quality_rating: "good" },
+          plots: [],
+        });
+      }
+      return Promise.resolve([]); // list
+    });
+
+    render(<QCDashboardsPage />);
+
+    await waitFor(() => expect(screen.queryByText("QC Dashboard - Run #42")).toBeTruthy());
+    expect(mockGet).toHaveBeenCalledWith("/api/qc-dashboards/by-run/42");
+  });
+
+  test("without ?run= it shows the list, not a detail", async () => {
+    mockGet.mockResolvedValue([]);
+    render(<QCDashboardsPage />);
+    await waitFor(() => expect(screen.queryByText("QC Dashboards")).toBeTruthy());
+    expect(screen.queryByText(/QC Dashboard - Run #/)).toBeNull();
   });
 });

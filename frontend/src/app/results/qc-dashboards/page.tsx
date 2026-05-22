@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { PlotModal } from "@/components/shared/PlotModal";
@@ -124,11 +125,20 @@ function QualityBadge({ rating }: { rating: string }) {
 }
 
 export default function QCDashboardsPage() {
+  return (
+    <Suspense fallback={null}>
+      <QCDashboardsPageInner />
+    </Suspense>
+  );
+}
+
+function QCDashboardsPageInner() {
   const [dashboards, setDashboards] = useState<QCDashboardSummary[]>([]);
   const [selected, setSelected] = useState<QCDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
   const [expandedPlot, setExpandedPlot] = useState<{ url: string; title: string } | null>(null);
+  const searchParams = useSearchParams();
 
   useEffect(() => {
     (async () => {
@@ -142,6 +152,21 @@ export default function QCDashboardsPage() {
       }
     })();
   }, []);
+
+  // Deep link: ?run=<id> opens that run's dashboard directly. This is where the
+  // "results ready" notification lands. Falls back to the list if there is none.
+  useEffect(() => {
+    const run = searchParams?.get("run");
+    if (!run) return;
+    (async () => {
+      try {
+        const data = await api.get<QCDashboardResponse>(`/api/qc-dashboards/by-run/${run}`);
+        setSelected(data);
+      } catch {
+        // ignore - the list remains visible
+      }
+    })();
+  }, [searchParams]);
 
   const viewDashboard = async (id: number) => {
     try {
