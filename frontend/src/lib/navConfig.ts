@@ -50,7 +50,7 @@ export const navConfig: NavSection[] = [
     ],
   },
   {
-    label: "Projects",
+    label: "Experiments",
     icon: "folder",
     children: [
       { label: "Project List", path: "/projects", permission: { resource: "projects", action: "view" } },

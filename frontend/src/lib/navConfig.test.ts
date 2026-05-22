@@ -58,3 +58,20 @@ describe("navConfig disambiguated labels", () => {
     expect(duplicates).toEqual([]);
   });
 });
+
+describe("Experiments surfaced as a top-level section", () => {
+  it("renames the 'Projects' section to 'Experiments'", () => {
+    expect(navConfig.some((s) => s.label === "Projects")).toBe(false);
+    expect(navConfig.some((s) => s.label === "Experiments")).toBe(true);
+  });
+
+  it("keeps the same sub-menu items under the renamed section", () => {
+    const exp = navConfig.find((s) => s.label === "Experiments");
+    expect(exp?.children?.map((c) => c.path)).toEqual([
+      "/projects",
+      "/projects/experiment-templates",
+      "/projects/experiments",
+      "/data/browser",
+    ]);
+  });
+});
