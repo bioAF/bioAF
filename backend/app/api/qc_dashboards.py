@@ -22,14 +22,19 @@ from app.services.qc_dashboard_service import QCDashboardService
 router = APIRouter(prefix="/api/qc-dashboards", tags=["qc-dashboards"])
 
 
-def _dashboard_response(d, qc_config: dict) -> QCDashboardResponse:
+def _dashboard_response(d, qc_config: dict, context: dict | None = None) -> QCDashboardResponse:
     metrics = d.metrics_json or {}
     plots = d.plots_json if isinstance(d.plots_json, list) else []
+    ctx = context or {}
 
     return QCDashboardResponse(
         id=d.id,
         pipeline_run_id=d.pipeline_run_id,
         experiment_id=d.experiment_id,
+        pipeline_name=ctx.get("pipeline_name"),
+        pipeline_version=ctx.get("pipeline_version"),
+        project_name=ctx.get("project_name"),
+        experiment_name=ctx.get("experiment_name"),
         qc_config=QCDashboardConfig(**qc_config),
         raw_metrics=metrics,
         metrics=QCMetrics(
@@ -168,6 +173,11 @@ async def _load_summary_context(session: AsyncSession, org_id: int, dashboards) 
     return {d.id: run_ctx.get(d.pipeline_run_id, {}) for d in dashboards}
 
 
+async def _dashboard_context(session: AsyncSession, org_id: int, d) -> dict:
+    """Run context (project / experiment / pipeline names) for a single dashboard."""
+    return (await _load_summary_context(session, org_id, [d])).get(d.id, {})
+
+
 @router.get("")
 async def list_dashboards(
     request: Request,
@@ -205,7 +215,8 @@ async def get_dashboard(
     if not d:
         raise HTTPException(404, "QC Dashboard not found")
     cfg = await _resolve_dashboard_config(session, d)
-    return _dashboard_response(d, cfg)
+    ctx = await _dashboard_context(session, org_id, d)
+    return _dashboard_response(d, cfg, ctx)
 
 
 @router.get("/by-run/{pipeline_run_id}", response_model=QCDashboardResponse)
@@ -221,7 +232,8 @@ async def get_dashboard_by_run(
     if not d:
         raise HTTPException(404, "QC Dashboard not found for this pipeline run")
     cfg = await _resolve_dashboard_config(session, d)
-    return _dashboard_response(d, cfg)
+    ctx = await _dashboard_context(session, org_id, d)
+    return _dashboard_response(d, cfg, ctx)
 
 
 @router.post("/generate/{pipeline_run_id}", response_model=QCDashboardResponse)
@@ -242,7 +254,8 @@ async def generate_dashboard(
         d = await QCDashboardService.generate_qc_dashboard(session, org_id, pipeline_run_id)
         await session.commit()
         cfg = await _resolve_dashboard_config(session, d)
-        return _dashboard_response(d, cfg)
+        ctx = await _dashboard_context(session, org_id, d)
+        return _dashboard_response(d, cfg, ctx)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -277,6 +290,7 @@ async def regenerate_dashboard(
         d = await QCDashboardService.generate_qc_dashboard(session, org_id, pipeline_run_id, skip_cache=True)
         await session.commit()
         cfg = await _resolve_dashboard_config(session, d)
-        return _dashboard_response(d, cfg)
+        ctx = await _dashboard_context(session, org_id, d)
+        return _dashboard_response(d, cfg, ctx)
     except ValueError as e:
         raise HTTPException(400, str(e))

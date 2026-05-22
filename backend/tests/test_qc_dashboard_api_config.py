@@ -111,6 +111,65 @@ async def test_get_dashboard_returns_qc_config_snapshot(client, admin_token, set
 
 
 @pytest.mark.asyncio
+async def test_get_dashboard_includes_run_context(client, admin_token, session, admin_user):
+    """The detail response carries project / experiment / pipeline names (and the
+    run id) so the UI can name the report meaningfully and link back to the run."""
+    from datetime import datetime, timezone
+
+    from app.models.experiment import Experiment
+    from app.models.pipeline_run import PipelineRun
+    from app.models.project import Project
+    from app.models.qc_dashboard import QCDashboard
+
+    org_id = admin_user.organization_id
+    proj = Project(organization_id=org_id, name="Project Aardvark")
+    session.add(proj)
+    await session.flush()
+    exp = Experiment(
+        organization_id=org_id, name="Experiment Beluga", owner_user_id=admin_user.id, status="processing"
+    )
+    session.add(exp)
+    await session.flush()
+    run = PipelineRun(
+        organization_id=org_id,
+        experiment_id=exp.id,
+        project_id=proj.id,
+        submitted_by_user_id=admin_user.id,
+        pipeline_name="nf-core/scrnaseq",
+        pipeline_version="2.6.0",
+        status="completed",
+        work_dir="/tmp/ctx",
+    )
+    session.add(run)
+    await session.flush()
+    d = QCDashboard(
+        organization_id=org_id,
+        pipeline_run_id=run.id,
+        experiment_id=exp.id,
+        metrics_json={"cell_count": 10, "quality_rating": "good"},
+        summary_text="ok",
+        plots_json=[],
+        status="ready",
+        generated_at=datetime.now(timezone.utc),
+    )
+    session.add(d)
+    await session.flush()
+    await session.commit()
+
+    resp = await client.get(
+        f"/api/qc-dashboards/{d.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pipeline_run_id"] == run.id
+    assert body["project_name"] == "Project Aardvark"
+    assert body["experiment_name"] == "Experiment Beluga"
+    assert body["pipeline_name"] == "nf-core/scrnaseq"
+    assert body["pipeline_version"] == "2.6.0"
+
+
+@pytest.mark.asyncio
 async def test_get_dashboard_substitutes_default_for_legacy_row(client, admin_token, setup):
     """Pre-migration dashboards have NULL qc_config_json. API substitutes
     the resolved template default so the page still renders."""
