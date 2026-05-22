@@ -195,11 +195,7 @@ async def billing_export_verify(
         # default compute SA instead of the runtime SA (ADR-028). Re-apply the
         # billing_export module (as the impersonated bootstrap SA, which owns
         # the dataset) to move the grant onto the runtime SA, then retry once.
-        logger.warning(
-            "BQ verify denied on %s.%s; re-applying billing_export to reconcile dataset IAM",
-            project_id,
-            dataset_id,
-        )
+        logger.warning("BQ verify denied; re-applying billing_export to reconcile dataset IAM")
         user_id = int(current_user["sub"])
         heal = await deploy_billing_export_module(session, user_id)
         if heal.get("status") != "completed":
