@@ -1,11 +1,12 @@
 """Agent review API (ADR-055, spec-llm-integration-ui).
 
-Three permission tiers:
-- llm_integration:use to trigger a review (POST /run) or dismiss/undismiss.
-- llm_integration:use to view in the tab; viewer-role users without :use see
-  the tab read-only via the inherited entity:view permission on the parent
-  pipeline_run or experiment (handled by the frontend; the API gates writes
-  but allows reads to any role with view on the parent entity).
+Two permission tiers:
+- llm_integration:use to trigger a review (POST /run) or dismiss/undismiss,
+  and to manage saved prompts / the section catalog.
+- "View Results" (experiments:view OR pipelines:view) to read reviews (the list
+  and detail endpoints). The QC report that surfaces these reviews is reachable
+  by anyone who can view experiments or pipelines, so reads are gated to match;
+  bench/viewer/leadership without llm_integration:use can read but not write.
 - The job is the operational record; only agent_review rows are exposed.
 """
 
@@ -19,7 +20,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_permission
+from app.api.dependencies import require_permission, require_results_view
 from app.database import get_session, async_session_factory
 from app.models.agent_review import AgentReview
 from app.models.pipeline_run import PipelineRun
@@ -345,8 +346,8 @@ async def delete_saved_prompt(
 async def list_reviews(
     entity_type: Literal["pipeline_run", "experiment"] = Query(...),
     entity_id: int = Query(...),
-    filter: Literal["active", "dismissed", "stale", "failed"] = Query("active"),
-    current_user: dict = require_permission("llm_integration", "use"),
+    filter: Literal["all", "active", "dismissed", "stale", "failed"] = Query("active"),
+    current_user: dict = require_results_view(),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -388,7 +389,7 @@ async def list_reviews(
 @router.get("/{review_id}", response_model=AgentReviewDetail)
 async def get_review(
     review_id: int,
-    current_user: dict = require_permission("llm_integration", "use"),
+    current_user: dict = require_results_view(),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])

@@ -357,3 +357,169 @@ async def test_pipeline_run_and_experiment_tabs_are_strictly_scoped(
     ).json()
     entity_types = {item["entity_type"] for item in exp_listed["items"]}
     assert entity_types == {"experiment"}, exp_listed
+
+
+# --- Read access for "View Results" roles (experiments:view OR pipelines:view) ---
+#
+# Reads of agent reviews back the QC report, which is shown to anyone who can view
+# Results. Bench/viewer/leadership lack llm_integration:use but must still see
+# existing reviews. Writes (run/dismiss) stay gated on llm_integration:use.
+
+
+async def _make_user_with_role(session, admin_user, role_name, permissions):
+    """Create a user under a fresh custom role with the given permissions."""
+    from app.services import role_service
+
+    role = await role_service.create_role(
+        session,
+        admin_user.organization_id,
+        name=role_name,
+        description=f"test {role_name}",
+        permissions=permissions,
+    )
+    await session.flush()
+    user = User(
+        email=f"{role_name}@test.com",
+        password_hash=AuthService.hash_password("custompass123"),
+        role_id=role.id,
+        organization_id=admin_user.organization_id,
+        status="active",
+    )
+    session.add(user)
+    await session.flush()
+    await session.commit()
+    role_service.invalidate_cache()
+    return user, role.name
+
+
+@pytest_asyncio.fixture
+async def pipelines_only_auth(session, admin_user):
+    """A role with pipelines:view but no experiments:view and no llm_integration:use."""
+    user, role_name = await _make_user_with_role(session, admin_user, "pipelines_only", [("pipelines", "view")])
+    token = AuthService.create_token(user.id, user.email, user.role_id, user.organization_id, role_name=role_name)
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest_asyncio.fixture
+async def no_results_auth(session, admin_user):
+    """A role with neither experiments:view nor pipelines:view."""
+    user, role_name = await _make_user_with_role(session, admin_user, "no_results", [("samples", "view")])
+    token = AuthService.create_token(user.id, user.email, user.role_id, user.organization_id, role_name=role_name)
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def _seed_run_review(client, admin_auth, run_id):
+    resp = await client.post(
+        "/api/agent_reviews/run",
+        json={
+            "entity_type": "pipeline_run",
+            "entity_id": run_id,
+            "selected_sub_item_ids": ["qc.metric_review"],
+        },
+        headers=admin_auth,
+    )
+    assert resp.status_code == 202, resp.text
+    return resp.json()["agent_review_id"]
+
+
+@pytest.mark.asyncio
+async def test_list_visible_to_experiments_viewer_without_llm_use(client, admin_auth, viewer_auth, configured_run):
+    await _seed_run_review(client, admin_auth, configured_run["run_id"])
+    resp = await client.get(
+        "/api/agent_reviews",
+        params={"entity_type": "pipeline_run", "entity_id": configured_run["run_id"]},
+        headers=viewer_auth,
+    )
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()["items"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_list_visible_to_pipelines_only_role(client, admin_auth, pipelines_only_auth, configured_run):
+    await _seed_run_review(client, admin_auth, configured_run["run_id"])
+    resp = await client.get(
+        "/api/agent_reviews",
+        params={"entity_type": "pipeline_run", "entity_id": configured_run["run_id"]},
+        headers=pipelines_only_auth,
+    )
+    assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.asyncio
+async def test_list_forbidden_without_results_view(client, admin_auth, no_results_auth, configured_run):
+    await _seed_run_review(client, admin_auth, configured_run["run_id"])
+    resp = await client.get(
+        "/api/agent_reviews",
+        params={"entity_type": "pipeline_run", "entity_id": configured_run["run_id"]},
+        headers=no_results_auth,
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_detail_visible_to_viewer_forbidden_without_results_view(
+    client, admin_auth, viewer_auth, no_results_auth, configured_run
+):
+    review_id = await _seed_run_review(client, admin_auth, configured_run["run_id"])
+    ok = await client.get(f"/api/agent_reviews/{review_id}", headers=viewer_auth)
+    assert ok.status_code == 200, ok.text
+    forbidden = await client.get(f"/api/agent_reviews/{review_id}", headers=no_results_auth)
+    assert forbidden.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_viewer_still_cannot_run_review(client, viewer_auth, configured_run):
+    resp = await client.post(
+        "/api/agent_reviews/run",
+        json={
+            "entity_type": "pipeline_run",
+            "entity_id": configured_run["run_id"],
+            "selected_sub_item_ids": ["qc.metric_review"],
+        },
+        headers=viewer_auth,
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_filter_all_includes_dismissed(client, admin_auth, configured_run):
+    review_id = await _seed_run_review(client, admin_auth, configured_run["run_id"])
+
+    all_before = (
+        await client.get(
+            "/api/agent_reviews",
+            params={
+                "entity_type": "pipeline_run",
+                "entity_id": configured_run["run_id"],
+                "filter": "all",
+            },
+            headers=admin_auth,
+        )
+    ).json()
+    assert len(all_before["items"]) == 1
+
+    dismiss = await client.post(f"/api/agent_reviews/{review_id}/dismiss", headers=admin_auth)
+    assert dismiss.status_code == 204
+
+    active = (
+        await client.get(
+            "/api/agent_reviews",
+            params={"entity_type": "pipeline_run", "entity_id": configured_run["run_id"]},
+            headers=admin_auth,
+        )
+    ).json()
+    assert active["items"] == []
+
+    all_after = (
+        await client.get(
+            "/api/agent_reviews",
+            params={
+                "entity_type": "pipeline_run",
+                "entity_id": configured_run["run_id"],
+                "filter": "all",
+            },
+            headers=admin_auth,
+        )
+    ).json()
+    assert len(all_after["items"]) == 1
+    assert all_after["items"][0]["dismissed"] is True
