@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -11,7 +11,16 @@ import { api } from "@/lib/api";
 import type { Project, ProjectListResponse } from "@/lib/types";
 
 export default function ProjectsPage() {
+  return (
+    <Suspense fallback={null}>
+      <ProjectsPageInner />
+    </Suspense>
+  );
+}
+
+function ProjectsPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -31,6 +40,14 @@ export default function ProjectsPage() {
     }
     loadProjects();
   }, [router, search, statusFilter]);
+
+  // The header "+ New > New Project" lands here with ?new=1 to open the create
+  // form immediately (only for users who can create projects).
+  useEffect(() => {
+    if (searchParams?.get("new") === "1" && canCreate) {
+      setShowCreateModal(true);
+    }
+  }, [searchParams, canCreate]);
 
   const loadProjects = async () => {
     setLoading(true);
