@@ -37,7 +37,15 @@ describe("widget registry", () => {
 
   test("accessibleWidgets filters by permission (ANY semantics)", () => {
     const canAccess = (r: string, a: string) => r === "experiments" && a === "view";
-    expect(accessibleWidgets(canAccess).map((w) => w.key)).toEqual(["experiments_status"]);
+    const keys = accessibleWidgets(canAccess).map((w) => w.key);
+    // experiments:view grants the experiment-scoped widgets...
+    expect(keys).toEqual(
+      expect.arrayContaining(["experiments_status", "recent_plots", "recent_cellxgene"]),
+    );
+    // ...but nothing requiring other resources
+    expect(keys).not.toContain("active_pipeline_runs");
+    expect(keys).not.toContain("cost_budget");
+    expect(keys).not.toContain("recent_literature");
   });
 
   test("canUseWidget is true when any required permission matches", () => {

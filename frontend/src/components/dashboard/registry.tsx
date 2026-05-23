@@ -10,6 +10,10 @@ import { FailedRunsWidget } from "@/components/dashboard/FailedRunsWidget";
 import { RunsAwaitingReviewWidget } from "@/components/dashboard/RunsAwaitingReviewWidget";
 import { MyCustomPipelinesWidget } from "@/components/dashboard/MyCustomPipelinesWidget";
 import { MySessionsWidget } from "@/components/dashboard/MySessionsWidget";
+import { RecentPlotsWidget } from "@/components/dashboard/RecentPlotsWidget";
+import { RecentCellxgeneWidget } from "@/components/dashboard/RecentCellxgeneWidget";
+import { RecentLiteratureWidget } from "@/components/dashboard/RecentLiteratureWidget";
+import { MyReadingListWidget } from "@/components/dashboard/MyReadingListWidget";
 
 export type PermissionPair = readonly [resource: string, action: string];
 export type CanAccess = (resource: string, action: string) => boolean;
@@ -99,6 +103,38 @@ export const WIDGETS: readonly WidgetDefinition[] = [
       ["work_nodes", "view"],
     ],
     defaultForRoles: ["comp_bio"],
+  },
+  {
+    key: "recent_plots",
+    title: "Recent plots",
+    description: "Latest figures from pipelines, notebooks, and cellxgene.",
+    component: RecentPlotsWidget,
+    permissions: [["experiments", "view"]],
+    defaultForRoles: ["comp_bio", "admin"],
+  },
+  {
+    key: "recent_cellxgene",
+    title: "Recent cellxgene",
+    description: "Recently published interactive datasets.",
+    component: RecentCellxgeneWidget,
+    permissions: [["experiments", "view"]],
+    defaultForRoles: ["bench"],
+  },
+  {
+    key: "recent_literature",
+    title: "Recent literature",
+    description: "Papers recently added to the lab library.",
+    component: RecentLiteratureWidget,
+    permissions: [["literature", "view"]],
+    defaultForRoles: ["comp_bio"],
+  },
+  {
+    key: "my_reading_list",
+    title: "My reading list",
+    description: "Papers you have not read yet.",
+    component: MyReadingListWidget,
+    permissions: [["literature", "view"]],
+    defaultForRoles: [],
   },
   {
     key: "cost_budget",
