@@ -14,6 +14,11 @@ import { RecentPlotsWidget } from "@/components/dashboard/RecentPlotsWidget";
 import { RecentCellxgeneWidget } from "@/components/dashboard/RecentCellxgeneWidget";
 import { RecentLiteratureWidget } from "@/components/dashboard/RecentLiteratureWidget";
 import { MyReadingListWidget } from "@/components/dashboard/MyReadingListWidget";
+import { TeamOutputWidget } from "@/components/dashboard/TeamOutputWidget";
+import { CostTrendWidget } from "@/components/dashboard/CostTrendWidget";
+import { BackupStatusWidget } from "@/components/dashboard/BackupStatusWidget";
+import { AutoIngestActivityWidget } from "@/components/dashboard/AutoIngestActivityWidget";
+import { PendingInvitesWidget } from "@/components/dashboard/PendingInvitesWidget";
 
 export type PermissionPair = readonly [resource: string, action: string];
 export type CanAccess = (resource: string, action: string) => boolean;
@@ -137,10 +142,26 @@ export const WIDGETS: readonly WidgetDefinition[] = [
     defaultForRoles: [],
   },
   {
+    key: "team_output",
+    title: "Team output this week",
+    description: "Runs completed and experiments started in the last 7 days.",
+    component: TeamOutputWidget,
+    permissions: [["pipelines", "view"]],
+    defaultForRoles: ["admin"],
+  },
+  {
     key: "cost_budget",
     title: "Cost vs budget",
     description: "This month's spend against the monthly budget.",
     component: CostBudgetWidget,
+    permissions: [["cost_center", "view"]],
+    defaultForRoles: ["admin"],
+  },
+  {
+    key: "cost_trend",
+    title: "Cost / spend trend",
+    description: "Daily cloud spend over the last 30 days.",
+    component: CostTrendWidget,
     permissions: [["cost_center", "view"]],
     defaultForRoles: ["admin"],
   },
@@ -151,6 +172,30 @@ export const WIDGETS: readonly WidgetDefinition[] = [
     component: InfrastructureHealthWidget,
     permissions: [["infrastructure", "view"]],
     defaultForRoles: ["admin"],
+  },
+  {
+    key: "backup_status",
+    title: "Backup status",
+    description: "Backup tiers and overall recovery health.",
+    component: BackupStatusWidget,
+    permissions: [["backups", "view"]],
+    defaultForRoles: [],
+  },
+  {
+    key: "auto_ingest_activity",
+    title: "Auto-ingest activity",
+    description: "Files processed and failed by auto-ingest in the last 24h.",
+    component: AutoIngestActivityWidget,
+    permissions: [["settings", "view"]],
+    defaultForRoles: [],
+  },
+  {
+    key: "pending_invites",
+    title: "Pending invites",
+    description: "Teammates invited but not yet active.",
+    component: PendingInvitesWidget,
+    permissions: [["users", "view"]],
+    defaultForRoles: [],
   },
   {
     key: "activity_feed",
