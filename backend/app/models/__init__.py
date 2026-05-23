@@ -36,6 +36,7 @@ from app.models.notification import (
     SlackChannelMapping,
     NotificationDeliveryLog,
 )
+from app.models.dashboard import DashboardLayout
 from app.models.upgrade_history import UpgradeHistory
 from app.models.access_log import AccessLog
 from app.models.activity_feed import ActivityFeedEntry
@@ -126,6 +127,7 @@ __all__ = [
     "Environment",
     "EnvironmentVersion",
     "TemplateNotebook",
+    "DashboardLayout",
     "Notification",
     "NotificationRule",
     "NotificationPreference",

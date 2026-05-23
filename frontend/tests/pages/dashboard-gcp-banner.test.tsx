@@ -38,24 +38,10 @@ jest.mock("@/lib/api", () => ({
   },
 }));
 
-// Mock all dashboard widgets to keep tests simple
-jest.mock("@/components/dashboard/InfrastructureHealthWidget", () => ({
-  InfrastructureHealthWidget: () => <div data-testid="infra-widget" />,
-}));
-jest.mock("@/components/dashboard/RunningJobsWidget", () => ({
-  RunningJobsWidget: () => <div data-testid="running-jobs-widget" />,
-}));
-jest.mock("@/components/dashboard/QueueDepthWidget", () => ({
-  QueueDepthWidget: () => <div data-testid="queue-depth-widget" />,
-}));
-jest.mock("@/components/dashboard/CostBudgetWidget", () => ({
-  CostBudgetWidget: () => <div data-testid="cost-budget-widget" />,
-}));
-jest.mock("@/components/dashboard/IngestStatusWidget", () => ({
-  IngestStatusWidget: () => <div data-testid="ingest-status-widget" />,
-}));
-jest.mock("@/components/dashboard/ActivityFeedWidget", () => ({
-  ActivityFeedWidget: () => <div data-testid="activity-feed-widget" />,
+// The page now delegates the widget grid to DashboardContent (covered by its own
+// tests). Mock it so these tests focus on the page shell and the GCP banner.
+jest.mock("@/components/dashboard/DashboardContent", () => ({
+  DashboardContent: () => <div data-testid="dashboard-content" />,
 }));
 
 describe("Dashboard GCP banner", () => {
