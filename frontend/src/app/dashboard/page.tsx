@@ -7,12 +7,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
-import { InfrastructureHealthWidget } from "@/components/dashboard/InfrastructureHealthWidget";
-import { RunningJobsWidget } from "@/components/dashboard/RunningJobsWidget";
-import { QueueDepthWidget } from "@/components/dashboard/QueueDepthWidget";
-import { CostBudgetWidget } from "@/components/dashboard/CostBudgetWidget";
-import { IngestStatusWidget } from "@/components/dashboard/IngestStatusWidget";
-import { ActivityFeedWidget } from "@/components/dashboard/ActivityFeedWidget";
+import { DashboardContent } from "@/components/dashboard/DashboardContent";
 import { api } from "@/lib/api";
 
 interface GCPConfig {
@@ -21,7 +16,7 @@ interface GCPConfig {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { canAccess, roleName } = usePermissions();
+  const { roleName } = usePermissions();
   const [gcpConfigured, setGcpConfigured] = useState<boolean | null>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
@@ -30,7 +25,8 @@ export default function DashboardPage() {
       router.push("/login");
       return;
     }
-    api.get<GCPConfig>("/api/v1/settings/gcp")
+    api
+      .get<GCPConfig>("/api/v1/settings/gcp")
       .then((cfg) => setGcpConfigured(cfg.gcp_credentials_configured))
       .catch(() => setGcpConfigured(true)); // don't block dashboard on API error
   }, [router]);
@@ -42,9 +38,7 @@ export default function DashboardPage() {
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header />
-        <main className="flex-1 flex flex-col overflow-hidden p-6" data-testid="dashboard">
-          <h1 className="text-2xl font-bold mb-4 shrink-0">Dashboard</h1>
-
+        <main className="flex-1 flex flex-col overflow-y-auto p-6" data-testid="dashboard">
           {showGcpBanner && (
             <div
               data-testid="gcp-setup-banner"
@@ -68,19 +62,7 @@ export default function DashboardPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4 shrink-0">
-            {canAccess("infrastructure", "view") && <InfrastructureHealthWidget />}
-            {canAccess("pipelines", "view") && <RunningJobsWidget />}
-            {canAccess("pipelines", "view") && <QueueDepthWidget />}
-            {canAccess("cost_center", "view") && <CostBudgetWidget />}
-            {canAccess("files", "view") && <IngestStatusWidget />}
-          </div>
-
-          <div className="flex-1 min-h-0">
-            {canAccess("audit_log", "view") && (
-              <ActivityFeedWidget className="h-full" />
-            )}
-          </div>
+          <DashboardContent />
         </main>
       </div>
     </div>
