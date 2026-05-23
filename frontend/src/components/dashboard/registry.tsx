@@ -6,6 +6,10 @@ import { QueueDepthWidget } from "@/components/dashboard/QueueDepthWidget";
 import { CostBudgetWidget } from "@/components/dashboard/CostBudgetWidget";
 import { ActivityFeedWidget } from "@/components/dashboard/ActivityFeedWidget";
 import { ExperimentsStatusWidget } from "@/components/dashboard/ExperimentsStatusWidget";
+import { FailedRunsWidget } from "@/components/dashboard/FailedRunsWidget";
+import { RunsAwaitingReviewWidget } from "@/components/dashboard/RunsAwaitingReviewWidget";
+import { MyCustomPipelinesWidget } from "@/components/dashboard/MyCustomPipelinesWidget";
+import { MySessionsWidget } from "@/components/dashboard/MySessionsWidget";
 
 export type PermissionPair = readonly [resource: string, action: string];
 export type CanAccess = (resource: string, action: string) => boolean;
@@ -54,11 +58,46 @@ export const WIDGETS: readonly WidgetDefinition[] = [
     defaultForRoles: ["comp_bio"],
   },
   {
+    key: "failed_runs",
+    title: "Failed runs",
+    description: "Recent pipeline failures, filterable by time window.",
+    component: FailedRunsWidget,
+    permissions: [["pipelines", "view"]],
+    defaultForRoles: ["comp_bio"],
+  },
+  {
+    key: "runs_awaiting_review",
+    title: "Runs awaiting review",
+    description: "Completed runs that still need a review verdict.",
+    component: RunsAwaitingReviewWidget,
+    permissions: [["pipelines", "view"]],
+    defaultForRoles: ["comp_bio", "admin"],
+  },
+  {
     key: "queue_depth",
     title: "Queue depth",
     description: "Jobs queued, including any awaiting budget approval.",
     component: QueueDepthWidget,
     permissions: [["pipelines", "view"]],
+    defaultForRoles: ["comp_bio"],
+  },
+  {
+    key: "my_custom_pipelines",
+    title: "My custom pipelines",
+    description: "Custom pipelines you have registered.",
+    component: MyCustomPipelinesWidget,
+    permissions: [["custom_pipelines", "view"]],
+    defaultForRoles: ["comp_bio"],
+  },
+  {
+    key: "my_sessions",
+    title: "My active sessions",
+    description: "Running notebooks and work nodes.",
+    component: MySessionsWidget,
+    permissions: [
+      ["notebooks", "view"],
+      ["work_nodes", "view"],
+    ],
     defaultForRoles: ["comp_bio"],
   },
   {
