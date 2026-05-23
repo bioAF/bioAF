@@ -11,7 +11,6 @@ import { RunsAwaitingReviewWidget } from "@/components/dashboard/RunsAwaitingRev
 import { MyCustomPipelinesWidget } from "@/components/dashboard/MyCustomPipelinesWidget";
 import { MySessionsWidget } from "@/components/dashboard/MySessionsWidget";
 import { RecentPlotsWidget } from "@/components/dashboard/RecentPlotsWidget";
-import { RecentCellxgeneWidget } from "@/components/dashboard/RecentCellxgeneWidget";
 import { RecentLiteratureWidget } from "@/components/dashboard/RecentLiteratureWidget";
 import { MyReadingListWidget } from "@/components/dashboard/MyReadingListWidget";
 import { TeamOutputWidget } from "@/components/dashboard/TeamOutputWidget";
@@ -116,14 +115,6 @@ export const WIDGETS: readonly WidgetDefinition[] = [
     component: RecentPlotsWidget,
     permissions: [["experiments", "view"]],
     defaultForRoles: ["comp_bio", "admin"],
-  },
-  {
-    key: "recent_cellxgene",
-    title: "Recent cellxgene",
-    description: "Recently published interactive datasets.",
-    component: RecentCellxgeneWidget,
-    permissions: [["experiments", "view"]],
-    defaultForRoles: ["bench"],
   },
   {
     key: "recent_literature",

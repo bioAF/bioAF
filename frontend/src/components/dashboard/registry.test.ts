@@ -39,9 +39,7 @@ describe("widget registry", () => {
     const canAccess = (r: string, a: string) => r === "experiments" && a === "view";
     const keys = accessibleWidgets(canAccess).map((w) => w.key);
     // experiments:view grants the experiment-scoped widgets...
-    expect(keys).toEqual(
-      expect.arrayContaining(["experiments_status", "recent_plots", "recent_cellxgene"]),
-    );
+    expect(keys).toEqual(expect.arrayContaining(["experiments_status", "recent_plots"]));
     // ...but nothing requiring other resources
     expect(keys).not.toContain("active_pipeline_runs");
     expect(keys).not.toContain("cost_budget");
