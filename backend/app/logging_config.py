@@ -70,7 +70,7 @@ class RedactSecretsFilter(logging.Filter):
         except Exception:
             # Defensive by design: logging filters must not raise or drop records.
             # If redaction fails, allow the original record through unchanged.
-            record
+            pass
         return True
 
 
