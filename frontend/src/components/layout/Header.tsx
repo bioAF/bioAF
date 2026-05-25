@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getCurrentUser, removeToken } from "@/lib/auth";
 import { clearPermissionsCache } from "@/hooks/usePermissions";
@@ -15,7 +16,12 @@ export function Header() {
   const [user, setUser] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
-    setUser(getCurrentUser());
+    const refresh = () => setUser(getCurrentUser());
+    refresh();
+    // The Account tab dispatches this after a name change so the header updates
+    // without a full reload.
+    window.addEventListener("profile-updated", refresh);
+    return () => window.removeEventListener("profile-updated", refresh);
   }, []);
 
   const handleLogout = async () => {
@@ -41,12 +47,13 @@ export function Header() {
           <>
             <QuickCreateMenu />
             <NotificationBell />
-            <span className="text-sm text-gray-600">
-              {(user.email as string) || "User"}
-            </span>
-            <span className="text-xs bg-bioaf-100 text-bioaf-700 px-2 py-1 rounded">
-              {user.role_name as string}
-            </span>
+            <Link
+              href="/profile"
+              className="text-sm text-gray-600 hover:text-bioaf-700 hover:underline"
+              title="View your profile"
+            >
+              {(user.name as string) || (user.email as string) || "User"}
+            </Link>
             <button
               onClick={handleLogout}
               className="text-sm text-gray-500 hover:text-gray-700"

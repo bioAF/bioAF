@@ -293,15 +293,16 @@ async def configure_smtp(body: ConfigureSmtpRequest, request: Request, session: 
     await session.flush()
 
     # Also update in-memory settings for immediate use
-    from app.config import settings
+    from app.services.email_service import apply_smtp_to_settings
 
-    settings.smtp_host = body.host
-    settings.smtp_port = body.port
-    settings.smtp_username = body.username
-    settings.smtp_password = body.password
-    settings.smtp_from_address = body.from_address
-    settings.smtp_encryption = body.encryption
-    settings.smtp_configured = True
+    apply_smtp_to_settings(
+        host=body.host,
+        port=body.port,
+        username=body.username,
+        password=body.password,
+        from_address=body.from_address,
+        encryption=body.encryption,
+    )
 
     await log_action(
         session,

@@ -51,6 +51,9 @@ class VerificationCode(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     code_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # URL-safe secret embedded in a password-reset link. Null for code-only flows
+    # (e.g. email verification).
+    token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
     purpose: Mapped[str] = mapped_column(String(50), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used: Mapped[bool] = mapped_column(Boolean, default=False)

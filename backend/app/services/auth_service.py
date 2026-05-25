@@ -24,10 +24,13 @@ class AuthService:
         )
 
     @staticmethod
-    def create_token(user_id: int, email: str, role_id: int, org_id: int, role_name: str = "") -> str:
+    def create_token(
+        user_id: int, email: str, role_id: int, org_id: int, role_name: str = "", name: str | None = None
+    ) -> str:
         payload = {
             "sub": str(user_id),
             "email": email,
+            "name": name,
             "role_id": role_id,
             "role_name": role_name,
             "org_id": org_id,
@@ -54,6 +57,11 @@ class AuthService:
     @staticmethod
     def verify_code(plain_code: str, code_hash: str) -> bool:
         return hashlib.sha256(plain_code.encode()).hexdigest() == code_hash
+
+    @staticmethod
+    def generate_reset_token() -> str:
+        """Generate a URL-safe secret for a password-reset link."""
+        return secrets.token_urlsafe(32)
 
     @staticmethod
     def generate_invite_token(user_id: int, email: str) -> str:

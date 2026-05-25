@@ -85,7 +85,6 @@ describe("top-level nav order", () => {
       "Results",
       "Workbench",
       "Data & Files",
-      "Profile",
       "Infrastructure",
       "Settings",
     ]);

@@ -189,8 +189,17 @@ class UserService:
         actor_user_id: int,
     ) -> None:
         """Hard-delete a user. Caller must verify eligibility first."""
+        from sqlalchemy import delete as sa_delete
+
+        from app.models.component import VerificationCode
+
         email = user.email
         user_id = user.id
+
+        # Discard any pending verification codes (e.g. an admin-sent password reset).
+        # These reference the user but represent no action by them, and would otherwise
+        # block the hard delete with a foreign-key violation.
+        await session.execute(sa_delete(VerificationCode).where(VerificationCode.user_id == user_id))
 
         await session.delete(user)
         await session.flush()

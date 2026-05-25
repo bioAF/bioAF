@@ -56,11 +56,12 @@ describe("Sidebar", () => {
     mockRoleName.mockReturnValue("admin");
   });
 
-  it("renders all 9 top-level items for admin user", () => {
+  it("renders all 8 top-level items for admin user", () => {
     render(<Sidebar />);
     const nav = screen.getByTestId("sidebar-nav");
-    // 9 top-level sections: Dashboard, Experiments, Pipelines, Results,
-    // Workbench, Data & Files, Profile, Infrastructure, Settings
+    // 8 top-level sections: Dashboard, Experiments, Pipelines, Results,
+    // Workbench, Data & Files, Infrastructure, Settings. Profile is reached by
+    // clicking the username in the header, not from the sidebar.
     expect(nav).toHaveTextContent("Dashboard");
     expect(nav).toHaveTextContent("Experiments");
     expect(nav).toHaveTextContent("Pipelines");
@@ -68,8 +69,8 @@ describe("Sidebar", () => {
     expect(nav).toHaveTextContent("Workbench");
     expect(nav).toHaveTextContent("Data & Files");
     expect(nav).toHaveTextContent("Infrastructure");
-    expect(nav).toHaveTextContent("Profile");
     expect(nav).toHaveTextContent("Settings");
+    expect(nav).not.toHaveTextContent("Profile");
   });
 
   it("renders Experiments as a top-level nav item (renamed from Projects)", () => {
