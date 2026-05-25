@@ -1,7 +1,7 @@
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from unittest.mock import MagicMock, patch
 
 
@@ -70,6 +70,105 @@ async def test_smtp_settings_stored_in_database(client: AsyncClient, admin_token
     assert row.smtp_username == "testuser"
     assert row.smtp_from_address == "bot@test.io"
     assert row.smtp_encryption == "starttls"
+
+
+@pytest.mark.asyncio
+async def test_startup_load_decrypts_smtp_password(session: AsyncSession, db_engine):
+    """Persisted SMTP settings loaded at startup must yield the decrypted
+    password in settings, not the stored Fernet ciphertext.
+
+    Regression: the startup loader read the encrypted smtp_password column via
+    raw SQL, which bypasses the EncryptedString decryptor, so the in-memory
+    settings held the ciphertext and the app authenticated to the SMTP server
+    with the encrypted blob as the password. The symptom was outbound SMTP
+    breaking on every restart until the password was re-saved.
+    """
+    from app.config import settings
+    from app.models.organization import Organization
+    from app.services.email_service import load_persisted_smtp_settings
+
+    plaintext_password = "super-secret-smtp-pw"
+
+    # Persist an org with SMTP configured; the ORM encrypts smtp_password at rest.
+    org = Organization(
+        name="Acme",
+        smtp_configured=True,
+        smtp_host="smtp.example.com",
+        smtp_port=587,
+        smtp_username="mailer",
+        smtp_password=plaintext_password,
+        smtp_from_address="noreply@example.com",
+        smtp_encryption="starttls",
+    )
+    session.add(org)
+    await session.commit()
+
+    # Sanity: the column is stored as Fernet ciphertext, not plaintext.
+    stored = (await session.execute(text("SELECT smtp_password FROM organizations LIMIT 1"))).scalar_one()
+    assert stored != plaintext_password
+    assert stored.startswith("gAAAA")  # Fernet token prefix
+
+    # Snapshot the global settings so this test's mutation cannot leak into others.
+    fields = (
+        "smtp_host",
+        "smtp_port",
+        "smtp_username",
+        "smtp_password",
+        "smtp_from_address",
+        "smtp_encryption",
+        "smtp_configured",
+    )
+    snapshot = {k: getattr(settings, k) for k in fields}
+    # Simulate a fresh process that has not yet loaded SMTP config.
+    settings.smtp_password = ""
+    settings.smtp_configured = False
+
+    try:
+        # Load through a fresh session so the value is read back from the DB
+        # through the EncryptedString decryptor, mirroring a real restart.
+        factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+        async with factory() as fresh:
+            applied = await load_persisted_smtp_settings(fresh)
+
+        assert applied is True
+        assert settings.smtp_configured is True
+        assert settings.smtp_host == "smtp.example.com"
+        assert settings.smtp_username == "mailer"
+        # The crux: settings hold the decrypted plaintext, never the ciphertext.
+        assert settings.smtp_password == plaintext_password
+        assert not settings.smtp_password.startswith("gAAAA")
+    finally:
+        for k, v in snapshot.items():
+            setattr(settings, k, v)
+
+
+@pytest.mark.asyncio
+async def test_startup_load_skips_when_not_configured(session: AsyncSession, db_engine):
+    """The loader is a no-op when no org has SMTP configured, leaving settings untouched."""
+    from app.config import settings
+    from app.models.organization import Organization
+    from app.services.email_service import load_persisted_smtp_settings
+
+    org = Organization(name="Acme", smtp_configured=False)
+    session.add(org)
+    await session.commit()
+
+    snapshot = {k: getattr(settings, k) for k in ("smtp_host", "smtp_password", "smtp_configured")}
+    settings.smtp_host = "sentinel.example.com"
+    settings.smtp_password = "sentinel-pw"
+    settings.smtp_configured = False
+    try:
+        factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+        async with factory() as fresh:
+            applied = await load_persisted_smtp_settings(fresh)
+
+        assert applied is False
+        # Settings left exactly as they were.
+        assert settings.smtp_host == "sentinel.example.com"
+        assert settings.smtp_password == "sentinel-pw"
+    finally:
+        for k, v in snapshot.items():
+            setattr(settings, k, v)
 
 
 @pytest.mark.asyncio

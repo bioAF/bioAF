@@ -4,9 +4,36 @@ import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.config import settings
+from app.models.organization import Organization
 
 logger = logging.getLogger("bioaf.email")
+
+
+async def load_persisted_smtp_settings(session: AsyncSession) -> bool:
+    """Hydrate the in-memory settings from the org's persisted SMTP config.
+
+    Read the Organization row through the ORM so the EncryptedString
+    smtp_password column is decrypted. A raw SQL read returns the Fernet
+    ciphertext, which would then be sent to the SMTP server as the login
+    password and fail authentication.
+
+    Returns True if configured settings were applied, False otherwise.
+    """
+    org = (await session.execute(select(Organization).limit(1))).scalar_one_or_none()
+    if not (org and org.smtp_configured and org.smtp_host):
+        return False
+    settings.smtp_host = org.smtp_host
+    settings.smtp_port = org.smtp_port
+    settings.smtp_username = org.smtp_username
+    settings.smtp_password = org.smtp_password
+    settings.smtp_from_address = org.smtp_from_address
+    settings.smtp_encryption = org.smtp_encryption
+    settings.smtp_configured = True
+    return True
 
 
 class EmailService:
