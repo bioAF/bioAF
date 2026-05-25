@@ -6,6 +6,9 @@
   replaces the old email that contained only a bare code with nowhere to use it.
 - Add a "Forgot password?" link on the sign-in page so users can request a reset
   themselves.
+- In Settings > Users, an admin can always set a user's password manually ("Set
+  Password Manually"), even when SMTP is configured; previously the manual option
+  was hidden whenever email reset was available.
 
 ### Profile
 

@@ -16,6 +16,7 @@ import { DetailModal } from "@/components/shared/DetailModal";
 import { ServiceAccountsTab } from "./components/ServiceAccountsTab";
 import { WebhooksTab } from "./components/WebhooksTab";
 import { ApiActivityTab } from "./components/ApiActivityTab";
+import { PasswordResetActions } from "./components/PasswordResetActions";
 
 type TabKey = "users" | "service-accounts" | "webhooks" | "api-activity";
 
@@ -293,29 +294,19 @@ function SettingsUsersPageInner() {
             Resend Invite
           </button>
         )}
-        {!isDeactivated && !smtpConfigured && (
-          <button
-            onClick={() => {
-              setTempPasswordUser(user);
-              setShowTempPasswordForm(true);
-              setViewingUser(null);
-            }}
-            className="px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50"
-          >
-            Change Password
-          </button>
-        )}
-        {!isDeactivated && smtpConfigured && (
-          <button
-            onClick={() => {
-              setPendingAction({ type: "reset_password_email", user });
-              setViewingUser(null);
-            }}
-            className="px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50"
-          >
-            Send Password Reset Link
-          </button>
-        )}
+        <PasswordResetActions
+          user={user}
+          smtpConfigured={smtpConfigured}
+          onSendResetEmail={(u) => {
+            setPendingAction({ type: "reset_password_email", user: u });
+            setViewingUser(null);
+          }}
+          onSetManualPassword={(u) => {
+            setTempPasswordUser(u);
+            setShowTempPasswordForm(true);
+            setViewingUser(null);
+          }}
+        />
         {!isDeactivated && (
           <button
             onClick={() => {
