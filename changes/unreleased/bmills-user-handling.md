@@ -30,3 +30,13 @@
 - Allow deleting a deactivated user who never logged in even if an admin had sent
   them a password reset. The pending reset code no longer blocks the deletion, and
   the admin's action remains recorded in the audit log.
+- Outbound email no longer stops working after a rebuild or restart. The saved SMTP
+  password was reloaded from the database without being decrypted, so the server
+  login used the encrypted value and failed until the password was re-entered and
+  saved again. It is now decrypted on load.
+
+### Security
+
+- The SMTP password is scrubbed from application logs. A redaction filter on every
+  log handler replaces the live value with `***`, so the credential cannot leak
+  through a log line, exception, or traceback.
