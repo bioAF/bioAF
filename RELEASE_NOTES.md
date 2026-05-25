@@ -11,6 +11,53 @@
 > changelog section. Sections below v0.15.1 remain in their original SemVer
 > format.
 
+## v2026.5.20
+
+### Dashboard
+
+- Replace the fixed infrastructure widget grid with a customizable, role-aware
+  dashboard. A gear menu lets each user choose which widgets to show; the choice
+  persists per user, and a sensible default set ships per role. Widgets are only
+  offered and rendered when you have permission to view the data they show.
+- Add dashboard widgets: experiments status, active pipeline runs, failed runs
+  (with a 24h/12h/1h window), runs awaiting review, queue depth, my custom
+  pipelines, my active sessions (notebooks and work nodes), recent plots, recent
+  literature, my reading list, team output this week, cost vs budget, cost trend,
+  infrastructure health, backup status, auto-ingest activity, pending invites,
+  and the activity feed.
+
+## v2026.5.19
+
+### Fixes
+
+- Fix BigQuery billing export verification failing with a 403
+  (`bigquery.tables.list denied`). The dataset read grant was landing on the
+  project's default compute service account instead of the service account the
+  backend actually queries as (`bioaf-app`), so verification and cost sync could
+  never read the dataset. The grant now targets the runtime service account, and
+  clicking **Verify** on an already-affected install self-heals the permissions
+  by re-applying the billing export module, then completes: no manual `gcloud` or
+  `bq` commands required.
+
+## v2026.5.18
+
+### Search
+
+- Add a full search results page at `/search`, reached by pressing Enter in the
+  global search bar instead of picking one of the dropdown hits. It searches
+  experiments, samples, pipeline runs, files, projects, pipeline definitions,
+  and literature papers, matching both names and content (descriptions,
+  abstracts, and the like), and hides any type you do not have permission to
+  view.
+- Results are a single relevance-ranked list of cards, each tagged with its
+  type and a context line that tells similar-looking results apart (for
+  example, four files with the same name by the run that generated them and
+  their sample). A type filter narrows results to one kind and shows a per-type
+  count.
+- Experiment result cards show the parent project, the number of samples,
+  files, and pipeline runs, and the last activity date.
+- Clicking a result takes you straight to the item.
+
 ## v2026.5.17
 
 ### Results and QC

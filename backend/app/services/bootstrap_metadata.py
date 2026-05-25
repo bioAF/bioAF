@@ -67,3 +67,38 @@ async def persist_bootstrap_sa_from_metadata(session: AsyncSession) -> bool:
     await session.commit()
     logger.info("Persisted gcp_bootstrap_sa_email from VM metadata: %s", email)
     return True
+
+
+async def persist_app_sa_from_metadata(session: AsyncSession) -> bool:
+    """Read the VM's attached SA (bioaf-app) and upsert it to platform_config.
+
+    The runtime data-plane SA email is needed by Terraform so it can grant that
+    identity read access to project resources the backend queries (e.g. the
+    BigQuery billing export dataset; see ADR-028). The installer does not write
+    it to platform_config, so the backend resolves it from the metadata server
+    on startup.
+
+    Returns True if a value was persisted (or already present), False if the
+    metadata server is unreachable or the attribute is unset (e.g. running
+    outside of GCE).
+
+    Idempotent: leaves an existing row untouched.
+    """
+    existing = (
+        await session.execute(text("SELECT value FROM platform_config WHERE key='bioaf_app_sa_email'"))
+    ).scalar()
+    if existing:
+        return True
+
+    email = await get_attached_sa_email()
+    if not email:
+        return False
+
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES ('bioaf_app_sa_email', :v) ON CONFLICT (key) DO NOTHING"
+        ).bindparams(v=email)
+    )
+    await session.commit()
+    logger.info("Persisted bioaf_app_sa_email from VM metadata: %s", email)
+    return True
