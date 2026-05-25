@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
@@ -72,48 +74,53 @@ async def test_smtp_settings_stored_in_database(client: AsyncClient, admin_token
     assert row.smtp_encryption == "starttls"
 
 
-def test_apply_smtp_to_settings_writes_all_fields():
+def _fake_settings():
+    """An isolated stand-in for the settings singleton with SMTP fields defaulted."""
+    return SimpleNamespace(
+        smtp_host="",
+        smtp_port=0,
+        smtp_username="",
+        smtp_password="",
+        smtp_from_address="",
+        smtp_encryption="",
+        smtp_configured=False,
+    )
+
+
+def test_apply_smtp_to_settings_writes_all_fields(monkeypatch):
     """The shared helper is the single writer of SMTP config into settings.
 
     Both the save path (configure_smtp) and the startup load path go through it,
     so the set of fields that make up SMTP config lives in exactly one place.
+    Patch the module-level settings to an isolated object so the assertions read
+    exactly what the helper wrote, with no dependency on (or mutation of) the
+    process-wide singleton shared by the rest of the suite.
     """
-    from app.config import settings
-    from app.services.email_service import apply_smtp_to_settings
+    from app.services import email_service
 
-    fields = (
-        "smtp_host",
-        "smtp_port",
-        "smtp_username",
-        "smtp_password",
-        "smtp_from_address",
-        "smtp_encryption",
-        "smtp_configured",
+    fake = _fake_settings()
+    monkeypatch.setattr(email_service, "settings", fake)
+
+    email_service.apply_smtp_to_settings(
+        host="h.example.com",
+        port=2525,
+        username="bob",
+        password="pw",
+        from_address="from@example.com",
+        encryption="ssl",
     )
-    snapshot = {k: getattr(settings, k) for k in fields}
-    try:
-        apply_smtp_to_settings(
-            host="h.example.com",
-            port=2525,
-            username="bob",
-            password="pw",
-            from_address="from@example.com",
-            encryption="ssl",
-        )
-        assert settings.smtp_host == "h.example.com"
-        assert settings.smtp_port == 2525
-        assert settings.smtp_username == "bob"
-        assert settings.smtp_password == "pw"
-        assert settings.smtp_from_address == "from@example.com"
-        assert settings.smtp_encryption == "ssl"
-        assert settings.smtp_configured is True
-    finally:
-        for k, v in snapshot.items():
-            setattr(settings, k, v)
+
+    assert fake.smtp_host == "h.example.com"
+    assert fake.smtp_port == 2525
+    assert fake.smtp_username == "bob"
+    assert fake.smtp_password == "pw"
+    assert fake.smtp_from_address == "from@example.com"
+    assert fake.smtp_encryption == "ssl"
+    assert fake.smtp_configured is True
 
 
 @pytest.mark.asyncio
-async def test_startup_load_decrypts_smtp_password(session: AsyncSession, db_engine):
+async def test_startup_load_decrypts_smtp_password(session: AsyncSession, db_engine, monkeypatch):
     """Persisted SMTP settings loaded at startup must yield the decrypted
     password in settings, not the stored Fernet ciphertext.
 
@@ -123,9 +130,8 @@ async def test_startup_load_decrypts_smtp_password(session: AsyncSession, db_eng
     with the encrypted blob as the password. The symptom was outbound SMTP
     breaking on every restart until the password was re-saved.
     """
-    from app.config import settings
     from app.models.organization import Organization
-    from app.services.email_service import load_persisted_smtp_settings
+    from app.services import email_service
 
     plaintext_password = "super-secret-smtp-pw"
 
@@ -148,67 +154,49 @@ async def test_startup_load_decrypts_smtp_password(session: AsyncSession, db_eng
     assert stored != plaintext_password
     assert stored.startswith("gAAAA")  # Fernet token prefix
 
-    # Snapshot the global settings so this test's mutation cannot leak into others.
-    fields = (
-        "smtp_host",
-        "smtp_port",
-        "smtp_username",
-        "smtp_password",
-        "smtp_from_address",
-        "smtp_encryption",
-        "smtp_configured",
-    )
-    snapshot = {k: getattr(settings, k) for k in fields}
-    # Simulate a fresh process that has not yet loaded SMTP config.
-    settings.smtp_password = ""
-    settings.smtp_configured = False
+    # Isolate the settings object the loader writes to, so the assertions read
+    # exactly what was loaded without depending on the shared global singleton.
+    fake = _fake_settings()
+    monkeypatch.setattr(email_service, "settings", fake)
 
-    try:
-        # Load through a fresh session so the value is read back from the DB
-        # through the EncryptedString decryptor, mirroring a real restart.
-        factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
-        async with factory() as fresh:
-            applied = await load_persisted_smtp_settings(fresh)
+    # Load through a fresh session so the value is read back from the DB through
+    # the EncryptedString decryptor, mirroring a real restart.
+    factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as fresh:
+        applied = await email_service.load_persisted_smtp_settings(fresh)
 
-        assert applied is True
-        assert settings.smtp_configured is True
-        assert settings.smtp_host == "smtp.example.com"
-        assert settings.smtp_username == "mailer"
-        # The crux: settings hold the decrypted plaintext, never the ciphertext.
-        assert settings.smtp_password == plaintext_password
-        assert not settings.smtp_password.startswith("gAAAA")
-    finally:
-        for k, v in snapshot.items():
-            setattr(settings, k, v)
+    assert applied is True
+    assert fake.smtp_configured is True
+    assert fake.smtp_host == "smtp.example.com"
+    assert fake.smtp_username == "mailer"
+    # The crux: settings hold the decrypted plaintext, never the ciphertext.
+    assert fake.smtp_password == plaintext_password
+    assert not fake.smtp_password.startswith("gAAAA")
 
 
 @pytest.mark.asyncio
-async def test_startup_load_skips_when_not_configured(session: AsyncSession, db_engine):
+async def test_startup_load_skips_when_not_configured(session: AsyncSession, db_engine, monkeypatch):
     """The loader is a no-op when no org has SMTP configured, leaving settings untouched."""
-    from app.config import settings
     from app.models.organization import Organization
-    from app.services.email_service import load_persisted_smtp_settings
+    from app.services import email_service
 
     org = Organization(name="Acme", smtp_configured=False)
     session.add(org)
     await session.commit()
 
-    snapshot = {k: getattr(settings, k) for k in ("smtp_host", "smtp_password", "smtp_configured")}
-    settings.smtp_host = "sentinel.example.com"
-    settings.smtp_password = "sentinel-pw"
-    settings.smtp_configured = False
-    try:
-        factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
-        async with factory() as fresh:
-            applied = await load_persisted_smtp_settings(fresh)
+    fake = _fake_settings()
+    fake.smtp_host = "sentinel.example.com"
+    fake.smtp_password = "sentinel-pw"
+    monkeypatch.setattr(email_service, "settings", fake)
 
-        assert applied is False
-        # Settings left exactly as they were.
-        assert settings.smtp_host == "sentinel.example.com"
-        assert settings.smtp_password == "sentinel-pw"
-    finally:
-        for k, v in snapshot.items():
-            setattr(settings, k, v)
+    factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as fresh:
+        applied = await email_service.load_persisted_smtp_settings(fresh)
+
+    assert applied is False
+    # Settings left exactly as they were.
+    assert fake.smtp_host == "sentinel.example.com"
+    assert fake.smtp_password == "sentinel-pw"
 
 
 @pytest.mark.asyncio

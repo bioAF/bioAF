@@ -1,8 +1,10 @@
 import logging
+from types import SimpleNamespace
 
 import pytest
 
-from app.config import settings
+from app import logging_config
+from app.logging_config import RedactSecretsFilter, configure_logging
 
 # A neutral marker parked in the SMTP password slot. Using a non-credential name
 # keeps static analysis (py/clear-text-logging-sensitive-data) from flagging the
@@ -13,12 +15,14 @@ CANARY = "redact-me-canary-9f8e7d6c"
 
 
 @pytest.fixture
-def canary():
-    """Park the canary in settings.smtp_password for the test, then restore."""
-    original = settings.smtp_password
-    settings.smtp_password = CANARY
-    yield CANARY
-    settings.smtp_password = original
+def canary(monkeypatch):
+    """Point logging_config at an isolated settings object holding the canary.
+
+    Patching the module-level settings (rather than mutating the shared global)
+    keeps the test deterministic under the full parallel suite.
+    """
+    monkeypatch.setattr(logging_config, "settings", SimpleNamespace(smtp_password=CANARY))
+    return CANARY
 
 
 def _record(msg, args=()):
@@ -35,8 +39,6 @@ def _record(msg, args=()):
 
 def test_filter_scrubs_value_from_message_args(canary):
     """The live SMTP-password value is replaced with *** in a record's rendered message."""
-    from app.logging_config import RedactSecretsFilter
-
     f = RedactSecretsFilter()
     record = _record("login failed for %s", (canary,))
 
@@ -48,8 +50,6 @@ def test_filter_scrubs_value_from_message_args(canary):
 
 def test_filter_scrubs_value_embedded_in_msg(canary):
     """Redaction works when the value is in the message string itself, not args."""
-    from app.logging_config import RedactSecretsFilter
-
     f = RedactSecretsFilter()
     record = _record(f"connecting as {canary}")
 
@@ -57,25 +57,18 @@ def test_filter_scrubs_value_embedded_in_msg(canary):
     assert canary not in record.getMessage()
 
 
-def test_filter_noop_when_password_unset():
+def test_filter_noop_when_password_unset(monkeypatch):
     """An empty/unset password must not be 'redacted' into mangled output."""
-    from app.logging_config import RedactSecretsFilter
+    monkeypatch.setattr(logging_config, "settings", SimpleNamespace(smtp_password=""))
 
-    original = settings.smtp_password
-    settings.smtp_password = ""
-    try:
-        f = RedactSecretsFilter()
-        record = _record("ordinary message with no secret")
-        assert f.filter(record) is True
-        assert record.getMessage() == "ordinary message with no secret"
-    finally:
-        settings.smtp_password = original
+    f = RedactSecretsFilter()
+    record = _record("ordinary message with no secret")
+    assert f.filter(record) is True
+    assert record.getMessage() == "ordinary message with no secret"
 
 
 def test_configure_logging_redacts_value_on_stdout(canary, capsys):
     """configure_logging wires the filter so propagated child-logger records are scrubbed."""
-    from app.logging_config import configure_logging
-
     configure_logging(debug=False)
     logging.getLogger("bioaf.email").warning("emitting marker %s", canary)
 
