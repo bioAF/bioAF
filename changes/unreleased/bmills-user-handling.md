@@ -9,6 +9,11 @@
 - In Settings > Users, an admin can always set a user's password manually ("Set
   Password Manually"), even when SMTP is configured; previously the manual option
   was hidden whenever email reset was available.
+- The reset link in the email is now an absolute URL (built from the request host
+  and scheme) instead of a host-less path that browsers rejected.
+- Sending a reset email now reports a real failure (e.g. bad SMTP credentials)
+  instead of falsely claiming success, and the confirm button shows a working
+  state while it sends so it is clear the click registered.
 
 ### Profile
 

@@ -74,6 +74,7 @@ function SettingsUsersPageInner() {
   const [success, setSuccess] = useState("");
   const [neverLoggedIn, setNeverLoggedIn] = useState<NeverLoggedInUser[]>([]);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
   const [tempPassword, setTempPassword] = useState("");
   const [showTempPasswordForm, setShowTempPasswordForm] = useState(false);
   const [tempPasswordUser, setTempPasswordUser] = useState<User | null>(null);
@@ -114,6 +115,7 @@ function SettingsUsersPageInner() {
   const handleConfirmAction = async () => {
     if (!pendingAction) return;
     clearMessages();
+    setConfirmBusy(true);
 
     try {
       switch (pendingAction.type) {
@@ -153,8 +155,10 @@ function SettingsUsersPageInner() {
       fetchNeverLoggedIn();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Action failed");
+    } finally {
+      setConfirmBusy(false);
+      setPendingAction(null);
     }
-    setPendingAction(null);
   };
 
   const handleSetTempPassword = async () => {
@@ -537,6 +541,7 @@ function SettingsUsersPageInner() {
               }
               onConfirm={handleConfirmAction}
               onCancel={() => setPendingAction(null)}
+              busy={confirmBusy}
             />
           )}
 

@@ -34,8 +34,12 @@ async def test_resend_invite_fails_for_active_user(client: AsyncClient, admin_to
 
 
 @pytest.mark.asyncio
-async def test_admin_reset_password_send_email(client: AsyncClient, admin_token: str, viewer_user):
-    """Admin can trigger a password reset email for a user."""
+async def test_admin_reset_password_send_email(client: AsyncClient, admin_token: str, viewer_user, monkeypatch):
+    """Admin can trigger a password reset email when the email actually sends."""
+    from app.services.email_service import EmailService
+
+    monkeypatch.setattr(EmailService, "send_password_reset", staticmethod(lambda *a, **k: True))
+
     resp = await client.post(
         f"/api/users/{viewer_user.id}/admin-reset-password",
         json={"mode": "email"},
@@ -43,6 +47,44 @@ async def test_admin_reset_password_send_email(client: AsyncClient, admin_token:
     )
     assert resp.status_code == 200
     assert "reset" in resp.json()["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_admin_reset_email_reports_send_failure(client: AsyncClient, admin_token: str, viewer_user, monkeypatch):
+    """If the email cannot be sent (e.g. bad SMTP creds), the admin gets an error, not a false success."""
+    from app.services.email_service import EmailService
+
+    monkeypatch.setattr(EmailService, "send_password_reset", staticmethod(lambda *a, **k: False))
+
+    resp = await client.post(
+        f"/api/users/{viewer_user.id}/admin-reset-password",
+        json={"mode": "email"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 502
+    assert "sent" not in resp.json()["detail"].lower() or "could not" in resp.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_admin_reset_email_link_is_absolute(client: AsyncClient, admin_token: str, viewer_user, monkeypatch):
+    """The reset link in the email is an absolute URL, not a host-less path."""
+    from app.services.email_service import EmailService
+
+    captured: dict = {}
+
+    def fake_send(to, code, reset_link):
+        captured["link"] = reset_link
+        return True
+
+    monkeypatch.setattr(EmailService, "send_password_reset", staticmethod(fake_send))
+
+    resp = await client.post(
+        f"/api/users/{viewer_user.id}/admin-reset-password",
+        json={"mode": "email"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    assert captured["link"].startswith("http://test/reset-password?token=")
 
 
 @pytest.mark.asyncio
@@ -212,9 +254,13 @@ async def test_delete_user_with_audit_activity_fails(client: AsyncClient, admin_
 
 
 @pytest.mark.asyncio
-async def test_delete_user_with_pending_reset_code_succeeds(client: AsyncClient, admin_token: str, admin_user):
+async def test_delete_user_with_pending_reset_code_succeeds(client: AsyncClient, admin_token: str, admin_user, monkeypatch):
     """A deactivated, never-logged-in user can be deleted even after an admin sent them a
     password reset, which leaves a pending verification code referencing the user."""
+    from app.services.email_service import EmailService
+
+    monkeypatch.setattr(EmailService, "send_password_reset", staticmethod(lambda *a, **k: True))
+
     role_map = admin_user._test_role_map
     resp = await client.post(
         "/api/users",
@@ -254,8 +300,12 @@ async def test_delete_user_with_pending_reset_code_succeeds(client: AsyncClient,
 
 
 @pytest.mark.asyncio
-async def test_delete_preserves_admin_reset_audit_entry(client: AsyncClient, admin_token: str, admin_user):
+async def test_delete_preserves_admin_reset_audit_entry(client: AsyncClient, admin_token: str, admin_user, monkeypatch):
     """Deleting the user discards their reset code but leaves the admin's reset audit entry."""
+    from app.services.email_service import EmailService
+
+    monkeypatch.setattr(EmailService, "send_password_reset", staticmethod(lambda *a, **k: True))
+
     role_map = admin_user._test_role_map
     resp = await client.post(
         "/api/users",

@@ -379,7 +379,18 @@ async def admin_reset_password(
         )
         session.add(verification)
         await session.flush()
-        EmailService.send_password_reset(user.email, code, f"/reset-password?token={token}")
+
+        from app.url_utils import public_base_url
+
+        reset_link = f"{public_base_url(request)}/reset-password?token={token}"
+        sent = EmailService.send_password_reset(user.email, code, reset_link)
+        if not sent:
+            # Do not claim success and do not persist the unusable code: the admin
+            # needs to know the email did not go out (e.g. bad SMTP credentials).
+            raise HTTPException(
+                status_code=502,
+                detail="Could not send the password reset email. Check the email (SMTP) settings and try again.",
+            )
 
         await log_action(
             session,

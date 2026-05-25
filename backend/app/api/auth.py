@@ -154,7 +154,7 @@ async def verify_email(body: VerifyEmailRequest, session: AsyncSession = Depends
 
 
 @router.post("/request-reset")
-async def request_reset(body: PasswordResetRequest, session: AsyncSession = Depends(get_session)):
+async def request_reset(body: PasswordResetRequest, request: Request, session: AsyncSession = Depends(get_session)):
     user = await UserService.get_by_email(session, body.email)
     if not user:
         # Don't reveal whether email exists
@@ -173,7 +173,12 @@ async def request_reset(body: PasswordResetRequest, session: AsyncSession = Depe
     session.add(verification)
     await session.flush()
 
-    EmailService.send_password_reset(user.email, code, f"/reset-password?token={token}")
+    from app.url_utils import public_base_url
+
+    reset_link = f"{public_base_url(request)}/reset-password?token={token}"
+    # Self-service path returns the same generic message whether or not the email
+    # sent, to avoid revealing which addresses have accounts.
+    EmailService.send_password_reset(user.email, code, reset_link)
 
     await log_action(session, user_id=user.id, entity_type="auth", entity_id=user.id, action="request_reset")
     await session.commit()

@@ -163,6 +163,14 @@ async def test_request_reset_sends_link_and_60min_code(client: AsyncClient, admi
 
 
 @pytest.mark.asyncio
+async def test_request_reset_link_is_absolute(client: AsyncClient, admin_user, monkeypatch):
+    sent = _capture_reset_email(monkeypatch)
+    resp = await client.post("/api/auth/request-reset", json={"email": "admin@test.com"})
+    assert resp.status_code == 200
+    assert sent["link"].startswith("http://test/reset-password?token=")
+
+
+@pytest.mark.asyncio
 async def test_validate_reset_token_valid(client: AsyncClient, admin_user, monkeypatch):
     token, _ = await _start_reset(client, monkeypatch)
     resp = await client.get(f"/api/auth/reset-password/validate?token={token}")
