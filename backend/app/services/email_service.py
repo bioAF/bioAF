@@ -13,6 +13,31 @@ from app.models.organization import Organization
 logger = logging.getLogger("bioaf.email")
 
 
+def apply_smtp_to_settings(
+    *,
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    from_address: str,
+    encryption: str,
+    configured: bool = True,
+) -> None:
+    """Write SMTP config into the in-memory settings singleton.
+
+    Single source of truth for which fields make up SMTP config, shared by the
+    save path (configure_smtp) and the startup load path so the two cannot
+    drift.
+    """
+    settings.smtp_host = host
+    settings.smtp_port = port
+    settings.smtp_username = username
+    settings.smtp_password = password
+    settings.smtp_from_address = from_address
+    settings.smtp_encryption = encryption
+    settings.smtp_configured = configured
+
+
 async def load_persisted_smtp_settings(session: AsyncSession) -> bool:
     """Hydrate the in-memory settings from the org's persisted SMTP config.
 
@@ -26,13 +51,14 @@ async def load_persisted_smtp_settings(session: AsyncSession) -> bool:
     org = (await session.execute(select(Organization).limit(1))).scalar_one_or_none()
     if not (org and org.smtp_configured and org.smtp_host):
         return False
-    settings.smtp_host = org.smtp_host
-    settings.smtp_port = org.smtp_port
-    settings.smtp_username = org.smtp_username
-    settings.smtp_password = org.smtp_password
-    settings.smtp_from_address = org.smtp_from_address
-    settings.smtp_encryption = org.smtp_encryption
-    settings.smtp_configured = True
+    apply_smtp_to_settings(
+        host=org.smtp_host,
+        port=org.smtp_port,
+        username=org.smtp_username,
+        password=org.smtp_password,
+        from_address=org.smtp_from_address,
+        encryption=org.smtp_encryption,
+    )
     return True
 
 

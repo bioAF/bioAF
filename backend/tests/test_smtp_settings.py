@@ -72,6 +72,46 @@ async def test_smtp_settings_stored_in_database(client: AsyncClient, admin_token
     assert row.smtp_encryption == "starttls"
 
 
+def test_apply_smtp_to_settings_writes_all_fields():
+    """The shared helper is the single writer of SMTP config into settings.
+
+    Both the save path (configure_smtp) and the startup load path go through it,
+    so the set of fields that make up SMTP config lives in exactly one place.
+    """
+    from app.config import settings
+    from app.services.email_service import apply_smtp_to_settings
+
+    fields = (
+        "smtp_host",
+        "smtp_port",
+        "smtp_username",
+        "smtp_password",
+        "smtp_from_address",
+        "smtp_encryption",
+        "smtp_configured",
+    )
+    snapshot = {k: getattr(settings, k) for k in fields}
+    try:
+        apply_smtp_to_settings(
+            host="h.example.com",
+            port=2525,
+            username="bob",
+            password="pw",
+            from_address="from@example.com",
+            encryption="ssl",
+        )
+        assert settings.smtp_host == "h.example.com"
+        assert settings.smtp_port == 2525
+        assert settings.smtp_username == "bob"
+        assert settings.smtp_password == "pw"
+        assert settings.smtp_from_address == "from@example.com"
+        assert settings.smtp_encryption == "ssl"
+        assert settings.smtp_configured is True
+    finally:
+        for k, v in snapshot.items():
+            setattr(settings, k, v)
+
+
 @pytest.mark.asyncio
 async def test_startup_load_decrypts_smtp_password(session: AsyncSession, db_engine):
     """Persisted SMTP settings loaded at startup must yield the decrypted
