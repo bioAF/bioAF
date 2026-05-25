@@ -254,7 +254,9 @@ async def test_delete_user_with_audit_activity_fails(client: AsyncClient, admin_
 
 
 @pytest.mark.asyncio
-async def test_delete_user_with_pending_reset_code_succeeds(client: AsyncClient, admin_token: str, admin_user, monkeypatch):
+async def test_delete_user_with_pending_reset_code_succeeds(
+    client: AsyncClient, admin_token: str, admin_user, monkeypatch
+):
     """A deactivated, never-logged-in user can be deleted even after an admin sent them a
     password reset, which leaves a pending verification code referencing the user."""
     from app.services.email_service import EmailService

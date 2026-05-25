@@ -152,9 +152,7 @@ async def test_request_reset_sends_link_and_60min_code(client: AsyncClient, admi
     assert token
     assert len(code) == 6 and code.isdigit()
 
-    result = await session.execute(
-        select(VerificationCode).where(VerificationCode.token == token)
-    )
+    result = await session.execute(select(VerificationCode).where(VerificationCode.token == token))
     row = result.scalar_one()
     assert row.purpose == "password_reset"
     assert row.used is False
