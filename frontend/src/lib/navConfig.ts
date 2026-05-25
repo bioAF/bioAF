@@ -84,14 +84,6 @@ export const navConfig: NavSection[] = [
     ],
   },
   {
-    label: "Profile",
-    icon: "user",
-    children: [
-      { label: "Account & Credentials", path: "/profile" },
-      { label: "Notifications", path: "/profile/notifications", permission: { resource: "notifications", action: "view" } },
-    ],
-  },
-  {
     label: "Infrastructure",
     icon: "server",
     children: [

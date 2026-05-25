@@ -1,7 +1,9 @@
+from types import SimpleNamespace
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from unittest.mock import MagicMock, patch
 
 
@@ -70,6 +72,131 @@ async def test_smtp_settings_stored_in_database(client: AsyncClient, admin_token
     assert row.smtp_username == "testuser"
     assert row.smtp_from_address == "bot@test.io"
     assert row.smtp_encryption == "starttls"
+
+
+def _fake_settings():
+    """An isolated stand-in for the settings singleton with SMTP fields defaulted."""
+    return SimpleNamespace(
+        smtp_host="",
+        smtp_port=0,
+        smtp_username="",
+        smtp_password="",
+        smtp_from_address="",
+        smtp_encryption="",
+        smtp_configured=False,
+    )
+
+
+def test_apply_smtp_to_settings_writes_all_fields(monkeypatch):
+    """The shared helper is the single writer of SMTP config into settings.
+
+    Both the save path (configure_smtp) and the startup load path go through it,
+    so the set of fields that make up SMTP config lives in exactly one place.
+    Patch the module-level settings to an isolated object so the assertions read
+    exactly what the helper wrote, with no dependency on (or mutation of) the
+    process-wide singleton shared by the rest of the suite.
+    """
+    from app.services import email_service
+
+    fake = _fake_settings()
+    monkeypatch.setattr(email_service, "settings", fake)
+
+    email_service.apply_smtp_to_settings(
+        host="h.example.com",
+        port=2525,
+        username="bob",
+        password="pw",
+        from_address="from@example.com",
+        encryption="ssl",
+    )
+
+    assert fake.smtp_host == "h.example.com"
+    assert fake.smtp_port == 2525
+    assert fake.smtp_username == "bob"
+    assert fake.smtp_password == "pw"
+    assert fake.smtp_from_address == "from@example.com"
+    assert fake.smtp_encryption == "ssl"
+    assert fake.smtp_configured is True
+
+
+@pytest.mark.asyncio
+async def test_startup_load_decrypts_smtp_password(session: AsyncSession, db_engine, monkeypatch):
+    """Persisted SMTP settings loaded at startup must yield the decrypted
+    password in settings, not the stored Fernet ciphertext.
+
+    Regression: the startup loader read the encrypted smtp_password column via
+    raw SQL, which bypasses the EncryptedString decryptor, so the in-memory
+    settings held the ciphertext and the app authenticated to the SMTP server
+    with the encrypted blob as the password. The symptom was outbound SMTP
+    breaking on every restart until the password was re-saved.
+    """
+    from app.models.organization import Organization
+    from app.services import email_service
+
+    plaintext_password = "super-secret-smtp-pw"
+
+    # Persist an org with SMTP configured; the ORM encrypts smtp_password at rest.
+    org = Organization(
+        name="Acme",
+        smtp_configured=True,
+        smtp_host="smtp.example.com",
+        smtp_port=587,
+        smtp_username="mailer",
+        smtp_password=plaintext_password,
+        smtp_from_address="noreply@example.com",
+        smtp_encryption="starttls",
+    )
+    session.add(org)
+    await session.commit()
+
+    # Sanity: the column is stored as Fernet ciphertext, not plaintext.
+    stored = (await session.execute(text("SELECT smtp_password FROM organizations LIMIT 1"))).scalar_one()
+    assert stored != plaintext_password
+    assert stored.startswith("gAAAA")  # Fernet token prefix
+
+    # Isolate the settings object the loader writes to, so the assertions read
+    # exactly what was loaded without depending on the shared global singleton.
+    fake = _fake_settings()
+    monkeypatch.setattr(email_service, "settings", fake)
+
+    # Load through a fresh session so the value is read back from the DB through
+    # the EncryptedString decryptor, mirroring a real restart.
+    factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as fresh:
+        applied = await email_service.load_persisted_smtp_settings(fresh)
+
+    assert applied is True
+    assert fake.smtp_configured is True
+    assert fake.smtp_host == "smtp.example.com"
+    assert fake.smtp_username == "mailer"
+    # The crux: settings hold the decrypted plaintext, never the ciphertext.
+    assert fake.smtp_password == plaintext_password
+    assert not fake.smtp_password.startswith("gAAAA")
+
+
+@pytest.mark.asyncio
+async def test_startup_load_skips_when_not_configured(session: AsyncSession, db_engine, monkeypatch):
+    """The loader is a no-op when no org has SMTP configured, leaving settings untouched."""
+    from app.models.organization import Organization
+    from app.services import email_service
+
+    org = Organization(name="Acme", smtp_configured=False)
+    session.add(org)
+    await session.commit()
+
+    fake = _fake_settings()
+    fake.smtp_host = "sentinel.example.com"
+    fake.smtp_password = "sentinel-pw"
+    monkeypatch.setattr(email_service, "settings", fake)
+
+    factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as fresh:
+        applied = await email_service.load_persisted_smtp_settings(fresh)
+
+    assert applied is False
+    # Settings left exactly as they were.
+    assert fake.smtp_host == "sentinel.example.com"
+    assert fake.smtp_password == "sentinel-pw"
 
 
 @pytest.mark.asyncio

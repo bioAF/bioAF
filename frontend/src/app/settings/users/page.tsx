@@ -16,6 +16,7 @@ import { DetailModal } from "@/components/shared/DetailModal";
 import { ServiceAccountsTab } from "./components/ServiceAccountsTab";
 import { WebhooksTab } from "./components/WebhooksTab";
 import { ApiActivityTab } from "./components/ApiActivityTab";
+import { PasswordResetActions } from "./components/PasswordResetActions";
 
 type TabKey = "users" | "service-accounts" | "webhooks" | "api-activity";
 
@@ -73,6 +74,7 @@ function SettingsUsersPageInner() {
   const [success, setSuccess] = useState("");
   const [neverLoggedIn, setNeverLoggedIn] = useState<NeverLoggedInUser[]>([]);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
   const [tempPassword, setTempPassword] = useState("");
   const [showTempPasswordForm, setShowTempPasswordForm] = useState(false);
   const [tempPasswordUser, setTempPasswordUser] = useState<User | null>(null);
@@ -113,6 +115,7 @@ function SettingsUsersPageInner() {
   const handleConfirmAction = async () => {
     if (!pendingAction) return;
     clearMessages();
+    setConfirmBusy(true);
 
     try {
       switch (pendingAction.type) {
@@ -152,8 +155,10 @@ function SettingsUsersPageInner() {
       fetchNeverLoggedIn();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Action failed");
+    } finally {
+      setConfirmBusy(false);
+      setPendingAction(null);
     }
-    setPendingAction(null);
   };
 
   const handleSetTempPassword = async () => {
@@ -293,29 +298,19 @@ function SettingsUsersPageInner() {
             Resend Invite
           </button>
         )}
-        {!isDeactivated && !smtpConfigured && (
-          <button
-            onClick={() => {
-              setTempPasswordUser(user);
-              setShowTempPasswordForm(true);
-              setViewingUser(null);
-            }}
-            className="px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50"
-          >
-            Change Password
-          </button>
-        )}
-        {!isDeactivated && smtpConfigured && (
-          <button
-            onClick={() => {
-              setPendingAction({ type: "reset_password_email", user });
-              setViewingUser(null);
-            }}
-            className="px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50"
-          >
-            Send Password Reset Link
-          </button>
-        )}
+        <PasswordResetActions
+          user={user}
+          smtpConfigured={smtpConfigured}
+          onSendResetEmail={(u) => {
+            setPendingAction({ type: "reset_password_email", user: u });
+            setViewingUser(null);
+          }}
+          onSetManualPassword={(u) => {
+            setTempPasswordUser(u);
+            setShowTempPasswordForm(true);
+            setViewingUser(null);
+          }}
+        />
         {!isDeactivated && (
           <button
             onClick={() => {
@@ -546,6 +541,7 @@ function SettingsUsersPageInner() {
               }
               onConfirm={handleConfirmAction}
               onCancel={() => setPendingAction(null)}
+              busy={confirmBusy}
             />
           )}
 

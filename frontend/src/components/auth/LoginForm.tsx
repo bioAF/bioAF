@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 
 interface LoginFormProps {
   onSubmit: (email: string, password: string) => Promise<void>;
@@ -63,6 +64,12 @@ export function LoginForm({ onSubmit, error }: LoginFormProps) {
       >
         {submitting ? "Signing in..." : "Sign In"}
       </button>
+
+      <div className="mt-4 text-center">
+        <Link href="/forgot-password" className="text-sm text-bioaf-600 hover:text-bioaf-700">
+          Forgot password?
+        </Link>
+      </div>
     </form>
   );
 }
