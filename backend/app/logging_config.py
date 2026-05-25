@@ -68,7 +68,9 @@ class RedactSecretsFilter(logging.Filter):
                 for secret in secrets:
                     record.exc_text = record.exc_text.replace(secret, _REDACTION)
         except Exception:
-            pass
+            # Defensive by design: logging filters must not raise or drop records.
+            # If redaction fails, allow the original record through unchanged.
+            record
         return True
 
 
