@@ -1,7 +1,7 @@
 """Add a tokenized link column to verification_codes for password resets.
 
-Revision ID: 088
-Revises: 087
+Revision ID: 089
+Revises: 088
 Create Date: 2026-05-25
 
 Password-reset emails now carry a unique link (valid 60 minutes) in addition to
@@ -12,8 +12,8 @@ validated and the reset confirmed by token rather than by email address.
 import sqlalchemy as sa
 from alembic import op
 
-revision = "088"
-down_revision = "087"
+revision = "089"
+down_revision = "088"
 branch_labels = None
 depends_on = None
 
