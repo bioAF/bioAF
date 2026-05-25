@@ -118,10 +118,11 @@ export function AccountTab() {
             </div>
           )}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="account-name" className="block text-sm font-medium text-gray-700 mb-1">
               Display name
             </label>
             <input
+              id="account-name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -154,10 +155,11 @@ export function AccountTab() {
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="account-current-password" className="block text-sm font-medium text-gray-700 mb-1">
               Current password
             </label>
             <input
+              id="account-current-password"
               type="password"
               value={currentPassword}
               onChange={(e) => setCurrentPassword(e.target.value)}
@@ -166,10 +168,11 @@ export function AccountTab() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="account-new-password" className="block text-sm font-medium text-gray-700 mb-1">
               New password
             </label>
             <input
+              id="account-new-password"
               type="password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
@@ -178,10 +181,11 @@ export function AccountTab() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="account-confirm-password" className="block text-sm font-medium text-gray-700 mb-1">
               Confirm new password
             </label>
             <input
+              id="account-confirm-password"
               type="password"
               value={confirmNewPassword}
               onChange={(e) => setConfirmNewPassword(e.target.value)}
