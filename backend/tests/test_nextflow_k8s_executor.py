@@ -243,9 +243,28 @@ class TestK8sExecutor:
         assert "withName: 'MULTIQC'" in config
         # Must pass --export through to MultiQC.
         assert "--export" in config
-        # Must preserve any pre-existing ext.args so we don't clobber pipeline
-        # defaults (e.g. nf-core sometimes ships args like --cl-config ...).
-        assert "task.ext.args" in config or "ext.args ?:" in config
+
+    def test_k8s_config_multiqc_ext_args_not_self_referential(self):
+        """The MULTIQC ext.args override must not read task.ext.args back into
+        itself. A closure like `ext.args = { (task.ext.args ?: '') + ' --export' }`
+        is self-referential: at resolution time `task.ext.args` *is* that closure,
+        so evaluating it recurses forever and Nextflow aborts the MULTIQC process
+        with `java.lang.StackOverflowError` before it ever runs. We override
+        ext.args with a plain value instead.
+
+        Regression: a self-referential closure shipped in the generated config
+        and crashed every scrnaseq run at the MULTIQC step."""
+        config = KubernetesComputeProvider._build_nextflow_k8s_config(
+            namespace="bioaf-pipelines",
+            has_gcs_secret=True,
+            gcs_work_dir="gs://bioaf-raw-test-abc123/nextflow-work",
+        )
+        multiqc_line = next(line for line in config.splitlines() if "withName: 'MULTIQC'" in line)
+        # The override must still inject --export...
+        assert "--export" in multiqc_line
+        # ...but must not reference task.ext.args, which is the self-reference
+        # that caused the StackOverflowError.
+        assert "task.ext.args" not in multiqc_line
 
     def test_command_logs_config_before_run(self):
         """Nextflow command should cat the config file for diagnostic logging."""
