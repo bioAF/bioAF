@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { getCurrentUser } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useComponents } from "@/hooks/useComponents";
 import { useBackendReady } from "@/hooks/useBackendReady";
@@ -105,14 +104,9 @@ function SidebarSection({
 
 export function Sidebar() {
   const pathname = usePathname();
-  const [user, setUser] = useState<Record<string, unknown> | null>(null);
   const { ready: backendReady } = useBackendReady();
   const { canAccess, roleName, loading } = usePermissions();
   const { components, loading: componentsLoading } = useComponents();
-
-  useEffect(() => {
-    setUser(getCurrentUser());
-  }, []);
 
   const passesComponentGate = useCallback(
     (gate?: ComponentGate): boolean => {
@@ -247,13 +241,7 @@ export function Sidebar() {
       </nav>
 
       <div className="p-4 border-t border-gray-700">
-        {user && (
-          <div className="text-xs text-gray-400">
-            <div className="truncate">{user.email as string}</div>
-            <div className="text-gray-500 mt-0.5">{user.role_name as string}</div>
-          </div>
-        )}
-        <div className="text-xs text-gray-600 mt-2">v{process.env.NEXT_PUBLIC_APP_VERSION}</div>
+        <div className="text-xs text-gray-600">v{process.env.NEXT_PUBLIC_APP_VERSION}</div>
       </div>
     </aside>
   );

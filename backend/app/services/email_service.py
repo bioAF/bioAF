@@ -57,11 +57,15 @@ class EmailService:
         return EmailService.send_email(to, "bioAF - Email Verification", body)
 
     @staticmethod
-    def send_password_reset(to: str, code: str) -> bool:
+    def send_password_reset(to: str, code: str, reset_link: str) -> bool:
         body = f"""
         <h2>bioAF Password Reset</h2>
-        <p>Your password reset code is: <strong>{code}</strong></p>
-        <p>This code expires in 10 minutes.</p>
+        <p>We received a request to reset your bioAF password.</p>
+        <p><a href="{reset_link}">Reset your password</a></p>
+        <p>When prompted, enter this reset code:</p>
+        <p style="font-size:20px"><strong>{code}</strong></p>
+        <p>This link and code expire in 60 minutes. If you did not request a reset,
+        you can ignore this email.</p>
         """
         return EmailService.send_email(to, "bioAF - Password Reset", body)
 

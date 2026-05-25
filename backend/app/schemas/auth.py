@@ -25,7 +25,7 @@ class PasswordResetRequest(BaseModel):
 
 
 class PasswordResetConfirm(BaseModel):
-    email: EmailStr
+    token: str
     code: str
     new_password: str
 
@@ -33,6 +33,10 @@ class PasswordResetConfirm(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
+
+
+class UpdateProfileRequest(BaseModel):
+    name: str
 
 
 class AdminResetPasswordRequest(BaseModel):

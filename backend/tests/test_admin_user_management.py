@@ -212,6 +212,83 @@ async def test_delete_user_with_audit_activity_fails(client: AsyncClient, admin_
 
 
 @pytest.mark.asyncio
+async def test_delete_user_with_pending_reset_code_succeeds(client: AsyncClient, admin_token: str, admin_user):
+    """A deactivated, never-logged-in user can be deleted even after an admin sent them a
+    password reset, which leaves a pending verification code referencing the user."""
+    role_map = admin_user._test_role_map
+    resp = await client.post(
+        "/api/users",
+        json={"email": "resetdelete@test.com", "role_id": role_map["bench"]},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    user_id = resp.json()["id"]
+
+    # Admin sends a password reset email -> creates a verification_codes row for the user.
+    resp = await client.post(
+        f"/api/users/{user_id}/admin-reset-password",
+        json={"mode": "email"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+
+    resp = await client.post(
+        f"/api/users/{user_id}/deactivate",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+
+    # The pending reset code must not block deletion. The user never acted.
+    resp = await client.delete(
+        f"/api/users/{user_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["message"] == "User deleted"
+
+    resp = await client.get(
+        f"/api/users/{user_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_preserves_admin_reset_audit_entry(client: AsyncClient, admin_token: str, admin_user):
+    """Deleting the user discards their reset code but leaves the admin's reset audit entry."""
+    role_map = admin_user._test_role_map
+    resp = await client.post(
+        "/api/users",
+        json={"email": "audittrail@test.com", "role_id": role_map["bench"]},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    user_id = resp.json()["id"]
+
+    await client.post(
+        f"/api/users/{user_id}/admin-reset-password",
+        json={"mode": "email"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    await client.post(
+        f"/api/users/{user_id}/deactivate",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    resp = await client.delete(
+        f"/api/users/{user_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+
+    resp = await client.get(
+        "/api/audit?action=admin_reset_password",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    entity_ids = [e["entity_id"] for e in resp.json()["entries"]]
+    assert user_id in entity_ids
+
+
+@pytest.mark.asyncio
 async def test_change_own_password(client: AsyncClient, admin_token: str, admin_user):
     """User can change their own platform password."""
     resp = await client.post(

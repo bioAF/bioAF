@@ -368,15 +368,18 @@ async def admin_reset_password(
         from app.models.component import VerificationCode
 
         code, code_hash = AuthService.generate_verification_code()
+        token = AuthService.generate_reset_token()
         verification = VerificationCode(
             user_id=user.id,
             code_hash=code_hash,
+            token=token,
             purpose="password_reset",
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+            # The reset link and code share one 60-minute window.
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=60),
         )
         session.add(verification)
         await session.flush()
-        EmailService.send_password_reset(user.email, code)
+        EmailService.send_password_reset(user.email, code, f"/reset-password?token={token}")
 
         await log_action(
             session,

@@ -15,6 +15,7 @@ PUBLIC_PATHS = {
     "/api/auth/verify-email",
     "/api/auth/request-reset",
     "/api/auth/reset-password",
+    "/api/auth/reset-password/validate",
     "/api/bootstrap/status",
     "/api/bootstrap/create-admin",
     "/api/bootstrap/generate-setup-code",
