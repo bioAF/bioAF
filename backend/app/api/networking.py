@@ -137,6 +137,136 @@ async def update_networking_config(
     return _to_response(await _read_config(session))
 
 
+_DNS_FAILURE_MARKERS = (
+    "Name or service not known",
+    "Temporary failure in name resolution",
+    "nodename nor servname provided",
+    "Name does not resolve",
+    "No address associated with hostname",
+    "getaddrinfo",
+)
+
+
+def _classify_connect_error(exc: Exception, scheme: str, fqdn: str) -> tuple[str, str]:
+    """Translate a low-level connect/HTTP error into (status, human-readable detail)."""
+    raw = str(exc) or exc.__class__.__name__
+    lowered = raw.lower()
+    port = 443 if scheme == "https" else 80
+    if any(marker.lower() in lowered for marker in _DNS_FAILURE_MARKERS):
+        return (
+            "dns_failed",
+            f"The bioAF backend pod could not resolve {fqdn} via cluster DNS. "
+            f"If you just added the DNS record, wait 1 to 5 minutes for negative "
+            f"DNS cache entries to expire and retry. If the failure persists, check "
+            f"that CoreDNS is healthy (kubectl -n kube-system get pods -l k8s-app=kube-dns) "
+            f"and that external DNS resolution works from inside the pod.",
+        )
+    if "ssl" in lowered or "tls" in lowered or "certificate" in lowered:
+        return (
+            "tls_error",
+            f"TLS handshake to {scheme}://{fqdn} failed: {raw}. This usually means "
+            f"the certificate is not yet provisioned for this hostname, or the "
+            f"server is presenting a certificate for a different name.",
+        )
+    if "refused" in lowered:
+        return (
+            "connection_refused",
+            f"The connection to {scheme}://{fqdn}:{port} was refused. Confirm the "
+            f"Ingress is routing traffic for {fqdn} and that the firewall allows "
+            f"port {port}.",
+        )
+    if "timed out" in lowered or "timeout" in lowered:
+        return (
+            "timeout",
+            f"The request to {scheme}://{fqdn} timed out. Check that the Ingress is "
+            f"responsive and the firewall allows port {port}.",
+        )
+    return (
+        "unreachable",
+        f"Could not contact {scheme}://{fqdn}: {raw}",
+    )
+
+
+async def _attempt_loopback(fqdn: str, nonce: str) -> tuple[str, str]:
+    """Try https first (verify=False), then http; return the most informative result.
+
+    HTTPS is attempted first because production installs typically enforce HTTPS
+    at the Ingress and refuse or redirect port 80. Certificate verification is
+    disabled because the cert may not yet cover this hostname; the loopback
+    nonce is the proof of reach, not the TLS chain.
+    """
+    first_error: tuple[str, str] | None = None
+    for scheme in ("https", "http"):
+        url = f"{scheme}://{fqdn}/api/v1/settings/networking/self-check"
+        try:
+            async with httpx.AsyncClient(
+                timeout=5.0, follow_redirects=True, verify=False
+            ) as http:
+                resp = await http.get(url)
+        except httpx.HTTPError as exc:
+            status_str, detail = _classify_connect_error(exc, scheme, fqdn)
+            if status_str == "dns_failed":
+                return status_str, detail
+            if first_error is None:
+                first_error = (status_str, detail)
+            continue
+
+        if resp.status_code != 200:
+            err = (
+                "bad_response",
+                f"{scheme.upper()} {scheme}://{fqdn} returned HTTP {resp.status_code}; "
+                f"expected 200. The FQDN may route to a different application, or the "
+                f"server is misconfigured.",
+            )
+            if first_error is None:
+                first_error = err
+            continue
+
+        try:
+            payload = resp.json()
+        except ValueError:
+            err = (
+                "bad_response",
+                f"The server at {scheme}://{fqdn} returned a non-JSON response. The "
+                f"FQDN may route to a different application.",
+            )
+            if first_error is None:
+                first_error = err
+            continue
+
+        returned = payload.get("token")
+        if returned == nonce:
+            return (
+                "reachable",
+                f"Verified via {scheme.upper()}: the FQDN {fqdn} routes to this "
+                f"bioAF instance.",
+            )
+        if returned is None:
+            err = (
+                "wrong_instance",
+                f"The server at {scheme}://{fqdn} did not return a reachability "
+                f"nonce. The FQDN likely routes to a different application, or to "
+                f"a different bioAF instance.",
+            )
+        else:
+            err = (
+                "wrong_instance",
+                f"The nonce returned from {scheme}://{fqdn} did not match the one "
+                f"this instance just wrote. The FQDN routes to a different bioAF "
+                f"instance.",
+            )
+        if first_error is None:
+            first_error = err
+        # Don't try http after a wrong_instance response on https: same server
+        # would answer the same way. Return the https result.
+        return first_error
+
+    return first_error or (
+        "unreachable",
+        "No scheme attempt succeeded; this is unexpected. Please retry.",
+    )
+
+
 @router.post("/reachability-test", response_model=ReachabilityTestResult)
 async def reachability_test(
     current_user: dict = require_permission("infrastructure", "edit"),
@@ -158,26 +288,7 @@ async def reachability_test(
     await _upsert(session, "networking_self_check_expires_at", expires_at.isoformat())
     await session.commit()
 
-    url = f"http://{fqdn}/api/v1/settings/networking/self-check"
-    status_str = "reachable"
-    detail = ""
-    try:
-        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as http:
-            resp = await http.get(url)
-        if resp.status_code != 200:
-            status_str = "http_unreachable"
-            detail = f"HTTP {resp.status_code}"
-        else:
-            payload = resp.json()
-            returned = payload.get("token")
-            if returned == nonce:
-                status_str = "reachable"
-            else:
-                status_str = "wrong_instance"
-                detail = "self-check token did not match"
-    except httpx.HTTPError as exc:
-        status_str = "http_unreachable"
-        detail = str(exc) or exc.__class__.__name__
+    status_str, detail = await _attempt_loopback(fqdn, nonce)
 
     checked_at = datetime.now(timezone.utc)
     await _upsert(session, "networking_reachability_status", status_str)

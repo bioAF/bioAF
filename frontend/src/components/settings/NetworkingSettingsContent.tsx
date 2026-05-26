@@ -60,6 +60,21 @@ function StatusPill({ value, tone }: { value: string; tone: "ok" | "warn" | "bad
   );
 }
 
+const REACHABILITY_LABELS: Record<string, { label: string; tone: "ok" | "warn" | "bad" }> = {
+  reachable: { label: "Reachable", tone: "ok" },
+  dns_failed: { label: "DNS resolution failed", tone: "bad" },
+  connection_refused: { label: "Connection refused", tone: "bad" },
+  timeout: { label: "Timed out", tone: "bad" },
+  tls_error: { label: "TLS error", tone: "warn" },
+  bad_response: { label: "Unexpected response", tone: "bad" },
+  wrong_instance: { label: "Wrong instance", tone: "bad" },
+  unreachable: { label: "Unreachable", tone: "bad" },
+};
+
+function describeReachability(status: string): { label: string; tone: "ok" | "warn" | "bad" } {
+  return REACHABILITY_LABELS[status] ?? { label: status, tone: "bad" };
+}
+
 export function NetworkingSettingsContent() {
   const [config, setConfig] = useState<NetworkingConfig | null>(null);
   const [hostname, setHostname] = useState("");
@@ -253,16 +268,15 @@ export function NetworkingSettingsContent() {
           </button>
           {config?.reachability_status && (
             <div data-testid="reachability-status">
-              {config.reachability_status === "reachable" ? (
-                <StatusPill value="reachable" tone="ok" />
-              ) : (
-                <StatusPill value={config.reachability_status} tone="bad" />
-              )}
+              {(() => {
+                const d = describeReachability(config.reachability_status);
+                return <StatusPill value={d.label} tone={d.tone} />;
+              })()}
             </div>
           )}
         </div>
         {reachabilityResult?.detail && (
-          <p data-testid="reachability-detail" className="mt-2 text-sm text-gray-700">
+          <p data-testid="reachability-detail" className="mt-3 text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded px-3 py-2">
             {reachabilityResult.detail}
           </p>
         )}

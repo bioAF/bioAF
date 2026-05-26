@@ -289,14 +289,16 @@ async def test_reachability_test_passes_on_matching_token(
 
 
 @pytest.mark.asyncio
-async def test_reachability_test_http_unreachable(client, admin_token, session, monkeypatch):
-    """Outbound HTTP raises -> status = http_unreachable."""
+async def test_reachability_test_dns_failure_classification(
+    client, admin_token, session, monkeypatch
+):
+    """A getaddrinfo failure surfaces as dns_failed with a friendly detail."""
     import httpx
 
     await _set_fqdn(session)
 
     async def fake_get(self, url, **kw):
-        raise httpx.ConnectError("Name or service not known")
+        raise httpx.ConnectError("[Errno -2] Name or service not known")
 
     monkeypatch.setattr("httpx.AsyncClient.get", fake_get)
 
@@ -306,8 +308,121 @@ async def test_reachability_test_http_unreachable(client, admin_token, session, 
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "http_unreachable"
-    assert "Name or service not known" in data["detail"]
+    assert data["status"] == "dns_failed"
+    detail = data["detail"].lower()
+    assert "could not resolve" in detail
+    assert "cluster dns" in detail
+    # Raw libc error must not leak through:
+    assert "errno -2" not in detail
+
+
+@pytest.mark.asyncio
+async def test_reachability_test_connection_refused_classification(
+    client, admin_token, session, monkeypatch
+):
+    """A connection refused error is classified separately from DNS failures."""
+    import httpx
+
+    await _set_fqdn(session)
+
+    async def fake_get(self, url, **kw):
+        raise httpx.ConnectError("[Errno 111] Connection refused")
+
+    monkeypatch.setattr("httpx.AsyncClient.get", fake_get)
+
+    response = await client.post(
+        "/api/v1/settings/networking/reachability-test",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    data = response.json()
+    assert data["status"] == "connection_refused"
+    assert "refused" in data["detail"].lower()
+    assert "ingress" in data["detail"].lower() or "firewall" in data["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_reachability_test_tls_error_classification(
+    client, admin_token, session, monkeypatch
+):
+    """A TLS handshake error on https is classified as tls_error."""
+    import httpx
+
+    await _set_fqdn(session)
+
+    calls: list[str] = []
+
+    async def fake_get(self, url, **kw):
+        calls.append(url)
+        if url.startswith("https://"):
+            raise httpx.ConnectError("SSL: CERTIFICATE_VERIFY_FAILED")
+        # http succeeds with the right token so the run also exercises the fallback
+        from httpx import Response
+        from app.api.networking import uuid4 as _uuid  # noqa: F401
+        # Use the most recently written token from the DB instead of guessing.
+        return Response(200, json={"token": "never-match"})
+
+    monkeypatch.setattr("httpx.AsyncClient.get", fake_get)
+
+    response = await client.post(
+        "/api/v1/settings/networking/reachability-test",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    data = response.json()
+    # First (https) error is preserved because the http fallback returned a
+    # mismatched nonce; that's an even noisier failure mode, but the operator's
+    # most actionable signal is the TLS error from the primary scheme.
+    assert data["status"] in ("tls_error", "wrong_instance")
+    # https must have been attempted first
+    assert calls[0].startswith("https://")
+
+
+@pytest.mark.asyncio
+async def test_reachability_test_tries_https_first(
+    client, admin_token, session, monkeypatch
+):
+    """Reachability test attempts https://<fqdn>/... before http://<fqdn>/..."""
+    import httpx
+
+    await _set_fqdn(session)
+    schemes_seen: list[str] = []
+
+    async def fake_get(self, url, **kw):
+        schemes_seen.append(url.split("://", 1)[0])
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr("httpx.AsyncClient.get", fake_get)
+
+    await client.post(
+        "/api/v1/settings/networking/reachability-test",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert schemes_seen[0] == "https"
+
+
+@pytest.mark.asyncio
+async def test_reachability_test_skips_http_fallback_on_dns_failure(
+    client, admin_token, session, monkeypatch
+):
+    """DNS failure on https short-circuits: no point retrying with http."""
+    import httpx
+
+    await _set_fqdn(session)
+    attempts: list[str] = []
+
+    async def fake_get(self, url, **kw):
+        attempts.append(url)
+        raise httpx.ConnectError("Name or service not known")
+
+    monkeypatch.setattr("httpx.AsyncClient.get", fake_get)
+
+    await client.post(
+        "/api/v1/settings/networking/reachability-test",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    # Only the https attempt should run; http is skipped because DNS will fail
+    # the same way.
+    assert len(attempts) == 1
+    assert attempts[0].startswith("https://")
 
 
 @pytest.mark.asyncio

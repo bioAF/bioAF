@@ -188,6 +188,39 @@ describe("Networking Settings Page", () => {
     expect(screen.getByTestId("https-warning")).toHaveTextContent(/logged out/i);
   });
 
+  it("renders friendly status labels for non-reachable outcomes", async () => {
+    setNetworkingConfig({
+      ...reachableConfig,
+      reachability_status: "dns_failed",
+    });
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("reachability-status")).toHaveTextContent(
+        "DNS resolution failed",
+      );
+    });
+  });
+
+  it("renders the detail message after a test run", async () => {
+    setNetworkingConfig(reachableConfig);
+    mockApiPost.mockResolvedValueOnce({
+      fqdn: "app.acme.com",
+      status: "dns_failed",
+      detail:
+        "The bioAF backend pod could not resolve app.acme.com via cluster DNS. Wait 1 to 5 minutes for negative DNS cache entries to expire and retry.",
+      checked_at: "2026-05-26T12:00:00Z",
+    });
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => screen.getByTestId("test-reachability-button"));
+
+    fireEvent.click(screen.getByTestId("test-reachability-button"));
+    await waitFor(() => {
+      expect(screen.getByTestId("reachability-detail")).toHaveTextContent(
+        /could not resolve/i,
+      );
+    });
+  });
+
   it("calls /enforce-https with enabled=true when Apply is clicked", async () => {
     setNetworkingConfig(certActiveConfig);
     mockApiPost.mockResolvedValueOnce({ fqdn: "app.acme.com", https_enforced: true });
