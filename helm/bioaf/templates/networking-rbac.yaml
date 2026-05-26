@@ -1,0 +1,49 @@
+{{- /*
+RBAC for the Networking Settings feature.
+
+The backend pod patches three things from inside the cluster when the operator
+uses Settings -> Networking:
+
+- ManagedCertificate (networking.gke.io): requested + status-polled when the
+  operator clicks "Request certificate" / "Refresh status".
+- Ingress: patched to add the HTTP -> HTTPS redirect on "Apply HTTPS".
+- Deployment template: annotated with kubectl.kubernetes.io/restartedAt to
+  trigger a rollout restart after enforcement flips.
+
+Scoped to the release namespace. Tests use a mock applier and do not exercise
+these permissions.
+*/}}
+{{- if .Values.networking.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}-networking
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+rules:
+  - apiGroups: ["networking.gke.io"]
+    resources: ["managedcertificates"]
+    verbs: ["get", "create", "patch", "update"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}-networking
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccount.name }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Release.Name }}-networking
+{{- end }}
