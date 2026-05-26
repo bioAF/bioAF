@@ -715,11 +715,19 @@ class KubernetesComputeProvider(ComputeProvider):
 
         # MultiQC 1.20+ no longer writes multiqc_plots/png/ by default. The
         # bioAF QC dashboard collects PNGs from that directory, so force
-        # MultiQC to export them by appending --export to its CLI args.
-        # Scope this to the MULTIQC process selector so only the MultiQC
-        # task picks it up. Preserve any pre-existing ext.args so we don't
-        # clobber pipeline-specific defaults (e.g. --cl-config blocks).
-        lines.append("process { withName: 'MULTIQC' { ext.args = { (task.ext.args ?: '') + ' --export' } } }")
+        # MultiQC to export them by passing --export. Scope this to the MULTIQC
+        # process selector so only the MultiQC task picks it up.
+        #
+        # ext.args is set to a plain value, NOT a closure that reads
+        # task.ext.args. A closure like `{ (task.ext.args ?: '') + ' --export' }`
+        # is self-referential: at resolution time task.ext.args is this very
+        # closure, so it recurses forever and Nextflow aborts MULTIQC with
+        # java.lang.StackOverflowError before the process runs. Nextflow has no
+        # native append for ext.args (a later assignment fully replaces the
+        # earlier one), so we override outright. This drops nf-core's default
+        # MULTIQC ext.args (the --title from params.multiqc_title); the QC
+        # dashboard does not depend on the report title.
+        lines.append("process { withName: 'MULTIQC' { ext.args = '--export' } }")
 
         return "\n".join(lines)
 
