@@ -74,3 +74,17 @@ class ReachabilityTestResult(BaseModel):
     status: str  # reachable | http_unreachable | wrong_instance
     detail: str = ""
     checked_at: datetime
+
+
+class CertificateStatusResponse(BaseModel):
+    fqdn: str
+    status: str  # not_requested | provisioning | active | failed
+
+
+class EnforceHttpsRequest(BaseModel):
+    enabled: bool
+
+
+class EnforceHttpsResponse(BaseModel):
+    fqdn: str
+    https_enforced: bool

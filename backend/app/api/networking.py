@@ -11,11 +11,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import require_permission
 from app.database import get_session
 from app.schemas.networking import (
+    CertificateStatusResponse,
+    EnforceHttpsRequest,
+    EnforceHttpsResponse,
     NetworkingConfigResponse,
     NetworkingConfigUpdate,
     ReachabilityTestResult,
 )
 from app.services import audit_service
+from app.services.networking_applier import (
+    CERT_STATUS_NOT_REQUESTED,
+    CERT_STATUS_PROVISIONING,
+    NetworkingApplier,
+    get_networking_applier,
+)
 
 router = APIRouter(prefix="/api/v1/settings/networking", tags=["networking"])
 
@@ -191,6 +200,92 @@ async def reachability_test(
         detail=detail,
         checked_at=checked_at,
     )
+
+
+@router.post("/certificate", response_model=CertificateStatusResponse)
+async def request_certificate(
+    current_user: dict = require_permission("infrastructure", "edit"),
+    session: AsyncSession = Depends(get_session),
+    applier: NetworkingApplier = Depends(get_networking_applier),
+) -> CertificateStatusResponse:
+    """Request a TLS certificate for the configured FQDN via the configured applier."""
+    user_id = int(current_user["sub"])
+    config = await _read_config(session)
+    hostname = config.get("networking_hostname", "")
+    domain = config.get("networking_domain", "")
+    fqdn = _compute_fqdn(hostname, domain)
+    if not hostname or not domain:
+        raise HTTPException(400, "hostname and domain must be configured before requesting a certificate")
+    if config.get("networking_reachability_status") != "reachable":
+        raise HTTPException(400, "reachability must be verified before requesting a certificate")
+
+    await applier.request_certificate(fqdn)
+    await _upsert(session, "networking_cert_status", CERT_STATUS_PROVISIONING)
+
+    await audit_service.log_action(
+        session,
+        user_id=user_id,
+        entity_type="platform_config",
+        entity_id=0,
+        action="request_certificate",
+        details={"fqdn": fqdn},
+    )
+    await session.commit()
+    return CertificateStatusResponse(fqdn=fqdn, status=CERT_STATUS_PROVISIONING)
+
+
+@router.get("/certificate/status", response_model=CertificateStatusResponse)
+async def certificate_status(
+    current_user: dict = require_permission("infrastructure", "view"),
+    session: AsyncSession = Depends(get_session),
+    applier: NetworkingApplier = Depends(get_networking_applier),
+) -> CertificateStatusResponse:
+    """Poll the applier for the current cert status; cache the result."""
+    config = await _read_config(session)
+    hostname = config.get("networking_hostname", "")
+    domain = config.get("networking_domain", "")
+    fqdn = _compute_fqdn(hostname, domain)
+    if not hostname or not domain:
+        return CertificateStatusResponse(fqdn="", status=CERT_STATUS_NOT_REQUESTED)
+
+    status_str = await applier.get_certificate_status(fqdn)
+    await _upsert(session, "networking_cert_status", status_str)
+    await session.commit()
+    return CertificateStatusResponse(fqdn=fqdn, status=status_str)
+
+
+@router.post("/enforce-https", response_model=EnforceHttpsResponse)
+async def enforce_https(
+    body: EnforceHttpsRequest,
+    current_user: dict = require_permission("infrastructure", "edit"),
+    session: AsyncSession = Depends(get_session),
+    applier: NetworkingApplier = Depends(get_networking_applier),
+) -> EnforceHttpsResponse:
+    """Flip the HTTPS-enforcement flag, patch the Ingress, restart services."""
+    user_id = int(current_user["sub"])
+    config = await _read_config(session)
+    hostname = config.get("networking_hostname", "")
+    domain = config.get("networking_domain", "")
+    fqdn = _compute_fqdn(hostname, domain)
+    if not hostname or not domain:
+        raise HTTPException(400, "hostname and domain must be configured before enforcing HTTPS")
+    if body.enabled and config.get("networking_cert_status") != "active":
+        raise HTTPException(400, "TLS certificate must be active before enforcing HTTPS")
+
+    await applier.enforce_https(fqdn, body.enabled)
+    await _upsert(session, "networking_https_enforced", "true" if body.enabled else "false")
+    await applier.restart_services()
+
+    await audit_service.log_action(
+        session,
+        user_id=user_id,
+        entity_type="platform_config",
+        entity_id=0,
+        action="enforce_https",
+        details={"fqdn": fqdn, "enabled": body.enabled},
+    )
+    await session.commit()
+    return EnforceHttpsResponse(fqdn=fqdn, https_enforced=body.enabled)
 
 
 @router.get("/self-check")

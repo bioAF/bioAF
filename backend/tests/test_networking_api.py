@@ -1,7 +1,32 @@
 """Tests for the networking settings API (hostname/domain, reachability, TLS)."""
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import text
+
+from app.services.networking_applier import (
+    CERT_STATUS_ACTIVE,
+    CERT_STATUS_PROVISIONING,
+    MockNetworkingApplier,
+    get_networking_applier,
+)
+
+
+@pytest_asyncio.fixture
+async def mock_applier(client):
+    """Override get_networking_applier with a fresh MockNetworkingApplier.
+
+    Yields the instance so tests can inspect calls (requested_for,
+    enforce_calls, restart_count) and drive responses (status_to_return).
+    """
+    from app import main as main_module
+
+    applier = MockNetworkingApplier()
+    main_module.app.dependency_overrides[get_networking_applier] = lambda: applier
+    try:
+        yield applier
+    finally:
+        main_module.app.dependency_overrides.pop(get_networking_applier, None)
 
 
 @pytest.mark.asyncio
@@ -374,6 +399,274 @@ async def test_reachability_test_requires_admin(client, viewer_token, session):
     await _set_fqdn(session)
     response = await client.post(
         "/api/v1/settings/networking/reachability-test",
+        headers={"Authorization": f"Bearer {viewer_token}"},
+    )
+    assert response.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# /certificate: request a TLS cert for the configured FQDN.
+# ---------------------------------------------------------------------------
+
+
+async def _mark_reachable(session) -> None:
+    """Mark the configured FQDN as reachable, the precondition for /certificate."""
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES "
+            "('networking_reachability_status', 'reachable') "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
+    )
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_request_certificate_calls_issuer(
+    client, admin_token, session, mock_applier
+):
+    """POST /certificate calls applier.request_certificate with the configured FQDN."""
+    await _set_fqdn(session, "app", "acme.com")
+    await _mark_reachable(session)
+
+    response = await client.post(
+        "/api/v1/settings/networking/certificate",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    assert mock_applier.requested_for == "app.acme.com"
+
+
+@pytest.mark.asyncio
+async def test_request_certificate_persists_status(
+    client, admin_token, session, mock_applier
+):
+    """After requesting, networking_cert_status is 'provisioning'."""
+    await _set_fqdn(session)
+    await _mark_reachable(session)
+
+    await client.post(
+        "/api/v1/settings/networking/certificate",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    row = (
+        await session.execute(
+            text("SELECT value FROM platform_config WHERE key='networking_cert_status'")
+        )
+    ).scalar()
+    assert row == CERT_STATUS_PROVISIONING
+
+
+@pytest.mark.asyncio
+async def test_request_certificate_requires_reachable(
+    client, admin_token, session, mock_applier
+):
+    """POST /certificate returns 400 if reachability hasn't been verified yet."""
+    await _set_fqdn(session)
+    # reachability NOT marked reachable
+
+    response = await client.post(
+        "/api/v1/settings/networking/certificate",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 400
+    assert mock_applier.requested_for is None
+
+
+@pytest.mark.asyncio
+async def test_request_certificate_writes_audit_log(
+    client, admin_token, session, mock_applier
+):
+    await _set_fqdn(session)
+    await _mark_reachable(session)
+
+    await client.post(
+        "/api/v1/settings/networking/certificate",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    count = (
+        await session.execute(
+            text(
+                "SELECT COUNT(*) FROM audit_log "
+                "WHERE entity_type='platform_config' AND action='request_certificate'"
+            )
+        )
+    ).scalar()
+    assert count >= 1
+
+
+@pytest.mark.asyncio
+async def test_request_certificate_requires_admin(client, viewer_token, session, mock_applier):
+    await _set_fqdn(session)
+    await _mark_reachable(session)
+    response = await client.post(
+        "/api/v1/settings/networking/certificate",
+        headers={"Authorization": f"Bearer {viewer_token}"},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_certificate_status_polls_applier_and_persists(
+    client, admin_token, session, mock_applier
+):
+    """GET /certificate/status calls applier.get_certificate_status and caches it."""
+    await _set_fqdn(session)
+    mock_applier.status_to_return = CERT_STATUS_ACTIVE
+
+    response = await client.get(
+        "/api/v1/settings/networking/certificate/status",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == CERT_STATUS_ACTIVE
+
+    cached = (
+        await session.execute(
+            text("SELECT value FROM platform_config WHERE key='networking_cert_status'")
+        )
+    ).scalar()
+    assert cached == CERT_STATUS_ACTIVE
+
+
+@pytest.mark.asyncio
+async def test_certificate_status_returns_not_requested_when_no_fqdn(
+    client, admin_token, session, mock_applier
+):
+    """GET /certificate/status returns not_requested if no FQDN is set."""
+    response = await client.get(
+        "/api/v1/settings/networking/certificate/status",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "not_requested"
+
+
+# ---------------------------------------------------------------------------
+# /enforce-https: flip the flag, patch Ingress, restart deployments.
+# ---------------------------------------------------------------------------
+
+
+async def _mark_cert_active(session) -> None:
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES "
+            "('networking_cert_status', 'active') "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
+    )
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_enforce_https_requires_active_cert(
+    client, admin_token, session, mock_applier
+):
+    """POST /enforce-https returns 400 if the cert is not yet active."""
+    await _set_fqdn(session)
+    # cert NOT active
+
+    response = await client.post(
+        "/api/v1/settings/networking/enforce-https",
+        json={"enabled": True},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 400
+    assert mock_applier.enforce_calls == []
+
+
+@pytest.mark.asyncio
+async def test_enforce_https_calls_applier_and_restarts(
+    client, admin_token, session, mock_applier
+):
+    """Enabling enforcement calls applier.enforce_https(fqdn, True) and restart_services."""
+    await _set_fqdn(session)
+    await _mark_cert_active(session)
+
+    response = await client.post(
+        "/api/v1/settings/networking/enforce-https",
+        json={"enabled": True},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    assert mock_applier.enforce_calls == [("app.acme.com", True)]
+    assert mock_applier.restart_count == 1
+
+
+@pytest.mark.asyncio
+async def test_enforce_https_persists_flag(
+    client, admin_token, session, mock_applier
+):
+    await _set_fqdn(session)
+    await _mark_cert_active(session)
+
+    await client.post(
+        "/api/v1/settings/networking/enforce-https",
+        json={"enabled": True},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    row = (
+        await session.execute(
+            text("SELECT value FROM platform_config WHERE key='networking_https_enforced'")
+        )
+    ).scalar()
+    assert row == "true"
+
+
+@pytest.mark.asyncio
+async def test_enforce_https_can_be_disabled(
+    client, admin_token, session, mock_applier
+):
+    """Disabling enforcement is allowed even without active cert (rollback)."""
+    await _set_fqdn(session)
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES "
+            "('networking_https_enforced', 'true') "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
+    )
+    await session.commit()
+
+    response = await client.post(
+        "/api/v1/settings/networking/enforce-https",
+        json={"enabled": False},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    assert mock_applier.enforce_calls == [("app.acme.com", False)]
+
+
+@pytest.mark.asyncio
+async def test_enforce_https_writes_audit_log(
+    client, admin_token, session, mock_applier
+):
+    await _set_fqdn(session)
+    await _mark_cert_active(session)
+
+    await client.post(
+        "/api/v1/settings/networking/enforce-https",
+        json={"enabled": True},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    count = (
+        await session.execute(
+            text(
+                "SELECT COUNT(*) FROM audit_log "
+                "WHERE entity_type='platform_config' AND action='enforce_https'"
+            )
+        )
+    ).scalar()
+    assert count >= 1
+
+
+@pytest.mark.asyncio
+async def test_enforce_https_requires_admin(client, viewer_token, session, mock_applier):
+    await _set_fqdn(session)
+    await _mark_cert_active(session)
+    response = await client.post(
+        "/api/v1/settings/networking/enforce-https",
+        json={"enabled": True},
         headers={"Authorization": f"Bearer {viewer_token}"},
     )
     assert response.status_code == 403
