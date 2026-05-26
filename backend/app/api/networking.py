@@ -22,6 +22,7 @@ from app.services import audit_service
 from app.services.networking_applier import (
     CERT_STATUS_NOT_REQUESTED,
     CERT_STATUS_PROVISIONING,
+    ManualActionRequired,
     NetworkingApplier,
     get_networking_applier,
 )
@@ -327,7 +328,24 @@ async def request_certificate(
     if config.get("networking_reachability_status") != "reachable":
         raise HTTPException(400, "reachability must be verified before requesting a certificate")
 
-    await applier.request_certificate(fqdn)
+    try:
+        await applier.request_certificate(fqdn)
+    except ManualActionRequired as exc:
+        # The current applier (VmNginxApplier) cannot issue certs itself; it
+        # returns instructions for the operator to run certbot on the host.
+        # Record the attempt in the audit log so we can see who tried and when,
+        # then surface the instruction to the UI.
+        await audit_service.log_action(
+            session,
+            user_id=user_id,
+            entity_type="platform_config",
+            entity_id=0,
+            action="request_certificate_manual",
+            details={"fqdn": fqdn},
+        )
+        await session.commit()
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+
     await _upsert(session, "networking_cert_status", CERT_STATUS_PROVISIONING)
 
     await audit_service.log_action(

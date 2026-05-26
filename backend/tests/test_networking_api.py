@@ -582,6 +582,37 @@ async def test_request_certificate_writes_audit_log(client, admin_token, session
 
 
 @pytest.mark.asyncio
+async def test_request_certificate_translates_manual_action_to_501(client, admin_token, session, mock_applier):
+    """When the applier raises ManualActionRequired, the API returns 501 with the operator
+    instructions in the detail and does not move cert_status to provisioning."""
+    from app.services.networking_applier import ManualActionRequired
+
+    await _set_fqdn(session)
+    await _mark_reachable(session)
+
+    async def raise_manual(fqdn):
+        raise ManualActionRequired(
+            "Install certbot on the host and run certbot certonly --webroot -d "
+            f"{fqdn} --email <email>; then copy fullchain.pem to docker/certs/."
+        )
+
+    mock_applier.request_certificate = raise_manual
+
+    response = await client.post(
+        "/api/v1/settings/networking/certificate",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 501
+    detail = response.json()["detail"]
+    assert "certbot" in detail.lower()
+    assert "app.acme.com" in detail
+
+    # Status must not have advanced to "provisioning" if no automated action ran.
+    row = (await session.execute(text("SELECT value FROM platform_config WHERE key='networking_cert_status'"))).scalar()
+    assert row != "provisioning"
+
+
+@pytest.mark.asyncio
 async def test_request_certificate_requires_admin(client, viewer_token, session, mock_applier):
     await _set_fqdn(session)
     await _mark_reachable(session)
