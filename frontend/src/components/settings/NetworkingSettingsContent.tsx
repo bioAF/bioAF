@@ -328,14 +328,16 @@ export function NetworkingSettingsContent() {
         </p>
 
         <div className="flex items-center gap-3 mb-4">
-          <button
-            data-testid="request-certificate-button"
-            disabled={!reachable || requesting}
-            onClick={requestCertificate}
-            className="px-3 py-1.5 bg-bioaf-700 text-white rounded disabled:bg-gray-300"
-          >
-            {requesting ? "Requesting..." : "Request certificate"}
-          </button>
+          {!certActive && (
+            <button
+              data-testid="request-certificate-button"
+              disabled={!reachable || requesting}
+              onClick={requestCertificate}
+              className="px-3 py-1.5 bg-bioaf-700 text-white rounded disabled:bg-gray-300"
+            >
+              {requesting ? "Requesting..." : "Request certificate"}
+            </button>
+          )}
           {config?.cert_status && (
             <div
               data-testid="cert-status"

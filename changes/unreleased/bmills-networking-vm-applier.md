@@ -51,3 +51,6 @@
   cert card now shows the green "HTTPS is enforced" indicator immediately
   and hides the "Apply HTTPS and restart" button (which had no effect on
   VM installs anyway).
+- The "Request certificate" button is hidden once the cert pill shows
+  active. Operators no longer see a stale CTA prompting them to repeat
+  work that has already been done.

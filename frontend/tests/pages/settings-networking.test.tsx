@@ -259,6 +259,15 @@ describe("Networking Settings Page", () => {
     });
   });
 
+  it("hides the Request certificate button once the cert is active", async () => {
+    setNetworkingConfig(certActiveConfig);
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => screen.getByTestId("networking-tls-card"));
+
+    expect(screen.queryByTestId("request-certificate-button")).not.toBeInTheDocument();
+    expect(screen.getByTestId("cert-status")).toHaveTextContent(/active/i);
+  });
+
   it("hides the Apply HTTPS button and shows the enforced indicator when https_enforced is true", async () => {
     setNetworkingConfig({
       ...certActiveConfig,
