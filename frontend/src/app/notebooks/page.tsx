@@ -566,14 +566,14 @@ export default function NotebooksPage() {
                   {/* Resource Profile */}
                   <div>
                     <label className="text-sm text-gray-500 mb-2 block">Resource Profile</label>
-                    <div className="flex gap-3">
-                      {(["small", "medium", "large"] as ResourceProfile[]).map((profile) => {
+                    <div className="grid grid-cols-3 gap-3">
+                      {(["small", "medium", "large", "xlarge", "2xlarge"] as ResourceProfile[]).map((profile) => {
                         const specs = RESOURCE_PROFILES[profile];
                         return (
                           <button
                             key={profile}
                             onClick={() => setSelectedProfile(profile)}
-                            className={`border rounded-lg px-4 py-3 text-sm flex-1 ${
+                            className={`border rounded-lg px-4 py-3 text-sm ${
                               selectedProfile === profile
                                 ? "border-bioaf-500 bg-bioaf-50 text-bioaf-700"
                                 : "border-gray-200 hover:border-gray-300"

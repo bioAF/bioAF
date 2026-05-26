@@ -177,6 +177,30 @@ describe("NotebooksPage launch modal", () => {
     });
   });
 
+  test("offers the full resource profile ladder up to 128GB", async () => {
+    setupMocks({ build_id: null, build_status: null, image_uri: null });
+
+    render(<NotebooksPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Launch Session")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Launch Session"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Launch Notebook Session")).toBeInTheDocument();
+    });
+
+    // All five tiers are selectable, with the larger options the colleague asked for.
+    for (const profile of ["small", "medium", "large", "xlarge", "2xlarge"]) {
+      expect(screen.getByText(profile)).toBeInTheDocument();
+    }
+    expect(screen.getByText("8 CPU, 32GB RAM")).toBeInTheDocument();
+    expect(screen.getByText("16 CPU, 64GB RAM")).toBeInTheDocument();
+    expect(screen.getByText("16 CPU, 128GB RAM")).toBeInTheDocument();
+  });
+
   test("shows error in modal on launch failure", async () => {
     setupMocks({ build_id: null, build_status: null, image_uri: null });
     mockPost.mockRejectedValue(new Error("The notebook image is currently building."));
