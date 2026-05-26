@@ -27,7 +27,17 @@ jest.mock("@/lib/api", () => ({
   },
 }));
 
-const blankConfig = {
+type NetworkingConfigFixture = {
+  hostname: string;
+  domain: string;
+  fqdn: string;
+  reachability_status: string;
+  reachability_checked_at: string | null;
+  cert_status: string;
+  https_enforced: boolean;
+};
+
+const blankConfig: NetworkingConfigFixture = {
   hostname: "",
   domain: "",
   fqdn: "",
@@ -37,7 +47,7 @@ const blankConfig = {
   https_enforced: false,
 };
 
-const reachableConfig = {
+const reachableConfig: NetworkingConfigFixture = {
   ...blankConfig,
   hostname: "app",
   domain: "acme.com",
@@ -46,12 +56,12 @@ const reachableConfig = {
   reachability_checked_at: "2026-05-26T12:00:00Z",
 };
 
-const certActiveConfig = {
+const certActiveConfig: NetworkingConfigFixture = {
   ...reachableConfig,
   cert_status: "active",
 };
 
-function setNetworkingConfig(cfg: typeof blankConfig) {
+function setNetworkingConfig(cfg: NetworkingConfigFixture) {
   mockApiGet.mockImplementation((url: string) => {
     if (url.includes("/api/v1/settings/networking/certificate/status")) {
       return Promise.resolve({ fqdn: cfg.fqdn, status: cfg.cert_status || "not_requested" });
