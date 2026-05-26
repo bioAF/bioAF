@@ -188,6 +188,62 @@ describe("Networking Settings Page", () => {
     expect(screen.getByTestId("https-warning")).toHaveTextContent(/logged out/i);
   });
 
+  it("polls the cert status when Refresh is clicked and surfaces a last-checked timestamp", async () => {
+    const provisioningConfig = { ...reachableConfig, cert_status: "provisioning" };
+    setNetworkingConfig(provisioningConfig);
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => screen.getByTestId("refresh-cert-status-button"));
+
+    fireEvent.click(screen.getByTestId("refresh-cert-status-button"));
+
+    await waitFor(() => {
+      expect(mockApiGet).toHaveBeenCalledWith(
+        expect.stringContaining("/api/v1/settings/networking/certificate/status"),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("cert-last-checked")).toBeInTheDocument();
+    });
+  });
+
+  it("shows 'Refreshing...' on the cert refresh button while a poll is in flight", async () => {
+    const provisioningConfig = { ...reachableConfig, cert_status: "provisioning" };
+    setNetworkingConfig(provisioningConfig);
+
+    // Make the certificate/status call resolve only when we release it.
+    let releaseStatus: (v: { fqdn: string; status: string }) => void = () => {};
+    const deferred = new Promise<{ fqdn: string; status: string }>((resolve) => {
+      releaseStatus = resolve;
+    });
+    mockApiGet.mockImplementation((url: string) => {
+      if (url.includes("/api/v1/settings/networking/certificate/status")) {
+        return deferred;
+      }
+      if (url.includes("/api/v1/settings/networking")) {
+        return Promise.resolve(provisioningConfig);
+      }
+      return Promise.resolve({});
+    });
+
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => screen.getByTestId("refresh-cert-status-button"));
+
+    fireEvent.click(screen.getByTestId("refresh-cert-status-button"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("refresh-cert-status-button")).toHaveTextContent(
+        /refreshing/i,
+      );
+    });
+
+    releaseStatus({ fqdn: "app.acme.com", status: "provisioning" });
+    await waitFor(() => {
+      expect(screen.getByTestId("refresh-cert-status-button")).toHaveTextContent(
+        /refresh status/i,
+      );
+    });
+  });
+
   it("renders friendly status labels for non-reachable outcomes", async () => {
     setNetworkingConfig({
       ...reachableConfig,

@@ -82,6 +82,9 @@ export function NetworkingSettingsContent() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [requesting, setRequesting] = useState(false);
+  const [pollingCert, setPollingCert] = useState(false);
+  const [certCheckedAt, setCertCheckedAt] = useState<Date | null>(null);
+  const [certFlash, setCertFlash] = useState(false);
   const [applyingHttps, setApplyingHttps] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reachabilityResult, setReachabilityResult] = useState<ReachabilityResult | null>(null);
@@ -156,14 +159,22 @@ export function NetworkingSettingsContent() {
   }
 
   async function pollCertStatus() {
+    setPollingCert(true);
+    setCertFlash(false);
+    setError(null);
     try {
       const result = await api.get<CertificateStatus>(
         "/api/v1/settings/networking/certificate/status",
       );
       const refreshed = await api.get<NetworkingConfig>("/api/v1/settings/networking");
       setConfig({ ...refreshed, cert_status: result.status });
+      setCertCheckedAt(new Date());
+      setCertFlash(true);
+      window.setTimeout(() => setCertFlash(false), 900);
     } catch (e) {
       setError(String(e));
+    } finally {
+      setPollingCert(false);
     }
   }
 
@@ -299,7 +310,12 @@ export function NetworkingSettingsContent() {
             {requesting ? "Requesting..." : "Request certificate"}
           </button>
           {config?.cert_status && (
-            <div data-testid="cert-status">
+            <div
+              data-testid="cert-status"
+              className={`inline-flex transition-shadow duration-300 rounded ${
+                certFlash ? "ring-2 ring-bioaf-400" : "ring-0"
+              }`}
+            >
               {certActive && <StatusPill value="active" tone="ok" />}
               {certProvisioning && <StatusPill value="provisioning" tone="warn" />}
               {config.cert_status === "failed" && (
@@ -314,10 +330,19 @@ export function NetworkingSettingsContent() {
             <button
               data-testid="refresh-cert-status-button"
               onClick={pollCertStatus}
-              className="text-sm text-bioaf-700 underline"
+              disabled={pollingCert}
+              className="text-sm text-bioaf-700 underline disabled:text-gray-400 disabled:no-underline"
             >
-              Refresh status
+              {pollingCert ? "Refreshing..." : "Refresh status"}
             </button>
+          )}
+          {certCheckedAt && (
+            <span
+              data-testid="cert-last-checked"
+              className="text-xs text-gray-500"
+            >
+              Last checked {certCheckedAt.toLocaleTimeString()}
+            </span>
           )}
         </div>
 

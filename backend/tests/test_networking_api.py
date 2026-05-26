@@ -262,9 +262,7 @@ async def test_reachability_test_requires_fqdn_set(client, admin_token, session)
 
 
 @pytest.mark.asyncio
-async def test_reachability_test_passes_on_matching_token(
-    client, admin_token, session, monkeypatch
-):
+async def test_reachability_test_passes_on_matching_token(client, admin_token, session, monkeypatch):
     """Loopback returns our nonce -> status = reachable."""
     from uuid import UUID
 
@@ -274,6 +272,7 @@ async def test_reachability_test_passes_on_matching_token(
 
     async def fake_get(self, url, **kw):
         from httpx import Response
+
         return Response(200, json={"token": str(fixed)})
 
     monkeypatch.setattr("httpx.AsyncClient.get", fake_get)
@@ -289,9 +288,7 @@ async def test_reachability_test_passes_on_matching_token(
 
 
 @pytest.mark.asyncio
-async def test_reachability_test_dns_failure_classification(
-    client, admin_token, session, monkeypatch
-):
+async def test_reachability_test_dns_failure_classification(client, admin_token, session, monkeypatch):
     """A getaddrinfo failure surfaces as dns_failed with a friendly detail."""
     import httpx
 
@@ -317,9 +314,7 @@ async def test_reachability_test_dns_failure_classification(
 
 
 @pytest.mark.asyncio
-async def test_reachability_test_connection_refused_classification(
-    client, admin_token, session, monkeypatch
-):
+async def test_reachability_test_connection_refused_classification(client, admin_token, session, monkeypatch):
     """A connection refused error is classified separately from DNS failures."""
     import httpx
 
@@ -341,9 +336,7 @@ async def test_reachability_test_connection_refused_classification(
 
 
 @pytest.mark.asyncio
-async def test_reachability_test_tls_error_classification(
-    client, admin_token, session, monkeypatch
-):
+async def test_reachability_test_tls_error_classification(client, admin_token, session, monkeypatch):
     """A TLS handshake error on https is classified as tls_error."""
     import httpx
 
@@ -358,6 +351,7 @@ async def test_reachability_test_tls_error_classification(
         # http succeeds with the right token so the run also exercises the fallback
         from httpx import Response
         from app.api.networking import uuid4 as _uuid  # noqa: F401
+
         # Use the most recently written token from the DB instead of guessing.
         return Response(200, json={"token": "never-match"})
 
@@ -377,9 +371,7 @@ async def test_reachability_test_tls_error_classification(
 
 
 @pytest.mark.asyncio
-async def test_reachability_test_tries_https_first(
-    client, admin_token, session, monkeypatch
-):
+async def test_reachability_test_tries_https_first(client, admin_token, session, monkeypatch):
     """Reachability test attempts https://<fqdn>/... before http://<fqdn>/..."""
     import httpx
 
@@ -400,9 +392,7 @@ async def test_reachability_test_tries_https_first(
 
 
 @pytest.mark.asyncio
-async def test_reachability_test_skips_http_fallback_on_dns_failure(
-    client, admin_token, session, monkeypatch
-):
+async def test_reachability_test_skips_http_fallback_on_dns_failure(client, admin_token, session, monkeypatch):
     """DNS failure on https short-circuits: no point retrying with http."""
     import httpx
 
@@ -426,14 +416,13 @@ async def test_reachability_test_skips_http_fallback_on_dns_failure(
 
 
 @pytest.mark.asyncio
-async def test_reachability_test_wrong_instance_on_token_mismatch(
-    client, admin_token, session, monkeypatch
-):
+async def test_reachability_test_wrong_instance_on_token_mismatch(client, admin_token, session, monkeypatch):
     """Loopback returns a different token -> status = wrong_instance."""
     await _set_fqdn(session)
 
     async def fake_get(self, url, **kw):
         from httpx import Response
+
         return Response(200, json={"token": "different-token"})
 
     monkeypatch.setattr("httpx.AsyncClient.get", fake_get)
@@ -458,6 +447,7 @@ async def test_reachability_test_persists_status(client, admin_token, session, m
 
     async def fake_get(self, url, **kw):
         from httpx import Response
+
         return Response(200, json={"token": str(fixed)})
 
     monkeypatch.setattr("httpx.AsyncClient.get", fake_get)
@@ -468,15 +458,11 @@ async def test_reachability_test_persists_status(client, admin_token, session, m
     )
 
     row = (
-        await session.execute(
-            text("SELECT value FROM platform_config WHERE key='networking_reachability_status'")
-        )
+        await session.execute(text("SELECT value FROM platform_config WHERE key='networking_reachability_status'"))
     ).scalar()
     assert row == "reachable"
     checked = (
-        await session.execute(
-            text("SELECT value FROM platform_config WHERE key='networking_reachability_checked_at'")
-        )
+        await session.execute(text("SELECT value FROM platform_config WHERE key='networking_reachability_checked_at'"))
     ).scalar()
     assert checked  # non-empty ISO timestamp
 
@@ -488,6 +474,7 @@ async def test_reachability_test_writes_audit_log(client, admin_token, session, 
 
     async def fake_get(self, url, **kw):
         import httpx
+
         raise httpx.ConnectError("nope")
 
     monkeypatch.setattr("httpx.AsyncClient.get", fake_get)
@@ -500,8 +487,7 @@ async def test_reachability_test_writes_audit_log(client, admin_token, session, 
     count = (
         await session.execute(
             text(
-                "SELECT COUNT(*) FROM audit_log "
-                "WHERE entity_type='platform_config' AND action='run_reachability_test'"
+                "SELECT COUNT(*) FROM audit_log WHERE entity_type='platform_config' AND action='run_reachability_test'"
             )
         )
     ).scalar()
@@ -537,9 +523,7 @@ async def _mark_reachable(session) -> None:
 
 
 @pytest.mark.asyncio
-async def test_request_certificate_calls_issuer(
-    client, admin_token, session, mock_applier
-):
+async def test_request_certificate_calls_issuer(client, admin_token, session, mock_applier):
     """POST /certificate calls applier.request_certificate with the configured FQDN."""
     await _set_fqdn(session, "app", "acme.com")
     await _mark_reachable(session)
@@ -553,9 +537,7 @@ async def test_request_certificate_calls_issuer(
 
 
 @pytest.mark.asyncio
-async def test_request_certificate_persists_status(
-    client, admin_token, session, mock_applier
-):
+async def test_request_certificate_persists_status(client, admin_token, session, mock_applier):
     """After requesting, networking_cert_status is 'provisioning'."""
     await _set_fqdn(session)
     await _mark_reachable(session)
@@ -564,18 +546,12 @@ async def test_request_certificate_persists_status(
         "/api/v1/settings/networking/certificate",
         headers={"Authorization": f"Bearer {admin_token}"},
     )
-    row = (
-        await session.execute(
-            text("SELECT value FROM platform_config WHERE key='networking_cert_status'")
-        )
-    ).scalar()
+    row = (await session.execute(text("SELECT value FROM platform_config WHERE key='networking_cert_status'"))).scalar()
     assert row == CERT_STATUS_PROVISIONING
 
 
 @pytest.mark.asyncio
-async def test_request_certificate_requires_reachable(
-    client, admin_token, session, mock_applier
-):
+async def test_request_certificate_requires_reachable(client, admin_token, session, mock_applier):
     """POST /certificate returns 400 if reachability hasn't been verified yet."""
     await _set_fqdn(session)
     # reachability NOT marked reachable
@@ -589,9 +565,7 @@ async def test_request_certificate_requires_reachable(
 
 
 @pytest.mark.asyncio
-async def test_request_certificate_writes_audit_log(
-    client, admin_token, session, mock_applier
-):
+async def test_request_certificate_writes_audit_log(client, admin_token, session, mock_applier):
     await _set_fqdn(session)
     await _mark_reachable(session)
 
@@ -601,10 +575,7 @@ async def test_request_certificate_writes_audit_log(
     )
     count = (
         await session.execute(
-            text(
-                "SELECT COUNT(*) FROM audit_log "
-                "WHERE entity_type='platform_config' AND action='request_certificate'"
-            )
+            text("SELECT COUNT(*) FROM audit_log WHERE entity_type='platform_config' AND action='request_certificate'")
         )
     ).scalar()
     assert count >= 1
@@ -622,9 +593,7 @@ async def test_request_certificate_requires_admin(client, viewer_token, session,
 
 
 @pytest.mark.asyncio
-async def test_certificate_status_polls_applier_and_persists(
-    client, admin_token, session, mock_applier
-):
+async def test_certificate_status_polls_applier_and_persists(client, admin_token, session, mock_applier):
     """GET /certificate/status calls applier.get_certificate_status and caches it."""
     await _set_fqdn(session)
     mock_applier.status_to_return = CERT_STATUS_ACTIVE
@@ -637,17 +606,13 @@ async def test_certificate_status_polls_applier_and_persists(
     assert response.json()["status"] == CERT_STATUS_ACTIVE
 
     cached = (
-        await session.execute(
-            text("SELECT value FROM platform_config WHERE key='networking_cert_status'")
-        )
+        await session.execute(text("SELECT value FROM platform_config WHERE key='networking_cert_status'"))
     ).scalar()
     assert cached == CERT_STATUS_ACTIVE
 
 
 @pytest.mark.asyncio
-async def test_certificate_status_returns_not_requested_when_no_fqdn(
-    client, admin_token, session, mock_applier
-):
+async def test_certificate_status_returns_not_requested_when_no_fqdn(client, admin_token, session, mock_applier):
     """GET /certificate/status returns not_requested if no FQDN is set."""
     response = await client.get(
         "/api/v1/settings/networking/certificate/status",
@@ -674,9 +639,7 @@ async def _mark_cert_active(session) -> None:
 
 
 @pytest.mark.asyncio
-async def test_enforce_https_requires_active_cert(
-    client, admin_token, session, mock_applier
-):
+async def test_enforce_https_requires_active_cert(client, admin_token, session, mock_applier):
     """POST /enforce-https returns 400 if the cert is not yet active."""
     await _set_fqdn(session)
     # cert NOT active
@@ -691,9 +654,7 @@ async def test_enforce_https_requires_active_cert(
 
 
 @pytest.mark.asyncio
-async def test_enforce_https_calls_applier_and_restarts(
-    client, admin_token, session, mock_applier
-):
+async def test_enforce_https_calls_applier_and_restarts(client, admin_token, session, mock_applier):
     """Enabling enforcement calls applier.enforce_https(fqdn, True) and restart_services."""
     await _set_fqdn(session)
     await _mark_cert_active(session)
@@ -709,9 +670,7 @@ async def test_enforce_https_calls_applier_and_restarts(
 
 
 @pytest.mark.asyncio
-async def test_enforce_https_persists_flag(
-    client, admin_token, session, mock_applier
-):
+async def test_enforce_https_persists_flag(client, admin_token, session, mock_applier):
     await _set_fqdn(session)
     await _mark_cert_active(session)
 
@@ -721,17 +680,13 @@ async def test_enforce_https_persists_flag(
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     row = (
-        await session.execute(
-            text("SELECT value FROM platform_config WHERE key='networking_https_enforced'")
-        )
+        await session.execute(text("SELECT value FROM platform_config WHERE key='networking_https_enforced'"))
     ).scalar()
     assert row == "true"
 
 
 @pytest.mark.asyncio
-async def test_enforce_https_can_be_disabled(
-    client, admin_token, session, mock_applier
-):
+async def test_enforce_https_can_be_disabled(client, admin_token, session, mock_applier):
     """Disabling enforcement is allowed even without active cert (rollback)."""
     await _set_fqdn(session)
     await session.execute(
@@ -753,9 +708,7 @@ async def test_enforce_https_can_be_disabled(
 
 
 @pytest.mark.asyncio
-async def test_enforce_https_writes_audit_log(
-    client, admin_token, session, mock_applier
-):
+async def test_enforce_https_writes_audit_log(client, admin_token, session, mock_applier):
     await _set_fqdn(session)
     await _mark_cert_active(session)
 
@@ -766,10 +719,7 @@ async def test_enforce_https_writes_audit_log(
     )
     count = (
         await session.execute(
-            text(
-                "SELECT COUNT(*) FROM audit_log "
-                "WHERE entity_type='platform_config' AND action='enforce_https'"
-            )
+            text("SELECT COUNT(*) FROM audit_log WHERE entity_type='platform_config' AND action='enforce_https'")
         )
     ).scalar()
     assert count >= 1

@@ -199,9 +199,7 @@ async def _attempt_loopback(fqdn: str, nonce: str) -> tuple[str, str]:
     for scheme in ("https", "http"):
         url = f"{scheme}://{fqdn}/api/v1/settings/networking/self-check"
         try:
-            async with httpx.AsyncClient(
-                timeout=5.0, follow_redirects=True, verify=False
-            ) as http:
+            async with httpx.AsyncClient(timeout=5.0, follow_redirects=True, verify=False) as http:
                 resp = await http.get(url)
         except httpx.HTTPError as exc:
             status_str, detail = _classify_connect_error(exc, scheme, fqdn)
@@ -238,8 +236,7 @@ async def _attempt_loopback(fqdn: str, nonce: str) -> tuple[str, str]:
         if returned == nonce:
             return (
                 "reachable",
-                f"Verified via {scheme.upper()}: the FQDN {fqdn} routes to this "
-                f"bioAF instance.",
+                f"Verified via {scheme.upper()}: the FQDN {fqdn} routes to this bioAF instance.",
             )
         if returned is None:
             err = (
