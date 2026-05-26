@@ -1,0 +1,205 @@
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import NetworkingSettingsPage from "@/app/settings/networking/page";
+
+const mockPush = jest.fn();
+jest.mock("next/navigation", () => ({
+  usePathname: () => "/settings/networking",
+  useRouter: () => ({ push: mockPush }),
+}));
+
+jest.mock("@/lib/auth", () => ({
+  isAuthenticated: () => true,
+  getCurrentUser: () => ({ email: "admin@bioaf.org", role: "admin", sub: "1" }),
+}));
+
+jest.mock("@/hooks/useComponents", () => ({
+  useComponents: () => ({ components: [], loading: false, refetch: jest.fn() }),
+}));
+
+const mockApiGet = jest.fn();
+const mockApiPut = jest.fn();
+const mockApiPost = jest.fn();
+jest.mock("@/lib/api", () => ({
+  api: {
+    get: (...args: unknown[]) => mockApiGet(...args),
+    put: (...args: unknown[]) => mockApiPut(...args),
+    post: (...args: unknown[]) => mockApiPost(...args),
+  },
+}));
+
+const blankConfig = {
+  hostname: "",
+  domain: "",
+  fqdn: "",
+  reachability_status: "",
+  reachability_checked_at: null,
+  cert_status: "",
+  https_enforced: false,
+};
+
+const reachableConfig = {
+  ...blankConfig,
+  hostname: "app",
+  domain: "acme.com",
+  fqdn: "app.acme.com",
+  reachability_status: "reachable",
+  reachability_checked_at: "2026-05-26T12:00:00Z",
+};
+
+const certActiveConfig = {
+  ...reachableConfig,
+  cert_status: "active",
+};
+
+function setNetworkingConfig(cfg: typeof blankConfig) {
+  mockApiGet.mockImplementation((url: string) => {
+    if (url.includes("/api/v1/settings/networking/certificate/status")) {
+      return Promise.resolve({ fqdn: cfg.fqdn, status: cfg.cert_status || "not_requested" });
+    }
+    if (url.includes("/api/v1/settings/networking")) {
+      return Promise.resolve(cfg);
+    }
+    // Sidebar/permissions and other unrelated calls fall through with empty data.
+    return Promise.resolve({});
+  });
+}
+
+describe("Networking Settings Page", () => {
+  beforeEach(() => {
+    mockApiGet.mockReset();
+    mockApiPut.mockReset();
+    mockApiPost.mockReset();
+    setNetworkingConfig(blankConfig);
+  });
+
+  it("renders the three networking cards", async () => {
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("networking-hostname-card")).toBeInTheDocument();
+      expect(screen.getByTestId("networking-reachability-card")).toBeInTheDocument();
+      expect(screen.getByTestId("networking-tls-card")).toBeInTheDocument();
+    });
+  });
+
+  it("loads existing hostname and domain from the API", async () => {
+    setNetworkingConfig(reachableConfig);
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => {
+      const hostInput = screen.getByTestId("hostname-input") as HTMLInputElement;
+      const domainInput = screen.getByTestId("domain-input") as HTMLInputElement;
+      expect(hostInput.value).toBe("app");
+      expect(domainInput.value).toBe("acme.com");
+    });
+    expect(mockApiGet).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/settings/networking"),
+    );
+  });
+
+  it("previews the FQDN as the operator types", async () => {
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => screen.getByTestId("hostname-input"));
+
+    fireEvent.change(screen.getByTestId("hostname-input"), { target: { value: "lab" } });
+    fireEvent.change(screen.getByTestId("domain-input"), { target: { value: "example.org" } });
+
+    expect(screen.getByTestId("fqdn-preview")).toHaveTextContent("lab.example.org");
+  });
+
+  it("PUTs to /api/v1/settings/networking when Save is clicked", async () => {
+    mockApiPut.mockResolvedValueOnce(reachableConfig);
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => screen.getByTestId("hostname-input"));
+
+    fireEvent.change(screen.getByTestId("hostname-input"), { target: { value: "app" } });
+    fireEvent.change(screen.getByTestId("domain-input"), { target: { value: "acme.com" } });
+    fireEvent.click(screen.getByTestId("save-hostname-button"));
+
+    await waitFor(() => {
+      expect(mockApiPut).toHaveBeenCalledWith(
+        expect.stringContaining("/api/v1/settings/networking"),
+        { hostname: "app", domain: "acme.com" },
+      );
+    });
+  });
+
+  it("disables the reachability test when no FQDN is configured", async () => {
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => {
+      const btn = screen.getByTestId("test-reachability-button") as HTMLButtonElement;
+      expect(btn.disabled).toBe(true);
+    });
+  });
+
+  it("enables and runs the reachability test once an FQDN is saved", async () => {
+    setNetworkingConfig(reachableConfig);
+    mockApiPost.mockResolvedValueOnce({
+      fqdn: "app.acme.com",
+      status: "reachable",
+      detail: "",
+      checked_at: "2026-05-26T12:00:00Z",
+    });
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => {
+      const btn = screen.getByTestId("test-reachability-button") as HTMLButtonElement;
+      expect(btn.disabled).toBe(false);
+    });
+
+    fireEvent.click(screen.getByTestId("test-reachability-button"));
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith(
+        expect.stringContaining("/api/v1/settings/networking/reachability-test"),
+      );
+    });
+  });
+
+  it("disables the request-certificate button until reachability is verified", async () => {
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => {
+      const btn = screen.getByTestId("request-certificate-button") as HTMLButtonElement;
+      expect(btn.disabled).toBe(true);
+    });
+  });
+
+  it("enables the request-certificate button once reachable", async () => {
+    setNetworkingConfig(reachableConfig);
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => {
+      const btn = screen.getByTestId("request-certificate-button") as HTMLButtonElement;
+      expect(btn.disabled).toBe(false);
+    });
+  });
+
+  it("disables the apply-https button until the certificate is active", async () => {
+    setNetworkingConfig(reachableConfig);
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => {
+      const btn = screen.getByTestId("apply-https-button") as HTMLButtonElement;
+      expect(btn.disabled).toBe(true);
+    });
+  });
+
+  it("enables apply-https and shows a warning once the cert is active", async () => {
+    setNetworkingConfig(certActiveConfig);
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => {
+      const btn = screen.getByTestId("apply-https-button") as HTMLButtonElement;
+      expect(btn.disabled).toBe(false);
+    });
+    expect(screen.getByTestId("https-warning")).toHaveTextContent(/logged out/i);
+  });
+
+  it("calls /enforce-https with enabled=true when Apply is clicked", async () => {
+    setNetworkingConfig(certActiveConfig);
+    mockApiPost.mockResolvedValueOnce({ fqdn: "app.acme.com", https_enforced: true });
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => screen.getByTestId("apply-https-button"));
+
+    fireEvent.click(screen.getByTestId("apply-https-button"));
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith(
+        expect.stringContaining("/api/v1/settings/networking/enforce-https"),
+        { enabled: true },
+      );
+    });
+  });
+});
