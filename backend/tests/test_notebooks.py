@@ -80,7 +80,7 @@ async def test_session_launch(client, comp_bio_token):
     assert data["session_type"] == "jupyter"
     assert data["resource_profile"] == "small"
     assert data["cpu_cores"] == 2
-    assert data["memory_gb"] == 4
+    assert data["memory_gb"] == 8
     assert data["status"] in ("starting", "pending", "running")
 
 
@@ -98,7 +98,47 @@ async def test_session_launch_medium_profile(client, comp_bio_token):
     assert response.status_code == 200
     data = response.json()
     assert data["cpu_cores"] == 4
-    assert data["memory_gb"] == 8
+    assert data["memory_gb"] == 16
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "profile,cpu,memory",
+    [
+        ("large", 8, 32),
+        ("xlarge", 16, 64),
+        ("2xlarge", 16, 128),
+    ],
+)
+async def test_session_launch_large_profiles(client, comp_bio_token, profile, cpu, memory):
+    """Large, xlarge, and 2xlarge profiles resolve to the expected resources."""
+    response = await client.post(
+        "/api/notebooks/sessions",
+        json={
+            "session_type": "jupyter",
+            "resource_profile": profile,
+        },
+        headers={"Authorization": f"Bearer {comp_bio_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["resource_profile"] == profile
+    assert data["cpu_cores"] == cpu
+    assert data["memory_gb"] == memory
+
+
+@pytest.mark.asyncio
+async def test_session_launch_rejects_unknown_profile(client, comp_bio_token):
+    """An unknown resource profile is rejected by request validation."""
+    response = await client.post(
+        "/api/notebooks/sessions",
+        json={
+            "session_type": "jupyter",
+            "resource_profile": "ginormous",
+        },
+        headers={"Authorization": f"Bearer {comp_bio_token}"},
+    )
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio

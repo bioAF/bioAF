@@ -21,10 +21,17 @@ from app.adapters.registry import get_notebook_adapter
 
 logger = logging.getLogger("bioaf.notebooks")
 
+# (cpu_cores, memory_gb) per profile. Memory-weighted toward the high end
+# because single-cell work (Seurat/scanpy objects, multi-sample integration)
+# is memory-bound. The K8s adapter sets requests == limits, so a profile only
+# schedules on a node with at least this much allocatable memory; keep the
+# ceiling aligned with the largest machine type in the notebook node pool.
 RESOURCE_PROFILES = {
-    "small": (2, 4),
-    "medium": (4, 8),
-    "large": (8, 16),
+    "small": (2, 8),
+    "medium": (4, 16),
+    "large": (8, 32),
+    "xlarge": (16, 64),
+    "2xlarge": (16, 128),
 }
 
 
