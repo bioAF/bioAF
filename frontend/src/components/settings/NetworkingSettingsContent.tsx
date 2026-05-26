@@ -239,7 +239,7 @@ export function NetworkingSettingsContent() {
         <p className="text-sm text-gray-600 mb-3">
           Point a DNS A record for{" "}
           <code className="font-mono">{config?.fqdn || previewFqdn || "<fqdn>"}</code> at this
-          instance's public IP, then run the test. bioAF will write a one-time nonce and call
+          instance&apos;s public IP, then run the test. bioAF will write a one-time nonce and call
           itself at the public FQDN to confirm the request comes back here.
         </p>
         <div className="flex items-center gap-3">
