@@ -32,6 +32,10 @@ PUBLIC_PATHS = {
     "/api/v1/integrations/openapi.json",
     "/api/v1/integrations/docs",
     "/api/v1/integrations/docs/oauth2-redirect",
+    # Networking self-check is the loopback target of the reachability test:
+    # this backend hits its own public FQDN, and the response (the active
+    # nonce) proves the FQDN routes to this instance. Token rotates per test.
+    "/api/v1/settings/networking/self-check",
 }
 
 

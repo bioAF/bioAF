@@ -103,6 +103,7 @@ export const navConfig: NavSection[] = [
       { label: "Audit Log", path: "/settings/audit-log", permission: { resource: "audit_log", action: "view" } },
       { label: "Integrations", path: "/settings/integrations", permission: { resource: "infrastructure", action: "configure" } },
       { label: "Workbench Settings", path: "/settings/work-nodes", permission: { resource: "work_nodes", action: "configure" } },
+      { label: "Networking", path: "/settings/networking", permission: { resource: "infrastructure", action: "edit" } },
       { label: "Information", path: "/settings/info", permission: { resource: "infrastructure", action: "view" } },
     ],
   },
