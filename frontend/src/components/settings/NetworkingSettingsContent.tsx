@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 
 interface NetworkingConfig {
   hostname: string;
@@ -85,6 +85,7 @@ export function NetworkingSettingsContent() {
   const [pollingCert, setPollingCert] = useState(false);
   const [certCheckedAt, setCertCheckedAt] = useState<Date | null>(null);
   const [certFlash, setCertFlash] = useState(false);
+  const [certManualAction, setCertManualAction] = useState<string | null>(null);
   const [applyingHttps, setApplyingHttps] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reachabilityResult, setReachabilityResult] = useState<ReachabilityResult | null>(null);
@@ -145,6 +146,7 @@ export function NetworkingSettingsContent() {
   async function requestCertificate() {
     setRequesting(true);
     setError(null);
+    setCertManualAction(null);
     try {
       const result = await api.post<CertificateStatus>(
         "/api/v1/settings/networking/certificate",
@@ -152,9 +154,34 @@ export function NetworkingSettingsContent() {
       const refreshed = await api.get<NetworkingConfig>("/api/v1/settings/networking");
       setConfig({ ...refreshed, cert_status: result.status });
     } catch (e) {
-      setError(String(e));
+      // The backend returns 501 with operator instructions when automated
+      // cert issuance is not available (current default on VM installs).
+      // Surface those instructions in a neutral callout, not the red
+      // generic-error box.
+      if (e instanceof ApiError && e.status === 501) {
+        setCertManualAction(e.message);
+      } else {
+        setError(String(e));
+      }
     } finally {
       setRequesting(false);
+    }
+  }
+
+  function extractShellCommand(detail: string): string | null {
+    const match = detail.match(/sudo\s+certbot[\s\S]*?--non-interactive/);
+    return match ? match[0].replace(/\s+/g, " ").trim() : null;
+  }
+
+  async function copyManualCommand() {
+    if (!certManualAction) return;
+    const cmd = extractShellCommand(certManualAction) ?? certManualAction;
+    try {
+      await navigator.clipboard.writeText(cmd);
+    } catch {
+      // Clipboard API can be unavailable in some browser contexts; silently
+      // ignore - the operator can still select-and-copy from the rendered
+      // pre block.
     }
   }
 
@@ -345,6 +372,30 @@ export function NetworkingSettingsContent() {
             </span>
           )}
         </div>
+
+        {certManualAction && (
+          <div
+            data-testid="cert-manual-action"
+            className="mb-4 rounded border border-blue-300 bg-blue-50 px-4 py-3 text-sm text-blue-900"
+          >
+            <div className="font-semibold mb-1">Manual setup required</div>
+            <p className="mb-2">
+              The bioAF backend can&apos;t issue this certificate by itself yet on a VM
+              install. Run the command below on the host (SSH into the VM, paste, hit
+              enter), then click <strong>Refresh status</strong> above.
+            </p>
+            <pre className="whitespace-pre-wrap break-words bg-white border border-blue-200 rounded p-2 text-xs text-gray-900 mb-2">
+              {certManualAction}
+            </pre>
+            <button
+              data-testid="cert-manual-action-copy"
+              onClick={copyManualCommand}
+              className="text-xs text-bioaf-700 underline"
+            >
+              Copy certbot command
+            </button>
+          </div>
+        )}
 
         <div className="border-t pt-3">
           <p

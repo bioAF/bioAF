@@ -102,9 +102,21 @@ def _to_response(config: dict[str, str]) -> NetworkingConfigResponse:
 async def get_networking_config(
     current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
+    applier: NetworkingApplier = Depends(get_networking_applier),
 ) -> NetworkingConfigResponse:
-    """Return current networking configuration (hostname, domain, reachability, cert, HTTPS)."""
+    """Return current networking configuration with live cert status."""
     config = await _read_config(session)
+    hostname = config.get("networking_hostname", "")
+    domain = config.get("networking_domain", "")
+    fqdn = _compute_fqdn(hostname, domain)
+    if fqdn:
+        # Cert status is external state (the on-disk nginx cert), not config.
+        # Read it live so a stale "provisioning" cache from an earlier click
+        # cannot lie to the operator about what the system actually serves.
+        live = await applier.get_certificate_status(fqdn)
+        config["networking_cert_status"] = live
+        await _upsert(session, "networking_cert_status", live)
+        await session.commit()
     return _to_response(config)
 
 

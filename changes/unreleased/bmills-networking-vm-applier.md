@@ -19,3 +19,12 @@
   `BIOAF_COMPUTE_MODE`. The applier Protocol is unchanged, so the Settings
   page, the reachability test, and the HTTPS-enforcement flag are
   unaffected.
+- The cert status pill now reflects the actual on-disk certificate at every
+  page load: a stale "Provisioning" cached from an earlier click on a
+  previous build is cleared and replaced with the truthful state as soon as
+  the page loads.
+- When the cert request returns the manual-setup instructions (current
+  default on VM installs until the host-side cert agent ships), the UI
+  shows a structured "Manual setup required" callout with the certbot
+  command in a code block and a Copy button, instead of the previous
+  single-line red `ApiError: ...` toast.

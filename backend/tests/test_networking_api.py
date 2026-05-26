@@ -653,6 +653,46 @@ async def test_certificate_status_returns_not_requested_when_no_fqdn(client, adm
     assert response.json()["status"] == "not_requested"
 
 
+@pytest.mark.asyncio
+async def test_get_networking_uses_live_cert_status_not_cached(client, admin_token, session, mock_applier):
+    """GET /networking computes cert status live from the applier.
+
+    A stale 'provisioning' row left over from an earlier click must NOT
+    leak into the response if the applier (reading the real on-disk cert)
+    says the cert is actually not_requested.
+    """
+    await _set_fqdn(session, hostname="app", domain="acme.com")
+    # Plant a stale 'provisioning' in the DB cache.
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES "
+            "('networking_cert_status', 'provisioning') "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
+    )
+    await session.commit()
+    # But the applier (truth) says the on-disk cert does not match.
+    mock_applier.status_to_return = "not_requested"
+
+    response = await client.get(
+        "/api/v1/settings/networking",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["cert_status"] == "not_requested"
+
+
+@pytest.mark.asyncio
+async def test_get_networking_skips_applier_when_no_fqdn_set(client, admin_token, session, mock_applier):
+    """No FQDN set means we can't ask the applier about anything; cert_status stays empty."""
+    response = await client.get(
+        "/api/v1/settings/networking",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["cert_status"] == ""
+
+
 # ---------------------------------------------------------------------------
 # /enforce-https: flip the flag, patch Ingress, restart deployments.
 # ---------------------------------------------------------------------------
