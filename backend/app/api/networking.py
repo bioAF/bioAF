@@ -8,7 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import get_session
-from app.schemas.networking import NetworkingConfigResponse
+from app.schemas.networking import NetworkingConfigResponse, NetworkingConfigUpdate
+from app.services import audit_service
 
 router = APIRouter(prefix="/api/v1/settings/networking", tags=["networking"])
 
@@ -40,6 +41,16 @@ async def _read_config(session: AsyncSession) -> dict[str, str]:
     config = dict(_DEFAULTS)
     config.update({r[0]: r[1] for r in rows})
     return config
+
+
+async def _upsert(session: AsyncSession, key: str, value: str) -> None:
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, "
+            "updated_at = now()"
+        ).bindparams(k=key, v=value)
+    )
 
 
 def _compute_fqdn(hostname: str, domain: str) -> str:
@@ -79,3 +90,33 @@ async def get_networking_config(
     """Return current networking configuration (hostname, domain, reachability, cert, HTTPS)."""
     config = await _read_config(session)
     return _to_response(config)
+
+
+@router.put("", response_model=NetworkingConfigResponse)
+async def update_networking_config(
+    body: NetworkingConfigUpdate,
+    current_user: dict = require_permission("infrastructure", "edit"),
+    session: AsyncSession = Depends(get_session),
+) -> NetworkingConfigResponse:
+    """Save hostname and domain, reset verification state, write an audit entry."""
+    user_id = int(current_user["sub"])
+
+    await _upsert(session, "networking_hostname", body.hostname)
+    await _upsert(session, "networking_domain", body.domain)
+    # Changing the FQDN invalidates any prior verification.
+    await _upsert(session, "networking_reachability_status", "")
+    await _upsert(session, "networking_reachability_checked_at", "")
+    await _upsert(session, "networking_cert_status", "")
+
+    await audit_service.log_action(
+        session,
+        user_id=user_id,
+        entity_type="platform_config",
+        entity_id=0,
+        action="update_networking_config",
+        details={"hostname": body.hostname, "domain": body.domain},
+    )
+
+    await session.commit()
+
+    return _to_response(await _read_config(session))

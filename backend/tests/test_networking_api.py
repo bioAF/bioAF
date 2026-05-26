@@ -1,6 +1,7 @@
 """Tests for the networking settings API (hostname/domain, reachability, TLS)."""
 
 import pytest
+from sqlalchemy import text
 
 
 @pytest.mark.asyncio
@@ -19,3 +20,126 @@ async def test_get_networking_returns_defaults(client, admin_token, session):
     assert data["reachability_checked_at"] is None
     assert data["cert_status"] == ""
     assert data["https_enforced"] is False
+
+
+@pytest.mark.asyncio
+async def test_get_networking_requires_auth(client):
+    """GET /api/v1/settings/networking returns 401 without a token."""
+    response = await client.get("/api/v1/settings/networking")
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_put_networking_saves_hostname_and_domain(client, admin_token, session):
+    """PUT saves hostname and domain and returns the composed FQDN."""
+    response = await client.put(
+        "/api/v1/settings/networking",
+        json={"hostname": "app", "domain": "acme.com"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["hostname"] == "app"
+    assert data["domain"] == "acme.com"
+    assert data["fqdn"] == "app.acme.com"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad_hostname",
+    [
+        "-leading",
+        "trailing-",
+        "UPPER",
+        "has space",
+        "under_score",
+        "a" * 64,
+        "",
+    ],
+)
+async def test_put_networking_rejects_invalid_hostname(client, admin_token, bad_hostname):
+    """PUT returns 422 for hostnames that are not valid DNS labels (RFC 1123)."""
+    response = await client.put(
+        "/api/v1/settings/networking",
+        json={"hostname": bad_hostname, "domain": "acme.com"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad_domain",
+    [
+        "-acme.com",
+        "acme.com-",
+        "acme..com",
+        "acme",
+        "acme.c",
+        "acme.com/",
+        " ".join(["a"] * 2),
+    ],
+)
+async def test_put_networking_rejects_invalid_domain(client, admin_token, bad_domain):
+    """PUT returns 422 for domains that are not valid DNS names."""
+    response = await client.put(
+        "/api/v1/settings/networking",
+        json={"hostname": "app", "domain": bad_domain},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_put_networking_resets_verification_state(client, admin_token, session):
+    """PUT clears reachability and cert status, since the new FQDN is unverified."""
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES "
+            "('networking_reachability_status', 'reachable'), "
+            "('networking_cert_status', 'active') "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
+    )
+    await session.commit()
+
+    response = await client.put(
+        "/api/v1/settings/networking",
+        json={"hostname": "newapp", "domain": "acme.com"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["reachability_status"] == ""
+    assert data["cert_status"] == ""
+
+
+@pytest.mark.asyncio
+async def test_put_networking_writes_audit_log(client, admin_token, session):
+    """PUT records an update_networking_config audit entry."""
+    await client.put(
+        "/api/v1/settings/networking",
+        json={"hostname": "app", "domain": "acme.com"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    count = (
+        await session.execute(
+            text(
+                "SELECT COUNT(*) FROM audit_log "
+                "WHERE entity_type='platform_config' AND action='update_networking_config'"
+            )
+        )
+    ).scalar()
+    assert count >= 1
+
+
+@pytest.mark.asyncio
+async def test_put_networking_requires_admin(client, viewer_token):
+    """PUT returns 403 for users without infrastructure:edit."""
+    response = await client.put(
+        "/api/v1/settings/networking",
+        json={"hostname": "app", "domain": "acme.com"},
+        headers={"Authorization": f"Bearer {viewer_token}"},
+    )
+    assert response.status_code == 403
