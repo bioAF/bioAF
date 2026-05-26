@@ -259,6 +259,19 @@ describe("Networking Settings Page", () => {
     });
   });
 
+  it("hides the Apply HTTPS button and shows the enforced indicator when https_enforced is true", async () => {
+    setNetworkingConfig({
+      ...certActiveConfig,
+      https_enforced: true,
+    });
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => screen.getByTestId("networking-tls-card"));
+
+    expect(screen.queryByTestId("apply-https-button")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("https-warning")).not.toBeInTheDocument();
+    expect(screen.getByTestId("https-enforced-indicator")).toHaveTextContent(/HTTPS is enforced/i);
+  });
+
   it("renders friendly status labels for non-reachable outcomes", async () => {
     setNetworkingConfig({
       ...reachableConfig,

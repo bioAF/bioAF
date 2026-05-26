@@ -398,27 +398,34 @@ export function NetworkingSettingsContent() {
         )}
 
         <div className="border-t pt-3">
-          <p
-            data-testid="https-warning"
-            className="text-sm text-yellow-900 bg-yellow-50 border border-yellow-200 rounded px-3 py-2 mb-2"
-          >
-            Applying HTTPS enforcement will redirect all HTTP traffic to HTTPS and restart the
-            backend and frontend pods. All users will be logged out. Confirm that any external
-            OAuth or SSO clients have the new <code>https://&lt;fqdn&gt;/auth/callback</code>{" "}
-            URL configured before applying.
-          </p>
-          <button
-            data-testid="apply-https-button"
-            disabled={!certActive || applyingHttps}
-            onClick={applyHttps}
-            className="px-3 py-1.5 bg-bioaf-700 text-white rounded disabled:bg-gray-300"
-          >
-            {applyingHttps ? "Applying..." : "Apply HTTPS and restart"}
-          </button>
-          {config?.https_enforced && (
-            <span data-testid="https-enforced-indicator" className="ml-3 text-sm text-green-800">
-              HTTPS is enforced.
+          {config?.https_enforced ? (
+            <span
+              data-testid="https-enforced-indicator"
+              className="inline-flex items-center text-sm text-green-800"
+            >
+              <span className="mr-2 inline-block w-2 h-2 rounded-full bg-green-600" />
+              HTTPS is enforced. All HTTP traffic is redirected to HTTPS by nginx.
             </span>
+          ) : (
+            <>
+              <p
+                data-testid="https-warning"
+                className="text-sm text-yellow-900 bg-yellow-50 border border-yellow-200 rounded px-3 py-2 mb-2"
+              >
+                Applying HTTPS enforcement will redirect all HTTP traffic to HTTPS and restart the
+                backend and frontend pods. All users will be logged out. Confirm that any external
+                OAuth or SSO clients have the new{" "}
+                <code>https://&lt;fqdn&gt;/auth/callback</code> URL configured before applying.
+              </p>
+              <button
+                data-testid="apply-https-button"
+                disabled={!certActive || applyingHttps}
+                onClick={applyHttps}
+                className="px-3 py-1.5 bg-bioaf-700 text-white rounded disabled:bg-gray-300"
+              >
+                {applyingHttps ? "Applying..." : "Apply HTTPS and restart"}
+              </button>
+            </>
           )}
         </div>
       </section>

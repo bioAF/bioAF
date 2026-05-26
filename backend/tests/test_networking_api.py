@@ -31,7 +31,12 @@ async def mock_applier(client):
 
 @pytest.mark.asyncio
 async def test_get_networking_returns_defaults(client, admin_token, session):
-    """GET /api/v1/settings/networking returns empty defaults for a fresh install."""
+    """GET /api/v1/settings/networking returns empty defaults for a fresh install.
+
+    https_enforced is True even on a fresh install because the VM topology
+    enforces it via nginx.conf's port-80 redirect; the value reflects the
+    install topology (asked of the applier), not a DB flag the operator sets.
+    """
     response = await client.get(
         "/api/v1/settings/networking",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -44,7 +49,7 @@ async def test_get_networking_returns_defaults(client, admin_token, session):
     assert data["reachability_status"] == ""
     assert data["reachability_checked_at"] is None
     assert data["cert_status"] == ""
-    assert data["https_enforced"] is False
+    assert data["https_enforced"] is True
 
 
 @pytest.mark.asyncio
@@ -680,6 +685,28 @@ async def test_get_networking_uses_live_cert_status_not_cached(client, admin_tok
     )
     assert response.status_code == 200
     assert response.json()["cert_status"] == "not_requested"
+
+
+@pytest.mark.asyncio
+async def test_get_networking_uses_live_https_enforced_from_applier(client, admin_token, session, mock_applier):
+    """GET /networking returns the applier's view of https_enforced, ignoring stale DB."""
+    await _set_fqdn(session, hostname="app", domain="acme.com")
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES "
+            "('networking_https_enforced', 'false') "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
+    )
+    await session.commit()
+    mock_applier.https_enforced_value = True
+
+    response = await client.get(
+        "/api/v1/settings/networking",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["https_enforced"] is True
 
 
 @pytest.mark.asyncio

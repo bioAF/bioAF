@@ -42,6 +42,11 @@ services:
       # and decisions/ADR-047-data-at-rest-encryption.md. Mount is a no-op
       # on installs where the key is already populated.
       - ./.env:/host/.env
+      # The networking applier reads the live nginx cert to decide whether
+      # the configured FQDN actually has a valid cert installed. Mounting
+      # the same docker/certs dir as nginx (read-only) lets it see what
+      # nginx serves.
+      - ${SSL_CERT_DIR:-./certs}:/etc/nginx/certs:ro
     depends_on:
       db:
         condition: service_healthy

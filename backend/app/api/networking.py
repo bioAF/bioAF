@@ -116,7 +116,13 @@ async def get_networking_config(
         live = await applier.get_certificate_status(fqdn)
         config["networking_cert_status"] = live
         await _upsert(session, "networking_cert_status", live)
-        await session.commit()
+    # HTTPS enforcement is also a property of the install topology
+    # (nginx.conf's port-80 redirect on VM installs), not a DB-stored
+    # toggle. Always ask the applier.
+    enforced = await applier.get_https_enforced()
+    config["networking_https_enforced"] = "true" if enforced else "false"
+    await _upsert(session, "networking_https_enforced", config["networking_https_enforced"])
+    await session.commit()
     return _to_response(config)
 
 

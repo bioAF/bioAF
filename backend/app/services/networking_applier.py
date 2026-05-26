@@ -50,6 +50,9 @@ class NetworkingApplier(Protocol):
     async def restart_services(self) -> None:
         pass
 
+    async def get_https_enforced(self) -> bool:
+        pass
+
 
 @dataclass
 class MockNetworkingApplier:
@@ -64,6 +67,7 @@ class MockNetworkingApplier:
     status_to_return: str = CERT_STATUS_PROVISIONING
     enforce_calls: list[tuple[str, bool]] = field(default_factory=list)
     restart_count: int = 0
+    https_enforced_value: bool = False
 
     async def request_certificate(self, fqdn: str) -> None:
         self.requested_for = fqdn
@@ -73,9 +77,13 @@ class MockNetworkingApplier:
 
     async def enforce_https(self, fqdn: str, enabled: bool) -> None:
         self.enforce_calls.append((fqdn, enabled))
+        self.https_enforced_value = enabled
 
     async def restart_services(self) -> None:
         self.restart_count += 1
+
+    async def get_https_enforced(self) -> bool:
+        return self.https_enforced_value
 
 
 class ManualActionRequired(Exception):
@@ -173,6 +181,15 @@ class VmNginxApplier:
         cert files. Documented in the request_certificate instructions.
         """
         return None
+
+    async def get_https_enforced(self) -> bool:
+        """Always True on VM installs.
+
+        nginx.conf serves port 80 only for /api/health/ and the ACME challenge
+        path; every other request 301s to https://. There is no toggle to flip
+        at runtime; HTTPS enforcement is a property of the install topology.
+        """
+        return True
 
 
 # Module-level singleton so the same mock state survives across requests

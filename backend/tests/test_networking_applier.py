@@ -13,6 +13,7 @@ from app.services.networking_applier import (
     CERT_STATUS_ACTIVE,
     CERT_STATUS_NOT_REQUESTED,
     ManualActionRequired,
+    MockNetworkingApplier,
     VmNginxApplier,
     get_networking_applier,
 )
@@ -132,6 +133,24 @@ async def test_vm_applier_restart_services_is_a_documented_noop():
     """No automated restart from the backend container on VM installs."""
     applier = VmNginxApplier()
     await applier.restart_services()
+
+
+@pytest.mark.asyncio
+async def test_mock_applier_get_https_enforced_defaults_false_overridable():
+    """MockNetworkingApplier reports https_enforced as configurable; tests can drive it."""
+    applier = MockNetworkingApplier()
+    assert await applier.get_https_enforced() is False
+    applier.https_enforced_value = True
+    assert await applier.get_https_enforced() is True
+
+
+@pytest.mark.asyncio
+async def test_vm_applier_get_https_enforced_returns_true():
+    """On VM installs, nginx.conf unconditionally redirects HTTP to HTTPS,
+    so the applier always reports HTTPS as enforced. Operators do not toggle
+    this; it is a property of the install topology."""
+    applier = VmNginxApplier()
+    assert await applier.get_https_enforced() is True
 
 
 def test_default_factory_returns_vm_applier():

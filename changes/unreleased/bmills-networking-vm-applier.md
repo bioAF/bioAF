@@ -41,3 +41,13 @@
     explicit `cp /etc/letsencrypt/live/<fqdn>/{fullchain,privkey}.pem
     docker/certs/...` commands and the `./bioaf restart` that picks up
     the new cert.
+- The backend container now mounts `docker/certs` so the networking
+  applier can read the live nginx cert. Without this mount the cert pill
+  stayed at "Not requested" even after the operator installed a valid
+  Let's Encrypt cert.
+- `https_enforced` is now driven by the install topology rather than a
+  DB flag the operator must toggle: VmNginxApplier reports it as always
+  true because nginx.conf unconditionally redirects HTTP to HTTPS. The
+  cert card now shows the green "HTTPS is enforced" indicator immediately
+  and hides the "Apply HTTPS and restart" button (which had no effect on
+  VM installs anyway).
