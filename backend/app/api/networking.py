@@ -1,14 +1,20 @@
 """Networking settings API: hostname, domain, reachability test, TLS, HTTPS enforcement."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends
+import httpx
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import get_session
-from app.schemas.networking import NetworkingConfigResponse, NetworkingConfigUpdate
+from app.schemas.networking import (
+    NetworkingConfigResponse,
+    NetworkingConfigUpdate,
+    ReachabilityTestResult,
+)
 from app.services import audit_service
 
 router = APIRouter(prefix="/api/v1/settings/networking", tags=["networking"])
@@ -120,6 +126,71 @@ async def update_networking_config(
     await session.commit()
 
     return _to_response(await _read_config(session))
+
+
+@router.post("/reachability-test", response_model=ReachabilityTestResult)
+async def reachability_test(
+    current_user: dict = require_permission("infrastructure", "edit"),
+    session: AsyncSession = Depends(get_session),
+) -> ReachabilityTestResult:
+    """Write a nonce, fetch http://<fqdn>/.../self-check, prove the FQDN routes here."""
+    user_id = int(current_user["sub"])
+
+    config = await _read_config(session)
+    hostname = config.get("networking_hostname", "")
+    domain = config.get("networking_domain", "")
+    fqdn = _compute_fqdn(hostname, domain)
+    if not hostname or not domain:
+        raise HTTPException(400, "hostname and domain must be configured before testing reachability")
+
+    nonce = str(uuid4())
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+    await _upsert(session, "networking_self_check_token", nonce)
+    await _upsert(session, "networking_self_check_expires_at", expires_at.isoformat())
+    await session.commit()
+
+    url = f"http://{fqdn}/api/v1/settings/networking/self-check"
+    status_str = "reachable"
+    detail = ""
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as http:
+            resp = await http.get(url)
+        if resp.status_code != 200:
+            status_str = "http_unreachable"
+            detail = f"HTTP {resp.status_code}"
+        else:
+            payload = resp.json()
+            returned = payload.get("token")
+            if returned == nonce:
+                status_str = "reachable"
+            else:
+                status_str = "wrong_instance"
+                detail = "self-check token did not match"
+    except httpx.HTTPError as exc:
+        status_str = "http_unreachable"
+        detail = str(exc) or exc.__class__.__name__
+
+    checked_at = datetime.now(timezone.utc)
+    await _upsert(session, "networking_reachability_status", status_str)
+    await _upsert(session, "networking_reachability_checked_at", checked_at.isoformat())
+
+    await audit_service.log_action(
+        session,
+        user_id=user_id,
+        entity_type="platform_config",
+        entity_id=0,
+        action="run_reachability_test",
+        details={"fqdn": fqdn, "status": status_str},
+    )
+
+    await session.commit()
+
+    return ReachabilityTestResult(
+        fqdn=fqdn,
+        status=status_str,
+        detail=detail,
+        checked_at=checked_at,
+    )
 
 
 @router.get("/self-check")

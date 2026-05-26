@@ -67,3 +67,10 @@ class NetworkingConfigUpdate(BaseModel):
                 "joined by dots, no leading/trailing hyphens, total length 1-253"
             )
         return v
+
+
+class ReachabilityTestResult(BaseModel):
+    fqdn: str
+    status: str  # reachable | http_unreachable | wrong_instance
+    detail: str = ""
+    checked_at: datetime
