@@ -1,0 +1,26 @@
+{{- /*
+Placeholder ManagedCertificate that the Settings -> Networking flow patches
+in-place when the operator clicks "Request certificate".
+
+We pre-create it (rather than letting the backend create it from scratch)
+so the chart owns the resource lifecycle. The spec.domains list starts empty
+and is patched once a real FQDN is configured; GMC tolerates this and only
+attempts issuance when at least one domain is set.
+
+The ingress annotation networking.gke.io/managed-certificates already
+references this resource name (see helm/bioaf/values.yaml).
+*/}}
+{{- if .Values.networking.managedCertificate.create }}
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: {{ .Values.networking.managedCertificate.name }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  annotations:
+    # Patched by the bioaf backend; do not edit by hand.
+    bioaf.io/managed-by: "networking-settings-api"
+spec:
+  domains: []
+{{- end }}
