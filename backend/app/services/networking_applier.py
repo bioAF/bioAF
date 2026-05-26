@@ -30,10 +30,17 @@ CERT_STATUS_FAILED = "failed"
 
 
 class NetworkingApplier(Protocol):
-    async def request_certificate(self, fqdn: str) -> None: ...
-    async def get_certificate_status(self, fqdn: str) -> str: ...
-    async def enforce_https(self, fqdn: str, enabled: bool) -> None: ...
-    async def restart_services(self) -> None: ...
+    async def request_certificate(self, fqdn: str) -> None:
+        pass
+
+    async def get_certificate_status(self, fqdn: str) -> str:
+        pass
+
+    async def enforce_https(self, fqdn: str, enabled: bool) -> None:
+        pass
+
+    async def restart_services(self) -> None:
+        pass
 
 
 @dataclass
