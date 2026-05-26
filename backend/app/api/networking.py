@@ -1,6 +1,6 @@
 """Networking settings API: hostname, domain, reachability test, TLS, HTTPS enforcement."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
@@ -120,3 +120,35 @@ async def update_networking_config(
     await session.commit()
 
     return _to_response(await _read_config(session))
+
+
+@router.get("/self-check")
+async def self_check(session: AsyncSession = Depends(get_session)) -> dict[str, str | None]:
+    """Unauthenticated. Return the active reachability-test nonce, or null.
+
+    The reachability test makes an outbound HTTP request to this endpoint at
+    the configured public FQDN. If the response token matches the one this
+    instance just wrote, we have proof that the FQDN routes here.
+    """
+    rows = (
+        await session.execute(
+            text(
+                "SELECT key, value FROM platform_config "
+                "WHERE key IN ('networking_self_check_token', 'networking_self_check_expires_at')"
+            )
+        )
+    ).fetchall()
+    values = {r[0]: r[1] for r in rows}
+    token = values.get("networking_self_check_token")
+    expires_raw = values.get("networking_self_check_expires_at")
+    if not token or not expires_raw:
+        return {"token": None}
+    try:
+        expires_at = datetime.fromisoformat(expires_raw)
+    except ValueError:
+        return {"token": None}
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < datetime.now(timezone.utc):
+        return {"token": None}
+    return {"token": token}

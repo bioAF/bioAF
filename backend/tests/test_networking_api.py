@@ -143,3 +143,67 @@ async def test_put_networking_requires_admin(client, viewer_token):
         headers={"Authorization": f"Bearer {viewer_token}"},
     )
     assert response.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# /self-check: unauthenticated loopback endpoint for the reachability test.
+# Returns the active nonce so the verifier can confirm the FQDN routes here.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_self_check_returns_active_token(client, session):
+    """GET /self-check returns the stored token when not expired."""
+    from datetime import datetime, timedelta, timezone
+
+    future = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES "
+            "('networking_self_check_token', 'abc-123'), "
+            "('networking_self_check_expires_at', :exp) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        ).bindparams(exp=future)
+    )
+    await session.commit()
+
+    response = await client.get("/api/v1/settings/networking/self-check")
+    assert response.status_code == 200
+    assert response.json() == {"token": "abc-123"}
+
+
+@pytest.mark.asyncio
+async def test_self_check_returns_null_when_expired(client, session):
+    """GET /self-check returns null when the token has expired."""
+    from datetime import datetime, timedelta, timezone
+
+    past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES "
+            "('networking_self_check_token', 'expired'), "
+            "('networking_self_check_expires_at', :exp) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        ).bindparams(exp=past)
+    )
+    await session.commit()
+
+    response = await client.get("/api/v1/settings/networking/self-check")
+    assert response.status_code == 200
+    assert response.json() == {"token": None}
+
+
+@pytest.mark.asyncio
+async def test_self_check_returns_null_when_unset(client, session):
+    """GET /self-check returns null when no token exists."""
+    response = await client.get("/api/v1/settings/networking/self-check")
+    assert response.status_code == 200
+    assert response.json() == {"token": None}
+
+
+@pytest.mark.asyncio
+async def test_self_check_unauthenticated_allowed(client):
+    """The self-check endpoint must be reachable without auth: it is the
+    target of an outbound HTTP loopback from this instance's own backend."""
+    response = await client.get("/api/v1/settings/networking/self-check")
+    assert response.status_code == 200
