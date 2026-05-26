@@ -65,6 +65,7 @@ usage() {
     echo "  check-prereqs     Check that required tools are installed"
     echo "  generate-env      Generate docker/.env (preserves existing values)"
     echo "  generate-certs    Generate self-signed TLS certificate"
+    echo "  prepare-letsencrypt  Install certbot + create /var/www/letsencrypt (requires sudo)"
     echo "  --help, -h        Show this usage information"
     echo ""
     bold "Options:"
@@ -396,6 +397,59 @@ APPEND_EOF
 }
 
 # ---------------------------------------------------------------------------
+# Let's Encrypt prerequisites (certbot + webroot dir)
+# ---------------------------------------------------------------------------
+# Idempotent: skips work if both certbot and the webroot are already present.
+# The webroot dir is mounted into the nginx container by docker-compose so
+# nginx can serve /.well-known/acme-challenge/ over HTTP. install-gcp.sh's
+# VM startup script runs the same steps; this function exists for operators
+# who installed bioAF on an existing Linux server.
+prepare_letsencrypt() {
+    local missing_certbot=false
+    local missing_webroot=false
+
+    if ! command -v certbot &>/dev/null; then
+        missing_certbot=true
+    fi
+
+    if [ ! -d "/var/www/letsencrypt" ]; then
+        missing_webroot=true
+    fi
+
+    if [ "$missing_certbot" = false ] && [ "$missing_webroot" = false ]; then
+        green "Let's Encrypt prerequisites already in place (certbot + /var/www/letsencrypt)."
+        return 0
+    fi
+
+    bold "Preparing Let's Encrypt prerequisites..."
+
+    if [ "$missing_certbot" = true ]; then
+        if ! command -v apt-get &>/dev/null; then
+            yellow "  certbot is missing and this is not a Debian/Ubuntu host."
+            yellow "  Install certbot for your distribution before running the cert flow."
+        else
+            echo "  Installing certbot via apt-get (requires sudo)..."
+            if ! sudo apt-get update -qq || ! sudo apt-get install -y -qq certbot; then
+                red "  Failed to install certbot. Install it manually, then re-run."
+                return 1
+            fi
+            green "  certbot installed."
+        fi
+    fi
+
+    if [ "$missing_webroot" = true ]; then
+        echo "  Creating /var/www/letsencrypt (requires sudo)..."
+        if ! sudo mkdir -p /var/www/letsencrypt || ! sudo chmod 755 /var/www /var/www/letsencrypt; then
+            red "  Failed to create /var/www/letsencrypt. Create it manually, then re-run."
+            return 1
+        fi
+        green "  Webroot /var/www/letsencrypt created."
+    fi
+
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # Full install
 # ---------------------------------------------------------------------------
 full_install() {
@@ -429,7 +483,13 @@ full_install() {
     generate_certs || exit 1
     echo ""
 
-    # Step 4: Show next steps (skip when called from ./bioaf setup)
+    # Step 4: Prepare Let's Encrypt prerequisites on the host so the
+    # Settings -> Networking cert flow works without manual setup later.
+    # Best-effort: failures here do not abort the install.
+    prepare_letsencrypt || yellow "Skipping Let's Encrypt prep; you can run './install.sh prepare-letsencrypt' later."
+    echo ""
+
+    # Step 5: Show next steps (skip when called from ./bioaf setup)
     if [ "$quiet" = false ]; then
         bold "=== Installation Complete ==="
         echo ""
@@ -464,6 +524,10 @@ case "$command" in
     generate-certs)
         shift
         generate_certs "$@"
+        ;;
+    prepare-letsencrypt)
+        shift
+        prepare_letsencrypt "$@"
         ;;
     ensure-encryption-key)
         shift

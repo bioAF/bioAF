@@ -967,6 +967,17 @@ if ! command -v docker &>/dev/null; then
     apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     usermod -aG docker $(ls /home/ | head -1)
 fi
+
+# Install certbot + create webroot for Let's Encrypt HTTP-01 challenges.
+# The Settings -> Networking page instructs the operator to run certbot
+# certonly --webroot -w /var/www/letsencrypt, and nginx serves
+# /.well-known/acme-challenge/ from that path. Both must exist before the
+# first run.
+if ! command -v certbot &>/dev/null; then
+    apt-get install -y -qq certbot
+fi
+mkdir -p /var/www/letsencrypt
+chmod 755 /var/www /var/www/letsencrypt
 BIOAF_STARTUP_EOF
 
         vm_created=false

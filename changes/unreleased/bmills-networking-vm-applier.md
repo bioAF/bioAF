@@ -28,3 +28,16 @@
   shows a structured "Manual setup required" callout with the certbot
   command in a code block and a Copy button, instead of the previous
   single-line red `ApiError: ...` toast.
+- New installs are now ready for Let's Encrypt out of the box:
+  - `install-gcp.sh` installs `certbot` and creates `/var/www/letsencrypt`
+    on first boot of the VM, alongside the existing Docker install.
+  - `./install.sh prepare-letsencrypt` installs certbot + creates the
+    webroot on any Debian/Ubuntu host. `./install.sh` (full install) also
+    runs this best-effort.
+  - `docker/nginx.conf` now serves `/.well-known/acme-challenge/` over HTTP
+    on port 80 from a new bind mount, so `certbot certonly --webroot -w
+    /var/www/letsencrypt` works without stopping nginx.
+  - The applier's instruction text has been tightened to include the
+    explicit `cp /etc/letsencrypt/live/<fqdn>/{fullchain,privkey}.pem
+    docker/certs/...` commands and the `./bioaf restart` that picks up
+    the new cert.

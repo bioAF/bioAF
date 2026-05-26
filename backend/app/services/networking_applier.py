@@ -104,12 +104,17 @@ class VmNginxApplier:
     async def request_certificate(self, fqdn: str) -> None:
         raise ManualActionRequired(
             f"Automated certificate issuance is not yet available on VM installs. "
-            f"On the host, install certbot and run:\n\n"
+            f"On the host, run:\n\n"
             f"    sudo certbot certonly --webroot -w /var/www/letsencrypt "
             f"-d {fqdn} --email <your-email> --agree-tos --non-interactive\n\n"
-            f"Then copy fullchain.pem to docker/certs/tls.crt and privkey.pem to "
-            f"docker/certs/tls.key, and run `./bioaf restart`. Once the new cert "
-            f"is in place, click Refresh status on this page to pick it up."
+            f"Then copy the issued cert into the nginx mount and reload:\n\n"
+            f"    sudo cp /etc/letsencrypt/live/{fqdn}/fullchain.pem docker/certs/tls.crt\n"
+            f"    sudo cp /etc/letsencrypt/live/{fqdn}/privkey.pem  docker/certs/tls.key\n"
+            f"    ./bioaf restart\n\n"
+            f"Once the new cert is in place, click Refresh status on this page "
+            f"to pick it up. certbot and the /var/www/letsencrypt webroot are "
+            f"installed by install-gcp.sh; on other Linux hosts, run "
+            f"./install.sh prepare-letsencrypt once."
         )
 
     async def get_certificate_status(self, fqdn: str) -> str:
