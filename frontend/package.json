@@ -1,6 +1,6 @@
 {
   "name": "bioaf-frontend",
-  "version": "2026.5.22",
+  "version": "2026.5.23",
   "private": true,
   "scripts": {
     "dev": "next dev",
