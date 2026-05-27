@@ -31,7 +31,12 @@ async def mock_applier(client):
 
 @pytest.mark.asyncio
 async def test_get_networking_returns_defaults(client, admin_token, session):
-    """GET /api/v1/settings/networking returns empty defaults for a fresh install."""
+    """GET /api/v1/settings/networking returns empty defaults for a fresh install.
+
+    https_enforced is True even on a fresh install because the VM topology
+    enforces it via nginx.conf's port-80 redirect; the value reflects the
+    install topology (asked of the applier), not a DB flag the operator sets.
+    """
     response = await client.get(
         "/api/v1/settings/networking",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -44,7 +49,7 @@ async def test_get_networking_returns_defaults(client, admin_token, session):
     assert data["reachability_status"] == ""
     assert data["reachability_checked_at"] is None
     assert data["cert_status"] == ""
-    assert data["https_enforced"] is False
+    assert data["https_enforced"] is True
 
 
 @pytest.mark.asyncio
@@ -582,6 +587,40 @@ async def test_request_certificate_writes_audit_log(client, admin_token, session
 
 
 @pytest.mark.asyncio
+async def test_request_certificate_translates_manual_action_to_501(client, admin_token, session, mock_applier):
+    """When the applier raises ManualActionRequired, the API returns 501 with the operator
+    instructions in the detail and does not move cert_status to provisioning."""
+    from app.services.networking_applier import ManualActionRequired
+
+    await _set_fqdn(session)
+    await _mark_reachable(session)
+
+    async def raise_manual(fqdn):
+        raise ManualActionRequired(
+            "Install certbot on the host and run certbot certonly --webroot -d "
+            f"{fqdn} --email <email>; then copy fullchain.pem to docker/certs/."
+        )
+
+    mock_applier.request_certificate = raise_manual
+
+    response = await client.post(
+        "/api/v1/settings/networking/certificate",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 501
+    detail = response.json()["detail"]
+    assert "certbot" in detail.lower()
+    # Match the FQDN in its certbot context (-d <fqdn>) to confirm the
+    # instruction is actually interpolated with the configured FQDN, not
+    # somewhere arbitrary in the text. Stricter than a bare substring check.
+    assert "-d app.acme.com " in detail or "-d app.acme.com\n" in detail
+
+    # Status must not have advanced to "provisioning" if no automated action ran.
+    row = (await session.execute(text("SELECT value FROM platform_config WHERE key='networking_cert_status'"))).scalar()
+    assert row != "provisioning"
+
+
+@pytest.mark.asyncio
 async def test_request_certificate_requires_admin(client, viewer_token, session, mock_applier):
     await _set_fqdn(session)
     await _mark_reachable(session)
@@ -620,6 +659,68 @@ async def test_certificate_status_returns_not_requested_when_no_fqdn(client, adm
     )
     assert response.status_code == 200
     assert response.json()["status"] == "not_requested"
+
+
+@pytest.mark.asyncio
+async def test_get_networking_uses_live_cert_status_not_cached(client, admin_token, session, mock_applier):
+    """GET /networking computes cert status live from the applier.
+
+    A stale 'provisioning' row left over from an earlier click must NOT
+    leak into the response if the applier (reading the real on-disk cert)
+    says the cert is actually not_requested.
+    """
+    await _set_fqdn(session, hostname="app", domain="acme.com")
+    # Plant a stale 'provisioning' in the DB cache.
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES "
+            "('networking_cert_status', 'provisioning') "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
+    )
+    await session.commit()
+    # But the applier (truth) says the on-disk cert does not match.
+    mock_applier.status_to_return = "not_requested"
+
+    response = await client.get(
+        "/api/v1/settings/networking",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["cert_status"] == "not_requested"
+
+
+@pytest.mark.asyncio
+async def test_get_networking_uses_live_https_enforced_from_applier(client, admin_token, session, mock_applier):
+    """GET /networking returns the applier's view of https_enforced, ignoring stale DB."""
+    await _set_fqdn(session, hostname="app", domain="acme.com")
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES "
+            "('networking_https_enforced', 'false') "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
+    )
+    await session.commit()
+    mock_applier.https_enforced_value = True
+
+    response = await client.get(
+        "/api/v1/settings/networking",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["https_enforced"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_networking_skips_applier_when_no_fqdn_set(client, admin_token, session, mock_applier):
+    """No FQDN set means we can't ask the applier about anything; cert_status stays empty."""
+    response = await client.get(
+        "/api/v1/settings/networking",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["cert_status"] == ""
 
 
 # ---------------------------------------------------------------------------

@@ -85,17 +85,3 @@ serviceAccount:
 
 monitoring:
   enabled: true
-
-# Networking Settings: in-cluster permissions and resources needed by the
-# Settings -> Networking page (Request certificate, Apply HTTPS). The backend
-# patches ManagedCertificate, Ingress, and Deployment templates from inside
-# the cluster using these grants. Disable both if you provision the cert and
-# enforce HTTPS through another mechanism.
-networking:
-  rbac:
-    create: true
-  managedCertificate:
-    create: true
-    # Must match the name referenced by ingress.annotations
-    # networking.gke.io/managed-certificates above.
-    name: bioaf-cert
