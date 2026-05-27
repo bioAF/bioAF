@@ -20,6 +20,7 @@ Given that topology, the production applier (:class:`VmNginxApplier`):
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -157,12 +158,12 @@ class VmNginxApplier:
         names: set[str] = set()
         for attr in cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME):
             names.add(str(attr.value).lower())
-        try:
+        # No SAN extension is fine: older self-signed certs commonly omit it
+        # and we already collected the CN-derived names above.
+        with contextlib.suppress(x509.ExtensionNotFound):
             san_ext = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName)
             for dns in san_ext.value.get_values_for_type(x509.DNSName):
                 names.add(dns.lower())
-        except x509.ExtensionNotFound:
-            pass
 
         return CERT_STATUS_ACTIVE if fqdn.lower() in names else CERT_STATUS_NOT_REQUESTED
 

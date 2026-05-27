@@ -610,7 +610,10 @@ async def test_request_certificate_translates_manual_action_to_501(client, admin
     assert response.status_code == 501
     detail = response.json()["detail"]
     assert "certbot" in detail.lower()
-    assert "app.acme.com" in detail
+    # Match the FQDN in its certbot context (-d <fqdn>) to confirm the
+    # instruction is actually interpolated with the configured FQDN, not
+    # somewhere arbitrary in the text. Stricter than a bare substring check.
+    assert "-d app.acme.com " in detail or "-d app.acme.com\n" in detail
 
     # Status must not have advanced to "provisioning" if no automated action ran.
     row = (await session.execute(text("SELECT value FROM platform_config WHERE key='networking_cert_status'"))).scalar()
