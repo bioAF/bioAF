@@ -642,3 +642,128 @@ async def test_ensure_default_notebook_environment_idempotent(session, admin_use
     )
     envs = list(result.scalars().all())
     assert len(envs) == 1
+
+
+# --- DEFAULT_NOTEBOOK_CONDA_YML content tests ---
+#
+# The Default Notebook environment ships with the platform. Its conda yaml must
+# resolve cleanly via conda-forge + bioconda and provide the single-cell stack
+# users expect for notebook sessions (Python scanpy/scvi, R Seurat/Bioconductor).
+# These tests pin the shape and the required package set so a regression in
+# coverage (or a silent format change) fails fast.
+
+
+def _parse_default_notebook_yml():
+    import yaml
+
+    from app.services.environment_service import DEFAULT_NOTEBOOK_CONDA_YML
+
+    return yaml.safe_load(DEFAULT_NOTEBOOK_CONDA_YML)
+
+
+def test_default_notebook_conda_yml_is_valid_yaml():
+    """The seeded conda spec must parse as a YAML mapping with name/channels/dependencies."""
+    data = _parse_default_notebook_yml()
+    assert isinstance(data, dict)
+    assert isinstance(data.get("name"), str) and data["name"]
+    assert isinstance(data.get("channels"), list) and data["channels"]
+    assert isinstance(data.get("dependencies"), list) and data["dependencies"]
+
+
+def test_default_notebook_conda_yml_channels_include_bioconda():
+    """conda-forge and bioconda are required; conda-forge must be listed first for priority."""
+    data = _parse_default_notebook_yml()
+    channels = data["channels"]
+    assert "conda-forge" in channels
+    assert "bioconda" in channels
+    assert channels.index("conda-forge") < channels.index("bioconda")
+
+
+def _dep_names(data) -> set[str]:
+    """Return the set of conda dependency names (strips version pins and pip sub-lists)."""
+    names: set[str] = set()
+    for item in data["dependencies"]:
+        if isinstance(item, str):
+            # Strip version pin: 'python=3.11' -> 'python', 'r-seurat>=4' -> 'r-seurat'
+            for sep in ("=", ">", "<", " "):
+                if sep in item:
+                    item = item.split(sep, 1)[0]
+                    break
+            names.add(item.strip().lower())
+    return names
+
+
+def test_default_notebook_conda_yml_has_python_runtime():
+    """Python 3.11 + jupyter kernel must be present so notebook sessions can launch."""
+    data = _parse_default_notebook_yml()
+    deps = _dep_names(data)
+    assert "python" in deps
+    assert "jupyterlab" in deps or "jupyter" in deps
+    assert "ipykernel" in deps
+    # pip is required so the build step can pip-install anything not on bioconda.
+    assert "pip" in deps
+
+
+def test_default_notebook_conda_yml_has_python_scrna_stack():
+    """The Python single-cell stack from the previous Dockerfile must be present."""
+    data = _parse_default_notebook_yml()
+    deps = _dep_names(data)
+    required_python = {
+        "scanpy",
+        "anndata",
+        "scvi-tools",
+        "leidenalg",
+        "python-igraph",
+        "harmonypy",
+        "scrublet",
+        "gseapy",
+        "scikit-learn",
+        "statsmodels",
+        "umap-learn",
+        "biopython",
+        "pysam",
+    }
+    missing = required_python - deps
+    assert not missing, f"Python scRNA packages missing from default notebook env: {sorted(missing)}"
+
+
+def test_default_notebook_conda_yml_has_r_seurat_stack():
+    """R + Seurat + IRkernel are required so users can open R notebooks."""
+    data = _parse_default_notebook_yml()
+    deps = _dep_names(data)
+    required_r = {
+        "r-base",
+        "r-irkernel",
+        "r-seurat",
+        "r-harmony",
+        "r-hdf5r",
+        "r-tidyverse",
+        "r-matrix",
+        "r-biocmanager",
+    }
+    missing = required_r - deps
+    assert not missing, f"R Seurat-stack packages missing from default notebook env: {sorted(missing)}"
+
+
+def test_default_notebook_conda_yml_has_bioconductor_stack():
+    """Bioconductor packages that failed in the Dockerfile build must be present here."""
+    data = _parse_default_notebook_yml()
+    deps = _dep_names(data)
+    required_bioc = {
+        "bioconductor-singlecellexperiment",
+        "bioconductor-scater",
+        "bioconductor-scran",
+        "bioconductor-glmgampoi",
+        "bioconductor-batchelor",
+        "bioconductor-dropletutils",
+        "bioconductor-singler",
+        "bioconductor-deseq2",
+        "bioconductor-edger",
+        "bioconductor-limma",
+        "bioconductor-clusterprofiler",
+        "bioconductor-fgsea",
+        "bioconductor-complexheatmap",
+        "bioconductor-org.hs.eg.db",
+    }
+    missing = required_bioc - deps
+    assert not missing, f"Bioconductor packages missing from default notebook env: {sorted(missing)}"
