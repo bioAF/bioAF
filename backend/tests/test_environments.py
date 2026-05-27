@@ -681,15 +681,15 @@ def test_default_notebook_conda_yml_channels_include_bioconda():
 
 def _dep_names(data) -> set[str]:
     """Return the set of conda dependency names (strips version pins and pip sub-lists)."""
+    import re
+
     names: set[str] = set()
     for item in data["dependencies"]:
         if isinstance(item, str):
-            # Strip version pin: 'python=3.11' -> 'python', 'r-seurat>=4' -> 'r-seurat'
-            for sep in ("=", ">", "<", " "):
-                if sep in item:
-                    item = item.split(sep, 1)[0]
-                    break
-            names.add(item.strip().lower())
+            # Strip anything from the first version-pin character onward:
+            # 'python=3.11' -> 'python', 'r-base>=4.4' -> 'r-base'
+            name = re.split(r"[=<>! ]", item, maxsplit=1)[0]
+            names.add(name.strip().lower())
     return names
 
 
