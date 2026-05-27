@@ -19,13 +19,18 @@ jest.mock("@/hooks/useComponents", () => ({
 const mockApiGet = jest.fn();
 const mockApiPut = jest.fn();
 const mockApiPost = jest.fn();
-jest.mock("@/lib/api", () => ({
-  api: {
-    get: (...args: unknown[]) => mockApiGet(...args),
-    put: (...args: unknown[]) => mockApiPut(...args),
-    post: (...args: unknown[]) => mockApiPost(...args),
-  },
-}));
+jest.mock("@/lib/api", () => {
+  const actual = jest.requireActual("@/lib/api");
+  return {
+    api: {
+      get: (...args: unknown[]) => mockApiGet(...args),
+      put: (...args: unknown[]) => mockApiPut(...args),
+      post: (...args: unknown[]) => mockApiPost(...args),
+    },
+    ApiError: actual.ApiError,
+    extractErrorMessage: actual.extractErrorMessage,
+  };
+});
 
 type NetworkingConfigFixture = {
   hostname: string;
@@ -254,6 +259,28 @@ describe("Networking Settings Page", () => {
     });
   });
 
+  it("hides the Request certificate button once the cert is active", async () => {
+    setNetworkingConfig(certActiveConfig);
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => screen.getByTestId("networking-tls-card"));
+
+    expect(screen.queryByTestId("request-certificate-button")).not.toBeInTheDocument();
+    expect(screen.getByTestId("cert-status")).toHaveTextContent(/active/i);
+  });
+
+  it("hides the Apply HTTPS button and shows the enforced indicator when https_enforced is true", async () => {
+    setNetworkingConfig({
+      ...certActiveConfig,
+      https_enforced: true,
+    });
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => screen.getByTestId("networking-tls-card"));
+
+    expect(screen.queryByTestId("apply-https-button")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("https-warning")).not.toBeInTheDocument();
+    expect(screen.getByTestId("https-enforced-indicator")).toHaveTextContent(/HTTPS is enforced/i);
+  });
+
   it("renders friendly status labels for non-reachable outcomes", async () => {
     setNetworkingConfig({
       ...reachableConfig,
@@ -285,6 +312,34 @@ describe("Networking Settings Page", () => {
         /could not resolve/i,
       );
     });
+  });
+
+  it("renders a manual-action callout (not a red error) when /certificate returns 501", async () => {
+    setNetworkingConfig(reachableConfig);
+    const { ApiError } = jest.requireActual("@/lib/api") as {
+      ApiError: new (status: number, message: string) => Error;
+    };
+    mockApiPost.mockImplementation((url: string) => {
+      if (url.includes("/certificate")) {
+        return Promise.reject(
+          new ApiError(
+            501,
+            "Automated certificate issuance is not yet available on VM installs. On the host, install certbot and run:\n\n    sudo certbot certonly --webroot -w /var/www/letsencrypt -d app.acme.com --email <your-email> --agree-tos --non-interactive\n\nThen copy fullchain.pem to docker/certs/tls.crt and privkey.pem to docker/certs/tls.key, and run `./bioaf restart`.",
+          ),
+        );
+      }
+      return Promise.resolve({});
+    });
+
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => screen.getByTestId("request-certificate-button"));
+    fireEvent.click(screen.getByTestId("request-certificate-button"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("cert-manual-action")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("cert-manual-action")).toHaveTextContent(/certbot certonly/);
+    expect(screen.queryByText(/ApiError/i)).not.toBeInTheDocument();
   });
 
   it("calls /enforce-https with enabled=true when Apply is clicked", async () => {
