@@ -54,8 +54,10 @@ dependencies:
 # single-cell stack so a brand new Default Notebook session boots with
 # scanpy/scvi-tools, Seurat, and the Bioconductor packages users expect.
 # Conda channel priority is conda-forge > bioconda; both are required.
-# R is pinned to >= 4.4 because earlier R rejects current Bioconductor
-# packages (utils::findMatches is only exported from R 4.4).
+# r-base is left unpinned so the solver picks whatever R version the
+# bioconductor-* packages were built against (currently 4.3 / 4.4 on
+# bioconda); conda-forge's r-base is well past the R 4.1 line that
+# produced the GlobalOptions findMatches failure in the prior Dockerfile.
 DEFAULT_NOTEBOOK_CONDA_YML = """\
 name: bioaf-notebook
 channels:
@@ -102,7 +104,7 @@ dependencies:
 
   # R runtime and Jupyter kernel (RStudio Server is not a conda package;
   # notebook sessions get R through Jupyter + IRkernel instead).
-  - r-base>=4.4
+  - r-base
   - r-irkernel
 
   # Seurat stack
