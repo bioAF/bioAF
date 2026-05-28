@@ -282,6 +282,77 @@ async def test_launch_passes_configured_boot_disk_to_vm_spec(
 
 
 @pytest.mark.asyncio
+async def test_launch_does_not_clobber_running_status_set_during_launch(
+    client,
+    session,
+    comp_bio_token,
+    comp_bio_user,
+    seed_environment,
+    seed_project,
+    seed_session_credentials,
+    seed_platform_config,
+):
+    """The background readiness poll can mark a session running mid-launch.
+
+    The launch request must commit 'starting' before launching (so the poll's
+    UPDATE finds the row) and must not write status/access_url back afterward,
+    or it clobbers the poll's 'running' transition and the node is stuck in
+    'starting' even though the VM is up.
+    """
+    from app.database import async_session_factory
+
+    async def fake_launch(vm_spec):
+        # Simulate _poll_vm_ready committing 'running' on its own DB session
+        # while the launch request is still in flight.
+        sid = vm_spec["session_id"]
+        async with async_session_factory() as poll_db:
+            await poll_db.execute(
+                text(
+                    "UPDATE compute_sessions SET status = 'running', "
+                    "access_url = 'ssh://node:22' WHERE id = :id"
+                ),
+                {"id": sid},
+            )
+            await poll_db.commit()
+        return {
+            "instance_name": f"bioaf-worknode-{sid}",
+            "zone": "us-central1-b",
+            "gcp_project_id": "proj",
+            "status": "starting",
+            "access_url": None,
+        }
+
+    mock_adapter = MagicMock()
+    mock_adapter.launch_vm = AsyncMock(side_effect=fake_launch)
+
+    with patch(
+        "app.services.work_node_service.get_work_node_adapter",
+        return_value=mock_adapter,
+    ):
+        response = await client.post(
+            "/api/v1/work-nodes/sessions",
+            json={
+                "project_id": seed_project.id,
+                "environment_version_id": seed_environment["ready_version"].id,
+                "machine_type": "n2-standard-4",
+            },
+            headers={"Authorization": f"Bearer {comp_bio_token}"},
+        )
+    assert response.status_code == 200
+    sid = response.json()["id"]
+
+    async with async_session_factory() as read_db:
+        row = (
+            await read_db.execute(
+                text("SELECT status, access_url FROM compute_sessions WHERE id = :id"),
+                {"id": sid},
+            )
+        ).first()
+    assert row[0] == "running"
+    assert row[1] == "ssh://node:22"
+
+
+@pytest.mark.asyncio
 async def test_launch_rejects_draft_environment(
     client,
     comp_bio_token,

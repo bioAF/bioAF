@@ -16,6 +16,11 @@
 
 ### Work nodes
 
+- Fix work nodes getting stuck in "Starting" even after the VM is up and SSH
+  reachable. The launch request now commits the "starting" status before
+  creating the VM and no longer rewrites status/access_url afterward, so the
+  background readiness poll's "running" transition (and SSH URL) is no longer
+  clobbered by the launch request's own commit.
 - Make the work-node boot disk size and type configurable from Workbench
   Settings (default 100 GB pd-ssd, down from a hardcoded 200 GB). pd-ssd and
   pd-balanced both count toward the regional SSD_TOTAL_GB quota, so a large
