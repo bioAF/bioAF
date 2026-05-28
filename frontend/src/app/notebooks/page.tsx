@@ -41,6 +41,16 @@ const SESSION_STATUS_COLORS: Record<string, string> = {
   failed: "bg-red-100 text-red-800",
 };
 
+const PROFILE_ORDER: ResourceProfile[] = ["small", "medium", "large", "xlarge", "2xlarge"];
+
+const PROFILE_META: Record<ResourceProfile, { label: string; description: string }> = {
+  small: { label: "Small", description: "Exploratory work and light data wrangling" },
+  medium: { label: "Medium", description: "General-purpose analysis" },
+  large: { label: "Large", description: "Larger datasets with several objects in memory" },
+  xlarge: { label: "Xlarge", description: "Large single-cell datasets, Seurat/scanpy integration" },
+  "2xlarge": { label: "2xlarge", description: "Very large or multi-sample integration" },
+};
+
 export default function NotebooksPage() {
   const router = useRouter();
   const { components } = useComponents();
@@ -557,30 +567,37 @@ export default function NotebooksPage() {
           {/* Launch Modal */}
           {showLaunchModal && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg shadow-xl w-[800px] max-h-[85vh] overflow-y-auto">
-                <div className="p-6 border-b flex items-center justify-between">
+              <div className="bg-white rounded-lg shadow-xl w-[800px] max-h-[85vh] flex flex-col">
+                <div className="p-6 border-b flex items-center justify-between shrink-0">
                   <h3 className="text-lg font-semibold">Launch Notebook Session</h3>
                   <button onClick={() => setShowLaunchModal(false)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
                 </div>
-                <div className="p-6 space-y-5">
+                <div className="p-6 space-y-5 overflow-y-auto flex-1">
                   {/* Resource Profile */}
                   <div>
                     <label className="text-sm text-gray-500 mb-2 block">Resource Profile</label>
-                    <div className="grid grid-cols-3 gap-3">
-                      {(["small", "medium", "large", "xlarge", "2xlarge"] as ResourceProfile[]).map((profile) => {
+                    <div className="space-y-2">
+                      {PROFILE_ORDER.map((profile) => {
                         const specs = RESOURCE_PROFILES[profile];
+                        const meta = PROFILE_META[profile];
+                        const selected = selectedProfile === profile;
                         return (
                           <button
                             key={profile}
+                            type="button"
                             onClick={() => setSelectedProfile(profile)}
-                            className={`border rounded-lg px-4 py-3 text-sm ${
-                              selectedProfile === profile
-                                ? "border-bioaf-500 bg-bioaf-50 text-bioaf-700"
+                            aria-pressed={selected}
+                            className={`w-full text-left p-3 border rounded-lg transition-colors ${
+                              selected
+                                ? "border-bioaf-500 bg-bioaf-50"
                                 : "border-gray-200 hover:border-gray-300"
                             }`}
                           >
-                            <div className="font-semibold capitalize">{profile}</div>
-                            <div className="text-xs text-gray-500">{specs.cpu} CPU, {specs.memory}GB RAM</div>
+                            <div className="flex justify-between items-center">
+                              <span className="font-semibold">{meta.label}</span>
+                              <span className="text-xs text-gray-500">{specs.cpu} CPU / {specs.memory} GB RAM</span>
+                            </div>
+                            <div className="text-xs text-gray-500 mt-0.5">{meta.description}</div>
                           </button>
                         );
                       })}
@@ -722,7 +739,7 @@ export default function NotebooksPage() {
                 </div>
 
                 {/* Launch buttons */}
-                <div className="p-6 border-t bg-gray-50 flex gap-3">
+                <div className="p-6 border-t bg-gray-50 flex gap-3 shrink-0">
                   {rstudioEnabled && (
                     <button
                       onClick={() => handleLaunch("rstudio")}

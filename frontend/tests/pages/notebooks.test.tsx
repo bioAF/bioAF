@@ -118,6 +118,36 @@ describe("NotebooksPage", () => {
     });
   });
 
+  // Test 30b: Resource profiles render as detailed items with descriptions
+  it("shows the full range of resource profiles with specs and descriptions", async () => {
+    mockApiGet.mockImplementation((url: string) => {
+      if (url.includes("sessions")) return Promise.resolve({ sessions: [], total: 0 });
+      if (url.includes("experiments")) return Promise.resolve(mockExperiments);
+      if (url.includes("projects")) return Promise.resolve({ projects: [] });
+      if (url.includes("/api/v1/environments/1")) return Promise.resolve(mockEnvDetail);
+      if (url.includes("/api/v1/environments")) return Promise.resolve(mockEnvironments);
+      return Promise.resolve({});
+    });
+
+    render(<NotebooksPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Launch Session")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Launch Session"));
+    await waitFor(() => {
+      expect(screen.getByText("Launch Notebook Session")).toBeInTheDocument();
+    });
+
+    // Every tier is visible (not just the first three), each with a spec line
+    // and a human description like the work-node machine-type items.
+    expect(screen.getByText("Small")).toBeInTheDocument();
+    expect(screen.getByText("2xlarge")).toBeInTheDocument();
+    expect(screen.getByText("2 CPU / 8 GB RAM")).toBeInTheDocument();
+    expect(screen.getByText("16 CPU / 128 GB RAM")).toBeInTheDocument();
+    expect(screen.getByText("General-purpose analysis")).toBeInTheDocument();
+    expect(screen.getByText(/single-cell datasets/i)).toBeInTheDocument();
+  });
+
   // Test 31: Launch button renders on page
   it("shows launch button on main page", async () => {
     mockApiGet.mockImplementation((url: string) => {
