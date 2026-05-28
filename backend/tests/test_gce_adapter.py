@@ -68,6 +68,60 @@ async def test_launch_advances_past_exhausted_zone():
 
 
 @pytest.mark.asyncio
+async def test_launch_applies_configured_boot_disk():
+    """vm_spec boot_disk_gb / boot_disk_type drive the created boot disk."""
+    provider = _launch_provider()
+    captured: dict = {}
+
+    def insert_side_effect(**kwargs):
+        captured["instance"] = kwargs["instance_resource"]
+        op = MagicMock()
+        op.result.return_value = None
+        return op
+
+    fake_client = MagicMock()
+    fake_client.insert.side_effect = insert_side_effect
+
+    vm_spec = _launch_vm_spec()
+    vm_spec["boot_disk_gb"] = 150
+    vm_spec["boot_disk_type"] = "pd-standard"
+
+    with patch("google.cloud.compute_v1.InstancesClient", return_value=fake_client), \
+        patch.object(provider, "_get_gcp_credentials", return_value=MagicMock()), \
+        patch.object(provider, "_poll_vm_ready", new=AsyncMock()):
+        await provider._gce_launch_vm(vm_spec)
+
+    init_params = captured["instance"].disks[0].initialize_params
+    assert init_params.disk_size_gb == 150
+    assert init_params.disk_type.endswith("/diskTypes/pd-standard")
+
+
+@pytest.mark.asyncio
+async def test_launch_boot_disk_defaults_to_100gb_pd_ssd():
+    """Absent explicit settings, the boot disk defaults to 100 GB pd-ssd."""
+    provider = _launch_provider()
+    captured: dict = {}
+
+    def insert_side_effect(**kwargs):
+        captured["instance"] = kwargs["instance_resource"]
+        op = MagicMock()
+        op.result.return_value = None
+        return op
+
+    fake_client = MagicMock()
+    fake_client.insert.side_effect = insert_side_effect
+
+    with patch("google.cloud.compute_v1.InstancesClient", return_value=fake_client), \
+        patch.object(provider, "_get_gcp_credentials", return_value=MagicMock()), \
+        patch.object(provider, "_poll_vm_ready", new=AsyncMock()):
+        await provider._gce_launch_vm(_launch_vm_spec())
+
+    init_params = captured["instance"].disks[0].initialize_params
+    assert init_params.disk_size_gb == 100
+    assert init_params.disk_type.endswith("/diskTypes/pd-ssd")
+
+
+@pytest.mark.asyncio
 async def test_launch_raises_when_all_zones_exhausted():
     """If every zone is exhausted, the adapter raises after trying them all."""
     provider = _launch_provider()

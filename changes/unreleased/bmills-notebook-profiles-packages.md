@@ -16,6 +16,12 @@
 
 ### Work nodes
 
+- Make the work-node boot disk size and type configurable from Workbench
+  Settings (default 100 GB pd-ssd, down from a hardcoded 200 GB). pd-ssd and
+  pd-balanced both count toward the regional SSD_TOTAL_GB quota, so a large
+  default could exhaust it and fail launches with a quota error; operators can
+  now shrink the disk or switch to pd-standard (which uses the separate HDD
+  quota) per their workload.
 - Make multi-zone failover actually work when a zone is out of capacity.
   `instances.insert` is asynchronous, so a `ZONE_RESOURCE_POOL_EXHAUSTED`
   stockout only surfaced when the operation was resolved, which the launcher

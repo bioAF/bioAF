@@ -333,6 +333,9 @@ class GCEWorkNodeProvider(WorkNodeProvider):
         # Resolve GCE machine type for GPU types
         gce_machine_type = vm_spec.get("gce_machine_type", machine_type)
 
+        boot_disk_gb = vm_spec.get("boot_disk_gb", 100)
+        boot_disk_type = vm_spec.get("boot_disk_type", "pd-ssd")
+
         # Generate an SSH key pair for the bioaf-sync user so the backend
         # can SSH into the VM at terminate time to sync outputs.
         import asyncssh
@@ -375,8 +378,8 @@ class GCEWorkNodeProvider(WorkNodeProvider):
                 disk.boot = True
                 init_params = compute_v1.AttachedDiskInitializeParams()
                 init_params.source_image = image_uri
-                init_params.disk_size_gb = 200
-                init_params.disk_type = f"zones/{try_zone}/diskTypes/pd-ssd"
+                init_params.disk_size_gb = boot_disk_gb
+                init_params.disk_type = f"zones/{try_zone}/diskTypes/{boot_disk_type}"
                 disk.initialize_params = init_params
                 instance.disks = [disk]
 

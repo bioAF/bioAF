@@ -3,6 +3,8 @@
 TDD: write failing tests first, then implement.
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 import pytest_asyncio
 from sqlalchemy import select, text
@@ -225,6 +227,58 @@ async def test_launch_work_node_success(
     assert row[0] == "ssh"
     assert row[1] == "n2-standard-4"
     assert row[2] is not None  # heartbeat token generated
+
+
+@pytest.mark.asyncio
+async def test_launch_passes_configured_boot_disk_to_vm_spec(
+    client,
+    session,
+    comp_bio_token,
+    comp_bio_user,
+    seed_environment,
+    seed_project,
+    seed_session_credentials,
+    seed_platform_config,
+):
+    """Configured boot disk settings flow into the vm_spec handed to the adapter."""
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES "
+            "('work_node_boot_disk_gb', '150'), ('work_node_boot_disk_type', 'pd-standard') "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
+    )
+    await session.commit()
+
+    mock_adapter = MagicMock()
+    mock_adapter.launch_vm = AsyncMock(
+        return_value={
+            "instance_name": "bioaf-worknode-1",
+            "zone": "us-central1-c",
+            "gcp_project_id": "proj",
+            "status": "starting",
+            "access_url": None,
+        }
+    )
+
+    with patch(
+        "app.services.work_node_service.get_work_node_adapter",
+        return_value=mock_adapter,
+    ):
+        response = await client.post(
+            "/api/v1/work-nodes/sessions",
+            json={
+                "project_id": seed_project.id,
+                "environment_version_id": seed_environment["ready_version"].id,
+                "machine_type": "n2-standard-4",
+            },
+            headers={"Authorization": f"Bearer {comp_bio_token}"},
+        )
+    assert response.status_code == 200
+
+    vm_spec = mock_adapter.launch_vm.call_args.args[0]
+    assert vm_spec["boot_disk_gb"] == 150
+    assert vm_spec["boot_disk_type"] == "pd-standard"
 
 
 @pytest.mark.asyncio
@@ -651,6 +705,8 @@ async def test_get_work_node_settings_defaults(client, admin_token, admin_user):
     data = response.json()
     assert data["max_nodes_per_user"] == 2
     assert data["idle_timeout_hours"] == 24
+    assert data["boot_disk_gb"] == 100
+    assert data["boot_disk_type"] == "pd-ssd"
 
 
 @pytest.mark.asyncio
@@ -658,7 +714,12 @@ async def test_update_work_node_settings(client, session, admin_token, admin_use
     """PUT /api/v1/settings/work-nodes persists new values."""
     response = await client.put(
         "/api/v1/settings/work-nodes",
-        json={"max_nodes_per_user": 5, "idle_timeout_hours": 48},
+        json={
+            "max_nodes_per_user": 5,
+            "idle_timeout_hours": 48,
+            "boot_disk_gb": 150,
+            "boot_disk_type": "pd-standard",
+        },
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert response.status_code == 200
@@ -671,6 +732,8 @@ async def test_update_work_node_settings(client, session, admin_token, admin_use
     data = get_resp.json()
     assert data["max_nodes_per_user"] == 5
     assert data["idle_timeout_hours"] == 48
+    assert data["boot_disk_gb"] == 150
+    assert data["boot_disk_type"] == "pd-standard"
 
 
 @pytest.mark.asyncio
@@ -682,6 +745,28 @@ async def test_update_work_node_settings_validates_range(client, admin_token, ad
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_update_work_node_settings_validates_disk(client, admin_token, admin_user):
+    """PUT rejects an out-of-range disk size and an unknown disk type."""
+    too_small = await client.put(
+        "/api/v1/settings/work-nodes",
+        json={"max_nodes_per_user": 2, "idle_timeout_hours": 24, "boot_disk_gb": 5},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert too_small.status_code == 422
+
+    bad_type = await client.put(
+        "/api/v1/settings/work-nodes",
+        json={
+            "max_nodes_per_user": 2,
+            "idle_timeout_hours": 24,
+            "boot_disk_type": "pd-magnetic",
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert bad_type.status_code == 422
 
 
 @pytest.mark.asyncio

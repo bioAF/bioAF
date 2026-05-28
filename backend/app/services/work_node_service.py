@@ -28,6 +28,8 @@ logger = logging.getLogger("bioaf.work_nodes")
 
 DEFAULT_MAX_WORK_NODES_PER_USER = 2
 DEFAULT_IDLE_TIMEOUT_HOURS = 24
+DEFAULT_BOOT_DISK_GB = 100
+DEFAULT_BOOT_DISK_TYPE = "pd-ssd"
 
 
 class WorkNodeService:
@@ -166,7 +168,8 @@ class WorkNodeService:
             text(
                 "SELECT key, value FROM platform_config "
                 "WHERE key IN ('working_bucket_name', 'notebook_runner_sa_email', "
-                "'gcp_project_id', 'gcp_zone')"
+                "'gcp_project_id', 'gcp_zone', "
+                "'work_node_boot_disk_gb', 'work_node_boot_disk_type')"
             )
         )
         config_map = {row[0]: row[1] for row in config_rows.all()}
@@ -222,6 +225,19 @@ class WorkNodeService:
             gcp_zone = (config_map.get("gcp_zone") or "").strip()
             if gcp_zone and gcp_zone != "null":
                 vm_spec["gcp_zone"] = gcp_zone
+
+            disk_gb_raw = (config_map.get("work_node_boot_disk_gb") or "").strip()
+            try:
+                vm_spec["boot_disk_gb"] = (
+                    int(disk_gb_raw) if disk_gb_raw and disk_gb_raw != "null" else DEFAULT_BOOT_DISK_GB
+                )
+            except ValueError:
+                vm_spec["boot_disk_gb"] = DEFAULT_BOOT_DISK_GB
+
+            disk_type = (config_map.get("work_node_boot_disk_type") or "").strip()
+            vm_spec["boot_disk_type"] = (
+                disk_type if disk_type and disk_type != "null" else DEFAULT_BOOT_DISK_TYPE
+            )
 
             # GPU accelerator info
             if mt.get("accelerator_type"):
