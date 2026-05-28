@@ -419,11 +419,16 @@ class GCEWorkNodeProvider(WorkNodeProvider):
                     scheduling.on_host_maintenance = "TERMINATE"
                     instance.scheduling = scheduling
 
-                instances_client.insert(
+                operation = instances_client.insert(
                     project=project,
                     zone=try_zone,
                     instance_resource=instance,
                 )
+                # insert() is asynchronous: it returns an accepted operation and
+                # a capacity stockout (ZONE_RESOURCE_POOL_EXHAUSTED) only surfaces
+                # when the operation is resolved. Resolve it here so the failover
+                # loop below can actually advance to the next zone.
+                operation.result()
                 zone = try_zone
                 logger.info("Creating GCE instance %s in %s/%s", instance_name, project, zone)
                 break

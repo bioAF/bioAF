@@ -1,10 +1,101 @@
 """Tests for GCE work-node adapter SA hardening (Breakages 1, 2)."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.adapters.work_nodes.gce import GCEWorkNodeProvider
+
+
+def _launch_provider():
+    provider = GCEWorkNodeProvider()
+    provider._mode = "gce"
+    provider._gcp_config = {
+        "gcp_project_id": "proj",
+        "gcp_zone": "us-central1-b",
+        "notebook_runner_sa_email": "runner@p.iam.gserviceaccount.com",
+    }
+    return provider
+
+
+def _launch_vm_spec():
+    return {
+        "gcp_project_id": "proj",
+        "gcp_zone": "us-central1-b",
+        "session_id": 7,
+        "user_id": 1,
+        "machine_type": "n2-standard-4",
+        "image_uri": "projects/proj/global/images/bioaf-worknode",
+        "session_credentials": {"username": "bioaf", "password_hash": "x"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_launch_advances_past_exhausted_zone():
+    """A zone stockout must skip to the next zone, not silently succeed.
+
+    GCE instances.insert is asynchronous: it returns an accepted operation and
+    the ZONE_RESOURCE_POOL_EXHAUSTED failure only surfaces when the operation
+    result is resolved. The adapter must resolve the operation so the existing
+    zone-failover loop actually advances past the exhausted zone.
+    """
+    provider = _launch_provider()
+    insert_calls: list[str] = []
+
+    def insert_side_effect(**kwargs):
+        zone = kwargs["zone"]
+        insert_calls.append(zone)
+        op = MagicMock()
+        if zone.endswith("-b"):
+            op.result.side_effect = Exception(
+                "operation failed: ZONE_RESOURCE_POOL_EXHAUSTED"
+            )
+        else:
+            op.result.return_value = None
+        return op
+
+    fake_client = MagicMock()
+    fake_client.insert.side_effect = insert_side_effect
+
+    with patch("google.cloud.compute_v1.InstancesClient", return_value=fake_client), \
+        patch.object(provider, "_get_gcp_credentials", return_value=MagicMock()), \
+        patch.object(provider, "_poll_vm_ready", new=AsyncMock()):
+        result = await provider._gce_launch_vm(_launch_vm_spec())
+
+    assert result["zone"] == "us-central1-c"
+    assert insert_calls[0] == "us-central1-b"
+    assert "us-central1-c" in insert_calls
+
+
+@pytest.mark.asyncio
+async def test_launch_raises_when_all_zones_exhausted():
+    """If every zone is exhausted, the adapter raises after trying them all."""
+    provider = _launch_provider()
+    insert_calls: list[str] = []
+
+    def insert_side_effect(**kwargs):
+        insert_calls.append(kwargs["zone"])
+        op = MagicMock()
+        op.result.side_effect = Exception(
+            "operation failed: ZONE_RESOURCE_POOL_EXHAUSTED"
+        )
+        return op
+
+    fake_client = MagicMock()
+    fake_client.insert.side_effect = insert_side_effect
+
+    with patch("google.cloud.compute_v1.InstancesClient", return_value=fake_client), \
+        patch.object(provider, "_get_gcp_credentials", return_value=MagicMock()), \
+        patch.object(provider, "_poll_vm_ready", new=AsyncMock()):
+        with pytest.raises(ValueError, match="resources unavailable"):
+            await provider._gce_launch_vm(_launch_vm_spec())
+
+    assert insert_calls == [
+        "us-central1-b",
+        "us-central1-c",
+        "us-central1-f",
+        "us-central1-a",
+    ]
 
 
 def test_get_gcp_credentials_uses_credential_injector_in_vm_default():

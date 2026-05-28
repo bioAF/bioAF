@@ -14,6 +14,16 @@
   edgeR, limma), and enrichment/annotation (clusterProfiler, fgsea, SingleR,
   org.Hs.eg.db, org.Mm.eg.db).
 
+### Work nodes
+
+- Make multi-zone failover actually work when a zone is out of capacity.
+  `instances.insert` is asynchronous, so a `ZONE_RESOURCE_POOL_EXHAUSTED`
+  stockout only surfaced when the operation was resolved, which the launcher
+  never did. As a result the failover loop broke on the first zone, the launch
+  silently never created a VM, and it failed five minutes later with a
+  misleading "no external IP" error. The launcher now resolves the insert
+  operation so a stockout advances to the next zone in the region.
+
 ### Fixes
 
 - Stop the default notebook image from silently shipping without R packages
