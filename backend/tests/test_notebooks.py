@@ -156,7 +156,7 @@ async def test_resource_profiles_highmem16_unlocks_through_large(client, session
     await session.execute(
         text(
             "INSERT INTO platform_config (key, value) VALUES "
-            "('interactive_pool_machine_type', 'n2-highmem-16') "
+            "('k8s_interactive_machine_type', 'n2-highmem-16') "
             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
         )
     )

@@ -22,7 +22,11 @@ from app.adapters.registry import get_notebook_adapter
 
 logger = logging.getLogger("bioaf.notebooks")
 
-# Must match the k8s_interactive_pool default in component_service.py.
+# platform_config key that holds the interactive GKE pool's machine type. This
+# is the Terraform-wired cluster setting edited in Infrastructure > Components
+# (POST /api/v1/infrastructure/cluster/config), NOT the vestigial
+# k8s_interactive_pool component config field. Default matches the tfvar default.
+INTERACTIVE_POOL_MACHINE_TYPE_KEY = "k8s_interactive_machine_type"
 DEFAULT_INTERACTIVE_POOL_MACHINE_TYPE = "n2-standard-4"
 
 # (cpu_cores, memory_gb) per profile. Memory-weighted toward the high end
@@ -53,13 +57,15 @@ class NotebookService:
         Notebook pods run with requests == limits and a nodeSelector onto the
         interactive GKE pool, so a tier only schedules when it is strictly
         smaller than a single pool node (GKE reserves CPU/memory per node). The
-        pool machine type is the `interactive_pool_machine_type` component
-        setting; the full ladder is always returned so the UI can show larger
-        tiers as unavailable rather than hiding them.
+        pool machine type is the `k8s_interactive_machine_type` cluster setting
+        (Infrastructure > Components); the full ladder is always returned so the
+        UI can show larger tiers as unavailable rather than hiding them.
         """
         row = (
             await session.execute(
-                text("SELECT value FROM platform_config WHERE key = 'interactive_pool_machine_type'")
+                text("SELECT value FROM platform_config WHERE key = :key").bindparams(
+                    key=INTERACTIVE_POOL_MACHINE_TYPE_KEY
+                )
             )
         ).first()
         pool_machine_type = (
