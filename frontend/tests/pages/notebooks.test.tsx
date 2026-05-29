@@ -141,7 +141,8 @@ describe("NotebooksPage", () => {
     // Every tier is visible (not just the first three), each with a spec line
     // and a human description like the work-node machine-type items.
     expect(screen.getByText("Small")).toBeInTheDocument();
-    expect(screen.getByText("2xlarge")).toBeInTheDocument();
+    expect(screen.getByText("X Large")).toBeInTheDocument();
+    expect(screen.getByText("XX Large")).toBeInTheDocument();
     expect(screen.getByText("2 CPU / 8 GB RAM")).toBeInTheDocument();
     expect(screen.getByText("16 CPU / 128 GB RAM")).toBeInTheDocument();
     expect(screen.getByText("General-purpose analysis")).toBeInTheDocument();

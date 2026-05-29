@@ -47,8 +47,8 @@ const PROFILE_META: Record<ResourceProfile, { label: string; description: string
   small: { label: "Small", description: "Exploratory work and light data wrangling" },
   medium: { label: "Medium", description: "General-purpose analysis" },
   large: { label: "Large", description: "Larger datasets with several objects in memory" },
-  xlarge: { label: "Xlarge", description: "Large single-cell datasets, Seurat/scanpy integration" },
-  "2xlarge": { label: "2xlarge", description: "Very large or multi-sample integration" },
+  xlarge: { label: "X Large", description: "Large single-cell datasets, Seurat/scanpy integration" },
+  "2xlarge": { label: "XX Large", description: "Very large or multi-sample integration" },
 };
 
 export default function NotebooksPage() {
