@@ -9,6 +9,12 @@
   work-node machine-type picker so the full range of tiers is legible. The
   modal now pins the launch buttons so they stay visible while the body
   scrolls.
+- Gate resource profiles to the interactive GKE pool's node size. Notebook pods
+  run with requests == limits on the interactive pool, so a tier only schedules
+  if it is strictly smaller than a single node. Tiers that exceed the configured
+  `interactive_pool_machine_type` are now shown but disabled; clicking one
+  explains that an admin must increase the interactive pool. Prevents notebooks
+  silently sitting in Pending when a too-large profile is chosen.
 
 ### Notebook environments
 

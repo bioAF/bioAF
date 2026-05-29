@@ -191,6 +191,15 @@ async def _sync_session_from_k8s(ns, session: AsyncSession) -> None:
 # -- Session endpoints --
 
 
+@router.get("/resource-profiles")
+async def list_resource_profiles(
+    current_user: dict = require_permission("notebooks", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Resource profile ladder with availability for the configured interactive pool."""
+    return await NotebookService.get_resource_profile_availability(session)
+
+
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_sessions(
     session_type: str | None = None,

@@ -149,6 +149,52 @@ describe("NotebooksPage", () => {
     expect(screen.getByText(/single-cell datasets/i)).toBeInTheDocument();
   });
 
+  // Test 30c: Tiers that exceed the interactive pool are shown but disabled
+  it("greys out profiles too large for the pool and prompts to ask an admin", async () => {
+    mockApiGet.mockImplementation((url: string) => {
+      if (url.includes("/api/v1/notebooks/resource-profiles")) {
+        return Promise.resolve({
+          pool_machine_type: "n2-highmem-16",
+          profiles: [
+            { name: "small", cpu: 2, memory_gb: 8, available: true },
+            { name: "medium", cpu: 4, memory_gb: 16, available: true },
+            { name: "large", cpu: 8, memory_gb: 32, available: true },
+            { name: "xlarge", cpu: 16, memory_gb: 64, available: false },
+            { name: "2xlarge", cpu: 16, memory_gb: 128, available: false },
+          ],
+        });
+      }
+      if (url.includes("sessions")) return Promise.resolve({ sessions: [], total: 0 });
+      if (url.includes("experiments")) return Promise.resolve(mockExperiments);
+      if (url.includes("projects")) return Promise.resolve({ projects: [] });
+      if (url.includes("/api/v1/environments/1")) return Promise.resolve(mockEnvDetail);
+      if (url.includes("/api/v1/environments")) return Promise.resolve(mockEnvironments);
+      return Promise.resolve({});
+    });
+
+    render(<NotebooksPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Launch Session")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Launch Session"));
+    await waitFor(() => {
+      expect(screen.getByText("Launch Notebook Session")).toBeInTheDocument();
+    });
+
+    // The oversized tiers are visible but disabled.
+    await waitFor(() => {
+      expect(screen.getByText("XX Large").closest("button")).toHaveAttribute("aria-disabled", "true");
+    });
+    expect(screen.getByText("X Large").closest("button")).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText("Small").closest("button")).toHaveAttribute("aria-disabled", "false");
+
+    // Clicking a disabled tier prompts the user to ask an admin to grow the pool.
+    fireEvent.click(screen.getByText("XX Large"));
+    await waitFor(() => {
+      expect(screen.getByText(/ask your admin/i)).toBeInTheDocument();
+    });
+  });
+
   // Test 31: Launch button renders on page
   it("shows launch button on main page", async () => {
     mockApiGet.mockImplementation((url: string) => {

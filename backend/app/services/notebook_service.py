@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -17,9 +17,13 @@ from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import SESSION_IDLE
 from app.services.quota_service import QuotaService
+from app.services.machine_types import machine_type_capacity
 from app.adapters.registry import get_notebook_adapter
 
 logger = logging.getLogger("bioaf.notebooks")
+
+# Must match the k8s_interactive_pool default in component_service.py.
+DEFAULT_INTERACTIVE_POOL_MACHINE_TYPE = "n2-standard-4"
 
 # (cpu_cores, memory_gb) per profile. Memory-weighted toward the high end
 # because single-cell work (Seurat/scanpy objects, multi-sample integration)
@@ -41,6 +45,39 @@ class NotebookService:
         if profile_name not in RESOURCE_PROFILES:
             raise ValueError(f"Invalid resource profile: {profile_name}")
         return RESOURCE_PROFILES[profile_name]
+
+    @staticmethod
+    async def get_resource_profile_availability(session: AsyncSession) -> dict:
+        """Return every resource profile plus whether it fits the interactive pool.
+
+        Notebook pods run with requests == limits and a nodeSelector onto the
+        interactive GKE pool, so a tier only schedules when it is strictly
+        smaller than a single pool node (GKE reserves CPU/memory per node). The
+        pool machine type is the `interactive_pool_machine_type` component
+        setting; the full ladder is always returned so the UI can show larger
+        tiers as unavailable rather than hiding them.
+        """
+        row = (
+            await session.execute(
+                text("SELECT value FROM platform_config WHERE key = 'interactive_pool_machine_type'")
+            )
+        ).first()
+        pool_machine_type = (
+            row[0].strip() if row and row[0] and row[0].strip() else DEFAULT_INTERACTIVE_POOL_MACHINE_TYPE
+        )
+        node_cpu, node_mem = machine_type_capacity(pool_machine_type) or machine_type_capacity(
+            DEFAULT_INTERACTIVE_POOL_MACHINE_TYPE
+        )
+        profiles = [
+            {
+                "name": name,
+                "cpu": cpu,
+                "memory_gb": mem,
+                "available": cpu < node_cpu and mem < node_mem,
+            }
+            for name, (cpu, mem) in RESOURCE_PROFILES.items()
+        ]
+        return {"pool_machine_type": pool_machine_type, "profiles": profiles}
 
     @staticmethod
     async def launch_session(

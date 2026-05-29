@@ -70,6 +70,9 @@ export default function NotebooksPage() {
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [selectedProfile, setSelectedProfile] = useState<ResourceProfile>("small");
+  const [profileAvailability, setProfileAvailability] = useState<Record<string, boolean>>({});
+  const [poolMachineType, setPoolMachineType] = useState<string>("");
+  const [profileNotice, setProfileNotice] = useState<string>("");
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [scopeType, setScopeType] = useState<"experiment" | "project">("experiment");
@@ -99,6 +102,7 @@ export default function NotebooksPage() {
     loadProjects();
     loadBuildStatus();
     loadEnvironments();
+    loadResourceProfiles();
   }, [router]);
 
   useEffect(() => {
@@ -107,6 +111,21 @@ export default function NotebooksPage() {
     const interval = setInterval(() => loadSessions(), 10000);
     return () => clearInterval(interval);
   }, [sessions]);
+
+  async function loadResourceProfiles() {
+    try {
+      const data = await api.get<{
+        pool_machine_type: string;
+        profiles: { name: ResourceProfile; available: boolean }[];
+      }>("/api/v1/notebooks/resource-profiles");
+      if (data?.profiles) {
+        setPoolMachineType(data.pool_machine_type);
+        setProfileAvailability(
+          Object.fromEntries(data.profiles.map((p) => [p.name, p.available]))
+        );
+      }
+    } catch {}
+  }
 
   async function loadBuildStatus() {
     try {
@@ -581,20 +600,43 @@ export default function NotebooksPage() {
                         const specs = RESOURCE_PROFILES[profile];
                         const meta = PROFILE_META[profile];
                         const selected = selectedProfile === profile;
+                        // Unknown availability (e.g. before the fetch resolves) defaults to
+                        // enabled so the picker never blocks the supported tiers.
+                        const available = profileAvailability[profile] !== false;
+                        const onProfileClick = () => {
+                          if (available) {
+                            setSelectedProfile(profile);
+                            setProfileNotice("");
+                          } else {
+                            setProfileNotice(
+                              `${meta.label} (${specs.cpu} CPU / ${specs.memory} GB) needs a larger interactive pool than the current ${poolMachineType || "pool"}. Ask your admin to increase the interactive pool machine type in Infrastructure > Components.`
+                            );
+                          }
+                        };
                         return (
                           <button
                             key={profile}
                             type="button"
-                            onClick={() => setSelectedProfile(profile)}
+                            onClick={onProfileClick}
                             aria-pressed={selected}
+                            aria-disabled={!available}
                             className={`w-full text-left p-3 border rounded-lg transition-colors ${
-                              selected
+                              !available
+                                ? "border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed"
+                                : selected
                                 ? "border-bioaf-500 bg-bioaf-50"
                                 : "border-gray-200 hover:border-gray-300"
                             }`}
                           >
                             <div className="flex justify-between items-center">
-                              <span className="font-semibold">{meta.label}</span>
+                              <span className="font-semibold flex items-center gap-2">
+                                {meta.label}
+                                {!available && (
+                                  <span className="text-[10px] font-medium uppercase tracking-wide text-gray-400 border border-gray-300 rounded px-1.5 py-0.5">
+                                    Admin upgrade required
+                                  </span>
+                                )}
+                              </span>
                               <span className="text-xs text-gray-500">{specs.cpu} CPU / {specs.memory} GB RAM</span>
                             </div>
                             <div className="text-xs text-gray-500 mt-0.5">{meta.description}</div>
@@ -602,6 +644,11 @@ export default function NotebooksPage() {
                         );
                       })}
                     </div>
+                    {profileNotice && (
+                      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mt-2">
+                        {profileNotice}
+                      </p>
+                    )}
                   </div>
 
                   {/* Environment */}
