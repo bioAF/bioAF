@@ -40,15 +40,10 @@ COMPONENT_CATALOG: dict[str, dict] = {
         "dependencies": [],
         "estimated_monthly_cost": "$0 (scales to zero)",
         "provisioning_time_estimate": "~10 minutes",
-        "config_schema": [
-            {"key": "interactive_pool_max_nodes", "label": "Max Nodes", "type": "number", "default": 5},
-            {
-                "key": "interactive_pool_machine_type",
-                "label": "Machine Type",
-                "type": "string",
-                "default": "n2-standard-4",
-            },
-        ],
+        # Pool size is configured via the cluster config (k8s_interactive_machine_type
+        # / k8s_interactive_max_nodes), which is what Terraform actually applies. No
+        # per-component fields here, to avoid exposing settings that do nothing.
+        "config_schema": [],
     },
     "nextflow_k8s": {
         "name": "Nextflow (K8s Executor)",
