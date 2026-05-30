@@ -164,6 +164,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [componentsLoading, setComponentsLoading] = useState(false);
   const [componentsSubmitting, setComponentsSubmitting] = useState(false);
 
+  // Step 8: Deploying status snapshot
+  const [deployStatus, setDeployStatus] = useState<
+    { key: string; name: string; status: string }[]
+  >([]);
+
   // Pre-populate GCP fields from platform_config once the user has
   // authenticated (we have a token after step 1). install-gcp.sh's prefill
   // path writes project/region/zone/credential-source/bootstrap-email to
@@ -387,6 +392,36 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const handlePickerChange = useCallback((keys: string[]) => {
     setSelectedComponents(keys);
   }, []);
+
+  // Poll per-component status on the Deploying step so the user can see
+  // image builds completing, the cluster coming up, components flipping
+  // enabled. The orchestrator runs on the backend; this is just a window.
+  useEffect(() => {
+    if (step !== 8) return;
+    let cancelled = false;
+    const fetchStatus = async () => {
+      try {
+        const data = await api.get<{
+          components: { key: string; name: string; status: string }[];
+        }>("/api/components");
+        if (cancelled) return;
+        const selected = new Set(selectedComponents);
+        setDeployStatus(
+          data.components
+            .filter((c) => selected.has(c.key))
+            .map((c) => ({ key: c.key, name: c.name, status: c.status }))
+        );
+      } catch {
+        // Polling failures are benign; the next tick will retry.
+      }
+    };
+    void fetchStatus();
+    const handle = setInterval(fetchStatus, 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+    };
+  }, [step, selectedComponents]);
 
   // Fetch the component catalog when entering step 7 so the picker has data.
   useEffect(() => {
@@ -919,6 +954,40 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               prerequisites become ready; you do not need to come back here.
             </p>
           </div>
+          {deployStatus.length > 0 && (
+            <div className="border border-gray-200 rounded divide-y">
+              {deployStatus.map((c) => (
+                <div
+                  key={c.key}
+                  className="flex items-center justify-between px-3 py-2 text-sm"
+                  data-testid={`deploy-status-${c.key}`}
+                >
+                  <span className="font-medium">{c.name}</span>
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                      c.status === "enabled"
+                        ? "bg-green-100 text-green-700"
+                        : c.status === "build_failed"
+                          ? "bg-red-100 text-red-700"
+                          : c.status === "provisioning"
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-gray-100 text-gray-600"
+                    }`}
+                  >
+                    {c.status === "enabled"
+                      ? "Ready"
+                      : c.status === "build_failed"
+                        ? "Build failed"
+                        : c.status === "provisioning"
+                          ? "Building"
+                          : c.status === "queued_for_infra"
+                            ? "Queued"
+                            : c.status}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           <button onClick={() => setStep(9)} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
             Continue to Getting Started
           </button>

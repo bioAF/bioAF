@@ -296,6 +296,93 @@ describe("SetupWizard", () => {
     );
   });
 
+  it("step 8: Deploying step renders per-component status for the just-queued selection", async () => {
+    const user = userEvent.setup();
+    render(<SetupWizard onComplete={jest.fn()} />);
+    await advanceToGcpStep(user);
+
+    mockApiPut.mockResolvedValueOnce({});
+    mockApiPost.mockResolvedValueOnce({ passed: true, checks: [], permission_details: [] });
+    await user.type(screen.getByLabelText("GCP Project ID"), "proj");
+    await user.click(screen.getByRole("button", { name: "Save & Validate" }));
+    await screen.findByRole("heading", { name: "SMTP Settings" });
+
+    await user.click(screen.getByRole("button", { name: /do this later/i }));
+    await user.click(screen.getByRole("button", { name: /set up infrastructure/i }));
+
+    // Stack selection
+    mockApiPost.mockResolvedValueOnce({}); // terraform/init
+    mockApiPost.mockResolvedValueOnce({}); // stack/deploy-background
+    mockApiGet.mockResolvedValueOnce({
+      compute_stack: "kubernetes",
+      components: [
+        {
+          key: "nextflow_k8s",
+          name: "Nextflow",
+          description: ".",
+          category: "pipeline_orchestration",
+          dependencies: [],
+          cost_estimate: "$0",
+          configurable_fields: [],
+          status: "available",
+        },
+        {
+          key: "jupyterhub",
+          name: "JupyterHub",
+          description: ".",
+          category: "analysis",
+          dependencies: [],
+          cost_estimate: "$50",
+          configurable_fields: [],
+          status: "available",
+        },
+      ],
+    });
+    await user.click(screen.getByRole("button", { name: /Continue with Kubernetes/i }));
+    await screen.findByRole("heading", { name: "Select Components" });
+
+    // Submit the components
+    mockApiPost.mockResolvedValueOnce({ queued: ["nextflow_k8s", "jupyterhub"] });
+    // The Deploying step then polls /api/components for live status.
+    mockApiGet.mockResolvedValue({
+      components: [
+        {
+          key: "nextflow_k8s",
+          name: "Nextflow",
+          description: ".",
+          category: "pipeline_orchestration",
+          enabled: true,
+          status: "queued_for_infra",
+          config: {},
+          dependencies: [],
+          estimated_monthly_cost: "$0",
+          updated_at: null,
+        },
+        {
+          key: "jupyterhub",
+          name: "JupyterHub",
+          description: ".",
+          category: "analysis",
+          enabled: true,
+          status: "provisioning",
+          config: {},
+          dependencies: [],
+          estimated_monthly_cost: "$50",
+          updated_at: null,
+        },
+      ],
+    });
+
+    await user.click(screen.getByRole("button", { name: /Continue/i }));
+    await screen.findByRole("heading", { name: "Deploying" });
+
+    // Each selected component renders with its current status visible
+    expect(await screen.findByText("Nextflow")).toBeInTheDocument();
+    expect(screen.getByText("JupyterHub")).toBeInTheDocument();
+    expect(screen.getByText(/Queued/i)).toBeInTheDocument();
+    expect(screen.getByText(/Building/i)).toBeInTheDocument();
+  });
+
   it("step 6: Kubernetes is selected by default", async () => {
     const user = userEvent.setup();
     render(<SetupWizard onComplete={jest.fn()} />);
