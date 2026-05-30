@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -70,10 +70,21 @@ async def get_bootstrap_status(request: Request, session: AsyncSession = Depends
     has_admin_user = await _has_admin(session) if org else False
     has_code = bool(org and org.setup_code_hash is not None) if org else False
 
+    in_flight_row = (
+        await session.execute(
+            text(
+                "SELECT 1 FROM component_states "
+                "WHERE enabled = true AND status IN ('queued_for_infra', 'provisioning') "
+                "LIMIT 1"
+            )
+        )
+    ).first()
+
     result: dict = {
         "setup_complete": org.setup_complete if org else False,
         "has_setup_code": has_code,
         "has_admin": has_admin_user,
+        "has_in_flight_components": in_flight_row is not None,
     }
 
     # Only include smtp_configured for authenticated callers to avoid

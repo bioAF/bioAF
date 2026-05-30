@@ -1,5 +1,6 @@
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import text
 
 
 pytestmark = pytest.mark.asyncio
@@ -93,6 +94,63 @@ async def test_full_bootstrap_flow(client: AsyncClient):
     # Verify setup is complete
     resp = await client.get("/api/bootstrap/status")
     assert resp.json()["setup_complete"] is True
+
+
+async def test_bootstrap_status_has_in_flight_when_components_queued(client: AsyncClient, session):
+    """T11a: a queued_for_infra row means the wizard should route returning
+    users back to the components view, not the dashboard.
+    """
+    await session.execute(
+        text(
+            "INSERT INTO component_states (component_key, enabled, status, config_json) "
+            "VALUES ('nextflow', true, 'queued_for_infra', '{}') "
+            "ON CONFLICT (component_key) DO UPDATE SET enabled = true, status = 'queued_for_infra'"
+        )
+    )
+    await session.commit()
+
+    response = await client.get("/api/bootstrap/status")
+    assert response.status_code == 200
+    assert response.json()["has_in_flight_components"] is True
+
+
+async def test_bootstrap_status_has_in_flight_when_components_provisioning(client: AsyncClient, session):
+    """T11b: provisioning (mid-image-build) also counts as in-flight."""
+    await session.execute(
+        text(
+            "INSERT INTO component_states (component_key, enabled, status, config_json) "
+            "VALUES ('jupyterhub', true, 'provisioning', '{}') "
+            "ON CONFLICT (component_key) DO UPDATE SET enabled = true, status = 'provisioning'"
+        )
+    )
+    await session.commit()
+
+    response = await client.get("/api/bootstrap/status")
+    assert response.status_code == 200
+    assert response.json()["has_in_flight_components"] is True
+
+
+async def test_bootstrap_status_no_in_flight_when_only_enabled_or_disabled(client: AsyncClient, session):
+    """T11c: rows in steady states do not count as in-flight."""
+    await session.execute(
+        text(
+            "INSERT INTO component_states (component_key, enabled, status, config_json) "
+            "VALUES ('nextflow', true, 'enabled', '{}'), ('rstudio', false, 'disabled', '{}') "
+            "ON CONFLICT (component_key) DO UPDATE SET status = EXCLUDED.status, enabled = EXCLUDED.enabled"
+        )
+    )
+    await session.commit()
+
+    response = await client.get("/api/bootstrap/status")
+    assert response.status_code == 200
+    assert response.json()["has_in_flight_components"] is False
+
+
+async def test_bootstrap_status_no_in_flight_when_table_empty(client: AsyncClient):
+    """T11d: a fresh install has no rows; the field is False, not omitted."""
+    response = await client.get("/api/bootstrap/status")
+    assert response.status_code == 200
+    assert response.json()["has_in_flight_components"] is False
 
 
 async def test_bootstrap_requires_admin_role(client: AsyncClient, viewer_token: str):
