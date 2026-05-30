@@ -1,9 +1,9 @@
 ### Notebook sessions
 
 - Add larger notebook resource profiles for real single-cell work. The ladder
-  is now small (2 CPU / 8 GB), medium (4 CPU / 16 GB), large (8 CPU / 32 GB),
-  xlarge (16 CPU / 64 GB), and 2xlarge (16 CPU / 128 GB). The previous options
-  topped out at 8 CPU / 16 GB, too small for Seurat/scanpy integration.
+  is now Small (2 CPU / 8 GB), Medium (4 CPU / 16 GB), Large (8 CPU / 32 GB),
+  X Large (16 CPU / 64 GB), and XX Large (16 CPU / 128 GB). The previous
+  options topped out at 8 CPU / 16 GB, too small for Seurat/scanpy integration.
 - Redesign the launch modal's resource profile picker as a full-width list of
   rows (tier name, CPU/RAM, and a short use-case description), matching the
   work-node machine-type picker so the full range of tiers is legible. The

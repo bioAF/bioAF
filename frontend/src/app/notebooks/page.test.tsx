@@ -192,13 +192,13 @@ describe("NotebooksPage launch modal", () => {
       expect(screen.getByText("Launch Notebook Session")).toBeInTheDocument();
     });
 
-    // All five tiers are selectable, with the larger options the colleague asked for.
-    for (const profile of ["small", "medium", "large", "xlarge", "2xlarge"]) {
-      expect(screen.getByText(profile)).toBeInTheDocument();
+    // All five tiers are shown in the picker (Small through XX Large).
+    for (const label of ["Small", "Medium", "Large", "X Large", "XX Large"]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
     }
-    expect(screen.getByText("8 CPU, 32GB RAM")).toBeInTheDocument();
-    expect(screen.getByText("16 CPU, 64GB RAM")).toBeInTheDocument();
-    expect(screen.getByText("16 CPU, 128GB RAM")).toBeInTheDocument();
+    expect(screen.getByText("8 CPU / 32 GB RAM")).toBeInTheDocument();
+    expect(screen.getByText("16 CPU / 64 GB RAM")).toBeInTheDocument();
+    expect(screen.getByText("16 CPU / 128 GB RAM")).toBeInTheDocument();
   });
 
   test("shows error in modal on launch failure", async () => {
