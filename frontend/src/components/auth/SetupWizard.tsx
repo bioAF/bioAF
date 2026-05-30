@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { setToken } from "@/lib/auth";
+import { ComponentPicker, type PickerComponent } from "@/components/components/ComponentPicker";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -14,6 +15,7 @@ const STEPS = [
   "SMTP Settings",
   "Infrastructure",
   "Select Stack",
+  "Select Components",
   "Deploying",
   "Getting Started",
 ];
@@ -153,6 +155,15 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [computeStack, setComputeStack] = useState("kubernetes");
   const [stackDeploying, setStackDeploying] = useState(false);
 
+  // Step 7: Select Components
+  // Defaults: the minimum set that gives the user a working "first pipeline
+  // + first notebook" experience without opening the Infrastructure menu.
+  const DEFAULT_SELECTED = ["nextflow_k8s", "jupyterhub"];
+  const [pickerComponents, setPickerComponents] = useState<PickerComponent[]>([]);
+  const [selectedComponents, setSelectedComponents] = useState<string[]>(DEFAULT_SELECTED);
+  const [componentsLoading, setComponentsLoading] = useState(false);
+  const [componentsSubmitting, setComponentsSubmitting] = useState(false);
+
   // Pre-populate GCP fields from platform_config once the user has
   // authenticated (we have a token after step 1). install-gcp.sh's prefill
   // path writes project/region/zone/credential-source/bootstrap-email to
@@ -161,7 +172,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   // what the system already knows so the user doesn't re-type values.
   useEffect(() => {
     let cancelled = false;
-    if (step < 3) return;
+    if (step !== 3) return;
     (async () => {
       try {
         const cfg = await api.get<{
@@ -342,11 +353,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       } catch {
         // Deployment may fail; user can retry from Infrastructure page
       }
-      try {
-        await api.post("/api/bootstrap/complete");
-      } catch {
-        // Non-critical
-      }
+      // Bootstrap completion is deferred until after the user has submitted
+      // their component selections, so an interrupted wizard does not look
+      // "complete" while still half-configured.
       setStep(7);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to initialize infrastructure");
@@ -354,6 +363,63 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       setStackDeploying(false);
     }
   };
+
+  const handleSelectComponents = async () => {
+    setError("");
+    setComponentsSubmitting(true);
+    try {
+      await api.post("/api/components/select-batch", {
+        keys: selectedComponents,
+      });
+      try {
+        await api.post("/api/bootstrap/complete");
+      } catch {
+        // Non-critical; the deploy step renders regardless.
+      }
+      setStep(8);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to queue components");
+    } finally {
+      setComponentsSubmitting(false);
+    }
+  };
+
+  const handlePickerChange = useCallback((keys: string[]) => {
+    setSelectedComponents(keys);
+  }, []);
+
+  // Fetch the component catalog when entering step 7 so the picker has data.
+  useEffect(() => {
+    let cancelled = false;
+    if (step !== 7) return;
+    setComponentsLoading(true);
+    (async () => {
+      try {
+        const data = await api.get<{
+          compute_stack: string;
+          components: {
+            key: string;
+            name: string;
+            description: string;
+            category: string;
+            dependencies: string[];
+            cost_estimate: string;
+            status: "available" | "coming_soon";
+          }[];
+        }>("/api/v1/infrastructure/components");
+        if (cancelled) return;
+        setPickerComponents(data.components ?? []);
+      } catch (e) {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : "Failed to load components");
+      } finally {
+        if (!cancelled) setComponentsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [step]);
 
   return (
     <div className="bg-white shadow rounded-lg p-8">
@@ -816,23 +882,51 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         </div>
       )}
 
-      {/* Step 7: Deploying */}
+      {/* Step 7: Select Components */}
       {step === 7 && (
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            Pick the components you want enabled. Selected components will be
+            queued and turned on automatically as the infrastructure becomes
+            ready, so you can leave this page once you continue.
+          </p>
+          {componentsLoading ? (
+            <div className="text-sm text-gray-500">Loading components...</div>
+          ) : (
+            <ComponentPicker
+              components={pickerComponents}
+              defaultSelected={DEFAULT_SELECTED}
+              onChange={handlePickerChange}
+            />
+          )}
+          <button
+            onClick={handleSelectComponents}
+            disabled={componentsSubmitting || componentsLoading}
+            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
+          >
+            {componentsSubmitting ? "Queueing components..." : "Continue"}
+          </button>
+        </div>
+      )}
+
+      {/* Step 8: Deploying */}
+      {step === 8 && (
         <div className="space-y-4">
           <div className="p-4 bg-blue-50 border border-blue-200 rounded">
             <p className="text-sm text-blue-800">
               Infrastructure deployment has started. This usually takes 10-15 minutes.
-              You can monitor progress on the Infrastructure page after setup.
+              Your selected components will turn on automatically as their
+              prerequisites become ready; you do not need to come back here.
             </p>
           </div>
-          <button onClick={() => setStep(8)} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
+          <button onClick={() => setStep(9)} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
             Continue to Getting Started
           </button>
         </div>
       )}
 
-      {/* Step 8: Getting Started */}
-      {step === 8 && (
+      {/* Step 9: Getting Started */}
+      {step === 9 && (
         <div className="space-y-4">
           <div className="p-4 bg-green-50 border border-green-200 rounded">
             <h3 className="font-semibold text-green-800">Setup Complete</h3>

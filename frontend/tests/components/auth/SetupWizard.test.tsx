@@ -8,10 +8,12 @@ global.fetch = mockFetch;
 
 const mockApiPost = jest.fn();
 const mockApiPut = jest.fn();
+const mockApiGet = jest.fn();
 jest.mock("@/lib/api", () => ({
   api: {
     post: (...args: unknown[]) => mockApiPost(...args),
     put: (...args: unknown[]) => mockApiPut(...args),
+    get: (...args: unknown[]) => mockApiGet(...args),
   },
 }));
 
@@ -73,15 +75,19 @@ describe("SetupWizard", () => {
     mockFetch.mockReset();
     mockApiPost.mockReset();
     mockApiPut.mockReset();
+    mockApiGet.mockReset();
     mockApiPost.mockResolvedValue({});
     mockApiPut.mockResolvedValue({});
+    mockApiGet.mockResolvedValue({});
     localStorage.clear();
   });
 
-  it("renders the 9-step indicator on mount", () => {
+  it("renders the 10-step indicator on mount", () => {
     render(<SetupWizard onComplete={jest.fn()} />);
     expect(screen.getByText("1")).toBeInTheDocument();
-    expect(screen.getByText("9")).toBeInTheDocument();
+    // Step 8 was "Select Components" -- a new step inserted after Select Stack
+    // and before Deploying. Indicator must reflect the new total.
+    expect(screen.getByText("10")).toBeInTheDocument();
   });
 
   it("step 0: shows Setup Code form", () => {
@@ -163,6 +169,131 @@ describe("SetupWizard", () => {
     expect(screen.getByText("Kubernetes + GCS")).toBeInTheDocument();
     expect(screen.getByText("Recommended")).toBeInTheDocument();
     expect(screen.getByTestId("compute-stack-slurm")).toBeInTheDocument();
+  });
+
+  it("step 7: shows Select Components after clicking Continue from stack pick", async () => {
+    const user = userEvent.setup();
+    render(<SetupWizard onComplete={jest.fn()} />);
+    await advanceToGcpStep(user);
+
+    mockApiPut.mockResolvedValueOnce({});
+    mockApiPost.mockResolvedValueOnce({ passed: true, checks: [], permission_details: [] });
+    await user.type(screen.getByLabelText("GCP Project ID"), "proj");
+    await user.click(screen.getByRole("button", { name: "Save & Validate" }));
+    await screen.findByRole("heading", { name: "SMTP Settings" });
+
+    await user.click(screen.getByRole("button", { name: /do this later/i }));
+    await screen.findByRole("heading", { name: "Infrastructure" });
+
+    await user.click(screen.getByRole("button", { name: /set up infrastructure/i }));
+    await screen.findByRole("heading", { name: "Select Stack" });
+
+    // After kicking off deploy, wizard advances to component selection so the
+    // user can queue components while the cluster is still being built.
+    mockApiPost.mockResolvedValueOnce({}); // terraform/init
+    mockApiPost.mockResolvedValueOnce({}); // stack/deploy-background
+    mockApiPost.mockResolvedValueOnce({}); // bootstrap/complete (now deferred)
+    mockApiGet.mockResolvedValueOnce({
+      compute_stack: "kubernetes",
+      components: [
+        {
+          key: "nextflow_k8s",
+          name: "Nextflow",
+          description: "Pipeline orchestration.",
+          category: "pipeline_orchestration",
+          dependencies: ["k8s_pipeline_pool"],
+          cost_estimate: "$0",
+          configurable_fields: [],
+          status: "available",
+        },
+        {
+          key: "jupyterhub",
+          name: "JupyterHub",
+          description: "Notebooks.",
+          category: "analysis",
+          dependencies: ["k8s_interactive_pool"],
+          cost_estimate: "$50",
+          configurable_fields: [],
+          status: "available",
+        },
+        {
+          key: "k8s_pipeline_pool",
+          name: "K8s Pipeline Pool",
+          description: "Internal pool.",
+          category: "compute",
+          dependencies: [],
+          cost_estimate: "$0",
+          configurable_fields: [],
+          status: "available",
+        },
+        {
+          key: "k8s_interactive_pool",
+          name: "K8s Interactive Pool",
+          description: "Internal pool.",
+          category: "compute",
+          dependencies: [],
+          cost_estimate: "$0",
+          configurable_fields: [],
+          status: "available",
+        },
+      ],
+    });
+
+    await user.click(screen.getByRole("button", { name: /Continue with Kubernetes/i }));
+    await screen.findByRole("heading", { name: "Select Components" });
+
+    expect(screen.getByRole("checkbox", { name: /Nextflow/ })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /JupyterHub/ })).toBeChecked();
+  });
+
+  it("step 7: clicking Continue POSTs select-batch and advances to Deploying", async () => {
+    const user = userEvent.setup();
+    render(<SetupWizard onComplete={jest.fn()} />);
+    await advanceToGcpStep(user);
+
+    mockApiPut.mockResolvedValueOnce({});
+    mockApiPost.mockResolvedValueOnce({ passed: true, checks: [], permission_details: [] });
+    await user.type(screen.getByLabelText("GCP Project ID"), "proj");
+    await user.click(screen.getByRole("button", { name: "Save & Validate" }));
+    await screen.findByRole("heading", { name: "SMTP Settings" });
+
+    await user.click(screen.getByRole("button", { name: /do this later/i }));
+    await screen.findByRole("heading", { name: "Infrastructure" });
+
+    await user.click(screen.getByRole("button", { name: /set up infrastructure/i }));
+    await screen.findByRole("heading", { name: "Select Stack" });
+
+    mockApiPost.mockResolvedValueOnce({}); // terraform/init
+    mockApiPost.mockResolvedValueOnce({}); // stack/deploy-background
+    mockApiPost.mockResolvedValueOnce({}); // bootstrap/complete
+    mockApiGet.mockResolvedValueOnce({
+      compute_stack: "kubernetes",
+      components: [
+        {
+          key: "nextflow_k8s",
+          name: "Nextflow",
+          description: ".",
+          category: "pipeline_orchestration",
+          dependencies: [],
+          cost_estimate: "$0",
+          configurable_fields: [],
+          status: "available",
+        },
+      ],
+    });
+
+    await user.click(screen.getByRole("button", { name: /Continue with Kubernetes/i }));
+    await screen.findByRole("heading", { name: "Select Components" });
+
+    mockApiPost.mockResolvedValueOnce({ queued: ["nextflow_k8s"] });
+
+    await user.click(screen.getByRole("button", { name: /Continue/i }));
+
+    await screen.findByRole("heading", { name: "Deploying" });
+    expect(mockApiPost).toHaveBeenCalledWith(
+      "/api/components/select-batch",
+      expect.objectContaining({ keys: expect.arrayContaining(["nextflow_k8s"]) })
+    );
   });
 
   it("step 6: Kubernetes is selected by default", async () => {
