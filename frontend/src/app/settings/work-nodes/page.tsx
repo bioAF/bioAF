@@ -11,7 +11,11 @@ import { api } from "@/lib/api";
 interface WorkNodeConfig {
   max_nodes_per_user: number;
   idle_timeout_hours: number;
+  boot_disk_gb: number;
+  boot_disk_type: string;
 }
+
+const DISK_TYPES = ["pd-ssd", "pd-balanced", "pd-standard"] as const;
 
 interface NotebookConfig {
   idle_timeout_hours: number;
@@ -42,6 +46,8 @@ export default function WorkbenchSettingsPage() {
   const [workNodes, setWorkNodes] = useState<WorkNodeConfig>({
     max_nodes_per_user: 2,
     idle_timeout_hours: 24,
+    boot_disk_gb: 100,
+    boot_disk_type: "pd-ssd",
   });
   const [savingWorkNodes, setSavingWorkNodes] = useState(false);
   const [workNodeMessage, setWorkNodeMessage] = useState("");
@@ -162,6 +168,47 @@ export default function WorkbenchSettingsPage() {
                 />
                 <p className="text-xs text-gray-500 mt-1">
                   Auto-stop nodes with no heartbeat after this many hours (1-720)
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="wn-disk-gb" className="block text-sm font-medium text-gray-700 mb-1">
+                  Boot Disk Size (GB)
+                </label>
+                <input
+                  id="wn-disk-gb"
+                  type="number"
+                  min={20}
+                  max={1000}
+                  value={workNodes.boot_disk_gb}
+                  onChange={(e) => setWorkNodes({ ...workNodes, boot_disk_gb: Number(e.target.value) })}
+                  className="border rounded px-3 py-2 text-sm w-32"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Per-node boot disk size (20-1000 GB). pd-ssd and pd-balanced both consume the
+                  regional SSD quota; lower this or use pd-standard if launches fail with
+                  SSD_TOTAL_GB quota errors.
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="wn-disk-type" className="block text-sm font-medium text-gray-700 mb-1">
+                  Boot Disk Type
+                </label>
+                <select
+                  id="wn-disk-type"
+                  value={workNodes.boot_disk_type}
+                  onChange={(e) => setWorkNodes({ ...workNodes, boot_disk_type: e.target.value })}
+                  className="border rounded px-3 py-2 text-sm w-48"
+                >
+                  {DISK_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  pd-standard uses the separate (larger) HDD quota but is slower than SSD.
                 </p>
               </div>
 

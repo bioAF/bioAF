@@ -34,33 +34,60 @@ FROM jupyter/scipy-notebook:latest
 
 USER root
 
-# System dependencies for R, HDF5, and git
+# System libraries. Several of these are the reason R/Python packages fail to
+# build if absent: libglpk (igraph), libgsl, libgeos (spatial), cairo/xt/
+# harfbuzz/fribidi (tidyverse graphics via ragg and textshaping), and HDF5 for
+# .h5 / .h5ad I/O. The base image is Ubuntu 22.04 (jammy).
 RUN apt-get update && apt-get install -y --no-install-recommends \\
     libhdf5-dev libcurl4-openssl-dev libssl-dev libxml2-dev \\
+    libglpk-dev libgsl-dev libgeos-dev libfftw3-dev cmake \\
+    libcairo2-dev libxt-dev libfontconfig1-dev \\
+    libharfbuzz-dev libfribidi-dev \\
+    libpng-dev libtiff5-dev libjpeg-dev \\
     r-base r-base-dev \\
     git openssh-client \\
     && rm -rf /var/lib/apt/lists/*
 
-# Python scRNA-seq packages
+# Python: single-cell, bulk RNA-seq, and general bioinformatics
 RUN pip install --no-cache-dir \\
-    scanpy anndata scvi-tools leidenalg \\
-    pandas numpy matplotlib seaborn plotly \\
-    umap-learn bbknn scrublet \\
-    google-cloud-storage
+    scanpy anndata muon scvi-tools \\
+    leidenalg python-igraph harmonypy scanorama bbknn \\
+    scrublet doubletdetection celltypist decoupler gseapy \\
+    scikit-misc statsmodels scvelo \\
+    pandas numpy scipy matplotlib seaborn plotly \\
+    umap-learn pybiomart biopython pysam anndata2ri \\
+    google-cloud-storage gsutil
 
-# R packages (core set for Seurat and Bioconductor)
-RUN R -e "install.packages(c('Seurat', 'ggplot2', 'tidyverse', 'pheatmap', 'devtools'), repos='https://cloud.r-project.org')"
-RUN R -e "if (!requireNamespace('BiocManager', quietly=TRUE)) install.packages('BiocManager', repos='https://cloud.r-project.org'); BiocManager::install(c('SingleCellExperiment', 'scater', 'scran'))"
+# Install R packages as precompiled binaries from the Posit Public Package
+# Manager (P3M) rather than compiling from source. This turns a ~1h fragile
+# build into a fast one; CRAN is kept as a source fallback. Combined with the
+# verification step below, it makes silent package failures impossible.
+RUN echo 'options(repos = c(P3M = "https://packagemanager.posit.co/cran/__linux__/jammy/latest", CRAN = "https://cloud.r-project.org"))' >> /usr/lib/R/etc/Rprofile.site
+RUN echo 'options(HTTPUserAgent = sprintf("R/%s R (%s)", getRversion(), paste(getRversion(), R.version$platform, R.version$arch, R.version$os)))' >> /usr/lib/R/etc/Rprofile.site
 
-# RStudio Server
+# R / CRAN: Seurat stack, single-cell helpers, plotting, dev tooling
+RUN R -e "install.packages(c('Seurat','SeuratObject','hdf5r','Matrix','harmony','future','tidyverse','data.table','patchwork','cowplot','ggplot2','pheatmap','RColorBrewer','viridis','devtools','remotes','R.utils','BiocManager'))"
+
+# presto (fast Wilcoxon for Seurat FindMarkers) ships only from GitHub
+RUN R -e "remotes::install_github('immunogenomics/presto', upgrade='never')"
+
+# R / Bioconductor: single-cell, bulk DE, enrichment, annotation
+RUN R -e "BiocManager::install(c('SingleCellExperiment','scater','scran','scuttle','glmGamPoi','batchelor','DropletUtils','SingleR','celldex','zellkonverter','DESeq2','edgeR','limma','clusterProfiler','fgsea','ComplexHeatmap','EnhancedVolcano','org.Hs.eg.db','org.Mm.eg.db','AnnotationDbi'), update=FALSE, ask=FALSE)"
+
+# Fail the build if any expected package is missing. install.packages() and
+# BiocManager::install() exit 0 even when a package fails to install, which is
+# how images previously shipped without Seurat. This is the guardrail.
+RUN R -e "req <- c('Seurat','SeuratObject','hdf5r','harmony','presto','SingleCellExperiment','scater','scran','glmGamPoi','batchelor','DropletUtils','SingleR','zellkonverter','DESeq2','edgeR','limma','clusterProfiler','fgsea','ComplexHeatmap','org.Hs.eg.db'); missing <- req[!req %in% rownames(installed.packages())]; if (length(missing) > 0) stop(paste('Missing R packages:', paste(missing, collapse=', '))); cat('R package check passed')"
+
+# Verify the key Python imports resolve too
+RUN python -c "import scanpy, anndata, scvi, muon, harmonypy, scanorama, scrublet, celltypist, decoupler, gseapy, scvelo; print('Python deps ok')"
+
+# RStudio Server (jammy build, matching the base image)
 RUN apt-get update && apt-get install -y --no-install-recommends gdebi-core wget \\
     && wget -q https://download2.rstudio.org/server/jammy/amd64/rstudio-server-2024.04.2-764-amd64.deb \\
     && gdebi -n rstudio-server-2024.04.2-764-amd64.deb \\
     && rm rstudio-server-*.deb \\
     && rm -rf /var/lib/apt/lists/*
-
-# gsutil for GCS home directory sync
-RUN pip install --no-cache-dir gsutil
 
 USER ${NB_UID}
 

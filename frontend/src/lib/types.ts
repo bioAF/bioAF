@@ -495,17 +495,20 @@ export interface TemplateCreateRequest {
 export type SlurmJobStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "timeout";
 export type SessionStatus = "pending" | "starting" | "running" | "idle" | "stopping" | "stopped" | "failed";
 export type SessionType = "jupyter" | "rstudio";
-export type ResourceProfile = "small" | "medium" | "large";
+export type ResourceProfile = "small" | "medium" | "large" | "xlarge" | "2xlarge";
 
 export interface ExperimentSummary {
   id: number;
   name: string;
 }
 
+// Keep in sync with RESOURCE_PROFILES in backend/app/services/notebook_service.py.
 export const RESOURCE_PROFILES: Record<ResourceProfile, { cpu: number; memory: number }> = {
-  small: { cpu: 2, memory: 4 },
-  medium: { cpu: 4, memory: 8 },
-  large: { cpu: 8, memory: 16 },
+  small: { cpu: 2, memory: 8 },
+  medium: { cpu: 4, memory: 16 },
+  large: { cpu: 8, memory: 32 },
+  xlarge: { cpu: 16, memory: 64 },
+  "2xlarge": { cpu: 16, memory: 128 },
 };
 
 export interface PartitionStatus {

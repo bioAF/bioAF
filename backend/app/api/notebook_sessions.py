@@ -4,6 +4,8 @@ Provides launch, stop, list, detail, sync, and settings endpoints
 under /api/v1/notebooks/sessions and /api/v1/settings/.
 """
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -29,7 +31,7 @@ logger = __import__("logging").getLogger("bioaf.notebooks.api")
 
 class NotebookLaunchRequest(BaseModel):
     session_type: str
-    resource_profile: str = "small"
+    resource_profile: Literal["small", "medium", "large", "xlarge", "2xlarge"] = "small"
     experiment_id: int | None = None
     input_file_ids: list[int] = []
     environment_version_id: int | None = None
@@ -187,6 +189,15 @@ async def _sync_session_from_k8s(ns, session: AsyncSession) -> None:
 
 
 # -- Session endpoints --
+
+
+@router.get("/resource-profiles")
+async def list_resource_profiles(
+    current_user: dict = require_permission("notebooks", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Resource profile ladder with availability for the configured interactive pool."""
+    return await NotebookService.get_resource_profile_availability(session)
 
 
 @router.get("/sessions", response_model=SessionListResponse)

@@ -42,6 +42,19 @@ class TestComponentsEndpoint:
         assert "k8s_pipeline_pool" in keys
         assert "k8s_interactive_pool" in keys
 
+    def test_interactive_pool_exposes_no_vestigial_config_fields(self):
+        """The interactive pool's size is set via the k8s_interactive_machine_type
+        cluster config, not per-component fields. The component must not surface
+        disconnected `interactive_pool_*` config keys that look editable but do
+        nothing.
+        """
+        from app.services.component_service import ComponentService
+
+        schema = ComponentService.get_catalog()["k8s_interactive_pool"]["config_schema"]
+        exposed = {field["key"] for field in schema}
+        assert "interactive_pool_machine_type" not in exposed
+        assert "interactive_pool_max_nodes" not in exposed
+
     @pytest.mark.asyncio
     async def test_slurm_listed_as_coming_soon_on_kubernetes(self, client, admin_token, session):
         await session.execute(

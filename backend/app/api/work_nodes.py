@@ -255,11 +255,22 @@ async def list_data_mounts(
 _SETTINGS_KEYS = {
     "max_nodes_per_user": "work_node_max_per_user",
     "idle_timeout_hours": "work_node_idle_timeout_hours",
+    "boot_disk_gb": "work_node_boot_disk_gb",
+    "boot_disk_type": "work_node_boot_disk_type",
 }
 
 _SETTINGS_DEFAULTS = {
     "max_nodes_per_user": 2,
     "idle_timeout_hours": 24,
+    "boot_disk_gb": 100,
+    "boot_disk_type": "pd-ssd",
+}
+
+_SETTINGS_CASTS = {
+    "max_nodes_per_user": int,
+    "idle_timeout_hours": int,
+    "boot_disk_gb": int,
+    "boot_disk_type": str,
 }
 
 
@@ -275,7 +286,10 @@ async def get_work_node_settings(
     )
     rows = {r[0]: r[1] for r in result.fetchall()}
 
-    return {field: int(rows.get(db_key, _SETTINGS_DEFAULTS[field])) for field, db_key in _SETTINGS_KEYS.items()}
+    return {
+        field: _SETTINGS_CASTS[field](rows.get(db_key, _SETTINGS_DEFAULTS[field]))
+        for field, db_key in _SETTINGS_KEYS.items()
+    }
 
 
 @settings_router.put("/work-nodes")
@@ -288,6 +302,8 @@ async def update_work_node_settings(
     updates = {
         "work_node_max_per_user": str(body.max_nodes_per_user),
         "work_node_idle_timeout_hours": str(body.idle_timeout_hours),
+        "work_node_boot_disk_gb": str(body.boot_disk_gb),
+        "work_node_boot_disk_type": body.boot_disk_type,
     }
 
     for key, value in updates.items():

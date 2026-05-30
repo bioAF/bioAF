@@ -1,6 +1,7 @@
 """Pydantic schemas for work node API endpoints."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -62,3 +63,7 @@ class MachineTypeResponse(BaseModel):
 class WorkNodeSettings(BaseModel):
     max_nodes_per_user: int = Field(default=2, ge=1, le=50)
     idle_timeout_hours: int = Field(default=24, ge=1, le=720)
+    # Boot disk for the work-node VM. pd-ssd and pd-balanced both count toward
+    # the regional SSD_TOTAL_GB quota; pd-standard uses the separate HDD quota.
+    boot_disk_gb: int = Field(default=100, ge=20, le=1000)
+    boot_disk_type: Literal["pd-ssd", "pd-balanced", "pd-standard"] = "pd-ssd"

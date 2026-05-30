@@ -101,3 +101,27 @@ def get_machine_type(name: str) -> dict | None:
         if mt["name"] == name:
             return mt
     return None
+
+
+# Memory-per-vCPU ratio (GB) for the standard GCE machine families, used to size
+# machine types that are not in the curated catalog above.
+_FAMILY_MEM_PER_VCPU = {"standard": 4, "highmem": 8, "highcpu": 1}
+
+
+def machine_type_capacity(name: str) -> tuple[int, int] | None:
+    """Return (vCPU, memory_gb) for a GCE machine type.
+
+    Prefers the curated catalog, then falls back to parsing the standard
+    `{family}-{class}-{vcpu}` naming (e.g. n2-highmem-16). Returns None when the
+    name cannot be interpreted.
+    """
+    mt = get_machine_type(name)
+    if mt:
+        return mt["cpu"], mt["memory_gb"]
+    parts = (name or "").split("-")
+    if len(parts) >= 3 and parts[-1].isdigit():
+        vcpu = int(parts[-1])
+        per_vcpu = _FAMILY_MEM_PER_VCPU.get(parts[-2])
+        if per_vcpu and vcpu > 0:
+            return vcpu, vcpu * per_vcpu
+    return None

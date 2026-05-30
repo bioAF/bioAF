@@ -1,5 +1,6 @@
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 
 from app.services.auth_service import AuthService
 
@@ -80,7 +81,7 @@ async def test_session_launch(client, comp_bio_token):
     assert data["session_type"] == "jupyter"
     assert data["resource_profile"] == "small"
     assert data["cpu_cores"] == 2
-    assert data["memory_gb"] == 4
+    assert data["memory_gb"] == 8
     assert data["status"] in ("starting", "pending", "running")
 
 
@@ -98,7 +99,93 @@ async def test_session_launch_medium_profile(client, comp_bio_token):
     assert response.status_code == 200
     data = response.json()
     assert data["cpu_cores"] == 4
-    assert data["memory_gb"] == 8
+    assert data["memory_gb"] == 16
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "profile,cpu,memory",
+    [
+        ("large", 8, 32),
+        ("xlarge", 16, 64),
+        ("2xlarge", 16, 128),
+    ],
+)
+async def test_session_launch_large_profiles(client, comp_bio_token, profile, cpu, memory):
+    """Large, xlarge, and 2xlarge profiles resolve to the expected resources."""
+    response = await client.post(
+        "/api/notebooks/sessions",
+        json={
+            "session_type": "jupyter",
+            "resource_profile": profile,
+        },
+        headers={"Authorization": f"Bearer {comp_bio_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["resource_profile"] == profile
+    assert data["cpu_cores"] == cpu
+    assert data["memory_gb"] == memory
+
+
+@pytest.mark.asyncio
+async def test_resource_profiles_default_pool_only_small_fits(client, comp_bio_token):
+    """With the default n2-standard-4 interactive pool (4/16), only Small fits.
+
+    Notebook pods run with requests==limits on the interactive pool, so a tier
+    only schedules if it is strictly smaller than a single node.
+    """
+    resp = await client.get(
+        "/api/v1/notebooks/resource-profiles",
+        headers={"Authorization": f"Bearer {comp_bio_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["pool_machine_type"] == "n2-standard-4"
+    avail = {p["name"]: p["available"] for p in data["profiles"]}
+    # All five tiers are present (visible), but only small is schedulable.
+    assert set(avail) == {"small", "medium", "large", "xlarge", "2xlarge"}
+    assert avail["small"] is True
+    assert avail["medium"] is False
+    assert avail["2xlarge"] is False
+
+
+@pytest.mark.asyncio
+async def test_resource_profiles_highmem16_unlocks_through_large(client, session, comp_bio_token):
+    """An n2-highmem-16 pool (16/128) makes small/medium/large fit, not the 16-CPU tiers."""
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES "
+            "('k8s_interactive_machine_type', 'n2-highmem-16') "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
+    )
+    await session.commit()
+
+    resp = await client.get(
+        "/api/v1/notebooks/resource-profiles",
+        headers={"Authorization": f"Bearer {comp_bio_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["pool_machine_type"] == "n2-highmem-16"
+    avail = {p["name"]: p["available"] for p in data["profiles"]}
+    assert avail["small"] and avail["medium"] and avail["large"]
+    assert not avail["xlarge"] and not avail["2xlarge"]
+
+
+@pytest.mark.asyncio
+async def test_session_launch_rejects_unknown_profile(client, comp_bio_token):
+    """An unknown resource profile is rejected by request validation."""
+    response = await client.post(
+        "/api/notebooks/sessions",
+        json={
+            "session_type": "jupyter",
+            "resource_profile": "ginormous",
+        },
+        headers={"Authorization": f"Bearer {comp_bio_token}"},
+    )
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio
