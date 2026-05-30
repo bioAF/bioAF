@@ -18,6 +18,11 @@
 
 ### Infrastructure
 
+- Surface the notebook tiers supported by the interactive pool's configured
+  machine type in Infrastructure > Components. The Interactive Pool status card
+  now shows "Machine Type: \<Tier\> (\<machine_type\>)" (e.g. "Medium
+  (n2-standard-8)") and a "Supports ... notebooks" line; the Cluster
+  Configuration form refreshes the supports line live as the dropdown changes.
 - Remove the disconnected `interactive_pool_machine_type` /
   `interactive_pool_max_nodes` fields from the K8s Interactive Node Pool
   component. They saved to component state but were never applied; the pool is
