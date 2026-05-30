@@ -78,7 +78,24 @@ describe("SetupWizard", () => {
     mockApiGet.mockReset();
     mockApiPost.mockResolvedValue({});
     mockApiPut.mockResolvedValue({});
-    mockApiGet.mockResolvedValue({});
+    // Default api.get router: GCP prefill returns an empty config; everything
+    // else returns an empty shape. Per-test setup uses mockImplementationOnce
+    // to override specific URLs. This keeps the prefill effect (which can
+    // fire on every step >= 3) from eating the once-mocks of other endpoints.
+    mockApiGet.mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("/api/v1/settings/gcp")) {
+        return Promise.resolve({
+          gcp_project_id: null,
+          gcp_region: null,
+          gcp_zone: null,
+          org_slug: null,
+          gcp_credential_source: "vm_default",
+          gcp_service_account_email: null,
+          gcp_bootstrap_sa_email: null,
+        });
+      }
+      return Promise.resolve({});
+    });
     localStorage.clear();
   });
 
@@ -193,50 +210,19 @@ describe("SetupWizard", () => {
     mockApiPost.mockResolvedValueOnce({}); // terraform/init
     mockApiPost.mockResolvedValueOnce({}); // stack/deploy-background
     mockApiPost.mockResolvedValueOnce({}); // bootstrap/complete (now deferred)
-    mockApiGet.mockResolvedValueOnce({
-      compute_stack: "kubernetes",
-      components: [
-        {
-          key: "nextflow_k8s",
-          name: "Nextflow",
-          description: "Pipeline orchestration.",
-          category: "pipeline_orchestration",
-          dependencies: ["k8s_pipeline_pool"],
-          cost_estimate: "$0",
-          configurable_fields: [],
-          status: "available",
-        },
-        {
-          key: "jupyterhub",
-          name: "JupyterHub",
-          description: "Notebooks.",
-          category: "analysis",
-          dependencies: ["k8s_interactive_pool"],
-          cost_estimate: "$50",
-          configurable_fields: [],
-          status: "available",
-        },
-        {
-          key: "k8s_pipeline_pool",
-          name: "K8s Pipeline Pool",
-          description: "Internal pool.",
-          category: "compute",
-          dependencies: [],
-          cost_estimate: "$0",
-          configurable_fields: [],
-          status: "available",
-        },
-        {
-          key: "k8s_interactive_pool",
-          name: "K8s Interactive Pool",
-          description: "Internal pool.",
-          category: "compute",
-          dependencies: [],
-          cost_estimate: "$0",
-          configurable_fields: [],
-          status: "available",
-        },
-      ],
+    mockApiGet.mockImplementation((url: string) => {
+      if (url.includes("/api/v1/infrastructure/components")) {
+        return Promise.resolve({
+          compute_stack: "kubernetes",
+          components: [
+            { key: "nextflow_k8s", name: "Nextflow", description: "Pipeline orchestration.", category: "pipeline_orchestration", dependencies: ["k8s_pipeline_pool"], cost_estimate: "$0", configurable_fields: [], status: "available" },
+            { key: "jupyterhub", name: "JupyterHub", description: "Notebooks.", category: "analysis", dependencies: ["k8s_interactive_pool"], cost_estimate: "$50", configurable_fields: [], status: "available" },
+            { key: "k8s_pipeline_pool", name: "K8s Pipeline Pool", description: "Internal pool.", category: "compute", dependencies: [], cost_estimate: "$0", configurable_fields: [], status: "available" },
+            { key: "k8s_interactive_pool", name: "K8s Interactive Pool", description: "Internal pool.", category: "compute", dependencies: [], cost_estimate: "$0", configurable_fields: [], status: "available" },
+          ],
+        });
+      }
+      return Promise.resolve({});
     });
 
     await user.click(screen.getByRole("button", { name: /Continue with Kubernetes/i }));
@@ -266,20 +252,16 @@ describe("SetupWizard", () => {
     mockApiPost.mockResolvedValueOnce({}); // terraform/init
     mockApiPost.mockResolvedValueOnce({}); // stack/deploy-background
     mockApiPost.mockResolvedValueOnce({}); // bootstrap/complete
-    mockApiGet.mockResolvedValueOnce({
-      compute_stack: "kubernetes",
-      components: [
-        {
-          key: "nextflow_k8s",
-          name: "Nextflow",
-          description: ".",
-          category: "pipeline_orchestration",
-          dependencies: [],
-          cost_estimate: "$0",
-          configurable_fields: [],
-          status: "available",
-        },
-      ],
+    mockApiGet.mockImplementation((url: string) => {
+      if (url.includes("/api/v1/infrastructure/components")) {
+        return Promise.resolve({
+          compute_stack: "kubernetes",
+          components: [
+            { key: "nextflow_k8s", name: "Nextflow", description: ".", category: "pipeline_orchestration", dependencies: [], cost_estimate: "$0", configurable_fields: [], status: "available" },
+          ],
+        });
+      }
+      return Promise.resolve({});
     });
 
     await user.click(screen.getByRole("button", { name: /Continue with Kubernetes/i }));
@@ -313,65 +295,31 @@ describe("SetupWizard", () => {
     // Stack selection
     mockApiPost.mockResolvedValueOnce({}); // terraform/init
     mockApiPost.mockResolvedValueOnce({}); // stack/deploy-background
-    mockApiGet.mockResolvedValueOnce({
-      compute_stack: "kubernetes",
-      components: [
-        {
-          key: "nextflow_k8s",
-          name: "Nextflow",
-          description: ".",
-          category: "pipeline_orchestration",
-          dependencies: [],
-          cost_estimate: "$0",
-          configurable_fields: [],
-          status: "available",
-        },
-        {
-          key: "jupyterhub",
-          name: "JupyterHub",
-          description: ".",
-          category: "analysis",
-          dependencies: [],
-          cost_estimate: "$50",
-          configurable_fields: [],
-          status: "available",
-        },
-      ],
+    mockApiGet.mockImplementation((url: string) => {
+      if (url.includes("/api/v1/infrastructure/components")) {
+        return Promise.resolve({
+          compute_stack: "kubernetes",
+          components: [
+            { key: "nextflow_k8s", name: "Nextflow", description: ".", category: "pipeline_orchestration", dependencies: [], cost_estimate: "$0", configurable_fields: [], status: "available" },
+            { key: "jupyterhub", name: "JupyterHub", description: ".", category: "analysis", dependencies: [], cost_estimate: "$50", configurable_fields: [], status: "available" },
+          ],
+        });
+      }
+      if (url === "/api/components") {
+        return Promise.resolve({
+          components: [
+            { key: "nextflow_k8s", name: "Nextflow", description: ".", category: "pipeline_orchestration", enabled: true, status: "queued_for_infra", config: {}, dependencies: [], estimated_monthly_cost: "$0", updated_at: null },
+            { key: "jupyterhub", name: "JupyterHub", description: ".", category: "analysis", enabled: true, status: "provisioning", config: {}, dependencies: [], estimated_monthly_cost: "$50", updated_at: null },
+          ],
+        });
+      }
+      return Promise.resolve({});
     });
     await user.click(screen.getByRole("button", { name: /Continue with Kubernetes/i }));
     await screen.findByRole("heading", { name: "Select Components" });
 
     // Submit the components
     mockApiPost.mockResolvedValueOnce({ queued: ["nextflow_k8s", "jupyterhub"] });
-    // The Deploying step then polls /api/components for live status.
-    mockApiGet.mockResolvedValue({
-      components: [
-        {
-          key: "nextflow_k8s",
-          name: "Nextflow",
-          description: ".",
-          category: "pipeline_orchestration",
-          enabled: true,
-          status: "queued_for_infra",
-          config: {},
-          dependencies: [],
-          estimated_monthly_cost: "$0",
-          updated_at: null,
-        },
-        {
-          key: "jupyterhub",
-          name: "JupyterHub",
-          description: ".",
-          category: "analysis",
-          enabled: true,
-          status: "provisioning",
-          config: {},
-          dependencies: [],
-          estimated_monthly_cost: "$50",
-          updated_at: null,
-        },
-      ],
-    });
 
     await user.click(screen.getByRole("button", { name: /Continue/i }));
     await screen.findByRole("heading", { name: "Deploying" });

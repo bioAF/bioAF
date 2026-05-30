@@ -177,7 +177,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   // what the system already knows so the user doesn't re-type values.
   useEffect(() => {
     let cancelled = false;
-    if (step !== 3) return;
+    if (step < 3) return;
     (async () => {
       try {
         const cfg = await api.get<{
