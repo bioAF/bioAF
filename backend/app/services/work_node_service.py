@@ -235,9 +235,7 @@ class WorkNodeService:
                 vm_spec["boot_disk_gb"] = DEFAULT_BOOT_DISK_GB
 
             disk_type = (config_map.get("work_node_boot_disk_type") or "").strip()
-            vm_spec["boot_disk_type"] = (
-                disk_type if disk_type and disk_type != "null" else DEFAULT_BOOT_DISK_TYPE
-            )
+            vm_spec["boot_disk_type"] = disk_type if disk_type and disk_type != "null" else DEFAULT_BOOT_DISK_TYPE
 
             # GPU accelerator info
             if mt.get("accelerator_type"):

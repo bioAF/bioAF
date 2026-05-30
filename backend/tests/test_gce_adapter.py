@@ -47,9 +47,7 @@ async def test_launch_advances_past_exhausted_zone():
         insert_calls.append(zone)
         op = MagicMock()
         if zone.endswith("-b"):
-            op.result.side_effect = Exception(
-                "operation failed: ZONE_RESOURCE_POOL_EXHAUSTED"
-            )
+            op.result.side_effect = Exception("operation failed: ZONE_RESOURCE_POOL_EXHAUSTED")
         else:
             op.result.return_value = None
         return op
@@ -57,9 +55,11 @@ async def test_launch_advances_past_exhausted_zone():
     fake_client = MagicMock()
     fake_client.insert.side_effect = insert_side_effect
 
-    with patch("google.cloud.compute_v1.InstancesClient", return_value=fake_client), \
-        patch.object(provider, "_get_gcp_credentials", return_value=MagicMock()), \
-        patch.object(provider, "_poll_vm_ready", new=AsyncMock()):
+    with (
+        patch("google.cloud.compute_v1.InstancesClient", return_value=fake_client),
+        patch.object(provider, "_get_gcp_credentials", return_value=MagicMock()),
+        patch.object(provider, "_poll_vm_ready", new=AsyncMock()),
+    ):
         result = await provider._gce_launch_vm(_launch_vm_spec())
 
     assert result["zone"] == "us-central1-c"
@@ -86,9 +86,11 @@ async def test_launch_applies_configured_boot_disk():
     vm_spec["boot_disk_gb"] = 150
     vm_spec["boot_disk_type"] = "pd-standard"
 
-    with patch("google.cloud.compute_v1.InstancesClient", return_value=fake_client), \
-        patch.object(provider, "_get_gcp_credentials", return_value=MagicMock()), \
-        patch.object(provider, "_poll_vm_ready", new=AsyncMock()):
+    with (
+        patch("google.cloud.compute_v1.InstancesClient", return_value=fake_client),
+        patch.object(provider, "_get_gcp_credentials", return_value=MagicMock()),
+        patch.object(provider, "_poll_vm_ready", new=AsyncMock()),
+    ):
         await provider._gce_launch_vm(vm_spec)
 
     init_params = captured["instance"].disks[0].initialize_params
@@ -111,9 +113,11 @@ async def test_launch_boot_disk_defaults_to_100gb_pd_ssd():
     fake_client = MagicMock()
     fake_client.insert.side_effect = insert_side_effect
 
-    with patch("google.cloud.compute_v1.InstancesClient", return_value=fake_client), \
-        patch.object(provider, "_get_gcp_credentials", return_value=MagicMock()), \
-        patch.object(provider, "_poll_vm_ready", new=AsyncMock()):
+    with (
+        patch("google.cloud.compute_v1.InstancesClient", return_value=fake_client),
+        patch.object(provider, "_get_gcp_credentials", return_value=MagicMock()),
+        patch.object(provider, "_poll_vm_ready", new=AsyncMock()),
+    ):
         await provider._gce_launch_vm(_launch_vm_spec())
 
     init_params = captured["instance"].disks[0].initialize_params
@@ -130,17 +134,17 @@ async def test_launch_raises_when_all_zones_exhausted():
     def insert_side_effect(**kwargs):
         insert_calls.append(kwargs["zone"])
         op = MagicMock()
-        op.result.side_effect = Exception(
-            "operation failed: ZONE_RESOURCE_POOL_EXHAUSTED"
-        )
+        op.result.side_effect = Exception("operation failed: ZONE_RESOURCE_POOL_EXHAUSTED")
         return op
 
     fake_client = MagicMock()
     fake_client.insert.side_effect = insert_side_effect
 
-    with patch("google.cloud.compute_v1.InstancesClient", return_value=fake_client), \
-        patch.object(provider, "_get_gcp_credentials", return_value=MagicMock()), \
-        patch.object(provider, "_poll_vm_ready", new=AsyncMock()):
+    with (
+        patch("google.cloud.compute_v1.InstancesClient", return_value=fake_client),
+        patch.object(provider, "_get_gcp_credentials", return_value=MagicMock()),
+        patch.object(provider, "_poll_vm_ready", new=AsyncMock()),
+    ):
         with pytest.raises(ValueError, match="resources unavailable"):
             await provider._gce_launch_vm(_launch_vm_spec())
 

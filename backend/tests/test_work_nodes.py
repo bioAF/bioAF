@@ -307,10 +307,7 @@ async def test_launch_does_not_clobber_running_status_set_during_launch(
         sid = vm_spec["session_id"]
         async with async_session_factory() as poll_db:
             await poll_db.execute(
-                text(
-                    "UPDATE compute_sessions SET status = 'running', "
-                    "access_url = 'ssh://node:22' WHERE id = :id"
-                ),
+                text("UPDATE compute_sessions SET status = 'running', access_url = 'ssh://node:22' WHERE id = :id"),
                 {"id": sid},
             )
             await poll_db.commit()
