@@ -106,6 +106,8 @@ const INTERACTIVE_MACHINE_OPTIONS = [
   { value: "n2-standard-8", label: "8 vCPU / 32 GB RAM", description: "General-purpose analysis" },
   { value: "n2-highmem-8", label: "8 vCPU / 64 GB RAM", description: "Large datasets" },
   { value: "n2-highmem-16", label: "16 vCPU / 128 GB RAM", description: "Very large datasets" },
+  { value: "n2-standard-32", label: "32 vCPU / 128 GB RAM", description: "Compute-intensive analysis" },
+  { value: "n2-highmem-32", label: "32 vCPU / 256 GB RAM", description: "Extreme memory workloads" },
 ];
 
 const CATEGORY_LABELS: Record<string, string> = {

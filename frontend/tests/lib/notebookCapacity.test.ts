@@ -28,6 +28,15 @@ describe("notebookSupportForMachine", () => {
     expect(r.supportSentence).toBe("Supports small, medium, and large notebooks");
   });
 
+  it("n2-standard-32 supports small through X Large but not XX Large", () => {
+    // 32/128: XX Large (16/128) is blocked by the strict-less-than memory rule
+    // because the pod's request equals the node's nominal RAM.
+    const r = notebookSupportForMachine("n2-standard-32");
+    expect(r.supported).toEqual(["small", "medium", "large", "xlarge"]);
+    expect(r.topLabel).toBe("X Large");
+    expect(r.supportSentence).toBe("Supports small, medium, large, and X Large notebooks");
+  });
+
   it("n2-highmem-32 unlocks every notebook tier", () => {
     const r = notebookSupportForMachine("n2-highmem-32");
     expect(r.supported).toEqual(["small", "medium", "large", "xlarge", "2xlarge"]);

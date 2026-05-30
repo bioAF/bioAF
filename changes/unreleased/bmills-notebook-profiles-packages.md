@@ -23,6 +23,11 @@
   now shows "Machine Type: \<Tier\> (\<machine_type\>)" (e.g. "Medium
   (n2-standard-8)") and a "Supports ... notebooks" line; the Cluster
   Configuration form refreshes the supports line live as the dropdown changes.
+- Extend the interactive pool dropdown with `n2-standard-32` (compute-intensive
+  analysis) and `n2-highmem-32` (extreme memory workloads). The previous top
+  option (`n2-highmem-16`) only unlocked through Large, leaving X Large and
+  XX Large unreachable from the UI; admins can now pick a machine that
+  unlocks every notebook tier.
 - Remove the disconnected `interactive_pool_machine_type` /
   `interactive_pool_max_nodes` fields from the K8s Interactive Node Pool
   component. They saved to component state but were never applied; the pool is
