@@ -27,6 +27,36 @@ def test_dockerfile_content_not_empty():
     assert "Seurat" in DOCKERFILE_CONTENT
 
 
+def test_dockerfile_includes_single_cell_python_stack():
+    """The bioinformatics Python stack a comp-bio needs is present."""
+    for pkg in ("anndata", "scvi-tools", "harmonypy", "scrublet", "celltypist", "decoupler", "muon"):
+        assert pkg in DOCKERFILE_CONTENT, f"missing Python package: {pkg}"
+
+
+def test_dockerfile_includes_bulk_and_bioconductor_stack():
+    """Bulk RNA-seq DE and core Bioconductor packages are present."""
+    for pkg in ("DESeq2", "edgeR", "limma", "clusterProfiler", "SingleCellExperiment", "scran", "SingleR"):
+        assert pkg in DOCKERFILE_CONTENT, f"missing Bioconductor/bulk package: {pkg}"
+
+
+def test_dockerfile_includes_seurat_companions():
+    """R packages that scRNA tutorials reach for beyond bare Seurat."""
+    for pkg in ("hdf5r", "harmony", "presto"):
+        assert pkg in DOCKERFILE_CONTENT, f"missing R companion package: {pkg}"
+
+
+def test_dockerfile_uses_binary_package_repo():
+    """R packages install from the Posit P3M binary repo for fast, reliable builds."""
+    assert "packagemanager.posit.co" in DOCKERFILE_CONTENT
+    assert "Rprofile.site" in DOCKERFILE_CONTENT
+
+
+def test_dockerfile_fails_build_on_missing_r_packages():
+    """A verification step turns silent install.packages() failures into build failures."""
+    assert "installed.packages()" in DOCKERFILE_CONTENT
+    assert "Missing R packages" in DOCKERFILE_CONTENT
+
+
 @pytest_asyncio.fixture
 async def seed_build_config(session):
     """Seed platform_config with build-related keys."""

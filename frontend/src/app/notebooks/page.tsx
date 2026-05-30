@@ -41,6 +41,16 @@ const SESSION_STATUS_COLORS: Record<string, string> = {
   failed: "bg-red-100 text-red-800",
 };
 
+const PROFILE_ORDER: ResourceProfile[] = ["small", "medium", "large", "xlarge", "2xlarge"];
+
+const PROFILE_META: Record<ResourceProfile, { label: string; description: string }> = {
+  small: { label: "Small", description: "Exploratory work and light data wrangling" },
+  medium: { label: "Medium", description: "General-purpose analysis" },
+  large: { label: "Large", description: "Larger datasets with several objects in memory" },
+  xlarge: { label: "X Large", description: "Large single-cell datasets, Seurat/scanpy integration" },
+  "2xlarge": { label: "XX Large", description: "Very large or multi-sample integration" },
+};
+
 export default function NotebooksPage() {
   const router = useRouter();
   const { components } = useComponents();
@@ -60,6 +70,9 @@ export default function NotebooksPage() {
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [selectedProfile, setSelectedProfile] = useState<ResourceProfile>("small");
+  const [profileAvailability, setProfileAvailability] = useState<Record<string, boolean>>({});
+  const [poolMachineType, setPoolMachineType] = useState<string>("");
+  const [profileNotice, setProfileNotice] = useState<string>("");
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [scopeType, setScopeType] = useState<"experiment" | "project">("experiment");
@@ -89,6 +102,7 @@ export default function NotebooksPage() {
     loadProjects();
     loadBuildStatus();
     loadEnvironments();
+    loadResourceProfiles();
   }, [router]);
 
   useEffect(() => {
@@ -97,6 +111,21 @@ export default function NotebooksPage() {
     const interval = setInterval(() => loadSessions(), 10000);
     return () => clearInterval(interval);
   }, [sessions]);
+
+  async function loadResourceProfiles() {
+    try {
+      const data = await api.get<{
+        pool_machine_type: string;
+        profiles: { name: ResourceProfile; available: boolean }[];
+      }>("/api/v1/notebooks/resource-profiles");
+      if (data?.profiles) {
+        setPoolMachineType(data.pool_machine_type);
+        setProfileAvailability(
+          Object.fromEntries(data.profiles.map((p) => [p.name, p.available]))
+        );
+      }
+    } catch {}
+  }
 
   async function loadBuildStatus() {
     try {
@@ -557,34 +586,69 @@ export default function NotebooksPage() {
           {/* Launch Modal */}
           {showLaunchModal && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg shadow-xl w-[800px] max-h-[85vh] overflow-y-auto">
-                <div className="p-6 border-b flex items-center justify-between">
+              <div className="bg-white rounded-lg shadow-xl w-[800px] max-h-[85vh] flex flex-col">
+                <div className="p-6 border-b flex items-center justify-between shrink-0">
                   <h3 className="text-lg font-semibold">Launch Notebook Session</h3>
                   <button onClick={() => setShowLaunchModal(false)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
                 </div>
-                <div className="p-6 space-y-5">
+                <div className="p-6 space-y-5 overflow-y-auto flex-1">
                   {/* Resource Profile */}
                   <div>
                     <label className="text-sm text-gray-500 mb-2 block">Resource Profile</label>
-                    <div className="flex gap-3">
-                      {(["small", "medium", "large"] as ResourceProfile[]).map((profile) => {
+                    <div className="space-y-2">
+                      {PROFILE_ORDER.map((profile) => {
                         const specs = RESOURCE_PROFILES[profile];
+                        const meta = PROFILE_META[profile];
+                        const selected = selectedProfile === profile;
+                        // Unknown availability (e.g. before the fetch resolves) defaults to
+                        // enabled so the picker never blocks the supported tiers.
+                        const available = profileAvailability[profile] !== false;
+                        const onProfileClick = () => {
+                          if (available) {
+                            setSelectedProfile(profile);
+                            setProfileNotice("");
+                          } else {
+                            setProfileNotice(
+                              `${meta.label} (${specs.cpu} CPU / ${specs.memory} GB) needs a larger interactive pool than the current ${poolMachineType || "pool"}. Ask your admin to increase the interactive pool machine type in Infrastructure > Components.`
+                            );
+                          }
+                        };
                         return (
                           <button
                             key={profile}
-                            onClick={() => setSelectedProfile(profile)}
-                            className={`border rounded-lg px-4 py-3 text-sm flex-1 ${
-                              selectedProfile === profile
-                                ? "border-bioaf-500 bg-bioaf-50 text-bioaf-700"
+                            type="button"
+                            onClick={onProfileClick}
+                            aria-pressed={selected}
+                            aria-disabled={!available}
+                            className={`w-full text-left p-3 border rounded-lg transition-colors ${
+                              !available
+                                ? "border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed"
+                                : selected
+                                ? "border-bioaf-500 bg-bioaf-50"
                                 : "border-gray-200 hover:border-gray-300"
                             }`}
                           >
-                            <div className="font-semibold capitalize">{profile}</div>
-                            <div className="text-xs text-gray-500">{specs.cpu} CPU, {specs.memory}GB RAM</div>
+                            <div className="flex justify-between items-center">
+                              <span className="font-semibold flex items-center gap-2">
+                                {meta.label}
+                                {!available && (
+                                  <span className="text-[10px] font-medium uppercase tracking-wide text-gray-400 border border-gray-300 rounded px-1.5 py-0.5">
+                                    Admin upgrade required
+                                  </span>
+                                )}
+                              </span>
+                              <span className="text-xs text-gray-500">{specs.cpu} CPU / {specs.memory} GB RAM</span>
+                            </div>
+                            <div className="text-xs text-gray-500 mt-0.5">{meta.description}</div>
                           </button>
                         );
                       })}
                     </div>
+                    {profileNotice && (
+                      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mt-2">
+                        {profileNotice}
+                      </p>
+                    )}
                   </div>
 
                   {/* Environment */}
@@ -722,7 +786,7 @@ export default function NotebooksPage() {
                 </div>
 
                 {/* Launch buttons */}
-                <div className="p-6 border-t bg-gray-50 flex gap-3">
+                <div className="p-6 border-t bg-gray-50 flex gap-3 shrink-0">
                   {rstudioEnabled && (
                     <button
                       onClick={() => handleLaunch("rstudio")}

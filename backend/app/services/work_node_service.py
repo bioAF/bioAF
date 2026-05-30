@@ -28,6 +28,8 @@ logger = logging.getLogger("bioaf.work_nodes")
 
 DEFAULT_MAX_WORK_NODES_PER_USER = 2
 DEFAULT_IDLE_TIMEOUT_HOURS = 24
+DEFAULT_BOOT_DISK_GB = 100
+DEFAULT_BOOT_DISK_TYPE = "pd-ssd"
 
 
 class WorkNodeService:
@@ -166,7 +168,8 @@ class WorkNodeService:
             text(
                 "SELECT key, value FROM platform_config "
                 "WHERE key IN ('working_bucket_name', 'notebook_runner_sa_email', "
-                "'gcp_project_id', 'gcp_zone')"
+                "'gcp_project_id', 'gcp_zone', "
+                "'work_node_boot_disk_gb', 'work_node_boot_disk_type')"
             )
         )
         config_map = {row[0]: row[1] for row in config_rows.all()}
@@ -223,24 +226,49 @@ class WorkNodeService:
             if gcp_zone and gcp_zone != "null":
                 vm_spec["gcp_zone"] = gcp_zone
 
+            disk_gb_raw = (config_map.get("work_node_boot_disk_gb") or "").strip()
+            try:
+                vm_spec["boot_disk_gb"] = (
+                    int(disk_gb_raw) if disk_gb_raw and disk_gb_raw != "null" else DEFAULT_BOOT_DISK_GB
+                )
+            except ValueError:
+                vm_spec["boot_disk_gb"] = DEFAULT_BOOT_DISK_GB
+
+            disk_type = (config_map.get("work_node_boot_disk_type") or "").strip()
+            vm_spec["boot_disk_type"] = disk_type if disk_type and disk_type != "null" else DEFAULT_BOOT_DISK_TYPE
+
             # GPU accelerator info
             if mt.get("accelerator_type"):
                 vm_spec["accelerator_type"] = mt["accelerator_type"]
                 vm_spec["accelerator_count"] = mt.get("accelerator_count", 1)
+
+            # Commit 'starting' before launching. The GCE adapter kicks off a
+            # background readiness poll that can mark the session 'running' (on
+            # its own DB session) within seconds. If the row is not committed
+            # first, that poll's UPDATE matches no row; and if this request
+            # re-writes status afterward, it clobbers the poll's 'running' back
+            # to 'starting', leaving the node stuck in 'starting' though the VM
+            # is up.
+            compute_session.status = "starting"
+            await session.commit()
 
             result = await adapter.launch_vm(vm_spec)
 
             compute_session.gce_instance_name = result.get("instance_name")
             compute_session.gce_zone = result.get("zone")
             compute_session.gce_project_id = result.get("gcp_project_id")
-            compute_session.access_url = result.get("access_url")
             adapter_status = result.get("status", "starting")
             if adapter_status == "error":
                 compute_session.status = "failed"
             elif adapter_status == "running":
+                # Synchronous adapters (e.g. local/mock) have no poll; honor the
+                # status they report immediately.
                 compute_session.status = "running"
-            else:
-                compute_session.status = "starting"
+            # adapter_status == "starting": leave the start -> running/failed
+            # transition to the background readiness poll, do not overwrite it.
+            result_url = result.get("access_url")
+            if result_url:
+                compute_session.access_url = result_url
         except Exception as e:
             compute_session.status = "failed"
             logger.error("Failed to launch work node %d: %s", compute_session.id, e)

@@ -17,6 +17,7 @@ import { isAuthenticated } from "@/lib/auth";
 import { GCP_REGIONS, zonesForRegion } from "@/lib/gcp-regions";
 import { api } from "@/lib/api";
 import { invalidateComponentCache } from "@/hooks/useComponents";
+import { notebookSupportForMachine } from "@/lib/notebookCapacity";
 
 interface TerraformStatus {
   terraform_initialized: boolean;
@@ -105,6 +106,8 @@ const INTERACTIVE_MACHINE_OPTIONS = [
   { value: "n2-standard-8", label: "8 vCPU / 32 GB RAM", description: "General-purpose analysis" },
   { value: "n2-highmem-8", label: "8 vCPU / 64 GB RAM", description: "Large datasets" },
   { value: "n2-highmem-16", label: "16 vCPU / 128 GB RAM", description: "Very large datasets" },
+  { value: "n2-standard-32", label: "32 vCPU / 128 GB RAM", description: "Compute-intensive analysis" },
+  { value: "n2-highmem-32", label: "32 vCPU / 256 GB RAM", description: "Extreme memory workloads" },
 ];
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -725,7 +728,20 @@ export default function InfraComponentsPage() {
                       <h4 className="text-sm font-medium mb-2">Interactive Pool</h4>
                       <div className="text-xs text-gray-600 space-y-1">
                         <p>Name: {stackStatus.cluster.interactive_pool.name}</p>
-                        <p>Machine Type: {stackStatus.cluster.interactive_pool.machine_type}</p>
+                        {(() => {
+                          const mt = stackStatus.cluster.interactive_pool.machine_type;
+                          const support = notebookSupportForMachine(mt);
+                          return (
+                            <>
+                              <p>
+                                Machine Type: {support.topLabel ? `${support.topLabel} (${mt})` : mt}
+                              </p>
+                              {support.supportSentence && (
+                                <p className="text-gray-500">{support.supportSentence}</p>
+                              )}
+                            </>
+                          );
+                        })()}
                         <p>Max Nodes: {stackStatus.cluster.interactive_pool.max_nodes}</p>
                         <p>Current: {stackStatus.cluster.interactive_pool.current_nodes}</p>
                       </div>
@@ -839,6 +855,15 @@ export default function InfraComponentsPage() {
                                 </option>
                               ))}
                             </select>
+                            {(() => {
+                              const selected =
+                                configEdits.k8s_interactive_machine_type ??
+                                clusterConfig.k8s_interactive_machine_type;
+                              const sentence = notebookSupportForMachine(selected).supportSentence;
+                              return sentence ? (
+                                <p className="text-xs text-gray-500 mt-1">{sentence}</p>
+                              ) : null;
+                            })()}
                           </div>
                           <div>
                             <label className="text-xs text-gray-500">Max Nodes</label>

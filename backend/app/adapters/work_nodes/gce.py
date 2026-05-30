@@ -333,6 +333,9 @@ class GCEWorkNodeProvider(WorkNodeProvider):
         # Resolve GCE machine type for GPU types
         gce_machine_type = vm_spec.get("gce_machine_type", machine_type)
 
+        boot_disk_gb = vm_spec.get("boot_disk_gb", 100)
+        boot_disk_type = vm_spec.get("boot_disk_type", "pd-ssd")
+
         # Generate an SSH key pair for the bioaf-sync user so the backend
         # can SSH into the VM at terminate time to sync outputs.
         import asyncssh
@@ -375,8 +378,8 @@ class GCEWorkNodeProvider(WorkNodeProvider):
                 disk.boot = True
                 init_params = compute_v1.AttachedDiskInitializeParams()
                 init_params.source_image = image_uri
-                init_params.disk_size_gb = 200
-                init_params.disk_type = f"zones/{try_zone}/diskTypes/pd-ssd"
+                init_params.disk_size_gb = boot_disk_gb
+                init_params.disk_type = f"zones/{try_zone}/diskTypes/{boot_disk_type}"
                 disk.initialize_params = init_params
                 instance.disks = [disk]
 
@@ -419,11 +422,16 @@ class GCEWorkNodeProvider(WorkNodeProvider):
                     scheduling.on_host_maintenance = "TERMINATE"
                     instance.scheduling = scheduling
 
-                instances_client.insert(
+                operation = instances_client.insert(
                     project=project,
                     zone=try_zone,
                     instance_resource=instance,
                 )
+                # insert() is asynchronous: it returns an accepted operation and
+                # a capacity stockout (ZONE_RESOURCE_POOL_EXHAUSTED) only surfaces
+                # when the operation is resolved. Resolve it here so the failover
+                # loop below can actually advance to the next zone.
+                operation.result()
                 zone = try_zone
                 logger.info("Creating GCE instance %s in %s/%s", instance_name, project, zone)
                 break

@@ -21,7 +21,7 @@ class UserSummary(BaseModel):
 
 class SessionLaunchRequest(BaseModel):
     session_type: Literal["jupyter", "rstudio"]
-    resource_profile: Literal["small", "medium", "large"]
+    resource_profile: Literal["small", "medium", "large", "xlarge", "2xlarge"]
     experiment_id: int | None = None
     input_file_ids: list[int] = []
 
