@@ -71,9 +71,13 @@ class NotebookService:
         pool_machine_type = (
             row[0].strip() if row and row[0] and row[0].strip() else DEFAULT_INTERACTIVE_POOL_MACHINE_TYPE
         )
-        node_cpu, node_mem = machine_type_capacity(pool_machine_type) or machine_type_capacity(
+        capacity = machine_type_capacity(pool_machine_type) or machine_type_capacity(
             DEFAULT_INTERACTIVE_POOL_MACHINE_TYPE
         )
+        # The default machine type is in the curated catalog, so the fallback is
+        # always defined. The literal here just keeps the type checker happy if
+        # the catalog and the default ever drift.
+        node_cpu, node_mem = capacity if capacity is not None else (4, 16)
         profiles = [
             {
                 "name": name,

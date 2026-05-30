@@ -345,6 +345,7 @@ async def test_launch_does_not_clobber_running_status_set_during_launch(
                 {"id": sid},
             )
         ).first()
+    assert row is not None
     assert row[0] == "running"
     assert row[1] == "ssh://node:22"
 
