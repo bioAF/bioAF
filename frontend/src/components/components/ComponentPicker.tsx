@@ -160,11 +160,8 @@ export function ComponentPicker({
                       aria-label={c.name}
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between mb-1">
+                      <div className="mb-1">
                         <span className="font-medium text-sm">{c.name}</span>
-                        <span className="text-xs text-gray-500 ml-2">
-                          {c.cost_estimate}
-                        </span>
                       </div>
                       <p className="text-xs text-gray-600">{c.description}</p>
                       {c.dependencies.length > 0 && (

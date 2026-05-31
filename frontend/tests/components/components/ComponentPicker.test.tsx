@@ -11,7 +11,7 @@
  *   - The picker emits the current set of selected keys to the parent.
  */
 
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ComponentPicker } from "@/components/components/ComponentPicker";
 
@@ -168,21 +168,6 @@ describe("ComponentPicker", () => {
     expect(
       screen.getByRole("checkbox", { name: /K8s Pipeline Pool/ })
     ).not.toBeChecked();
-  });
-
-  it("shows the cost estimate inside each card", () => {
-    render(
-      <ComponentPicker
-        components={SAMPLE_COMPONENTS}
-        defaultSelected={[]}
-        onChange={jest.fn()}
-      />
-    );
-
-    const nextflowCard = screen
-      .getByRole("checkbox", { name: /Nextflow/ })
-      .closest('[data-testid="component-card"]') as HTMLElement;
-    expect(within(nextflowCard).getByText(/uses Kubernetes compute/)).toBeInTheDocument();
   });
 
   it("does not render coming_soon components as checkable", () => {
