@@ -220,6 +220,11 @@ async def poll_image_build(session: AsyncSession) -> str | None:
         region = await _read_config(session, "gcp_region")
         image_uri = get_image_uri(project_id, region)
         await _set_config(session, "cellxgene_image", image_uri)
+        # Drain the wizard queue: a queued cellxgene now has its image.
+        # Local import to avoid the cycle through component_queue.
+        from app.services.component_queue import process_queued_components
+
+        await process_queued_components(session)
         await session.execute(
             text("""
             UPDATE component_states SET status = 'enabled'

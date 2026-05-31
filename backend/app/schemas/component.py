@@ -35,6 +35,14 @@ class ComponentListResponse(BaseModel):
     components: list[ComponentStateResponse]
 
 
+class ComponentSelectBatchRequest(BaseModel):
+    keys: list[str]
+
+
+class ComponentSelectBatchResponse(BaseModel):
+    queued: list[str]
+
+
 class TerraformRunResponse(BaseModel):
     id: int
     triggered_by_user_id: int

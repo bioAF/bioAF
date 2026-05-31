@@ -156,11 +156,17 @@ async def test_bootstrap_status_returns_incomplete_when_no_org(client):
 
 
 @pytest.mark.asyncio
-async def test_create_admin_blocked_after_cli_setup(client, session):
-    """POST /api/bootstrap/create-admin returns 409 after CLI admin creation."""
+async def test_create_admin_updates_existing_admin_after_cli_setup(client, session):
+    """POST /api/bootstrap/create-admin treats an existing admin as an update.
+
+    The wizard's Back/Forward flow requires that resubmitting Create Admin
+    with the same setup token does not 409. With a valid setup token in
+    hand, the call overwrites the existing admin's email/name/password.
+    """
     from app.models.organization import Organization
     from app.models.user import User
     from app.services.auth_service import AuthService
+    from app.services.user_service import UserService
 
     org = Organization(name="CLI Org", setup_complete=True)
     session.add(org)
@@ -178,7 +184,6 @@ async def test_create_admin_blocked_after_cli_setup(client, session):
     session.add(user)
     await session.commit()
 
-    # Get a setup token (even though admin exists, we need one to test the 409 path)
     from datetime import datetime, timedelta, timezone
 
     import jwt
@@ -198,7 +203,13 @@ async def test_create_admin_blocked_after_cli_setup(client, session):
         json={"email": "other@example.com", "password": "pass", "name": "Other"},
         headers={"Authorization": f"Bearer {setup_token}"},
     )
-    assert resp.status_code == 409
+    assert resp.status_code == 200, resp.text
+
+    updated = await UserService.get_by_email(session, "other@example.com")
+    gone = await UserService.get_by_email(session, "cli-admin@example.com")
+    assert updated is not None
+    assert updated.name == "Other"
+    assert gone is None
 
 
 @pytest.mark.asyncio

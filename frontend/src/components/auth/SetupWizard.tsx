@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { setToken } from "@/lib/auth";
+import { ComponentPicker, type PickerComponent } from "@/components/components/ComponentPicker";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -14,6 +15,7 @@ const STEPS = [
   "SMTP Settings",
   "Infrastructure",
   "Select Stack",
+  "Select Components",
   "Deploying",
   "Getting Started",
 ];
@@ -96,6 +98,35 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [step, setStep] = useState(0);
   const [error, setError] = useState("");
 
+  // Steps the user has already moved past at least once. Used to render a
+  // Forward affordance and to short-circuit the per-step submit if the user
+  // is just clicking through unchanged values after a Back.
+  const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
+  // Snapshot of the inputs at the moment each step was last submitted, so we
+  // can detect "no real change" on a re-submit and skip the backend call.
+  const [committedValues, setCommittedValues] = useState<Record<number, Record<string, string>>>({});
+
+  const markStepCompleted = (idx: number, values: Record<string, string>) => {
+    setCompletedSteps((prev) => {
+      const next = new Set(prev);
+      next.add(idx);
+      return next;
+    });
+    setCommittedValues((prev) => ({ ...prev, [idx]: values }));
+  };
+
+  /** True when the step has been completed and current inputs match the
+   * snapshot taken on its last successful submit. Lets re-submit handlers
+   * skip the network call. */
+  const isUnchangedSinceCommit = (idx: number, values: Record<string, string>): boolean => {
+    if (!completedSteps.has(idx)) return false;
+    const committed = committedValues[idx] ?? {};
+    for (const k of Object.keys(values)) {
+      if ((committed[k] ?? "") !== (values[k] ?? "")) return false;
+    }
+    return true;
+  };
+
   // Step 0: Setup code
   const [setupCode, setSetupCode] = useState("");
   const [setupToken, setSetupToken] = useState("");
@@ -152,6 +183,22 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   // Step 6: Compute stack
   const [computeStack, setComputeStack] = useState("kubernetes");
   const [stackDeploying, setStackDeploying] = useState(false);
+
+  // Step 7: Select Components
+  // Defaults: the minimum set that gives the user a working "first pipeline
+  // + first notebook" experience without opening the Infrastructure menu.
+  // Keys match the canonical KUBERNETES_COMPONENTS list (the same 7 the
+  // post-install Infrastructure > Components page renders).
+  const DEFAULT_SELECTED = ["nextflow", "jupyterhub"];
+  const [pickerComponents, setPickerComponents] = useState<PickerComponent[]>([]);
+  const [selectedComponents, setSelectedComponents] = useState<string[]>(DEFAULT_SELECTED);
+  const [componentsLoading, setComponentsLoading] = useState(false);
+  const [componentsSubmitting, setComponentsSubmitting] = useState(false);
+
+  // Step 8: Deploying status snapshot
+  const [deployStatus, setDeployStatus] = useState<
+    { key: string; name: string; status: string }[]
+  >([]);
 
   // Pre-populate GCP fields from platform_config once the user has
   // authenticated (we have a token after step 1). install-gcp.sh's prefill
@@ -210,6 +257,13 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   const handleVerifyCode = async () => {
     setError("");
+    if (isUnchangedSinceCommit(0, { setupCode })) {
+      setStep(1);
+      return;
+    }
+    if (completedSteps.has(0) && !confirm("Re-verify the setup code with the new value?")) {
+      return;
+    }
     try {
       // Use raw fetch since the api module auto-redirects on 401
       const resp = await fetch(`${API_URL}/api/bootstrap/verify-setup-code`, {
@@ -224,6 +278,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       }
       const data = await resp.json();
       setSetupToken(data.setup_token);
+      markStepCompleted(0, { setupCode });
       setStep(1);
     } catch {
       setError("Failed to verify setup code");
@@ -236,6 +291,20 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       return;
     }
     setError("");
+    const current = { email, password, name };
+    if (isUnchangedSinceCommit(1, current)) {
+      setStep(2);
+      return;
+    }
+    if (completedSteps.has(1)) {
+      const c = committedValues[1] ?? {};
+      const diff = [
+        c.email !== email ? `Email: ${c.email || "(empty)"} -> ${email}` : null,
+        c.name !== name ? `Name: ${c.name || "(empty)"} -> ${name || "(empty)"}` : null,
+        c.password !== password ? "Password updated" : null,
+      ].filter(Boolean).join("\n");
+      if (!confirm(`This will overwrite the admin account.\n\n${diff}\n\nContinue?`)) return;
+    }
     try {
       // Use raw fetch with setup token (not the stored auth token)
       const resp = await fetch(`${API_URL}/api/bootstrap/create-admin`, {
@@ -253,6 +322,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       }
       const data = await resp.json();
       setToken(data.access_token);
+      markStepCompleted(1, current);
       setStep(2);
     } catch {
       setError("Failed to create admin");
@@ -261,8 +331,18 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   const handleConfigureOrg = async () => {
     setError("");
+    const current = { orgName };
+    if (isUnchangedSinceCommit(2, current)) {
+      setStep(3);
+      return;
+    }
+    if (completedSteps.has(2)) {
+      const c = committedValues[2] ?? {};
+      if (!confirm(`This will overwrite the organization name.\n\n${c.orgName} -> ${orgName}\n\nContinue?`)) return;
+    }
     try {
       await api.post("/api/bootstrap/configure-org", { org_name: orgName });
+      markStepCompleted(2, current);
       setStep(3);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to configure org");
@@ -290,6 +370,13 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       setGcpValidation(result);
       if (result?.passed) {
         setGcpConfigured(true);
+        markStepCompleted(3, {
+          gcpProjectId,
+          gcpRegion,
+          gcpZone,
+          gcpOrgSlug,
+          gcpCredentialSource,
+        });
         setStep(4);
       } else {
         setError("Validation failed. Fix the issues below and try again.");
@@ -303,6 +390,14 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   const handleConfigureSmtp = async () => {
     setError("");
+    const current = { smtpHost, smtpPort, smtpUsername, smtpPassword, smtpFrom };
+    if (isUnchangedSinceCommit(4, current)) {
+      setStep(5);
+      return;
+    }
+    if (completedSteps.has(4)) {
+      if (!confirm("This will overwrite the previously saved SMTP settings. Continue?")) return;
+    }
     try {
       await api.post("/api/bootstrap/configure-smtp", {
         host: smtpHost,
@@ -311,6 +406,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         password: smtpPassword,
         from_address: smtpFrom,
       });
+      markStepCompleted(4, current);
       setStep(5);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to configure SMTP");
@@ -342,11 +438,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       } catch {
         // Deployment may fail; user can retry from Infrastructure page
       }
-      try {
-        await api.post("/api/bootstrap/complete");
-      } catch {
-        // Non-critical
-      }
+      // Bootstrap completion is deferred until after the user has submitted
+      // their component selections, so an interrupted wizard does not look
+      // "complete" while still half-configured.
       setStep(7);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to initialize infrastructure");
@@ -354,6 +448,107 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       setStackDeploying(false);
     }
   };
+
+  const handleSelectComponents = async () => {
+    setError("");
+    setComponentsSubmitting(true);
+    try {
+      await api.post("/api/components/select-batch", {
+        keys: selectedComponents,
+      });
+      try {
+        await api.post("/api/bootstrap/complete");
+      } catch {
+        // Non-critical; the deploy step renders regardless.
+      }
+      setStep(8);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to queue components");
+    } finally {
+      setComponentsSubmitting(false);
+    }
+  };
+
+  const handlePickerChange = useCallback((keys: string[]) => {
+    setSelectedComponents(keys);
+  }, []);
+
+  // Poll per-component status on the Deploying step so the user can see
+  // image builds completing, the cluster coming up, components flipping
+  // enabled. The orchestrator runs on the backend; this is just a window.
+  useEffect(() => {
+    if (step !== 8) return;
+    let cancelled = false;
+    const fetchStatus = async () => {
+      try {
+        const data = await api.get<{
+          components: { key: string; name: string; status: string }[];
+        }>("/api/components");
+        if (cancelled) return;
+        const selected = new Set(selectedComponents);
+        setDeployStatus(
+          data.components
+            .filter((c) => selected.has(c.key))
+            .map((c) => ({ key: c.key, name: c.name, status: c.status }))
+        );
+      } catch {
+        // Polling failures are benign; the next tick will retry.
+      }
+    };
+    void fetchStatus();
+    const handle = setInterval(fetchStatus, 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+    };
+  }, [step, selectedComponents]);
+
+  // Fetch the component catalog when entering step 7 so the picker has data.
+  // Hits the same endpoint the post-install components page uses so the two
+  // views are guaranteed to show the same 7 K8s components, no more, no less.
+  useEffect(() => {
+    let cancelled = false;
+    if (step !== 7) return;
+    setComponentsLoading(true);
+    (async () => {
+      try {
+        const data = await api.get<{
+          compute_stack: string | null;
+          components: {
+            key: string;
+            name: string;
+            description: string;
+            category: string;
+            dependencies: string[];
+            cost_estimate: string;
+            status: string; // "enabled" | "disabled" | "provisioning" | "build_failed" | "coming_soon"
+          }[];
+        }>("/api/v1/infrastructure/stack/components");
+        if (cancelled) return;
+        // The endpoint's "status" is the runtime state; the picker only cares
+        // about whether the component is selectable. Anything that is not
+        // coming_soon is selectable on the wizard.
+        const mapped: PickerComponent[] = (data.components ?? []).map((c) => ({
+          key: c.key,
+          name: c.name,
+          description: c.description,
+          category: c.category,
+          dependencies: c.dependencies,
+          cost_estimate: c.cost_estimate,
+          status: c.status === "coming_soon" ? "coming_soon" : "available",
+        }));
+        setPickerComponents(mapped);
+      } catch (e) {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : "Failed to load components");
+      } finally {
+        if (!cancelled) setComponentsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [step]);
 
   return (
     <div className="bg-white shadow rounded-lg p-8">
@@ -380,6 +575,34 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       </div>
 
       <h2 className="text-xl font-semibold mb-4">{STEPS[step]}</h2>
+
+      {/* Back / Forward: allowed only on steps 1-6 (everything before TF deploy
+          fires). Once Select Stack -> Continue triggers terraform/init and
+          stack/deploy-background, the user is past the point of no return.
+          Forward only renders for steps the user has already moved past, so
+          they can go back to verify a value and return without re-submitting. */}
+      {step >= 1 && step <= 6 && (
+        <div className="mb-4 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => setStep(step - 1)}
+            aria-label="Back"
+            className="text-sm text-gray-500 hover:text-gray-700"
+          >
+            <span aria-hidden="true">&larr; </span>Back
+          </button>
+          {completedSteps.has(step) && (
+            <button
+              type="button"
+              onClick={() => setStep(step + 1)}
+              aria-label="Forward"
+              className="text-sm text-gray-500 hover:text-gray-700"
+            >
+              Forward<span aria-hidden="true"> &rarr;</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded text-sm">
@@ -816,23 +1039,85 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         </div>
       )}
 
-      {/* Step 7: Deploying */}
+      {/* Step 7: Select Components */}
       {step === 7 && (
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            Pick the components you want enabled. Selected components will be
+            queued and turned on automatically as the infrastructure becomes
+            ready, so you can leave this page once you continue.
+          </p>
+          {componentsLoading ? (
+            <div className="text-sm text-gray-500">Loading components...</div>
+          ) : (
+            <ComponentPicker
+              components={pickerComponents}
+              defaultSelected={DEFAULT_SELECTED}
+              onChange={handlePickerChange}
+            />
+          )}
+          <button
+            onClick={handleSelectComponents}
+            disabled={componentsSubmitting || componentsLoading}
+            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
+          >
+            {componentsSubmitting ? "Queueing components..." : "Continue"}
+          </button>
+        </div>
+      )}
+
+      {/* Step 8: Deploying */}
+      {step === 8 && (
         <div className="space-y-4">
           <div className="p-4 bg-blue-50 border border-blue-200 rounded">
             <p className="text-sm text-blue-800">
               Infrastructure deployment has started. This usually takes 10-15 minutes.
-              You can monitor progress on the Infrastructure page after setup.
+              Your selected components will turn on automatically as their
+              prerequisites become ready; you do not need to come back here.
             </p>
           </div>
-          <button onClick={() => setStep(8)} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
+          {deployStatus.length > 0 && (
+            <div className="border border-gray-200 rounded divide-y">
+              {deployStatus.map((c) => (
+                <div
+                  key={c.key}
+                  className="flex items-center justify-between px-3 py-2 text-sm"
+                  data-testid={`deploy-status-${c.key}`}
+                >
+                  <span className="font-medium">{c.name}</span>
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                      c.status === "enabled"
+                        ? "bg-green-100 text-green-700"
+                        : c.status === "build_failed"
+                          ? "bg-red-100 text-red-700"
+                          : c.status === "provisioning"
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-gray-100 text-gray-600"
+                    }`}
+                  >
+                    {c.status === "enabled"
+                      ? "Ready"
+                      : c.status === "build_failed"
+                        ? "Build failed"
+                        : c.status === "provisioning"
+                          ? "Building"
+                          : c.status === "queued_for_infra"
+                            ? "Queued"
+                            : c.status}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <button onClick={() => setStep(9)} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
             Continue to Getting Started
           </button>
         </div>
       )}
 
-      {/* Step 8: Getting Started */}
-      {step === 8 && (
+      {/* Step 9: Getting Started */}
+      {step === 9 && (
         <div className="space-y-4">
           <div className="p-4 bg-green-50 border border-green-200 rounded">
             <h3 className="font-semibold text-green-800">Setup Complete</h3>

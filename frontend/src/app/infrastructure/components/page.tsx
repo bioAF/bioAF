@@ -968,7 +968,9 @@ export default function InfraComponentsPage() {
                                             ? "bg-red-100 text-red-700"
                                             : comp.status === "provisioning"
                                               ? "bg-amber-100 text-amber-700"
-                                              : "bg-gray-100 text-gray-500"
+                                              : comp.status === "queued_for_infra"
+                                                ? "bg-blue-100 text-blue-700"
+                                                : "bg-gray-100 text-gray-500"
                                       }`}
                                     >
                                       {comp.status === "enabled"
@@ -977,7 +979,9 @@ export default function InfraComponentsPage() {
                                           ? "Build Failed"
                                           : comp.status === "provisioning"
                                             ? "Building Image..."
-                                            : "Disabled"}
+                                            : comp.status === "queued_for_infra"
+                                              ? "Queued"
+                                              : "Disabled"}
                                     </span>
                                   );
                                 })()}

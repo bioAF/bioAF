@@ -472,6 +472,13 @@ async def poll_image_build(session: AsyncSession) -> str | None:
         region = await _read_config(session, "gcp_region")
         image_uri = get_image_uri(project_id, region)
         await _set_config(session, "bioaf_scrna_image", image_uri)
+        # Drain the wizard's queue: any rstudio/jupyterhub queued before the
+        # image existed can now flip to enabled (or stay provisioning if
+        # compute is not up yet). Local import to avoid a cycle through
+        # component_queue -> notebook_image_service.build_notebook_image.
+        from app.services.component_queue import process_queued_components
+
+        await process_queued_components(session)
         # Update component states for notebook components
         await session.execute(
             text("""

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -49,6 +49,16 @@ async def _has_admin(session: AsyncSession) -> bool:
     return result.scalar_one_or_none() is not None
 
 
+async def _get_admin_user(session: AsyncSession) -> User | None:
+    """Return the first admin user, or None."""
+    from app.models.role import Role
+
+    result = await session.execute(
+        select(User).join(Role, User.role_id == Role.id).where(Role.name == "admin").limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 def _validate_setup_token(request: Request) -> dict:
     """Extract and validate a setup JWT from the Authorization header."""
     auth_header = request.headers.get("Authorization")
@@ -70,10 +80,21 @@ async def get_bootstrap_status(request: Request, session: AsyncSession = Depends
     has_admin_user = await _has_admin(session) if org else False
     has_code = bool(org and org.setup_code_hash is not None) if org else False
 
+    in_flight_row = (
+        await session.execute(
+            text(
+                "SELECT 1 FROM component_states "
+                "WHERE enabled = true AND status IN ('queued_for_infra', 'provisioning') "
+                "LIMIT 1"
+            )
+        )
+    ).first()
+
     result: dict = {
         "setup_complete": org.setup_complete if org else False,
         "has_setup_code": has_code,
         "has_admin": has_admin_user,
+        "has_in_flight_components": in_flight_row is not None,
     }
 
     # Only include smtp_configured for authenticated callers to avoid
@@ -143,9 +164,32 @@ async def create_admin(body: CreateAdminRequest, request: Request, session: Asyn
     # Require setup token
     _validate_setup_token(request)
 
-    # Only callable once -- if admin exists, block
-    if await _has_admin(session):
-        raise HTTPException(status_code=409, detail="Admin account already created")
+    # If an admin already exists, treat the call as an update. This supports
+    # the wizard's Back/Forward navigation: a user who walks back to the
+    # Create Admin step and clicks Continue again is not blocked, and an
+    # edit to email/name/password lands as expected.
+    existing_admin = await _get_admin_user(session)
+    if existing_admin:
+        org = await _get_org(session)
+        org_id = org.id if org else existing_admin.organization_id
+        existing_admin.email = body.email
+        if body.name is not None:
+            existing_admin.name = body.name
+        existing_admin.password_hash = AuthService.hash_password(body.password)
+        await session.flush()
+        await session.commit()
+        token = AuthService.create_token(
+            existing_admin.id,
+            existing_admin.email,
+            existing_admin.role_id,
+            org_id,
+            role_name="admin",
+        )
+        return {
+            "message": "Admin account updated",
+            "access_token": token,
+            "token_type": "bearer",
+        }
 
     # Get or create organization
     org = await _get_org(session)
