@@ -40,6 +40,39 @@ async def test_create_admin(client: AsyncClient):
     assert data["message"] == "Admin account created"
 
 
+async def test_create_admin_is_idempotent_with_same_setup_token(client: AsyncClient, session):
+    """The wizard's Back/Forward navigation can re-submit Create Admin with
+    the same setup token. The second call must NOT 409; it should update
+    the existing admin's email/name/password and return a fresh token.
+    """
+    setup_token = await _get_setup_token(client)
+
+    first = await client.post(
+        "/api/bootstrap/create-admin",
+        json={"email": "first@test.com", "password": "pw-original", "name": "Original"},
+        headers={"Authorization": f"Bearer {setup_token}"},
+    )
+    assert first.status_code == 200
+
+    # User went back, edited email and name, clicked Continue again.
+    second = await client.post(
+        "/api/bootstrap/create-admin",
+        json={"email": "second@test.com", "password": "pw-original", "name": "Renamed"},
+        headers={"Authorization": f"Bearer {setup_token}"},
+    )
+    assert second.status_code == 200, second.text
+    assert "access_token" in second.json()
+
+    # Confirm the update landed: the new email is on the admin row, old is gone.
+    from app.services.user_service import UserService
+
+    renamed = await UserService.get_by_email(session, "second@test.com")
+    gone = await UserService.get_by_email(session, "first@test.com")
+    assert renamed is not None
+    assert renamed.name == "Renamed"
+    assert gone is None
+
+
 async def test_create_admin_twice_fails(client: AsyncClient):
     setup_token = await _get_setup_token(client)
     # First call

@@ -176,6 +176,61 @@ describe("SetupWizard", () => {
     expect(screen.getByLabelText(/organization name/i)).toHaveValue("Acme Bio");
   });
 
+  it("Forward button appears on a step that has already been completed", async () => {
+    const user = userEvent.setup();
+    render(<SetupWizard onComplete={jest.fn()} />);
+    await advanceToGcpStep(user);
+    // Step 3 (GCP) is now active, but step 1 (Admin) and step 2 (Org) have
+    // been completed during advanceToGcpStep. Going back to step 1...
+    await user.click(screen.getByRole("button", { name: /^Back$/i }));
+    await user.click(screen.getByRole("button", { name: /^Back$/i }));
+    expect(screen.getByRole("heading", { name: "Create Admin Account" })).toBeInTheDocument();
+    // ...should now show a Forward affordance the user can use to advance
+    // without re-running create-admin.
+    expect(screen.getByRole("button", { name: /^Forward$/i })).toBeInTheDocument();
+  });
+
+  it("Forward button is absent on a step that has NOT been completed", () => {
+    render(<SetupWizard onComplete={jest.fn()} />);
+    expect(screen.getByRole("heading", { name: "Setup Code" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Forward$/i })).not.toBeInTheDocument();
+  });
+
+  it("Re-submitting Create Admin with unchanged values skips the backend call", async () => {
+    const user = userEvent.setup();
+    render(<SetupWizard onComplete={jest.fn()} />);
+    await advanceToGcpStep(user);
+
+    // Go back to step 1, then click Create Admin Account again without edits.
+    // The setup-token fetch should NOT be re-invoked.
+    await user.click(screen.getByRole("button", { name: /^Back$/i }));
+    await user.click(screen.getByRole("button", { name: /^Back$/i }));
+
+    const callsBeforeResubmit = mockFetch.mock.calls.length;
+    await user.click(screen.getByRole("button", { name: /create admin/i }));
+
+    // No new fetch call, but we did advance to the next step.
+    expect(mockFetch.mock.calls.length).toBe(callsBeforeResubmit);
+    expect(await screen.findByRole("heading", { name: "Organization Name" })).toBeInTheDocument();
+  });
+
+  it("Forward button advances to the next step without any backend call", async () => {
+    const user = userEvent.setup();
+    render(<SetupWizard onComplete={jest.fn()} />);
+    await advanceToGcpStep(user);
+    await user.click(screen.getByRole("button", { name: /^Back$/i }));
+    await user.click(screen.getByRole("button", { name: /^Back$/i }));
+
+    const fetchBefore = mockFetch.mock.calls.length;
+    const postBefore = mockApiPost.mock.calls.length;
+
+    await user.click(screen.getByRole("button", { name: /^Forward$/i }));
+
+    expect(await screen.findByRole("heading", { name: "Organization Name" })).toBeInTheDocument();
+    expect(mockFetch.mock.calls.length).toBe(fetchBefore);
+    expect(mockApiPost.mock.calls.length).toBe(postBefore);
+  });
+
   it("Back button is absent on step 0 (nothing to go back to)", () => {
     render(<SetupWizard onComplete={jest.fn()} />);
     expect(screen.getByRole("heading", { name: "Setup Code" })).toBeInTheDocument();

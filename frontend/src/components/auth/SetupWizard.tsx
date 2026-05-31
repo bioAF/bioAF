@@ -98,6 +98,35 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [step, setStep] = useState(0);
   const [error, setError] = useState("");
 
+  // Steps the user has already moved past at least once. Used to render a
+  // Forward affordance and to short-circuit the per-step submit if the user
+  // is just clicking through unchanged values after a Back.
+  const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
+  // Snapshot of the inputs at the moment each step was last submitted, so we
+  // can detect "no real change" on a re-submit and skip the backend call.
+  const [committedValues, setCommittedValues] = useState<Record<number, Record<string, string>>>({});
+
+  const markStepCompleted = (idx: number, values: Record<string, string>) => {
+    setCompletedSteps((prev) => {
+      const next = new Set(prev);
+      next.add(idx);
+      return next;
+    });
+    setCommittedValues((prev) => ({ ...prev, [idx]: values }));
+  };
+
+  /** True when the step has been completed and current inputs match the
+   * snapshot taken on its last successful submit. Lets re-submit handlers
+   * skip the network call. */
+  const isUnchangedSinceCommit = (idx: number, values: Record<string, string>): boolean => {
+    if (!completedSteps.has(idx)) return false;
+    const committed = committedValues[idx] ?? {};
+    for (const k of Object.keys(values)) {
+      if ((committed[k] ?? "") !== (values[k] ?? "")) return false;
+    }
+    return true;
+  };
+
   // Step 0: Setup code
   const [setupCode, setSetupCode] = useState("");
   const [setupToken, setSetupToken] = useState("");
@@ -228,6 +257,13 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   const handleVerifyCode = async () => {
     setError("");
+    if (isUnchangedSinceCommit(0, { setupCode })) {
+      setStep(1);
+      return;
+    }
+    if (completedSteps.has(0) && !confirm("Re-verify the setup code with the new value?")) {
+      return;
+    }
     try {
       // Use raw fetch since the api module auto-redirects on 401
       const resp = await fetch(`${API_URL}/api/bootstrap/verify-setup-code`, {
@@ -242,6 +278,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       }
       const data = await resp.json();
       setSetupToken(data.setup_token);
+      markStepCompleted(0, { setupCode });
       setStep(1);
     } catch {
       setError("Failed to verify setup code");
@@ -254,6 +291,20 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       return;
     }
     setError("");
+    const current = { email, password, name };
+    if (isUnchangedSinceCommit(1, current)) {
+      setStep(2);
+      return;
+    }
+    if (completedSteps.has(1)) {
+      const c = committedValues[1] ?? {};
+      const diff = [
+        c.email !== email ? `Email: ${c.email || "(empty)"} -> ${email}` : null,
+        c.name !== name ? `Name: ${c.name || "(empty)"} -> ${name || "(empty)"}` : null,
+        c.password !== password ? "Password updated" : null,
+      ].filter(Boolean).join("\n");
+      if (!confirm(`This will overwrite the admin account.\n\n${diff}\n\nContinue?`)) return;
+    }
     try {
       // Use raw fetch with setup token (not the stored auth token)
       const resp = await fetch(`${API_URL}/api/bootstrap/create-admin`, {
@@ -271,6 +322,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       }
       const data = await resp.json();
       setToken(data.access_token);
+      markStepCompleted(1, current);
       setStep(2);
     } catch {
       setError("Failed to create admin");
@@ -279,8 +331,18 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   const handleConfigureOrg = async () => {
     setError("");
+    const current = { orgName };
+    if (isUnchangedSinceCommit(2, current)) {
+      setStep(3);
+      return;
+    }
+    if (completedSteps.has(2)) {
+      const c = committedValues[2] ?? {};
+      if (!confirm(`This will overwrite the organization name.\n\n${c.orgName} -> ${orgName}\n\nContinue?`)) return;
+    }
     try {
       await api.post("/api/bootstrap/configure-org", { org_name: orgName });
+      markStepCompleted(2, current);
       setStep(3);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to configure org");
@@ -308,6 +370,13 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       setGcpValidation(result);
       if (result?.passed) {
         setGcpConfigured(true);
+        markStepCompleted(3, {
+          gcpProjectId,
+          gcpRegion,
+          gcpZone,
+          gcpOrgSlug,
+          gcpCredentialSource,
+        });
         setStep(4);
       } else {
         setError("Validation failed. Fix the issues below and try again.");
@@ -321,6 +390,14 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   const handleConfigureSmtp = async () => {
     setError("");
+    const current = { smtpHost, smtpPort, smtpUsername, smtpPassword, smtpFrom };
+    if (isUnchangedSinceCommit(4, current)) {
+      setStep(5);
+      return;
+    }
+    if (completedSteps.has(4)) {
+      if (!confirm("This will overwrite the previously saved SMTP settings. Continue?")) return;
+    }
     try {
       await api.post("/api/bootstrap/configure-smtp", {
         host: smtpHost,
@@ -329,6 +406,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         password: smtpPassword,
         from_address: smtpFrom,
       });
+      markStepCompleted(4, current);
       setStep(5);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to configure SMTP");
@@ -498,18 +576,32 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
       <h2 className="text-xl font-semibold mb-4">{STEPS[step]}</h2>
 
-      {/* Back: allowed only on steps 1-6 (everything before TF deploy fires).
-          Once Select Stack -> Continue triggers terraform/init and
-          stack/deploy-background, the user is past the point of no return. */}
+      {/* Back / Forward: allowed only on steps 1-6 (everything before TF deploy
+          fires). Once Select Stack -> Continue triggers terraform/init and
+          stack/deploy-background, the user is past the point of no return.
+          Forward only renders for steps the user has already moved past, so
+          they can go back to verify a value and return without re-submitting. */}
       {step >= 1 && step <= 6 && (
-        <button
-          type="button"
-          onClick={() => setStep(step - 1)}
-          aria-label="Back"
-          className="mb-4 text-sm text-gray-500 hover:text-gray-700"
-        >
-          <span aria-hidden="true">&larr; </span>Back
-        </button>
+        <div className="mb-4 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => setStep(step - 1)}
+            aria-label="Back"
+            className="text-sm text-gray-500 hover:text-gray-700"
+          >
+            <span aria-hidden="true">&larr; </span>Back
+          </button>
+          {completedSteps.has(step) && (
+            <button
+              type="button"
+              onClick={() => setStep(step + 1)}
+              aria-label="Forward"
+              className="text-sm text-gray-500 hover:text-gray-700"
+            >
+              Forward<span aria-hidden="true"> &rarr;</span>
+            </button>
+          )}
+        </div>
       )}
 
       {error && (

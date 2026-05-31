@@ -49,6 +49,16 @@ async def _has_admin(session: AsyncSession) -> bool:
     return result.scalar_one_or_none() is not None
 
 
+async def _get_admin_user(session: AsyncSession) -> User | None:
+    """Return the first admin user, or None."""
+    from app.models.role import Role
+
+    result = await session.execute(
+        select(User).join(Role, User.role_id == Role.id).where(Role.name == "admin").limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 def _validate_setup_token(request: Request) -> dict:
     """Extract and validate a setup JWT from the Authorization header."""
     auth_header = request.headers.get("Authorization")
@@ -154,9 +164,32 @@ async def create_admin(body: CreateAdminRequest, request: Request, session: Asyn
     # Require setup token
     _validate_setup_token(request)
 
-    # Only callable once -- if admin exists, block
-    if await _has_admin(session):
-        raise HTTPException(status_code=409, detail="Admin account already created")
+    # If an admin already exists, treat the call as an update. This supports
+    # the wizard's Back/Forward navigation: a user who walks back to the
+    # Create Admin step and clicks Continue again is not blocked, and an
+    # edit to email/name/password lands as expected.
+    existing_admin = await _get_admin_user(session)
+    if existing_admin:
+        org = await _get_org(session)
+        org_id = org.id if org else existing_admin.organization_id
+        existing_admin.email = body.email
+        if body.name is not None:
+            existing_admin.name = body.name
+        existing_admin.password_hash = AuthService.hash_password(body.password)
+        await session.flush()
+        await session.commit()
+        token = AuthService.create_token(
+            existing_admin.id,
+            existing_admin.email,
+            existing_admin.role_id,
+            org_id,
+            role_name="admin",
+        )
+        return {
+            "message": "Admin account updated",
+            "access_token": token,
+            "token_type": "bearer",
+        }
 
     # Get or create organization
     org = await _get_org(session)

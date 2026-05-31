@@ -11,6 +11,15 @@
 - Add a "Back" link on every step from Create Admin through Select Stack,
   preserving previously entered field values. Back is hidden once the
   Terraform deploy has been triggered.
+- Re-submitting an already-completed wizard step no longer fails. If the
+  user goes back to a finished step and clicks Continue with unchanged
+  values, the wizard advances without re-calling the backend. If the user
+  edits a value, the wizard shows the diff and asks to confirm the
+  overwrite. A "Forward" link appears alongside Back on completed steps so
+  the user can go back to verify a value (e.g. "which email did I use for
+  admin?") and forward again without re-submitting. The Create Admin
+  backend endpoint is now idempotent: a second call with the same setup
+  token updates the existing admin instead of returning 409.
 - Widen the setup card so the 10-step indicator has breathing room.
 
 ### Component lifecycle
