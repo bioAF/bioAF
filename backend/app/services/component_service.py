@@ -92,6 +92,26 @@ COMPONENT_CATALOG: dict[str, dict] = {
             {"key": "rstudio_memory_limit", "label": "Max Memory per session (GB)", "type": "number", "default": 8},
         ],
     },
+    # The runtime (image services, toggle endpoint, migration 025) writes
+    # status for the K8s JupyterHub under the key "jupyterhub". Keep a
+    # first-class catalog entry under that key so dependency checks, the
+    # status read-back, and the wizard picker all resolve. The duplication
+    # with `jupyter_k8s` is acknowledged tech-debt; collapsing the two is a
+    # separate effort.
+    "jupyterhub": {
+        "name": "JupyterHub",
+        "description": "Managed Jupyter notebook environment on Kubernetes with pre-built scRNA-seq kernels.",
+        "category": "analysis",
+        "compute_stack": "kubernetes",
+        "dependencies": ["k8s_interactive_pool"],
+        "estimated_monthly_cost": "$50-$200",
+        "provisioning_time_estimate": "~10 minutes",
+        "config_schema": [
+            {"key": "jupyter_cpu_limit", "label": "Max CPU per session", "type": "number", "default": 4},
+            {"key": "jupyter_memory_limit", "label": "Max Memory per session (GB)", "type": "number", "default": 8},
+            {"key": "session_idle_timeout_hours", "label": "Idle Timeout (hours)", "type": "number", "default": 4},
+        ],
+    },
     # --- SLURM-stack components ---
     "slurm": {
         "name": "SLURM HPC Cluster",

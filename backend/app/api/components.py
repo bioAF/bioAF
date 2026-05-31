@@ -1,8 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.schemas.component import ComponentConfigUpdate, ComponentListResponse, ComponentStateResponse
+from app.schemas.component import (
+    ComponentConfigUpdate,
+    ComponentListResponse,
+    ComponentSelectBatchRequest,
+    ComponentSelectBatchResponse,
+    ComponentStateResponse,
+)
 from app.services.component_service import COMPONENT_CATALOG, ComponentService
 from app.services import role_service
 from app.services.terraform_service import TerraformService
@@ -31,6 +38,63 @@ def _build_response(key: str, state) -> ComponentStateResponse:
         estimated_monthly_cost=catalog.get("estimated_monthly_cost", ""),
         updated_at=state.updated_at if state else None,
     )
+
+
+@router.post("/select-batch", response_model=ComponentSelectBatchResponse)
+async def select_batch(
+    body: ComponentSelectBatchRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Queue a set of components for the post-deploy orchestrator.
+
+    Called by the setup wizard's "Select Components" step. Each accepted key
+    becomes a component_states row with enabled=true, status='queued_for_infra'.
+    The drain orchestrator (process_queued_components) takes it from there as
+    infra readiness flips.
+
+    Validation is all-or-nothing: any unknown key, or any key that does not
+    belong to the active compute_stack, fails the whole batch and no rows
+    are written.
+    """
+    await _require_admin(request, session)
+
+    keys = list(dict.fromkeys(body.keys))  # de-dup while preserving order
+
+    row = (await session.execute(text("SELECT value FROM platform_config WHERE key = 'compute_stack'"))).first()
+    compute_stack = row[0] if row else "kubernetes"
+
+    # Validate against the same canonical list that the post-install
+    # Infrastructure > Components page renders; that is the contract the
+    # wizard's picker is built on.
+    if compute_stack == "kubernetes":
+        from app.api.stack_deploy import KUBERNETES_COMPONENTS
+
+        allowed = {c["key"] for c in KUBERNETES_COMPONENTS}
+    else:
+        # SLURM components are not yet shippable from the wizard.
+        allowed = set()
+
+    unknown = [k for k in keys if k not in allowed]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown component keys for compute_stack '{compute_stack}': {', '.join(unknown)}",
+        )
+
+    for k in keys:
+        await session.execute(
+            text(
+                "INSERT INTO component_states (component_key, enabled, status, config_json) "
+                "VALUES (:k, true, 'queued_for_infra', '{}') "
+                "ON CONFLICT (component_key) DO UPDATE SET "
+                "enabled = true, status = 'queued_for_infra'"
+            ).bindparams(k=k)
+        )
+
+    await session.commit()
+
+    return ComponentSelectBatchResponse(queued=keys)
 
 
 @router.get("", response_model=ComponentListResponse)

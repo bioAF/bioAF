@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.activity_feed_service import ActivityFeedService
 from app.services.audit_service import log_action
+from app.services.component_queue import process_queued_components
 from app.services.credential_injector import load_gcp_credentials
 from app.services.orphaned_resource_service import OrphanedResourceService
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
@@ -417,6 +418,10 @@ async def deploy_stack(
                     if output_val:
                         await _set_config(session, config_key, output_val)
                 await _set_config(session, "storage_deployed", "true")
+                # Storage is now usable; drain queued components that only
+                # need the working bucket (notebook + cellxgene image builds
+                # can start now while the cluster is still being built).
+                await process_queued_components(session)
                 await log_action(
                     session,
                     user_id=user_id,
@@ -551,6 +556,11 @@ async def deploy_stack(
                 WHERE component_key = 'kubernetes_cluster'
                 """)
             )
+
+            # Compute is now usable; flip any cluster-only queued components
+            # (nextflow, snakemake, qc_dashboard, meilisearch) to enabled, and
+            # flip image-bound components whose images are already built.
+            await process_queued_components(session)
             await log_action(
                 session,
                 user_id=user_id,

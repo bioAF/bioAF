@@ -281,6 +281,50 @@ describe("InfraComponentsPage", () => {
     expect(screen.getByText("Nextflow")).toBeInTheDocument();
   });
 
+  // T21: renders the queued_for_infra status the wizard's batch endpoint writes
+  it("renders queued_for_infra as a Queued badge without crashing", async () => {
+    const components = [
+      {
+        key: "nextflow",
+        name: "Nextflow",
+        category: "pipeline_orchestration",
+        description: "Pipeline orchestration",
+        cost_estimate: "$0",
+        dependencies: ["kubernetes_cluster"],
+        status: "queued_for_infra",
+        configurable: false,
+      },
+    ];
+
+    mockApiGet.mockImplementation((url: string) => {
+      if (url.includes("terraform/status")) return Promise.resolve(mockTfStatus());
+      if (url.includes("terraform/runs")) return Promise.resolve({ runs: [] });
+      if (url.includes("stack/status")) return Promise.resolve(mockClusterStatus());
+      if (url.includes("stack/components")) return Promise.resolve(mockStackComponents(components));
+      if (url.includes("storage/buckets")) return Promise.resolve({ buckets: [] });
+      if (url.includes("cluster/config"))
+        return Promise.resolve({
+          k8s_pipeline_machine_type: "n2-highmem-8",
+          k8s_pipeline_max_nodes: 20,
+          k8s_pipeline_use_spot: true,
+          k8s_interactive_machine_type: "n2-standard-4",
+          k8s_interactive_max_nodes: 5,
+        });
+      return Promise.reject(new Error("Not found"));
+    });
+
+    await act(async () => {
+      render(<InfraComponentsPage />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Nextflow")).toBeInTheDocument();
+    });
+    // The badge text should communicate the queued state explicitly,
+    // not the default "Disabled" fallback.
+    expect(screen.getByText(/Queued/i)).toBeInTheDocument();
+  });
+
   // Test 28: Cluster status card shows pool info
   it("cluster status card shows pool info", async () => {
     mockApiGet.mockImplementation((url: string) => {

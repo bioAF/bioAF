@@ -1,5 +1,6 @@
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import text
 
 
 pytestmark = pytest.mark.asyncio
@@ -37,6 +38,39 @@ async def test_create_admin(client: AsyncClient):
     data = response.json()
     assert "access_token" in data
     assert data["message"] == "Admin account created"
+
+
+async def test_create_admin_is_idempotent_with_same_setup_token(client: AsyncClient, session):
+    """The wizard's Back/Forward navigation can re-submit Create Admin with
+    the same setup token. The second call must NOT 409; it should update
+    the existing admin's email/name/password and return a fresh token.
+    """
+    setup_token = await _get_setup_token(client)
+
+    first = await client.post(
+        "/api/bootstrap/create-admin",
+        json={"email": "first@test.com", "password": "pw-original", "name": "Original"},
+        headers={"Authorization": f"Bearer {setup_token}"},
+    )
+    assert first.status_code == 200
+
+    # User went back, edited email and name, clicked Continue again.
+    second = await client.post(
+        "/api/bootstrap/create-admin",
+        json={"email": "second@test.com", "password": "pw-original", "name": "Renamed"},
+        headers={"Authorization": f"Bearer {setup_token}"},
+    )
+    assert second.status_code == 200, second.text
+    assert "access_token" in second.json()
+
+    # Confirm the update landed: the new email is on the admin row, old is gone.
+    from app.services.user_service import UserService
+
+    renamed = await UserService.get_by_email(session, "second@test.com")
+    gone = await UserService.get_by_email(session, "first@test.com")
+    assert renamed is not None
+    assert renamed.name == "Renamed"
+    assert gone is None
 
 
 async def test_create_admin_twice_fails(client: AsyncClient):
@@ -93,6 +127,63 @@ async def test_full_bootstrap_flow(client: AsyncClient):
     # Verify setup is complete
     resp = await client.get("/api/bootstrap/status")
     assert resp.json()["setup_complete"] is True
+
+
+async def test_bootstrap_status_has_in_flight_when_components_queued(client: AsyncClient, session):
+    """T11a: a queued_for_infra row means the wizard should route returning
+    users back to the components view, not the dashboard.
+    """
+    await session.execute(
+        text(
+            "INSERT INTO component_states (component_key, enabled, status, config_json) "
+            "VALUES ('nextflow', true, 'queued_for_infra', '{}') "
+            "ON CONFLICT (component_key) DO UPDATE SET enabled = true, status = 'queued_for_infra'"
+        )
+    )
+    await session.commit()
+
+    response = await client.get("/api/bootstrap/status")
+    assert response.status_code == 200
+    assert response.json()["has_in_flight_components"] is True
+
+
+async def test_bootstrap_status_has_in_flight_when_components_provisioning(client: AsyncClient, session):
+    """T11b: provisioning (mid-image-build) also counts as in-flight."""
+    await session.execute(
+        text(
+            "INSERT INTO component_states (component_key, enabled, status, config_json) "
+            "VALUES ('jupyterhub', true, 'provisioning', '{}') "
+            "ON CONFLICT (component_key) DO UPDATE SET enabled = true, status = 'provisioning'"
+        )
+    )
+    await session.commit()
+
+    response = await client.get("/api/bootstrap/status")
+    assert response.status_code == 200
+    assert response.json()["has_in_flight_components"] is True
+
+
+async def test_bootstrap_status_no_in_flight_when_only_enabled_or_disabled(client: AsyncClient, session):
+    """T11c: rows in steady states do not count as in-flight."""
+    await session.execute(
+        text(
+            "INSERT INTO component_states (component_key, enabled, status, config_json) "
+            "VALUES ('nextflow', true, 'enabled', '{}'), ('rstudio', false, 'disabled', '{}') "
+            "ON CONFLICT (component_key) DO UPDATE SET status = EXCLUDED.status, enabled = EXCLUDED.enabled"
+        )
+    )
+    await session.commit()
+
+    response = await client.get("/api/bootstrap/status")
+    assert response.status_code == 200
+    assert response.json()["has_in_flight_components"] is False
+
+
+async def test_bootstrap_status_no_in_flight_when_table_empty(client: AsyncClient):
+    """T11d: a fresh install has no rows; the field is False, not omitted."""
+    response = await client.get("/api/bootstrap/status")
+    assert response.status_code == 200
+    assert response.json()["has_in_flight_components"] is False
 
 
 async def test_bootstrap_requires_admin_role(client: AsyncClient, viewer_token: str):
