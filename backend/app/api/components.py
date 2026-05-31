@@ -61,25 +61,25 @@ async def select_batch(
 
     keys = list(dict.fromkeys(body.keys))  # de-dup while preserving order
 
-    unknown = [k for k in keys if k not in COMPONENT_CATALOG]
-    if unknown:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown component keys: {', '.join(unknown)}",
-        )
-
     row = (await session.execute(text("SELECT value FROM platform_config WHERE key = 'compute_stack'"))).first()
     compute_stack = row[0] if row else "kubernetes"
 
-    mismatched = []
-    for k in keys:
-        catalog_stack = COMPONENT_CATALOG[k].get("compute_stack")
-        if catalog_stack and catalog_stack != compute_stack:
-            mismatched.append(k)
-    if mismatched:
+    # Validate against the same canonical list that the post-install
+    # Infrastructure > Components page renders; that is the contract the
+    # wizard's picker is built on.
+    if compute_stack == "kubernetes":
+        from app.api.stack_deploy import KUBERNETES_COMPONENTS
+
+        allowed = {c["key"] for c in KUBERNETES_COMPONENTS}
+    else:
+        # SLURM components are not yet shippable from the wizard.
+        allowed = set()
+
+    unknown = [k for k in keys if k not in allowed]
+    if unknown:
         raise HTTPException(
             status_code=400,
-            detail=(f"Components do not match active compute_stack '{compute_stack}': {', '.join(mismatched)}"),
+            detail=f"Unknown component keys for compute_stack '{compute_stack}': {', '.join(unknown)}",
         )
 
     for k in keys:

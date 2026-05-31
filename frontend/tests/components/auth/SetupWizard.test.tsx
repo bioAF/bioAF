@@ -211,14 +211,19 @@ describe("SetupWizard", () => {
     mockApiPost.mockResolvedValueOnce({}); // stack/deploy-background
     mockApiPost.mockResolvedValueOnce({}); // bootstrap/complete (now deferred)
     mockApiGet.mockImplementation((url: string) => {
-      if (url.includes("/api/v1/infrastructure/components")) {
+      if (url.includes("/api/v1/infrastructure/stack/components")) {
         return Promise.resolve({
           compute_stack: "kubernetes",
+          compute_deployed: false,
+          storage_deployed: false,
           components: [
-            { key: "nextflow_k8s", name: "Nextflow", description: "Pipeline orchestration.", category: "pipeline_orchestration", dependencies: ["k8s_pipeline_pool"], cost_estimate: "$0", configurable_fields: [], status: "available" },
-            { key: "jupyterhub", name: "JupyterHub", description: "Notebooks.", category: "analysis", dependencies: ["k8s_interactive_pool"], cost_estimate: "$50", configurable_fields: [], status: "available" },
-            { key: "k8s_pipeline_pool", name: "K8s Pipeline Pool", description: "Internal pool.", category: "compute", dependencies: [], cost_estimate: "$0", configurable_fields: [], status: "available" },
-            { key: "k8s_interactive_pool", name: "K8s Interactive Pool", description: "Internal pool.", category: "compute", dependencies: [], cost_estimate: "$0", configurable_fields: [], status: "available" },
+            { key: "nextflow", name: "Nextflow", description: "Pipeline orchestration.", category: "pipeline_orchestration", dependencies: ["kubernetes_cluster"], cost_estimate: "$0", status: "disabled", configurable: false },
+            { key: "jupyterhub", name: "JupyterHub", description: "Notebooks.", category: "analysis", dependencies: ["kubernetes_cluster"], cost_estimate: "$50", status: "disabled", configurable: true },
+            { key: "rstudio", name: "RStudio", description: "RStudio.", category: "analysis", dependencies: ["kubernetes_cluster"], cost_estimate: "$50", status: "disabled", configurable: true },
+            { key: "cellxgene", name: "cellxgene", description: "Viz.", category: "visualization", dependencies: [], cost_estimate: "$20", status: "disabled", configurable: false },
+            { key: "snakemake", name: "Snakemake", description: "snakemake.", category: "pipeline_orchestration", dependencies: ["kubernetes_cluster"], cost_estimate: "$0", status: "coming_soon", configurable: false },
+            { key: "qc_dashboard", name: "QC Dashboard", description: "qc.", category: "visualization", dependencies: ["nextflow"], cost_estimate: "$10", status: "disabled", configurable: false },
+            { key: "meilisearch", name: "Meilisearch", description: "search.", category: "search", dependencies: [], cost_estimate: "$20", status: "disabled", configurable: false },
           ],
         });
       }
@@ -253,11 +258,13 @@ describe("SetupWizard", () => {
     mockApiPost.mockResolvedValueOnce({}); // stack/deploy-background
     mockApiPost.mockResolvedValueOnce({}); // bootstrap/complete
     mockApiGet.mockImplementation((url: string) => {
-      if (url.includes("/api/v1/infrastructure/components")) {
+      if (url.includes("/api/v1/infrastructure/stack/components")) {
         return Promise.resolve({
           compute_stack: "kubernetes",
+          compute_deployed: false,
+          storage_deployed: false,
           components: [
-            { key: "nextflow_k8s", name: "Nextflow", description: ".", category: "pipeline_orchestration", dependencies: [], cost_estimate: "$0", configurable_fields: [], status: "available" },
+            { key: "nextflow", name: "Nextflow", description: ".", category: "pipeline_orchestration", dependencies: [], cost_estimate: "$0", status: "disabled", configurable: false },
           ],
         });
       }
@@ -267,14 +274,14 @@ describe("SetupWizard", () => {
     await user.click(screen.getByRole("button", { name: /Continue with Kubernetes/i }));
     await screen.findByRole("heading", { name: "Select Components" });
 
-    mockApiPost.mockResolvedValueOnce({ queued: ["nextflow_k8s"] });
+    mockApiPost.mockResolvedValueOnce({ queued: ["nextflow"] });
 
     await user.click(screen.getByRole("button", { name: /Continue/i }));
 
     await screen.findByRole("heading", { name: "Deploying" });
     expect(mockApiPost).toHaveBeenCalledWith(
       "/api/components/select-batch",
-      expect.objectContaining({ keys: expect.arrayContaining(["nextflow_k8s"]) })
+      expect.objectContaining({ keys: expect.arrayContaining(["nextflow"]) })
     );
   });
 
@@ -296,19 +303,21 @@ describe("SetupWizard", () => {
     mockApiPost.mockResolvedValueOnce({}); // terraform/init
     mockApiPost.mockResolvedValueOnce({}); // stack/deploy-background
     mockApiGet.mockImplementation((url: string) => {
-      if (url.includes("/api/v1/infrastructure/components")) {
+      if (url.includes("/api/v1/infrastructure/stack/components")) {
         return Promise.resolve({
           compute_stack: "kubernetes",
+          compute_deployed: false,
+          storage_deployed: false,
           components: [
-            { key: "nextflow_k8s", name: "Nextflow", description: ".", category: "pipeline_orchestration", dependencies: [], cost_estimate: "$0", configurable_fields: [], status: "available" },
-            { key: "jupyterhub", name: "JupyterHub", description: ".", category: "analysis", dependencies: [], cost_estimate: "$50", configurable_fields: [], status: "available" },
+            { key: "nextflow", name: "Nextflow", description: ".", category: "pipeline_orchestration", dependencies: [], cost_estimate: "$0", status: "disabled", configurable: false },
+            { key: "jupyterhub", name: "JupyterHub", description: ".", category: "analysis", dependencies: [], cost_estimate: "$50", status: "disabled", configurable: true },
           ],
         });
       }
       if (url === "/api/components") {
         return Promise.resolve({
           components: [
-            { key: "nextflow_k8s", name: "Nextflow", description: ".", category: "pipeline_orchestration", enabled: true, status: "queued_for_infra", config: {}, dependencies: [], estimated_monthly_cost: "$0", updated_at: null },
+            { key: "nextflow", name: "Nextflow", description: ".", category: "pipeline_orchestration", enabled: true, status: "queued_for_infra", config: {}, dependencies: [], estimated_monthly_cost: "$0", updated_at: null },
             { key: "jupyterhub", name: "JupyterHub", description: ".", category: "analysis", enabled: true, status: "provisioning", config: {}, dependencies: [], estimated_monthly_cost: "$50", updated_at: null },
           ],
         });
@@ -319,7 +328,7 @@ describe("SetupWizard", () => {
     await screen.findByRole("heading", { name: "Select Components" });
 
     // Submit the components
-    mockApiPost.mockResolvedValueOnce({ queued: ["nextflow_k8s", "jupyterhub"] });
+    mockApiPost.mockResolvedValueOnce({ queued: ["nextflow", "jupyterhub"] });
 
     await user.click(screen.getByRole("button", { name: /Continue/i }));
     await screen.findByRole("heading", { name: "Deploying" });

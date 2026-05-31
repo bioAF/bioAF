@@ -55,7 +55,11 @@ export function ComponentPicker({
     return map;
   }, [components]);
 
-  /** Resolve transitively all deps of the given keys. */
+  /** Resolve transitively all deps of the given keys, restricted to deps that
+   * actually exist in the visible component list. The K8s components depend on
+   * `kubernetes_cluster`, which is always-on plumbing the wizard owns; it must
+   * not leak into the user's selection or the batch endpoint will reject it.
+   */
   const resolveDeps = useCallback(
     (keys: string[]): Set<string> => {
       const out = new Set<string>();
@@ -63,6 +67,7 @@ export function ComponentPicker({
         const c = byKey.get(k);
         if (!c) return;
         for (const dep of c.dependencies) {
+          if (!byKey.has(dep)) continue;
           if (!out.has(dep)) {
             out.add(dep);
             walk(dep);

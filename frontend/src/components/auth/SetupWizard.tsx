@@ -158,7 +158,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   // Step 7: Select Components
   // Defaults: the minimum set that gives the user a working "first pipeline
   // + first notebook" experience without opening the Infrastructure menu.
-  const DEFAULT_SELECTED = ["nextflow_k8s", "jupyterhub"];
+  // Keys match the canonical KUBERNETES_COMPONENTS list (the same 7 the
+  // post-install Infrastructure > Components page renders).
+  const DEFAULT_SELECTED = ["nextflow", "jupyterhub"];
   const [pickerComponents, setPickerComponents] = useState<PickerComponent[]>([]);
   const [selectedComponents, setSelectedComponents] = useState<string[]>(DEFAULT_SELECTED);
   const [componentsLoading, setComponentsLoading] = useState(false);
@@ -424,6 +426,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   }, [step, selectedComponents]);
 
   // Fetch the component catalog when entering step 7 so the picker has data.
+  // Hits the same endpoint the post-install components page uses so the two
+  // views are guaranteed to show the same 7 K8s components, no more, no less.
   useEffect(() => {
     let cancelled = false;
     if (step !== 7) return;
@@ -431,7 +435,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     (async () => {
       try {
         const data = await api.get<{
-          compute_stack: string;
+          compute_stack: string | null;
           components: {
             key: string;
             name: string;
@@ -439,11 +443,23 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             category: string;
             dependencies: string[];
             cost_estimate: string;
-            status: "available" | "coming_soon";
+            status: string; // "enabled" | "disabled" | "provisioning" | "build_failed" | "coming_soon"
           }[];
-        }>("/api/v1/infrastructure/components");
+        }>("/api/v1/infrastructure/stack/components");
         if (cancelled) return;
-        setPickerComponents(data.components ?? []);
+        // The endpoint's "status" is the runtime state; the picker only cares
+        // about whether the component is selectable. Anything that is not
+        // coming_soon is selectable on the wizard.
+        const mapped: PickerComponent[] = (data.components ?? []).map((c) => ({
+          key: c.key,
+          name: c.name,
+          description: c.description,
+          category: c.category,
+          dependencies: c.dependencies,
+          cost_estimate: c.cost_estimate,
+          status: c.status === "coming_soon" ? "coming_soon" : "available",
+        }));
+        setPickerComponents(mapped);
       } catch (e) {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : "Failed to load components");

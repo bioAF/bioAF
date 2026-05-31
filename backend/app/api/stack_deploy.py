@@ -298,6 +298,17 @@ async def stack_deploy_background_endpoint(
     if tf_val != "true":
         raise HTTPException(status_code=400, detail="Terraform has not been initialized")
 
+    # Record the chosen compute_stack now so downstream views (the wizard's
+    # Select Components step, the post-install components page) can resolve
+    # the right component list before the compute module finishes applying.
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES ('compute_stack', :v) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
+        ).bindparams(v=stack_type)
+    )
+    await session.commit()
+
     async def _run_deploy():
         """Drain the deploy_stack generator in the background with its own session."""
         async with async_session_factory() as bg_session:
