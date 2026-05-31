@@ -29,9 +29,7 @@ def test_notebook_image_target_keys_exist_in_catalog():
 def test_cellxgene_image_target_keys_exist_in_catalog():
     """Same invariant for the cellxgene image service."""
     missing = [k for k in _CELLXGENE_COMPONENTS if k not in COMPONENT_CATALOG]
-    assert missing == [], (
-        f"_CELLXGENE_COMPONENTS targets keys not in COMPONENT_CATALOG: {missing}."
-    )
+    assert missing == [], f"_CELLXGENE_COMPONENTS targets keys not in COMPONENT_CATALOG: {missing}."
 
 
 def test_kubernetes_components_keys_exist_in_catalog():
