@@ -498,6 +498,20 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
       <h2 className="text-xl font-semibold mb-4">{STEPS[step]}</h2>
 
+      {/* Back: allowed only on steps 1-6 (everything before TF deploy fires).
+          Once Select Stack -> Continue triggers terraform/init and
+          stack/deploy-background, the user is past the point of no return. */}
+      {step >= 1 && step <= 6 && (
+        <button
+          type="button"
+          onClick={() => setStep(step - 1)}
+          aria-label="Back"
+          className="mb-4 text-sm text-gray-500 hover:text-gray-700"
+        >
+          <span aria-hidden="true">&larr; </span>Back
+        </button>
+      )}
+
       {error && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded text-sm">
           {error}

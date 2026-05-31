@@ -162,6 +162,62 @@ describe("SetupWizard", () => {
     expect(mockApiPost).toHaveBeenCalledWith("/api/v1/settings/gcp/validate");
   });
 
+  it("Back button: step 3 (GCP) returns to step 2 (Org Name) with state preserved", async () => {
+    const user = userEvent.setup();
+    render(<SetupWizard onComplete={jest.fn()} />);
+    await advanceToGcpStep(user);
+
+    expect(screen.getByRole("heading", { name: "GCP Credentials" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Back$/i }));
+
+    expect(screen.getByRole("heading", { name: "Organization Name" })).toBeInTheDocument();
+    // Org name input still holds the previously-entered value
+    expect(screen.getByLabelText(/organization name/i)).toHaveValue("Acme Bio");
+  });
+
+  it("Back button is absent on step 0 (nothing to go back to)", () => {
+    render(<SetupWizard onComplete={jest.fn()} />);
+    expect(screen.getByRole("heading", { name: "Setup Code" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Back$/i })).not.toBeInTheDocument();
+  });
+
+  it("Back button is absent on Select Components (step 7) because TF deploy is in flight", async () => {
+    const user = userEvent.setup();
+    render(<SetupWizard onComplete={jest.fn()} />);
+    await advanceToGcpStep(user);
+
+    mockApiPut.mockResolvedValueOnce({});
+    mockApiPost.mockResolvedValueOnce({ passed: true, checks: [], permission_details: [] });
+    await user.type(screen.getByLabelText("GCP Project ID"), "proj");
+    await user.click(screen.getByRole("button", { name: "Save & Validate" }));
+    await screen.findByRole("heading", { name: "SMTP Settings" });
+
+    await user.click(screen.getByRole("button", { name: /do this later/i }));
+    await user.click(screen.getByRole("button", { name: /set up infrastructure/i }));
+
+    mockApiPost.mockResolvedValueOnce({}); // terraform/init
+    mockApiPost.mockResolvedValueOnce({}); // stack/deploy-background
+    mockApiGet.mockImplementation((url: string) => {
+      if (url.includes("/api/v1/infrastructure/stack/components")) {
+        return Promise.resolve({
+          compute_stack: "kubernetes",
+          compute_deployed: false,
+          storage_deployed: false,
+          components: [
+            { key: "nextflow", name: "Nextflow", description: ".", category: "pipeline_orchestration", dependencies: [], cost_estimate: "$0", status: "disabled", configurable: false },
+          ],
+        });
+      }
+      return Promise.resolve({});
+    });
+    await user.click(screen.getByRole("button", { name: /Continue with Kubernetes/i }));
+    await screen.findByRole("heading", { name: "Select Components" });
+
+    // Once TF deploy has fired, no going back.
+    expect(screen.queryByRole("button", { name: /^Back$/i })).not.toBeInTheDocument();
+  });
+
   it("step 6: renders Kubernetes (recommended) and SLURM (coming soon) cards", async () => {
     const user = userEvent.setup();
     render(<SetupWizard onComplete={jest.fn()} />);
