@@ -94,6 +94,46 @@ def test_create_import_job_builds_job_with_backend_image_and_worker_command(fake
     assert container.command == ["python", "-m", "app.workers.reference_importer"]
 
 
+def test_create_import_job_image_tag_tracks_backend_image_tag(fake_compute_adapter, monkeypatch):
+    """The importer Pod must pull the SAME image tag as the backend that
+    submitted it. Hardcoding ':latest' is wrong on a dev / branch build:
+    the Pod ends up pulling the last released image from ghcr.io and
+    fails with ModuleNotFoundError when the new branch added a module
+    that doesn't exist in the released image. settings.bioaf_image_tag
+    (BIOAF_IMAGE_TAG env, the same var docker-compose uses to pick the
+    backend's own image) feeds the Pod's image when no explicit override
+    is set."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "bioaf_image_tag", "v2026.6.0-mybranch")
+    monkeypatch.setattr(settings, "reference_importer_image", "")
+    with patch("app.services.reference_data_service.get_compute_adapter", return_value=fake_compute_adapter):
+        ReferenceDataService._create_import_job(**_kwargs())
+
+    batch = fake_compute_adapter._get_k8s_batch_client.return_value
+    body = batch.create_namespaced_job.call_args.kwargs.get("body") or batch.create_namespaced_job.call_args.args[1]
+    container = body.spec.template.spec.containers[0]
+    assert container.image == "ghcr.io/bioaf/bioaf-backend:v2026.6.0-mybranch"
+
+
+def test_create_import_job_image_override_wins_over_tag(fake_compute_adapter, monkeypatch):
+    """An explicit BIOAF_REFERENCE_IMPORTER_IMAGE override must win over
+    the tag-derivation default, so an operator can point the importer at
+    a totally different image (e.g. a debug build in a private registry)
+    without redefining BIOAF_IMAGE_TAG for the whole backend."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "bioaf_image_tag", "v2026.6.0")
+    monkeypatch.setattr(settings, "reference_importer_image", "us-central1-docker.pkg.dev/foo/bar:debug")
+    with patch("app.services.reference_data_service.get_compute_adapter", return_value=fake_compute_adapter):
+        ReferenceDataService._create_import_job(**_kwargs())
+
+    batch = fake_compute_adapter._get_k8s_batch_client.return_value
+    body = batch.create_namespaced_job.call_args.kwargs.get("body") or batch.create_namespaced_job.call_args.args[1]
+    container = body.spec.template.spec.containers[0]
+    assert container.image == "us-central1-docker.pkg.dev/foo/bar:debug"
+
+
 def test_create_import_job_sets_env_vars_matching_worker_contract(fake_compute_adapter):
     """The env vars the Job writes must match the keys
     app.workers.reference_importer.config_from_env reads."""

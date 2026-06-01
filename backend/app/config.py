@@ -171,6 +171,14 @@ class Settings(BaseSettings):
     # Internal callbacks (importer container -> bioAF API)
     internal_token: str = ""
 
+    # The image tag of the bioAF backend container itself. Sourced from the
+    # same BIOAF_IMAGE_TAG env var docker-compose uses to pin the backend
+    # image; the importer Pod defaults to this same tag so a dev build /
+    # branch build never accidentally pulls the released ':latest' image
+    # from ghcr.io and fails with ModuleNotFoundError on a module the
+    # released image doesn't have yet.
+    bioaf_image_tag: str = "latest"
+
     # Reference-data URL import: GKE Job that streams a public URL into the
     # references bucket. The image reuses the backend container with the
     # `python -m app.workers.reference_importer` entrypoint, so a separate
@@ -178,7 +186,11 @@ class Settings(BaseSettings):
     # which carries Workload Identity to the bioaf-nextflow GSA with
     # project-wide storage.objectAdmin (sufficient for writing to the
     # references bucket).
-    reference_importer_image: str = "ghcr.io/bioaf/bioaf-backend:latest"
+    #
+    # Empty default = derive from bioaf_image_tag at use site. An explicit
+    # override wins (e.g. to point at a private-registry debug build
+    # without redefining the whole backend's tag).
+    reference_importer_image: str = ""
     reference_importer_namespace: str = "bioaf-pipelines"
     reference_importer_service_account: str = "bioaf-pipeline-runner"
 

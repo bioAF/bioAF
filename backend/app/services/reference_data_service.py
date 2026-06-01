@@ -845,9 +845,11 @@ class ReferenceDataService:
         if auth_header:
             env.append(k8s_client.V1EnvVar(name="SOURCE_AUTH_HEADER", value=auth_header))
 
+        image = settings.reference_importer_image or f"ghcr.io/bioaf/bioaf-backend:{settings.bioaf_image_tag}"
+
         container = k8s_client.V1Container(
             name="importer",
-            image=settings.reference_importer_image,
+            image=image,
             command=["python", "-m", "app.workers.reference_importer"],
             env=env,
             resources=k8s_client.V1ResourceRequirements(

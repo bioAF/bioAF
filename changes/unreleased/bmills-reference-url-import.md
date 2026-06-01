@@ -27,3 +27,12 @@
   platform_config as `internal_callback_token`, and reused for every
   subsequent import. The `BIOAF_INTERNAL_TOKEN` env var still overrides
   it when set, but is no longer required for the feature to work.
+
+- The reference-importer Pod's image now tracks the backend's own image
+  tag via the `BIOAF_IMAGE_TAG` env var that docker-compose already uses
+  to pin the backend container. Previously the Pod always pulled
+  `ghcr.io/bioaf/bioaf-backend:latest`, which on a dev / branch build is
+  the wrong image: the released `:latest` does not contain the new
+  worker module and the Pod crashed immediately with ModuleNotFoundError.
+  Setting an explicit `BIOAF_REFERENCE_IMPORTER_IMAGE` still overrides
+  the tag-derived default for one-off debug builds in private registries.
