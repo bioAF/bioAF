@@ -14,9 +14,10 @@
   back to `/api/internal/references/{id}/import-progress` so the Import
   Status modal updates in real time without holding the request open.
 
-- New `bioaf_api_url` platform_config key. The installer must set this to
-  the publicly reachable bioAF API base URL (e.g.
-  `https://bioaf.example.com`); the backend uses it to render the
-  internal callback URL the importer Pod posts to. The endpoint returns
-  503 with a clear remediation message if the URL or `BIOAF_INTERNAL_TOKEN`
-  is not configured, instead of failing late inside the Pod.
+- The importer Pod's callback URL is now derived from the existing
+  Networking settings (`networking_hostname`, `networking_domain`,
+  `networking_https_enforced`) that operators already configure for the
+  UI / API to be reachable; no separate platform_config key. The
+  endpoint returns 503 with a clear remediation message if Networking
+  has not been configured yet or `BIOAF_INTERNAL_TOKEN` is unset, instead
+  of failing late inside the Pod.

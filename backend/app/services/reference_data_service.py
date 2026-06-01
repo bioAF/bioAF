@@ -447,19 +447,37 @@ class ReferenceDataService:
 
     @staticmethod
     async def _get_api_base_url(session: AsyncSession) -> str:
-        """Read the publicly reachable bioAF API base URL from platform_config.
+        """Render the publicly reachable bioAF API base URL.
 
-        Used to render the callback URL the importer Pod posts progress
-        to. Set by the installer when configuring the VM's FQDN.
+        Derived from the Networking settings the operator already configured
+        for the UI / API to be reachable: `networking_hostname`,
+        `networking_domain`, and `networking_https_enforced`. The importer
+        Pod uses the resulting URL to POST progress callbacks.
         """
-        result = await session.execute(text("SELECT value FROM platform_config WHERE key = 'bioaf_api_url'"))
-        value = result.scalar_one_or_none()
-        if not value or value == "null":
-            raise ValueError(
-                "bioaf_api_url not configured. Set the public API URL in platform_config "
-                "before importing reference data from a URL."
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT key, value FROM platform_config WHERE key IN "
+                    "('networking_hostname', 'networking_domain', 'networking_https_enforced')"
+                )
             )
-        return value
+        ).fetchall()
+        cfg = {r[0]: (r[1] or "") for r in rows}
+        hostname = cfg.get("networking_hostname", "")
+        domain = cfg.get("networking_domain", "")
+        if hostname and domain:
+            fqdn = f"{hostname}.{domain}"
+        elif hostname:
+            fqdn = hostname
+        else:
+            fqdn = domain
+        if not fqdn:
+            raise ValueError(
+                "Networking not configured. Set hostname and domain in the bioAF Networking "
+                "settings before importing reference data from a URL."
+            )
+        scheme = "https" if cfg.get("networking_https_enforced", "false") == "true" else "http"
+        return f"{scheme}://{fqdn}"
 
     @staticmethod
     def _create_resumable_session(

@@ -56,8 +56,10 @@ async def configured(session, monkeypatch):
     )
     await session.execute(
         text(
-            "INSERT INTO platform_config (key, value, updated_at) "
-            "VALUES ('bioaf_api_url', 'http://bioaf-backend:8000', NOW()) "
+            "INSERT INTO platform_config (key, value) VALUES "
+            "('networking_hostname', 'bioaf'),"
+            "('networking_domain', 'example.com'),"
+            "('networking_https_enforced', 'true') "
             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
         )
     )

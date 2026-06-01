@@ -52,10 +52,26 @@ async def configured_refs_bucket(session, monkeypatch):
             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
         )
     )
+    # The callback URL is rendered from the Networking settings the operator
+    # already configured for the UI/API to be reachable.
     await session.execute(
         text(
             "INSERT INTO platform_config (key, value, updated_at) "
-            "VALUES ('bioaf_api_url', 'http://bioaf-backend:8000', NOW()) "
+            "VALUES ('networking_hostname', 'bioaf', NOW()) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
+    )
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value, updated_at) "
+            "VALUES ('networking_domain', 'example.com', NOW()) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
+    )
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value, updated_at) "
+            "VALUES ('networking_https_enforced', 'true', NOW()) "
             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
         )
     )
@@ -255,6 +271,119 @@ async def test_record_import_progress_updates_row(session, comp_bio_user, config
     assert progress.status == "downloading"
     assert progress.progress_pct == 25
     assert progress.bytes_downloaded == 250
+
+
+@pytest.mark.asyncio
+async def test_start_import_renders_callback_url_from_networking_settings(
+    session, comp_bio_user, configured_refs_bucket
+):
+    """The Pod's callback URL must point at the *publicly reachable* bioAF
+    API on the VM. That hostname/domain is already configured via the
+    Networking settings page (networking_hostname + networking_domain +
+    networking_https_enforced). The importer must derive the callback URL
+    from those existing keys: no separate 'bioaf_api_url' to maintain."""
+    payload = ReferenceImportRequest(
+        name="CallbackCheck",
+        category="annotation",
+        scope="internal",
+        version="v1",
+        source_url="https://ftp.example/file.gz",
+        extract="none",
+    )
+
+    captured: dict = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return _stub_create_job(**kwargs)
+
+    with patch.object(ReferenceDataService, "_create_import_job", side_effect=_capture):
+        dataset, _ = await ReferenceDataService.start_import(
+            session, org_id=comp_bio_user.organization_id, user_id=comp_bio_user.id, request=payload
+        )
+        await session.commit()
+
+    # Configured: hostname=bioaf, domain=example.com, https=true
+    assert captured["callback_url"] == (
+        f"https://bioaf.example.com/api/internal/references/{dataset.id}/import-progress"
+    )
+
+
+@pytest.mark.asyncio
+async def test_start_import_callback_url_uses_http_when_https_not_enforced(
+    session, comp_bio_user, monkeypatch
+):
+    """When networking_https_enforced is not 'true', fall back to http://
+    so the importer Pod can reach the backend before TLS is provisioned."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "internal_token", "test-internal-token")
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES "
+            "('references_bucket_name', 'bioaf-references-test'),"
+            "('networking_hostname', 'bioaf-staging'),"
+            "('networking_domain', 'example.com'),"
+            "('networking_https_enforced', 'false') "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
+    )
+    await session.commit()
+
+    payload = ReferenceImportRequest(
+        name="HttpCheck",
+        category="annotation",
+        scope="internal",
+        version="v1",
+        source_url="https://ftp.example/file.gz",
+        extract="none",
+    )
+
+    captured: dict = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return _stub_create_job(**kwargs)
+
+    with patch.object(ReferenceDataService, "_create_import_job", side_effect=_capture):
+        await ReferenceDataService.start_import(
+            session, org_id=comp_bio_user.organization_id, user_id=comp_bio_user.id, request=payload
+        )
+        await session.commit()
+
+    assert captured["callback_url"].startswith("http://bioaf-staging.example.com/")
+
+
+@pytest.mark.asyncio
+async def test_start_import_raises_when_networking_unset(session, comp_bio_user, monkeypatch):
+    """If neither hostname nor domain is set, the importer Pod has no way
+    to reach the backend. Raise a ValueError with 'not configured' so the
+    API maps it to 503."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "internal_token", "test-internal-token")
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES "
+            "('references_bucket_name', 'bioaf-references-test') "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
+    )
+    await session.commit()
+
+    payload = ReferenceImportRequest(
+        name="NoNetworking",
+        category="annotation",
+        scope="internal",
+        version="v1",
+        source_url="https://ftp.example/file.gz",
+        extract="none",
+    )
+    with pytest.raises(ValueError) as exc:
+        await ReferenceDataService.start_import(
+            session, org_id=comp_bio_user.organization_id, user_id=comp_bio_user.id, request=payload
+        )
+    assert "not configured" in str(exc.value).lower()
 
 
 @pytest.mark.asyncio
