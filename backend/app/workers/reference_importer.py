@@ -12,7 +12,9 @@ for tests. See backend/tests/test_reference_importer_worker.py.
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, Protocol
 from urllib.parse import urlparse
@@ -67,14 +69,16 @@ ProgressCallback = Callable[..., None]
 
 class _ProgressFileReader:
     """Wraps an HTTP byte iterator as a file-like with a `read(n)` interface,
-    reporting bytes read via a callback. Used to feed the GCS uploader so we
-    can stream the source URL straight to GCS without buffering the full
-    payload in memory or on disk."""
+    reporting bytes read via a callback and computing an MD5 hash of the
+    stream inline. Used to feed the GCS uploader so we can stream the source
+    URL straight to GCS without buffering the full payload in memory or on
+    disk."""
 
     def __init__(self, chunks: Iterable[bytes], on_progress: Callable[[int], None]):
         self._iter = iter(chunks)
         self._buf = bytearray()
         self._on_progress = on_progress
+        self._hash = hashlib.md5()
         self.bytes_read = 0
 
     def read(self, size: int = -1) -> bytes:
@@ -93,8 +97,32 @@ class _ProgressFileReader:
             del self._buf[:size]
         if out:
             self.bytes_read += len(out)
+            self._hash.update(out)
             self._on_progress(self.bytes_read)
         return out
+
+    @property
+    def md5_hex(self) -> str:
+        return self._hash.hexdigest()
+
+
+def _parse_md5_file(body: bytes) -> str:
+    """Parse a coreutils-style md5 file: '<hex>  <filename>' on the first
+    non-blank line. Falls back to a bare 32-hex-character line."""
+
+    for raw in body.decode("utf-8", errors="replace").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        m = re.match(r"^([a-fA-F0-9]{32})(?:\s+\*?(.+))?$", line)
+        if m:
+            return m.group(1).lower()
+        break
+    raise ValueError("Could not parse md5 file")
+
+
+class Md5MismatchError(Exception):
+    """Raised when the streamed payload's md5 disagrees with the upstream md5 file."""
 
 
 def _filename_from_url(url: str) -> str:
@@ -152,6 +180,22 @@ class ReferenceImporter:
             blob.upload_from_file(reader, content_type="application/octet-stream")
 
         size = reader.bytes_read
+        computed_md5 = reader.md5_hex
+
+        if cfg.source_md5_url:
+            self._callback(
+                status="verifying",
+                progress_pct=100,
+                bytes_downloaded=size,
+                total_bytes=size,
+            )
+            expected = self._fetch_expected_md5(cfg.source_md5_url)
+            if expected != computed_md5:
+                blob.delete()
+                msg = f"md5 mismatch: expected {expected} got {computed_md5}"
+                self._callback(status="failed", error_message=msg)
+                raise Md5MismatchError(msg)
+
         self._callback(
             status="active",
             progress_pct=100,
@@ -165,6 +209,13 @@ class ReferenceImporter:
                     filename=filename,
                     gcs_uri=f"gs://{cfg.gcs_bucket}/{blob_name}",
                     size_bytes=size,
+                    md5=computed_md5,
                 )
             ]
         )
+
+    def _fetch_expected_md5(self, url: str) -> str:
+        with self._http.stream("GET", url, headers=None) as response:
+            response.raise_for_status()
+            body = b"".join(response.iter_bytes(chunk_size=4096))
+        return _parse_md5_file(body)

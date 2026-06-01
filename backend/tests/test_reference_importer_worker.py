@@ -200,3 +200,95 @@ def test_streams_source_url_into_single_gcs_blob_and_reports_progress():
     assert f.filename == "gencode.v45.gtf.gz"
     assert f.gcs_uri == "gs://bioaf-references-test/annotation/gencode/v45/gencode.v45.gtf.gz"
     assert f.size_bytes == len(payload)
+
+
+def test_verifies_md5_when_source_md5_url_provided():
+    """When source_md5_url is set, the importer:
+
+    - fetches the MD5 file separately,
+    - computes the streamed payload's MD5 inline,
+    - emits a `verifying` callback,
+    - reports `active` on match and records the md5 on the ImportedFile.
+    """
+    import hashlib
+
+    from app.workers.reference_importer import ReferenceImporter
+
+    payload = b"GENCODE GTF body, totally legit\n" * 1024
+    expected_md5 = hashlib.md5(payload).hexdigest()
+    md5_file_body = f"{expected_md5}  gencode.v45.gtf.gz\n".encode()
+
+    http = _FakeHttpClient(
+        {
+            "https://ftp.example.org/data/refs/gencode.v45.gtf.gz": _FakeResponse(
+                status_code=200,
+                chunks=[payload[i : i + 64 * 1024] for i in range(0, len(payload), 64 * 1024)],
+                headers={"content-length": str(len(payload))},
+            ),
+            "https://ftp.example.org/data/refs/gencode.v45.gtf.gz.md5": _FakeResponse(
+                status_code=200,
+                chunks=[md5_file_body],
+                headers={"content-length": str(len(md5_file_body))},
+            ),
+        }
+    )
+    storage = _FakeStorageClient()
+    callback = _RecordingCallback()
+    config = _make_config(
+        source_md5_url="https://ftp.example.org/data/refs/gencode.v45.gtf.gz.md5",
+    )
+    importer = ReferenceImporter(config, http_client=http, storage_client=storage, callback=callback)
+
+    result = importer.run()
+
+    statuses = [e["status"] for e in callback.events]
+    assert "verifying" in statuses, statuses
+    assert statuses[-1] == "active"
+
+    blob = storage.blobs["bioaf-references-test"]["annotation/gencode/v45/gencode.v45.gtf.gz"]
+    assert blob.deleted is False
+    assert bytes(blob.data) == payload
+    assert result.files[0].md5 == expected_md5
+
+
+def test_reports_failed_when_md5_mismatches_and_purges_blob():
+    """If the upstream md5 file disagrees with the streamed payload, the
+    importer reports failure with a descriptive error_message AND deletes
+    the partial GCS object so the dataset prefix is clean for a retry."""
+    from app.workers.reference_importer import ReferenceImporter
+
+    payload = b"this body does not match the md5 file" * 1000
+    wrong_md5 = "0" * 32
+    md5_file_body = f"{wrong_md5}  gencode.v45.gtf.gz\n".encode()
+
+    http = _FakeHttpClient(
+        {
+            "https://ftp.example.org/data/refs/gencode.v45.gtf.gz": _FakeResponse(
+                status_code=200,
+                chunks=[payload[i : i + 64 * 1024] for i in range(0, len(payload), 64 * 1024)],
+                headers={"content-length": str(len(payload))},
+            ),
+            "https://ftp.example.org/data/refs/gencode.v45.gtf.gz.md5": _FakeResponse(
+                status_code=200,
+                chunks=[md5_file_body],
+                headers={"content-length": str(len(md5_file_body))},
+            ),
+        }
+    )
+    storage = _FakeStorageClient()
+    callback = _RecordingCallback()
+    config = _make_config(
+        source_md5_url="https://ftp.example.org/data/refs/gencode.v45.gtf.gz.md5",
+    )
+    importer = ReferenceImporter(config, http_client=http, storage_client=storage, callback=callback)
+
+    with pytest.raises(Exception):
+        importer.run()
+
+    failure = callback.events[-1]
+    assert failure["status"] == "failed"
+    assert "md5" in (failure.get("error_message") or "").lower()
+
+    # Partial blob purged.
+    blob = storage.blobs["bioaf-references-test"]["annotation/gencode/v45/gencode.v45.gtf.gz"]
+    assert blob.deleted is True
