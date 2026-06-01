@@ -27,3 +27,11 @@
   the `failed` state. Previously these controls were only on the
   import wizard, so navigating away during a long download left no way
   to see progress, cancel, or clean up a stuck or failed dataset.
+
+- Force GCS uploads to a resumable / chunked upload with an 8 MiB
+  chunk size on every blob the importer writes. Without this the
+  google-cloud-storage SDK tries to buffer the entire body in memory,
+  which back-pressures the URL stream and silently stalls multi-GB
+  imports well before they finish (e.g., a 10 GB 10x Genomics
+  reference would freeze around 56 MB). With chunked uploads, each
+  8 MiB block is PUT to GCS as soon as it has been read.

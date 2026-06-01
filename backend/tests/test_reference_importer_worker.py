@@ -70,6 +70,7 @@ class _FakeBlob:
         self.md5_hash: str | None = None
         self.content_type: str | None = None
         self.deleted = False
+        self.chunk_size: int | None = None
 
     @property
     def gcs_uri(self) -> str:
@@ -443,6 +444,40 @@ def test_passes_auth_header_to_source_request_when_provided():
     _, headers = src_calls[0]
     assert headers is not None
     assert headers.get("Authorization") == "Bearer secret-token"
+
+
+def test_blob_chunk_size_is_set_so_uploads_stream_in_chunks_not_buffered_in_memory():
+    """For multi-gig downloads on the 512MB backend container, the GCS
+    upload must be chunked / resumable. Setting blob.chunk_size before
+    upload_from_file tells google-cloud-storage to PUT each chunk to GCS
+    as soon as it has chunk_size bytes, rather than buffering the entire
+    body in memory. Without this, large imports stall: the SDK
+    back-pressures the reader and progress callbacks stop firing well
+    before the body finishes."""
+    from app.workers.reference_importer import ReferenceImporter
+
+    payload = b"x" * (2 * 1024 * 1024)  # 2 MB, plenty to verify the wiring
+    http = _FakeHttpClient(
+        {
+            "https://ftp.example.org/data/refs/gencode.v45.gtf.gz": _FakeResponse(
+                status_code=200,
+                chunks=[payload[i : i + 64 * 1024] for i in range(0, len(payload), 64 * 1024)],
+                headers={"content-length": str(len(payload))},
+            )
+        }
+    )
+    storage = _FakeStorageClient()
+    callback = _RecordingCallback()
+    importer = ReferenceImporter(_make_config(), http_client=http, storage_client=storage, callback=callback)
+
+    importer.run()
+
+    blob = storage.blobs["bioaf-references-test"]["annotation/gencode/v45/gencode.v45.gtf.gz"]
+    assert blob.chunk_size is not None, "chunk_size must be set so the upload is chunked / resumable"
+    # GCS resumable chunk_size must be a multiple of 256 KiB; assert that
+    # and a sane minimum so a single chunk doesn't try to buffer many MB.
+    assert blob.chunk_size % (256 * 1024) == 0
+    assert 256 * 1024 <= blob.chunk_size <= 32 * 1024 * 1024
 
 
 def test_extract_tar_gz_writes_each_member_as_its_own_blob():

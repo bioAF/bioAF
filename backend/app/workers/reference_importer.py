@@ -19,6 +19,12 @@ from dataclasses import dataclass, field
 from typing import Callable, Iterable, Protocol
 from urllib.parse import urlparse
 
+# GCS resumable-upload chunk size. Must be a multiple of 256 KiB. Picked at
+# 8 MiB so a multi-gig download streams through the backend's 512 MB
+# container without buffering the whole payload in memory: the SDK PUTs
+# each 8 MiB chunk to GCS as soon as it has been read from the source URL.
+_GCS_UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024
+
 
 @dataclass
 class ImporterConfig:
@@ -205,9 +211,16 @@ class ReferenceImporter:
 
             reader = _ProgressFileReader(response.iter_bytes(chunk_size=64 * 1024), _on_bytes)
 
+            def _new_blob(name: str):
+                b = bucket.blob(name)
+                # Force resumable, chunked upload so 10+ GB downloads don't
+                # try to buffer the whole body in memory.
+                b.chunk_size = _GCS_UPLOAD_CHUNK_SIZE
+                return b
+
             if cfg.extract_mode == "none":
                 blob_name = prefix + filename
-                blob = bucket.blob(blob_name)
+                blob = _new_blob(blob_name)
                 blob.upload_from_file(reader, content_type="application/octet-stream")
                 # size is settled after the stream completes (== bytes downloaded)
                 files_written.append((filename, blob, None))
@@ -217,7 +230,7 @@ class ReferenceImporter:
 
                 inner = filename[:-3] if filename.endswith(".gz") else filename
                 blob_name = prefix + inner
-                blob = bucket.blob(blob_name)
+                blob = _new_blob(blob_name)
                 gz = gzip.GzipFile(fileobj=reader, mode="rb")
                 counter = _CountingReader(gz)
                 blob.upload_from_file(counter, content_type="application/octet-stream")
@@ -232,7 +245,7 @@ class ReferenceImporter:
                         if not member.isfile():
                             continue
                         blob_name = prefix + member.name
-                        blob = bucket.blob(blob_name)
+                        blob = _new_blob(blob_name)
                         src = tf.extractfile(member)
                         if src is None:
                             continue
