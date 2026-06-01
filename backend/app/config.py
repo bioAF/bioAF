@@ -171,6 +171,14 @@ class Settings(BaseSettings):
     # Internal callbacks (importer container -> bioAF API)
     internal_token: str = ""
 
+    # Reference-data URL import: GKE Job that streams a public URL into the
+    # references bucket. The image reuses the backend container with the
+    # `python -m app.workers.reference_importer` entrypoint, so a separate
+    # importer image is not needed.
+    reference_importer_image: str = "ghcr.io/bioaf/bioaf-backend:latest"
+    reference_importer_namespace: str = "bioaf-pipelines"
+    reference_importer_service_account: str = "bioaf-reference-importer"
+
     # Data-at-rest encryption (comma-separated Fernet keys; first key is the
     # primary writer, all keys are accepted readers).
     encryption_keys: str = ""

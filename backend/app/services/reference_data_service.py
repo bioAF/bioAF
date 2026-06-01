@@ -27,6 +27,7 @@ from app.schemas.reference_dataset import (
     ReferenceImportStatusResponse,
     ReferenceUploadInitRequest,
 )
+from app.adapters.registry import get_compute_adapter
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import REFERENCE_DEPRECATED
@@ -445,6 +446,22 @@ class ReferenceDataService:
         return name
 
     @staticmethod
+    async def _get_api_base_url(session: AsyncSession) -> str:
+        """Read the publicly reachable bioAF API base URL from platform_config.
+
+        Used to render the callback URL the importer Pod posts progress
+        to. Set by the installer when configuring the VM's FQDN.
+        """
+        result = await session.execute(text("SELECT value FROM platform_config WHERE key = 'bioaf_api_url'"))
+        value = result.scalar_one_or_none()
+        if not value or value == "null":
+            raise ValueError(
+                "bioaf_api_url not configured. Set the public API URL in platform_config "
+                "before importing reference data from a URL."
+            )
+        return value
+
+    @staticmethod
     def _create_resumable_session(
         bucket_name: str,
         blob_path: str,
@@ -722,7 +739,7 @@ class ReferenceDataService:
         await session.delete(dataset)
         await session.flush()
 
-    # --- Import-from-URL (GKE Job) flow — spec §3 ------------------------------
+    # --- Import-from-URL (GKE Job) flow ----------------------------------------
 
     @staticmethod
     def _create_import_job(
@@ -734,28 +751,45 @@ class ReferenceDataService:
         bucket_name: str,
         extract: str,
         auth_header: str | None,
+        callback_url: str,
+        internal_token: str,
     ) -> str:
-        """Launch the importer GKE Job and return its name. Tests monkey-patch.
+        """Submit the importer GKE Job and return its name. Tests monkey-patch.
 
-        Production: builds a kubernetes BatchV1 Job from the spec in
-        documentation/spec-reference-data-ingest.md §3 and returns the Job's
-        metadata.name.
+        The Job Pod runs the bioAF backend image with `python -m
+        app.workers.reference_importer` as its entrypoint and is configured
+        purely via env vars; see app/workers/reference_importer.py.
+
+        Authentication to GKE goes through the shared compute adapter
+        (out-of-cluster client built from platform_config), the same path
+        the pipeline / notebook / cellxgene features use. Submitting from
+        the VM with a local kubeconfig is not supported.
         """
-        from kubernetes import client as k8s_client, config as k8s_config
+        from kubernetes import client as k8s_client
+
+        from app.config import settings
 
         try:
-            k8s_config.load_incluster_config()
-        except k8s_config.ConfigException:
-            k8s_config.load_kube_config()
+            batch_v1 = get_compute_adapter()._get_k8s_batch_client()
+        except RuntimeError as exc:
+            msg = str(exc)
+            if "No GKE cluster endpoint" in msg or "Deploy the compute stack" in msg:
+                raise ValueError(
+                    "Compute stack not configured. Deploy the compute stack before importing reference data from a URL."
+                ) from exc
+            raise
 
         nonce = re.sub(r"[^a-z0-9]", "", str(reference_id))[:6] or "0"
         job_name = f"refimport-{reference_id}-{nonce}"
+
         env = [
             k8s_client.V1EnvVar(name="REFERENCE_ID", value=str(reference_id)),
             k8s_client.V1EnvVar(name="SOURCE_URL", value=source_url),
             k8s_client.V1EnvVar(name="GCS_PREFIX", value=gcs_prefix),
             k8s_client.V1EnvVar(name="GCS_BUCKET", value=bucket_name),
             k8s_client.V1EnvVar(name="EXTRACT_MODE", value=extract),
+            k8s_client.V1EnvVar(name="CALLBACK_URL", value=callback_url),
+            k8s_client.V1EnvVar(name="INTERNAL_TOKEN", value=internal_token),
         ]
         if source_md5_url:
             env.append(k8s_client.V1EnvVar(name="SOURCE_MD5_URL", value=source_md5_url))
@@ -764,7 +798,8 @@ class ReferenceDataService:
 
         container = k8s_client.V1Container(
             name="importer",
-            image="us-central1-docker.pkg.dev/bioaf/bioaf-reference-importer:latest",
+            image=settings.reference_importer_image,
+            command=["python", "-m", "app.workers.reference_importer"],
             env=env,
             resources=k8s_client.V1ResourceRequirements(
                 requests={"cpu": "1", "memory": "2Gi"},
@@ -773,7 +808,7 @@ class ReferenceDataService:
         )
         pod_spec = k8s_client.V1PodSpec(
             restart_policy="Never",
-            service_account_name="bioaf-reference-importer",
+            service_account_name=settings.reference_importer_service_account,
             containers=[container],
         )
         job = k8s_client.V1Job(
@@ -792,21 +827,31 @@ class ReferenceDataService:
                 template=k8s_client.V1PodTemplateSpec(spec=pod_spec),
             ),
         )
-        k8s_client.BatchV1Api().create_namespaced_job(namespace="default", body=job)
+        batch_v1.create_namespaced_job(
+            namespace=settings.reference_importer_namespace,
+            body=job,
+        )
         return job_name
 
     @staticmethod
     def _delete_import_job(job_name: str) -> None:
         """Delete the importer GKE Job. Tests monkey-patch."""
-        from kubernetes import client as k8s_client, config as k8s_config
+        from app.config import settings
 
         try:
-            k8s_config.load_incluster_config()
-        except k8s_config.ConfigException:
-            k8s_config.load_kube_config()
-        k8s_client.BatchV1Api().delete_namespaced_job(
+            batch_v1 = get_compute_adapter()._get_k8s_batch_client()
+        except RuntimeError as exc:
+            msg = str(exc)
+            if "No GKE cluster endpoint" in msg or "Deploy the compute stack" in msg:
+                # Cancel should still purge the dataset; swallow the cluster
+                # unreachability so the rest of cancel_import can finish.
+                logger.warning("Cannot delete import Job %s (GKE unreachable): %s", job_name, msg)
+                return
+            raise
+
+        batch_v1.delete_namespaced_job(
             name=job_name,
-            namespace="default",
+            namespace=settings.reference_importer_namespace,
             propagation_policy="Background",
         )
 
@@ -832,6 +877,14 @@ class ReferenceDataService:
         bucket_name = await ReferenceDataService._get_references_bucket(session)
         gcs_prefix = f"{request.category}/{_slugify(request.name)}/{_slugify(request.version)}/"
 
+        api_base_url = await ReferenceDataService._get_api_base_url(session)
+        from app.config import settings
+
+        if not settings.internal_token:
+            raise ValueError(
+                "Internal token not configured. Set BIOAF_INTERNAL_TOKEN before importing reference data from a URL."
+            )
+
         dataset = ReferenceDataset(
             organization_id=org_id,
             name=request.name,
@@ -846,6 +899,8 @@ class ReferenceDataService:
         session.add(dataset)
         await session.flush()
 
+        callback_url = f"{api_base_url.rstrip('/')}/api/internal/references/{dataset.id}/import-progress"
+
         job_id = ReferenceDataService._create_import_job(
             reference_id=dataset.id,
             source_url=request.source_url,
@@ -854,6 +909,8 @@ class ReferenceDataService:
             bucket_name=bucket_name,
             extract=request.extract,
             auth_header=request.auth_header,
+            callback_url=callback_url,
+            internal_token=settings.internal_token,
         )
 
         progress = ReferenceImportProgress(

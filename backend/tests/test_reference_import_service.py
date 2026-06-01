@@ -41,11 +41,21 @@ async def comp_bio_user(session, admin_user):
 
 
 @pytest_asyncio.fixture
-async def configured_refs_bucket(session):
+async def configured_refs_bucket(session, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "internal_token", "test-internal-token")
     await session.execute(
         text(
             "INSERT INTO platform_config (key, value, updated_at) "
             "VALUES ('references_bucket_name', 'bioaf-references-test', NOW()) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
+    )
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value, updated_at) "
+            "VALUES ('bioaf_api_url', 'http://bioaf-backend:8000', NOW()) "
             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
         )
     )
