@@ -827,10 +827,22 @@ class ReferenceDataService:
                 template=k8s_client.V1PodTemplateSpec(spec=pod_spec),
             ),
         )
-        batch_v1.create_namespaced_job(
-            namespace=settings.reference_importer_namespace,
-            body=job,
-        )
+        from kubernetes.client.rest import ApiException
+
+        try:
+            batch_v1.create_namespaced_job(
+                namespace=settings.reference_importer_namespace,
+                body=job,
+            )
+        except ApiException as exc:
+            if exc.status == 404:
+                raise ValueError(
+                    "Compute stack not configured. The "
+                    f"{settings.reference_importer_namespace} namespace or "
+                    f"{settings.reference_importer_service_account} service account is missing. "
+                    "Deploy the compute stack before importing reference data from a URL."
+                ) from exc
+            raise
         return job_name
 
     @staticmethod

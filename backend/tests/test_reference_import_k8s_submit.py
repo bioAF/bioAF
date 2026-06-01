@@ -121,10 +121,12 @@ def test_create_import_job_sets_env_vars_matching_worker_contract(fake_compute_a
     assert env["INTERNAL_TOKEN"] == "t0p-secret"
 
 
-def test_create_import_job_uses_reference_importer_ksa(fake_compute_adapter):
-    """The Pod must run as the bioaf-reference-importer KSA so it picks up
-    Workload Identity credentials with GCS write access to the reference
-    bucket."""
+def test_create_import_job_uses_pipeline_runner_ksa(fake_compute_adapter):
+    """The Pod runs as bioaf-pipeline-runner so it inherits the existing
+    Workload Identity binding to the nextflow GSA (project-wide
+    storage.objectAdmin). Reusing this KSA avoids needing a dedicated
+    reference-importer KSA + GSA on day 1; least-privilege split can come
+    later."""
     with patch(
         "app.services.reference_data_service.get_compute_adapter", return_value=fake_compute_adapter
     ):
@@ -133,7 +135,7 @@ def test_create_import_job_uses_reference_importer_ksa(fake_compute_adapter):
     batch = fake_compute_adapter._get_k8s_batch_client.return_value
     body = batch.create_namespaced_job.call_args.kwargs.get("body") or batch.create_namespaced_job.call_args.args[1]
     pod_spec = body.spec.template.spec
-    assert pod_spec.service_account_name == "bioaf-reference-importer"
+    assert pod_spec.service_account_name == "bioaf-pipeline-runner"
 
 
 def test_create_import_job_raises_value_error_when_no_gke_endpoint(fake_compute_adapter):
@@ -143,6 +145,26 @@ def test_create_import_job_raises_value_error_when_no_gke_endpoint(fake_compute_
     API-layer ValueError -> 503 mapping kicks in."""
     fake_compute_adapter._get_k8s_batch_client.side_effect = RuntimeError(
         "No GKE cluster endpoint in platform_config. Deploy the compute stack first."
+    )
+    with patch(
+        "app.services.reference_data_service.get_compute_adapter", return_value=fake_compute_adapter
+    ):
+        with pytest.raises(ValueError) as excinfo:
+            ReferenceDataService._create_import_job(**_kwargs())
+        assert "not configured" in str(excinfo.value).lower()
+
+
+def test_create_import_job_translates_k8s_not_found_to_value_error(fake_compute_adapter):
+    """If the bioaf-pipelines namespace or pipeline-runner KSA doesn't exist
+    (compute stack not deployed yet), k8s returns 404 on Job creation.
+    Translate that into the same 'Compute stack not configured' ValueError
+    so the API surfaces a 503 with a clear remediation message instead of
+    a 500."""
+    from kubernetes.client.rest import ApiException
+
+    batch = fake_compute_adapter._get_k8s_batch_client.return_value
+    batch.create_namespaced_job.side_effect = ApiException(
+        status=404, reason="Not Found"
     )
     with patch(
         "app.services.reference_data_service.get_compute_adapter", return_value=fake_compute_adapter

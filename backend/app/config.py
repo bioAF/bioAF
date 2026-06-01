@@ -174,10 +174,13 @@ class Settings(BaseSettings):
     # Reference-data URL import: GKE Job that streams a public URL into the
     # references bucket. The image reuses the backend container with the
     # `python -m app.workers.reference_importer` entrypoint, so a separate
-    # importer image is not needed.
+    # importer image is not needed. The Pod runs as the pipeline-runner KSA,
+    # which carries Workload Identity to the bioaf-nextflow GSA with
+    # project-wide storage.objectAdmin (sufficient for writing to the
+    # references bucket).
     reference_importer_image: str = "ghcr.io/bioaf/bioaf-backend:latest"
     reference_importer_namespace: str = "bioaf-pipelines"
-    reference_importer_service_account: str = "bioaf-reference-importer"
+    reference_importer_service_account: str = "bioaf-pipeline-runner"
 
     # Data-at-rest encryption (comma-separated Fernet keys; first key is the
     # primary writer, all keys are accepted readers).
