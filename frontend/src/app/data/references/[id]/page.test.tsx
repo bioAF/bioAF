@@ -14,10 +14,11 @@ jest.mock("@/components/layout/Header", () => ({
   Header: () => <header data-testid="header" />,
 }));
 
+const mockPost = jest.fn();
 jest.mock("@/lib/api", () => ({
   api: {
     get: jest.fn(),
-    post: jest.fn(),
+    post: (...args: unknown[]) => mockPost(...args),
   },
 }));
 
@@ -52,6 +53,7 @@ const REF_DETAIL = {
 beforeEach(() => {
   mockPush.mockReset();
   mockGet.mockReset();
+  mockPost.mockReset();
 });
 
 describe("Reference Detail — versioning UX", () => {
@@ -104,5 +106,115 @@ describe("Reference Detail — versioning UX", () => {
     expect(await screen.findByText(/v44/)).toBeInTheDocument();
     // Versions tab marks the current row with a "current" badge
     expect(screen.getByText(/current/i)).toBeInTheDocument();
+  });
+});
+
+describe("Reference Detail - in-flight URL import", () => {
+  it("Shows progress and a Cancel import button when status is uploading", async () => {
+    const inflight = {
+      ...REF_DETAIL,
+      status: "uploading",
+    };
+    mockGet.mockImplementation((url: string) => {
+      if (url === "/api/references/1") return Promise.resolve(inflight);
+      if (url === "/api/references/1/import-status") {
+        return Promise.resolve({
+          reference_id: 1,
+          status: "downloading",
+          progress_pct: 37,
+          bytes_downloaded: 370_000,
+          total_bytes: 1_000_000,
+          error_message: null,
+          import_job_id: "refimport-1-inproc",
+          updated_at: "2026-06-01T15:00:00Z",
+        });
+      }
+      return Promise.resolve({ references: [], total: 0 });
+    });
+
+    render(<DataReferenceDetailPage />);
+
+    // The in-flight banner shows progress text + a Cancel button.
+    expect(await screen.findByText(/import in progress/i)).toBeInTheDocument();
+    expect(await screen.findByText(/37%/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /cancel import/i })).toBeInTheDocument();
+  });
+
+  it("Cancel import POSTs import-cancel and navigates back to the list", async () => {
+    const inflight = {
+      ...REF_DETAIL,
+      status: "uploading",
+    };
+    mockGet.mockImplementation((url: string) => {
+      if (url === "/api/references/1") return Promise.resolve(inflight);
+      if (url === "/api/references/1/import-status") {
+        return Promise.resolve({
+          reference_id: 1,
+          status: "downloading",
+          progress_pct: 10,
+          bytes_downloaded: 100,
+          total_bytes: 1000,
+          error_message: null,
+          import_job_id: null,
+          updated_at: null,
+        });
+      }
+      return Promise.resolve({ references: [], total: 0 });
+    });
+    mockPost.mockResolvedValue({});
+
+    render(<DataReferenceDetailPage />);
+
+    const cancelBtn = await screen.findByRole("button", { name: /cancel import/i });
+    fireEvent.click(cancelBtn);
+
+    await waitFor(() => {
+      expect(mockPost).toHaveBeenCalledWith("/api/references/1/import-cancel");
+    });
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith("/data/references");
+    });
+  });
+
+  it("Shows error message and a Delete button when status is failed", async () => {
+    const failed = {
+      ...REF_DETAIL,
+      status: "failed",
+      deprecation_note: "404 from upstream",
+    };
+    mockGet.mockImplementation((url: string) => {
+      if (url === "/api/references/1") return Promise.resolve(failed);
+      return Promise.resolve({ references: [], total: 0 });
+    });
+
+    render(<DataReferenceDetailPage />);
+
+    expect(await screen.findByText(/import failed/i)).toBeInTheDocument();
+    expect(screen.getByText(/404 from upstream/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /delete/i })).toBeInTheDocument();
+  });
+
+  it("Delete on a failed dataset POSTs import-cancel and navigates back to the list", async () => {
+    const failed = {
+      ...REF_DETAIL,
+      status: "failed",
+      deprecation_note: "boom",
+    };
+    mockGet.mockImplementation((url: string) => {
+      if (url === "/api/references/1") return Promise.resolve(failed);
+      return Promise.resolve({ references: [], total: 0 });
+    });
+    mockPost.mockResolvedValue({});
+
+    render(<DataReferenceDetailPage />);
+    const deleteBtn = await screen.findByRole("button", { name: /delete/i });
+    fireEvent.click(deleteBtn);
+
+    await waitFor(() => {
+      expect(mockPost).toHaveBeenCalledWith("/api/references/1/import-cancel");
+    });
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith("/data/references");
+    });
   });
 });

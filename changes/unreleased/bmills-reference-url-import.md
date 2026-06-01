@@ -20,3 +20,10 @@
   reported (typically `downloading`) and does not resume; the user
   cancels the stuck import (existing `Cancel` button on the Import
   Status modal) and retries.
+
+- The reference detail page now shows in-flight import progress and a
+  `Cancel import` button when the dataset is in the `uploading` state,
+  and an error banner with a `Delete` button when the dataset is in
+  the `failed` state. Previously these controls were only on the
+  import wizard, so navigating away during a long download left no way
+  to see progress, cancel, or clean up a stuck or failed dataset.
