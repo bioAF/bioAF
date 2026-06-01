@@ -480,7 +480,6 @@ def test_main_returns_zero_on_success_and_posts_callback_with_internal_token():
     with injected http/storage/callback, returns 0 on success. The
     callback the entrypoint constructs (when not injected) POSTs to
     callback_url with the X-Internal-Token header."""
-    import httpx
     import respx
 
     from app.workers.reference_importer import main
@@ -529,9 +528,7 @@ def test_main_returns_nonzero_on_failure():
         "INTERNAL_TOKEN": "t",
     }
     storage = _FakeStorageClient()
-    http = _FakeHttpClient(
-        {env["SOURCE_URL"]: _FakeResponse(status_code=404, chunks=[b""], headers={})}
-    )
+    http = _FakeHttpClient({env["SOURCE_URL"]: _FakeResponse(status_code=404, chunks=[b""], headers={})})
     callback = _RecordingCallback()
     rc = main(env=env, http_client=http, storage_client=storage, callback=callback)
     assert rc != 0

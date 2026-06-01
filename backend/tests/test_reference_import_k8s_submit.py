@@ -82,9 +82,7 @@ def test_create_import_job_builds_job_with_backend_image_and_worker_command(fake
     """The Job runs the bioAF backend image with `python -m
     app.workers.reference_importer` so the importer module can run inside
     the Pod without needing a separate image build."""
-    with patch(
-        "app.services.reference_data_service.get_compute_adapter", return_value=fake_compute_adapter
-    ):
+    with patch("app.services.reference_data_service.get_compute_adapter", return_value=fake_compute_adapter):
         ReferenceDataService._create_import_job(**_kwargs())
 
     batch = fake_compute_adapter._get_k8s_batch_client.return_value
@@ -99,9 +97,7 @@ def test_create_import_job_builds_job_with_backend_image_and_worker_command(fake
 def test_create_import_job_sets_env_vars_matching_worker_contract(fake_compute_adapter):
     """The env vars the Job writes must match the keys
     app.workers.reference_importer.config_from_env reads."""
-    with patch(
-        "app.services.reference_data_service.get_compute_adapter", return_value=fake_compute_adapter
-    ):
+    with patch("app.services.reference_data_service.get_compute_adapter", return_value=fake_compute_adapter):
         ReferenceDataService._create_import_job(
             **_kwargs(source_md5_url="https://ftp.example.org/data/gencode.v45.gtf.gz.md5", auth_header="Bearer x")
         )
@@ -127,9 +123,7 @@ def test_create_import_job_uses_pipeline_runner_ksa(fake_compute_adapter):
     storage.objectAdmin). Reusing this KSA avoids needing a dedicated
     reference-importer KSA + GSA on day 1; least-privilege split can come
     later."""
-    with patch(
-        "app.services.reference_data_service.get_compute_adapter", return_value=fake_compute_adapter
-    ):
+    with patch("app.services.reference_data_service.get_compute_adapter", return_value=fake_compute_adapter):
         ReferenceDataService._create_import_job(**_kwargs())
 
     batch = fake_compute_adapter._get_k8s_batch_client.return_value
@@ -146,9 +140,7 @@ def test_create_import_job_raises_value_error_when_no_gke_endpoint(fake_compute_
     fake_compute_adapter._get_k8s_batch_client.side_effect = RuntimeError(
         "No GKE cluster endpoint in platform_config. Deploy the compute stack first."
     )
-    with patch(
-        "app.services.reference_data_service.get_compute_adapter", return_value=fake_compute_adapter
-    ):
+    with patch("app.services.reference_data_service.get_compute_adapter", return_value=fake_compute_adapter):
         with pytest.raises(ValueError) as excinfo:
             ReferenceDataService._create_import_job(**_kwargs())
         assert "not configured" in str(excinfo.value).lower()
@@ -163,12 +155,8 @@ def test_create_import_job_translates_k8s_not_found_to_value_error(fake_compute_
     from kubernetes.client.rest import ApiException
 
     batch = fake_compute_adapter._get_k8s_batch_client.return_value
-    batch.create_namespaced_job.side_effect = ApiException(
-        status=404, reason="Not Found"
-    )
-    with patch(
-        "app.services.reference_data_service.get_compute_adapter", return_value=fake_compute_adapter
-    ):
+    batch.create_namespaced_job.side_effect = ApiException(status=404, reason="Not Found")
+    with patch("app.services.reference_data_service.get_compute_adapter", return_value=fake_compute_adapter):
         with pytest.raises(ValueError) as excinfo:
             ReferenceDataService._create_import_job(**_kwargs())
         assert "not configured" in str(excinfo.value).lower()
