@@ -191,7 +191,9 @@ def test_streams_source_url_into_single_gcs_blob_and_reports_progress():
     assert statuses[-1] == "active", statuses
 
     # Bytes downloaded monotonically non-decreasing, terminal matches total.
-    bytes_seen = [e.get("bytes_downloaded") for e in callback.events if e.get("bytes_downloaded") is not None]
+    bytes_seen: list[int] = [
+        e["bytes_downloaded"] for e in callback.events if e.get("bytes_downloaded") is not None
+    ]
     assert bytes_seen == sorted(bytes_seen)
     assert bytes_seen[-1] == len(payload)
 

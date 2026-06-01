@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass, field
-from typing import Callable, Iterable, Protocol
+from typing import IO, Callable, Iterable, Literal, Protocol, cast
 from urllib.parse import urlparse
 
 # GCS resumable-upload chunk size. Must be a multiple of 256 KiB. Picked at
@@ -231,7 +231,7 @@ class ReferenceImporter:
                 inner = filename[:-3] if filename.endswith(".gz") else filename
                 blob_name = prefix + inner
                 blob = _new_blob(blob_name)
-                gz = gzip.GzipFile(fileobj=reader, mode="rb")
+                gz = gzip.GzipFile(fileobj=cast(IO[bytes], reader), mode="rb")
                 counter = _CountingReader(gz)
                 blob.upload_from_file(counter, content_type="application/octet-stream")
                 files_written.append((inner, blob, counter.bytes_read))
@@ -239,8 +239,8 @@ class ReferenceImporter:
                 self._callback(status="extracting", bytes_downloaded=reader.bytes_read, total_bytes=total_bytes)
                 import tarfile
 
-                mode = "r|" if cfg.extract_mode == "tar" else "r|gz"
-                with tarfile.open(fileobj=reader, mode=mode) as tf:
+                tar_mode: Literal["r|", "r|gz"] = "r|" if cfg.extract_mode == "tar" else "r|gz"
+                with tarfile.open(fileobj=cast(IO[bytes], reader), mode=tar_mode) as tf:
                     for member in tf:
                         if not member.isfile():
                             continue
