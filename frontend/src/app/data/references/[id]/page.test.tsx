@@ -67,7 +67,8 @@ describe("Reference Detail — versioning UX", () => {
     fireEvent.click(btn);
     expect(mockPush).toHaveBeenCalled();
     const target = mockPush.mock.calls[0][0] as string;
-    expect(target).toContain("/data/references/new?");
+    expect(target).toContain("/data/references/add?");
+    expect(target).toContain("mode=upload");
     expect(target).toContain("name=GRCh38+GENCODE");
     expect(target).toContain("category=genome");
     expect(target).toContain("scope=public");

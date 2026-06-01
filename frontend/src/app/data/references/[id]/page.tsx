@@ -259,11 +259,12 @@ export default function DataReferenceDetailPage() {
                 <button
                   onClick={() => {
                     const params = new URLSearchParams({
+                      mode: "upload",
                       name: reference.name,
                       category: reference.category,
                       scope: reference.scope,
                     });
-                    router.push(`/data/references/new?${params}`);
+                    router.push(`/data/references/add?${params}`);
                   }}
                   className="bg-bioaf-50 text-bioaf-700 border border-bioaf-200 px-3 py-1.5 rounded-md text-sm hover:bg-bioaf-100 transition-colors"
                 >

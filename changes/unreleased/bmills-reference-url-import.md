@@ -35,3 +35,22 @@
   imports well before they finish (e.g., a 10 GB 10x Genomics
   reference would freeze around 56 MB). With chunked uploads, each
   8 MiB block is PUT to GCS as soon as it has been read.
+
+- Merge "Add Reference" and "Import from URL" into a single
+  "Add Reference Data" button. The unified page has an Upload / URL
+  Import toggle at the top and renders the matching form. The
+  "Upload new version" button on the reference detail page now
+  deep-links into the same page with the Upload side preselected.
+
+- The version field on both forms is now optional and auto-populated.
+  When the user enters or selects a name + category, the page fetches
+  the existing versions for that name and prefills the field with the
+  next `v<N>` (or `v1` if this is the first version). Users keeping
+  their own naming convention (e.g., `GRCh38.p14`) can still type any
+  value to override.
+
+- The URL Import form now auto-selects the extract mode from the
+  source URL's file extension: `.tar.gz` / `.tgz` -> `tar.gz`,
+  `.tar` -> `tar`, `.gz` -> `gzip`, anything else -> `none`. As soon
+  as the user changes the extract dropdown themselves, later URL edits
+  no longer overwrite their selection.
