@@ -305,3 +305,66 @@ class ReferenceImporter:
             response.raise_for_status()
             body = b"".join(response.iter_bytes(chunk_size=4096))
         return _parse_md5_file(body)
+
+
+def _make_http_callback(callback_url: str, internal_token: str):
+    """Build a callback fn that POSTs progress updates to the backend's
+    internal endpoint with the X-Internal-Token header set."""
+    import httpx
+
+    def _callback(**payload):
+        # Drop keys whose values are None so the JSON body is minimal.
+        body = {k: v for k, v in payload.items() if v is not None}
+        try:
+            httpx.post(
+                callback_url,
+                json=body,
+                headers={"X-Internal-Token": internal_token},
+                timeout=10.0,
+            )
+        except Exception:
+            # Don't let a transient callback error abort the import.
+            pass
+
+    return _callback
+
+
+def main(
+    env=None,
+    *,
+    http_client=None,
+    storage_client=None,
+    callback=None,
+) -> int:
+    """CLI entrypoint. Used by `python -m app.workers.reference_importer`
+    inside the GKE Job Pod. Returns 0 on success, 1 on failure."""
+    env = env if env is not None else os.environ
+    cfg = config_from_env(env)
+
+    if http_client is None:
+        import httpx
+
+        http_client = httpx.Client(timeout=httpx.Timeout(connect=30.0, read=None, write=60.0, pool=None))
+    if storage_client is None:
+        from google.cloud import storage as gcs_storage
+
+        storage_client = gcs_storage.Client()
+    if callback is None:
+        callback = _make_http_callback(cfg.callback_url, cfg.internal_token)
+
+    try:
+        ReferenceImporter(
+            cfg,
+            http_client=http_client,
+            storage_client=storage_client,
+            callback=callback,
+        ).run()
+        return 0
+    except Exception:
+        return 1
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())

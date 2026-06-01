@@ -475,6 +475,68 @@ def test_config_from_env_reads_all_supported_keys():
     assert cfg.internal_token == env["INTERNAL_TOKEN"]
 
 
+def test_main_returns_zero_on_success_and_posts_callback_with_internal_token():
+    """The CLI entrypoint: builds the config from env, runs the importer
+    with injected http/storage/callback, returns 0 on success. The
+    callback the entrypoint constructs (when not injected) POSTs to
+    callback_url with the X-Internal-Token header."""
+    import httpx
+    import respx
+
+    from app.workers.reference_importer import main
+
+    payload = b"ok" * 256
+    env = {
+        "REFERENCE_ID": "11",
+        "SOURCE_URL": "https://ftp.example.org/data/ok.txt",
+        "GCS_BUCKET": "bioaf-references-test",
+        "GCS_PREFIX": "annotation/ok/v1/",
+        "CALLBACK_URL": "http://backend:8000/api/internal/references/11/import-progress",
+        "INTERNAL_TOKEN": "topsecret",
+    }
+    storage = _FakeStorageClient()
+    http = _FakeHttpClient(
+        {
+            env["SOURCE_URL"]: _FakeResponse(
+                status_code=200,
+                chunks=[payload],
+                headers={"content-length": str(len(payload))},
+            )
+        }
+    )
+
+    with respx.mock(assert_all_called=True) as router:
+        route = router.post(env["CALLBACK_URL"]).respond(200, json={"ok": True})
+        rc = main(env=env, http_client=http, storage_client=storage)
+
+    assert rc == 0
+    # The auto-built callback POSTs at least once and includes the internal token.
+    assert route.called
+    last_call = route.calls[-1]
+    assert last_call.request.headers.get("x-internal-token") == "topsecret"
+
+
+def test_main_returns_nonzero_on_failure():
+    """When the source URL returns 404, main reports failure and returns 1."""
+    from app.workers.reference_importer import main
+
+    env = {
+        "REFERENCE_ID": "12",
+        "SOURCE_URL": "https://ftp.example.org/missing.txt",
+        "GCS_BUCKET": "bioaf-references-test",
+        "GCS_PREFIX": "annotation/missing/v1/",
+        "CALLBACK_URL": "http://backend:8000/api/internal/references/12/import-progress",
+        "INTERNAL_TOKEN": "t",
+    }
+    storage = _FakeStorageClient()
+    http = _FakeHttpClient(
+        {env["SOURCE_URL"]: _FakeResponse(status_code=404, chunks=[b""], headers={})}
+    )
+    callback = _RecordingCallback()
+    rc = main(env=env, http_client=http, storage_client=storage, callback=callback)
+    assert rc != 0
+
+
 def test_config_from_env_defaults_optional_fields():
     """Optional env vars (SOURCE_MD5_URL, SOURCE_AUTH_HEADER) absent -> None.
     EXTRACT_MODE absent -> 'none'."""
