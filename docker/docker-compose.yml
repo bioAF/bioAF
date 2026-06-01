@@ -34,11 +34,6 @@ services:
       BIOAF_GCP_PROJECT_ID: ${GCP_PROJECT_ID:-}
       BIOAF_DEBUG: "false"
       BIOAF_USE_SECRET_MANAGER: "false"
-      # Surface the backend's own image tag so the reference-import GKE Job
-      # pulls a matching image (instead of always pulling :latest from ghcr.io,
-      # which on a dev / branch build is the wrong image and crashes the Pod
-      # with ModuleNotFoundError on any module the released image lacks).
-      BIOAF_IMAGE_TAG: ${BIOAF_IMAGE_TAG:-latest}
     volumes:
       - ../update-requests:/app/update-requests
       - ../update-status:/app/update-status

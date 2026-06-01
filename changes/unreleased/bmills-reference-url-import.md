@@ -3,36 +3,20 @@
 - Reference data import-from-URL works end to end. The endpoint previously
   500'd on every call because the backend tried to load a kubeconfig that
   doesn't exist in the VM-resident container, and the importer image and
-  service account it referenced had never been built. The submission path
-  now authenticates to bioaf-cluster via the same out-of-cluster client
-  the compute and notebook adapters use, the Pod runs the bioAF backend
-  image with `python -m app.workers.reference_importer` as its
-  entrypoint, and it reuses the existing `bioaf-pipeline-runner` KSA for
-  GCS access via Workload Identity. The Pod streams the source URL
-  straight to GCS, optionally verifies an upstream `.md5` file, and
-  optionally extracts gzip / tar / tar.gz archives. It POSTs progress
-  back to `/api/internal/references/{id}/import-progress` so the Import
-  Status modal updates in real time without holding the request open.
+  service account it referenced had never been built. The import now
+  runs as an in-process asyncio background task in the backend: the
+  HTTP request returns immediately after creating the dataset and
+  progress rows, and the task streams the source URL straight into GCS
+  via the existing `UploadService` credentials, optionally verifies an
+  upstream `.md5` file, and optionally extracts gzip / tar / tar.gz
+  archives. Progress is written directly to `ReferenceImportProgress`
+  per chunk so the Import Status modal updates in real time. There is
+  no GKE Job, no importer image, no internal callback token, no
+  separate KSA -- the worker code is the running backend code, so a
+  dev / branch build never desynchronizes from the worker the way a
+  Pod-based design would.
 
-- The importer Pod's callback URL is now derived from the existing
-  Networking settings (`networking_hostname`, `networking_domain`,
-  `networking_https_enforced`) that operators already configure for the
-  UI / API to be reachable; no separate platform_config key. The
-  endpoint returns 503 with a clear remediation message if Networking
-  has not been configured yet, instead of failing late inside the Pod.
-
-- The internal callback token the importer Pod uses to authenticate
-  back to the bioAF API is now bootstrapped automatically on the first
-  URL import. A random 256-bit token is generated, stored in
-  platform_config as `internal_callback_token`, and reused for every
-  subsequent import. The `BIOAF_INTERNAL_TOKEN` env var still overrides
-  it when set, but is no longer required for the feature to work.
-
-- The reference-importer Pod's image now tracks the backend's own image
-  tag via the `BIOAF_IMAGE_TAG` env var that docker-compose already uses
-  to pin the backend container. Previously the Pod always pulled
-  `ghcr.io/bioaf/bioaf-backend:latest`, which on a dev / branch build is
-  the wrong image: the released `:latest` does not contain the new
-  worker module and the Pod crashed immediately with ModuleNotFoundError.
-  Setting an explicit `BIOAF_REFERENCE_IMPORTER_IMAGE` still overrides
-  the tag-derived default for one-off debug builds in private registries.
+- A backend restart mid-import leaves the row in whichever state was last
+  reported (typically `downloading`) and does not resume; the user
+  cancels the stuck import (existing `Cancel` button on the Import
+  Status modal) and retries.

@@ -1,19 +1,19 @@
 """Reference-data URL import worker.
 
-Runs inside the GKE Job Pod submitted by `ReferenceDataService._create_import_job`.
-Reads its parameters from `ImporterConfig` (env vars in production), streams
-the source URL into the org's reference GCS bucket, optionally verifies MD5
-and extracts, and POSTs progress updates back to the backend's internal
-callback endpoint.
+Runs as an in-process asyncio background task scheduled by
+`ReferenceDataService._schedule_import`. Streams the source URL straight
+into the org's reference GCS bucket, optionally verifies an upstream MD5
+file, optionally extracts gzip / tar / tar.gz archives, and reports
+progress via a caller-supplied callback so the service layer can write
+updates to the `ReferenceImportProgress` row.
 
-The class is structured so that HTTP, GCS, and the callback are injectable
-for tests. See backend/tests/test_reference_importer_worker.py.
+HTTP, GCS, and the callback are injectable for tests. See
+backend/tests/test_reference_importer_worker.py.
 """
 
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, Protocol
@@ -26,34 +26,13 @@ class ImporterConfig:
     source_url: str
     gcs_bucket: str
     gcs_prefix: str
-    callback_url: str
-    internal_token: str
+    # Unused in-process; retained so the dataclass shape stays stable for
+    # any future out-of-process deployment that needs a callback URL.
+    callback_url: str = ""
+    internal_token: str = ""
     source_md5_url: str | None = None
     auth_header: str | None = None
     extract_mode: str = "none"
-
-
-def config_from_env(env) -> ImporterConfig:
-    """Build an ImporterConfig from a mapping (typically os.environ) using
-    the env-var contract written by
-    ReferenceDataService._create_import_job. Empty strings are treated as
-    unset for the optional fields."""
-
-    def _opt(key: str) -> str | None:
-        value = env.get(key)
-        return value if value else None
-
-    return ImporterConfig(
-        reference_id=int(env["REFERENCE_ID"]),
-        source_url=env["SOURCE_URL"],
-        gcs_bucket=env["GCS_BUCKET"],
-        gcs_prefix=env["GCS_PREFIX"],
-        callback_url=env["CALLBACK_URL"],
-        internal_token=env["INTERNAL_TOKEN"],
-        source_md5_url=_opt("SOURCE_MD5_URL"),
-        auth_header=_opt("SOURCE_AUTH_HEADER"),
-        extract_mode=env.get("EXTRACT_MODE") or "none",
-    )
 
 
 @dataclass
@@ -166,8 +145,7 @@ class Md5MismatchError(Exception):
 
 def _filename_from_url(url: str) -> str:
     path = urlparse(url).path
-    name = os.path.basename(path) or "download"
-    return name
+    return path.rsplit("/", 1)[-1] or "download"
 
 
 class ReferenceImporter:
@@ -305,66 +283,3 @@ class ReferenceImporter:
             response.raise_for_status()
             body = b"".join(response.iter_bytes(chunk_size=4096))
         return _parse_md5_file(body)
-
-
-def _make_http_callback(callback_url: str, internal_token: str):
-    """Build a callback fn that POSTs progress updates to the backend's
-    internal endpoint with the X-Internal-Token header set."""
-    import httpx
-
-    def _callback(**payload):
-        # Drop keys whose values are None so the JSON body is minimal.
-        body = {k: v for k, v in payload.items() if v is not None}
-        try:
-            httpx.post(
-                callback_url,
-                json=body,
-                headers={"X-Internal-Token": internal_token},
-                timeout=10.0,
-            )
-        except Exception:
-            # Don't let a transient callback error abort the import.
-            pass
-
-    return _callback
-
-
-def main(
-    env=None,
-    *,
-    http_client=None,
-    storage_client=None,
-    callback=None,
-) -> int:
-    """CLI entrypoint. Used by `python -m app.workers.reference_importer`
-    inside the GKE Job Pod. Returns 0 on success, 1 on failure."""
-    env = env if env is not None else os.environ
-    cfg = config_from_env(env)
-
-    if http_client is None:
-        import httpx
-
-        http_client = httpx.Client(timeout=httpx.Timeout(connect=30.0, read=None, write=60.0, pool=None))
-    if storage_client is None:
-        from google.cloud import storage as gcs_storage
-
-        storage_client = gcs_storage.Client()
-    if callback is None:
-        callback = _make_http_callback(cfg.callback_url, cfg.internal_token)
-
-    try:
-        ReferenceImporter(
-            cfg,
-            http_client=http_client,
-            storage_client=storage_client,
-            callback=callback,
-        ).run()
-        return 0
-    except Exception:
-        return 1
-
-
-if __name__ == "__main__":
-    import sys
-
-    sys.exit(main())

@@ -65,10 +65,7 @@ async def bench_token(bench_user) -> str:
 
 
 @pytest_asyncio.fixture
-async def configured_refs_bucket(session, monkeypatch):
-    from app.config import settings
-
-    monkeypatch.setattr(settings, "internal_token", "test-internal-token")
+async def configured_refs_bucket(session):
     await session.execute(
         text(
             "INSERT INTO platform_config (key, value, updated_at) "
@@ -76,20 +73,11 @@ async def configured_refs_bucket(session, monkeypatch):
             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
         )
     )
-    await session.execute(
-        text(
-            "INSERT INTO platform_config (key, value) VALUES "
-            "('networking_hostname', 'bioaf'),"
-            "('networking_domain', 'example.com'),"
-            "('networking_https_enforced', 'true') "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
-        )
-    )
     await session.commit()
 
 
-def _stub_create_job(*, reference_id, **_):
-    return f"refimport-{reference_id}-stub"
+def _stub_schedule(*, dataset_id, request):
+    return f"refimport-{dataset_id}-inproc"
 
 
 VALID_IMPORT = {
@@ -104,7 +92,7 @@ VALID_IMPORT = {
 
 @pytest.mark.asyncio
 async def test_import_route_starts_job(client, comp_bio_token, configured_refs_bucket):
-    with patch.object(ReferenceDataService, "_create_import_job", side_effect=_stub_create_job):
+    with patch.object(ReferenceDataService, "_schedule_import", side_effect=_stub_schedule):
         response = await client.post(
             "/api/references/import",
             json=VALID_IMPORT,
@@ -129,7 +117,7 @@ async def test_import_route_rejects_bench(client, bench_token, configured_refs_b
 
 @pytest.mark.asyncio
 async def test_import_route_409_on_duplicate(client, comp_bio_token, configured_refs_bucket):
-    with patch.object(ReferenceDataService, "_create_import_job", side_effect=_stub_create_job):
+    with patch.object(ReferenceDataService, "_schedule_import", side_effect=_stub_schedule):
         first = await client.post(
             "/api/references/import",
             json=VALID_IMPORT,
@@ -146,7 +134,7 @@ async def test_import_route_409_on_duplicate(client, comp_bio_token, configured_
 
 @pytest.mark.asyncio
 async def test_import_status_route_returns_progress(client, comp_bio_token, configured_refs_bucket, session):
-    with patch.object(ReferenceDataService, "_create_import_job", side_effect=_stub_create_job):
+    with patch.object(ReferenceDataService, "_schedule_import", side_effect=_stub_schedule):
         init = await client.post(
             "/api/references/import",
             json=VALID_IMPORT,
@@ -175,7 +163,7 @@ async def test_import_status_404_when_unknown(client, comp_bio_token, configured
 
 @pytest.mark.asyncio
 async def test_import_cancel_route_purges(client, comp_bio_token, configured_refs_bucket, session):
-    with patch.object(ReferenceDataService, "_create_import_job", side_effect=_stub_create_job):
+    with patch.object(ReferenceDataService, "_schedule_import", side_effect=_stub_schedule):
         init = await client.post(
             "/api/references/import",
             json=VALID_IMPORT,
@@ -183,10 +171,7 @@ async def test_import_cancel_route_purges(client, comp_bio_token, configured_ref
         )
     ref_id = init.json()["reference_id"]
 
-    with (
-        patch.object(ReferenceDataService, "_delete_import_job", return_value=None),
-        patch.object(ReferenceDataService, "_delete_blobs", return_value=None),
-    ):
+    with patch.object(ReferenceDataService, "_delete_blobs", return_value=None):
         response = await client.post(
             f"/api/references/{ref_id}/import-cancel",
             headers={"Authorization": f"Bearer {comp_bio_token}"},

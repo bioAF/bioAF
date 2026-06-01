@@ -168,32 +168,6 @@ class Settings(BaseSettings):
     # Bcrypt
     bcrypt_rounds: int = 12
 
-    # Internal callbacks (importer container -> bioAF API)
-    internal_token: str = ""
-
-    # The image tag of the bioAF backend container itself. Sourced from the
-    # same BIOAF_IMAGE_TAG env var docker-compose uses to pin the backend
-    # image; the importer Pod defaults to this same tag so a dev build /
-    # branch build never accidentally pulls the released ':latest' image
-    # from ghcr.io and fails with ModuleNotFoundError on a module the
-    # released image doesn't have yet.
-    bioaf_image_tag: str = "latest"
-
-    # Reference-data URL import: GKE Job that streams a public URL into the
-    # references bucket. The image reuses the backend container with the
-    # `python -m app.workers.reference_importer` entrypoint, so a separate
-    # importer image is not needed. The Pod runs as the pipeline-runner KSA,
-    # which carries Workload Identity to the bioaf-nextflow GSA with
-    # project-wide storage.objectAdmin (sufficient for writing to the
-    # references bucket).
-    #
-    # Empty default = derive from bioaf_image_tag at use site. An explicit
-    # override wins (e.g. to point at a private-registry debug build
-    # without redefining the whole backend's tag).
-    reference_importer_image: str = ""
-    reference_importer_namespace: str = "bioaf-pipelines"
-    reference_importer_service_account: str = "bioaf-pipeline-runner"
-
     # Data-at-rest encryption (comma-separated Fernet keys; first key is the
     # primary writer, all keys are accepted readers).
     encryption_keys: str = ""

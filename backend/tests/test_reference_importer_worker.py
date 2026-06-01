@@ -1,9 +1,11 @@
-"""TDD: backend/app/workers/reference_importer.py — the GKE Job entrypoint.
+"""TDD: backend/app/workers/reference_importer.py — the import worker.
 
-The importer runs inside a Pod on bioaf-cluster, reads its inputs from env
-vars, streams the source URL into GCS, optionally verifies MD5 and extracts,
-and POSTs progress updates back to the backend via the internal callback
-endpoint. See local/specs/reference-url-import.md.
+ReferenceImporter is run from an in-process asyncio background task in
+the backend (scheduled by ReferenceDataService._schedule_import). It
+streams the source URL straight into GCS, optionally verifies an upstream
+MD5 file, optionally extracts gzip / tar / tar.gz archives, and reports
+progress via a caller-supplied callback so the service layer can write
+updates to the ReferenceImportProgress row.
 
 These tests inject fake HTTP + GCS + callback dependencies so they assert
 behavior (what the importer does), not implementation (which library it
@@ -137,8 +139,6 @@ def _make_config(**overrides):
         gcs_bucket="bioaf-references-test",
         gcs_prefix="annotation/gencode/v45/",
         extract_mode="none",
-        callback_url="http://backend/api/internal/references/42/import-progress",
-        internal_token="t0ken",
     )
     base.update(overrides)
     return ImporterConfig(**base)
@@ -443,114 +443,6 @@ def test_passes_auth_header_to_source_request_when_provided():
     _, headers = src_calls[0]
     assert headers is not None
     assert headers.get("Authorization") == "Bearer secret-token"
-
-
-def test_config_from_env_reads_all_supported_keys():
-    """The Pod is configured exclusively via env vars set by
-    ReferenceDataService._create_import_job. config_from_env is the
-    canonical mapping; it must read every key the Job spec writes."""
-    from app.workers.reference_importer import config_from_env
-
-    env = {
-        "REFERENCE_ID": "42",
-        "SOURCE_URL": "https://ftp.example.org/x.tar.gz",
-        "SOURCE_MD5_URL": "https://ftp.example.org/x.tar.gz.md5",
-        "SOURCE_AUTH_HEADER": "Bearer abc",
-        "GCS_BUCKET": "bioaf-references-prod",
-        "GCS_PREFIX": "annotation/x/v1/",
-        "EXTRACT_MODE": "tar.gz",
-        "CALLBACK_URL": "http://backend:8000/api/internal/references/42/import-progress",
-        "INTERNAL_TOKEN": "supersecret",
-    }
-
-    cfg = config_from_env(env)
-    assert cfg.reference_id == 42
-    assert cfg.source_url == env["SOURCE_URL"]
-    assert cfg.source_md5_url == env["SOURCE_MD5_URL"]
-    assert cfg.auth_header == env["SOURCE_AUTH_HEADER"]
-    assert cfg.gcs_bucket == env["GCS_BUCKET"]
-    assert cfg.gcs_prefix == env["GCS_PREFIX"]
-    assert cfg.extract_mode == "tar.gz"
-    assert cfg.callback_url == env["CALLBACK_URL"]
-    assert cfg.internal_token == env["INTERNAL_TOKEN"]
-
-
-def test_main_returns_zero_on_success_and_posts_callback_with_internal_token():
-    """The CLI entrypoint: builds the config from env, runs the importer
-    with injected http/storage/callback, returns 0 on success. The
-    callback the entrypoint constructs (when not injected) POSTs to
-    callback_url with the X-Internal-Token header."""
-    import respx
-
-    from app.workers.reference_importer import main
-
-    payload = b"ok" * 256
-    env = {
-        "REFERENCE_ID": "11",
-        "SOURCE_URL": "https://ftp.example.org/data/ok.txt",
-        "GCS_BUCKET": "bioaf-references-test",
-        "GCS_PREFIX": "annotation/ok/v1/",
-        "CALLBACK_URL": "http://backend:8000/api/internal/references/11/import-progress",
-        "INTERNAL_TOKEN": "topsecret",
-    }
-    storage = _FakeStorageClient()
-    http = _FakeHttpClient(
-        {
-            env["SOURCE_URL"]: _FakeResponse(
-                status_code=200,
-                chunks=[payload],
-                headers={"content-length": str(len(payload))},
-            )
-        }
-    )
-
-    with respx.mock(assert_all_called=True) as router:
-        route = router.post(env["CALLBACK_URL"]).respond(200, json={"ok": True})
-        rc = main(env=env, http_client=http, storage_client=storage)
-
-    assert rc == 0
-    # The auto-built callback POSTs at least once and includes the internal token.
-    assert route.called
-    last_call = route.calls[-1]
-    assert last_call.request.headers.get("x-internal-token") == "topsecret"
-
-
-def test_main_returns_nonzero_on_failure():
-    """When the source URL returns 404, main reports failure and returns 1."""
-    from app.workers.reference_importer import main
-
-    env = {
-        "REFERENCE_ID": "12",
-        "SOURCE_URL": "https://ftp.example.org/missing.txt",
-        "GCS_BUCKET": "bioaf-references-test",
-        "GCS_PREFIX": "annotation/missing/v1/",
-        "CALLBACK_URL": "http://backend:8000/api/internal/references/12/import-progress",
-        "INTERNAL_TOKEN": "t",
-    }
-    storage = _FakeStorageClient()
-    http = _FakeHttpClient({env["SOURCE_URL"]: _FakeResponse(status_code=404, chunks=[b""], headers={})})
-    callback = _RecordingCallback()
-    rc = main(env=env, http_client=http, storage_client=storage, callback=callback)
-    assert rc != 0
-
-
-def test_config_from_env_defaults_optional_fields():
-    """Optional env vars (SOURCE_MD5_URL, SOURCE_AUTH_HEADER) absent -> None.
-    EXTRACT_MODE absent -> 'none'."""
-    from app.workers.reference_importer import config_from_env
-
-    env = {
-        "REFERENCE_ID": "7",
-        "SOURCE_URL": "https://ftp.example.org/a.txt",
-        "GCS_BUCKET": "b",
-        "GCS_PREFIX": "p/",
-        "CALLBACK_URL": "http://backend/cb",
-        "INTERNAL_TOKEN": "t",
-    }
-    cfg = config_from_env(env)
-    assert cfg.source_md5_url is None
-    assert cfg.auth_header is None
-    assert cfg.extract_mode == "none"
 
 
 def test_extract_tar_gz_writes_each_member_as_its_own_blob():
