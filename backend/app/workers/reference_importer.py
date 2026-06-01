@@ -67,6 +67,22 @@ class _HttpClient(Protocol):
 ProgressCallback = Callable[..., None]
 
 
+class _CountingReader:
+    """File-like wrapper that delegates read() to another file-like and
+    counts the bytes that flow through. Used to size GCS uploads whose total
+    size we don't know up-front (e.g., the output of a gzip decompressor)."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.bytes_read = 0
+
+    def read(self, size: int = -1) -> bytes:
+        chunk = self._inner.read(size) if size >= 0 else self._inner.read()
+        if chunk:
+            self.bytes_read += len(chunk)
+        return chunk
+
+
 class _ProgressFileReader:
     """Wraps an HTTP byte iterator as a file-like with a `read(n)` interface,
     reporting bytes read via a callback and computing an MD5 hash of the
@@ -150,11 +166,11 @@ class ReferenceImporter:
     def run(self) -> ImportResult:
         cfg = self._cfg
         filename = _filename_from_url(cfg.source_url)
-        blob_name = cfg.gcs_prefix.rstrip("/") + "/" + filename
-
         headers = {"Authorization": cfg.auth_header} if cfg.auth_header else None
         bucket = self._storage.bucket(cfg.gcs_bucket)
-        blob = bucket.blob(blob_name)
+        prefix = cfg.gcs_prefix.rstrip("/") + "/"
+
+        files_written: list[tuple[str, object, int]] = []
 
         with self._http.stream("GET", cfg.source_url, headers=headers) as response:
             response.raise_for_status()
@@ -177,21 +193,57 @@ class ReferenceImporter:
                 )
 
             reader = _ProgressFileReader(response.iter_bytes(chunk_size=64 * 1024), _on_bytes)
-            blob.upload_from_file(reader, content_type="application/octet-stream")
 
-        size = reader.bytes_read
+            if cfg.extract_mode == "none":
+                blob_name = prefix + filename
+                blob = bucket.blob(blob_name)
+                blob.upload_from_file(reader, content_type="application/octet-stream")
+                # size is settled after the stream completes (== bytes downloaded)
+                files_written.append((filename, blob, None))
+            elif cfg.extract_mode == "gzip":
+                self._callback(status="extracting", bytes_downloaded=reader.bytes_read, total_bytes=total_bytes)
+                import gzip
+
+                inner = filename[:-3] if filename.endswith(".gz") else filename
+                blob_name = prefix + inner
+                blob = bucket.blob(blob_name)
+                gz = gzip.GzipFile(fileobj=reader, mode="rb")
+                counter = _CountingReader(gz)
+                blob.upload_from_file(counter, content_type="application/octet-stream")
+                files_written.append((inner, blob, counter.bytes_read))
+            elif cfg.extract_mode in ("tar", "tar.gz"):
+                self._callback(status="extracting", bytes_downloaded=reader.bytes_read, total_bytes=total_bytes)
+                import tarfile
+
+                mode = "r|" if cfg.extract_mode == "tar" else "r|gz"
+                with tarfile.open(fileobj=reader, mode=mode) as tf:
+                    for member in tf:
+                        if not member.isfile():
+                            continue
+                        blob_name = prefix + member.name
+                        blob = bucket.blob(blob_name)
+                        src = tf.extractfile(member)
+                        if src is None:
+                            continue
+                        blob.upload_from_file(src, content_type="application/octet-stream", size=member.size)
+                        files_written.append((member.name, blob, member.size))
+            else:
+                raise ValueError(f"Unsupported extract_mode: {cfg.extract_mode!r}")
+
+        downloaded = reader.bytes_read
         computed_md5 = reader.md5_hex
 
         if cfg.source_md5_url:
             self._callback(
                 status="verifying",
                 progress_pct=100,
-                bytes_downloaded=size,
-                total_bytes=size,
+                bytes_downloaded=downloaded,
+                total_bytes=downloaded,
             )
             expected = self._fetch_expected_md5(cfg.source_md5_url)
             if expected != computed_md5:
-                blob.delete()
+                for _, blob, _size in files_written:
+                    blob.delete()
                 msg = f"md5 mismatch: expected {expected} got {computed_md5}"
                 self._callback(status="failed", error_message=msg)
                 raise Md5MismatchError(msg)
@@ -199,18 +251,19 @@ class ReferenceImporter:
         self._callback(
             status="active",
             progress_pct=100,
-            bytes_downloaded=size,
-            total_bytes=size,
+            bytes_downloaded=downloaded,
+            total_bytes=downloaded,
         )
 
         return ImportResult(
             files=[
                 ImportedFile(
-                    filename=filename,
-                    gcs_uri=f"gs://{cfg.gcs_bucket}/{blob_name}",
-                    size_bytes=size,
-                    md5=computed_md5,
+                    filename=name,
+                    gcs_uri=f"gs://{cfg.gcs_bucket}/{prefix + name}",
+                    size_bytes=size_hint if size_hint is not None else downloaded,
+                    md5=computed_md5 if cfg.extract_mode == "none" else None,
                 )
+                for name, blob, size_hint in files_written
             ]
         )
 

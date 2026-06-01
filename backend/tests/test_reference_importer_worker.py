@@ -292,3 +292,135 @@ def test_reports_failed_when_md5_mismatches_and_purges_blob():
     # Partial blob purged.
     blob = storage.blobs["bioaf-references-test"]["annotation/gencode/v45/gencode.v45.gtf.gz"]
     assert blob.deleted is True
+
+
+def test_extract_gzip_writes_decompressed_object_with_stripped_extension():
+    """extract_mode='gzip': source URL ends in .gz; importer writes the
+    decompressed body as a single blob with the '.gz' suffix stripped from
+    the filename."""
+    import gzip
+    import io
+
+    from app.workers.reference_importer import ReferenceImporter
+
+    decompressed = b"chr1\t1\t1000\tregion-A\n" * 5000
+    buf = io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode="wb") as gz:
+        gz.write(decompressed)
+    gz_bytes = buf.getvalue()
+
+    http = _FakeHttpClient(
+        {
+            "https://ftp.example.org/data/refs/gencode.v45.gtf.gz": _FakeResponse(
+                status_code=200,
+                chunks=[gz_bytes[i : i + 64 * 1024] for i in range(0, len(gz_bytes), 64 * 1024)],
+                headers={"content-length": str(len(gz_bytes))},
+            ),
+        }
+    )
+    storage = _FakeStorageClient()
+    callback = _RecordingCallback()
+    config = _make_config(extract_mode="gzip")
+    result = ReferenceImporter(config, http_client=http, storage_client=storage, callback=callback).run()
+
+    blobs = storage.blobs["bioaf-references-test"]
+    assert list(blobs.keys()) == ["annotation/gencode/v45/gencode.v45.gtf"]
+    assert bytes(blobs["annotation/gencode/v45/gencode.v45.gtf"].data) == decompressed
+
+    statuses = [e["status"] for e in callback.events]
+    assert "extracting" in statuses, statuses
+    assert statuses[-1] == "active"
+
+    assert [f.filename for f in result.files] == ["gencode.v45.gtf"]
+    assert result.files[0].size_bytes == len(decompressed)
+
+
+def test_extract_tar_writes_each_member_as_its_own_blob():
+    """extract_mode='tar': importer streams the archive, writes each tar
+    member to a separate blob under gcs_prefix, and returns one ImportedFile
+    per member."""
+    import io
+    import tarfile
+
+    from app.workers.reference_importer import ReferenceImporter
+
+    members = {
+        "ref_a.txt": b"alpha contents " * 1000,
+        "subdir/ref_b.tsv": b"col1\tcol2\n" * 2000,
+    }
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tf:
+        for name, body in members.items():
+            info = tarfile.TarInfo(name=name)
+            info.size = len(body)
+            tf.addfile(info, io.BytesIO(body))
+    tar_bytes = buf.getvalue()
+
+    url = "https://ftp.example.org/data/refs/pack.tar"
+    http = _FakeHttpClient(
+        {
+            url: _FakeResponse(
+                status_code=200,
+                chunks=[tar_bytes[i : i + 64 * 1024] for i in range(0, len(tar_bytes), 64 * 1024)],
+                headers={"content-length": str(len(tar_bytes))},
+            ),
+        }
+    )
+    storage = _FakeStorageClient()
+    callback = _RecordingCallback()
+    config = _make_config(source_url=url, extract_mode="tar")
+    result = ReferenceImporter(config, http_client=http, storage_client=storage, callback=callback).run()
+
+    bucket_blobs = storage.blobs["bioaf-references-test"]
+    assert sorted(bucket_blobs.keys()) == [
+        "annotation/gencode/v45/ref_a.txt",
+        "annotation/gencode/v45/subdir/ref_b.tsv",
+    ]
+    assert bytes(bucket_blobs["annotation/gencode/v45/ref_a.txt"].data) == members["ref_a.txt"]
+    assert bytes(bucket_blobs["annotation/gencode/v45/subdir/ref_b.tsv"].data) == members["subdir/ref_b.tsv"]
+
+    statuses = [e["status"] for e in callback.events]
+    assert "extracting" in statuses
+    assert statuses[-1] == "active"
+
+    assert sorted(f.filename for f in result.files) == ["ref_a.txt", "subdir/ref_b.tsv"]
+
+
+def test_extract_tar_gz_writes_each_member_as_its_own_blob():
+    """extract_mode='tar.gz': same as tar but the archive is gzipped first."""
+    import io
+    import tarfile
+
+    from app.workers.reference_importer import ReferenceImporter
+
+    members = {"a.txt": b"aa" * 5000, "b.txt": b"bb" * 5000}
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        for name, body in members.items():
+            info = tarfile.TarInfo(name=name)
+            info.size = len(body)
+            tf.addfile(info, io.BytesIO(body))
+    archive_bytes = buf.getvalue()
+
+    url = "https://ftp.example.org/data/refs/pack.tar.gz"
+    http = _FakeHttpClient(
+        {
+            url: _FakeResponse(
+                status_code=200,
+                chunks=[archive_bytes[i : i + 64 * 1024] for i in range(0, len(archive_bytes), 64 * 1024)],
+                headers={"content-length": str(len(archive_bytes))},
+            ),
+        }
+    )
+    storage = _FakeStorageClient()
+    callback = _RecordingCallback()
+    config = _make_config(source_url=url, extract_mode="tar.gz")
+    result = ReferenceImporter(config, http_client=http, storage_client=storage, callback=callback).run()
+
+    bucket_blobs = storage.blobs["bioaf-references-test"]
+    assert sorted(bucket_blobs.keys()) == [
+        "annotation/gencode/v45/a.txt",
+        "annotation/gencode/v45/b.txt",
+    ]
+    assert sorted(f.filename for f in result.files) == ["a.txt", "b.txt"]
+    assert [e["status"] for e in callback.events][-1] == "active"
