@@ -445,6 +445,55 @@ def test_passes_auth_header_to_source_request_when_provided():
     assert headers.get("Authorization") == "Bearer secret-token"
 
 
+def test_config_from_env_reads_all_supported_keys():
+    """The Pod is configured exclusively via env vars set by
+    ReferenceDataService._create_import_job. config_from_env is the
+    canonical mapping; it must read every key the Job spec writes."""
+    from app.workers.reference_importer import config_from_env
+
+    env = {
+        "REFERENCE_ID": "42",
+        "SOURCE_URL": "https://ftp.example.org/x.tar.gz",
+        "SOURCE_MD5_URL": "https://ftp.example.org/x.tar.gz.md5",
+        "SOURCE_AUTH_HEADER": "Bearer abc",
+        "GCS_BUCKET": "bioaf-references-prod",
+        "GCS_PREFIX": "annotation/x/v1/",
+        "EXTRACT_MODE": "tar.gz",
+        "CALLBACK_URL": "http://backend:8000/api/internal/references/42/import-progress",
+        "INTERNAL_TOKEN": "supersecret",
+    }
+
+    cfg = config_from_env(env)
+    assert cfg.reference_id == 42
+    assert cfg.source_url == env["SOURCE_URL"]
+    assert cfg.source_md5_url == env["SOURCE_MD5_URL"]
+    assert cfg.auth_header == env["SOURCE_AUTH_HEADER"]
+    assert cfg.gcs_bucket == env["GCS_BUCKET"]
+    assert cfg.gcs_prefix == env["GCS_PREFIX"]
+    assert cfg.extract_mode == "tar.gz"
+    assert cfg.callback_url == env["CALLBACK_URL"]
+    assert cfg.internal_token == env["INTERNAL_TOKEN"]
+
+
+def test_config_from_env_defaults_optional_fields():
+    """Optional env vars (SOURCE_MD5_URL, SOURCE_AUTH_HEADER) absent -> None.
+    EXTRACT_MODE absent -> 'none'."""
+    from app.workers.reference_importer import config_from_env
+
+    env = {
+        "REFERENCE_ID": "7",
+        "SOURCE_URL": "https://ftp.example.org/a.txt",
+        "GCS_BUCKET": "b",
+        "GCS_PREFIX": "p/",
+        "CALLBACK_URL": "http://backend/cb",
+        "INTERNAL_TOKEN": "t",
+    }
+    cfg = config_from_env(env)
+    assert cfg.source_md5_url is None
+    assert cfg.auth_header is None
+    assert cfg.extract_mode == "none"
+
+
 def test_extract_tar_gz_writes_each_member_as_its_own_blob():
     """extract_mode='tar.gz': same as tar but the archive is gzipped first."""
     import io

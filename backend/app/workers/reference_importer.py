@@ -33,6 +33,29 @@ class ImporterConfig:
     extract_mode: str = "none"
 
 
+def config_from_env(env) -> ImporterConfig:
+    """Build an ImporterConfig from a mapping (typically os.environ) using
+    the env-var contract written by
+    ReferenceDataService._create_import_job. Empty strings are treated as
+    unset for the optional fields."""
+
+    def _opt(key: str) -> str | None:
+        value = env.get(key)
+        return value if value else None
+
+    return ImporterConfig(
+        reference_id=int(env["REFERENCE_ID"]),
+        source_url=env["SOURCE_URL"],
+        gcs_bucket=env["GCS_BUCKET"],
+        gcs_prefix=env["GCS_PREFIX"],
+        callback_url=env["CALLBACK_URL"],
+        internal_token=env["INTERNAL_TOKEN"],
+        source_md5_url=_opt("SOURCE_MD5_URL"),
+        auth_header=_opt("SOURCE_AUTH_HEADER"),
+        extract_mode=env.get("EXTRACT_MODE") or "none",
+    )
+
+
 @dataclass
 class ImportedFile:
     filename: str
