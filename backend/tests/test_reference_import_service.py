@@ -310,9 +310,7 @@ async def test_start_import_renders_callback_url_from_networking_settings(
 
 
 @pytest.mark.asyncio
-async def test_start_import_callback_url_uses_http_when_https_not_enforced(
-    session, comp_bio_user, monkeypatch
-):
+async def test_start_import_callback_url_uses_http_when_https_not_enforced(session, comp_bio_user, monkeypatch):
     """When networking_https_enforced is not 'true', fall back to http://
     so the importer Pod can reach the backend before TLS is provisioned."""
     from app.config import settings
@@ -352,6 +350,122 @@ async def test_start_import_callback_url_uses_http_when_https_not_enforced(
         await session.commit()
 
     assert captured["callback_url"].startswith("http://bioaf-staging.example.com/")
+
+
+@pytest.mark.asyncio
+async def test_start_import_auto_bootstraps_internal_token_when_unset(session, comp_bio_user):
+    """The internal callback token is never set by any installer flow; the
+    backend must self-bootstrap one on first use, persist it to
+    platform_config so it survives restarts, and pass it to the Pod. The
+    operator should not have to set BIOAF_INTERNAL_TOKEN by hand."""
+    from app.config import settings
+
+    # Networking + references bucket configured; internal_token deliberately NOT.
+    settings.internal_token = ""
+    await session.execute(
+        text(
+            "DELETE FROM platform_config WHERE key IN "
+            "('internal_callback_token', 'references_bucket_name', 'networking_hostname', "
+            "'networking_domain', 'networking_https_enforced')"
+        )
+    )
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES "
+            "('references_bucket_name', 'bioaf-references-test'),"
+            "('networking_hostname', 'bioaf'),"
+            "('networking_domain', 'example.com'),"
+            "('networking_https_enforced', 'true')"
+        )
+    )
+    await session.commit()
+
+    payload = ReferenceImportRequest(
+        name="AutoBootstrap",
+        category="annotation",
+        scope="internal",
+        version="v1",
+        source_url="https://ftp.example/file.gz",
+        extract="none",
+    )
+
+    captured: dict = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return _stub_create_job(**kwargs)
+
+    with patch.object(ReferenceDataService, "_create_import_job", side_effect=_capture):
+        await ReferenceDataService.start_import(
+            session, org_id=comp_bio_user.organization_id, user_id=comp_bio_user.id, request=payload
+        )
+        await session.commit()
+
+    # A token was generated and passed to the Pod.
+    assert captured["internal_token"]
+    assert len(captured["internal_token"]) >= 16
+
+    # Persisted to platform_config so a backend restart sees the same value.
+    row = (
+        await session.execute(text("SELECT value FROM platform_config WHERE key = 'internal_callback_token'"))
+    ).scalar_one_or_none()
+    assert row == captured["internal_token"]
+
+    # And the running process's settings.internal_token is now set so the
+    # callback endpoint will accept the Pod's POST.
+    assert settings.internal_token == captured["internal_token"]
+
+
+@pytest.mark.asyncio
+async def test_start_import_reuses_persisted_internal_token(session, comp_bio_user):
+    """If a token already exists in platform_config (set by a previous
+    start_import or a future installer), the backend reuses it instead of
+    generating a fresh one each request."""
+    from app.config import settings
+
+    settings.internal_token = ""
+    await session.execute(
+        text(
+            "DELETE FROM platform_config WHERE key IN "
+            "('internal_callback_token', 'references_bucket_name', 'networking_hostname', "
+            "'networking_domain', 'networking_https_enforced')"
+        )
+    )
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES "
+            "('references_bucket_name', 'bioaf-references-test'),"
+            "('networking_hostname', 'bioaf'),"
+            "('networking_domain', 'example.com'),"
+            "('networking_https_enforced', 'true'),"
+            "('internal_callback_token', 'pre-existing-token-value')"
+        )
+    )
+    await session.commit()
+
+    payload = ReferenceImportRequest(
+        name="ReusePersisted",
+        category="annotation",
+        scope="internal",
+        version="v1",
+        source_url="https://ftp.example/file.gz",
+        extract="none",
+    )
+
+    captured: dict = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return _stub_create_job(**kwargs)
+
+    with patch.object(ReferenceDataService, "_create_import_job", side_effect=_capture):
+        await ReferenceDataService.start_import(
+            session, org_id=comp_bio_user.organization_id, user_id=comp_bio_user.id, request=payload
+        )
+        await session.commit()
+
+    assert captured["internal_token"] == "pre-existing-token-value"
+    assert settings.internal_token == "pre-existing-token-value"
 
 
 @pytest.mark.asyncio

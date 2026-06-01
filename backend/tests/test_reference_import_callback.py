@@ -59,7 +59,8 @@ async def configured(session, monkeypatch):
             "INSERT INTO platform_config (key, value) VALUES "
             "('networking_hostname', 'bioaf'),"
             "('networking_domain', 'example.com'),"
-            "('networking_https_enforced', 'true') "
+            "('networking_https_enforced', 'true'),"
+            "('internal_callback_token', 'test-internal-secret') "
             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
         )
     )

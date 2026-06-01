@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import Select, func, select, text
@@ -444,6 +445,36 @@ class ReferenceDataService:
         if not name or name == "null":
             raise ValueError("References bucket not configured. Deploy storage infrastructure first.")
         return name
+
+    @staticmethod
+    async def _ensure_internal_token(session: AsyncSession) -> str:
+        """Return the internal callback token, bootstrapping on first use.
+
+        The importer Pod authenticates back to the bioAF API with an
+        X-Internal-Token header that matches `settings.internal_token`. No
+        installer flow sets that env var, so the first URL import bootstraps
+        a random token, persists it to platform_config so the value
+        survives a backend restart, and updates the in-process settings so
+        the existing callback auth check accepts the Pod's POSTs.
+        """
+        from app.config import settings
+
+        existing = (
+            await session.execute(text("SELECT value FROM platform_config WHERE key = 'internal_callback_token'"))
+        ).scalar_one_or_none()
+        if existing and existing != "null":
+            settings.internal_token = existing
+            return existing
+
+        token = secrets.token_urlsafe(32)
+        await session.execute(
+            text(
+                "INSERT INTO platform_config (key, value) VALUES ('internal_callback_token', :v) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
+            ).bindparams(v=token)
+        )
+        settings.internal_token = token
+        return token
 
     @staticmethod
     async def _get_api_base_url(session: AsyncSession) -> str:
@@ -908,12 +939,7 @@ class ReferenceDataService:
         gcs_prefix = f"{request.category}/{_slugify(request.name)}/{_slugify(request.version)}/"
 
         api_base_url = await ReferenceDataService._get_api_base_url(session)
-        from app.config import settings
-
-        if not settings.internal_token:
-            raise ValueError(
-                "Internal token not configured. Set BIOAF_INTERNAL_TOKEN before importing reference data from a URL."
-            )
+        internal_token = await ReferenceDataService._ensure_internal_token(session)
 
         dataset = ReferenceDataset(
             organization_id=org_id,
@@ -940,7 +966,7 @@ class ReferenceDataService:
             extract=request.extract,
             auth_header=request.auth_header,
             callback_url=callback_url,
-            internal_token=settings.internal_token,
+            internal_token=internal_token,
         )
 
         progress = ReferenceImportProgress(

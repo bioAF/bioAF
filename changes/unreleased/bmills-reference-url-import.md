@@ -19,5 +19,11 @@
   `networking_https_enforced`) that operators already configure for the
   UI / API to be reachable; no separate platform_config key. The
   endpoint returns 503 with a clear remediation message if Networking
-  has not been configured yet or `BIOAF_INTERNAL_TOKEN` is unset, instead
-  of failing late inside the Pod.
+  has not been configured yet, instead of failing late inside the Pod.
+
+- The internal callback token the importer Pod uses to authenticate
+  back to the bioAF API is now bootstrapped automatically on the first
+  URL import. A random 256-bit token is generated, stored in
+  platform_config as `internal_callback_token`, and reused for every
+  subsequent import. The `BIOAF_INTERNAL_TOKEN` env var still overrides
+  it when set, but is no longer required for the feature to work.
