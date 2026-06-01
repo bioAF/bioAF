@@ -72,20 +72,12 @@ export default function DataReferencesPage() {
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl font-bold">Reference Data</h1>
             {canAdd && (
-              <div className="flex gap-2">
-                <button
-                  onClick={() => router.push("/data/references/import")}
-                  className="border border-bioaf-600 text-bioaf-700 px-4 py-2 rounded-md hover:bg-bioaf-50 transition-colors"
-                >
-                  Import from URL
-                </button>
-                <button
-                  onClick={() => router.push("/data/references/new")}
-                  className="bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700 transition-colors"
-                >
-                  Add Reference
-                </button>
-              </div>
+              <button
+                onClick={() => router.push("/data/references/add")}
+                className="bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700 transition-colors"
+              >
+                Add Reference Data
+              </button>
             )}
           </div>
 
@@ -151,10 +143,10 @@ export default function DataReferencesPage() {
               </p>
               {canAdd && (
                 <button
-                  onClick={() => router.push("/data/references/new")}
+                  onClick={() => router.push("/data/references/add")}
                   className="bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700"
                 >
-                  Add Reference
+                  Add Reference Data
                 </button>
               )}
             </div>

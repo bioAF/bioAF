@@ -168,9 +168,6 @@ class Settings(BaseSettings):
     # Bcrypt
     bcrypt_rounds: int = 12
 
-    # Internal callbacks (importer container -> bioAF API)
-    internal_token: str = ""
-
     # Data-at-rest encryption (comma-separated Fernet keys; first key is the
     # primary writer, all keys are accepted readers).
     encryption_keys: str = ""

@@ -1,12 +1,16 @@
 """TDD: ReferenceDataService.start_import / import_status / import_cancel.
 
-Spec §3 import-from-URL flow. The service:
+Import-from-URL runs as an in-process asyncio background task in the
+backend (not a GKE Pod), so the worker code is the running backend code
+and there is no image / KSA / callback-URL plumbing to keep in sync.
+start_import:
+
 - creates a ReferenceDataset row in status='uploading' (same lifecycle as
-  upload — finalize via the existing upload_complete path),
+  upload -- finalize via the existing upload_complete path),
 - creates a ReferenceImportProgress row in status='pending',
-- launches a GKE job (stubbed in tests) and stores its name as import_job_id,
-- exposes status reads + a cancel that deletes the GKE job and aborts the
-  reference (purges GCS + deletes the row).
+- schedules a background task that streams the URL into GCS and writes
+  progress directly to the DB,
+- returns immediately so the caller (the HTTP request) can navigate away.
 """
 
 from unittest.mock import patch
@@ -52,13 +56,15 @@ async def configured_refs_bucket(session):
     await session.commit()
 
 
-def _stub_create_job(*, reference_id, source_url, gcs_prefix, **kwargs):
-    """Drop-in for the live GKE job creator. Returns the job name."""
-    return f"refimport-{reference_id}-stub"
+def _stub_schedule(*, dataset_id, request):
+    """Drop-in for the live background scheduler. Returns the sentinel job id."""
+    return f"refimport-{dataset_id}-inproc"
 
 
 @pytest.mark.asyncio
-async def test_start_import_creates_dataset_progress_and_job(session, comp_bio_user, configured_refs_bucket):
+async def test_start_import_creates_dataset_progress_and_schedules_background_task(
+    session, comp_bio_user, configured_refs_bucket
+):
     payload = ReferenceImportRequest(
         name="GENCODE",
         category="annotation",
@@ -68,7 +74,7 @@ async def test_start_import_creates_dataset_progress_and_job(session, comp_bio_u
         extract="gzip",
     )
 
-    with patch.object(ReferenceDataService, "_create_import_job", side_effect=_stub_create_job) as mock_job:
+    with patch.object(ReferenceDataService, "_schedule_import", side_effect=_stub_schedule) as mock_schedule:
         dataset, job_id = await ReferenceDataService.start_import(
             session, org_id=comp_bio_user.organization_id, user_id=comp_bio_user.id, request=payload
         )
@@ -76,14 +82,13 @@ async def test_start_import_creates_dataset_progress_and_job(session, comp_bio_u
 
     assert dataset.status == "uploading"
     assert dataset.gcs_prefix.endswith("/")
-    assert job_id == f"refimport-{dataset.id}-stub"
+    assert job_id == f"refimport-{dataset.id}-inproc"
 
-    # k8s job creation called once with expected args
-    mock_job.assert_called_once()
-    call_kwargs = mock_job.call_args.kwargs
-    assert call_kwargs["reference_id"] == dataset.id
-    assert call_kwargs["source_url"] == payload.source_url
-    assert call_kwargs["gcs_prefix"] == dataset.gcs_prefix
+    # Background task scheduled once, with the dataset id and the request.
+    mock_schedule.assert_called_once()
+    call_kwargs = mock_schedule.call_args.kwargs
+    assert call_kwargs["dataset_id"] == dataset.id
+    assert call_kwargs["request"].source_url == payload.source_url
 
     # progress row exists
     progress = await session.get(ReferenceImportProgress, dataset.id)
@@ -112,7 +117,7 @@ async def test_start_import_rejects_duplicate(session, comp_bio_user, configured
         source_url="https://ftp.example/gencode.gtf.gz",
         extract="gzip",
     )
-    with patch.object(ReferenceDataService, "_create_import_job", side_effect=_stub_create_job):
+    with patch.object(ReferenceDataService, "_schedule_import", side_effect=_stub_schedule):
         await ReferenceDataService.start_import(
             session, org_id=comp_bio_user.organization_id, user_id=comp_bio_user.id, request=payload
         )
@@ -137,13 +142,13 @@ async def test_get_import_status_returns_progress_row(session, comp_bio_user, co
         source_url="https://ftp.example/file.gz",
         extract="none",
     )
-    with patch.object(ReferenceDataService, "_create_import_job", side_effect=_stub_create_job):
+    with patch.object(ReferenceDataService, "_schedule_import", side_effect=_stub_schedule):
         dataset, _ = await ReferenceDataService.start_import(
             session, org_id=comp_bio_user.organization_id, user_id=comp_bio_user.id, request=payload
         )
         await session.commit()
 
-    # Importer container would write progress; simulate it here:
+    # Simulate the background task writing progress.
     progress = await session.get(ReferenceImportProgress, dataset.id)
     progress.status = "downloading"
     progress.progress_pct = 42
@@ -169,7 +174,11 @@ async def test_get_import_status_404_when_not_found(session, comp_bio_user):
 
 
 @pytest.mark.asyncio
-async def test_cancel_import_deletes_job_and_purges_reference(session, comp_bio_user, configured_refs_bucket):
+async def test_cancel_import_purges_reference(session, comp_bio_user, configured_refs_bucket):
+    """Cancel deletes the dataset + progress rows and purges GCS. There is
+    no GKE Job to delete; an in-flight background task may continue
+    running for a short window after cancel returns, but its writes to a
+    nonexistent progress row are no-ops."""
     payload = ReferenceImportRequest(
         name="CancelMe",
         category="annotation",
@@ -178,45 +187,33 @@ async def test_cancel_import_deletes_job_and_purges_reference(session, comp_bio_
         source_url="https://ftp.example/file.gz",
         extract="none",
     )
-    with patch.object(ReferenceDataService, "_create_import_job", side_effect=_stub_create_job):
+    with patch.object(ReferenceDataService, "_schedule_import", side_effect=_stub_schedule):
         dataset, _ = await ReferenceDataService.start_import(
             session, org_id=comp_bio_user.organization_id, user_id=comp_bio_user.id, request=payload
         )
         await session.commit()
     dataset_id = dataset.id
 
-    deleted_jobs: list[str] = []
-
-    def _capture_delete(job_id: str) -> None:
-        deleted_jobs.append(job_id)
-
-    with (
-        patch.object(ReferenceDataService, "_delete_import_job", side_effect=_capture_delete),
-        patch.object(ReferenceDataService, "_delete_blobs", return_value=None),
-    ):
+    with patch.object(ReferenceDataService, "_delete_blobs", return_value=None):
         await ReferenceDataService.cancel_import(
             session, reference_id=dataset_id, org_id=comp_bio_user.organization_id, user_id=comp_bio_user.id
         )
         await session.commit()
 
-    assert deleted_jobs == [f"refimport-{dataset_id}-stub"]
     fresh = await session.get(ReferenceDataset, dataset_id)
     assert fresh is None
-    # Bypass the ORM identity map: cascade DELETE happens at the DB level via
-    # FK ON DELETE CASCADE, so SQLAlchemy may still return the cached instance
-    # via session.get(). Query directly to confirm the row is gone.
     progress_row = (
         await session.execute(
             text("SELECT 1 FROM reference_import_progress WHERE reference_id = :id"),
             {"id": dataset_id},
         )
     ).first()
-    assert progress_row is None  # cascade delete
+    assert progress_row is None
 
 
 @pytest.mark.asyncio
 async def test_record_import_progress_updates_row(session, comp_bio_user, configured_refs_bucket):
-    """Internal callback path: the importer container POSTs progress updates."""
+    """The in-process background task records progress via record_import_progress."""
     payload = ReferenceImportRequest(
         name="ProgressMe",
         category="annotation",
@@ -225,7 +222,7 @@ async def test_record_import_progress_updates_row(session, comp_bio_user, config
         source_url="https://ftp.example/file.gz",
         extract="none",
     )
-    with patch.object(ReferenceDataService, "_create_import_job", side_effect=_stub_create_job):
+    with patch.object(ReferenceDataService, "_schedule_import", side_effect=_stub_schedule):
         dataset, _ = await ReferenceDataService.start_import(
             session, org_id=comp_bio_user.organization_id, user_id=comp_bio_user.id, request=payload
         )
@@ -249,8 +246,8 @@ async def test_record_import_progress_updates_row(session, comp_bio_user, config
 
 @pytest.mark.asyncio
 async def test_record_import_progress_failure_sets_dataset_failed(session, comp_bio_user, configured_refs_bucket):
-    """When the importer reports status='failed', the dataset row must also
-    flip to status='failed' so the existing UI surfaces it."""
+    """When the background task records status='failed', the dataset row
+    must also flip to status='failed' so the existing UI surfaces it."""
     payload = ReferenceImportRequest(
         name="FailMe",
         category="annotation",
@@ -259,7 +256,7 @@ async def test_record_import_progress_failure_sets_dataset_failed(session, comp_
         source_url="https://ftp.example/file.gz",
         extract="none",
     )
-    with patch.object(ReferenceDataService, "_create_import_job", side_effect=_stub_create_job):
+    with patch.object(ReferenceDataService, "_schedule_import", side_effect=_stub_schedule):
         dataset, _ = await ReferenceDataService.start_import(
             session, org_id=comp_bio_user.organization_id, user_id=comp_bio_user.id, request=payload
         )

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
@@ -12,8 +12,11 @@ import type {
   ReferenceDatasetDetail,
   ReferenceDataset,
   ReferenceDatasetListResponse,
+  ReferenceImportStatusResponse,
   ImpactSummary,
 } from "@/lib/types";
+
+const IMPORT_POLL_INTERVAL_MS = 5000;
 
 function formatBytes(bytes: number | null): string {
   if (bytes == null) return "—";
@@ -50,6 +53,10 @@ export default function DataReferenceDetailPage() {
   const [versions, setVersions] = useState<ReferenceDataset[] | null>(null);
   const [versionsLoading, setVersionsLoading] = useState(false);
 
+  const [importStatus, setImportStatus] = useState<ReferenceImportStatusResponse | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const importPollHandle = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => {
     if (!isAuthenticated()) {
       router.push("/login");
@@ -58,6 +65,57 @@ export default function DataReferenceDetailPage() {
     loadReference();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, router]);
+
+  // Poll the import-status row while the dataset is in flight so the
+  // progress bar updates as the in-process background task makes its way
+  // through the source URL.
+  useEffect(() => {
+    if (!reference || reference.status !== "uploading") {
+      if (importPollHandle.current) {
+        clearInterval(importPollHandle.current);
+        importPollHandle.current = null;
+      }
+      return;
+    }
+    const tick = async () => {
+      try {
+        const s = await api.get<ReferenceImportStatusResponse>(`/api/references/${id}/import-status`);
+        setImportStatus(s);
+        if (s.status === "active" || s.status === "failed") {
+          // Reload the dataset so the page transitions out of the
+          // in-flight banner once the task reaches a terminal state.
+          loadReference();
+        }
+      } catch {
+        // 404 (no progress row) or transient: keep polling.
+      }
+    };
+    void tick();
+    importPollHandle.current = setInterval(tick, IMPORT_POLL_INTERVAL_MS);
+    return () => {
+      if (importPollHandle.current) {
+        clearInterval(importPollHandle.current);
+        importPollHandle.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reference?.status, id]);
+
+  async function handleCancelOrDelete() {
+    setCancelling(true);
+    try {
+      await api.post(`/api/references/${id}/import-cancel`);
+      if (importPollHandle.current) {
+        clearInterval(importPollHandle.current);
+        importPollHandle.current = null;
+      }
+      router.push("/data/references");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to cancel");
+    } finally {
+      setCancelling(false);
+    }
+  }
 
   useEffect(() => {
     if (activeTab === "impact") loadImpact();
@@ -201,11 +259,12 @@ export default function DataReferenceDetailPage() {
                 <button
                   onClick={() => {
                     const params = new URLSearchParams({
+                      mode: "upload",
                       name: reference.name,
                       category: reference.category,
                       scope: reference.scope,
                     });
-                    router.push(`/data/references/new?${params}`);
+                    router.push(`/data/references/add?${params}`);
                   }}
                   className="bg-bioaf-50 text-bioaf-700 border border-bioaf-200 px-3 py-1.5 rounded-md text-sm hover:bg-bioaf-100 transition-colors"
                 >
@@ -222,6 +281,60 @@ export default function DataReferenceDetailPage() {
               </div>
             )}
           </div>
+
+          {reference.status === "uploading" && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-blue-800 font-medium">Import in progress</p>
+                <button
+                  type="button"
+                  onClick={handleCancelOrDelete}
+                  disabled={cancelling}
+                  className="px-3 py-1.5 border border-red-300 text-red-700 rounded-md text-sm hover:bg-red-50 disabled:opacity-50"
+                >
+                  {cancelling ? "Cancelling..." : "Cancel import"}
+                </button>
+              </div>
+              {importStatus && (
+                <>
+                  <div className="text-sm text-blue-900">
+                    Status: <span className="font-mono">{importStatus.status}</span>
+                    {importStatus.progress_pct != null && <> &mdash; {importStatus.progress_pct}%</>}
+                  </div>
+                  {importStatus.total_bytes != null && (
+                    <div className="text-sm text-blue-900">
+                      {formatBytes(importStatus.bytes_downloaded)} / {formatBytes(importStatus.total_bytes)}
+                    </div>
+                  )}
+                  <div className="bg-blue-100 h-2 rounded overflow-hidden">
+                    <div
+                      className="bg-blue-600 h-2 transition-all"
+                      style={{ width: `${importStatus.progress_pct ?? 0}%` }}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {reference.status === "failed" && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-red-800 font-medium">Import failed</p>
+                {reference.deprecation_note && (
+                  <p className="text-red-700 text-sm mt-1">{reference.deprecation_note}</p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={handleCancelOrDelete}
+                disabled={cancelling}
+                className="px-3 py-1.5 border border-red-300 text-red-700 rounded-md text-sm hover:bg-red-100 disabled:opacity-50 shrink-0"
+              >
+                {cancelling ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          )}
 
           {reference.status === "deprecated" && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
