@@ -1530,7 +1530,7 @@ export interface ReferenceDataset {
   gcs_prefix: string;
   total_size_bytes: number | null;
   file_count: number | null;
-  status: "active" | "deprecated" | "pending_approval";
+  status: "uploading" | "active" | "deprecated" | "pending_approval" | "failed";
   deprecation_note: string | null;
   superseded_by_id: number | null;
   created_at: string;

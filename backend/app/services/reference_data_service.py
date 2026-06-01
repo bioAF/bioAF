@@ -722,93 +722,144 @@ class ReferenceDataService:
         await session.delete(dataset)
         await session.flush()
 
-    # --- Import-from-URL (GKE Job) flow — spec §3 ------------------------------
+    # --- Import-from-URL (in-process background task) -------------------------
 
     @staticmethod
-    def _create_import_job(
+    def _schedule_import(
         *,
-        reference_id: int,
-        source_url: str,
-        source_md5_url: str | None,
-        gcs_prefix: str,
-        bucket_name: str,
-        extract: str,
-        auth_header: str | None,
+        dataset_id: int,
+        request: ReferenceImportRequest,
     ) -> str:
-        """Launch the importer GKE Job and return its name. Tests monkey-patch.
+        """Schedule the in-process import as an asyncio background task.
 
-        Production: builds a kubernetes BatchV1 Job from the spec in
-        documentation/spec-reference-data-ingest.md §3 and returns the Job's
-        metadata.name.
+        Returns a sentinel job id stored on the progress row purely for
+        UI traceability; there is no external job to manage. Tests
+        monkey-patch this to avoid running the real importer.
         """
-        from kubernetes import client as k8s_client, config as k8s_config
-
-        try:
-            k8s_config.load_incluster_config()
-        except k8s_config.ConfigException:
-            k8s_config.load_kube_config()
-
-        nonce = re.sub(r"[^a-z0-9]", "", str(reference_id))[:6] or "0"
-        job_name = f"refimport-{reference_id}-{nonce}"
-        env = [
-            k8s_client.V1EnvVar(name="REFERENCE_ID", value=str(reference_id)),
-            k8s_client.V1EnvVar(name="SOURCE_URL", value=source_url),
-            k8s_client.V1EnvVar(name="GCS_PREFIX", value=gcs_prefix),
-            k8s_client.V1EnvVar(name="GCS_BUCKET", value=bucket_name),
-            k8s_client.V1EnvVar(name="EXTRACT_MODE", value=extract),
-        ]
-        if source_md5_url:
-            env.append(k8s_client.V1EnvVar(name="SOURCE_MD5_URL", value=source_md5_url))
-        if auth_header:
-            env.append(k8s_client.V1EnvVar(name="SOURCE_AUTH_HEADER", value=auth_header))
-
-        container = k8s_client.V1Container(
-            name="importer",
-            image="us-central1-docker.pkg.dev/bioaf/bioaf-reference-importer:latest",
-            env=env,
-            resources=k8s_client.V1ResourceRequirements(
-                requests={"cpu": "1", "memory": "2Gi"},
-                limits={"cpu": "2", "memory": "4Gi"},
-            ),
-        )
-        pod_spec = k8s_client.V1PodSpec(
-            restart_policy="Never",
-            service_account_name="bioaf-reference-importer",
-            containers=[container],
-        )
-        job = k8s_client.V1Job(
-            api_version="batch/v1",
-            kind="Job",
-            metadata=k8s_client.V1ObjectMeta(
-                name=job_name,
-                labels={
-                    "bioaf.app/job-type": "reference-import",
-                    "bioaf.app/reference-id": str(reference_id),
-                },
-            ),
-            spec=k8s_client.V1JobSpec(
-                backoff_limit=1,
-                ttl_seconds_after_finished=3600,
-                template=k8s_client.V1PodTemplateSpec(spec=pod_spec),
-            ),
-        )
-        k8s_client.BatchV1Api().create_namespaced_job(namespace="default", body=job)
-        return job_name
+        job_id = f"refimport-{dataset_id}-inproc"
+        loop = asyncio.get_running_loop()
+        loop.create_task(ReferenceDataService._run_import_inproc(dataset_id, request))
+        return job_id
 
     @staticmethod
-    def _delete_import_job(job_name: str) -> None:
-        """Delete the importer GKE Job. Tests monkey-patch."""
-        from kubernetes import client as k8s_client, config as k8s_config
+    async def _run_import_inproc(dataset_id: int, request: ReferenceImportRequest) -> None:
+        """Run a single URL import to completion in the backend process.
+
+        Streams the source URL straight into GCS via the existing
+        ReferenceImporter worker, opening a fresh AsyncSession per progress
+        update so writes are committed promptly and visible to the
+        polling import-status endpoint. The blocking parts of the import
+        (httpx stream + GCS upload) run in a worker thread via
+        asyncio.to_thread so the event loop stays responsive.
+        """
+        from app.database import async_session_factory
+        from app.workers.reference_importer import ImporterConfig, ReferenceImporter
+
+        loop = asyncio.get_running_loop()
+
+        # Pull bucket name + GCS credentials once, in the current event loop.
+        async with async_session_factory() as setup_session:
+            try:
+                bucket_name = await ReferenceDataService._get_references_bucket(setup_session)
+            except Exception:
+                logger.exception("Reference import %s: bucket lookup failed", dataset_id)
+                await ReferenceDataService._record_progress_in_new_session(
+                    dataset_id,
+                    status="failed",
+                    error_message="References bucket not configured.",
+                )
+                return
+            from app.services.upload_service import UploadService
+
+            credentials = await UploadService._get_gcs_credentials(setup_session)
+            dataset_row = await setup_session.get(ReferenceDataset, dataset_id)
+            if dataset_row is None:
+                logger.info("Reference import %s: dataset gone before start, abandoning", dataset_id)
+                return
+            gcs_prefix = dataset_row.gcs_prefix
+
+        cfg = ImporterConfig(
+            reference_id=dataset_id,
+            source_url=request.source_url,
+            gcs_bucket=bucket_name,
+            gcs_prefix=gcs_prefix,
+            # Unused in-process (callback writes straight to the DB) but the
+            # ImporterConfig contract still requires them.
+            callback_url="",
+            internal_token="",
+            source_md5_url=request.source_md5_url,
+            auth_header=request.auth_header,
+            extract_mode=request.extract,
+        )
+
+        def _on_progress(**payload: object) -> None:
+            # Runs on the importer's worker thread. Schedule the DB write
+            # back on the main event loop and wait until it commits so
+            # progress is durable before the next chunk callback fires.
+            future = asyncio.run_coroutine_threadsafe(
+                ReferenceDataService._record_progress_in_new_session(dataset_id, **payload),  # type: ignore[arg-type]
+                loop,
+            )
+            try:
+                future.result(timeout=15)
+            except Exception:
+                logger.exception("Reference import %s: progress write failed", dataset_id)
+
+        def _build_and_run() -> None:
+            import httpx
+            from google.cloud import storage as gcs_storage
+
+            with httpx.Client(timeout=httpx.Timeout(connect=30.0, read=None, write=60.0, pool=None)) as http_client:
+                storage_client = gcs_storage.Client(credentials=credentials) if credentials else gcs_storage.Client()
+                ReferenceImporter(
+                    cfg,
+                    http_client=http_client,
+                    storage_client=storage_client,
+                    callback=_on_progress,
+                ).run()
 
         try:
-            k8s_config.load_incluster_config()
-        except k8s_config.ConfigException:
-            k8s_config.load_kube_config()
-        k8s_client.BatchV1Api().delete_namespaced_job(
-            name=job_name,
-            namespace="default",
-            propagation_policy="Background",
-        )
+            await asyncio.to_thread(_build_and_run)
+        except Exception:
+            # ReferenceImporter already emitted a 'failed' callback before
+            # raising; log and exit. Pod-style re-raise would only matter
+            # for k8s backoff, which no longer applies.
+            logger.exception("Reference import %s failed", dataset_id)
+
+    @staticmethod
+    async def _record_progress_in_new_session(
+        reference_id: int,
+        *,
+        status: str,
+        progress_pct: int | None = None,
+        bytes_downloaded: int | None = None,
+        total_bytes: int | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        """Write a single progress update in a fresh AsyncSession + commit.
+
+        Per-callback session matches the operational semantics of the old
+        importer Pod's HTTP callback: each progress event is its own
+        durable transaction, so the UI sees updates immediately and a
+        crash mid-import leaves the last reported state intact.
+        """
+        from app.database import async_session_factory
+
+        async with async_session_factory() as session:
+            try:
+                await ReferenceDataService.record_import_progress(
+                    session,
+                    reference_id=reference_id,
+                    status=status,
+                    progress_pct=progress_pct,
+                    bytes_downloaded=bytes_downloaded,
+                    total_bytes=total_bytes,
+                    error_message=error_message,
+                )
+                await session.commit()
+            except ValueError:
+                # The progress row is gone (cancel raced); nothing to do.
+                logger.info("Reference import %s: progress row gone, skipping update", reference_id)
 
     @staticmethod
     async def start_import(
@@ -846,22 +897,19 @@ class ReferenceDataService:
         session.add(dataset)
         await session.flush()
 
-        job_id = ReferenceDataService._create_import_job(
-            reference_id=dataset.id,
-            source_url=request.source_url,
-            source_md5_url=request.source_md5_url,
-            gcs_prefix=gcs_prefix,
-            bucket_name=bucket_name,
-            extract=request.extract,
-            auth_header=request.auth_header,
-        )
-
+        # Persist the dataset + progress row before scheduling the background
+        # task so the task's first DB write finds the rows in place.
         progress = ReferenceImportProgress(
             reference_id=dataset.id,
             status="pending",
-            import_job_id=job_id,
         )
         session.add(progress)
+        await session.flush()
+        await session.commit()
+
+        job_id = ReferenceDataService._schedule_import(dataset_id=dataset.id, request=request)
+        progress.import_job_id = job_id
+        await session.flush()
 
         await log_action(
             session,
@@ -935,14 +983,14 @@ class ReferenceDataService:
         org_id: int,
         user_id: int,
     ) -> None:
-        """Terminate the GKE job + abort the in-flight reference (purge + delete)."""
-        progress = await session.get(ReferenceImportProgress, reference_id)
-        if progress and progress.import_job_id:
-            try:
-                ReferenceDataService._delete_import_job(progress.import_job_id)
-            except Exception as e:
-                logger.warning("Failed to delete import job %s: %s", progress.import_job_id, e)
+        """Abort the in-flight reference: purge GCS objects and delete the row.
 
+        An in-process import task may still be running for a short window
+        after cancel returns; its remaining progress writes target a row
+        that no longer exists and become no-ops. Any GCS objects the task
+        writes after cancel become orphaned under the prefix; a future
+        cleanup pass can sweep them.
+        """
         await ReferenceDataService.abort_upload(session, reference_id, org_id, user_id)
 
     @staticmethod
