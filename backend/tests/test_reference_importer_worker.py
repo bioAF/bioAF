@@ -386,6 +386,65 @@ def test_extract_tar_writes_each_member_as_its_own_blob():
     assert sorted(f.filename for f in result.files) == ["ref_a.txt", "subdir/ref_b.tsv"]
 
 
+def test_source_url_non_200_reports_failed_and_records_status_code():
+    """If the source URL returns a non-2xx, the importer emits a `failed`
+    callback with an error_message that includes the upstream status and
+    raises so the Job exits non-zero. No GCS objects are written."""
+    from app.workers.reference_importer import ReferenceImporter
+
+    http = _FakeHttpClient(
+        {
+            "https://ftp.example.org/data/refs/gencode.v45.gtf.gz": _FakeResponse(
+                status_code=404,
+                chunks=[b""],
+                headers={},
+            ),
+        }
+    )
+    storage = _FakeStorageClient()
+    callback = _RecordingCallback()
+    importer = ReferenceImporter(_make_config(), http_client=http, storage_client=storage, callback=callback)
+
+    with pytest.raises(Exception):
+        importer.run()
+
+    failure = callback.events[-1]
+    assert failure["status"] == "failed"
+    assert "404" in (failure.get("error_message") or "")
+    assert storage.blobs == {}
+
+
+def test_passes_auth_header_to_source_request_when_provided():
+    """When config.auth_header is set, the importer sends it as the
+    Authorization header on the source URL request. The md5 URL fetch
+    does NOT receive it (the md5 file may live on a different host or
+    not need auth)."""
+    from app.workers.reference_importer import ReferenceImporter
+
+    payload = b"x" * 4096
+    http = _FakeHttpClient(
+        {
+            "https://ftp.example.org/data/refs/gencode.v45.gtf.gz": _FakeResponse(
+                status_code=200,
+                chunks=[payload],
+                headers={"content-length": str(len(payload))},
+            ),
+        }
+    )
+    storage = _FakeStorageClient()
+    callback = _RecordingCallback()
+    config = _make_config(auth_header="Bearer secret-token")
+
+    ReferenceImporter(config, http_client=http, storage_client=storage, callback=callback).run()
+
+    # Find the source URL call
+    src_calls = [c for c in http.calls if c[0] == config.source_url]
+    assert len(src_calls) == 1
+    _, headers = src_calls[0]
+    assert headers is not None
+    assert headers.get("Authorization") == "Bearer secret-token"
+
+
 def test_extract_tar_gz_writes_each_member_as_its_own_blob():
     """extract_mode='tar.gz': same as tar but the archive is gzipped first."""
     import io

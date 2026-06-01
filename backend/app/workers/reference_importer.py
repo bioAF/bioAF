@@ -164,6 +164,16 @@ class ReferenceImporter:
         self._callback = callback
 
     def run(self) -> ImportResult:
+        try:
+            return self._run_inner()
+        except Md5MismatchError:
+            # Md5MismatchError already emitted a 'failed' callback.
+            raise
+        except Exception as exc:
+            self._callback(status="failed", error_message=str(exc) or exc.__class__.__name__)
+            raise
+
+    def _run_inner(self) -> ImportResult:
         cfg = self._cfg
         filename = _filename_from_url(cfg.source_url)
         headers = {"Authorization": cfg.auth_header} if cfg.auth_header else None
