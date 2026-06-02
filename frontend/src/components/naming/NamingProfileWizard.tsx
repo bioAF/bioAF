@@ -68,13 +68,13 @@ function innerSeparatorFor(delimiter: NamingProfileDelimiter): "_" | "-" {
   return delimiter === "_" ? "-" : "_";
 }
 
-function stringSegmentHint(
+function stringSegmentExample(
   delimiter: NamingProfileDelimiter,
   identifier: string | null,
 ): string {
   const innerSep = innerSeparatorFor(delimiter);
   const ident = (identifier?.trim() || "REQ").toUpperCase();
-  return `${delimiter}hint${delimiter} -> ${ident}${innerSep}text`;
+  return `${ident}${innerSep}text`;
 }
 
 const DATE_FORMATS: SegmentDateFormat[] = ["YYYYMMDD", "YYYY-MM-DD", "YYMMDD"];
@@ -432,7 +432,8 @@ export function NamingProfileWizard({ onSave, onCancel }: Props) {
                   </div>
                   {seg.field_type === "string" && (
                     <div className="mt-1 text-xs text-gray-500 font-mono">
-                      {stringSegmentHint(delimiter, seg.identifier)}
+                      <i>hint</i> {"-> "}
+                      {stringSegmentExample(delimiter, seg.identifier)}
                     </div>
                   )}
                 </div>
@@ -450,7 +451,7 @@ export function NamingProfileWizard({ onSave, onCancel }: Props) {
                     />
                   </label>
                 )}
-                {seg.field_type === "number" && (
+                {seg.field_type === "number" && !seg.is_system_chip && (
                   <label className="text-xs text-gray-600">
                     Padding
                     <input
