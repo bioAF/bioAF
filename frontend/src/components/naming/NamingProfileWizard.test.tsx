@@ -78,9 +78,9 @@ describe("initial render", () => {
   test("shows system chips regardless of template selection", async () => {
     renderWizard();
     // System chips: Project, Experiment, Sample. They are always visible.
-    expect(await screen.findByRole("button", { name: /project code chip/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /experiment code chip/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /sample id chip/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /project code segment/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /experiment code segment/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /sample id segment/i })).toBeInTheDocument();
   });
 });
 
@@ -114,7 +114,7 @@ describe("adding segments", () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await user.click(await screen.findByRole("button", { name: /sample id chip/i }));
+    await user.click(await screen.findByRole("button", { name: /sample id segment/i }));
 
     // The new segment shows up in the segments list and Save becomes enabled.
     const segmentsList = await screen.findByTestId("segments-list");
@@ -128,6 +128,33 @@ describe("adding segments", () => {
 // Validation
 // ---------------------------------------------------------------------------
 
+describe("string segment hint", () => {
+  test("shows hint matching the delimiter and identifier", async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    // Create a string segment (custom field), then change its identifier
+    // and watch the hint update with both the delimiter and the new id.
+    await user.click(await screen.findByText(/Create new segment/i));
+    await user.type(screen.getByLabelText(/new segment name/i), "Requestor");
+    await user.click(screen.getByRole("button", { name: /add segment$/i }));
+
+    // Default delimiter is "_", default identifier from "Requestor" is "REQ"
+    const segmentsList = await screen.findByTestId("segments-list");
+    expect(within(segmentsList).getByText("_hint_ -> REQ-text")).toBeInTheDocument();
+
+    // Flip the delimiter to "-" -- inner sep becomes "_".
+    await user.selectOptions(screen.getByLabelText(/delimiter/i), "-");
+    expect(within(segmentsList).getByText("-hint- -> REQ_text")).toBeInTheDocument();
+
+    // Override the identifier to "OPR" -- hint follows.
+    const identInput = within(segmentsList).getByLabelText("identifier-0");
+    await user.clear(identInput);
+    await user.type(identInput, "OPR");
+    expect(within(segmentsList).getByText("-hint- -> OPR_text")).toBeInTheDocument();
+  });
+});
+
 describe("client-side validation", () => {
   test("duplicate identifiers block save and surface an inline error", async () => {
     const user = userEvent.setup();
@@ -135,7 +162,7 @@ describe("client-side validation", () => {
 
     // Add the Sample chip twice (the second time produces a duplicate
     // identifier because they share the SMP default).
-    const sampleChip = await screen.findByRole("button", { name: /sample id chip/i });
+    const sampleChip = await screen.findByRole("button", { name: /sample id segment/i });
     await user.click(sampleChip);
     await user.click(sampleChip);
 
@@ -181,7 +208,7 @@ describe("test field", () => {
     });
 
     renderWizard();
-    await user.click(await screen.findByRole("button", { name: /sample id chip/i }));
+    await user.click(await screen.findByRole("button", { name: /sample id segment/i }));
     await user.type(screen.getByLabelText(/test against a real filename/i), "SMP0042.fastq.gz");
     await user.click(screen.getByRole("button", { name: /parse$/i }));
 
@@ -202,7 +229,7 @@ describe("test field", () => {
     ]);
 
     renderWizard();
-    await user.click(await screen.findByRole("button", { name: /sample id chip/i }));
+    await user.click(await screen.findByRole("button", { name: /sample id segment/i }));
     await user.type(screen.getByLabelText(/test against a real filename/i), "garbage.txt");
     await user.click(screen.getByRole("button", { name: /parse$/i }));
 
@@ -223,7 +250,7 @@ describe("save", () => {
     renderWizard({ onSave });
 
     await user.type(screen.getByLabelText(/profile name/i), "Team A");
-    await user.click(await screen.findByRole("button", { name: /sample id chip/i }));
+    await user.click(await screen.findByRole("button", { name: /sample id segment/i }));
     await user.click(screen.getByRole("button", { name: /save profile/i }));
 
     await waitFor(() => expect(mockPost).toHaveBeenCalled());
@@ -250,7 +277,7 @@ describe("save", () => {
 
     renderWizard();
     await user.type(screen.getByLabelText(/profile name/i), "Team A");
-    await user.click(await screen.findByRole("button", { name: /sample id chip/i }));
+    await user.click(await screen.findByRole("button", { name: /sample id segment/i }));
     await user.click(screen.getByRole("button", { name: /save profile/i }));
 
     expect(await screen.findByText(/failed to save/i)).toBeInTheDocument();

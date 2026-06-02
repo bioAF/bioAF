@@ -28,7 +28,7 @@ interface ExperimentTemplateOption {
   };
 }
 
-interface SystemChipSpec {
+interface SystemSegmentSpec {
   label: string;
   ariaLabel: string;
   identifier: string;
@@ -37,10 +37,10 @@ interface SystemChipSpec {
   padding: number;
 }
 
-const SYSTEM_CHIPS: SystemChipSpec[] = [
+const SYSTEM_SEGMENTS: SystemSegmentSpec[] = [
   {
     label: "Project Code",
-    ariaLabel: "project code chip",
+    ariaLabel: "project code segment",
     identifier: "PRJ",
     fieldName: "ProjectCode",
     fieldType: "number",
@@ -48,7 +48,7 @@ const SYSTEM_CHIPS: SystemChipSpec[] = [
   },
   {
     label: "Experiment Code",
-    ariaLabel: "experiment code chip",
+    ariaLabel: "experiment code segment",
     identifier: "EXP",
     fieldName: "ExperimentCode",
     fieldType: "number",
@@ -56,13 +56,26 @@ const SYSTEM_CHIPS: SystemChipSpec[] = [
   },
   {
     label: "Sample ID",
-    ariaLabel: "sample id chip",
+    ariaLabel: "sample id segment",
     identifier: "SMP",
     fieldName: "SampleID",
     fieldType: "number",
     padding: 2,
   },
 ];
+
+function innerSeparatorFor(delimiter: NamingProfileDelimiter): "_" | "-" {
+  return delimiter === "_" ? "-" : "_";
+}
+
+function stringSegmentHint(
+  delimiter: NamingProfileDelimiter,
+  identifier: string | null,
+): string {
+  const innerSep = innerSeparatorFor(delimiter);
+  const ident = (identifier?.trim() || "REQ").toUpperCase();
+  return `${delimiter}hint${delimiter} -> ${ident}${innerSep}text`;
+}
 
 const DATE_FORMATS: SegmentDateFormat[] = ["YYYYMMDD", "YYYY-MM-DD", "YYMMDD"];
 
@@ -139,12 +152,12 @@ export function NamingProfileWizard({ onSave, onCancel }: Props) {
     setSegments((prev) => [...prev, { ...seg, position: prev.length }]);
   }
 
-  function addSystemChip(chip: SystemChipSpec) {
+  function addSystemSegment(spec: SystemSegmentSpec) {
     addSegment({
-      identifier: chip.identifier,
-      field_name: chip.fieldName,
-      field_type: chip.fieldType,
-      padding: chip.padding,
+      identifier: spec.identifier,
+      field_name: spec.fieldName,
+      field_type: spec.fieldType,
+      padding: spec.padding,
       date_format: null,
       is_system_chip: true,
     });
@@ -332,28 +345,28 @@ export function NamingProfileWizard({ onSave, onCancel }: Props) {
         </div>
       </section>
 
-      {/* Available fields panel */}
+      {/* Available segments panel */}
       <section>
-        <h3 className="text-sm font-medium text-gray-700 mb-2">Available fields</h3>
+        <h3 className="text-sm font-medium text-gray-700 mb-2">Available segments</h3>
 
-        <div className="text-xs text-gray-500 mb-1">System chips (always available)</div>
+        <div className="text-xs text-gray-500 mb-1">System segments (always available)</div>
         <div className="flex flex-wrap gap-2 mb-3">
-          {SYSTEM_CHIPS.map((chip) => (
+          {SYSTEM_SEGMENTS.map((spec) => (
             <button
-              key={chip.identifier}
+              key={spec.identifier}
               type="button"
-              aria-label={chip.ariaLabel}
-              onClick={() => addSystemChip(chip)}
+              aria-label={spec.ariaLabel}
+              onClick={() => addSystemSegment(spec)}
               className="px-3 py-1 rounded-full border border-bioaf-200 bg-bioaf-50 text-sm text-bioaf-800 hover:bg-bioaf-100"
             >
-              + {chip.label}
+              + {spec.label}
             </button>
           ))}
         </div>
 
         {templateFields.length > 0 && (
           <>
-            <div className="text-xs text-gray-500 mb-1">Template fields</div>
+            <div className="text-xs text-gray-500 mb-1">Template segments</div>
             <div className="flex flex-wrap gap-2 mb-3">
               {templateFields.map((f) => (
                 <button
@@ -371,7 +384,7 @@ export function NamingProfileWizard({ onSave, onCancel }: Props) {
 
         {customFields.length > 0 && (
           <>
-            <div className="text-xs text-gray-500 mb-1">Custom fields (this profile)</div>
+            <div className="text-xs text-gray-500 mb-1">Custom segments (this profile)</div>
             <div className="flex flex-wrap gap-2 mb-3">
               {customFields.map((f) => (
                 <span key={f.name} className="px-3 py-1 rounded-full border border-gray-200 bg-gray-50 text-sm text-gray-800">
@@ -382,7 +395,7 @@ export function NamingProfileWizard({ onSave, onCancel }: Props) {
           </>
         )}
 
-        <NewFieldInline onAdd={addCustomFieldThenSegment} />
+        <NewSegmentInline onAdd={addCustomFieldThenSegment} />
 
         <div className="mt-3">
           <button
@@ -415,8 +428,13 @@ export function NamingProfileWizard({ onSave, onCancel }: Props) {
                   <div className="font-medium text-gray-800">{seg.field_name}</div>
                   <div className="text-xs text-gray-500">
                     {seg.field_type}
-                    {seg.is_system_chip && " · system chip"}
+                    {seg.is_system_chip && " · system segment"}
                   </div>
+                  {seg.field_type === "string" && (
+                    <div className="mt-1 text-xs text-gray-500 font-mono">
+                      {stringSegmentHint(delimiter, seg.identifier)}
+                    </div>
+                  )}
                 </div>
                 {seg.field_type !== "date" && (
                   <label className="text-xs text-gray-600">
@@ -620,14 +638,14 @@ function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));
 }
 
-interface NewFieldInlineProps {
+interface NewSegmentInlineProps {
   onAdd: (name: string, type: SegmentFieldType) => void;
 }
 
-function NewFieldInline({ onAdd }: NewFieldInlineProps) {
+function NewSegmentInline({ onAdd }: NewSegmentInlineProps) {
   const [open, setOpen] = useState(false);
-  const [fieldName, setFieldName] = useState("");
-  const [fieldType, setFieldType] = useState<SegmentFieldType>("string");
+  const [segmentName, setSegmentName] = useState("");
+  const [segmentType, setSegmentType] = useState<SegmentFieldType>("string");
 
   if (!open) {
     return (
@@ -636,7 +654,7 @@ function NewFieldInline({ onAdd }: NewFieldInlineProps) {
         onClick={() => setOpen(true)}
         className="text-sm text-bioaf-700 hover:text-bioaf-800"
       >
-        + Create new field
+        + Create new segment
       </button>
     );
   }
@@ -646,18 +664,18 @@ function NewFieldInline({ onAdd }: NewFieldInlineProps) {
       <label className="text-xs text-gray-600">
         Name
         <input
-          value={fieldName}
-          onChange={(e) => setFieldName(e.target.value)}
-          aria-label="new field name"
+          value={segmentName}
+          onChange={(e) => setSegmentName(e.target.value)}
+          aria-label="new segment name"
           className="ml-2 border rounded px-2 py-1 text-sm"
         />
       </label>
       <label className="text-xs text-gray-600">
         Type
         <select
-          value={fieldType}
-          onChange={(e) => setFieldType(e.target.value as SegmentFieldType)}
-          aria-label="new field type"
+          value={segmentType}
+          onChange={(e) => setSegmentType(e.target.value as SegmentFieldType)}
+          aria-label="new segment type"
           className="ml-2 border rounded px-2 py-1 text-sm"
         >
           <option value="string">string</option>
@@ -667,15 +685,15 @@ function NewFieldInline({ onAdd }: NewFieldInlineProps) {
       </label>
       <button
         type="button"
-        disabled={!fieldName.trim()}
+        disabled={!segmentName.trim()}
         onClick={() => {
-          onAdd(fieldName.trim(), fieldType);
-          setFieldName("");
+          onAdd(segmentName.trim(), segmentType);
+          setSegmentName("");
           setOpen(false);
         }}
         className="px-3 py-1 bg-bioaf-600 text-white rounded text-sm disabled:opacity-50"
       >
-        Add field
+        Add segment
       </button>
       <button
         type="button"
