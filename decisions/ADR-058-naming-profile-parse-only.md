@@ -174,8 +174,7 @@ Rejected: every new team eventually requests another addition, and
 the cycle never converges. The enum becomes a backlog of requests
 rather than a designed surface.
 
-### B. Make naming profiles fully free-form (no identifier letters,
-parse purely by position)
+### B. Make naming profiles fully free-form (no identifier letters, parse purely by position)
 
 Rejected: position-based parsing is fragile (one extra segment in a
 filename and everything shifts), and biologists routinely vary the
@@ -183,8 +182,7 @@ order of segments between batches. The identifier-letter scheme
 trades a small amount of authoring effort for substantial parsing
 robustness.
 
-### C. Tie naming profiles to a separate "field library" entity,
-not to Experiment Templates
+### C. Tie naming profiles to a separate "field library" entity, not to Experiment Templates
 
 A library of fields scoped to the org, reusable by both templates
 and profiles. Rejected as over-engineered for the current need:

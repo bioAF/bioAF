@@ -157,6 +157,15 @@ The parser splits on the **first** occurrence only, so values may
 contain the inner separator (e.g. `req-bmills-jr` parses as identifier
 `req` and value `bmills-jr`).
 
+### Experiment Template
+
+A reusable definition of the custom field vocabulary a team uses on its
+[Experiments](#experiment) and [Samples](#sample). Templates carry an
+optional set of required sample fields and a `custom_fields_schema_json`
+listing fields with name + type (`string`, `number`, `date`) + required
+flag. An [Experiment](#experiment) created from a template inherits its
+default [Naming Profile](#naming-profile) and can override it per-row.
+
 ### LLM Provider
 
 A configured back end for [Agent Review](#agent-review) inference. Four are
