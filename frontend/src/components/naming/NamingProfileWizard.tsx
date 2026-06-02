@@ -95,7 +95,7 @@ export function NamingProfileWizard({ onSave, onCancel }: Props) {
 
   useEffect(() => {
     api
-      .get<ExperimentTemplateOption[]>("/api/experiments/templates")
+      .get<ExperimentTemplateOption[]>("/api/templates")
       .then(setTemplates)
       .catch(() => {
         // Template selection is optional; failure is non-blocking.

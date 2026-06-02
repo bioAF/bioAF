@@ -43,7 +43,7 @@ beforeEach(() => {
   mockGet.mockReset();
   mockPost.mockReset();
   mockGet.mockImplementation((url: string) => {
-    if (url.startsWith("/api/experiments/templates")) {
+    if (url.startsWith("/api/templates")) {
       return Promise.resolve(TEMPLATES);
     }
     return Promise.resolve([]);
