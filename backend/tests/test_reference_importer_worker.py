@@ -192,7 +192,7 @@ def test_streams_source_url_into_single_gcs_blob_and_reports_progress():
     # Progress: at least one 'downloading' and a terminal 'active'.
     statuses = [e["status"] for e in callback.events]
     assert "downloading" in statuses, statuses
-    assert statuses[-1] == "active", statuses
+    assert statuses[-1] == "finalizing", statuses
 
     # Bytes downloaded monotonically non-decreasing, terminal matches total.
     bytes_seen: list[int] = [e["bytes_downloaded"] for e in callback.events if e.get("bytes_downloaded") is not None]
@@ -248,7 +248,7 @@ def test_verifies_md5_when_source_md5_url_provided():
 
     statuses = [e["status"] for e in callback.events]
     assert "verifying" in statuses, statuses
-    assert statuses[-1] == "active"
+    assert statuses[-1] == "finalizing"
 
     blob = storage.blobs["bioaf-references-test"]["annotation/gencode/v45/gencode.v45.gtf.gz"]
     assert blob.deleted is False
@@ -335,7 +335,7 @@ def test_extract_gzip_writes_decompressed_object_with_stripped_extension():
 
     statuses = [e["status"] for e in callback.events]
     assert "extracting" in statuses, statuses
-    assert statuses[-1] == "active"
+    assert statuses[-1] == "finalizing"
 
     assert [f.filename for f in result.files] == ["gencode.v45.gtf"]
     assert result.files[0].size_bytes == len(decompressed)
@@ -387,7 +387,7 @@ def test_extract_tar_writes_each_member_as_its_own_blob():
 
     statuses = [e["status"] for e in callback.events]
     assert "extracting" in statuses
-    assert statuses[-1] == "active"
+    assert statuses[-1] == "finalizing"
 
     assert sorted(f.filename for f in result.files) == ["ref_a.txt", "subdir/ref_b.tsv"]
 
@@ -628,7 +628,7 @@ def test_retries_when_source_connection_drops_mid_stream_then_succeeds(monkeypat
     assert len(attempts) == 2
     # And the dataset ended in 'active' with the full payload uploaded.
     statuses = [e["status"] for e in callback.events]
-    assert statuses[-1] == "active", statuses
+    assert statuses[-1] == "finalizing", statuses
     blob = storage.blobs["bioaf-references-test"]["annotation/gencode/v45/gencode.v45.gtf.gz"]
     assert bytes(blob.data) == payload
 
@@ -749,4 +749,4 @@ def test_extract_tar_gz_writes_each_member_as_its_own_blob():
         "annotation/gencode/v45/b.txt",
     ]
     assert sorted(f.filename for f in result.files) == ["a.txt", "b.txt"]
-    assert [e["status"] for e in callback.events][-1] == "active"
+    assert [e["status"] for e in callback.events][-1] == "finalizing"

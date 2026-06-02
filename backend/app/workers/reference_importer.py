@@ -305,8 +305,13 @@ class ReferenceImporter:
                 # operators can find it if disk fills up unexpectedly.
                 logger.debug("Reference import %d: tempfile cleanup failed (%s): %s", cfg.reference_id, tmp_path, exc)
 
+        # Worker emits the penultimate 'finalizing' status. The service
+        # layer flips the dataset row + progress row to 'active' after
+        # writing the file rows (see ReferenceDataService.finalize_import),
+        # so the dataset and progress row transition out of 'uploading'
+        # together.
         self._callback(
-            status="active",
+            status="finalizing",
             progress_pct=100,
             bytes_downloaded=total_bytes,
             total_bytes=total_bytes,

@@ -25,3 +25,13 @@
   importer uploaded as it streamed and deleted the blob on mismatch;
   now a mismatch means no blob is ever created, so a failed MD5 leaves
   the references bucket clean by construction.
+
+- The URL-import path now finalizes the dataset row after the worker
+  finishes. Previously `ReferenceImportProgress` reached `active` but
+  `ReferenceDataset.status` stayed at `uploading` forever, so the UI's
+  `Importing` badge persisted even on a completed 10.66 GB import. The
+  service now writes a `ReferenceDatasetFile` per imported file,
+  aggregates `total_size_bytes` / `file_count` / `md5_manifest_json`,
+  flips `dataset.status` to `pending_approval` for public datasets or
+  `active` for internal (matching the upload-flow rule), and writes an
+  `import_completed` audit entry.
