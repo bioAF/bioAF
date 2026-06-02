@@ -38,4 +38,7 @@ class NamingProfile(Base):
 
     organization = relationship("Organization")
     creator = relationship("User")
-    experiment_template = relationship("ExperimentTemplate")
+    experiment_template = relationship(
+        "ExperimentTemplate",
+        foreign_keys=[experiment_template_id],
+    )
