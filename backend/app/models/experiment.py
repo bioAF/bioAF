@@ -64,10 +64,16 @@ class Experiment(Base):
     variables_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     column_aliases: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
+    # Optional naming profile override. The effective naming profile for an
+    # experiment is `self.naming_profile_id or self.template.naming_profile_id`
+    # (template default; see ADR-058).
+    naming_profile_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("naming_profiles.id"), nullable=True)
+
     organization = relationship("Organization")
     project = relationship("Project", back_populates="experiments")
     owner = relationship("User")
     template = relationship("ExperimentTemplate")
+    naming_profile = relationship("NamingProfile", foreign_keys=[naming_profile_id])
     samples = relationship("Sample", back_populates="experiment")
     sample_batches = relationship("SampleBatch", back_populates="experiment")
     custom_fields = relationship("ExperimentCustomField", back_populates="experiment")

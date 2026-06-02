@@ -5,12 +5,22 @@ import pytest_asyncio
 from sqlalchemy import text
 
 from app.schemas.naming_profile import NamingProfileCreate, SegmentDefinition
+from app.services.auto_ingest_gate import AUTO_INGEST_DISABLED
 from app.services.ingest_service import (
     detect_file_type,
     get_unclaimed_entities,
     process_ingest_event,
 )
 from app.services.naming_profile_service import NamingProfileService
+
+# Auto-ingest is gated off during the Naming Profile redesign. These tests
+# assert behaviors of the gated body and will be re-enabled by the follow-up
+# rework when AUTO_INGEST_DISABLED flips. See
+# local/Naming Profiles/spec-auto-ingest-neutralize.md.
+pytestmark = pytest.mark.skipif(
+    AUTO_INGEST_DISABLED,
+    reason="auto-ingest gated off during Naming Profile redesign",
+)
 
 
 @pytest_asyncio.fixture
@@ -24,14 +34,45 @@ async def org_user(client, admin_token, session):
 
 @pytest_asyncio.fixture
 async def cro_profile(session, org_user):
-    """Create a naming profile with date + project_code + experiment_code segments."""
+    """Placeholder profile used by the (currently skipped) auto-ingest tests.
+
+    The auto-ingest body these tests exercise is gated behind
+    AUTO_INGEST_DISABLED (see local/Naming Profiles/spec-auto-ingest-neutralize.md);
+    the fixture exists only so mypy and pytest collection are happy. The
+    follow-up rework will replace these tests in lockstep with picking
+    profile selection at parse time.
+    """
     org_id, user_id = org_user
     data = NamingProfileCreate(
         name="CRO Standard",
         segments=[
-            SegmentDefinition(position=0, field="date", format="YYYY-MM-DD", required=True),
-            SegmentDefinition(position=1, field="project_code", required=True),
-            SegmentDefinition(position=2, field="experiment_code", required=True),
+            SegmentDefinition(
+                position=0,
+                identifier=None,
+                field_name="RunDate",
+                field_type="date",
+                padding=None,
+                date_format="YYYY-MM-DD",
+                is_system_chip=False,
+            ),
+            SegmentDefinition(
+                position=1,
+                identifier="PRJ",
+                field_name="ProjectCode",
+                field_type="number",
+                padding=2,
+                date_format=None,
+                is_system_chip=True,
+            ),
+            SegmentDefinition(
+                position=2,
+                identifier="EXP",
+                field_name="ExperimentCode",
+                field_type="number",
+                padding=2,
+                date_format=None,
+                is_system_chip=True,
+            ),
         ],
     )
     profile = await NamingProfileService.create_profile(session, org_id, user_id, data)

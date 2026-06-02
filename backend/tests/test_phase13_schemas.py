@@ -1,49 +1,76 @@
+"""Pydantic schema sanity checks for the Phase 13 surfaces.
+
+The Naming Profile schemas were rewritten in 2026-06 (see
+local/Naming Profiles/redesign-plan.md). This file now exercises the new
+shape; the closed-enum field-name tests it used to carry are gone with the
+feature they tested.
+"""
+
 import pytest
 from pydantic import ValidationError
 
+from app.schemas.ingest import (
+    BulkReassignRequest,
+    IngestSimulateRequest,
+)
 from app.schemas.naming_profile import (
     NamingProfileCreate,
     NamingProfileTestRequest,
     SegmentDefinition,
 )
-from app.schemas.ingest import (
-    BulkReassignRequest,
-    IngestSimulateRequest,
-)
 from app.services.budget_service import BudgetCheckResult
+
+
+def _number_segment(**overrides) -> SegmentDefinition:
+    defaults = {
+        "position": 0,
+        "identifier": "SMP",
+        "field_name": "SampleID",
+        "field_type": "number",
+        "padding": 2,
+        "date_format": None,
+        "is_system_chip": False,
+    }
+    defaults.update(overrides)
+    return SegmentDefinition(**defaults)
 
 
 class TestSegmentDefinition:
     def test_valid_segment(self):
-        seg = SegmentDefinition(position=0, field="date", format="YYYY-MM-DD", required=True)
-        assert seg.field == "date"
+        seg = _number_segment()
+        assert seg.field_name == "SampleID"
+        assert seg.identifier == "SMP"
+        assert seg.field_type == "number"
         assert seg.position == 0
 
-    def test_invalid_field_value(self):
+    def test_invalid_field_type_value(self):
         with pytest.raises(ValidationError):
-            SegmentDefinition(position=0, field="invalid_field", required=True)
+            SegmentDefinition(
+                position=0,
+                identifier="SMP",
+                field_name="SampleID",
+                field_type="not_a_real_type",  # type: ignore[arg-type]
+            )
 
     def test_negative_position(self):
         with pytest.raises(ValidationError):
-            SegmentDefinition(position=-1, field="date", required=True)
+            _number_segment(position=-1)
 
 
 class TestNamingProfileCreate:
     def test_valid_profile(self):
         profile = NamingProfileCreate(
             name="Test Profile",
-            segments=[SegmentDefinition(position=0, field="date", required=True)],
+            segments=[_number_segment()],
         )
         assert profile.name == "Test Profile"
         assert profile.delimiter == "_"
         assert profile.strip_extension is True
+        assert profile.experiment_template_id is None
 
     def test_empty_name_rejected(self):
         with pytest.raises(ValidationError):
-            NamingProfileCreate(
-                name="   ",
-                segments=[SegmentDefinition(position=0, field="date", required=True)],
-            )
+            NamingProfileCreate(name="   ", segments=[_number_segment()])
 
     def test_empty_segments_rejected(self):
         with pytest.raises(ValidationError):
@@ -56,12 +83,20 @@ class TestNamingProfileCreate:
 
 class TestNamingProfileTestRequest:
     def test_valid_request(self):
-        req = NamingProfileTestRequest(filenames=["test.fastq", "sample.bam"])
+        req = NamingProfileTestRequest(
+            filenames=["test.fastq", "sample.bam"],
+            segments=[_number_segment()],
+        )
         assert len(req.filenames) == 2
+        assert len(req.segments) == 1
 
     def test_empty_filenames_rejected(self):
         with pytest.raises(ValidationError):
-            NamingProfileTestRequest(filenames=[])
+            NamingProfileTestRequest(filenames=[], segments=[_number_segment()])
+
+    def test_empty_segments_rejected(self):
+        with pytest.raises(ValidationError):
+            NamingProfileTestRequest(filenames=["a.txt"], segments=[])
 
 
 class TestIngestSimulateRequest:

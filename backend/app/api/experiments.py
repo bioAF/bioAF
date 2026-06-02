@@ -44,6 +44,12 @@ def _user_summary(user) -> UserSummary | None:
 
 
 def _experiment_response(exp) -> ExperimentResponse:
+    # Effective naming profile: experiment override wins, otherwise inherit
+    # from the experiment's template (ADR-058).
+    template_naming_profile_id = exp.template.naming_profile_id if exp.template is not None else None
+    effective_naming_profile_id = (
+        exp.naming_profile_id if exp.naming_profile_id is not None else template_naming_profile_id
+    )
     return ExperimentResponse(
         id=exp.id,
         name=exp.name,
@@ -63,6 +69,9 @@ def _experiment_response(exp) -> ExperimentResponse:
         variables_json=exp.variables_json,
         sample_count=len(exp.samples) if exp.samples else 0,
         batch_count=len(exp.sample_batches) if exp.sample_batches else 0,
+        naming_profile_id=exp.naming_profile_id,
+        template_naming_profile_id=template_naming_profile_id,
+        effective_naming_profile_id=effective_naming_profile_id,
         created_at=exp.created_at,
         updated_at=exp.updated_at,
     )
@@ -133,6 +142,10 @@ async def get_experiment(
 
     _, audit_count = await ExperimentService.get_audit_trail(session, experiment_id, org_id, page=1, page_size=1)
 
+    template_naming_profile_id = experiment.template.naming_profile_id if experiment.template is not None else None
+    effective_naming_profile_id = (
+        experiment.naming_profile_id if experiment.naming_profile_id is not None else template_naming_profile_id
+    )
     return ExperimentDetailResponse(
         id=experiment.id,
         name=experiment.name,
@@ -150,6 +163,9 @@ async def get_experiment(
         owner=_user_summary(experiment.owner),
         sample_count=len(experiment.samples),
         batch_count=len(experiment.sample_batches),
+        naming_profile_id=experiment.naming_profile_id,
+        template_naming_profile_id=template_naming_profile_id,
+        effective_naming_profile_id=effective_naming_profile_id,
         created_at=experiment.created_at,
         updated_at=experiment.updated_at,
         samples=[

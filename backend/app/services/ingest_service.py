@@ -17,6 +17,7 @@ from app.models.ingest_event import IngestEvent
 from app.models.project import Project
 from app.models.sample import Sample
 from app.services.audit_service import log_action
+from app.services.auto_ingest_gate import check_gate
 from app.services.event_bus import event_bus
 from app.services.event_types import (
     DUPLICATE_FILE,
@@ -240,6 +241,12 @@ async def process_ingest_event(
     8. Update experiment status if applicable
     9. Emit events for pipeline triggers
     """
+    # Auto-ingest is gated off during the Naming Profile redesign. The body
+    # below is intentionally left intact so the follow-up rework refactors in
+    # place rather than starting from scratch. See
+    # local/Naming Profiles/spec-auto-ingest-neutralize.md.
+    check_gate()
+
     auto_created = {"projects": [], "experiments": [], "samples": []}
 
     # Step 1: Parse filename

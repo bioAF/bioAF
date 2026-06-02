@@ -1,8 +1,15 @@
 # ADR-023: Configurable CRO Naming Profiles
 
-**Status:** Accepted
+**Status:** Superseded by [ADR-058](ADR-058-naming-profile-parse-only.md)
 **Date:** 2026-03-10
+**Superseded:** 2026-06-02
 **Deciders:** Brent (repository owner), informed by feedback from computational biology practitioners
+
+> The closed enum of segment field names this ADR introduced (`project_code`,
+> `experiment_code`, `sample_id`, etc.) was too rigid for real team
+> conventions, and the intent to rename files on upload misframed the
+> feature. ADR-058 reframes Naming Profiles as parse-only with an
+> unbounded, template-driven field vocabulary.
 
 ---
 

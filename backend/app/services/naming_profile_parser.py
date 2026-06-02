@@ -1,272 +1,231 @@
-"""Naming profile parser engine for CRO filename parsing.
+"""Naming Profile parser: read structured fields out of a filename.
 
-Parses filenames against configurable naming profiles to extract
-project codes, experiment codes, sample IDs, dates, and other metadata.
+The parser is pure: input is `(filename, profile)`; output is a dict shaped
+``{"parsed": {field_name: value}, "unrecognized": [...], "warnings": [...]}``.
+No DB / filesystem / network side effects.
+
+The contract is restated in local/Naming Profiles/spec-parser.md. The high
+points:
+
+- Segments self-identify via 1-4 letter `identifier` prefix (or, for dates,
+  by digit pattern). Segment order in the filename is irrelevant.
+- Non-date values are returned as strings; leading zeros are preserved.
+- Dates are returned as ISO `YYYY-MM-DD` strings regardless of input format.
+- Identifier matching is case-insensitive; the authored case is preserved
+  for display.
 """
 
+from __future__ import annotations
+
 import re
-from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.models.experiment import Experiment
-from app.models.naming_profile import NamingProfile
-from app.models.project import Project
-from app.models.sample import Sample
+from typing import Any
 
 
-@dataclass
-class ParseResult:
-    success: bool
-    profile_id: int | None = None
-    profile_name: str | None = None
-    segments: dict[str, str] = field(default_factory=dict)
-    error: str | None = None
+# --- Token classification patterns ---------------------------------------
+_NUMBER_TOKEN_RE = re.compile(r"^([A-Za-z]{1,4})(\d+)$")
+_YYYYMMDD_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})$")
+_YYMMDD_RE = re.compile(r"^(\d{2})(\d{2})(\d{2})$")
+_YYYY_MM_DD_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+_BARE_4 = re.compile(r"^\d{4}$")
+_BARE_2 = re.compile(r"^\d{2}$")
 
-
-@dataclass
-class MatchResult:
-    status: str  # "matched", "multiple_matches", "unmatched"
-    parse_result: ParseResult | None = None
-    candidate_profile_ids: list[int] = field(default_factory=list)
-    candidate_results: list[ParseResult] = field(default_factory=list)
-
-
-@dataclass
-class EntityResolution:
-    project_id: int | None = None
-    project_name: str | None = None
-    experiment_id: int | None = None
-    experiment_name: str | None = None
-    sample_id: int | None = None
-    sample_name: str | None = None
-
-
-DATE_PATTERNS = {
-    "YYYY-MM-DD": r"^\d{4}-\d{2}-\d{2}$",
-    "YYYYMMDD": r"^\d{8}$",
-}
-
-VERSION_PATTERN = r"^[vV]\d+$"
-SAMPLE_INDEX_PATTERN = re.compile(r"^[Ss]?(\d+)$")
+_DOUBLE_EXT_SUFFIXES = (".gz", ".bz2", ".xz")
 
 
 def _strip_extension(filename: str) -> str:
-    """Remove file extension, handling double extensions like .fastq.gz."""
+    """Drop the file extension, handling common double extensions (.fastq.gz)."""
     p = PurePosixPath(filename)
-    # Handle double extensions
-    if p.suffix in (".gz", ".bz2", ".xz") and PurePosixPath(p.stem).suffix:
+    if p.suffix.lower() in _DOUBLE_EXT_SUFFIXES and PurePosixPath(p.stem).suffix:
         return PurePosixPath(p.stem).stem
     return p.stem
 
 
-def _validate_date(value: str, fmt: str | None) -> bool:
-    """Validate a date segment value against a format pattern."""
-    if not fmt:
-        # Accept any recognized date format
-        return any(re.match(pat, value) for pat in DATE_PATTERNS.values())
-    pattern = DATE_PATTERNS.get(fmt)
-    if pattern:
-        return bool(re.match(pattern, value))
-    return True  # Unknown format, accept
+def _inner_separator(delimiter: str) -> str:
+    """The opposite of the profile delimiter, used to split string-segment values."""
+    if delimiter == "_":
+        return "-"
+    if delimiter == "-":
+        return "_"
+    # Unknown delimiter: nothing to swap to. Falls back to a sentinel that
+    # will never appear, so string-segment splits become no-ops.
+    return "\x00"
 
 
-def _validate_version(value: str, fmt: str | None) -> bool:
-    """Validate a version segment (e.g. v001, v01, v1)."""
-    return bool(re.match(VERSION_PATTERN, value))
+def _normalize_yy(yy: str) -> str:
+    """Two-digit year -> four-digit year using a fixed pivot.
 
-
-def parse_filename(filename: str, profile: NamingProfile) -> ParseResult:
-    """Parse a single filename against a single naming profile.
-
-    Returns a ParseResult with success=True if the filename matches,
-    or success=False with an error message if it doesn't.
+    Per spec, the date format `YYMMDD` is rendered to ISO. Without a
+    century pivot, `26` is ambiguous between 1926 and 2026. The pivot
+    matches the Y2K-style cutoff most laboratory data systems use:
+    `00..69` -> 2000s, `70..99` -> 1900s.
     """
-    segments_config = profile.segments_json
-    if not isinstance(segments_config, list):
-        return ParseResult(success=False, error="Invalid segments configuration")
+    n = int(yy)
+    return f"19{yy}" if n >= 70 else f"20{yy}"
 
-    # Step 1: Optionally strip extension
-    name = _strip_extension(filename) if profile.strip_extension else filename
 
-    # Step 2: Split by delimiter
-    parts = name.split(profile.delimiter)
+def _try_classify_date(token: str, date_format: str | None) -> str | None:
+    """Return ISO YYYY-MM-DD if the token matches the profile's date format."""
+    if date_format == "YYYYMMDD":
+        m = _YYYYMMDD_RE.match(token)
+        if m:
+            return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    elif date_format == "YYYY-MM-DD":
+        m = _YYYY_MM_DD_RE.match(token)
+        if m:
+            return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    elif date_format == "YYMMDD":
+        m = _YYMMDD_RE.match(token)
+        if m:
+            return f"{_normalize_yy(m.group(1))}-{m.group(2)}-{m.group(3)}"
+    return None
 
-    # Step 3: Check segment count
-    if len(parts) != len(segments_config):
-        return ParseResult(
-            success=False,
-            error=f"Expected {len(segments_config)} segments, got {len(parts)}",
-        )
 
-    # Step 4: Validate and parse each segment
-    parsed = {}
-    for seg_def in segments_config:
-        pos = seg_def.get("position", 0)
-        seg_field = seg_def.get("field", "ignore")
-        seg_format = seg_def.get("format")
-        required = seg_def.get("required", True)
+def _find_date_segment(segments: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for seg in segments:
+        if seg.get("field_type") == "date":
+            return seg
+    return None
 
-        if pos >= len(parts):
-            if required:
-                return ParseResult(success=False, error=f"Segment at position {pos} out of range")
+
+def _recombine_yyyy_mm_dd(tokens: list[str]) -> tuple[list[str], list[tuple[int, str]], list[str]]:
+    """When delimiter == '-' and date format == 'YYYY-MM-DD', the date is
+    shattered into three bare-digit tokens. Reassemble consecutive triples
+    of `\\d{4}` + `\\d{2}` + `\\d{2}` into one ISO date string.
+
+    Returns:
+        (kept_tokens, date_hits, warnings)
+        - kept_tokens: tokens that were NOT consumed by recombination.
+        - date_hits: list of (start_index_in_original, iso_date) for each
+          recombined triple. The caller binds the first to the profile's
+          date segment; the rest are surfaced as warnings.
+        - warnings: any messages produced (e.g. ambiguous date).
+    """
+    kept: list[str] = []
+    date_hits: list[tuple[int, str]] = []
+    warnings: list[str] = []
+
+    i = 0
+    while i < len(tokens):
+        if (
+            i + 2 < len(tokens)
+            and _BARE_4.match(tokens[i])
+            and _BARE_2.match(tokens[i + 1])
+            and _BARE_2.match(tokens[i + 2])
+        ):
+            iso = f"{tokens[i]}-{tokens[i + 1]}-{tokens[i + 2]}"
+            date_hits.append((i, iso))
+            i += 3
+        else:
+            kept.append(tokens[i])
+            i += 1
+
+    if len(date_hits) > 1:
+        warnings.append(f"ambiguous date: multiple matching triples; chose {date_hits[0][1]}")
+
+    return kept, date_hits, warnings
+
+
+def parse_filename(filename: str, profile: Any) -> dict[str, Any]:
+    """Parse `filename` against `profile` and return a parsed-fields map.
+
+    Returns a dict ``{"parsed": ..., "unrecognized": ..., "warnings": ...}``.
+    Never raises on malformed input: tokens that don't match any segment
+    definition show up in `unrecognized`.
+    """
+    segments: list[dict[str, Any]] = list(profile.segments_json or [])
+    delimiter: str = profile.delimiter
+    inner_sep = _inner_separator(delimiter)
+
+    name = _strip_extension(filename) if getattr(profile, "strip_extension", True) else filename
+    raw_tokens = name.split(delimiter) if delimiter else [name]
+
+    # Build identifier lookup keyed on casefolded identifier.
+    by_identifier: dict[str, dict[str, Any]] = {}
+    for seg in segments:
+        ident = seg.get("identifier")
+        if ident:
+            by_identifier[ident.casefold()] = seg
+
+    date_segment = _find_date_segment(segments)
+
+    parsed: dict[str, str] = {}
+    unrecognized: list[str] = []
+    warnings: list[str] = []
+
+    # Handle the YYYY-MM-DD-collides-with-`-`-delimiter case up front: the
+    # delimiter-split shatters the date, so recombine triples first.
+    tokens_to_classify = raw_tokens
+    if delimiter == "-" and date_segment is not None and date_segment.get("date_format") == "YYYY-MM-DD":
+        tokens_to_classify, date_hits, recomb_warnings = _recombine_yyyy_mm_dd(raw_tokens)
+        warnings.extend(recomb_warnings)
+        if date_hits:
+            parsed[date_segment["field_name"]] = date_hits[0][1]
+
+    for token in tokens_to_classify:
+        if not token:
             continue
 
-        value = parts[pos]
-
-        # Check required fields are not empty
-        if required and not value.strip():
-            return ParseResult(success=False, error=f"Required segment '{seg_field}' at position {pos} is empty")
-
-        # Skip empty optional segments
-        if not value.strip() and not required:
+        # Date-shaped (no identifier).
+        if token[0].isdigit():
+            if date_segment is not None:
+                iso = _try_classify_date(token, date_segment.get("date_format"))
+                if iso is not None and date_segment["field_name"] not in parsed:
+                    parsed[date_segment["field_name"]] = iso
+                    continue
+            unrecognized.append(token)
             continue
 
-        # Field-specific validation
-        if seg_field == "date":
-            if not _validate_date(value, seg_format):
-                if required:
-                    return ParseResult(success=False, error=f"Invalid date format at position {pos}: '{value}'")
+        # Number-shaped: <letters><digits>.
+        m = _NUMBER_TOKEN_RE.match(token)
+        if m:
+            ident, value = m.group(1), m.group(2)
+            seg = by_identifier.get(ident.casefold())
+            if seg is not None and seg.get("field_type") == "number":
+                parsed[seg["field_name"]] = value
                 continue
-        elif seg_field == "version":
-            if not _validate_version(value, seg_format):
-                if required:
-                    return ParseResult(success=False, error=f"Invalid version format at position {pos}: '{value}'")
-                continue
-        elif seg_field == "sample_index":
-            m = SAMPLE_INDEX_PATTERN.match(value)
-            if not m:
-                if required:
-                    return ParseResult(
-                        success=False,
-                        error=f"Invalid sample_index format at position {pos}: '{value}'",
-                    )
-                continue
-            # Store the numeric part only (strip S prefix)
-            parsed["sample_index"] = m.group(1)
+            unrecognized.append(token)
             continue
 
-        if seg_field != "ignore":
-            parsed[seg_field] = value
+        # String-shaped: <letters><inner_sep><value>.
+        if inner_sep in token:
+            head, _, tail = token.partition(inner_sep)
+            if head and head.isascii() and head.isalpha() and 1 <= len(head) <= 4:
+                seg = by_identifier.get(head.casefold())
+                if seg is not None and seg.get("field_type") == "string":
+                    parsed[seg["field_name"]] = tail
+                    continue
+            unrecognized.append(token)
+            continue
 
-    return ParseResult(
-        success=True,
-        profile_id=profile.id,
-        profile_name=profile.name,
-        segments=parsed,
+        # Pure letters, no digits, no inner sep: identifier alone is unrecognized.
+        unrecognized.append(token)
+
+    return {"parsed": parsed, "unrecognized": unrecognized, "warnings": warnings}
+
+
+# ---------------------------------------------------------------------------
+# Legacy stubs kept for import compatibility while auto-ingest is gated off.
+#
+# The gated body of process_ingest_event / process_manifest_ingest still
+# references these names. The auto-ingest gate fires before either is called,
+# so these stubs should never actually execute. The follow-up auto-ingest
+# rework will delete both the stubs and the call sites. See
+# local/Naming Profiles/spec-auto-ingest-neutralize.md.
+# ---------------------------------------------------------------------------
+
+
+def match_filename(*_args, **_kwargs):
+    raise NotImplementedError(
+        "match_filename was removed in the Naming Profile redesign. "
+        "Auto-ingest is gated off; this name exists only so the gated "
+        "module loads. See local/Naming Profiles/spec-auto-ingest-neutralize.md."
     )
 
 
-def match_filename(filename: str, profiles: list[NamingProfile]) -> MatchResult:
-    """Try all active profiles against a filename and return the best match.
-
-    Returns:
-        MatchResult with status 'matched' (exactly one), 'multiple_matches',
-        or 'unmatched' (zero).
-    """
-    if not filename or not filename.strip():
-        return MatchResult(status="unmatched")
-
-    successful_results: list[ParseResult] = []
-    for profile in profiles:
-        result = parse_filename(filename, profile)
-        if result.success:
-            successful_results.append(result)
-
-    if len(successful_results) == 0:
-        return MatchResult(status="unmatched")
-    elif len(successful_results) == 1:
-        return MatchResult(
-            status="matched",
-            parse_result=successful_results[0],
-            candidate_profile_ids=[successful_results[0].profile_id] if successful_results[0].profile_id else [],
-        )
-    else:
-        return MatchResult(
-            status="multiple_matches",
-            candidate_profile_ids=[r.profile_id for r in successful_results if r.profile_id],
-            candidate_results=successful_results,
-        )
-
-
-async def resolve_entities(
-    parse_result: ParseResult,
-    profile: NamingProfile,
-    org_id: int,
-    db: AsyncSession,
-) -> EntityResolution:
-    """Look up project/experiment/sample from parsed segment values.
-
-    Uses the profile's code mappings to resolve codes to entity IDs.
-    Returns None for entities that can't be resolved (to be auto-created by ingest).
-    """
-    resolution = EntityResolution()
-    segments = parse_result.segments
-
-    # Resolve project
-    project_code = segments.get("project_code")
-    if project_code:
-        resolution.project_name = project_code
-        # Check code mappings first
-        mapped_id = profile.project_code_mappings.get(project_code)
-        if mapped_id:
-            try:
-                pid = int(mapped_id)
-                result = await db.execute(select(Project).where(Project.id == pid, Project.organization_id == org_id))
-                project = result.scalar_one_or_none()
-                if project:
-                    resolution.project_id = project.id
-                    resolution.project_name = project.name
-            except (ValueError, TypeError):
-                pass
-
-        # If not mapped, try to find by name
-        if not resolution.project_id:
-            result = await db.execute(
-                select(Project).where(Project.name == project_code, Project.organization_id == org_id)
-            )
-            project = result.scalar_one_or_none()
-            if project:
-                resolution.project_id = project.id
-                resolution.project_name = project.name
-
-    # Resolve experiment
-    experiment_code = segments.get("experiment_code")
-    if experiment_code:
-        resolution.experiment_name = experiment_code
-        mapped_id = profile.experiment_code_mappings.get(experiment_code)
-        if mapped_id:
-            try:
-                eid = int(mapped_id)
-                result = await db.execute(
-                    select(Experiment).where(Experiment.id == eid, Experiment.organization_id == org_id)
-                )
-                experiment = result.scalar_one_or_none()
-                if experiment:
-                    resolution.experiment_id = experiment.id
-                    resolution.experiment_name = experiment.name
-            except (ValueError, TypeError):
-                pass
-
-        if not resolution.experiment_id:
-            result = await db.execute(
-                select(Experiment).where(Experiment.name == experiment_code, Experiment.organization_id == org_id)
-            )
-            experiment = result.scalar_one_or_none()
-            if experiment:
-                resolution.experiment_id = experiment.id
-                resolution.experiment_name = experiment.name
-
-    # Resolve sample
-    sample_id_ext = segments.get("sample_id")
-    if sample_id_ext:
-        resolution.sample_name = sample_id_ext
-        result = await db.execute(select(Sample).where(Sample.external_id == sample_id_ext))
-        sample = result.scalar_one_or_none()
-        if sample:
-            resolution.sample_id = sample.id
-            resolution.sample_name = sample.external_id
-
-    return resolution
+async def resolve_entities(*_args, **_kwargs):
+    raise NotImplementedError(
+        "resolve_entities was removed in the Naming Profile redesign. "
+        "Auto-ingest is gated off; this name exists only so the gated "
+        "module loads. See local/Naming Profiles/spec-auto-ingest-neutralize.md."
+    )

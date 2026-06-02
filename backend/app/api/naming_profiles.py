@@ -1,3 +1,19 @@
+"""HTTP API for Naming Profiles.
+
+Three things changed in the redesign:
+
+1. The response model drops the closed-enum `*_mappings` columns and gains
+   `experiment_template_id`.
+2. The `POST /test` endpoint now takes an unsaved profile draft inline (with
+   one or more filenames) instead of a list of filenames matched against
+   every active profile. Profile selection at parse time is a separate
+   problem deferred to the auto-ingest rework.
+3. The closed enum of field names is gone; segment validation is enforced
+   entirely by the Pydantic layer.
+"""
+
+from types import SimpleNamespace
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,12 +27,13 @@ from app.schemas.naming_profile import (
     NamingProfileUpdate,
     SegmentDefinition,
 )
+from app.services.naming_profile_parser import parse_filename
 from app.services.naming_profile_service import NamingProfileService
 
 router = APIRouter(prefix="/api/naming-profiles", tags=["naming_profiles"])
 
 
-def _profile_response(p, match_count: int | None = None) -> NamingProfileResponse:
+def _profile_response(p) -> NamingProfileResponse:
     return NamingProfileResponse(
         id=p.id,
         organization_id=p.organization_id,
@@ -24,14 +41,12 @@ def _profile_response(p, match_count: int | None = None) -> NamingProfileRespons
         description=p.description,
         delimiter=p.delimiter,
         strip_extension=p.strip_extension,
-        segments=[SegmentDefinition(**seg) for seg in p.segments_json] if p.segments_json else [],
-        project_code_mappings=p.project_code_mappings or {},
-        experiment_code_mappings=p.experiment_code_mappings or {},
+        segments=[SegmentDefinition(**seg) for seg in (p.segments_json or [])],
+        experiment_template_id=p.experiment_template_id,
         status=p.status,
         created_by=p.created_by,
         created_at=p.created_at,
         updated_at=p.updated_at,
-        match_count_30d=match_count,
     )
 
 
@@ -43,11 +58,7 @@ async def list_profiles(
 ):
     org_id = int(current_user["org_id"])
     profiles = await NamingProfileService.list_profiles(session, org_id, status_filter=status)
-    results = []
-    for p in profiles:
-        count = await NamingProfileService.get_match_statistics(session, p.id)
-        results.append(_profile_response(p, match_count=count))
-    return results
+    return [_profile_response(p) for p in profiles]
 
 
 @router.post("", response_model=NamingProfileResponse)
@@ -73,8 +84,7 @@ async def get_profile(
     profile = await NamingProfileService.get_profile(session, profile_id)
     if not profile:
         raise HTTPException(404, "Naming profile not found")
-    count = await NamingProfileService.get_match_statistics(session, profile_id)
-    return _profile_response(profile, match_count=count)
+    return _profile_response(profile)
 
 
 @router.put("/{profile_id}", response_model=NamingProfileResponse)
@@ -109,11 +119,31 @@ async def deactivate_profile(
 
 
 @router.post("/test", response_model=list[NamingProfileTestResult])
-async def test_profiles(
+async def test_profile(
     body: NamingProfileTestRequest,
     current_user: dict = require_permission("experiments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
-    org_id = int(current_user["org_id"])
-    results = await NamingProfileService.test_profiles(session, org_id, body.filenames)
-    return [NamingProfileTestResult(**r) for r in results]
+    """Parse one or more filenames against an unsaved profile draft.
+
+    Used by the wizard's "Test against a real filename" affordance: the
+    profile being authored is sent inline so the user can preview the
+    parse before saving.
+    """
+    draft = SimpleNamespace(
+        delimiter=body.delimiter,
+        strip_extension=body.strip_extension,
+        segments_json=[seg.model_dump() for seg in body.segments],
+    )
+    results: list[NamingProfileTestResult] = []
+    for filename in body.filenames:
+        out = parse_filename(filename, draft)
+        results.append(
+            NamingProfileTestResult(
+                filename=filename,
+                parsed=out["parsed"],
+                unrecognized=out["unrecognized"],
+                warnings=out["warnings"],
+            )
+        )
+    return results
