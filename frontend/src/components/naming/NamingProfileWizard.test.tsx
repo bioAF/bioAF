@@ -437,6 +437,62 @@ describe("save", () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
+  test("edit mode prefills state from the profile and PUTs on save", async () => {
+    const user = userEvent.setup();
+    const onSave = jest.fn();
+    const mockPut = api.put as jest.Mock | undefined;
+    const putMock = mockPut ?? jest.fn();
+    (api as unknown as { put: jest.Mock }).put = putMock;
+    putMock.mockReset();
+    putMock.mockResolvedValue({});
+
+    const existing = {
+      id: 99,
+      organization_id: 1,
+      name: "Existing profile",
+      description: "Old description",
+      delimiter: "_" as const,
+      strip_extension: true,
+      segments: [
+        {
+          position: 0,
+          identifier: "SMP",
+          field_name: "SampleID",
+          field_type: "number" as const,
+          padding: 2,
+          date_format: null,
+          is_system_chip: true,
+        },
+      ],
+      experiment_template_id: null,
+      status: "active" as const,
+      created_by: 1,
+      created_at: "2026-06-02T00:00:00Z",
+      updated_at: "2026-06-02T00:00:00Z",
+    };
+
+    render(
+      <NamingProfileWizard onSave={onSave} onCancel={jest.fn()} profile={existing} />,
+    );
+
+    // Existing values are reflected in the form and the segment is in the list.
+    const nameInput = await screen.findByLabelText(/profile name/i);
+    expect(nameInput).toHaveValue("Existing profile");
+    const segmentsList = await screen.findByTestId("segments-list");
+    expect(within(segmentsList).getByText(/SampleID/)).toBeInTheDocument();
+
+    // Rename and save.
+    await user.clear(nameInput);
+    await user.type(nameInput, "Renamed");
+    await user.click(screen.getByRole("button", { name: /save profile/i }));
+
+    await waitFor(() => expect(putMock).toHaveBeenCalled());
+    const [url, body] = putMock.mock.calls[0];
+    expect(url).toBe("/api/naming-profiles/99");
+    expect(body.name).toBe("Renamed");
+    expect(onSave).toHaveBeenCalled();
+  });
+
   test("backend save failure preserves in-progress state and surfaces error", async () => {
     const user = userEvent.setup();
     mockPost.mockImplementation((url: string) => {

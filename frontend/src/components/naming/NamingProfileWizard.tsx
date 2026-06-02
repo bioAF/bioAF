@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { api } from "@/lib/api";
 import type {
+  NamingProfile,
   NamingProfileDelimiter,
   NamingProfileTestResult,
   SegmentDateFormat,
@@ -97,16 +98,23 @@ const PADDING_MAX = 3;
 interface Props {
   onSave: () => void;
   onCancel: () => void;
+  /** When present, the wizard edits this profile in place via PUT. */
+  profile?: NamingProfile;
 }
 
-export function NamingProfileWizard({ onSave, onCancel }: Props) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [delimiter, setDelimiter] = useState<NamingProfileDelimiter>("_");
-  const [stripExtension, setStripExtension] = useState(true);
-  const [segments, setSegments] = useState<SegmentDefinition[]>([]);
+export function NamingProfileWizard({ onSave, onCancel, profile }: Props) {
+  const editing = profile != null;
+  const [name, setName] = useState(profile?.name ?? "");
+  const [description, setDescription] = useState(profile?.description ?? "");
+  const [delimiter, setDelimiter] = useState<NamingProfileDelimiter>(
+    profile?.delimiter ?? "_",
+  );
+  const [stripExtension, setStripExtension] = useState(profile?.strip_extension ?? true);
+  const [segments, setSegments] = useState<SegmentDefinition[]>(profile?.segments ?? []);
   const [templates, setTemplates] = useState<ExperimentTemplateOption[]>([]);
-  const [templateId, setTemplateId] = useState<number | null>(null);
+  const [templateId, setTemplateId] = useState<number | null>(
+    profile?.experiment_template_id ?? null,
+  );
   const [customFields, setCustomFields] = useState<TemplateField[]>([]);
   const [testFilename, setTestFilename] = useState("");
   const [testResult, setTestResult] = useState<NamingProfileTestResult | null>(null);
@@ -291,14 +299,19 @@ export function NamingProfileWizard({ onSave, onCancel }: Props) {
           },
         });
       }
-      await api.post("/api/naming-profiles", {
+      const body = {
         name: name.trim() || "Untitled profile",
         description: description.trim() || null,
         delimiter,
         strip_extension: stripExtension,
         segments,
         experiment_template_id: templateId,
-      });
+      };
+      if (editing && profile) {
+        await api.put(`/api/naming-profiles/${profile.id}`, body);
+      } else {
+        await api.post("/api/naming-profiles", body);
+      }
       setPromotionRows(null);
       onSave();
     } catch {
@@ -317,7 +330,9 @@ export function NamingProfileWizard({ onSave, onCancel }: Props) {
   // ----- Render -----------------------------------------------------------
   return (
     <div className="bg-white border rounded-lg p-6 mb-6 space-y-6">
-      <h2 className="text-lg font-semibold">Create Naming Profile</h2>
+      <h2 className="text-lg font-semibold">
+        {editing ? `Edit Naming Profile: ${profile?.name ?? ""}` : "Create Naming Profile"}
+      </h2>
       <p className="text-sm text-gray-600">
         Tell bioAF how your team encodes information in filenames. bioAF
         reads filenames; it never renames them.

@@ -8,6 +8,7 @@ import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { ContentLoading } from "@/components/shared/ContentLoading";
+import { NamingProfileDetail } from "@/components/naming/NamingProfileDetail";
 import { NamingProfileWizard } from "@/components/naming/NamingProfileWizard";
 import type { NamingProfile } from "@/lib/types";
 
@@ -17,6 +18,8 @@ export default function SettingsNamingProfilesPage() {
   const [profiles, setProfiles] = useState<NamingProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [showWizard, setShowWizard] = useState(false);
+  const [editingProfile, setEditingProfile] = useState<NamingProfile | null>(null);
+  const [detailProfile, setDetailProfile] = useState<NamingProfile | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
@@ -48,8 +51,15 @@ export default function SettingsNamingProfilesPage() {
 
   const handleSaved = () => {
     setShowWizard(false);
+    setEditingProfile(null);
     setMessage("Profile saved.");
     loadProfiles();
+  };
+
+  const openEdit = (p: NamingProfile) => {
+    setDetailProfile(null);
+    setEditingProfile(p);
+    setShowWizard(true);
   };
 
   const handleDeactivate = async (id: number) => {
@@ -132,7 +142,19 @@ export default function SettingsNamingProfilesPage() {
             {showWizard && (
               <NamingProfileWizard
                 onSave={handleSaved}
-                onCancel={() => setShowWizard(false)}
+                onCancel={() => {
+                  setShowWizard(false);
+                  setEditingProfile(null);
+                }}
+                profile={editingProfile ?? undefined}
+              />
+            )}
+
+            {detailProfile && (
+              <NamingProfileDetail
+                profile={detailProfile}
+                onClose={() => setDetailProfile(null)}
+                onEdit={() => openEdit(detailProfile)}
               />
             )}
 
@@ -168,7 +190,11 @@ export default function SettingsNamingProfilesPage() {
                   </thead>
                   <tbody className="divide-y">
                     {profiles.map((p) => (
-                      <tr key={p.id} className="hover:bg-gray-50">
+                      <tr
+                        key={p.id}
+                        onClick={() => setDetailProfile(p)}
+                        className="hover:bg-gray-50 cursor-pointer"
+                      >
                         <td className="px-6 py-4">
                           <div className="font-medium text-gray-900">{p.name}</div>
                           {p.description && (
@@ -196,7 +222,10 @@ export default function SettingsNamingProfilesPage() {
                             {p.status}
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-right space-x-2">
+                        <td
+                          className="px-6 py-4 text-right space-x-2"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           {p.status === "active" && (
                             <button
                               onClick={() => handleDeactivate(p.id)}
