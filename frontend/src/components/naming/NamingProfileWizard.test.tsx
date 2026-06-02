@@ -20,6 +20,31 @@ jest.mock("@/lib/api", () => ({
   },
 }));
 
+async function addSystemSampleSegment(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole("button", { name: /sample id segment/i }));
+}
+
+async function addCustomSegment(
+  user: ReturnType<typeof userEvent.setup>,
+  name: string,
+  type: "string" | "number" | "date" = "string",
+) {
+  await user.click(await screen.findByText(/Create new segment/i));
+  await user.type(screen.getByLabelText(/new segment name/i), name);
+  if (type !== "string") {
+    await user.selectOptions(screen.getByLabelText(/new segment type/i), type);
+  }
+  await user.click(screen.getByRole("button", { name: /add segment$/i }));
+}
+
+async function selectTemplate(user: ReturnType<typeof userEvent.setup>, templateId: string) {
+  const picker = await screen.findByLabelText(/experiment template/i);
+  await waitFor(() =>
+    expect(within(picker as HTMLSelectElement).getByText(/RNA-seq Template/i)).toBeInTheDocument(),
+  );
+  await user.selectOptions(picker, templateId);
+}
+
 import { api } from "@/lib/api";
 
 const mockGet = api.get as jest.Mock;
@@ -296,6 +321,120 @@ describe("save", () => {
     expect(payload.segments[0].is_system_chip).toBe(true);
 
     expect(onSave).toHaveBeenCalled();
+  });
+
+  test("save with no template and custom segments skips the promotion modal", async () => {
+    const user = userEvent.setup();
+    const onSave = jest.fn();
+    renderWizard({ onSave });
+
+    // No template selected, but the user adds an ad-hoc segment.
+    await addCustomSegment(user, "Requestor", "string");
+    await user.type(screen.getByLabelText(/profile name/i), "Team A");
+    await user.click(screen.getByRole("button", { name: /save profile/i }));
+
+    // No modal should appear; profile is saved straight through.
+    expect(screen.queryByRole("dialog", { name: /add new segments to template/i })).not.toBeInTheDocument();
+    await waitFor(() => expect(mockPost).toHaveBeenCalled());
+    expect(onSave).toHaveBeenCalled();
+  });
+
+  test("save with template and only template / system segments skips the promotion modal", async () => {
+    const user = userEvent.setup();
+    const onSave = jest.fn();
+    renderWizard({ onSave });
+
+    await selectTemplate(user, "7");
+    // Pick a template field and a system chip. No ad-hoc fields.
+    await user.click(await screen.findByRole("button", { name: /Read/ }));
+    await addSystemSampleSegment(user);
+    await user.type(screen.getByLabelText(/profile name/i), "Team A");
+    await user.click(screen.getByRole("button", { name: /save profile/i }));
+
+    expect(screen.queryByRole("dialog", { name: /add new segments to template/i })).not.toBeInTheDocument();
+    await waitFor(() => expect(mockPost).toHaveBeenCalled());
+    expect(onSave).toHaveBeenCalled();
+  });
+
+  test("save with template and custom segments opens the promotion modal", async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await selectTemplate(user, "7");
+    await addCustomSegment(user, "Operator", "string");
+    await addCustomSegment(user, "Rescan", "number");
+    await user.type(screen.getByLabelText(/profile name/i), "Team A");
+    await user.click(screen.getByRole("button", { name: /save profile/i }));
+
+    const dialog = await screen.findByRole("dialog", { name: /add new segments to template/i });
+    // Each new field gets one row in the table.
+    expect(within(dialog).getByText("Operator")).toBeInTheDocument();
+    expect(within(dialog).getByText("Rescan")).toBeInTheDocument();
+    // Nothing has been posted yet.
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  test("modal confirm PATCHes template with checked rows then POSTs profile", async () => {
+    const user = userEvent.setup();
+    const onSave = jest.fn();
+    const mockPatch = api.patch as jest.Mock;
+    mockPatch.mockResolvedValue({});
+    renderWizard({ onSave });
+
+    await selectTemplate(user, "7");
+    await addCustomSegment(user, "Operator", "string");
+    await addCustomSegment(user, "Rescan", "number");
+    await user.type(screen.getByLabelText(/profile name/i), "Team A");
+    await user.click(screen.getByRole("button", { name: /save profile/i }));
+
+    const dialog = await screen.findByRole("dialog", { name: /add new segments to template/i });
+    // Mark Operator as required; leave Rescan unrequired.
+    await user.click(within(dialog).getByLabelText("required-Operator"));
+    // Uncheck Rescan's 'Add to Template' so it is NOT promoted.
+    await user.click(within(dialog).getByLabelText("add-to-template-Rescan"));
+    await user.click(within(dialog).getByRole("button", { name: /save profile$/i }));
+
+    await waitFor(() => expect(mockPatch).toHaveBeenCalled());
+    const [patchUrl, patchBody] = mockPatch.mock.calls[0];
+    expect(patchUrl).toBe("/api/templates/7");
+    expect(patchBody.custom_fields_schema_json.fields).toEqual(
+      expect.arrayContaining([
+        { name: "Read", type: "number" }, // existing template field preserved
+        { name: "Lane", type: "number" },
+        { name: "Requestor", type: "string" },
+        { name: "Operator", type: "string", required: true },
+      ]),
+    );
+    // Rescan was unchecked; it must not be in the template payload.
+    expect(
+      patchBody.custom_fields_schema_json.fields.some(
+        (f: { name: string }) => f.name === "Rescan",
+      ),
+    ).toBe(false);
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith("/api/naming-profiles", expect.anything()));
+    expect(onSave).toHaveBeenCalled();
+  });
+
+  test("modal cancel closes without saving anything", async () => {
+    const user = userEvent.setup();
+    const onSave = jest.fn();
+    const mockPatch = api.patch as jest.Mock;
+    mockPatch.mockReset();
+    renderWizard({ onSave });
+
+    await selectTemplate(user, "7");
+    await addCustomSegment(user, "Operator", "string");
+    await user.type(screen.getByLabelText(/profile name/i), "Team A");
+    await user.click(screen.getByRole("button", { name: /save profile/i }));
+
+    const dialog = await screen.findByRole("dialog", { name: /add new segments to template/i });
+    await user.click(within(dialog).getByRole("button", { name: /^cancel$/i }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mockPatch).not.toHaveBeenCalled();
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(onSave).not.toHaveBeenCalled();
   });
 
   test("backend save failure preserves in-progress state and surfaces error", async () => {

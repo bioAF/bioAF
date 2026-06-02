@@ -64,6 +64,13 @@ const SYSTEM_SEGMENTS: SystemSegmentSpec[] = [
   },
 ];
 
+interface PromotionRow {
+  name: string;
+  type: SegmentFieldType;
+  required: boolean;
+  addToTemplate: boolean;
+}
+
 function innerSeparatorFor(delimiter: NamingProfileDelimiter): "_" | "-" {
   return delimiter === "_" ? "-" : "_";
 }
@@ -105,6 +112,7 @@ export function NamingProfileWizard({ onSave, onCancel }: Props) {
   const [testResult, setTestResult] = useState<NamingProfileTestResult | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [promotionRows, setPromotionRows] = useState<PromotionRow[] | null>(null);
 
   useEffect(() => {
     api
@@ -245,8 +253,44 @@ export function NamingProfileWizard({ onSave, onCancel }: Props) {
   async function handleSave() {
     if (!canSave) return;
     setError("");
+
+    // If a template is selected and the user added custom segments not in it,
+    // ask first whether to promote those segments back to the template.
+    if (templateId !== null && customFields.length > 0) {
+      setPromotionRows(
+        customFields.map((f) => ({
+          name: f.name,
+          type: f.type,
+          required: false,
+          addToTemplate: true,
+        })),
+      );
+      return;
+    }
+
+    await persistProfile([]);
+  }
+
+  async function persistProfile(promotions: PromotionRow[]) {
     setSaving(true);
     try {
+      const toPromote = promotions.filter((r) => r.addToTemplate);
+      if (toPromote.length > 0 && templateId !== null) {
+        const selected = templates.find((t) => t.id === templateId);
+        const existing = selected?.custom_fields_schema_json?.fields ?? [];
+        await api.patch(`/api/templates/${templateId}`, {
+          custom_fields_schema_json: {
+            fields: [
+              ...existing,
+              ...toPromote.map((r) => ({
+                name: r.name,
+                type: r.type,
+                required: r.required,
+              })),
+            ],
+          },
+        });
+      }
       await api.post("/api/naming-profiles", {
         name: name.trim() || "Untitled profile",
         description: description.trim() || null,
@@ -255,12 +299,19 @@ export function NamingProfileWizard({ onSave, onCancel }: Props) {
         segments,
         experiment_template_id: templateId,
       });
+      setPromotionRows(null);
       onSave();
     } catch {
       setError("Failed to save profile. Please try again.");
     } finally {
       setSaving(false);
     }
+  }
+
+  function togglePromotionRow(name: string, patch: Partial<PromotionRow>) {
+    setPromotionRows((prev) =>
+      prev ? prev.map((r) => (r.name === name ? { ...r, ...patch } : r)) : prev,
+    );
   }
 
   // ----- Render -----------------------------------------------------------
@@ -620,6 +671,110 @@ export function NamingProfileWizard({ onSave, onCancel }: Props) {
         >
           Cancel
         </button>
+      </div>
+
+      {promotionRows !== null && (
+        <PromotionModal
+          templateName={templates.find((t) => t.id === templateId)?.name ?? "(unnamed)"}
+          rows={promotionRows}
+          onChange={togglePromotionRow}
+          onCancel={() => setPromotionRows(null)}
+          onConfirm={() => persistProfile(promotionRows)}
+          saving={saving}
+        />
+      )}
+    </div>
+  );
+}
+
+interface PromotionModalProps {
+  templateName: string;
+  rows: PromotionRow[];
+  onChange: (name: string, patch: Partial<PromotionRow>) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+  saving: boolean;
+}
+
+function PromotionModal({
+  templateName,
+  rows,
+  onChange,
+  onConfirm,
+  onCancel,
+  saving,
+}: PromotionModalProps) {
+  return (
+    <div
+      role="dialog"
+      aria-label={`Add new segments to template '${templateName}'?`}
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+    >
+      <div className="bg-white rounded-lg shadow-lg w-full max-w-2xl p-6 space-y-4">
+        <h3 className="text-base font-semibold text-gray-900">
+          Add new segments to template{" "}
+          <span className="font-mono">&apos;{templateName}&apos;</span>?
+        </h3>
+        <p className="text-sm text-gray-600">
+          These segments aren&apos;t in the template yet. Pick which to add
+          and whether each is required. Unchecked rows stay on this profile
+          only; their parsed values will be human-readable but not persisted
+          to experiment records.
+        </p>
+        <table className="min-w-full text-sm">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-3 py-2 text-left font-medium text-gray-600">Name</th>
+              <th className="px-3 py-2 text-left font-medium text-gray-600">Type</th>
+              <th className="px-3 py-2 text-left font-medium text-gray-600">Required</th>
+              <th className="px-3 py-2 text-left font-medium text-gray-600">Add to template</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {rows.map((r) => (
+              <tr key={r.name}>
+                <td className="px-3 py-2 font-medium">{r.name}</td>
+                <td className="px-3 py-2 text-gray-500">{r.type}</td>
+                <td className="px-3 py-2">
+                  <input
+                    type="checkbox"
+                    aria-label={`required-${r.name}`}
+                    checked={r.required}
+                    onChange={(e) => onChange(r.name, { required: e.target.checked })}
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <input
+                    type="checkbox"
+                    aria-label={`add-to-template-${r.name}`}
+                    checked={r.addToTemplate}
+                    onChange={(e) =>
+                      onChange(r.name, { addToTemplate: e.target.checked })
+                    }
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="flex gap-2 pt-2 border-t">
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={saving}
+            className="px-4 py-2 bg-bioaf-600 text-white rounded-lg hover:bg-bioaf-700 disabled:opacity-50"
+          >
+            {saving ? "Saving..." : "Save profile"}
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );
