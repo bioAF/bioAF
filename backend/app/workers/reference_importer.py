@@ -55,6 +55,8 @@ def _build_transient_network_exceptions() -> tuple[type[BaseException], ...]:
             ]
         )
     except ImportError:
+        # `httpx` is optional in some environments; fall back to stdlib/network
+        # exception classes only.
         pass
     try:
         import httpcore
@@ -70,6 +72,8 @@ def _build_transient_network_exceptions() -> tuple[type[BaseException], ...]:
             ]
         )
     except ImportError:
+        # `httpcore` may not be installed directly; continue with available
+        # exception classes.
         pass
     return tuple(excs)
 
