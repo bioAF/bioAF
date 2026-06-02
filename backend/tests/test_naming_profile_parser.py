@@ -1,363 +1,310 @@
-"""Tests for the naming profile parser engine."""
+"""Unit tests for the Naming Profile parser.
+
+The parser is the heart of the Naming Profile feature: it reads a filename
+against a profile and returns a typed map of the fields the profile
+recognized, plus any unrecognized tokens and warnings. It is a pure
+function with no DB / filesystem / network side effects.
+
+See local/Naming Profiles/spec-parser.md for the full contract.
+"""
+
+import inspect
 
 import pytest
-import pytest_asyncio
-from sqlalchemy import text
 
-from app.services.naming_profile_parser import (
-    ParseResult,
-    _strip_extension,
-    match_filename,
-    parse_filename,
-    resolve_entities,
-)
+from app.services.naming_profile_parser import parse_filename
 
 
 def _make_profile(
-    segments_json,
+    segments,
     delimiter="_",
     strip_extension=True,
-    project_code_mappings=None,
-    experiment_code_mappings=None,
     profile_id=1,
     name="TestProfile",
 ):
-    """Create a mock NamingProfile-like object for testing."""
+    """Build a minimal duck-typed profile object for parser unit tests.
 
-    class MockProfile:
+    Per the spec, the parser only needs `segments_json`, `delimiter`, and
+    `strip_extension` off the profile. Tests pass plain dicts in
+    `segments` (matching the SegmentDefinition shape) so they read as the
+    on-disk JSON does.
+    """
+
+    class _Profile:
         def __init__(self):
             self.id = profile_id
             self.name = name
             self.delimiter = delimiter
             self.strip_extension = strip_extension
-            self.segments_json = segments_json
-            self.project_code_mappings = project_code_mappings or {}
-            self.experiment_code_mappings = experiment_code_mappings or {}
+            self.segments_json = segments
 
-    return MockProfile()
+    return _Profile()
 
 
-# --- _strip_extension tests ---
+def _seg(
+    field_name,
+    field_type,
+    identifier=None,
+    position=0,
+    padding=None,
+    date_format=None,
+    is_system_chip=False,
+):
+    """Helper to build a SegmentDefinition-shaped dict."""
+    return {
+        "position": position,
+        "identifier": identifier,
+        "field_name": field_name,
+        "field_type": field_type,
+        "padding": padding,
+        "date_format": date_format,
+        "is_system_chip": is_system_chip,
+    }
 
 
-class TestStripExtension:
-    def test_simple_extension(self):
-        assert _strip_extension("test.fastq") == "test"
-
-    def test_double_extension(self):
-        assert _strip_extension("test.fastq.gz") == "test"
-
-    def test_no_extension(self):
-        assert _strip_extension("test") == "test"
-
-    def test_complex_name(self):
-        assert _strip_extension("2026-03-10_ProjectX_RNASeq.txt") == "2026-03-10_ProjectX_RNASeq"
+# ---------------------------------------------------------------------------
+# Signature / purity guards
+# ---------------------------------------------------------------------------
 
 
-# --- parse_filename tests ---
-
-
-class TestParseFilename:
-    def test_standard_cro_filename(self):
-        """Parse a standard 6-segment CRO filename."""
-        profile = _make_profile(
-            segments_json=[
-                {"position": 0, "field": "date", "format": "YYYY-MM-DD", "required": True},
-                {"position": 1, "field": "project_code", "required": True},
-                {"position": 2, "field": "data_type", "required": True},
-                {"position": 3, "field": "analysis_type", "required": True},
-                {"position": 4, "field": "researcher_initials", "required": True},
-                {"position": 5, "field": "version", "required": True},
-            ]
-        )
-        result = parse_filename("2026-03-10_ProjectX_RNASeq_DiffExpr_SmithE_v001.txt", profile)
-        assert result.success is True
-        assert result.segments["date"] == "2026-03-10"
-        assert result.segments["project_code"] == "ProjectX"
-        assert result.segments["data_type"] == "RNASeq"
-        assert result.segments["analysis_type"] == "DiffExpr"
-        assert result.segments["researcher_initials"] == "SmithE"
-        assert result.segments["version"] == "v001"
-
-    def test_different_delimiters(self):
-        """Test parsing with hyphen delimiter."""
-        profile = _make_profile(
-            segments_json=[
-                {"position": 0, "field": "project_code", "required": True},
-                {"position": 1, "field": "sample_id", "required": True},
-            ],
-            delimiter="-",
-        )
-        result = parse_filename("ProjectX-Sample001.fastq", profile)
-        assert result.success is True
-        assert result.segments["project_code"] == "ProjectX"
-        assert result.segments["sample_id"] == "Sample001"
-
-    def test_dot_delimiter(self):
-        profile = _make_profile(
-            segments_json=[
-                {"position": 0, "field": "project_code", "required": True},
-                {"position": 1, "field": "sample_id", "required": True},
-            ],
-            delimiter=".",
-            strip_extension=False,
-        )
-        result = parse_filename("ProjectX.Sample001", profile)
-        assert result.success is True
-
-    def test_strip_extension_disabled(self):
-        """With strip_extension=False, extension stays as part of last segment."""
-        profile = _make_profile(
-            segments_json=[
-                {"position": 0, "field": "project_code", "required": True},
-                {"position": 1, "field": "data_type", "required": True},
-            ],
-            strip_extension=False,
-        )
-        result = parse_filename("ProjectX_RNASeq.fastq", profile)
-        assert result.success is True
-        assert result.segments["data_type"] == "RNASeq.fastq"  # extension included
-
-    def test_optional_segment_missing(self):
-        """Optional segments should not cause failure."""
-        profile = _make_profile(
-            segments_json=[
-                {"position": 0, "field": "project_code", "required": True},
-                {"position": 1, "field": "sample_id", "required": True},
-                {"position": 2, "field": "version", "required": False},
-            ]
-        )
-        # 2 segments but profile expects 3 - should fail on count
-        result = parse_filename("ProjectX_Sample001.txt", profile)
-        assert result.success is False
-
-    def test_date_format_yyyy_mm_dd(self):
-        profile = _make_profile(
-            segments_json=[
-                {"position": 0, "field": "date", "format": "YYYY-MM-DD", "required": True},
-                {"position": 1, "field": "project_code", "required": True},
-            ]
-        )
-        result = parse_filename("2026-03-10_ProjectX.txt", profile)
-        assert result.success is True
-        assert result.segments["date"] == "2026-03-10"
-
-    def test_date_format_yyyymmdd(self):
-        profile = _make_profile(
-            segments_json=[
-                {"position": 0, "field": "date", "format": "YYYYMMDD", "required": True},
-                {"position": 1, "field": "project_code", "required": True},
-            ]
-        )
-        result = parse_filename("20260310_ProjectX.txt", profile)
-        assert result.success is True
-        assert result.segments["date"] == "20260310"
-
-    def test_invalid_date_format(self):
-        profile = _make_profile(
-            segments_json=[
-                {"position": 0, "field": "date", "format": "YYYY-MM-DD", "required": True},
-                {"position": 1, "field": "project_code", "required": True},
-            ]
-        )
-        result = parse_filename("notadate_ProjectX.txt", profile)
-        assert result.success is False
-        assert "date" in result.error.lower()
-
-    def test_version_format_valid(self):
-        profile = _make_profile(
-            segments_json=[
-                {"position": 0, "field": "project_code", "required": True},
-                {"position": 1, "field": "version", "required": True},
-            ]
-        )
-        for version in ["v001", "v01", "v1", "V1"]:
-            result = parse_filename(f"ProjectX_{version}.txt", profile)
-            assert result.success is True, f"Failed for version: {version}"
-
-    def test_version_format_invalid(self):
-        profile = _make_profile(
-            segments_json=[
-                {"position": 0, "field": "project_code", "required": True},
-                {"position": 1, "field": "version", "required": True},
-            ]
-        )
-        result = parse_filename("ProjectX_abc.txt", profile)
-        assert result.success is False
-
-    def test_ignore_segment(self):
-        profile = _make_profile(
-            segments_json=[
-                {"position": 0, "field": "project_code", "required": True},
-                {"position": 1, "field": "ignore", "required": False},
-                {"position": 2, "field": "sample_id", "required": True},
-            ]
-        )
-        result = parse_filename("ProjectX_misc_Sample001.txt", profile)
-        assert result.success is True
-        assert "ignore" not in result.segments
-        assert result.segments["project_code"] == "ProjectX"
-        assert result.segments["sample_id"] == "Sample001"
-
-    def test_wrong_segment_count(self):
-        profile = _make_profile(
-            segments_json=[
-                {"position": 0, "field": "project_code", "required": True},
-                {"position": 1, "field": "sample_id", "required": True},
-                {"position": 2, "field": "version", "required": True},
-            ]
-        )
-        result = parse_filename("ProjectX_Sample001.txt", profile)
-        assert result.success is False
-        assert result.error is not None and "Expected 3" in result.error
-
-    def test_empty_filename(self):
-        profile = _make_profile(
-            segments_json=[
-                {"position": 0, "field": "project_code", "required": True},
-            ]
-        )
-        result = parse_filename("", profile)
-        assert result.success is False
-
-    def test_extra_segments(self):
-        profile = _make_profile(
-            segments_json=[
-                {"position": 0, "field": "project_code", "required": True},
-            ]
-        )
-        result = parse_filename("ProjectX_Extra_More.txt", profile)
-        assert result.success is False
-
-
-# --- match_filename tests ---
-
-
-class TestMatchFilename:
-    def test_exactly_one_match(self):
-        profile1 = _make_profile(
-            segments_json=[
-                {"position": 0, "field": "date", "format": "YYYY-MM-DD", "required": True},
-                {"position": 1, "field": "project_code", "required": True},
-            ],
-            profile_id=1,
-            name="Profile1",
-        )
-        profile2 = _make_profile(
-            segments_json=[
-                {"position": 0, "field": "project_code", "required": True},
-                {"position": 1, "field": "sample_id", "required": True},
-                {"position": 2, "field": "version", "required": True},
-            ],
-            profile_id=2,
-            name="Profile2",
-        )
-        result = match_filename("2026-03-10_ProjectX.txt", [profile1, profile2])
-        assert result.status == "matched"
-        assert result.parse_result is not None
-        assert result.parse_result.profile_id == 1
-
-    def test_zero_matches(self):
-        profile1 = _make_profile(
-            segments_json=[
-                {"position": 0, "field": "date", "format": "YYYY-MM-DD", "required": True},
-                {"position": 1, "field": "project_code", "required": True},
-                {"position": 2, "field": "version", "required": True},
-            ],
-            profile_id=1,
-        )
-        result = match_filename("something.txt", [profile1])
-        assert result.status == "unmatched"
-
-    def test_multiple_matches(self):
-        # Two profiles with same segment count and loose validation
-        profile1 = _make_profile(
-            segments_json=[
-                {"position": 0, "field": "project_code", "required": True},
-                {"position": 1, "field": "sample_id", "required": True},
-            ],
-            profile_id=1,
-            name="Profile1",
-        )
-        profile2 = _make_profile(
-            segments_json=[
-                {"position": 0, "field": "data_type", "required": True},
-                {"position": 1, "field": "organism", "required": True},
-            ],
-            profile_id=2,
-            name="Profile2",
-        )
-        result = match_filename("ABC_DEF.txt", [profile1, profile2])
-        assert result.status == "multiple_matches"
-        assert len(result.candidate_profile_ids) == 2
-
-    def test_empty_filename(self):
-        result = match_filename("", [])
-        assert result.status == "unmatched"
-
-    def test_no_profiles(self):
-        result = match_filename("test.fastq", [])
-        assert result.status == "unmatched"
-
-
-# --- resolve_entities tests ---
-
-
-@pytest_asyncio.fixture
-async def org_and_user(client, admin_token, session):
-    """Get the test org and user IDs."""
-    result = await session.execute(text("SELECT id FROM organizations LIMIT 1"))
-    org = result.fetchone()
-    result = await session.execute(text("SELECT id FROM users LIMIT 1"))
-    user = result.fetchone()
-    return org.id, user.id
-
-
-@pytest.mark.asyncio
-async def test_resolve_mapped_project(client, admin_token, session, org_and_user):
-    """Test entity resolution when project code is mapped to an existing project."""
-    from app.models.project import Project
-
-    org_id, _ = org_and_user
-    project = Project(organization_id=org_id, name="Mapped Project")
-    session.add(project)
-    await session.flush()
-    await session.commit()
-
-    profile = _make_profile(
-        segments_json=[],
-        project_code_mappings={"PRJX": str(project.id)},
+def test_parser_has_no_db_session_argument():
+    """The parser is pure; no db / session argument may be added."""
+    sig = inspect.signature(parse_filename)
+    forbidden = {"db", "session", "conn", "engine"}
+    assert not (forbidden & set(sig.parameters)), (
+        f"parse_filename signature must stay pure; saw {set(sig.parameters)}"
     )
 
-    parse_result = ParseResult(success=True, segments={"project_code": "PRJX"})
-    resolution = await resolve_entities(parse_result, profile, org_id, session)
-    assert resolution.project_id == project.id
-    assert resolution.project_name == "Mapped Project"
+
+def test_parser_returns_documented_shape():
+    profile = _make_profile([_seg("requestor", "string", identifier="req", position=0)])
+    result = parse_filename("req-bmills.txt", profile)
+    assert set(result) == {"parsed", "unrecognized", "warnings"}
+    assert isinstance(result["parsed"], dict)
+    assert isinstance(result["unrecognized"], list)
+    assert isinstance(result["warnings"], list)
 
 
-@pytest.mark.asyncio
-async def test_resolve_unmapped_project_by_name(client, admin_token, session, org_and_user):
-    """Test resolution by project name when no mapping exists."""
-    from app.models.project import Project
-
-    org_id, _ = org_and_user
-    project = Project(organization_id=org_id, name="DiscoverMe")
-    session.add(project)
-    await session.flush()
-    await session.commit()
-
-    profile = _make_profile(segments_json=[])
-    parse_result = ParseResult(success=True, segments={"project_code": "DiscoverMe"})
-    resolution = await resolve_entities(parse_result, profile, org_id, session)
-    assert resolution.project_id == project.id
+# ---------------------------------------------------------------------------
+# Number segments
+# ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_resolve_unmapped_code_returns_null(client, admin_token, session, org_and_user):
-    """Test that an unmapped code that doesn't match any entity returns None."""
-    org_id, _ = org_and_user
-    profile = _make_profile(segments_json=[])
-    parse_result = ParseResult(success=True, segments={"project_code": "NonExistent"})
-    resolution = await resolve_entities(parse_result, profile, org_id, session)
-    assert resolution.project_id is None
-    assert resolution.project_name == "NonExistent"
+def test_parses_single_number_segment():
+    profile = _make_profile(
+        [_seg("SampleID", "number", identifier="SMP", padding=2, position=0)]
+    )
+    result = parse_filename("SMP0042.txt", profile)
+    assert result["parsed"] == {"SampleID": "0042"}
+    assert result["unrecognized"] == []
+
+
+def test_number_value_preserves_leading_zeros():
+    profile = _make_profile([_seg("Batch", "number", identifier="B", padding=3, position=0)])
+    result = parse_filename("B007.txt", profile)
+    assert result["parsed"]["Batch"] == "007"
+
+
+def test_lenient_padding_under_width():
+    """A number segment whose value has fewer digits than padding still binds."""
+    profile = _make_profile([_seg("SampleID", "number", identifier="SMP", padding=3, position=0)])
+    result = parse_filename("SMP4.txt", profile)
+    assert result["parsed"]["SampleID"] == "4"
+    assert result["warnings"] == []
+
+
+def test_lenient_padding_over_width():
+    """A number segment whose value has more digits than padding still binds."""
+    profile = _make_profile([_seg("SampleID", "number", identifier="SMP", padding=2, position=0)])
+    result = parse_filename("SMP12345.txt", profile)
+    assert result["parsed"]["SampleID"] == "12345"
+
+
+def test_letters_only_no_digits_is_unrecognized():
+    """`SMP` alone (no digit portion) is unrecognized, not an error."""
+    profile = _make_profile([_seg("SampleID", "number", identifier="SMP", padding=2, position=0)])
+    result = parse_filename("SMP.txt", profile)
+    assert "SampleID" not in result["parsed"]
+    assert "SMP" in result["unrecognized"]
+
+
+# ---------------------------------------------------------------------------
+# String segments
+# ---------------------------------------------------------------------------
+
+
+def test_parses_single_string_segment():
+    profile = _make_profile(
+        [_seg("Requestor", "string", identifier="req", position=0)],
+        delimiter="_",
+    )
+    # delimiter "_" implies inner separator "-"
+    result = parse_filename("req-bmills.txt", profile)
+    assert result["parsed"] == {"Requestor": "bmills"}
+
+
+def test_string_value_contains_inner_separator_split_first_only():
+    """`req-bmills-jr` parses to identifier `req` and value `bmills-jr`."""
+    profile = _make_profile(
+        [_seg("Requestor", "string", identifier="req", position=0)],
+        delimiter="_",
+    )
+    result = parse_filename("req-bmills-jr.txt", profile)
+    assert result["parsed"] == {"Requestor": "bmills-jr"}
+
+
+def test_string_inner_separator_with_hyphen_delimiter():
+    """Delimiter `-` implies inner separator `_`."""
+    profile = _make_profile(
+        [_seg("Requestor", "string", identifier="req", position=0)],
+        delimiter="-",
+    )
+    result = parse_filename("req_bmills.txt", profile)
+    assert result["parsed"] == {"Requestor": "bmills"}
+
+
+# ---------------------------------------------------------------------------
+# Date segments
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "date_format,token,iso",
+    [
+        ("YYYYMMDD", "20260602", "2026-06-02"),
+        ("YYYY-MM-DD", "2026-06-02", "2026-06-02"),
+        ("YYMMDD", "260602", "2026-06-02"),
+    ],
+)
+def test_parses_each_date_format(date_format, token, iso):
+    """All three date formats produce ISO YYYY-MM-DD output."""
+    # YYYY-MM-DD uses underscore delimiter to avoid the collision case
+    # (which has its own test below).
+    profile = _make_profile(
+        [_seg("RunDate", "date", date_format=date_format, position=0)],
+        delimiter="_",
+    )
+    result = parse_filename(f"{token}.txt", profile)
+    assert result["parsed"]["RunDate"] == iso
+
+
+def test_date_recombination_when_delimiter_is_hyphen():
+    """Delimiter `-` plus YYYY-MM-DD: parser recombines `2026-06-02` into one date."""
+    profile = _make_profile(
+        [_seg("RunDate", "date", date_format="YYYY-MM-DD", position=0)],
+        delimiter="-",
+    )
+    result = parse_filename("2026-06-02.txt", profile)
+    assert result["parsed"]["RunDate"] == "2026-06-02"
+
+
+def test_ambiguous_date_triples_emit_warning_and_pick_first():
+    """If a filename has two date triples, parser picks the first and warns."""
+    profile = _make_profile(
+        [_seg("RunDate", "date", date_format="YYYY-MM-DD", position=0)],
+        delimiter="-",
+    )
+    result = parse_filename("2026-06-02-2027-07-03.txt", profile)
+    assert result["parsed"]["RunDate"] == "2026-06-02"
+    assert any("ambiguous" in w.lower() for w in result["warnings"])
+
+
+def test_date_token_in_profile_without_date_segment_is_unrecognized():
+    profile = _make_profile([_seg("SampleID", "number", identifier="SMP", padding=2, position=0)])
+    result = parse_filename("SMP0042_20260602.txt", profile)
+    assert "20260602" in result["unrecognized"]
+    assert result["parsed"] == {"SampleID": "0042"}
+
+
+# ---------------------------------------------------------------------------
+# Order independence
+# ---------------------------------------------------------------------------
+
+
+def test_reordered_segments_produce_same_result():
+    """Identifier letters drive parsing; segment order in the filename is irrelevant."""
+    profile = _make_profile(
+        [
+            _seg("SampleID", "number", identifier="SMP", padding=2, position=0),
+            _seg("Requestor", "string", identifier="req", position=1),
+            _seg("RunDate", "date", date_format="YYYYMMDD", position=2),
+        ],
+        delimiter="_",
+    )
+
+    a = parse_filename("SMP0042_req-bmills_20260602.txt", profile)
+    b = parse_filename("20260602_req-bmills_SMP0042.txt", profile)
+    c = parse_filename("req-bmills_20260602_SMP0042.txt", profile)
+    assert a["parsed"] == b["parsed"] == c["parsed"]
+    assert a["parsed"] == {
+        "SampleID": "0042",
+        "Requestor": "bmills",
+        "RunDate": "2026-06-02",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Unrecognized handling, strip_extension, case-insensitive match
+# ---------------------------------------------------------------------------
+
+
+def test_unrecognized_tokens_reported_no_raise():
+    profile = _make_profile([_seg("SampleID", "number", identifier="SMP", padding=2, position=0)])
+    result = parse_filename("SMP0042_garbage_morejunk.txt", profile)
+    assert result["parsed"] == {"SampleID": "0042"}
+    assert "garbage" in result["unrecognized"]
+    assert "morejunk" in result["unrecognized"]
+
+
+def test_strip_extension_true_removes_suffix():
+    profile = _make_profile(
+        [_seg("SampleID", "number", identifier="SMP", padding=2, position=0)],
+        strip_extension=True,
+    )
+    result = parse_filename("SMP0042.fastq.gz", profile)
+    assert result["parsed"]["SampleID"] == "0042"
+
+
+def test_strip_extension_false_keeps_suffix():
+    """With strip_extension=False, the extension stays attached to the last token."""
+    profile = _make_profile(
+        [_seg("SampleID", "number", identifier="SMP", padding=2, position=0)],
+        strip_extension=False,
+    )
+    result = parse_filename("SMP0042.fastq.gz", profile)
+    # `SMP0042.fastq.gz` is a single token but doesn't match number shape
+    # because trailing non-digits; expected as unrecognized.
+    assert "SMP0042.fastq.gz" in result["unrecognized"]
+    assert "SampleID" not in result["parsed"]
+
+
+def test_case_insensitive_identifier_match():
+    """Authored `SMP` matches `smp0042` in a filename, case-insensitively."""
+    profile = _make_profile([_seg("SampleID", "number", identifier="SMP", padding=2, position=0)])
+    result = parse_filename("smp0042.txt", profile)
+    assert result["parsed"]["SampleID"] == "0042"
+
+
+# ---------------------------------------------------------------------------
+# Multi-segment realistic example
+# ---------------------------------------------------------------------------
+
+
+def test_realistic_multi_segment_filename():
+    profile = _make_profile(
+        [
+            _seg("ProjectCode", "number", identifier="PRJ", padding=2, position=0, is_system_chip=True),
+            _seg("SampleID", "number", identifier="SMP", padding=2, position=1, is_system_chip=True),
+            _seg("Read", "number", identifier="R", padding=0, position=2),
+            _seg("RunDate", "date", date_format="YYYYMMDD", position=3),
+        ],
+        delimiter="_",
+    )
+    result = parse_filename("PRJ01_SMP0042_R1_20260602.fastq.gz", profile)
+    assert result["parsed"] == {
+        "ProjectCode": "01",
+        "SampleID": "0042",
+        "Read": "1",
+        "RunDate": "2026-06-02",
+    }
+    assert result["unrecognized"] == []
