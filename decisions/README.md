@@ -24,7 +24,7 @@
 | [ADR-020](ADR-020-bioaf-adapter-layer.md) | BioAF Adapter Layer (BAL) | Accepted | 2026-03-10 |
 | [ADR-021](ADR-021-kubernetes-compute-backend.md) | Kubernetes as Recommended Compute Backend | Accepted | 2026-03-10 |
 | [ADR-022](ADR-022-gcs-storage-backend.md) | GCS as Recommended Storage Backend | Accepted | 2026-03-10 |
-| [ADR-023](ADR-023-cro-naming-profiles.md) | Configurable CRO Naming Profiles | Accepted | 2026-03-10 |
+| [ADR-023](ADR-023-cro-naming-profiles.md) | Configurable CRO Naming Profiles | Superseded by ADR-058 | 2026-03-10 |
 | [ADR-024](ADR-024-gcs-auto-ingest.md) | GCS Event-Driven Auto-Ingest | Accepted | 2026-03-10 |
 | [ADR-025](ADR-025-automated-pipeline-triggering.md) | Automated Pipeline Triggering | Accepted | 2026-03-10 |
 | [ADR-026](ADR-026-ssh-access.md) | SSH Access to Running Containers | Accepted | 2026-03-10 |
@@ -53,6 +53,7 @@
 | [ADR-049](ADR-049-service-accounts-and-api-keys.md) | Service Accounts and API Key Authentication | Accepted | 2026-05-13 |
 | [ADR-050](ADR-050-external-ids-and-idempotent-writes.md) | External IDs and Idempotent Writes | Accepted | 2026-05-13 |
 | [ADR-051](ADR-051-outbound-webhook-delivery.md) | Outbound Webhook Delivery | Accepted | 2026-05-13 |
+| [ADR-058](ADR-058-naming-profile-parse-only.md) | Naming Profiles are Parse-Only with Template-Driven Vocabulary | Accepted | 2026-06-02 |
 
 ## How to Use This Directory
 

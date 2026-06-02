@@ -68,6 +68,7 @@ class ExperimentCreate(BaseModel):
     protocol_version: str | None = None
     variables_json: dict | None = None
     column_aliases: dict[str, str] | None = None
+    naming_profile_id: int | None = None
 
 
 class ExperimentUpdate(BaseModel):
@@ -82,6 +83,7 @@ class ExperimentUpdate(BaseModel):
     protocol_version: str | None = None
     variables_json: dict | None = None
     column_aliases: dict[str, str] | None = None
+    naming_profile_id: int | None = None
 
 
 class ExperimentStatusUpdate(BaseModel):
@@ -121,6 +123,9 @@ class ExperimentResponse(BaseModel):
     variables_json: dict | None = None
     sample_count: int = 0
     batch_count: int = 0
+    naming_profile_id: int | None = None
+    template_naming_profile_id: int | None = None
+    effective_naming_profile_id: int | None = None
     created_at: datetime
     updated_at: datetime
 

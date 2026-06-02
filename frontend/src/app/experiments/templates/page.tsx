@@ -8,6 +8,7 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { TemplateSheetImportModal } from "@/components/experiments/TemplateSheetImportModal";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { NamingProfileSelect } from "@/components/naming/NamingProfileSelect";
 import type { ExperimentTemplate, TemplateCreateRequest } from "@/lib/types";
 
 const STANDARD_SAMPLE_FIELDS = [
@@ -36,6 +37,7 @@ export default function ExperimentTemplatesPage() {
     description: null,
     required_fields_json: { sample_fields: [], experiment_fields: [] },
     custom_fields_schema_json: { fields: [] },
+    naming_profile_id: null,
   });
 
   useEffect(() => {
@@ -104,7 +106,7 @@ export default function ExperimentTemplatesPage() {
       }
       setShowForm(false);
       setEditingId(null);
-      setForm({ name: "", description: null, required_fields_json: { sample_fields: [], experiment_fields: [] }, custom_fields_schema_json: { fields: [] } });
+      setForm({ name: "", description: null, required_fields_json: { sample_fields: [], experiment_fields: [] }, custom_fields_schema_json: { fields: [] }, naming_profile_id: null });
       loadTemplates();
     } catch {}
   }
@@ -115,6 +117,7 @@ export default function ExperimentTemplatesPage() {
       description: t.description,
       required_fields_json: t.required_fields_json || { sample_fields: [], experiment_fields: [] },
       custom_fields_schema_json: t.custom_fields_schema_json || { fields: [] },
+      naming_profile_id: t.naming_profile_id ?? null,
     });
     setEditingId(t.id);
     setShowForm(true);
@@ -174,6 +177,15 @@ export default function ExperimentTemplatesPage() {
                   className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
                 />
               </div>
+
+              <NamingProfileSelect
+                id="tmpl-naming-profile"
+                label="Default naming profile (optional)"
+                hint="Experiments created from this template inherit this default. They can override it per-experiment."
+                emptyLabel="No default profile"
+                value={form.naming_profile_id ?? null}
+                onChange={(v) => setForm({ ...form, naming_profile_id: v })}
+              />
 
               <div>
                 <div className="flex items-center justify-between mb-2">

@@ -17,6 +17,7 @@ def _template_response(t) -> TemplateResponse:
         description=t.description,
         required_fields_json=t.required_fields_json,
         custom_fields_schema_json=t.custom_fields_schema_json,
+        naming_profile_id=t.naming_profile_id,
         created_by=UserSummary(id=t.created_by.id, name=t.created_by.name, email=t.created_by.email)
         if t.created_by
         else None,

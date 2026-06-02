@@ -220,6 +220,9 @@ export interface Experiment {
   sample_count: number;
   batch_count: number;
   design_type: string | null;
+  naming_profile_id: number | null;
+  template_naming_profile_id: number | null;
+  effective_naming_profile_id: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -233,6 +236,7 @@ export interface ExperimentUpdateRequest {
   design_type?: string | null;
   field_defaults?: FieldDefaultValue[];
   custom_fields?: CustomFieldValue[];
+  naming_profile_id?: number | null;
 }
 
 export interface ExperimentListResponse {
@@ -397,6 +401,7 @@ export interface ExperimentTemplate {
   description: string | null;
   required_fields_json: Record<string, unknown> | null;
   custom_fields_schema_json: Record<string, unknown> | null;
+  naming_profile_id: number | null;
   created_by: UserSummary | null;
   created_at: string;
 }
@@ -431,6 +436,7 @@ export interface ExperimentCreateRequest {
   field_defaults?: FieldDefaultValue[];
   design_type?: string | null;
   column_aliases?: Record<string, string>;
+  naming_profile_id?: number | null;
 }
 
 export interface SampleCreateRequest {
@@ -488,6 +494,7 @@ export interface TemplateCreateRequest {
   description?: string | null;
   required_fields_json?: Record<string, unknown> | null;
   custom_fields_schema_json?: Record<string, unknown> | null;
+  naming_profile_id?: number | null;
 }
 
 // Phase 3 — Compute + Notebooks
@@ -1737,13 +1744,24 @@ export interface SnapshotComparison {
 }
 
 // Phase 13 — Auto-Ingest, Naming Profiles, Pipeline Triggers
+//
+// Naming Profiles were redesigned (see local/Naming Profiles/redesign-plan.md).
+// The closed enum of field names is gone; profiles now carry an optional
+// experiment_template_id and a list of segments shaped by the new
+// SegmentDefinition.
+
+export type SegmentFieldType = "string" | "number" | "date";
+export type SegmentDateFormat = "YYYYMMDD" | "YYYY-MM-DD" | "YYMMDD";
+export type NamingProfileDelimiter = "_" | "-";
 
 export interface SegmentDefinition {
   position: number;
-  field: "date" | "project_code" | "experiment_code" | "sample_id" | "sample_index" | "data_type" | "analysis_type" | "researcher_initials" | "version" | "organism" | "ignore" | "custom";
-  format?: string | null;
-  required: boolean;
-  custom_label?: string | null;
+  identifier: string | null;
+  field_name: string;
+  field_type: SegmentFieldType;
+  padding: number | null;
+  date_format: SegmentDateFormat | null;
+  is_system_chip: boolean;
 }
 
 export interface NamingProfile {
@@ -1751,24 +1769,21 @@ export interface NamingProfile {
   organization_id: number;
   name: string;
   description: string | null;
-  delimiter: string;
+  delimiter: NamingProfileDelimiter;
   strip_extension: boolean;
   segments: SegmentDefinition[];
-  project_code_mappings: Record<string, string>;
-  experiment_code_mappings: Record<string, string>;
-  status: "active" | "inactive";
+  experiment_template_id: number | null;
+  status: "active" | "inactive" | "deprecated";
+  created_by: number;
   created_at: string;
   updated_at: string;
 }
 
 export interface NamingProfileTestResult {
   filename: string;
-  match_status: "matched" | "unmatched" | "multiple_matches";
-  profile_id: number | null;
-  profile_name: string | null;
-  parsed_segments: Record<string, string> | null;
-  candidate_profile_ids: number[];
-  error: string | null;
+  parsed: Record<string, string>;
+  unrecognized: string[];
+  warnings: string[];
 }
 
 export interface IngestEvent {

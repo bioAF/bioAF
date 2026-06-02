@@ -7,9 +7,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.manifest_entry import ManifestEntry
 from app.models.sequencing_batch import SequencingBatch
+from app.services.auto_ingest_gate import AUTO_INGEST_DISABLED
 from app.services.manifest_ingest_service import process_manifest_ingest
 
-pytestmark = pytest.mark.asyncio
+# Manifest ingest is gated off during the Naming Profile redesign. These
+# tests assert behaviors of the gated body and will be re-enabled by the
+# follow-up rework. See local/Naming Profiles/spec-auto-ingest-neutralize.md.
+pytestmark = [
+    pytest.mark.asyncio,
+    pytest.mark.skipif(
+        AUTO_INGEST_DISABLED,
+        reason="auto-ingest gated off during Naming Profile redesign",
+    ),
+]
 
 
 @pytest_asyncio.fixture

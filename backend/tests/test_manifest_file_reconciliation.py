@@ -7,7 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.manifest_entry import ManifestEntry
 from app.models.sequencing_batch import SequencingBatch
+from app.services.auto_ingest_gate import AUTO_INGEST_DISABLED
 from app.services.ingest_service import process_ingest_event
+
+pytestmark = pytest.mark.skipif(
+    AUTO_INGEST_DISABLED,
+    reason="auto-ingest gated off during Naming Profile redesign; see local/Naming Profiles/spec-auto-ingest-neutralize.md",
+)
 
 
 async def _setup_batch_and_entries(

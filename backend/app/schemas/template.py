@@ -10,6 +10,7 @@ class TemplateCreate(BaseModel):
     description: str | None = None
     required_fields_json: dict | None = None
     custom_fields_schema_json: dict | None = None
+    naming_profile_id: int | None = None
 
 
 class TemplateUpdate(BaseModel):
@@ -17,6 +18,7 @@ class TemplateUpdate(BaseModel):
     description: str | None = None
     required_fields_json: dict | None = None
     custom_fields_schema_json: dict | None = None
+    naming_profile_id: int | None = None
 
 
 class TemplateResponse(BaseModel):
@@ -25,6 +27,7 @@ class TemplateResponse(BaseModel):
     description: str | None
     required_fields_json: dict | None
     custom_fields_schema_json: dict | None
+    naming_profile_id: int | None = None
     created_by: UserSummary | None = None
     created_at: datetime
 

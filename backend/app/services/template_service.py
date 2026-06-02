@@ -18,6 +18,7 @@ class TemplateService:
             description=data.description,
             required_fields_json=data.required_fields_json,
             custom_fields_schema_json=data.custom_fields_schema_json,
+            naming_profile_id=data.naming_profile_id,
             created_by_user_id=user_id,
         )
         session.add(template)
@@ -44,7 +45,13 @@ class TemplateService:
 
         previous = {}
         updates = {}
-        for field in ["name", "description", "required_fields_json", "custom_fields_schema_json"]:
+        for field in [
+            "name",
+            "description",
+            "required_fields_json",
+            "custom_fields_schema_json",
+            "naming_profile_id",
+        ]:
             new_val = getattr(data, field, None)
             if new_val is not None:
                 old_val = getattr(template, field)

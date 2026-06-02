@@ -14,16 +14,22 @@ async def test_naming_profile_creation(client, admin_token, session):
 
     profile = NamingProfile(
         organization_id=org.id,
-        name="Test CRO Profile",
+        name="Test profile",
         description="A test naming profile",
         delimiter="_",
         strip_extension=True,
         segments_json=[
-            {"position": 0, "field": "date", "format": "YYYY-MM-DD", "required": True},
-            {"position": 1, "field": "project_code", "required": True},
+            {
+                "position": 0,
+                "identifier": "SMP",
+                "field_name": "SampleID",
+                "field_type": "number",
+                "padding": 2,
+                "date_format": None,
+                "is_system_chip": True,
+            },
         ],
-        project_code_mappings={"PRJX": "1"},
-        experiment_code_mappings={},
+        experiment_template_id=None,
         status="active",
         created_by=user.id,
     )

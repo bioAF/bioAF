@@ -19,6 +19,7 @@ from app.models.experiment import Experiment
 from app.models.file import File
 from app.models.manifest_entry import ManifestEntry
 from app.models.sequencing_batch import SequencingBatch
+from app.services.auto_ingest_gate import check_gate
 from app.services.manifest_parser import parse_manifest
 from app.services.naming_profile_parser import match_filename, resolve_entities
 from app.services.naming_profile_service import NamingProfileService
@@ -134,6 +135,11 @@ async def process_manifest_ingest(
 
     Returns the SequencingBatch record.
     """
+    # Auto-ingest is gated off during the Naming Profile redesign. See
+    # local/Naming Profiles/spec-auto-ingest-neutralize.md. The body below is
+    # left intact so the follow-up rework refactors in place.
+    check_gate()
+
     # Step 1: Parse manifest
     parse_result = parse_manifest(manifest_content, manifest_format)
     batch_number = parse_result.batch_number or f"UNKNOWN-{org_id}"
