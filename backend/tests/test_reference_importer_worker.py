@@ -475,7 +475,7 @@ def test_resumes_with_range_header_after_connection_drop(monkeypatch):
             if len(requests) == 1:
 
                 class _Drop(_FakeResponse):
-                    def iter_bytes(self_inner, chunk_size=None):
+                    def iter_bytes(self, chunk_size=None):
                         size = chunk_size or 64 * 1024
                         for i in range(0, drop_at, size):
                             yield payload[i : i + size]
@@ -534,12 +534,12 @@ def test_falls_back_to_full_restart_when_server_ignores_range_header(monkeypatch
     class _Http:
         attempts = 0
 
-        def stream(self_outer, method, u, *, headers=None, follow_redirects=True):
-            type(self_outer).attempts += 1
-            if type(self_outer).attempts == 1:
+        def stream(self, method, u, *, headers=None, follow_redirects=True):
+            type(self).attempts += 1
+            if type(self).attempts == 1:
 
                 class _Drop(_FakeResponse):
-                    def iter_bytes(self_inner, chunk_size=None):
+                    def iter_bytes(self, chunk_size=None):
                         size = chunk_size or 64 * 1024
                         for i in range(0, drop_at, size):
                             yield payload[i : i + size]

@@ -55,8 +55,8 @@ def _build_transient_network_exceptions() -> tuple[type[BaseException], ...]:
             ]
         )
     except ImportError:
-        # `httpx` is optional in some environments; fall back to stdlib/network
-        # exception classes only.
+        # httpx is optional at import time; if absent the importer falls back
+        # to the stdlib base exceptions added above.
         pass
     try:
         import httpcore
@@ -72,8 +72,8 @@ def _build_transient_network_exceptions() -> tuple[type[BaseException], ...]:
             ]
         )
     except ImportError:
-        # `httpcore` may not be installed directly; continue with available
-        # exception classes.
+        # httpcore is optional at import time; if absent the importer falls
+        # back to the httpx + stdlib exceptions added above.
         pass
     return tuple(excs)
 
@@ -299,8 +299,11 @@ class ReferenceImporter:
         finally:
             try:
                 os.unlink(tmp_path)
-            except OSError:
-                pass
+            except OSError as exc:
+                # Cleanup is best-effort; a leftover tempfile under /tmp is
+                # not worth failing the import for. Logged at debug so
+                # operators can find it if disk fills up unexpectedly.
+                logger.debug("Reference import %d: tempfile cleanup failed (%s): %s", cfg.reference_id, tmp_path, exc)
 
         self._callback(
             status="active",
