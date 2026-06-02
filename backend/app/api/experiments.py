@@ -46,13 +46,9 @@ def _user_summary(user) -> UserSummary | None:
 def _experiment_response(exp) -> ExperimentResponse:
     # Effective naming profile: experiment override wins, otherwise inherit
     # from the experiment's template (ADR-058).
-    template_naming_profile_id = (
-        exp.template.naming_profile_id if exp.template is not None else None
-    )
+    template_naming_profile_id = exp.template.naming_profile_id if exp.template is not None else None
     effective_naming_profile_id = (
-        exp.naming_profile_id
-        if exp.naming_profile_id is not None
-        else template_naming_profile_id
+        exp.naming_profile_id if exp.naming_profile_id is not None else template_naming_profile_id
     )
     return ExperimentResponse(
         id=exp.id,
@@ -146,13 +142,9 @@ async def get_experiment(
 
     _, audit_count = await ExperimentService.get_audit_trail(session, experiment_id, org_id, page=1, page_size=1)
 
-    template_naming_profile_id = (
-        experiment.template.naming_profile_id if experiment.template is not None else None
-    )
+    template_naming_profile_id = experiment.template.naming_profile_id if experiment.template is not None else None
     effective_naming_profile_id = (
-        experiment.naming_profile_id
-        if experiment.naming_profile_id is not None
-        else template_naming_profile_id
+        experiment.naming_profile_id if experiment.naming_profile_id is not None else template_naming_profile_id
     )
     return ExperimentDetailResponse(
         id=experiment.id,

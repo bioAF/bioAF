@@ -64,9 +64,7 @@ async def test_post_naming_profile_with_no_template_id_succeeds(client, admin_to
 
 
 @pytest.mark.asyncio
-async def test_post_naming_profile_with_invalid_identifier_returns_422(
-    client, admin_token
-):
+async def test_post_naming_profile_with_invalid_identifier_returns_422(client, admin_token):
     resp = await client.post(
         "/api/naming-profiles",
         json={
@@ -79,9 +77,7 @@ async def test_post_naming_profile_with_invalid_identifier_returns_422(
 
 
 @pytest.mark.asyncio
-async def test_post_naming_profile_with_duplicate_identifier_returns_422(
-    client, admin_token
-):
+async def test_post_naming_profile_with_duplicate_identifier_returns_422(client, admin_token):
     resp = await client.post(
         "/api/naming-profiles",
         json={
@@ -180,9 +176,7 @@ async def test_test_endpoint_accepts_unsaved_profile_payload(client, admin_token
 
 
 @pytest.mark.asyncio
-async def test_test_endpoint_warns_on_yyyy_mm_dd_with_hyphen_delimiter(
-    client, admin_token
-):
+async def test_test_endpoint_warns_on_yyyy_mm_dd_with_hyphen_delimiter(client, admin_token):
     resp = await client.post(
         "/api/naming-profiles/test",
         json={

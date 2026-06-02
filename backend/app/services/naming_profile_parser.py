@@ -121,9 +121,7 @@ def _recombine_yyyy_mm_dd(tokens: list[str]) -> tuple[list[str], list[tuple[int,
             i += 1
 
     if len(date_hits) > 1:
-        warnings.append(
-            f"ambiguous date: multiple matching triples; chose {date_hits[0][1]}"
-        )
+        warnings.append(f"ambiguous date: multiple matching triples; chose {date_hits[0][1]}")
 
     return kept, date_hits, warnings
 
@@ -158,11 +156,7 @@ def parse_filename(filename: str, profile: Any) -> dict[str, Any]:
     # Handle the YYYY-MM-DD-collides-with-`-`-delimiter case up front: the
     # delimiter-split shatters the date, so recombine triples first.
     tokens_to_classify = raw_tokens
-    if (
-        delimiter == "-"
-        and date_segment is not None
-        and date_segment.get("date_format") == "YYYY-MM-DD"
-    ):
+    if delimiter == "-" and date_segment is not None and date_segment.get("date_format") == "YYYY-MM-DD":
         tokens_to_classify, date_hits, recomb_warnings = _recombine_yyyy_mm_dd(raw_tokens)
         warnings.extend(recomb_warnings)
         if date_hits:

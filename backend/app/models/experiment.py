@@ -67,9 +67,7 @@ class Experiment(Base):
     # Optional naming profile override. The effective naming profile for an
     # experiment is `self.naming_profile_id or self.template.naming_profile_id`
     # (template default; see ADR-058).
-    naming_profile_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("naming_profiles.id"), nullable=True
-    )
+    naming_profile_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("naming_profiles.id"), nullable=True)
 
     organization = relationship("Organization")
     project = relationship("Project", back_populates="experiments")

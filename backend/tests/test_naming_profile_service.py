@@ -73,9 +73,7 @@ async def sample_profile(session, org_user_ids):
 
 
 @pytest.mark.asyncio
-async def test_create_profile_persists_with_new_schema(
-    client, admin_token, session, org_user_ids
-):
+async def test_create_profile_persists_with_new_schema(client, admin_token, session, org_user_ids):
     org_id, user_id = org_user_ids
     data = NamingProfileCreate(
         name="Test Profile",
@@ -88,9 +86,7 @@ async def test_create_profile_persists_with_new_schema(
     assert profile.experiment_template_id is None
 
     audit = await session.execute(
-        text(
-            "SELECT * FROM audit_log WHERE entity_type = 'naming_profile' AND action = 'create'"
-        )
+        text("SELECT * FROM audit_log WHERE entity_type = 'naming_profile' AND action = 'create'")
     )
     assert audit.fetchone() is not None
 
@@ -110,9 +106,7 @@ async def test_list_profiles(client, admin_token, session, org_user_ids, sample_
 
 
 @pytest.mark.asyncio
-async def test_update_profile_name_and_delimiter(
-    client, admin_token, session, org_user_ids, sample_profile
-):
+async def test_update_profile_name_and_delimiter(client, admin_token, session, org_user_ids, sample_profile):
     _, user_id = org_user_ids
     updated = await NamingProfileService.update_profile(
         session,
@@ -126,20 +120,14 @@ async def test_update_profile_name_and_delimiter(
 
 
 @pytest.mark.asyncio
-async def test_deactivate_profile_writes_audit(
-    client, admin_token, session, org_user_ids, sample_profile
-):
+async def test_deactivate_profile_writes_audit(client, admin_token, session, org_user_ids, sample_profile):
     _, user_id = org_user_ids
-    deactivated = await NamingProfileService.deactivate_profile(
-        session, sample_profile.id, user_id
-    )
+    deactivated = await NamingProfileService.deactivate_profile(session, sample_profile.id, user_id)
     await session.commit()
     assert deactivated.status == "inactive"
 
     audit = await session.execute(
-        text(
-            "SELECT * FROM audit_log WHERE entity_type = 'naming_profile' AND action = 'deactivate'"
-        )
+        text("SELECT * FROM audit_log WHERE entity_type = 'naming_profile' AND action = 'deactivate'")
     )
     assert audit.fetchone() is not None
 

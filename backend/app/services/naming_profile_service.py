@@ -50,12 +50,8 @@ class NamingProfileService:
         return profile
 
     @staticmethod
-    async def get_profile(
-        session: AsyncSession, profile_id: int
-    ) -> NamingProfile | None:
-        result = await session.execute(
-            select(NamingProfile).where(NamingProfile.id == profile_id)
-        )
+    async def get_profile(session: AsyncSession, profile_id: int) -> NamingProfile | None:
+        result = await session.execute(select(NamingProfile).where(NamingProfile.id == profile_id))
         return result.scalar_one_or_none()
 
     @staticmethod
@@ -78,9 +74,7 @@ class NamingProfileService:
         user_id: int,
         data: NamingProfileUpdate,
     ) -> NamingProfile | None:
-        result = await session.execute(
-            select(NamingProfile).where(NamingProfile.id == profile_id)
-        )
+        result = await session.execute(select(NamingProfile).where(NamingProfile.id == profile_id))
         profile = result.scalar_one_or_none()
         if not profile:
             return None
@@ -119,9 +113,7 @@ class NamingProfileService:
         profile_id: int,
         user_id: int,
     ) -> NamingProfile | None:
-        result = await session.execute(
-            select(NamingProfile).where(NamingProfile.id == profile_id)
-        )
+        result = await session.execute(select(NamingProfile).where(NamingProfile.id == profile_id))
         profile = result.scalar_one_or_none()
         if not profile:
             return None

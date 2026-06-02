@@ -57,9 +57,7 @@ async def list_profiles(
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
-    profiles = await NamingProfileService.list_profiles(
-        session, org_id, status_filter=status
-    )
+    profiles = await NamingProfileService.list_profiles(session, org_id, status_filter=status)
     return [_profile_response(p) for p in profiles]
 
 
@@ -97,9 +95,7 @@ async def update_profile(
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
-    profile = await NamingProfileService.update_profile(
-        session, profile_id, user_id, body
-    )
+    profile = await NamingProfileService.update_profile(session, profile_id, user_id, body)
     if not profile:
         raise HTTPException(404, "Naming profile not found")
     await session.commit()

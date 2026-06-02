@@ -30,9 +30,7 @@ depends_on = None
 def upgrade() -> None:
     # Mark every existing row deprecated. Their segments_json shape uses the
     # old closed-enum field names and is not parseable by the new parser.
-    op.execute(
-        "UPDATE naming_profiles SET status = 'deprecated' WHERE status != 'deprecated'"
-    )
+    op.execute("UPDATE naming_profiles SET status = 'deprecated' WHERE status != 'deprecated'")
 
     # Add the optional template FK.
     op.add_column(

@@ -19,9 +19,7 @@ class ExperimentTemplate(Base):
     # Optional default naming profile for experiments built from this
     # template. Inherited at experiment-create time; experiments can
     # override. See ADR-058.
-    naming_profile_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("naming_profiles.id"), nullable=True
-    )
+    naming_profile_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("naming_profiles.id"), nullable=True)
     created_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

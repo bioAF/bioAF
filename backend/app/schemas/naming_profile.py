@@ -60,9 +60,7 @@ class SegmentDefinition(BaseModel):
         if v is None:
             return v
         if not IDENTIFIER_REGEX.match(v):
-            raise ValueError(
-                "identifier must be 1-4 ASCII letters [A-Za-z]"
-            )
+            raise ValueError("identifier must be 1-4 ASCII letters [A-Za-z]")
         return v
 
     @field_validator("padding")
@@ -71,9 +69,7 @@ class SegmentDefinition(BaseModel):
         if v is None:
             return v
         if not (PADDING_MIN <= v <= PADDING_MAX):
-            raise ValueError(
-                f"padding must be between {PADDING_MIN} and {PADDING_MAX}"
-            )
+            raise ValueError(f"padding must be between {PADDING_MIN} and {PADDING_MAX}")
         return v
 
     @model_validator(mode="after")
@@ -87,13 +83,9 @@ class SegmentDefinition(BaseModel):
                 raise ValueError("date segments must not have padding")
         else:
             if self.identifier is None:
-                raise ValueError(
-                    f"{self.field_type} segments require an identifier"
-                )
+                raise ValueError(f"{self.field_type} segments require an identifier")
             if self.date_format is not None:
-                raise ValueError(
-                    f"{self.field_type} segments must not have date_format"
-                )
+                raise ValueError(f"{self.field_type} segments must not have date_format")
             if self.field_type == "string" and self.padding is not None:
                 raise ValueError("string segments must not have padding")
         return self
@@ -116,9 +108,7 @@ class NamingProfileCreate(BaseModel):
 
     @field_validator("segments")
     @classmethod
-    def _at_least_one_segment(
-        cls, v: list[SegmentDefinition]
-    ) -> list[SegmentDefinition]:
+    def _at_least_one_segment(cls, v: list[SegmentDefinition]) -> list[SegmentDefinition]:
         if not v:
             raise ValueError("at least one segment is required")
         return v
@@ -131,9 +121,7 @@ class NamingProfileCreate(BaseModel):
                 continue
             key = seg.identifier.casefold()
             if key in seen:
-                raise ValueError(
-                    f"identifier '{seg.identifier}' is used by more than one segment"
-                )
+                raise ValueError(f"identifier '{seg.identifier}' is used by more than one segment")
             seen.add(key)
         date_segments = [s for s in self.segments if s.field_type == "date"]
         if len(date_segments) > 1:
@@ -161,9 +149,7 @@ class NamingProfileUpdate(BaseModel):
                 continue
             key = seg.identifier.casefold()
             if key in seen:
-                raise ValueError(
-                    f"identifier '{seg.identifier}' is used by more than one segment"
-                )
+                raise ValueError(f"identifier '{seg.identifier}' is used by more than one segment")
             seen.add(key)
         date_segments = [s for s in self.segments if s.field_type == "date"]
         if len(date_segments) > 1:
@@ -209,9 +195,7 @@ class NamingProfileTestRequest(BaseModel):
 
     @field_validator("segments")
     @classmethod
-    def _at_least_one_segment(
-        cls, v: list[SegmentDefinition]
-    ) -> list[SegmentDefinition]:
+    def _at_least_one_segment(cls, v: list[SegmentDefinition]) -> list[SegmentDefinition]:
         if not v:
             raise ValueError("at least one segment is required")
         return v

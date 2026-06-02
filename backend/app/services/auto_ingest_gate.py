@@ -31,11 +31,9 @@ class AutoIngestDisabledError(Exception):
 def check_gate() -> None:
     """Raise AutoIngestDisabledError if the gate is currently active.
 
-    Re-reads AUTO_INGEST_DISABLED at call time so monkeypatching the module
-    constant in tests (and flipping the constant for real in the follow-up
-    rework) takes effect without import-time capture.
+    Reads AUTO_INGEST_DISABLED via the module global at call time, so
+    monkeypatching the module attribute in tests (and flipping the constant
+    for real in the follow-up rework) takes effect immediately.
     """
-    from app.services import auto_ingest_gate as _self
-
-    if _self.AUTO_INGEST_DISABLED:
+    if AUTO_INGEST_DISABLED:
         raise AutoIngestDisabledError()

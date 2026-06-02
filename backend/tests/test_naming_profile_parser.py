@@ -71,9 +71,7 @@ def test_parser_has_no_db_session_argument():
     """The parser is pure; no db / session argument may be added."""
     sig = inspect.signature(parse_filename)
     forbidden = {"db", "session", "conn", "engine"}
-    assert not (forbidden & set(sig.parameters)), (
-        f"parse_filename signature must stay pure; saw {set(sig.parameters)}"
-    )
+    assert not (forbidden & set(sig.parameters)), f"parse_filename signature must stay pure; saw {set(sig.parameters)}"
 
 
 def test_parser_returns_documented_shape():
@@ -91,9 +89,7 @@ def test_parser_returns_documented_shape():
 
 
 def test_parses_single_number_segment():
-    profile = _make_profile(
-        [_seg("SampleID", "number", identifier="SMP", padding=2, position=0)]
-    )
+    profile = _make_profile([_seg("SampleID", "number", identifier="SMP", padding=2, position=0)])
     result = parse_filename("SMP0042.txt", profile)
     assert result["parsed"] == {"SampleID": "0042"}
     assert result["unrecognized"] == []
