@@ -78,10 +78,15 @@ compliance and forensics. Distinct from [Access Log](#access-log) (resource acce
 
 ### Auto-ingest
 
-A GCS event-driven process that watches a dedicated ingest bucket. On file arrival it
-parses the filename via a [Naming Profile](#naming-profile), resolves or auto-creates
-entities (in [Unclaimed](#unclaimed) status), checksums, links the file, copies it to
-permanent storage, and emits an ingest event.
+A GCS event-driven process that watches a dedicated ingest bucket. On
+file arrival it parses the filename via a [Naming Profile](#naming-profile),
+resolves or auto-creates entities (in [Unclaimed](#unclaimed) status),
+checksums, links the file, copies it to permanent storage, and emits an
+ingest event.
+
+_Status: temporarily disabled during the Naming Profile redesign. The
+selection logic for which profile applies to which file is being
+reworked. See [ADR-058](../decisions/ADR-058-naming-profile-parse-only.md)._
 
 ### BioAF Adapter Layer (BAL)
 
@@ -141,6 +146,16 @@ lifecycle: `registered` -> `library_prep` -> `sequencing` -> `fastq_uploaded` ->
 `processing` -> `pipeline_complete` -> `reviewed` -> `analysis` -> `complete`. The
 primary entity all other layers reference; mandatory (unlike [Project](#project)). Has
 a code, belongs to an [Organization](#organization), optionally to a Project.
+
+### Inner Separator
+
+The character used inside a `string`-typed [Segment](#segment) to
+separate the [Segment Identifier](#segment-identifier) from the value.
+It is always the opposite of the [Naming Profile](#naming-profile)'s
+delimiter: delimiter `_` implies inner separator `-`, and vice versa.
+The parser splits on the **first** occurrence only, so values may
+contain the inner separator (e.g. `req-bmills-jr` parses as identifier
+`req` and value `bmills-jr`).
 
 ### LLM Provider
 
@@ -204,11 +219,29 @@ pipeline logs are never included.
 
 ### Naming Profile
 
-A configurable template for parsing structured filenames, typically from a [CRO](#cro-contract-research-organization)
-delivery, into bioAF entity codes. Defines a delimiter and ordered segments plus
-mappings from parsed codes to [Project](#project) and [Experiment](#experiment) codes.
-Multiple profiles can be active simultaneously; ambiguous matches flag for manual review.
-_Volatile: the Naming Profile model is expected to change in the near future._
+A team-authored configuration that tells bioAF how to **read** structured
+information out of a filename. A profile defines a delimiter (`_` or `-`)
+and an ordered list of [Segments](#segment), and may optionally reference
+an [Experiment Template](#experiment-template) whose custom fields seed
+the profile's available field vocabulary.
+
+A profile is read-only with respect to filenames: bioAF never renames,
+rewrites, or standardizes a file based on a profile. The filename the
+user provides is the filename bioAF stores.
+
+Segment order is preserved for display but does not affect parsing:
+each non-date segment carries a 1-4 letter [Segment Identifier](#segment-identifier)
+that lets the parser recognize it regardless of position. Date segments
+are recognized by their digit pattern (one of `YYYYMMDD`, `YYYY-MM-DD`,
+`YYMMDD`) and carry no identifier.
+
+Parsed values are returned as strings (leading zeros preserved), except
+dates which are returned as ISO date strings. If a parsed field has a
+matching custom field on the target experiment, the value is persisted
+to `experiment_custom_fields`; otherwise it is human-readable only.
+
+See [ADR-058](../decisions/ADR-058-naming-profile-parse-only.md) for
+the decision record.
 
 ### Notebook Session
 
@@ -313,6 +346,30 @@ tracking file-ingestion progress with its own status. Distinct from
 [Sample Batch](#sample-batch). Plain "Batch" is disallowed; always use one of the two
 specific terms.
 
+### Segment
+
+One parseable unit inside a filename, separated from other segments by
+the [Naming Profile](#naming-profile)'s delimiter. A segment binds to
+exactly one field; the field's type (`string`, `number`, or `date`)
+determines the segment's shape on disk:
+
+- `number`: `<1-4 letters><zero-padded integer>`, e.g. `SMP0042`.
+- `string`: `<1-4 letters><inner-separator><value>`, e.g. `req-bmills`.
+  The [Inner Separator](#inner-separator) is the opposite of the
+  profile's delimiter.
+- `date`: one of `YYYYMMDD`, `YYYY-MM-DD`, `YYMMDD`, with no identifier.
+
+Non-date segments are recognized by their [Segment Identifier](#segment-identifier).
+
+### Segment Identifier
+
+The 1-4 letter prefix at the start of a non-date [Segment](#segment).
+The identifier is how the parser knows which segment definition a token
+matches, which is why segment order in the filename does not matter.
+Identifiers must be unique within a [Naming Profile](#naming-profile);
+matching is case-insensitive but the authored case is preserved for
+display. ASCII letters only.
+
 ### Severity (Agent Review)
 
 The red/orange/green grading returned in the [Agent Review](#agent-review)
@@ -328,6 +385,16 @@ A flag on an experiment-level [Agent Review](#agent-review) indicating that the
 not in the review's included-runs list. Computed at query time, not persisted.
 Adding a [Sample](#sample) alone does not trigger stale; only adding a pipeline
 run does. Single-run reviews are never stale.
+
+### System Chip
+
+A pre-built [Segment](#segment) template for `ProjectCode`,
+`ExperimentCode`, or `SampleID`. System chips appear in the Naming
+Profile wizard regardless of which [Experiment Template](#experiment-template)
+is selected, because these codes are managed by bioAF itself (or
+pushed in via API from an external LIMS) rather than user-defined.
+They are the only hard-coded fields in the system; every other field
+is user-defined or template-defined.
 
 ### Unclaimed
 
