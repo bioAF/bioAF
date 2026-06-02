@@ -1,12 +1,27 @@
 ### Reference data
 
-- The URL importer now retries up to 3 times on a transient mid-stream
-  network failure (peer hanging up the TCP connection, read timeout,
-  remote-protocol error) with 5s / 10s / 20s backoff before declaring
-  the import failed. Multi-gigabyte downloads from public CDNs (10x
-  Genomics, Ensembl FTP, etc.) routinely lose a connection partway
-  through; previously a single drop at 7 GB of an 11 GB body would mark
-  the whole reference as failed and force a manual re-import. The retry
-  emits a `downloading` progress event with `progress_pct=0` so the UI
-  snaps back to zero on each new attempt instead of appearing stuck at
-  the byte count from the dropped attempt.
+- The URL importer now resumes a dropped download via HTTP
+  `Range: bytes=<N>-` instead of starting over from byte 0. When the
+  source CDN closes the TCP connection mid-stream (a 10x Genomics
+  11.4 GB reference died at 7.1 GB with `peer closed connection without
+  sending complete message body`), the importer reissues the GET with a
+  Range header pointing at the next byte it needs, the server returns
+  `206 Partial Content`, and only the remaining bytes are re-fetched.
+  If the server doesn't honor the Range request (returns `200 OK` with
+  the full body), the importer falls back to a clean restart so the
+  final object is still correct. Up to 3 attempts with 5s / 10s / 20s
+  exponential backoff.
+
+- To support resume cleanly across all extract modes
+  (`none` / `gzip` / `tar` / `tar.gz`), the source URL is staged to a
+  local tempfile during the download phase and only uploaded to GCS
+  once the download finishes (and the optional `.md5` verification
+  passes). This requires `<size of largest reference>` of free space
+  on the backend container's `/tmp`. On a 10 GB import that's a
+  one-time scratch cost; the tempfile is deleted as soon as the upload
+  completes (or the import fails).
+
+- MD5 verification now happens before any bytes hit GCS. Previously the
+  importer uploaded as it streamed and deleted the blob on mismatch;
+  now a mismatch means no blob is ever created, so a failed MD5 leaves
+  the references bucket clean by construction.
