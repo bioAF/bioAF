@@ -117,6 +117,22 @@ export default function DataReferenceDetailPage() {
     }
   }
 
+  const [finalizing, setFinalizing] = useState(false);
+
+  async function handleFinalize() {
+    setFinalizing(true);
+    try {
+      await api.post(`/api/references/${id}/recover-finalize`);
+      // Reload the reference so the badge and banner reflect the new
+      // 'active' (or 'pending_approval') state without a manual refresh.
+      await loadReference();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to finalize");
+    } finally {
+      setFinalizing(false);
+    }
+  }
+
   useEffect(() => {
     if (activeTab === "impact") loadImpact();
     if (activeTab === "versions") loadVersions();
@@ -286,14 +302,27 @@ export default function DataReferenceDetailPage() {
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 space-y-3">
               <div className="flex items-center justify-between">
                 <p className="text-blue-800 font-medium">Import in progress</p>
-                <button
-                  type="button"
-                  onClick={handleCancelOrDelete}
-                  disabled={cancelling}
-                  className="px-3 py-1.5 border border-red-300 text-red-700 rounded-md text-sm hover:bg-red-50 disabled:opacity-50"
-                >
-                  {cancelling ? "Cancelling..." : "Cancel import"}
-                </button>
+                <div className="flex gap-2">
+                  {importStatus &&
+                    (importStatus.status === "finalizing" || importStatus.status === "active") && (
+                      <button
+                        type="button"
+                        onClick={handleFinalize}
+                        disabled={finalizing}
+                        className="px-3 py-1.5 border border-blue-400 text-blue-800 rounded-md text-sm hover:bg-blue-100 disabled:opacity-50"
+                      >
+                        {finalizing ? "Finalizing..." : "Finalize import"}
+                      </button>
+                    )}
+                  <button
+                    type="button"
+                    onClick={handleCancelOrDelete}
+                    disabled={cancelling}
+                    className="px-3 py-1.5 border border-red-300 text-red-700 rounded-md text-sm hover:bg-red-50 disabled:opacity-50"
+                  >
+                    {cancelling ? "Cancelling..." : "Cancel import"}
+                  </button>
+                </div>
               </div>
               {importStatus && (
                 <>

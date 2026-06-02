@@ -195,6 +195,74 @@ describe("Reference Detail - in-flight URL import", () => {
     expect(screen.getByRole("button", { name: /delete/i })).toBeInTheDocument();
   });
 
+  it("Shows a Finalize button when the importer reports done but the dataset is still uploading", async () => {
+    const stuck = { ...REF_DETAIL, status: "uploading" };
+    mockGet.mockImplementation((url: string) => {
+      if (url === "/api/references/1") return Promise.resolve(stuck);
+      if (url === "/api/references/1/import-status") {
+        return Promise.resolve({
+          reference_id: 1,
+          status: "finalizing",
+          progress_pct: 100,
+          bytes_downloaded: 10_660_000_000,
+          total_bytes: 10_660_000_000,
+          error_message: null,
+          import_job_id: null,
+          updated_at: null,
+        });
+      }
+      return Promise.resolve({ references: [], total: 0 });
+    });
+
+    render(<DataReferenceDetailPage />);
+
+    expect(await screen.findByRole("button", { name: /finalize/i })).toBeInTheDocument();
+  });
+
+  it("Finalize button POSTs recover-finalize and reloads the reference", async () => {
+    const stuck = { ...REF_DETAIL, status: "uploading" };
+    let finalizedCalled = false;
+    const finalized = { ...REF_DETAIL, status: "active", file_count: 1, total_size_bytes: 10_660_000_000 };
+    mockGet.mockImplementation((url: string) => {
+      if (url === "/api/references/1") {
+        return Promise.resolve(finalizedCalled ? finalized : stuck);
+      }
+      if (url === "/api/references/1/import-status") {
+        return Promise.resolve({
+          reference_id: 1,
+          status: "finalizing",
+          progress_pct: 100,
+          bytes_downloaded: 10_660_000_000,
+          total_bytes: 10_660_000_000,
+          error_message: null,
+          import_job_id: null,
+          updated_at: null,
+        });
+      }
+      return Promise.resolve({ references: [], total: 0 });
+    });
+    mockPost.mockImplementation(async (url: string) => {
+      if (url === "/api/references/1/recover-finalize") {
+        finalizedCalled = true;
+      }
+      return {};
+    });
+
+    render(<DataReferenceDetailPage />);
+
+    const finalizeBtn = await screen.findByRole("button", { name: /finalize/i });
+    fireEvent.click(finalizeBtn);
+
+    await waitFor(() => {
+      expect(mockPost).toHaveBeenCalledWith("/api/references/1/recover-finalize");
+    });
+    // After the explicit reload triggered by Finalize, the dataset
+    // transitions to 'active' and the in-flight banner is gone.
+    await waitFor(() => {
+      expect(screen.queryByText(/import in progress/i)).not.toBeInTheDocument();
+    });
+  });
+
   it("Delete on a failed dataset POSTs import-cancel and navigates back to the list", async () => {
     const failed = {
       ...REF_DETAIL,
