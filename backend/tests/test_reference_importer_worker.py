@@ -80,6 +80,10 @@ class _FakeBlob:
         if rewind:
             fileobj.seek(0)
         self.content_type = content_type
+        # Real GCS overwrites the object on every upload_from_file (a fresh
+        # resumable session). Mirror that so retry tests see the final
+        # body, not the concatenation of all attempts.
+        self.data = bytearray()
         while True:
             chunk = fileobj.read(64 * 1024)
             if not chunk:
@@ -188,7 +192,7 @@ def test_streams_source_url_into_single_gcs_blob_and_reports_progress():
     # Progress: at least one 'downloading' and a terminal 'active'.
     statuses = [e["status"] for e in callback.events]
     assert "downloading" in statuses, statuses
-    assert statuses[-1] == "active", statuses
+    assert statuses[-1] == "finalizing", statuses
 
     # Bytes downloaded monotonically non-decreasing, terminal matches total.
     bytes_seen: list[int] = [e["bytes_downloaded"] for e in callback.events if e.get("bytes_downloaded") is not None]
@@ -244,7 +248,7 @@ def test_verifies_md5_when_source_md5_url_provided():
 
     statuses = [e["status"] for e in callback.events]
     assert "verifying" in statuses, statuses
-    assert statuses[-1] == "active"
+    assert statuses[-1] == "finalizing"
 
     blob = storage.blobs["bioaf-references-test"]["annotation/gencode/v45/gencode.v45.gtf.gz"]
     assert blob.deleted is False
@@ -252,10 +256,12 @@ def test_verifies_md5_when_source_md5_url_provided():
     assert result.files[0].md5 == expected_md5
 
 
-def test_reports_failed_when_md5_mismatches_and_purges_blob():
-    """If the upstream md5 file disagrees with the streamed payload, the
-    importer reports failure with a descriptive error_message AND deletes
-    the partial GCS object so the dataset prefix is clean for a retry."""
+def test_reports_failed_when_md5_mismatches_and_no_blob_is_uploaded():
+    """If the upstream md5 file disagrees with the downloaded payload, the
+    importer reports failure with a descriptive error_message and never
+    uploads to GCS in the first place. The download stages to a local
+    file, md5 is verified against that file, and only on a match does
+    the upload phase begin."""
     from app.workers.reference_importer import ReferenceImporter
 
     payload = b"this body does not match the md5 file" * 1000
@@ -290,9 +296,8 @@ def test_reports_failed_when_md5_mismatches_and_purges_blob():
     assert failure["status"] == "failed"
     assert "md5" in (failure.get("error_message") or "").lower()
 
-    # Partial blob purged.
-    blob = storage.blobs["bioaf-references-test"]["annotation/gencode/v45/gencode.v45.gtf.gz"]
-    assert blob.deleted is True
+    # No blob was uploaded -- verify happens before the upload phase.
+    assert storage.blobs == {}
 
 
 def test_extract_gzip_writes_decompressed_object_with_stripped_extension():
@@ -330,7 +335,7 @@ def test_extract_gzip_writes_decompressed_object_with_stripped_extension():
 
     statuses = [e["status"] for e in callback.events]
     assert "extracting" in statuses, statuses
-    assert statuses[-1] == "active"
+    assert statuses[-1] == "finalizing"
 
     assert [f.filename for f in result.files] == ["gencode.v45.gtf"]
     assert result.files[0].size_bytes == len(decompressed)
@@ -382,7 +387,7 @@ def test_extract_tar_writes_each_member_as_its_own_blob():
 
     statuses = [e["status"] for e in callback.events]
     assert "extracting" in statuses
-    assert statuses[-1] == "active"
+    assert statuses[-1] == "finalizing"
 
     assert sorted(f.filename for f in result.files) == ["ref_a.txt", "subdir/ref_b.tsv"]
 
@@ -444,6 +449,233 @@ def test_passes_auth_header_to_source_request_when_provided():
     _, headers = src_calls[0]
     assert headers is not None
     assert headers.get("Authorization") == "Bearer secret-token"
+
+
+def test_resumes_with_range_header_after_connection_drop(monkeypatch):
+    """When the source CDN drops the connection partway through, the
+    importer's second GET sets a `Range: bytes=N-` header so the server
+    only re-sends the remaining bytes, not the whole file from byte 0.
+    Bandwidth on a 10+ GB reference matters."""
+    import httpcore
+
+    from app.workers.reference_importer import ReferenceImporter
+
+    monkeypatch.setattr("time.sleep", lambda *_: None)
+
+    payload = b"abcdefgh" * 50_000  # 400 KB, deterministic content
+    drop_at = 128 * 1024  # break after 128 KB
+    url = "https://ftp.example.org/data/refs/gencode.v45.gtf.gz"
+
+    requests: list[tuple[str, dict[str, str] | None]] = []
+
+    class _Http:
+        def stream(self, method, u, *, headers=None, follow_redirects=True):
+            captured = dict(headers) if headers else None
+            requests.append((u, captured))
+            if len(requests) == 1:
+
+                class _Drop(_FakeResponse):
+                    def iter_bytes(self, chunk_size=None):
+                        size = chunk_size or 64 * 1024
+                        for i in range(0, drop_at, size):
+                            yield payload[i : i + size]
+                        raise httpcore.RemoteProtocolError("peer closed connection")
+
+                return _Drop(
+                    status_code=200,
+                    chunks=[],
+                    headers={"content-length": str(len(payload)), "accept-ranges": "bytes"},
+                )
+
+            # Second request: must be a Range request
+            assert captured is not None
+            assert captured.get("Range") == f"bytes={drop_at}-", captured
+            return _FakeResponse(
+                status_code=206,
+                chunks=[payload[drop_at:]],
+                headers={
+                    "content-length": str(len(payload) - drop_at),
+                    "content-range": f"bytes {drop_at}-{len(payload) - 1}/{len(payload)}",
+                },
+            )
+
+    storage = _FakeStorageClient()
+    callback = _RecordingCallback()
+    ReferenceImporter(
+        _make_config(source_url=url),
+        http_client=_Http(),
+        storage_client=storage,
+        callback=callback,
+    ).run()
+
+    # Final blob has the FULL payload, no duplicates, no missing bytes.
+    blob = storage.blobs["bioaf-references-test"]["annotation/gencode/v45/gencode.v45.gtf.gz"]
+    assert bytes(blob.data) == payload
+    # Two GETs total: the initial and the Range continuation.
+    assert len(requests) == 2
+
+
+def test_falls_back_to_full_restart_when_server_ignores_range_header(monkeypatch):
+    """Some servers (and CDN edges) ignore the Range header and return
+    200 OK with the full body instead of 206 Partial Content. The
+    importer must detect this, throw away the partial bytes already on
+    disk, and accept the full re-sent body so the final object is
+    still correct."""
+    import httpcore
+
+    from app.workers.reference_importer import ReferenceImporter
+
+    monkeypatch.setattr("time.sleep", lambda *_: None)
+
+    payload = b"y" * 200_000
+    drop_at = 100_000
+    url = "https://ftp.example.org/data/refs/gencode.v45.gtf.gz"
+
+    class _Http:
+        attempts = 0
+
+        def stream(self, method, u, *, headers=None, follow_redirects=True):
+            type(self).attempts += 1
+            if type(self).attempts == 1:
+
+                class _Drop(_FakeResponse):
+                    def iter_bytes(self, chunk_size=None):
+                        size = chunk_size or 64 * 1024
+                        for i in range(0, drop_at, size):
+                            yield payload[i : i + size]
+                        raise httpcore.RemoteProtocolError("peer closed connection")
+
+                return _Drop(
+                    status_code=200,
+                    chunks=[],
+                    headers={"content-length": str(len(payload))},
+                )
+            # Server ignored the Range header and returned 200 with the
+            # full body. The importer should accept this gracefully.
+            return _FakeResponse(
+                status_code=200,
+                chunks=[payload],
+                headers={"content-length": str(len(payload))},
+            )
+
+    storage = _FakeStorageClient()
+    callback = _RecordingCallback()
+    ReferenceImporter(
+        _make_config(source_url=url),
+        http_client=_Http(),
+        storage_client=storage,
+        callback=callback,
+    ).run()
+
+    blob = storage.blobs["bioaf-references-test"]["annotation/gencode/v45/gencode.v45.gtf.gz"]
+    assert bytes(blob.data) == payload
+
+
+def test_retries_when_source_connection_drops_mid_stream_then_succeeds(monkeypatch):
+    """Public CDNs (10x Genomics, Ensembl FTP, ...) routinely drop the TCP
+    connection mid-stream during multi-GB transfers. The importer must
+    re-issue the GET on a transient network error and run the import to
+    completion instead of failing the whole reference dataset. We keep
+    this naive (restart from byte 0) for now; a Range-resume can come
+    later if bandwidth becomes an issue."""
+    import httpcore
+
+    from app.workers.reference_importer import ReferenceImporter
+
+    # No real backoff in tests.
+    monkeypatch.setattr("time.sleep", lambda *_: None)
+
+    payload = b"x" * 200_000
+    chunks = [payload[i : i + 64 * 1024] for i in range(0, len(payload), 64 * 1024)]
+    url = "https://ftp.example.org/data/refs/gencode.v45.gtf.gz"
+
+    class _FlakyResponse(_FakeResponse):
+        def iter_bytes(self, chunk_size=None):
+            # Emit a couple of chunks, then simulate the CDN hanging up.
+            for c in self.chunks[:2]:
+                yield c
+            raise httpcore.RemoteProtocolError("peer closed connection")
+
+    success_response = _FakeResponse(
+        status_code=200,
+        chunks=chunks,
+        headers={"content-length": str(len(payload))},
+    )
+    attempts: list[int] = []
+
+    class _RetryingHttp:
+        def stream(self, method, url_arg, *, headers=None, follow_redirects=True):
+            attempts.append(1)
+            if len(attempts) == 1:
+                return _FlakyResponse(
+                    status_code=200,
+                    chunks=chunks,
+                    headers={"content-length": str(len(payload))},
+                )
+            return success_response
+
+    storage = _FakeStorageClient()
+    callback = _RecordingCallback()
+    importer = ReferenceImporter(
+        _make_config(source_url=url),
+        http_client=_RetryingHttp(),
+        storage_client=storage,
+        callback=callback,
+    )
+    importer.run()
+
+    # Two attempts: the first dropped, the second completed.
+    assert len(attempts) == 2
+    # And the dataset ended in 'active' with the full payload uploaded.
+    statuses = [e["status"] for e in callback.events]
+    assert statuses[-1] == "finalizing", statuses
+    blob = storage.blobs["bioaf-references-test"]["annotation/gencode/v45/gencode.v45.gtf.gz"]
+    assert bytes(blob.data) == payload
+
+
+def test_gives_up_after_max_retries_on_persistent_connection_drops(monkeypatch):
+    """If every attempt fails with a transient network error, the importer
+    reports 'failed' and re-raises so the background task in the service
+    layer can clean up. The final error_message should include the last
+    upstream error so the user can see WHY it failed."""
+    import httpcore
+
+    from app.workers.reference_importer import ReferenceImporter
+
+    monkeypatch.setattr("time.sleep", lambda *_: None)
+
+    url = "https://ftp.example.org/data/refs/gencode.v45.gtf.gz"
+
+    class _AlwaysFlaky:
+        attempts = 0
+
+        def stream(self, method, url_arg, *, headers=None, follow_redirects=True):
+            type(self).attempts += 1
+
+            class _R(_FakeResponse):
+                def iter_bytes(self, chunk_size=None):
+                    yield b"x" * 64
+                    raise httpcore.RemoteProtocolError("peer closed connection")
+
+            return _R(status_code=200, chunks=[b""], headers={"content-length": "100"})
+
+    storage = _FakeStorageClient()
+    callback = _RecordingCallback()
+    importer = ReferenceImporter(
+        _make_config(source_url=url),
+        http_client=_AlwaysFlaky(),
+        storage_client=storage,
+        callback=callback,
+    )
+
+    with pytest.raises(Exception):
+        importer.run()
+
+    # Multiple attempts before giving up.
+    assert _AlwaysFlaky.attempts >= 3
+    last = callback.events[-1]
+    assert last["status"] == "failed"
+    assert "peer closed connection" in (last.get("error_message") or "")
 
 
 def test_blob_chunk_size_is_set_so_uploads_stream_in_chunks_not_buffered_in_memory():
@@ -517,4 +749,4 @@ def test_extract_tar_gz_writes_each_member_as_its_own_blob():
         "annotation/gencode/v45/b.txt",
     ]
     assert sorted(f.filename for f in result.files) == ["a.txt", "b.txt"]
-    assert [e["status"] for e in callback.events][-1] == "active"
+    assert [e["status"] for e in callback.events][-1] == "finalizing"

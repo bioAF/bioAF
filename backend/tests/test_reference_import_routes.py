@@ -180,3 +180,61 @@ async def test_import_cancel_route_purges(client, comp_bio_token, configured_ref
 
     result = await session.execute(text("SELECT id FROM reference_datasets WHERE id = :id"), {"id": ref_id})
     assert result.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_recover_finalize_route_finalizes_stuck_dataset(client, comp_bio_token, configured_refs_bucket, session):
+    """POST /api/references/{id}/recover-finalize lists what's in GCS and
+    runs finalize_import, returning the refreshed reference detail."""
+    with patch.object(ReferenceDataService, "_schedule_import", side_effect=_stub_schedule):
+        init = await client.post(
+            "/api/references/import",
+            json=VALID_IMPORT,
+            headers={"Authorization": f"Bearer {comp_bio_token}"},
+        )
+    ref_id = init.json()["reference_id"]
+
+    class _FakeBlob:
+        def __init__(self, name, size, md5_hash=None):
+            self.name = name
+            self.size = size
+            self.md5_hash = md5_hash
+
+    # The import fixture creates the dataset with gcs_prefix
+    # 'annotation/gencode/v45/' (slugified name+version).
+    fake_blobs = [_FakeBlob(name="annotation/gencode/v45/file.gz", size=10, md5_hash=None)]
+    with patch.object(ReferenceDataService, "_list_uploaded_blobs", return_value=fake_blobs):
+        response = await client.post(
+            f"/api/references/{ref_id}/recover-finalize",
+            headers={"Authorization": f"Bearer {comp_bio_token}"},
+        )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] in ("active", "pending_approval")
+    assert body["file_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_recover_finalize_route_409_when_already_finalized(
+    client, comp_bio_token, configured_refs_bucket, session
+):
+    """If the dataset is no longer 'uploading' the endpoint returns 409
+    so the UI can hide the recovery button after a successful run."""
+    with patch.object(ReferenceDataService, "_schedule_import", side_effect=_stub_schedule):
+        init = await client.post(
+            "/api/references/import",
+            json=VALID_IMPORT,
+            headers={"Authorization": f"Bearer {comp_bio_token}"},
+        )
+    ref_id = init.json()["reference_id"]
+
+    # Flip the dataset to 'active' directly so the recovery endpoint
+    # sees it as already finalized.
+    await session.execute(text("UPDATE reference_datasets SET status='active' WHERE id=:id"), {"id": ref_id})
+    await session.commit()
+
+    response = await client.post(
+        f"/api/references/{ref_id}/recover-finalize",
+        headers={"Authorization": f"Bearer {comp_bio_token}"},
+    )
+    assert response.status_code == 409

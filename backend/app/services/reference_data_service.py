@@ -4,6 +4,10 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from app.workers.reference_importer import ImportResult
 
 from sqlalchemy import Select, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -811,13 +815,17 @@ class ReferenceDataService:
 
             with httpx.Client(timeout=httpx.Timeout(connect=30.0, read=None, write=60.0, pool=None)) as http_client:
                 storage_client = gcs_storage.Client(credentials=credentials) if credentials else gcs_storage.Client()
-                ReferenceImporter(
+                # Capture the worker's ImportResult so the service can
+                # finalize the dataset (write file rows + flip status)
+                # once the bytes are safely in GCS.
+                result_holder["result"] = ReferenceImporter(
                     cfg,
                     http_client=http_client,
                     storage_client=storage_client,
                     callback=_on_progress,
                 ).run()
 
+        result_holder: dict[str, object] = {}
         try:
             await asyncio.to_thread(_build_and_run)
         except Exception:
@@ -825,6 +833,27 @@ class ReferenceDataService:
             # raising; log and exit. Pod-style re-raise would only matter
             # for k8s backoff, which no longer applies.
             logger.exception("Reference import %s failed", dataset_id)
+            return
+
+        result = result_holder.get("result")
+        if result is None:
+            logger.error("Reference import %s: worker returned no result", dataset_id)
+            return
+        async with async_session_factory() as finalize_session:
+            try:
+                await ReferenceDataService.finalize_import(
+                    finalize_session,
+                    reference_id=dataset_id,
+                    result=cast(Any, result),
+                )
+                await finalize_session.commit()
+            except Exception:
+                logger.exception("Reference import %s: finalization failed", dataset_id)
+                await ReferenceDataService._record_progress_in_new_session(
+                    dataset_id,
+                    status="failed",
+                    error_message="Import finalization failed; see backend logs.",
+                )
 
     @staticmethod
     async def _record_progress_in_new_session(
@@ -1027,3 +1056,146 @@ class ReferenceDataService:
 
         await session.flush()
         return progress
+
+    @staticmethod
+    async def recover_finalize(
+        session: AsyncSession,
+        *,
+        reference_id: int,
+        org_id: int,
+    ) -> ReferenceDataset:
+        """Recover a dataset stuck in 'uploading' whose bytes are already
+        in GCS.
+
+        This is the cleanup path for any case where the URL-import
+        worker finished writing to the references bucket but the
+        backend never reached finalize_import: the pre-fix in-process
+        code path, a backend crash mid-finalize, etc. The recovery
+        lists the blobs that actually exist under the dataset's
+        gcs_prefix, builds an ImportResult from them (using whatever
+        size and md5 metadata GCS surfaces), and runs the regular
+        finalize_import. Bigger uploads use composite-object hashes so
+        md5_hash may be None on the blob; we surface that as-is in
+        md5_manifest_json rather than fabricating a checksum.
+        """
+        dataset = await session.execute(
+            select(ReferenceDataset).where(
+                ReferenceDataset.id == reference_id,
+                ReferenceDataset.organization_id == org_id,
+            )
+        )
+        ds = dataset.scalar_one_or_none()
+        if ds is None:
+            raise ValueError("Reference dataset not found")
+        if ds.status != "uploading":
+            raise ValueError(
+                f"Reference dataset {reference_id} is not in 'uploading' status (currently '{ds.status}'); nothing to recover."
+            )
+
+        bucket_name = await ReferenceDataService._get_references_bucket(session)
+        from app.services.upload_service import UploadService
+        from app.workers.reference_importer import ImportedFile, ImportResult
+
+        credentials = await UploadService._get_gcs_credentials(session)
+        blobs = ReferenceDataService._list_uploaded_blobs(bucket_name, ds.gcs_prefix, credentials=credentials)
+        if not blobs:
+            raise ValueError(
+                f"Reference dataset {reference_id} has no files under gs://{bucket_name}/{ds.gcs_prefix}; cancel and re-import."
+            )
+
+        prefix_len = len(ds.gcs_prefix)
+        files = [
+            ImportedFile(
+                filename=blob.name[prefix_len:] if blob.name.startswith(ds.gcs_prefix) else blob.name,
+                gcs_uri=f"gs://{bucket_name}/{blob.name}",
+                size_bytes=int(blob.size or 0),
+                md5=getattr(blob, "md5_hash", None) or None,
+            )
+            for blob in blobs
+        ]
+        result = ImportResult(files=files)
+        return await ReferenceDataService.finalize_import(session, reference_id=reference_id, result=result)
+
+    @staticmethod
+    async def finalize_import(
+        session: AsyncSession,
+        *,
+        reference_id: int,
+        result: "ImportResult",
+    ) -> ReferenceDataset:
+        """Finish the URL-import flow after the in-process worker returns.
+
+        Writes a ReferenceDatasetFile per imported file, aggregates the
+        dataset's total_size_bytes / file_count / md5_manifest_json, and
+        flips ReferenceDataset.status off 'uploading' the same way
+        upload_complete does (-> 'pending_approval' for public datasets,
+        -> 'active' for internal). The progress row is also marked
+        'active' so the polling endpoint and the detail page transition
+        cleanly out of the 'Importing' badge.
+
+        Idempotent on the dataset.status check: re-running on an
+        already-finalized dataset is a no-op so a retry of the
+        background task after a partial finalization doesn't double-add
+        file rows.
+        """
+        dataset = await session.get(ReferenceDataset, reference_id)
+        if dataset is None:
+            logger.info("Reference import %s: dataset gone before finalize, abandoning", reference_id)
+            return cast(ReferenceDataset, None)
+        if dataset.status != "uploading":
+            logger.info(
+                "Reference import %s: dataset already in status %s; skipping finalize",
+                reference_id,
+                dataset.status,
+            )
+            return dataset
+
+        from app.services.file_type_utils import detect_reference_file_type
+
+        manifest: dict[str, str] = {}
+        total_size = 0
+        for f in result.files:
+            session.add(
+                ReferenceDatasetFile(
+                    reference_dataset_id=dataset.id,
+                    filename=f.filename,
+                    gcs_uri=f.gcs_uri,
+                    size_bytes=f.size_bytes,
+                    md5_checksum=f.md5,
+                    file_type=detect_reference_file_type(f.filename),
+                )
+            )
+            if f.md5:
+                manifest[f.filename] = f.md5
+            total_size += f.size_bytes
+
+        dataset.md5_manifest_json = manifest
+        dataset.total_size_bytes = total_size
+        dataset.file_count = len(result.files)
+        dataset.status = "pending_approval" if dataset.scope == "public" else "active"
+
+        progress = await session.get(ReferenceImportProgress, reference_id)
+        if progress is not None:
+            progress.status = "active"
+            progress.progress_pct = 100
+            progress.bytes_downloaded = total_size
+            progress.total_bytes = total_size
+
+        await log_action(
+            session,
+            user_id=dataset.uploaded_by_user_id or 0,
+            entity_type="reference_dataset",
+            entity_id=dataset.id,
+            action="import_completed",
+            details={
+                "name": dataset.name,
+                "version": dataset.version,
+                "scope": dataset.scope,
+                "file_count": dataset.file_count,
+                "total_size_bytes": total_size,
+                "final_status": dataset.status,
+            },
+        )
+
+        await session.flush()
+        return dataset
