@@ -87,9 +87,10 @@ function stringSegmentExample(
 
 const DATE_FORMATS: SegmentDateFormat[] = ["YYYYMMDD", "YYYY-MM-DD", "YYMMDD"];
 
+// Default padding stored on new number segments. Not surfaced to the user
+// (padding has no read-time effect; the parser is lenient per spec section
+// 8.7), so it's just a sensible default written into the JSON.
 const PADDING_DEFAULT = 2;
-const PADDING_MIN = 0;
-const PADDING_MAX = 3;
 
 // ---------------------------------------------------------------------------
 // Component
@@ -517,24 +518,6 @@ export function NamingProfileWizard({ onSave, onCancel, profile }: Props) {
                     />
                   </label>
                 )}
-                {seg.field_type === "number" && !seg.is_system_chip && (
-                  <label className="text-xs text-gray-600">
-                    Padding
-                    <input
-                      type="number"
-                      value={seg.padding ?? PADDING_DEFAULT}
-                      onChange={(e) =>
-                        updateSegment(idx, {
-                          padding: clamp(Number(e.target.value), PADDING_MIN, PADDING_MAX),
-                        })
-                      }
-                      min={PADDING_MIN}
-                      max={PADDING_MAX}
-                      aria-label={`padding-${idx}`}
-                      className="ml-2 w-14 border rounded px-2 py-1 text-xs"
-                    />
-                  </label>
-                )}
                 {seg.field_type === "date" && (
                   <label className="text-xs text-gray-600">
                     Date format
@@ -802,11 +785,6 @@ function PromotionModal({
 function defaultIdentifierFor(name: string): string {
   const ascii = name.replace(/[^A-Za-z]/g, "");
   return (ascii.slice(0, 3) || "X").toUpperCase();
-}
-
-function clamp(n: number, min: number, max: number): number {
-  if (Number.isNaN(n)) return min;
-  return Math.max(min, Math.min(max, n));
 }
 
 interface NewSegmentInlineProps {
