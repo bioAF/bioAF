@@ -8,12 +8,14 @@ import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { VocabularySelect } from "@/components/shared/VocabularySelect";
 import { ExtensibleVocabularySelect } from "@/components/shared/ExtensibleVocabularySelect";
+import { NamingProfileSelect } from "@/components/naming/NamingProfileSelect";
 import { SheetImportModal } from "@/components/experiments/SheetImportModal";
 import type {
   Experiment,
   ExperimentCreateRequest,
   ExperimentTemplate,
   FieldDefaultValue,
+  NamingProfile,
   ProjectListResponse,
   SampleCreateRequest,
 } from "@/lib/types";
@@ -22,6 +24,7 @@ export default function NewExperimentPage() {
   const router = useRouter();
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
   const [templates, setTemplates] = useState<ExperimentTemplate[]>([]);
+  const [profiles, setProfiles] = useState<NamingProfile[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -34,6 +37,7 @@ export default function NewExperimentPage() {
     description: null,
     start_date: new Date().toISOString().split("T")[0],
     expected_sample_count: null,
+    naming_profile_id: null,
   });
 
   const [csvFile, setCsvFile] = useState<File | null>(null);
@@ -108,13 +112,25 @@ export default function NewExperimentPage() {
     Promise.all([
       api.get<ProjectListResponse>("/api/projects"),
       api.get<ExperimentTemplate[]>("/api/templates"),
-    ]).then(([projData, templateData]) => {
+      api.get<NamingProfile[]>("/api/naming-profiles?status=active"),
+    ]).then(([projData, templateData, profileData]) => {
       setProjects(projData.projects.map((p) => ({ id: p.id, name: p.name })));
       setTemplates(templateData);
+      setProfiles(profileData);
     }).catch(() => {});
   }, [router]);
 
   const selectedTemplate = templates.find((t) => t.id === form.template_id);
+  const inheritedProfile =
+    selectedTemplate?.naming_profile_id != null
+      ? profiles.find((p) => p.id === selectedTemplate.naming_profile_id)
+      : null;
+  const namingProfileHint =
+    form.naming_profile_id != null
+      ? "Override: this experiment uses the selected profile."
+      : inheritedProfile
+        ? `Inherited from template '${selectedTemplate?.name}': ${inheritedProfile.name}.`
+        : "No profile set on this experiment or its template.";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -229,6 +245,16 @@ export default function NewExperimentPage() {
                   className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
                 />
               </div>
+
+              <NamingProfileSelect
+                id="new-exp-naming-profile"
+                label="Naming profile (optional)"
+                hint={namingProfileHint}
+                emptyLabel={inheritedProfile ? "Inherit from template" : "No profile"}
+                value={form.naming_profile_id ?? null}
+                onChange={(v) => setForm({ ...form, naming_profile_id: v })}
+                profiles={profiles}
+              />
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Hypothesis</label>

@@ -220,6 +220,9 @@ export interface Experiment {
   sample_count: number;
   batch_count: number;
   design_type: string | null;
+  naming_profile_id: number | null;
+  template_naming_profile_id: number | null;
+  effective_naming_profile_id: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -233,6 +236,7 @@ export interface ExperimentUpdateRequest {
   design_type?: string | null;
   field_defaults?: FieldDefaultValue[];
   custom_fields?: CustomFieldValue[];
+  naming_profile_id?: number | null;
 }
 
 export interface ExperimentListResponse {
@@ -397,6 +401,7 @@ export interface ExperimentTemplate {
   description: string | null;
   required_fields_json: Record<string, unknown> | null;
   custom_fields_schema_json: Record<string, unknown> | null;
+  naming_profile_id: number | null;
   created_by: UserSummary | null;
   created_at: string;
 }
@@ -431,6 +436,7 @@ export interface ExperimentCreateRequest {
   field_defaults?: FieldDefaultValue[];
   design_type?: string | null;
   column_aliases?: Record<string, string>;
+  naming_profile_id?: number | null;
 }
 
 export interface SampleCreateRequest {
@@ -488,6 +494,7 @@ export interface TemplateCreateRequest {
   description?: string | null;
   required_fields_json?: Record<string, unknown> | null;
   custom_fields_schema_json?: Record<string, unknown> | null;
+  naming_profile_id?: number | null;
 }
 
 // Phase 3 — Compute + Notebooks

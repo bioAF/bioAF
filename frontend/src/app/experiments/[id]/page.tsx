@@ -19,6 +19,7 @@ import { VocabularySelect } from "@/components/shared/VocabularySelect";
 import { CsvUploadModal } from "@/components/experiments/CsvUploadModal";
 import { AutoRunConfigSection } from "@/components/experiments/AutoRunConfigSection";
 import { ExtensibleVocabularySelect } from "@/components/shared/ExtensibleVocabularySelect";
+import { NamingProfileSelect } from "@/components/naming/NamingProfileSelect";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api, fileContentUrl, plotThumbnailContentUrl } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -33,6 +34,7 @@ import type {
   ExperimentDetail,
   ExperimentUpdateRequest,
   FieldDefaultValue,
+  NamingProfile,
   Sample,
   SampleBatch,
   SequencingBatch,
@@ -91,6 +93,7 @@ function ExperimentDetailPageInner() {
   const [editingOverview, setEditingOverview] = useState(false);
   const [overviewForm, setOverviewForm] = useState<ExperimentUpdateRequest>({});
   const [overviewError, setOverviewError] = useState("");
+  const [namingProfiles, setNamingProfiles] = useState<NamingProfile[]>([]);
   const [showSampleForm, setShowSampleForm] = useState(false);
   const [showCsvUpload, setShowCsvUpload] = useState(false);
   const [showBatchForm, setShowBatchForm] = useState(false);
@@ -133,6 +136,10 @@ function ExperimentDetailPageInner() {
       return;
     }
     loadExperiment();
+    api
+      .get<NamingProfile[]>("/api/naming-profiles?status=active")
+      .then(setNamingProfiles)
+      .catch(() => setNamingProfiles([]));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, router]);
 
@@ -246,6 +253,7 @@ function ExperimentDetailPageInner() {
       start_date: experiment.start_date,
       expected_sample_count: experiment.expected_sample_count,
       design_type: experiment.design_type,
+      naming_profile_id: experiment.naming_profile_id,
     });
     setEditFieldDefaults(
       experiment.field_defaults.map((fd) => ({
@@ -551,6 +559,29 @@ function ExperimentDetailPageInner() {
                       <label className="block text-sm text-gray-500 mb-1">Description</label>
                       <textarea value={overviewForm.description ?? ""} onChange={(e) => setOverviewForm({ ...overviewForm, description: e.target.value || null })} rows={3} className="w-full border rounded px-3 py-1.5 text-sm" />
                     </div>
+                    {(() => {
+                      const templateProfile =
+                        experiment.template_naming_profile_id != null
+                          ? namingProfiles.find((p) => p.id === experiment.template_naming_profile_id)
+                          : null;
+                      const overriding = overviewForm.naming_profile_id != null;
+                      const hint = overriding
+                        ? "Override: this experiment uses the selected profile."
+                        : templateProfile
+                          ? `Inherited from template '${experiment.template_name}': ${templateProfile.name}.`
+                          : "No profile set on this experiment or its template.";
+                      return (
+                        <NamingProfileSelect
+                          id="exp-naming-profile"
+                          label="Naming profile (override)"
+                          hint={hint}
+                          emptyLabel={templateProfile ? "Inherit from template" : "No profile"}
+                          value={overviewForm.naming_profile_id ?? null}
+                          onChange={(v) => setOverviewForm({ ...overviewForm, naming_profile_id: v })}
+                          profiles={namingProfiles}
+                        />
+                      );
+                    })()}
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-sm text-gray-500 mb-1">Start Date</label>
@@ -657,6 +688,19 @@ function ExperimentDetailPageInner() {
                   <dl className="space-y-3">
                     <div><dt className="text-sm text-gray-500">Project</dt><dd className="text-sm">{experiment.project?.name || "—"}</dd></div>
                     <div><dt className="text-sm text-gray-500">Template</dt><dd className="text-sm">{experiment.template_name || "—"}</dd></div>
+                    <div>
+                      <dt className="text-sm text-gray-500">Naming Profile</dt>
+                      <dd className="text-sm">
+                        {(() => {
+                          const eff = experiment.effective_naming_profile_id;
+                          if (eff == null) return "—";
+                          const profile = namingProfiles.find((p) => p.id === eff);
+                          const label = profile?.name ?? `#${eff}`;
+                          const overriding = experiment.naming_profile_id != null;
+                          return `${label}${overriding ? " (override)" : " (from template)"}`;
+                        })()}
+                      </dd>
+                    </div>
                     <div><dt className="text-sm text-gray-500">Design Type</dt><dd className="text-sm">{experiment.design_type || "—"}</dd></div>
                     <div><dt className="text-sm text-gray-500">Owner</dt><dd className="text-sm">{experiment.owner?.name || experiment.owner?.email || "—"}</dd></div>
                     <div><dt className="text-sm text-gray-500">Hypothesis</dt><dd className="text-sm">{experiment.hypothesis || "—"}</dd></div>
