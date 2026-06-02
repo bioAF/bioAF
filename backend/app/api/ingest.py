@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +19,7 @@ from app.schemas.ingest import (
     UnclaimedEntityResponse,
 )
 from app.services.audit_service import log_action
+from app.services.auto_ingest_gate import AutoIngestDisabledError
 from app.services.ingest_service import get_unclaimed_entities, process_ingest_event
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
@@ -79,16 +81,22 @@ async def simulate_ingest(
     """Simulate a file arrival for local/POC testing."""
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
-    event = await process_ingest_event(
-        filename=body.filename,
-        source_bucket="bioaf-ingest-local",
-        source_path=f"simulate/{body.filename}",
-        org_id=org_id,
-        db=session,
-        user_id=user_id,
-        file_size_bytes=body.file_size_bytes,
-        content_md5=body.content_md5,
-    )
+    try:
+        event = await process_ingest_event(
+            filename=body.filename,
+            source_bucket="bioaf-ingest-local",
+            source_path=f"simulate/{body.filename}",
+            org_id=org_id,
+            db=session,
+            user_id=user_id,
+            file_size_bytes=body.file_size_bytes,
+            content_md5=body.content_md5,
+        )
+    except AutoIngestDisabledError as exc:
+        return JSONResponse(
+            status_code=503,
+            content={"error": exc.code, "message": exc.message},
+        )
     await session.commit()
     # Re-fetch to ensure all fields populated
     result = await session.execute(select(IngestEvent).where(IngestEvent.id == event.id))

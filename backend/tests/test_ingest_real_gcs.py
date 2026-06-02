@@ -10,6 +10,13 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import text
 
+from app.services.auto_ingest_gate import AUTO_INGEST_DISABLED
+
+pytestmark = pytest.mark.skipif(
+    AUTO_INGEST_DISABLED,
+    reason="auto-ingest gated off during Naming Profile redesign; see local/Naming Profiles/spec-auto-ingest-neutralize.md",
+)
+
 
 async def _seed_config(session, overrides=None):
     defaults = {

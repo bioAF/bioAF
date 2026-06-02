@@ -3,6 +3,17 @@
 import pytest
 import pytest_asyncio
 
+from app.services.auto_ingest_gate import AUTO_INGEST_DISABLED
+
+# Auto-ingest is gated off during the Naming Profile redesign. These tests
+# assert behaviors of the gated body and will be re-enabled by the follow-up
+# rework when AUTO_INGEST_DISABLED flips. See
+# local/Naming Profiles/spec-auto-ingest-neutralize.md.
+pytestmark = pytest.mark.skipif(
+    AUTO_INGEST_DISABLED,
+    reason="auto-ingest gated off during Naming Profile redesign",
+)
+
 
 @pytest_asyncio.fixture
 async def _create_profile(client, admin_token):

@@ -5,12 +5,22 @@ import pytest_asyncio
 from sqlalchemy import text
 
 from app.schemas.naming_profile import NamingProfileCreate, SegmentDefinition
+from app.services.auto_ingest_gate import AUTO_INGEST_DISABLED
 from app.services.ingest_service import (
     detect_file_type,
     get_unclaimed_entities,
     process_ingest_event,
 )
 from app.services.naming_profile_service import NamingProfileService
+
+# Auto-ingest is gated off during the Naming Profile redesign. These tests
+# assert behaviors of the gated body and will be re-enabled by the follow-up
+# rework when AUTO_INGEST_DISABLED flips. See
+# local/Naming Profiles/spec-auto-ingest-neutralize.md.
+pytestmark = pytest.mark.skipif(
+    AUTO_INGEST_DISABLED,
+    reason="auto-ingest gated off during Naming Profile redesign",
+)
 
 
 @pytest_asyncio.fixture

@@ -13,6 +13,12 @@ import pytest
 from sqlalchemy import select, text
 
 from app.models.manifest_entry import ManifestEntry
+from app.services.auto_ingest_gate import AUTO_INGEST_DISABLED
+
+pytestmark = pytest.mark.skipif(
+    AUTO_INGEST_DISABLED,
+    reason="auto-ingest gated off during Naming Profile redesign; see local/Naming Profiles/spec-auto-ingest-neutralize.md",
+)
 from app.models.sequencing_batch import SequencingBatch
 from app.services.pubsub_listener import _base64_md5_to_hex
 
