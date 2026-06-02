@@ -80,6 +80,10 @@ class _FakeBlob:
         if rewind:
             fileobj.seek(0)
         self.content_type = content_type
+        # Real GCS overwrites the object on every upload_from_file (a fresh
+        # resumable session). Mirror that so retry tests see the final
+        # body, not the concatenation of all attempts.
+        self.data = bytearray()
         while True:
             chunk = fileobj.read(64 * 1024)
             if not chunk:
@@ -444,6 +448,113 @@ def test_passes_auth_header_to_source_request_when_provided():
     _, headers = src_calls[0]
     assert headers is not None
     assert headers.get("Authorization") == "Bearer secret-token"
+
+
+def test_retries_when_source_connection_drops_mid_stream_then_succeeds(monkeypatch):
+    """Public CDNs (10x Genomics, Ensembl FTP, ...) routinely drop the TCP
+    connection mid-stream during multi-GB transfers. The importer must
+    re-issue the GET on a transient network error and run the import to
+    completion instead of failing the whole reference dataset. We keep
+    this naive (restart from byte 0) for now; a Range-resume can come
+    later if bandwidth becomes an issue."""
+    import httpcore
+
+    from app.workers.reference_importer import ReferenceImporter
+
+    # No real backoff in tests.
+    monkeypatch.setattr("time.sleep", lambda *_: None)
+
+    payload = b"x" * 200_000
+    chunks = [payload[i : i + 64 * 1024] for i in range(0, len(payload), 64 * 1024)]
+    url = "https://ftp.example.org/data/refs/gencode.v45.gtf.gz"
+
+    class _FlakyResponse(_FakeResponse):
+        def iter_bytes(self, chunk_size=None):
+            # Emit a couple of chunks, then simulate the CDN hanging up.
+            for c in self.chunks[:2]:
+                yield c
+            raise httpcore.RemoteProtocolError("peer closed connection")
+
+    success_response = _FakeResponse(
+        status_code=200,
+        chunks=chunks,
+        headers={"content-length": str(len(payload))},
+    )
+    attempts: list[int] = []
+
+    class _RetryingHttp:
+        def stream(self, method, url_arg, *, headers=None, follow_redirects=True):
+            attempts.append(1)
+            if len(attempts) == 1:
+                return _FlakyResponse(
+                    status_code=200,
+                    chunks=chunks,
+                    headers={"content-length": str(len(payload))},
+                )
+            return success_response
+
+    storage = _FakeStorageClient()
+    callback = _RecordingCallback()
+    importer = ReferenceImporter(
+        _make_config(source_url=url),
+        http_client=_RetryingHttp(),
+        storage_client=storage,
+        callback=callback,
+    )
+    importer.run()
+
+    # Two attempts: the first dropped, the second completed.
+    assert len(attempts) == 2
+    # And the dataset ended in 'active' with the full payload uploaded.
+    statuses = [e["status"] for e in callback.events]
+    assert statuses[-1] == "active", statuses
+    blob = storage.blobs["bioaf-references-test"]["annotation/gencode/v45/gencode.v45.gtf.gz"]
+    assert bytes(blob.data) == payload
+
+
+def test_gives_up_after_max_retries_on_persistent_connection_drops(monkeypatch):
+    """If every attempt fails with a transient network error, the importer
+    reports 'failed' and re-raises so the background task in the service
+    layer can clean up. The final error_message should include the last
+    upstream error so the user can see WHY it failed."""
+    import httpcore
+
+    from app.workers.reference_importer import ReferenceImporter
+
+    monkeypatch.setattr("time.sleep", lambda *_: None)
+
+    url = "https://ftp.example.org/data/refs/gencode.v45.gtf.gz"
+
+    class _AlwaysFlaky:
+        attempts = 0
+
+        def stream(self, method, url_arg, *, headers=None, follow_redirects=True):
+            type(self).attempts += 1
+
+            class _R(_FakeResponse):
+                def iter_bytes(self, chunk_size=None):
+                    yield b"x" * 64
+                    raise httpcore.RemoteProtocolError("peer closed connection")
+
+            return _R(status_code=200, chunks=[b""], headers={"content-length": "100"})
+
+    storage = _FakeStorageClient()
+    callback = _RecordingCallback()
+    importer = ReferenceImporter(
+        _make_config(source_url=url),
+        http_client=_AlwaysFlaky(),
+        storage_client=storage,
+        callback=callback,
+    )
+
+    with pytest.raises(Exception):
+        importer.run()
+
+    # Multiple attempts before giving up.
+    assert _AlwaysFlaky.attempts >= 3
+    last = callback.events[-1]
+    assert last["status"] == "failed"
+    assert "peer closed connection" in (last.get("error_message") or "")
 
 
 def test_blob_chunk_size_is_set_so_uploads_stream_in_chunks_not_buffered_in_memory():

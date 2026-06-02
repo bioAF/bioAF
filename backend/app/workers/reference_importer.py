@@ -14,10 +14,65 @@ backend/tests/test_reference_importer_worker.py.
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import IO, Callable, Iterable, Literal, Protocol, cast
 from urllib.parse import urlparse
+
+logger = logging.getLogger("bioaf.reference_importer")
+
+# Retry policy for transient mid-stream network failures (e.g., a public CDN
+# closing the TCP connection during a multi-GB download). We re-issue the
+# whole GET; range-resume is left for a future iteration if bandwidth waste
+# becomes a concern.
+_MAX_ATTEMPTS = 3
+_BACKOFF_BASE_SECONDS = 5.0
+
+
+def _build_transient_network_exceptions() -> tuple[type[BaseException], ...]:
+    """The exception types we treat as 'connection blip, retry the whole GET'.
+
+    httpx wraps httpcore exceptions most of the time but the wrapping is not
+    consistent across all stream-iteration paths, so we catch both
+    libraries' versions plus the OS-level ConnectionError that bubbles up
+    when a peer hangs up before httpx has translated the failure.
+    """
+    excs: list[type[BaseException]] = [ConnectionError, TimeoutError, OSError]
+    try:
+        import httpx
+
+        excs.extend(
+            [
+                httpx.RemoteProtocolError,
+                httpx.ConnectError,
+                httpx.ReadError,
+                httpx.WriteError,
+                httpx.TimeoutException,
+            ]
+        )
+    except ImportError:
+        pass
+    try:
+        import httpcore
+
+        excs.extend(
+            [
+                httpcore.RemoteProtocolError,
+                httpcore.ConnectError,
+                httpcore.ReadError,
+                httpcore.WriteError,
+                httpcore.ConnectTimeout,
+                httpcore.ReadTimeout,
+            ]
+        )
+    except ImportError:
+        pass
+    return tuple(excs)
+
+
+_TRANSIENT_NETWORK_EXCEPTIONS = _build_transient_network_exceptions()
 
 # GCS resumable-upload chunk size. Must be a multiple of 256 KiB. Picked at
 # 8 MiB so a multi-gig download streams through the backend's 512 MB
@@ -171,14 +226,45 @@ class ReferenceImporter:
         self._callback = callback
 
     def run(self) -> ImportResult:
-        try:
-            return self._run_inner()
-        except Md5MismatchError:
-            # Md5MismatchError already emitted a 'failed' callback.
-            raise
-        except Exception as exc:
-            self._callback(status="failed", error_message=str(exc) or exc.__class__.__name__)
-            raise
+        last_exc: Exception | None = None
+        for attempt in range(1, _MAX_ATTEMPTS + 1):
+            try:
+                return self._run_inner()
+            except Md5MismatchError:
+                # Md5MismatchError already emitted a 'failed' callback.
+                raise
+            except _TRANSIENT_NETWORK_EXCEPTIONS as exc:
+                last_exc = exc
+                if attempt < _MAX_ATTEMPTS:
+                    backoff = _BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+                    logger.warning(
+                        "Reference import %d attempt %d/%d failed (%s); retrying in %.0fs",
+                        self._cfg.reference_id,
+                        attempt,
+                        _MAX_ATTEMPTS,
+                        exc,
+                        backoff,
+                    )
+                    # Tell the UI we're restarting so the progress bar
+                    # snaps to 0 and the user understands why.
+                    self._callback(
+                        status="downloading",
+                        progress_pct=0,
+                        bytes_downloaded=0,
+                        error_message=f"Connection dropped (attempt {attempt}/{_MAX_ATTEMPTS}); retrying",
+                    )
+                    time.sleep(backoff)
+                    continue
+                break
+            except Exception as exc:
+                self._callback(status="failed", error_message=str(exc) or exc.__class__.__name__)
+                raise
+
+        # Out of retries on a transient error.
+        assert last_exc is not None
+        msg = f"Source connection dropped after {_MAX_ATTEMPTS} attempts: {last_exc}"
+        self._callback(status="failed", error_message=msg)
+        raise last_exc
 
     def _run_inner(self) -> ImportResult:
         cfg = self._cfg
