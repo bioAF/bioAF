@@ -1058,6 +1058,65 @@ class ReferenceDataService:
         return progress
 
     @staticmethod
+    async def recover_finalize(
+        session: AsyncSession,
+        *,
+        reference_id: int,
+        org_id: int,
+    ) -> ReferenceDataset:
+        """Recover a dataset stuck in 'uploading' whose bytes are already
+        in GCS.
+
+        This is the cleanup path for any case where the URL-import
+        worker finished writing to the references bucket but the
+        backend never reached finalize_import: the pre-fix in-process
+        code path, a backend crash mid-finalize, etc. The recovery
+        lists the blobs that actually exist under the dataset's
+        gcs_prefix, builds an ImportResult from them (using whatever
+        size and md5 metadata GCS surfaces), and runs the regular
+        finalize_import. Bigger uploads use composite-object hashes so
+        md5_hash may be None on the blob; we surface that as-is in
+        md5_manifest_json rather than fabricating a checksum.
+        """
+        dataset = await session.execute(
+            select(ReferenceDataset).where(
+                ReferenceDataset.id == reference_id,
+                ReferenceDataset.organization_id == org_id,
+            )
+        )
+        ds = dataset.scalar_one_or_none()
+        if ds is None:
+            raise ValueError("Reference dataset not found")
+        if ds.status != "uploading":
+            raise ValueError(
+                f"Reference dataset {reference_id} is not in 'uploading' status (currently '{ds.status}'); nothing to recover."
+            )
+
+        bucket_name = await ReferenceDataService._get_references_bucket(session)
+        from app.services.upload_service import UploadService
+        from app.workers.reference_importer import ImportedFile, ImportResult
+
+        credentials = await UploadService._get_gcs_credentials(session)
+        blobs = ReferenceDataService._list_uploaded_blobs(bucket_name, ds.gcs_prefix, credentials=credentials)
+        if not blobs:
+            raise ValueError(
+                f"Reference dataset {reference_id} has no files under gs://{bucket_name}/{ds.gcs_prefix}; cancel and re-import."
+            )
+
+        prefix_len = len(ds.gcs_prefix)
+        files = [
+            ImportedFile(
+                filename=blob.name[prefix_len:] if blob.name.startswith(ds.gcs_prefix) else blob.name,
+                gcs_uri=f"gs://{bucket_name}/{blob.name}",
+                size_bytes=int(blob.size or 0),
+                md5=getattr(blob, "md5_hash", None) or None,
+            )
+            for blob in blobs
+        ]
+        result = ImportResult(files=files)
+        return await ReferenceDataService.finalize_import(session, reference_id=reference_id, result=result)
+
+    @staticmethod
     async def finalize_import(
         session: AsyncSession,
         *,

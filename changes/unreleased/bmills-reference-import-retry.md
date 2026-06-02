@@ -35,3 +35,15 @@
   flips `dataset.status` to `pending_approval` for public datasets or
   `active` for internal (matching the upload-flow rule), and writes an
   `import_completed` audit entry.
+
+- For reference datasets already stuck in `uploading` from before the
+  finalize fix landed (or any future case where the backend crashed
+  between worker completion and the finalize step), the detail page
+  now shows a `Finalize import` button alongside `Cancel import`
+  whenever the worker reports `finalizing` or `active` but the dataset
+  row is still `uploading`. The button POSTs
+  `/api/references/{id}/recover-finalize`, which lists the blobs that
+  exist under the dataset's `gcs_prefix`, builds an `ImportResult`
+  from what's actually there, and runs the standard `finalize_import`
+  -- so a 10 GB stuck row can be recovered without re-downloading
+  anything.

@@ -188,6 +188,38 @@ async def cancel_import(
     return Response(status_code=204)
 
 
+@router.post("/{reference_id}/recover-finalize", response_model=ReferenceDatasetDetailResponse)
+async def recover_finalize(
+    reference_id: int,
+    current_user: dict = require_permission("references", "upload"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Recover a reference dataset stuck in 'uploading' whose bytes are
+    already in GCS. Lists the blobs under the dataset's gcs_prefix,
+    builds an ImportResult from what's actually there, and runs the
+    standard finalize_import. Returns 409 if the dataset is not in
+    'uploading' (recovery is only meaningful for a stuck row); 400 if
+    the prefix is empty (cancel + retry rather than finalize a no-op).
+    """
+    org_id = int(current_user["org_id"])
+    try:
+        await ReferenceDataService.recover_finalize(session, reference_id=reference_id, org_id=org_id)
+        await session.commit()
+    except ValueError as e:
+        await session.rollback()
+        msg = str(e)
+        if "not found" in msg:
+            raise HTTPException(404, msg)
+        if "not in 'uploading'" in msg:
+            raise HTTPException(409, msg)
+        raise HTTPException(400, msg)
+
+    refreshed = await ReferenceDataService.get_reference(session, reference_id, org_id)
+    if refreshed is None:
+        raise HTTPException(404, "Reference dataset not found after finalize")
+    return _detail_response(refreshed)
+
+
 @router.post("/{reference_id}/upload-complete", response_model=ReferenceDatasetDetailResponse)
 async def upload_complete(
     reference_id: int,
