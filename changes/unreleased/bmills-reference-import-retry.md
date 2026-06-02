@@ -36,6 +36,16 @@
   `active` for internal (matching the upload-flow rule), and writes an
   `import_completed` audit entry.
 
+- The Type column on the reference detail page now shows a friendly
+  label for the common bioinformatics formats and STAR genome-index
+  files (`FASTA`, `FASTA index`, `GTF`, `VCF`, `BAM`, `AnnData`, `Loom`,
+  `Matrix Market`, `STAR genome`, `STAR SA index`, etc.) instead of an
+  em-dash. The new `detect_reference_file_type` is applied on write
+  (URL-import finalization persists it) and as a read-side backfill in
+  the detail response, so already-imported datasets light up without a
+  data migration. Unknown extensions still render as `—`; the detector
+  does not invent a category.
+
 - For reference datasets already stuck in `uploading` from before the
   finalize fix landed (or any future case where the backend crashed
   between worker completion and the finalize step), the detail page

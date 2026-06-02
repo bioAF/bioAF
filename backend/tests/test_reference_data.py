@@ -219,6 +219,54 @@ async def test_get_reference_detail(client, comp_bio_token):
 
 
 @pytest.mark.asyncio
+async def test_get_reference_detail_backfills_file_type_from_filename(client, comp_bio_token, session):
+    """Rows imported before the detector covered a given extension (or
+    before the URL-import flow set file_type at all) have file_type=null
+    in the DB. The detail response derives a display label from the
+    filename so the Type column lights up without a data migration. The
+    DB value itself stays null (not persisted on read)."""
+    from sqlalchemy import text as sa_text
+
+    payload = {
+        **REF_DATA,
+        "name": "BackfillCheck",
+        "version": "v1",
+        "files": [
+            {"filename": "genome.fa", "gcs_uri": "gs://b/genome.fa", "size_bytes": 1, "md5_checksum": "a" * 32},
+            {"filename": "star/SAindex", "gcs_uri": "gs://b/star/SAindex", "size_bytes": 1, "md5_checksum": "b" * 32},
+            {"filename": "weird.xyz", "gcs_uri": "gs://b/weird.xyz", "size_bytes": 1, "md5_checksum": "c" * 32},
+        ],
+    }
+    resp = await client.post("/api/references", json=payload, headers={"Authorization": f"Bearer {comp_bio_token}"})
+    ref_id = resp.json()["id"]
+    # Force the DB rows to null file_type so we exercise the backfill path
+    # specifically (the create flow already sets file_type from the
+    # request body when present).
+    await session.execute(
+        sa_text("UPDATE reference_dataset_files SET file_type = NULL WHERE reference_dataset_id = :id"),
+        {"id": ref_id},
+    )
+    await session.commit()
+
+    response = await client.get(f"/api/references/{ref_id}", headers={"Authorization": f"Bearer {comp_bio_token}"})
+    assert response.status_code == 200
+    files_by_name = {f["filename"]: f for f in response.json()["files"]}
+    assert files_by_name["genome.fa"]["file_type"] == "FASTA"
+    assert files_by_name["star/SAindex"]["file_type"] == "STAR SA index"
+    # Unknown extension stays None so the UI renders an em-dash.
+    assert files_by_name["weird.xyz"]["file_type"] is None
+
+    # DB rows were never updated.
+    rows = (
+        await session.execute(
+            sa_text("SELECT file_type FROM reference_dataset_files WHERE reference_dataset_id = :id"),
+            {"id": ref_id},
+        )
+    ).fetchall()
+    assert all(r[0] is None for r in rows)
+
+
+@pytest.mark.asyncio
 async def test_get_reference_404(client, comp_bio_token):
     response = await client.get(
         "/api/references/99999",

@@ -1150,6 +1150,8 @@ class ReferenceDataService:
             )
             return dataset
 
+        from app.services.file_type_utils import detect_reference_file_type
+
         manifest: dict[str, str] = {}
         total_size = 0
         for f in result.files:
@@ -1160,6 +1162,7 @@ class ReferenceDataService:
                     gcs_uri=f.gcs_uri,
                     size_bytes=f.size_bytes,
                     md5_checksum=f.md5,
+                    file_type=detect_reference_file_type(f.filename),
                 )
             )
             if f.md5:

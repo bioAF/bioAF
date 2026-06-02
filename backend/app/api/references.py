@@ -30,8 +30,21 @@ def _response(dataset) -> ReferenceDatasetResponse:
 
 def _detail_response(dataset) -> ReferenceDatasetDetailResponse:
     from app.schemas.reference_dataset import ReferenceDatasetFileResponse, UserSummary
+    from app.services.file_type_utils import detect_reference_file_type
 
-    files = [ReferenceDatasetFileResponse.model_validate(f) for f in (dataset.files or [])]
+    def _to_file(f) -> ReferenceDatasetFileResponse:
+        resp = ReferenceDatasetFileResponse.model_validate(f)
+        # Read-side backfill: rows imported before the URL-import flow set
+        # file_type, or before the detector covered a given extension,
+        # have file_type=None. Derive it from the filename so the Type
+        # column shows a useful label without a data migration. (Not
+        # persisted; the next write to this row picks up whatever the
+        # detector knows then.)
+        if not resp.file_type:
+            resp.file_type = detect_reference_file_type(f.filename)
+        return resp
+
+    files = [_to_file(f) for f in (dataset.files or [])]
     uploaded_by = UserSummary.model_validate(dataset.uploaded_by) if dataset.uploaded_by else None
     approved_by = UserSummary.model_validate(dataset.approved_by) if dataset.approved_by else None
 
