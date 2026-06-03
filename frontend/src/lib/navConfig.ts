@@ -88,7 +88,6 @@ export const navConfig: NavSection[] = [
     icon: "server",
     children: [
       { label: "Components", path: "/infrastructure/components", permission: { resource: "infrastructure", action: "view" } },
-      { label: "Compute", path: "/infrastructure/compute", permission: { resource: "infrastructure", action: "view" } },
       { label: "Cost Center", path: "/infrastructure/cost-center", permission: { resource: "cost_center", action: "view" } },
       { label: "Backup & Recovery", path: "/infrastructure/backup", permission: { resource: "backups", action: "view" } },
     ],

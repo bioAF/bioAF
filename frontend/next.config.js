@@ -18,11 +18,11 @@ const nextConfig = {
       { source: "/compute/pipelines/runs", destination: "/pipelines/runs", permanent: true },
       // Compute notebooks -> Notebooks
       { source: "/compute/notebooks", destination: "/notebooks", permanent: true },
-      // Compute -> Infrastructure compute
-      { source: "/compute", destination: "/infrastructure/compute", permanent: true },
-      { source: "/compute/cluster", destination: "/infrastructure/compute", permanent: true },
-      // Note: /compute/jobs (Job Browser) and /compute/quotas (Quotas) are live
-      // pages reached from the Infrastructure > Compute buttons; do not redirect them.
+      // Old Compute pages were removed; send any stale bookmarks to the dashboard.
+      { source: "/compute", destination: "/dashboard", permanent: true },
+      { source: "/compute/cluster", destination: "/dashboard", permanent: true },
+      { source: "/compute/jobs", destination: "/dashboard", permanent: true },
+      { source: "/compute/quotas", destination: "/dashboard", permanent: true },
       // Environment -> Infrastructure
       { source: "/environment/components", destination: "/infrastructure/components", permanent: true },
       { source: "/components", destination: "/infrastructure/components", permanent: true },
