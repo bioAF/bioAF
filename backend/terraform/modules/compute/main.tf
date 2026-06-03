@@ -35,11 +35,12 @@ resource "google_container_cluster" "bioaf" {
   initial_node_count       = 1
 
   # Minimal default node pool config -- this pool is deleted immediately
-  # after cluster creation. 30GB disk keeps the regional bootstrap
-  # (3 zones x 30GB = 90GB) well within the default 250GB SSD quota.
+  # after cluster creation. pd-standard avoids consuming SSD_TOTAL_GB
+  # during the brief bootstrap window (3 zones x 30GB = 90GB) before
+  # the pool is torn down.
   node_config {
     disk_size_gb = 30
-    disk_type    = "pd-ssd"
+    disk_type    = "pd-standard"
   }
 
   # Workload Identity for pod-level GCP auth
@@ -85,6 +86,8 @@ resource "google_container_node_pool" "pipelines" {
   node_config {
     machine_type = var.k8s_pipeline_machine_type
     spot         = var.k8s_pipeline_use_spot
+    disk_size_gb = 100
+    disk_type    = "pd-standard"
 
     oauth_scopes = [
       "https://www.googleapis.com/auth/cloud-platform"
@@ -132,9 +135,8 @@ resource "google_container_node_pool" "pipelines" {
 # never an architected goal for the cluster's workloads (see commits
 # bde4d604, c399ee21 -- multi-zone was for capacity fallback).
 #
-# Disk: pd-standard, not pd-ssd, so the always-on 30GB does not consume
-# SSD_TOTAL_GB regional quota (already pressured by pipeline pool boot
-# disks). On-demand, not spot -- system addons must not be evicted.
+# Disk: pd-standard, matching the other pools. On-demand, not spot --
+# system addons must not be evicted.
 # No taint: GKE-managed DaemonSets do not reliably tolerate custom
 # taints. Nextflow process pods are kept off this pool naturally by
 # its small size (e2-standard-2 allocatable < typical pipeline requests).
@@ -191,6 +193,8 @@ resource "google_container_node_pool" "interactive" {
   node_config {
     machine_type = var.k8s_interactive_machine_type
     spot         = false # On-demand for notebook sessions
+    disk_size_gb = 100
+    disk_type    = "pd-standard"
 
     oauth_scopes = [
       "https://www.googleapis.com/auth/cloud-platform"
