@@ -1,3 +1,14 @@
+### Infrastructure
+
+- Surface the GCE machine type in the Infrastructure > Components cluster
+  configuration dropdowns and add e2-family options to the Interactive Pool.
+  The pool was previously locked to the n2 family, which has been repeatedly
+  stocking out in us-central1 for 8-vCPU scale-ups. Each option now reads
+  `<machine-type> - <cpu/memory> - <description>`, and the e2 variants are
+  tagged "(high availability)" because the e2 family spills over onto
+  whichever generation of host has room. e2-standard-8 is the new
+  recommended interactive size.
+
 ### Fixes
 
 - Fix notebook launches failing with 401 Unauthorized after a fresh install
