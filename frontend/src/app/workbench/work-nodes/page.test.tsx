@@ -186,3 +186,87 @@ describe("WorkNodesPage launch dialog: 2-step shape", () => {
     expect(screen.getByRole("button", { name: /^Launch Work Node$/i })).toBeInTheDocument();
   });
 });
+
+async function advanceToStep2(user: ReturnType<typeof userEvent.setup>) {
+  setupApiMocks();
+  render(<WorkNodesPage />);
+  await openLaunchDialog(user);
+  await user.click(screen.getByRole("button", { name: /Project Alpha/i }));
+  const envSelect = await screen.findByRole("combobox", { name: "" });
+  await user.selectOptions(envSelect, "1");
+  await waitFor(() =>
+    expect(screen.getByRole("option", { name: /v1\.1 \(ready\)/i })).toBeInTheDocument()
+  );
+  const profileGroup = screen.getByRole("group", { name: /machine profile/i });
+  await user.click(within(profileGroup).getByRole("button", { name: /^Medium\b/i }));
+  await user.click(screen.getByRole("button", { name: /^Next: Review$/i }));
+}
+
+describe("WorkNodesPage launch click feedback", () => {
+  it("closes the dialog immediately when Launch Work Node is clicked, before POST resolves", async () => {
+    const user = userEvent.setup();
+    let resolvePost!: (value: unknown) => void;
+    const postPromise = new Promise((resolve) => {
+      resolvePost = resolve;
+    });
+    mockPost.mockReturnValue(postPromise);
+    await advanceToStep2(user);
+
+    await user.click(screen.getByRole("button", { name: /^Launch Work Node$/i }));
+
+    expect(screen.queryByRole("heading", { name: /^Review$/i })).not.toBeInTheDocument();
+
+    resolvePost({});
+  });
+
+  it("shows a provisioning banner after the dialog closes", async () => {
+    const user = userEvent.setup();
+    let resolvePost!: (value: unknown) => void;
+    const postPromise = new Promise((resolve) => {
+      resolvePost = resolve;
+    });
+    mockPost.mockReturnValue(postPromise);
+    await advanceToStep2(user);
+
+    await user.click(screen.getByRole("button", { name: /^Launch Work Node$/i }));
+    expect(screen.getByText(/provisioning work node/i)).toBeInTheDocument();
+
+    resolvePost({});
+  });
+
+  it("removes the provisioning banner after the POST resolves successfully and reloads the node list", async () => {
+    const user = userEvent.setup();
+    let resolvePost!: (value: unknown) => void;
+    const postPromise = new Promise((resolve) => {
+      resolvePost = resolve;
+    });
+    mockPost.mockReturnValue(postPromise);
+    await advanceToStep2(user);
+
+    mockGet.mockClear();
+    await user.click(screen.getByRole("button", { name: /^Launch Work Node$/i }));
+    expect(screen.getByText(/provisioning work node/i)).toBeInTheDocument();
+
+    resolvePost({});
+    await waitFor(() =>
+      expect(screen.queryByText(/provisioning work node/i)).not.toBeInTheDocument()
+    );
+    expect(
+      mockGet.mock.calls.some((call) => String(call[0]).includes("/api/v1/work-nodes/sessions"))
+    ).toBe(true);
+  });
+
+  it("shows an error banner with the message and a Dismiss button when POST fails", async () => {
+    const user = userEvent.setup();
+    const { ApiError } = jest.requireMock("@/lib/api") as { ApiError: typeof Error };
+    mockPost.mockRejectedValueOnce(new (ApiError as never as new (s: number, m: string) => Error)(400, "Quota exceeded"));
+    await advanceToStep2(user);
+
+    await user.click(screen.getByRole("button", { name: /^Launch Work Node$/i }));
+    await waitFor(() => expect(screen.getByText(/quota exceeded/i)).toBeInTheDocument());
+
+    const dismiss = screen.getByRole("button", { name: /^Dismiss$/i });
+    await user.click(dismiss);
+    expect(screen.queryByText(/quota exceeded/i)).not.toBeInTheDocument();
+  });
+});
