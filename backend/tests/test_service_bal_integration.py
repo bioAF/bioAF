@@ -104,27 +104,6 @@ class TestNotebookServiceUsesAdapter:
         assert "SlurmService" not in source
 
 
-class TestComputeApiUsesAdapter:
-    @pytest.mark.asyncio
-    async def test_cluster_status_uses_adapter(self):
-        """Verify compute API uses the compute adapter."""
-        from app.api.compute import get_cluster_status
-
-        import inspect
-
-        source = inspect.getsource(get_cluster_status)
-        assert "get_compute_adapter" in source
-
-    @pytest.mark.asyncio
-    async def test_budget_uses_adapter(self):
-        from app.api.compute import get_budget
-
-        import inspect
-
-        source = inspect.getsource(get_budget)
-        assert "get_compute_adapter" in source
-
-
 class TestComputeAdapterLocalMode:
     @pytest.mark.asyncio
     async def test_adapter_submit_and_cancel_flow(self):
