@@ -22,6 +22,7 @@ from app.services.event_types import (
     WORK_NODE_HEARTBEAT_TIMEOUT,
 )
 from app.services.machine_types import MACHINE_TYPES, get_machine_type
+from app.services.session_bucket import _bucket_filter
 from app.adapters.registry import get_work_node_adapter
 
 logger = logging.getLogger("bioaf.work_nodes")
@@ -435,10 +436,14 @@ class WorkNodeService:
         org_id: int,
         user_id: int | None = None,
         status: str | None = None,
+        bucket: str | None = None,
     ) -> tuple[list[ComputeSession], int]:
         query = (
             select(ComputeSession)
-            .options(selectinload(ComputeSession.user))
+            .options(
+                selectinload(ComputeSession.user),
+                selectinload(ComputeSession.project),
+            )
             .where(
                 ComputeSession.organization_id == org_id,
                 ComputeSession.session_type == "ssh",
@@ -455,6 +460,11 @@ class WorkNodeService:
         if status:
             query = query.where(ComputeSession.status == status)
             count_query = count_query.where(ComputeSession.status == status)
+
+        bucket_filter = _bucket_filter(ComputeSession, bucket)
+        if bucket_filter is not None:
+            query = query.where(bucket_filter)
+            count_query = count_query.where(bucket_filter)
 
         query = query.order_by(ComputeSession.created_at.desc())
 
@@ -473,7 +483,10 @@ class WorkNodeService:
     ) -> ComputeSession | None:
         result = await session.execute(
             select(ComputeSession)
-            .options(selectinload(ComputeSession.user))
+            .options(
+                selectinload(ComputeSession.user),
+                selectinload(ComputeSession.project),
+            )
             .where(ComputeSession.id == session_id, ComputeSession.session_type == "ssh")
         )
         return result.scalar_one_or_none()

@@ -19,6 +19,7 @@ from app.schemas.notebook_session import (
     SessionListResponse,
     UserSummary,
     ExperimentSummary,
+    ProjectSummary,
 )
 from app.services.notebook_service import NotebookService
 from app.adapters.registry import get_notebook_adapter
@@ -59,16 +60,26 @@ def _experiment_summary(experiment) -> ExperimentSummary | None:
     return ExperimentSummary(id=experiment.id, name=experiment.name)
 
 
+def _project_summary(project) -> ProjectSummary | None:
+    if not project:
+        return None
+    return ProjectSummary(id=project.id, name=project.name)
+
+
 def _session_response(ns) -> SessionResponse:
     return SessionResponse(
         id=ns.id,
         session_type=ns.session_type,
         user=_user_summary(ns.user),
         experiment=_experiment_summary(ns.experiment),
+        project=_project_summary(getattr(ns, "project", None)),
         resource_profile=ns.resource_profile,
         cpu_cores=ns.cpu_cores,
         memory_gb=ns.memory_gb,
+        requested_disk_gb=ns.requested_disk_gb,
         status=ns.status,
+        failure_reason=ns.failure_reason,
+        failure_message=ns.failure_message,
         idle_since=ns.idle_since,
         proxy_url=ns.access_url or ns.proxy_url,
         started_at=ns.started_at,
@@ -212,6 +223,7 @@ async def list_resource_profiles(
 async def list_sessions(
     session_type: str | None = None,
     status: str | None = None,
+    bucket: Literal["active", "recent", "all"] | None = None,
     current_user: dict = require_permission("notebooks", "view"),
     session: AsyncSession = Depends(get_session),
 ):
@@ -226,6 +238,7 @@ async def list_sessions(
         user_id=filter_user_id,
         session_type=session_type,
         status=status,
+        bucket=bucket,
     )
 
     # Sync active sessions that are missing access_url or still starting

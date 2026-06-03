@@ -18,6 +18,7 @@ from app.services.event_bus import event_bus
 from app.services.event_types import SESSION_IDLE
 from app.services.quota_service import QuotaService
 from app.services.machine_types import machine_type_capacity
+from app.services.session_bucket import _bucket_filter
 from app.adapters.registry import get_notebook_adapter
 
 logger = logging.getLogger("bioaf.notebooks")
@@ -363,10 +364,15 @@ class NotebookService:
         user_id: int | None = None,
         session_type: str | None = None,
         status: str | None = None,
+        bucket: str | None = None,
     ) -> tuple[list[NotebookSession], int]:
         query = (
             select(NotebookSession)
-            .options(selectinload(NotebookSession.user), selectinload(NotebookSession.experiment))
+            .options(
+                selectinload(NotebookSession.user),
+                selectinload(NotebookSession.experiment),
+                selectinload(NotebookSession.project),
+            )
             .where(
                 NotebookSession.organization_id == org_id,
                 NotebookSession.session_type != "ssh",
@@ -387,6 +393,11 @@ class NotebookService:
             query = query.where(NotebookSession.status == status)
             count_query = count_query.where(NotebookSession.status == status)
 
+        bucket_filter = _bucket_filter(NotebookSession, bucket)
+        if bucket_filter is not None:
+            query = query.where(bucket_filter)
+            count_query = count_query.where(bucket_filter)
+
         query = query.order_by(NotebookSession.created_at.desc())
 
         result = await session.execute(query)
@@ -401,7 +412,11 @@ class NotebookService:
     async def get_session(session: AsyncSession, session_id: int) -> NotebookSession | None:
         result = await session.execute(
             select(NotebookSession)
-            .options(selectinload(NotebookSession.user), selectinload(NotebookSession.experiment))
+            .options(
+                selectinload(NotebookSession.user),
+                selectinload(NotebookSession.experiment),
+                selectinload(NotebookSession.project),
+            )
             .where(NotebookSession.id == session_id)
         )
         return result.scalar_one_or_none()
