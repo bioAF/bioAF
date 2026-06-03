@@ -989,7 +989,7 @@ BIOAF_STARTUP_EOF
                 --image-family="$IMAGE_FAMILY"
                 --image-project="$IMAGE_PROJECT"
                 --boot-disk-size="$BOOT_DISK_SIZE"
-                --boot-disk-type=pd-ssd
+                --boot-disk-type=pd-standard
                 --tags="$NETWORK_TAG"
                 --scopes=cloud-platform
                 --service-account="${APP_SA_EMAIL}"
