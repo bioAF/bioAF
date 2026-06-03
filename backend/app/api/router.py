@@ -12,9 +12,7 @@ from app.api.sample_batches import router as sample_batches_router
 from app.api.projects import router as projects_router
 from app.api.templates import router as templates_router
 from app.api.audit import router as audit_router
-from app.api.compute import router as compute_router
 from app.api.notebooks import router as notebooks_router
-from app.api.quotas import router as quotas_router
 from app.api.pipelines import router as pipelines_router
 from app.api.pipeline_runs import router as pipeline_runs_router
 from app.api.files import router as files_router
@@ -87,9 +85,7 @@ api_router.include_router(sample_batches_router)
 api_router.include_router(projects_router)
 api_router.include_router(templates_router)
 api_router.include_router(audit_router)
-api_router.include_router(compute_router)
 api_router.include_router(notebooks_router)
-api_router.include_router(quotas_router)
 api_router.include_router(pipelines_router)
 api_router.include_router(pipeline_runs_router)
 api_router.include_router(files_router)

@@ -5,79 +5,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.api.dependencies import require_permission
-from app.adapters.registry import get_compute_adapter, get_storage_adapter
+from app.adapters.registry import get_storage_adapter
 from app.schemas.infrastructure import (
-    InfraComputeStatusResponse,
-    InfraComputeMetricsResponse,
     InfraStorageMetricsResponse,
     ComputeStackResponse,
-    NodePoolStatus,
-    NodePoolMetrics,
     BucketMetrics,
     ComponentDefinitionResponse,
     ComponentsListResponse,
 )
 
 router = APIRouter(prefix="/api/v1/infrastructure", tags=["infrastructure"])
-
-
-@router.get("/compute/status", response_model=InfraComputeStatusResponse)
-async def get_compute_status(
-    current_user: dict = require_permission("infrastructure", "change_status"),
-):
-    """Returns cluster status from the active compute adapter."""
-    compute_adapter = get_compute_adapter()
-    status = await compute_adapter.get_cluster_status()
-
-    node_pools = []
-    for pool in status.get("node_pools", []):
-        node_pools.append(
-            NodePoolStatus(
-                name=pool.get("name", "unknown"),
-                machine_type=pool.get("machine_type", "unknown"),
-                min_nodes=pool.get("min_nodes", 0),
-                max_nodes=pool.get("max_nodes", 0),
-                current_nodes=pool.get("current_nodes", 0),
-                status=pool.get("status", "unknown"),
-                spot=pool.get("spot", False),
-            )
-        )
-
-    return InfraComputeStatusResponse(
-        controller_status=status.get("controller_status", "unknown"),
-        node_pools=node_pools,
-        total_nodes=status.get("total_nodes", 0),
-        active_nodes=status.get("active_nodes", 0),
-        queue_depth=status.get("queue_depth", 0),
-        health=status.get("health", "unknown"),
-    )
-
-
-@router.get("/compute/metrics", response_model=InfraComputeMetricsResponse)
-async def get_compute_metrics(
-    current_user: dict = require_permission("infrastructure", "view"),
-):
-    """Returns cluster metrics from the active compute adapter."""
-    compute_adapter = get_compute_adapter()
-    metrics = await compute_adapter.get_cluster_metrics()
-
-    node_pools = []
-    for pool in metrics.get("node_pools", []):
-        node_pools.append(
-            NodePoolMetrics(
-                name=pool.get("name", "unknown"),
-                cpu_utilization_pct=pool.get("cpu_utilization_pct", 0.0),
-                memory_utilization_pct=pool.get("memory_utilization_pct", 0.0),
-                cost_rate_hourly=pool.get("cost_rate_hourly", 0.0),
-            )
-        )
-
-    return InfraComputeMetricsResponse(
-        cpu_utilization_pct=metrics.get("cpu_utilization_pct", 0.0),
-        memory_utilization_pct=metrics.get("memory_utilization_pct", 0.0),
-        cost_burn_rate_hourly=metrics.get("cost_burn_rate_hourly", 0.0),
-        node_pools=node_pools,
-    )
 
 
 @router.get("/storage/metrics", response_model=InfraStorageMetricsResponse)

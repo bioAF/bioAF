@@ -195,7 +195,6 @@ describe("Sidebar", () => {
     // Expand Infrastructure
     fireEvent.click(screen.getByText("Infrastructure"));
     expect(screen.getByText("Components")).toBeInTheDocument();
-    expect(screen.getByText("Compute")).toBeInTheDocument();
     expect(screen.getByText("Cost Center")).toBeInTheDocument();
     expect(screen.getByText("Backup & Recovery")).toBeInTheDocument();
   });

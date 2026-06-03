@@ -31,7 +31,6 @@ const SECTION_FOR_ENTITY: Record<string, string> = {
   work_node: "/workbench/work-nodes",
   notebook_session: "/notebooks",
   literature_review_run: "/data/literature",
-  user_quota: "/infrastructure/compute",
 };
 
 function asInt(value: unknown): number | null {

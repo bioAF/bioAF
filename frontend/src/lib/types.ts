@@ -497,9 +497,8 @@ export interface TemplateCreateRequest {
   naming_profile_id?: number | null;
 }
 
-// Phase 3 — Compute + Notebooks
+// Notebook sessions
 
-export type SlurmJobStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "timeout";
 export type SessionStatus = "pending" | "starting" | "running" | "idle" | "stopping" | "stopped" | "failed";
 export type SessionType = "jupyter" | "rstudio";
 export type ResourceProfile = "small" | "medium" | "large" | "xlarge" | "2xlarge";
@@ -517,86 +516,6 @@ export const RESOURCE_PROFILES: Record<ResourceProfile, { cpu: number; memory: n
   xlarge: { cpu: 16, memory: 64 },
   "2xlarge": { cpu: 16, memory: 128 },
 };
-
-export interface PartitionStatus {
-  name: string;
-  max_nodes: number;
-  active_nodes: number;
-  idle_nodes: number;
-  queue_depth: number;
-  instance_type: string;
-  use_spot: boolean;
-}
-
-export interface ClusterStatus {
-  controller_status: string;
-  partitions: PartitionStatus[];
-  total_nodes: number;
-  active_nodes: number;
-  queue_depth: number;
-  cost_burn_rate_hourly: number | null;
-}
-
-// BAL normalized compute types (Phase 12)
-
-export interface NodePoolStatus {
-  name: string;
-  machine_type: string;
-  min_nodes: number;
-  max_nodes: number;
-  current_nodes: number;
-  status: string;
-  spot?: boolean;
-}
-
-export interface InfraComputeStatus {
-  controller_status: string;
-  node_pools: NodePoolStatus[];
-  total_nodes: number;
-  active_nodes: number;
-  queue_depth: number;
-  health: string;
-}
-
-export interface NodePoolMetrics {
-  name: string;
-  cpu_utilization_pct: number;
-  memory_utilization_pct: number;
-  cost_rate_hourly: number;
-}
-
-export interface InfraComputeMetrics {
-  cpu_utilization_pct: number;
-  memory_utilization_pct: number;
-  cost_burn_rate_hourly: number;
-  node_pools: NodePoolMetrics[];
-}
-
-export interface SlurmJob {
-  id: number;
-  slurm_job_id: string;
-  job_name: string | null;
-  partition: string;
-  status: SlurmJobStatus;
-  user: UserSummary | null;
-  experiment: ExperimentSummary | null;
-  cpu_requested: number | null;
-  memory_gb_requested: number | null;
-  cpu_used: number | null;
-  memory_gb_used: number | null;
-  exit_code: number | null;
-  cost_estimate: number | null;
-  submitted_at: string;
-  started_at: string | null;
-  completed_at: string | null;
-}
-
-export interface SlurmJobListResponse {
-  jobs: SlurmJob[];
-  total: number;
-  page: number;
-  page_size: number;
-}
 
 export interface NotebookSession {
   id: number;
@@ -666,28 +585,7 @@ export interface SessionProvenance {
   stopped_at: string | null;
 }
 
-export interface UserQuota {
-  user_id: number;
-  user_name: string | null;
-  user_email: string | null;
-  user_role: string | null;
-  cpu_hours_limit: number | null;
-  cpu_hours_used: number;
-  quota_reset_at: string;
-}
-
-export interface QuotaUpdateRequest {
-  cpu_hours_monthly_limit: number | null;
-}
-
-export interface BudgetInfo {
-  monthly_budget: number | null;
-  current_spend: number;
-  projected_spend: number;
-  threshold_alerts: string[];
-}
-
-// Phase 4 — Pipeline Orchestration
+// Pipeline orchestration
 
 export type PipelineRunStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 export type PipelineProcessStatus = "pending" | "running" | "completed" | "failed" | "cached";
