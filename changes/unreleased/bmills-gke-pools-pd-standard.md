@@ -21,11 +21,15 @@
   fits in RAM after warmup, so disk latency only matters for cold
   reads and indexing. Worth revisiting if Meilisearch is ever wired
   into the user-facing search path and a real workload shows up.
-- Existing installs: the GKE node pool changes will trigger a
-  destroy-and-recreate of the pipelines and interactive pools on next
-  `terraform apply` of the compute module. Expect a brief disruption
-  while pods reschedule onto the new pool: active notebook sessions
-  will disconnect and need to be reopened, and in-flight pipeline
-  tasks will rely on Nextflow/Snakemake retry semantics. The app VM
-  change is install-time only; existing app VMs keep their `pd-ssd`
-  boot disk until manually migrated.
+- Existing installs adopt the GKE pool changes by going to
+  Infrastructure > Components and clicking Teardown, then Deploy.
+  Teardown destroys the cluster and its node pools but leaves storage
+  buckets and your data untouched; Deploy rebuilds the cluster with
+  the new pd-standard disks. Total compute unavailability is roughly
+  20-25 minutes; Postgres on the app VM is not touched at all. The
+  in-app "Check for Updates" / "Apply Updates" flow is additive-only
+  by design and will report the node pool replacement as a destructive
+  change without applying it, which is correct: the redeploy path is
+  the right tool for this kind of immutable-field change. The app VM
+  boot disk change is install-time only; existing app VMs keep their
+  `pd-ssd` boot disk until manually migrated.
