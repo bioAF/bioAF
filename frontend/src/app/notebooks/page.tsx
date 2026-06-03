@@ -710,6 +710,7 @@ export default function NotebooksPage() {
                     </div>
                     {scopeType === "experiment" ? (
                       <select
+                        aria-label="Experiment"
                         value={selectedExperiment || ""}
                         onChange={(e) => handleExperimentChange(e.target.value ? Number(e.target.value) : null)}
                         className="border rounded px-3 py-2 text-sm w-full"
@@ -721,6 +722,7 @@ export default function NotebooksPage() {
                       </select>
                     ) : (
                       <select
+                        aria-label="Project"
                         value={selectedProject || ""}
                         onChange={(e) => setSelectedProject(e.target.value ? Number(e.target.value) : null)}
                         className="border rounded px-3 py-2 text-sm w-full"
@@ -733,27 +735,19 @@ export default function NotebooksPage() {
                     )}
                   </div>
 
-                  {/* Input Files (only for experiment scope with files available) */}
-                  {scopeType === "experiment" && selectedExperiment && experimentFiles.length > 0 && (
+                  {scopeType === "experiment" && selectedExperiment && (
                     <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <label className="text-sm text-gray-500">Input Files (optional)</label>
-                        <button
-                          onClick={() => setShowFileSelector(!showFileSelector)}
-                          className="text-xs text-bioaf-600 hover:underline"
-                        >
-                          {showFileSelector ? "Hide" : `Select files (${experimentFiles.length} available)`}
-                        </button>
-                      </div>
-                      {showFileSelector && (
+                      <label className="text-sm text-gray-500 mb-2 block">Input Files</label>
+                      {experimentFiles.length === 0 ? (
+                        <p className="text-xs text-gray-400">
+                          No files found for this experiment.
+                        </p>
+                      ) : (
                         <FileTreeSelector
                           files={experimentFiles}
                           sampleNames={sampleNames}
                           onSelectionChange={setSelectedFileIds}
                         />
-                      )}
-                      {!showFileSelector && selectedFileIds.length > 0 && (
-                        <p className="text-xs text-gray-500">{selectedFileIds.length} file(s) selected</p>
                       )}
                     </div>
                   )}

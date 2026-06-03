@@ -16,6 +16,9 @@ import type {
   WorkNodeLaunchRequest,
   MachineType,
   Project,
+  ProjectListResponse,
+  Experiment,
+  ExperimentListResponse,
   EnvironmentResponse,
   EnvironmentListResponse,
   EnvironmentDetailResponse,
@@ -66,13 +69,13 @@ export default function WorkNodesPage() {
   // Launch form state
   const [launchStep, setLaunchStep] = useState(1);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [experiments, setExperiments] = useState<Experiment[]>([]);
+  const [scopeType, setScopeType] = useState<"experiment" | "project">("experiment");
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
-  const [projectExperiments, setProjectExperiments] = useState<{ id: number; name: string; code: string | null }[]>([]);
   const [selectedExperimentId, setSelectedExperimentId] = useState<number | null>(null);
   const [experimentFiles, setExperimentFiles] = useState<FileResponse[]>([]);
   const [sampleNames, setSampleNames] = useState<Record<number, string>>({});
   const [selectedFileIds, setSelectedFileIds] = useState<number[]>([]);
-  const [showFileSelector, setShowFileSelector] = useState(false);
   const [environments, setEnvironments] = useState<EnvironmentResponse[]>([]);
   const [selectedEnvId, setSelectedEnvId] = useState<number | null>(null);
   const [envDetail, setEnvDetail] = useState<EnvironmentDetailResponse | null>(null);
@@ -154,13 +157,12 @@ export default function WorkNodesPage() {
   async function openLaunchDialog() {
     setShowLaunch(true);
     setLaunchStep(1);
+    setScopeType("experiment");
     setSelectedProjectId(null);
-    setProjectExperiments([]);
     setSelectedExperimentId(null);
     setExperimentFiles([]);
     setSampleNames({});
     setSelectedFileIds([]);
-    setShowFileSelector(false);
     setSelectedEnvId(null);
     setEnvDetail(null);
     setSelectedVersionId(null);
@@ -170,37 +172,37 @@ export default function WorkNodesPage() {
     setLaunchError(null);
 
     try {
-      const [projectData, mtData, envData] = await Promise.all([
-        api.get<{ projects: Project[]; total: number }>("/api/projects?page_size=100"),
+      const [projectData, expData, mtData, envData] = await Promise.all([
+        api.get<ProjectListResponse>("/api/projects?page_size=100"),
+        api.get<ExperimentListResponse>("/api/experiments?page_size=100"),
         api.get<MachineType[]>("/api/v1/work-nodes/machine-types"),
         api.get<EnvironmentListResponse>("/api/v1/environments?type=work_node"),
       ]);
       setProjects(projectData.projects);
+      setExperiments(expData.experiments);
       setMachineTypes(mtData);
       setEnvironments(envData.environments);
     } catch {}
   }
 
-  async function handleProjectSelect(projectId: number) {
-    setSelectedProjectId(projectId);
+  function handleScopeChange(scope: "experiment" | "project") {
+    setScopeType(scope);
+    setSelectedProjectId(null);
     setSelectedExperimentId(null);
     setExperimentFiles([]);
+    setSampleNames({});
     setSelectedFileIds([]);
-    setShowFileSelector(false);
-    try {
-      const data = await api.get<{ experiments: { id: number; name: string; code: string | null }[]; total: number }>(
-        `/api/experiments?project_id=${projectId}&page_size=100`
-      );
-      setProjectExperiments(data.experiments);
-    } catch {
-      setProjectExperiments([]);
-    }
+  }
+
+  function handleProjectSelect(projectId: number) {
+    setSelectedProjectId(projectId);
   }
 
   async function handleExperimentSelect(experimentId: number) {
+    const exp = experiments.find((e) => e.id === experimentId);
     setSelectedExperimentId(experimentId);
+    setSelectedProjectId(exp?.project?.id ?? null);
     setSelectedFileIds([]);
-    setShowFileSelector(false);
     try {
       const data = await api.get<FileListResponse>(
         `/api/experiments/${experimentId}/files?page_size=500`
@@ -701,166 +703,11 @@ export default function WorkNodesPage() {
 
                   {launchStep === 1 && (
                     <>
-                      <section>
-                        <h3 className="text-sm font-medium text-gray-700 mb-2">Select Project</h3>
-                        {projects.length === 0 ? (
-                          <p className="text-sm text-gray-500">No projects found</p>
-                        ) : (
-                          <div className="space-y-2 max-h-48 overflow-y-auto">
-                            {projects.map((p) => (
-                              <button
-                                key={p.id}
-                                type="button"
-                                onClick={() => handleProjectSelect(p.id)}
-                                className={`w-full text-left p-3 border rounded-lg transition-colors ${
-                                  selectedProjectId === p.id
-                                    ? "border-indigo-500 bg-indigo-50"
-                                    : "border-gray-200 hover:border-gray-300"
-                                }`}
-                              >
-                                <div className="font-medium text-sm">{p.name}</div>
-                                {p.description && (
-                                  <div className="text-xs text-gray-500 mt-0.5">{p.description}</div>
-                                )}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </section>
-
-                      {selectedProjectId && (
-                        <section>
-                          <h3 className="text-sm font-medium text-gray-700 mb-2">Input Files (optional)</h3>
-                          {projectExperiments.length === 0 ? (
-                            <p className="text-xs text-gray-400">No experiments in this project.</p>
-                          ) : (
-                            <>
-                              <select
-                                className="w-full border rounded px-3 py-2 text-sm mb-2"
-                                value={selectedExperimentId || ""}
-                                onChange={(e) => {
-                                  const val = e.target.value ? Number(e.target.value) : null;
-                                  if (val) handleExperimentSelect(val);
-                                }}
-                              >
-                                <option value="">Select an experiment to browse files...</option>
-                                {projectExperiments.map((exp) => (
-                                  <option key={exp.id} value={exp.id}>
-                                    {exp.name}
-                                    {exp.code ? ` (${exp.code})` : ""}
-                                  </option>
-                                ))}
-                              </select>
-                              {selectedExperimentId &&
-                                experimentFiles.length === 0 && (
-                                  <p className="text-xs text-gray-400">No files found for this experiment.</p>
-                                )}
-                              {selectedExperimentId && experimentFiles.length > 0 && (
-                                <FileTreeSelector
-                                  files={experimentFiles}
-                                  sampleNames={sampleNames}
-                                  onSelectionChange={setSelectedFileIds}
-                                />
-                              )}
-                            </>
-                          )}
-                        </section>
-                      )}
-
-                      <section>
-                        <h3 className="text-sm font-medium text-gray-700 mb-2">Select Environment</h3>
-                        {environments.length === 0 ? (
-                          <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm text-yellow-700">
-                            No work node environments found. Create one from the{" "}
-                            <a href="/environments" className="underline font-medium">
-                              Environments
-                            </a>{" "}
-                            page with type &quot;Work Node&quot;.
-                          </div>
-                        ) : (
-                          <div className="flex gap-3">
-                            <select
-                              value={selectedEnvId || ""}
-                              onChange={(e) =>
-                                e.target.value ? handleEnvSelect(Number(e.target.value)) : null
-                              }
-                              className="border rounded px-3 py-2 text-sm flex-1"
-                            >
-                              <option value="">Select environment</option>
-                              {environments.map((env) => (
-                                <option key={env.id} value={env.id}>
-                                  {env.name}
-                                  {env.latest_version
-                                    ? ` (v${env.latest_version.version_number} - ${env.latest_version.status})`
-                                    : " (no versions)"}
-                                </option>
-                              ))}
-                            </select>
-                            {envDetail &&
-                              envDetail.versions.filter(
-                                (v) => v.status === "ready" && v.image_uri
-                              ).length > 0 && (
-                                <select
-                                  value={selectedVersionId || ""}
-                                  onChange={(e) =>
-                                    setSelectedVersionId(
-                                      e.target.value ? Number(e.target.value) : null
-                                    )
-                                  }
-                                  className="border rounded px-3 py-2 text-sm flex-1"
-                                >
-                                  {envDetail.versions
-                                    .filter((v) => v.status === "ready" && v.image_uri)
-                                    .map((v) => (
-                                      <option key={v.id} value={v.id}>
-                                        v{v.version_number}.{v.build_number} (ready)
-                                      </option>
-                                    ))}
-                                </select>
-                              )}
-                          </div>
-                        )}
-                      </section>
-
-                      <section>
-                        <h3 className="text-sm font-medium text-gray-700 mb-2">
-                          Select GitHub Repos (optional)
+                      <section aria-labelledby="wn-machine-profile-heading">
+                        <h3 id="wn-machine-profile-heading" className="text-sm font-medium text-gray-700 mb-2">
+                          Machine Profile
                         </h3>
-                        <p className="text-xs text-gray-500 mb-2">
-                          Cloned into ~/repos/ when the node boots.
-                        </p>
-                        {repos.length === 0 ? (
-                          <p className="text-xs text-gray-400">
-                            No repos configured. Add one from the GitHub Repos section below.
-                          </p>
-                        ) : (
-                          <div className="space-y-1">
-                            {repos.map((repo) => (
-                              <label
-                                key={repo.id}
-                                className="flex items-start gap-3 p-2 border rounded-lg hover:bg-gray-50 cursor-pointer"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={selectedRepoIds.includes(repo.id)}
-                                  onChange={() => toggleRepo(repo.id)}
-                                  className="mt-0.5"
-                                />
-                                <div>
-                                  <div className="text-sm font-medium">{repo.display_name}</div>
-                                  <div className="text-xs text-gray-400 font-mono mt-0.5">
-                                    {repo.git_ssh_url}
-                                  </div>
-                                </div>
-                              </label>
-                            ))}
-                          </div>
-                        )}
-                      </section>
-
-                      <section role="group" aria-label="Machine Profile">
-                        <h3 className="text-sm font-medium text-gray-700 mb-2">Machine Profile</h3>
-                        <div className="space-y-2">
+                        <div role="group" aria-label="Machine Profile" className="space-y-2">
                           {workNodeProfiles.map((profile) => {
                             const available = profile.machineType !== null;
                             const selected =
@@ -963,6 +810,179 @@ export default function WorkNodesPage() {
                             </div>
                           )}
                         </div>
+                      </section>
+
+                      <section>
+                        <h3 className="text-sm font-medium text-gray-700 mb-2">Select Environment</h3>
+                        {environments.length === 0 ? (
+                          <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm text-yellow-700">
+                            No work node environments found. Create one from the{" "}
+                            <a href="/environments" className="underline font-medium">
+                              Environments
+                            </a>{" "}
+                            page with type &quot;Work Node&quot;.
+                          </div>
+                        ) : (
+                          <div className="flex gap-3">
+                            <select
+                              aria-label="Environment"
+                              value={selectedEnvId || ""}
+                              onChange={(e) =>
+                                e.target.value ? handleEnvSelect(Number(e.target.value)) : null
+                              }
+                              className="border rounded px-3 py-2 text-sm flex-1"
+                            >
+                              <option value="">Select environment</option>
+                              {environments.map((env) => (
+                                <option key={env.id} value={env.id}>
+                                  {env.name}
+                                  {env.latest_version
+                                    ? ` (v${env.latest_version.version_number} - ${env.latest_version.status})`
+                                    : " (no versions)"}
+                                </option>
+                              ))}
+                            </select>
+                            {envDetail &&
+                              envDetail.versions.filter(
+                                (v) => v.status === "ready" && v.image_uri
+                              ).length > 0 && (
+                                <select
+                                  aria-label="Version"
+                                  value={selectedVersionId || ""}
+                                  onChange={(e) =>
+                                    setSelectedVersionId(
+                                      e.target.value ? Number(e.target.value) : null
+                                    )
+                                  }
+                                  className="border rounded px-3 py-2 text-sm flex-1"
+                                >
+                                  {envDetail.versions
+                                    .filter((v) => v.status === "ready" && v.image_uri)
+                                    .map((v) => (
+                                      <option key={v.id} value={v.id}>
+                                        v{v.version_number}.{v.build_number} (ready)
+                                      </option>
+                                    ))}
+                                </select>
+                              )}
+                          </div>
+                        )}
+                      </section>
+
+                      <section role="group" aria-label="Link to">
+                        <h3 className="text-sm font-medium text-gray-700 mb-2">Link to</h3>
+                        <div className="flex gap-2 mb-2">
+                          <button
+                            type="button"
+                            onClick={() => handleScopeChange("experiment")}
+                            aria-pressed={scopeType === "experiment"}
+                            className={`px-3 py-1.5 text-sm rounded ${
+                              scopeType === "experiment"
+                                ? "bg-bioaf-100 text-bioaf-700 font-medium"
+                                : "text-gray-500 hover:bg-gray-100"
+                            }`}
+                          >
+                            Experiment
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleScopeChange("project")}
+                            aria-pressed={scopeType === "project"}
+                            className={`px-3 py-1.5 text-sm rounded ${
+                              scopeType === "project"
+                                ? "bg-bioaf-100 text-bioaf-700 font-medium"
+                                : "text-gray-500 hover:bg-gray-100"
+                            }`}
+                          >
+                            Project
+                          </button>
+                        </div>
+                        {scopeType === "experiment" ? (
+                          <select
+                            value={selectedExperimentId || ""}
+                            onChange={(e) =>
+                              e.target.value ? handleExperimentSelect(Number(e.target.value)) : null
+                            }
+                            className="border rounded px-3 py-2 text-sm w-full"
+                          >
+                            <option value="">No experiment</option>
+                            {experiments.map((exp) => (
+                              <option key={exp.id} value={exp.id}>
+                                {exp.name}
+                                {exp.code ? ` (${exp.code})` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <select
+                            value={selectedProjectId || ""}
+                            onChange={(e) =>
+                              e.target.value ? handleProjectSelect(Number(e.target.value)) : null
+                            }
+                            className="border rounded px-3 py-2 text-sm w-full"
+                          >
+                            <option value="">No project</option>
+                            {projects.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name}
+                                {p.code ? ` (${p.code})` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </section>
+
+                      {scopeType === "experiment" && selectedExperimentId && (
+                        <section>
+                          <h3 className="text-sm font-medium text-gray-700 mb-2">Input Files</h3>
+                          {experimentFiles.length === 0 ? (
+                            <p className="text-xs text-gray-400">
+                              No files found for this experiment.
+                            </p>
+                          ) : (
+                            <FileTreeSelector
+                              files={experimentFiles}
+                              sampleNames={sampleNames}
+                              onSelectionChange={setSelectedFileIds}
+                            />
+                          )}
+                        </section>
+                      )}
+
+                      <section>
+                        <h3 className="text-sm font-medium text-gray-700 mb-2">
+                          GitHub Repos (optional)
+                        </h3>
+                        <p className="text-xs text-gray-500 mb-2">
+                          Cloned into ~/repos/ when the node boots.
+                        </p>
+                        {repos.length === 0 ? (
+                          <p className="text-xs text-gray-400">
+                            No repos configured. Add one from the GitHub Repos section below.
+                          </p>
+                        ) : (
+                          <div className="space-y-1">
+                            {repos.map((repo) => (
+                              <label
+                                key={repo.id}
+                                className="flex items-start gap-3 p-2 border rounded-lg hover:bg-gray-50 cursor-pointer"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedRepoIds.includes(repo.id)}
+                                  onChange={() => toggleRepo(repo.id)}
+                                  className="mt-0.5"
+                                />
+                                <div>
+                                  <div className="text-sm font-medium">{repo.display_name}</div>
+                                  <div className="text-xs text-gray-400 font-mono mt-0.5">
+                                    {repo.git_ssh_url}
+                                  </div>
+                                </div>
+                              </label>
+                            ))}
+                          </div>
+                        )}
                       </section>
                     </>
                   )}
