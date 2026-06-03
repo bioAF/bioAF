@@ -27,7 +27,7 @@ logger = logging.getLogger("bioaf.notebooks")
 # (POST /api/v1/infrastructure/cluster/config), NOT the vestigial
 # k8s_interactive_pool component config field. Default matches the tfvar default.
 INTERACTIVE_POOL_MACHINE_TYPE_KEY = "k8s_interactive_machine_type"
-DEFAULT_INTERACTIVE_POOL_MACHINE_TYPE = "n2-standard-4"
+DEFAULT_INTERACTIVE_POOL_MACHINE_TYPE = "e2-standard-8"
 
 # (cpu_cores, memory_gb) per profile. Memory-weighted toward the high end
 # because single-cell work (Seurat/scanpy objects, multi-sample integration)

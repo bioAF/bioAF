@@ -8,6 +8,13 @@
   tagged "(high availability)" because the e2 family spills over onto
   whichever generation of host has room. e2-standard-8 is the new
   recommended interactive size.
+- Default the interactive node pool's machine type to e2-standard-8 (was
+  n2-standard-4). e2-standard-8 has the same shape as n2-standard-8 (8 vCPU
+  / 32 GB) but is allocated against any compatible host generation, so it
+  almost never stocks out. The larger shape also unlocks Medium notebooks
+  on a fresh install without operator intervention. Migration 093 updates
+  the platform_config row only when it still holds the prior default;
+  operators who already picked a different machine type keep their choice.
 
 ### Fixes
 
