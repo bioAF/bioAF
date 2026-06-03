@@ -120,6 +120,11 @@ class NotebookService:
             resource_profile=resource_profile,
             cpu_cores=cpu_cores,
             memory_gb=memory_gb,
+            # Notebook pods land on the bioaf-interactive GKE node pool, whose
+            # boot disk defaults to 100 GB (see backend/terraform/modules/compute).
+            # Surfaced in the detail modal so the user sees the available
+            # workspace size without leaving the page.
+            requested_disk_gb=100,
             status="pending",
             started_at=datetime.now(timezone.utc),
         )
@@ -235,11 +240,21 @@ class NotebookService:
                         )
                     )
 
-        except ValueError:
+        except ValueError as e:
+            from app.adapters.failure_classification import classify_gce_vm_failure
+
             notebook_session.status = "failed"
+            reason, message = classify_gce_vm_failure(str(e))
+            notebook_session.failure_reason = reason
+            notebook_session.failure_message = message
             raise
         except Exception as e:
+            from app.adapters.failure_classification import classify_gce_vm_failure
+
             notebook_session.status = "failed"
+            reason, message = classify_gce_vm_failure(str(e))
+            notebook_session.failure_reason = reason
+            notebook_session.failure_message = message
             logger.error("Failed to launch notebook session %d: %s", notebook_session.id, e)
             if "not found or not accessible" in str(e):
                 raise

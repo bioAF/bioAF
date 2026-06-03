@@ -234,6 +234,7 @@ class WorkNodeService:
                 )
             except ValueError:
                 vm_spec["boot_disk_gb"] = DEFAULT_BOOT_DISK_GB
+            compute_session.requested_disk_gb = vm_spec["boot_disk_gb"]
 
             disk_type = (config_map.get("work_node_boot_disk_type") or "").strip()
             vm_spec["boot_disk_type"] = disk_type if disk_type and disk_type != "null" else DEFAULT_BOOT_DISK_TYPE
@@ -271,7 +272,12 @@ class WorkNodeService:
             if result_url:
                 compute_session.access_url = result_url
         except Exception as e:
+            from app.adapters.failure_classification import classify_gce_vm_failure
+
             compute_session.status = "failed"
+            reason, message = classify_gce_vm_failure(str(e))
+            compute_session.failure_reason = reason
+            compute_session.failure_message = message
             logger.error("Failed to launch work node %d: %s", compute_session.id, e)
 
         await session.flush()

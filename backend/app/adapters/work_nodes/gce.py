@@ -476,6 +476,7 @@ class GCEWorkNodeProvider(WorkNodeProvider):
             instances_client = compute_v1.InstancesClient(credentials=credentials)
 
             external_ip = None
+            last_terminal_status = None
             for _ in range(60):  # up to 5 minutes
                 try:
                     instance = instances_client.get(project=project, zone=zone, instance=instance_name)
@@ -490,8 +491,15 @@ class GCEWorkNodeProvider(WorkNodeProvider):
                         if external_ip:
                             break
                     elif instance.status in ("TERMINATED", "STOPPED", "SUSPENDED"):
+                        last_terminal_status = instance.status
                         logger.error("VM %s entered %s status", instance_name, instance.status)
-                        await self._update_session_in_db(session_id, status="failed", access_url=None)
+                        reason, message = self._classify_vm_failure_from_operations(
+                            instances_client, project, zone, instance_name, last_terminal_status
+                        )
+                        await self._update_session_in_db(
+                            session_id, status="failed", access_url=None,
+                            failure_reason=reason, failure_message=message,
+                        )
                         return
                 except Exception:
                     pass
@@ -499,7 +507,13 @@ class GCEWorkNodeProvider(WorkNodeProvider):
 
             if not external_ip:
                 logger.error("VM %s not running with external IP after 5 min", instance_name)
-                await self._update_session_in_db(session_id, status="failed", access_url=None)
+                reason, message = self._classify_vm_failure_from_operations(
+                    instances_client, project, zone, instance_name, last_terminal_status
+                )
+                await self._update_session_in_db(
+                    session_id, status="failed", access_url=None,
+                    failure_reason=reason, failure_message=message,
+                )
                 return
 
             user_prefix = f"{ssh_username}@" if ssh_username else ""
@@ -507,12 +521,61 @@ class GCEWorkNodeProvider(WorkNodeProvider):
             logger.info("VM %s ready at %s", instance_name, external_ip)
             await self._update_session_in_db(session_id, status="running", access_url=access_url)
 
-        except Exception:
-            logger.exception("Background poll failed for VM session %s", session_id)
-            await self._update_session_in_db(session_id, status="failed", access_url=None)
+        except Exception as e:
+            from app.adapters.failure_classification import FAILURE_REASON_UNKNOWN
 
-    async def _update_session_in_db(self, session_id: int, status: str, access_url: str | None) -> None:
-        """Update a work node session's status and access_url in the DB."""
+            logger.exception("Background poll failed for VM session %s", session_id)
+            await self._update_session_in_db(
+                session_id, status="failed", access_url=None,
+                failure_reason=FAILURE_REASON_UNKNOWN,
+                failure_message=f"Background poll raised: {e}",
+            )
+
+    def _classify_vm_failure_from_operations(
+        self,
+        instances_client,
+        project: str,
+        zone: str,
+        instance_name: str,
+        last_terminal_status: str | None,
+    ) -> tuple[str, str]:
+        """Query recent zonal operations on `instance_name` and run the latest
+        error string through the classifier. Returns (failure_reason,
+        failure_message) even when the operations API call fails."""
+        from app.adapters.failure_classification import classify_gce_vm_failure, FAILURE_REASON_UNKNOWN
+        try:
+            from google.cloud import compute_v1
+
+            ops_client = compute_v1.ZoneOperationsClient(credentials=self._get_gcp_credentials())
+            filter_expr = f'targetLink eq ".*/instances/{instance_name}"'
+            ops = list(ops_client.list(project=project, zone=zone, filter=filter_expr, max_results=20))
+            for op in ops:
+                if op.error and op.error.errors:
+                    err = op.error.errors[0]
+                    code = getattr(err, "code", "") or ""
+                    message = getattr(err, "message", "") or ""
+                    combined = f"{code}: {message}" if code else message
+                    return classify_gce_vm_failure(combined)
+        except Exception:
+            logger.exception("Failed to inspect zonal operations for %s/%s/%s", project, zone, instance_name)
+        # No operation error found (or API unavailable). If we did see the VM
+        # enter a terminal status, surface that; otherwise fall through.
+        if last_terminal_status:
+            return classify_gce_vm_failure(f"VM entered {last_terminal_status} status")
+        return (FAILURE_REASON_UNKNOWN, "VM did not start within 5 minutes.")
+
+    async def _update_session_in_db(
+        self,
+        session_id: int,
+        status: str,
+        access_url: str | None,
+        failure_reason: str | None = None,
+        failure_message: str | None = None,
+    ) -> None:
+        """Update a work node session's status, access_url, and (on failure)
+        the failure_reason / failure_message taxonomy. Only writes the
+        failure fields when they are set so we don't clobber a row that was
+        already explained by the service layer."""
         if not self._session_factory:
             logger.warning("No session_factory, cannot update session %s", session_id)
             return
@@ -521,12 +584,35 @@ class GCEWorkNodeProvider(WorkNodeProvider):
             async with self._session_factory() as db:
                 from sqlalchemy import text
 
-                await db.execute(
-                    text("UPDATE compute_sessions SET status = :status, access_url = :url WHERE id = :id"),
-                    {"status": status, "url": access_url, "id": session_id},
-                )
+                if failure_reason is not None or failure_message is not None:
+                    await db.execute(
+                        text(
+                            "UPDATE compute_sessions "
+                            "SET status = :status, access_url = :url, "
+                            "    failure_reason = :reason, failure_message = :msg "
+                            "WHERE id = :id"
+                        ),
+                        {
+                            "status": status,
+                            "url": access_url,
+                            "reason": failure_reason,
+                            "msg": failure_message,
+                            "id": session_id,
+                        },
+                    )
+                else:
+                    await db.execute(
+                        text("UPDATE compute_sessions SET status = :status, access_url = :url WHERE id = :id"),
+                        {"status": status, "url": access_url, "id": session_id},
+                    )
                 await db.commit()
-                logger.info("Updated session %s: status=%s access_url=%s", session_id, status, access_url)
+                logger.info(
+                    "Updated session %s: status=%s access_url=%s failure_reason=%s",
+                    session_id,
+                    status,
+                    access_url,
+                    failure_reason,
+                )
         except Exception:
             logger.exception("Failed to update session %s in DB", session_id)
 

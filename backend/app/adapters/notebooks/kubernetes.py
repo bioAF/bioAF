@@ -873,7 +873,16 @@ class KubernetesNotebookProvider(NotebookProvider):
                             break
                     if pod.status.phase in ("Failed", "Unknown"):
                         logger.error("Pod %s entered %s phase", pod_name, pod.status.phase)
-                        await self._update_session_in_db(session_id, status="failed", access_url=None)
+                        reason, message = await self._classify_pod_failure_from_api(
+                            core_client, pod_name, namespace
+                        )
+                        await self._update_session_in_db(
+                            session_id,
+                            status="failed",
+                            access_url=None,
+                            failure_reason=reason,
+                            failure_message=message,
+                        )
                         return
                 except Exception:
                     pass
@@ -881,7 +890,16 @@ class KubernetesNotebookProvider(NotebookProvider):
 
             if not pod_ready:
                 logger.error("Pod %s not ready after 5 min", pod_name)
-                await self._update_session_in_db(session_id, status="failed", access_url=None)
+                reason, message = await self._classify_pod_failure_from_api(
+                    core_client, pod_name, namespace
+                )
+                await self._update_session_in_db(
+                    session_id,
+                    status="failed",
+                    access_url=None,
+                    failure_reason=reason,
+                    failure_message=message,
+                )
                 return
 
             # Wait for LoadBalancer external IP (up to 3 minutes)
@@ -931,17 +949,52 @@ class KubernetesNotebookProvider(NotebookProvider):
 
             await self._update_session_in_db(session_id, status="running", access_url=access_url)
 
-        except Exception:
+        except Exception as e:
+            from app.adapters.failure_classification import FAILURE_REASON_UNKNOWN
+
             logger.exception("Background poll failed for session %s", session_id)
-            await self._update_session_in_db(session_id, status="failed", access_url=None)
+            await self._update_session_in_db(
+                session_id,
+                status="failed",
+                access_url=None,
+                failure_reason=FAILURE_REASON_UNKNOWN,
+                failure_message=f"Background poll raised: {e}",
+            )
+
+    async def _classify_pod_failure_from_api(
+        self,
+        core_client,
+        pod_name: str,
+        namespace: str,
+    ) -> tuple[str, str]:
+        """Query the K8s API for events on `pod_name` and run them through the
+        shared classifier. Returns (failure_reason, failure_message) even if
+        the API call fails (falls back to "unknown")."""
+        from app.adapters.failure_classification import classify_pod_failure, FAILURE_REASON_UNKNOWN
+
+        events: list[dict] = []
+        try:
+            field_selector = f"involvedObject.name={pod_name}"
+            evt_list = core_client.list_namespaced_event(namespace=namespace, field_selector=field_selector)
+            for evt in evt_list.items or []:
+                events.append({"reason": getattr(evt, "reason", "") or "", "message": getattr(evt, "message", "") or ""})
+        except Exception:
+            logger.exception("Failed to fetch pod events for %s/%s", namespace, pod_name)
+            return (FAILURE_REASON_UNKNOWN, "Pod did not become ready and pod events were unavailable.")
+        return classify_pod_failure(events)
 
     async def _update_session_in_db(
         self,
         session_id: int,
         status: str,
         access_url: str | None,
+        failure_reason: str | None = None,
+        failure_message: str | None = None,
     ) -> None:
-        """Update a notebook session's status and access_url in the DB."""
+        """Update a notebook session's status, access_url, and (on failure)
+        the failure_reason / failure_message taxonomy. Only writes the
+        failure fields when they are set so we don't clobber a row that was
+        already explained by the service layer."""
         if not self._session_factory:
             logger.warning("No session_factory, cannot update session %s in DB", session_id)
             return
@@ -950,16 +1003,34 @@ class KubernetesNotebookProvider(NotebookProvider):
             async with self._session_factory() as db:
                 from sqlalchemy import text
 
-                await db.execute(
-                    text("UPDATE compute_sessions SET status = :status, access_url = :url WHERE id = :id"),
-                    {"status": status, "url": access_url, "id": session_id},
-                )
+                if failure_reason is not None or failure_message is not None:
+                    await db.execute(
+                        text(
+                            "UPDATE compute_sessions "
+                            "SET status = :status, access_url = :url, "
+                            "    failure_reason = :reason, failure_message = :msg "
+                            "WHERE id = :id"
+                        ),
+                        {
+                            "status": status,
+                            "url": access_url,
+                            "reason": failure_reason,
+                            "msg": failure_message,
+                            "id": session_id,
+                        },
+                    )
+                else:
+                    await db.execute(
+                        text("UPDATE compute_sessions SET status = :status, access_url = :url WHERE id = :id"),
+                        {"status": status, "url": access_url, "id": session_id},
+                    )
                 await db.commit()
                 logger.info(
-                    "Updated session %s: status=%s access_url=%s",
+                    "Updated session %s: status=%s access_url=%s failure_reason=%s",
                     session_id,
                     status,
                     access_url,
+                    failure_reason,
                 )
         except Exception:
             logger.exception("Failed to update session %s in DB", session_id)
