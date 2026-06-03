@@ -91,6 +91,7 @@ export default function NotebooksPage() {
   const [selectedFileIds, setSelectedFileIds] = useState<number[]>([]);
   const [activeBranchCount, setActiveBranchCount] = useState(0);
   const [showGuide, setShowGuide] = useState(false);
+  const [pendingLaunch, setPendingLaunch] = useState<SessionType | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -259,7 +260,16 @@ export default function NotebooksPage() {
     }
   }
 
-  async function handleLaunch(sessionType: SessionType) {
+  function handleLaunch(sessionType: SessionType) {
+    if (selectedFileIds.length === 0) {
+      setPendingLaunch(sessionType);
+      return;
+    }
+    void performLaunch(sessionType);
+  }
+
+  async function performLaunch(sessionType: SessionType) {
+    setPendingLaunch(null);
     setLaunching(true);
     setLaunchError(null);
     try {
@@ -710,6 +720,7 @@ export default function NotebooksPage() {
                     </div>
                     {scopeType === "experiment" ? (
                       <select
+                        aria-label="Experiment"
                         value={selectedExperiment || ""}
                         onChange={(e) => handleExperimentChange(e.target.value ? Number(e.target.value) : null)}
                         className="border rounded px-3 py-2 text-sm w-full"
@@ -721,6 +732,7 @@ export default function NotebooksPage() {
                       </select>
                     ) : (
                       <select
+                        aria-label="Project"
                         value={selectedProject || ""}
                         onChange={(e) => setSelectedProject(e.target.value ? Number(e.target.value) : null)}
                         className="border rounded px-3 py-2 text-sm w-full"
@@ -733,27 +745,19 @@ export default function NotebooksPage() {
                     )}
                   </div>
 
-                  {/* Input Files (only for experiment scope with files available) */}
-                  {scopeType === "experiment" && selectedExperiment && experimentFiles.length > 0 && (
+                  {scopeType === "experiment" && selectedExperiment && (
                     <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <label className="text-sm text-gray-500">Input Files (optional)</label>
-                        <button
-                          onClick={() => setShowFileSelector(!showFileSelector)}
-                          className="text-xs text-bioaf-600 hover:underline"
-                        >
-                          {showFileSelector ? "Hide" : `Select files (${experimentFiles.length} available)`}
-                        </button>
-                      </div>
-                      {showFileSelector && (
+                      <label className="text-sm text-gray-500 mb-2 block">Input Files</label>
+                      {experimentFiles.length === 0 ? (
+                        <p className="text-xs text-gray-400">
+                          No files found for this experiment.
+                        </p>
+                      ) : (
                         <FileTreeSelector
                           files={experimentFiles}
                           sampleNames={sampleNames}
                           onSelectionChange={setSelectedFileIds}
                         />
-                      )}
-                      {!showFileSelector && selectedFileIds.length > 0 && (
-                        <p className="text-xs text-gray-500">{selectedFileIds.length} file(s) selected</p>
                       )}
                     </div>
                   )}
@@ -810,6 +814,44 @@ export default function NotebooksPage() {
                     className="px-4 py-2.5 border rounded-md text-sm text-gray-600 hover:bg-gray-100"
                   >
                     Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {pendingLaunch && (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Launch without inputs"
+              className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center"
+            >
+              <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+                <h3 className="text-lg font-semibold mb-2">Launch without inputs?</h3>
+                <p className="text-sm text-gray-600 mb-3">
+                  You haven&apos;t added the following to this session:
+                </p>
+                <ul className="text-sm text-gray-700 list-disc list-inside mb-4">
+                  <li>No input files attached to /data/</li>
+                </ul>
+                <p className="text-sm text-gray-600 mb-4">
+                  You can launch without them, or go back and add them now.
+                </p>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPendingLaunch(null)}
+                    className="px-4 py-2 border rounded-md text-sm text-gray-700 hover:bg-gray-100"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => performLaunch(pendingLaunch)}
+                    className="px-4 py-2 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700"
+                  >
+                    Launch anyway
                   </button>
                 </div>
               </div>
