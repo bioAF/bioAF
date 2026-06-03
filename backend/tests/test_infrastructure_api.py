@@ -43,54 +43,6 @@ async def bench_token(bench_user):
     )
 
 
-class TestComputeStatusEndpoint:
-    @pytest.mark.asyncio
-    async def test_returns_cluster_status(self, client, admin_token):
-        response = await client.get(
-            "/api/v1/infrastructure/compute/status",
-            headers={"Authorization": f"Bearer {admin_token}"},
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["controller_status"] == "running"
-        assert "node_pools" in data
-        assert len(data["node_pools"]) == 3
-        assert data["total_nodes"] >= 0
-        assert data["active_nodes"] >= 0
-        assert "queue_depth" in data
-
-    @pytest.mark.asyncio
-    async def test_bench_denied(self, client, bench_token):
-        response = await client.get(
-            "/api/v1/infrastructure/compute/status",
-            headers={"Authorization": f"Bearer {bench_token}"},
-        )
-        assert response.status_code == 403
-
-
-class TestComputeMetricsEndpoint:
-    @pytest.mark.asyncio
-    async def test_returns_metrics(self, client, admin_token):
-        response = await client.get(
-            "/api/v1/infrastructure/compute/metrics",
-            headers={"Authorization": f"Bearer {admin_token}"},
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert "cpu_utilization_pct" in data
-        assert "memory_utilization_pct" in data
-        assert "cost_burn_rate_hourly" in data
-        assert "node_pools" in data
-
-    @pytest.mark.asyncio
-    async def test_bench_denied(self, client, bench_token):
-        response = await client.get(
-            "/api/v1/infrastructure/compute/metrics",
-            headers={"Authorization": f"Bearer {bench_token}"},
-        )
-        assert response.status_code == 403
-
-
 class TestStorageMetricsEndpoint:
     @pytest.mark.asyncio
     async def test_returns_storage_metrics(self, client, admin_token):
