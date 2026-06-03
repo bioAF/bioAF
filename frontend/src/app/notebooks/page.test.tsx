@@ -1,4 +1,5 @@
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import NotebooksPage from "./page";
 
 jest.mock("next/navigation", () => ({
@@ -219,6 +220,10 @@ describe("NotebooksPage launch modal", () => {
 
     fireEvent.click(screen.getByText("Launch RStudio"));
 
+    // No files selected -> confirmation modal opens; click through it.
+    const confirm = await screen.findByRole("dialog", { name: /launch without/i });
+    fireEvent.click(within(confirm).getByRole("button", { name: /launch anyway/i }));
+
     await waitFor(() => {
       expect(screen.getByText("The notebook image is currently building.")).toBeInTheDocument();
     });
@@ -306,5 +311,120 @@ describe("NotebooksPage launch button component gating", () => {
       expect(screen.getByText("Launch RStudio")).toBeInTheDocument();
       expect(screen.getByText("Launch Jupyter")).toBeInTheDocument();
     });
+  });
+});
+
+describe("NotebooksPage launch confirmation when no files selected", () => {
+  test("clicking Launch RStudio with no files selected opens a confirmation modal; Cancel keeps the launch modal open and skips POST", async () => {
+    const user = userEvent.setup();
+    setupMocks({ build_id: null, build_status: null, image_uri: null });
+    render(<NotebooksPage />);
+
+    await waitFor(() => expect(screen.getByText("Launch Session")).toBeInTheDocument());
+    await user.click(screen.getByText("Launch Session"));
+    await waitFor(() => expect(screen.getByText("Launch RStudio")).toBeInTheDocument());
+
+    await user.click(screen.getByText("Launch RStudio"));
+
+    const confirm = await screen.findByRole("dialog", { name: /launch without/i });
+    expect(within(confirm).getByText(/no input files/i)).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
+
+    await user.click(within(confirm).getByRole("button", { name: /^Cancel$/i }));
+    expect(screen.queryByRole("dialog", { name: /launch without/i })).not.toBeInTheDocument();
+    expect(screen.getByText("Launch Notebook Session")).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  test("clicking Launch anyway in the confirmation modal proceeds with the POST", async () => {
+    const user = userEvent.setup();
+    setupMocks({ build_id: null, build_status: null, image_uri: null });
+    mockPost.mockResolvedValue({});
+    render(<NotebooksPage />);
+
+    await waitFor(() => expect(screen.getByText("Launch Session")).toBeInTheDocument());
+    await user.click(screen.getByText("Launch Session"));
+    await waitFor(() => expect(screen.getByText("Launch RStudio")).toBeInTheDocument());
+
+    await user.click(screen.getByText("Launch RStudio"));
+    const confirm = await screen.findByRole("dialog", { name: /launch without/i });
+    await user.click(within(confirm).getByRole("button", { name: /launch anyway/i }));
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalled());
+  });
+});
+
+describe("NotebooksPage file picker auto-shows when experiment selected", () => {
+  test("renders FileTreeSelector inline after selecting an experiment, no 'Select files' button", async () => {
+    const user = userEvent.setup();
+
+    const experimentWithFiles = {
+      experiments: [
+        {
+          id: 42,
+          name: "Experiment Beta",
+          code: "BETA",
+          project: { id: 7, name: "Project Alpha", code: "ALPHA" },
+        },
+      ],
+      total: 1,
+    };
+    const filesResponse = {
+      files: [
+        {
+          id: 100,
+          filename: "matrix.mtx.gz",
+          gcs_uri: "gs://b/x/matrix.mtx.gz",
+          size_bytes: 1024,
+          md5_checksum: null,
+          file_type: "count_matrix",
+          tags: [],
+          uploader: null,
+          project_id: 7,
+          experiment_id: 42,
+          sample_ids: [],
+          source_type: "upload",
+          source_pipeline_run_id: null,
+          source_notebook_session_id: null,
+          storage_deleted: false,
+          upload_timestamp: "2026-01-01T00:00:00Z",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 500,
+    };
+
+    mockGet.mockImplementation((url: string) => {
+      if (url.includes("/api/v1/notebooks/sessions")) return Promise.resolve({ sessions: [] });
+      if (url.includes("/api/experiments/42/files")) return Promise.resolve(filesResponse);
+      if (url.includes("/api/experiments/42/samples")) return Promise.resolve({ samples: [] });
+      if (url.includes("/api/experiments")) return Promise.resolve(experimentWithFiles);
+      if (url.includes("/api/projects")) return Promise.resolve({ projects: [], total: 0 });
+      if (url.includes("build-status"))
+        return Promise.resolve({ build_id: null, build_status: null, image_uri: null });
+      if (url.includes("/api/v1/environments/1")) return Promise.resolve(mockEnvDetail);
+      if (url.includes("/api/v1/environments")) return Promise.resolve(mockEnvironments);
+      if (url.includes("/api/v1/notebooks/resource-profiles"))
+        return Promise.resolve({ pool_machine_type: "n2-standard-8", profiles: [] });
+      return Promise.resolve({});
+    });
+
+    render(<NotebooksPage />);
+    await waitFor(() => expect(screen.getByText("Launch Session")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Launch Session"));
+    await waitFor(() => expect(screen.getByText("Launch Notebook Session")).toBeInTheDocument());
+
+    expect(screen.queryByRole("button", { name: /select files/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /file type filters/i })).not.toBeInTheDocument();
+
+    const expSelect = await screen.findByRole("combobox", { name: /^Experiment$/i });
+    await user.selectOptions(expSelect, "42");
+
+    await waitFor(() =>
+      expect(screen.getByRole("group", { name: /file type filters/i })).toBeInTheDocument()
+    );
+    expect(screen.queryByRole("button", { name: /select files/i })).not.toBeInTheDocument();
   });
 });
