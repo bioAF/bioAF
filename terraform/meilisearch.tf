@@ -19,7 +19,7 @@ resource "google_service_account_iam_member" "meilisearch_workload_identity" {
 resource "google_compute_disk" "meilisearch_data" {
   count = var.enable_meilisearch ? 1 : 0
   name  = "bioaf-meilisearch-data"
-  type  = "pd-ssd"
+  type  = "pd-standard"
   zone  = var.zone
   size  = 20
 

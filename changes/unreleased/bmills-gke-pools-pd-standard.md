@@ -16,6 +16,11 @@
   boot disk as `pd-standard` instead of `pd-ssd`. Postgres on the app
   VM is far below the workload where SSD makes a measurable
   difference, and this drops the install's SSD footprint to zero.
+- The optional Meilisearch component's 20 GB data disk moves from
+  `pd-ssd` to `pd-standard`. At bioAF's scale the entire search index
+  fits in RAM after warmup, so disk latency only matters for cold
+  reads and indexing. Worth revisiting if Meilisearch is ever wired
+  into the user-facing search path and a real workload shows up.
 - Existing installs: the GKE node pool changes will trigger a
   destroy-and-recreate of the pipelines and interactive pools on next
   `terraform apply` of the compute module. Expect a brief disruption
