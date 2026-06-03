@@ -892,7 +892,12 @@ class KubernetesNotebookProvider(NotebookProvider):
             api_client = self._get_api_client()
             config = api_client.configuration
             svc_url = f"{config.host}/api/v1/namespaces/{namespace}/services/{service_name}"
-            headers = {"Authorization": list(config.api_key.values())[0]}
+            auth = api_client.default_headers.get("Authorization")
+            if not auth:
+                raise RuntimeError(
+                    "K8s ApiClient has no Authorization header; _build_out_of_cluster_client did not set one."
+                )
+            headers = {"Authorization": auth}
 
             access_url = None
             for attempt in range(36):

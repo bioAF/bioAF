@@ -185,6 +185,25 @@ class TestOutOfClusterClientAuthHeader:
             api_client = provider_with_cfg._build_out_of_cluster_client()
         assert api_client.configuration.host == "https://1.2.3.4"
 
+    def test_httpx_reader_path_can_retrieve_auth_header(self, provider_with_cfg):
+        """The LB-IP polling path reads the Authorization header from the
+        ApiClient to forward to httpx. It must be present after
+        _build_out_of_cluster_client; an IndexError or KeyError here breaks
+        the access_url discovery for every notebook session.
+        """
+        fake_creds = MagicMock()
+        fake_creds.token = "test-token-xyz"
+        with patch(
+            "app.services.credential_injector.load_gcp_credentials",
+            return_value=fake_creds,
+        ):
+            api_client = provider_with_cfg._build_out_of_cluster_client()
+
+        auth = api_client.default_headers.get("Authorization")
+        assert auth is not None
+        assert auth.startswith("Bearer ")
+        assert "test-token-xyz" in auth
+
 
 class TestApiClientCacheInvalidation:
     """Rebuilding the cluster must invalidate any cached K8s client."""

@@ -147,7 +147,15 @@ async def _sync_session_from_k8s(ns, session: AsyncSession) -> None:
                 api_client = adapter._get_api_client()
                 config = api_client.configuration
                 url = f"{config.host}/api/v1/namespaces/{namespace}/services/{svc_name}"
-                headers = {"Authorization": list(config.api_key.values())[0]}
+                # Auth header lives on the ApiClient's default_headers, not on
+                # Configuration.api_key (which the kubernetes-python lib does
+                # not auto-route into requests). See _build_out_of_cluster_client.
+                auth = api_client.default_headers.get("Authorization")
+                if not auth:
+                    raise RuntimeError(
+                        "K8s ApiClient has no Authorization header; _build_out_of_cluster_client did not set one."
+                    )
+                headers = {"Authorization": auth}
                 resp = httpx.get(
                     url,
                     headers=headers,
