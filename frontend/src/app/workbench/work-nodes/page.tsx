@@ -9,6 +9,7 @@ import { isAuthenticated } from "@/lib/auth";
 import { api, ApiError } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
 import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
+import { resolveWorkNodeProfiles } from "@/lib/workNodeProfiles";
 import type {
   WorkNode,
   WorkNodeListResponse,
@@ -79,10 +80,16 @@ export default function WorkNodesPage() {
   const [selectedRepoIds, setSelectedRepoIds] = useState<number[]>([]);
   const [machineTypes, setMachineTypes] = useState<MachineType[]>([]);
   const [selectedMachineType, setSelectedMachineType] = useState<string>("");
+  const [showAdvancedMachines, setShowAdvancedMachines] = useState(false);
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
+  const [provisioningNotice, setProvisioningNotice] = useState<
+    null | { kind: "info" | "error"; message: string }
+  >(null);
   const [stoppingNodes, setStoppingNodes] = useState<Set<number>>(new Set());
   const [showGuide, setShowGuide] = useState(false);
+
+  const workNodeProfiles = resolveWorkNodeProfiles(machineTypes);
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/login"); return; }
@@ -159,6 +166,7 @@ export default function WorkNodesPage() {
     setSelectedVersionId(null);
     setSelectedRepoIds([]);
     setSelectedMachineType("");
+    setShowAdvancedMachines(false);
     setLaunchError(null);
 
     try {
@@ -187,7 +195,6 @@ export default function WorkNodesPage() {
     } catch {
       setProjectExperiments([]);
     }
-    setLaunchStep(2);
   }
 
   async function handleExperimentSelect(experimentId: number) {
@@ -248,19 +255,25 @@ export default function WorkNodesPage() {
     if (!selectedProjectId || !selectedVersionId || !selectedMachineType) return;
     setLaunching(true);
     setLaunchError(null);
+    const req: WorkNodeLaunchRequest = {
+      project_id: selectedProjectId,
+      environment_version_id: selectedVersionId,
+      machine_type: selectedMachineType,
+      input_file_ids: selectedFileIds.length > 0 ? selectedFileIds : undefined,
+      github_repo_ids: selectedRepoIds.length > 0 ? selectedRepoIds : undefined,
+    };
+    setShowLaunch(false);
+    setProvisioningNotice({
+      kind: "info",
+      message: "Provisioning work node... this can take 1-3 minutes.",
+    });
     try {
-      const req: WorkNodeLaunchRequest = {
-        project_id: selectedProjectId,
-        environment_version_id: selectedVersionId,
-        machine_type: selectedMachineType,
-        input_file_ids: selectedFileIds.length > 0 ? selectedFileIds : undefined,
-        github_repo_ids: selectedRepoIds.length > 0 ? selectedRepoIds : undefined,
-      };
       await api.post("/api/v1/work-nodes/sessions", req);
-      setShowLaunch(false);
+      setProvisioningNotice(null);
       loadNodes();
     } catch (err) {
-      setLaunchError(err instanceof ApiError ? err.message : "Launch failed");
+      const message = err instanceof ApiError ? err.message : "Launch failed";
+      setProvisioningNotice({ kind: "error", message });
     } finally {
       setLaunching(false);
     }
@@ -331,10 +344,33 @@ export default function WorkNodesPage() {
                 onClick={openLaunchDialog}
                 className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
               >
-                Launch Work Node
+                New Work Node
               </button>
             )}
           </div>
+
+          {provisioningNotice && (
+            <div
+              role="status"
+              className={`mb-4 rounded-lg p-3 flex items-center justify-between gap-3 ${
+                provisioningNotice.kind === "error"
+                  ? "bg-red-50 border border-red-200 text-red-800"
+                  : "bg-blue-50 border border-blue-200 text-blue-800"
+              }`}
+            >
+              <div className="flex items-center gap-2 text-sm">
+                {provisioningNotice.kind === "info" && <LoadingSpinner size="sm" />}
+                <span>{provisioningNotice.message}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setProvisioningNotice(null)}
+                className="text-xs text-gray-500 hover:text-gray-700"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
 
           {/* Quick Start Guide */}
           <div className="mb-6">
@@ -629,294 +665,390 @@ export default function WorkNodesPage() {
             </div>
           )}
 
-          {/* Launch dialog -- 6 steps */}
+          {/* Launch dialog -- 2 steps */}
           {showLaunch && (
-            <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center" onClick={() => setShowLaunch(false)}>
-              <div className="bg-white rounded-lg shadow-xl max-w-xl w-full mx-4 p-6 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-                <div className="flex justify-between items-center mb-4">
+            <div
+              className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center"
+              onClick={() => setShowLaunch(false)}
+            >
+              <div
+                className="bg-white rounded-lg shadow-xl w-[800px] max-w-full mx-4 max-h-[85vh] flex flex-col"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="p-6 border-b flex items-center justify-between shrink-0">
                   <h2 className="text-lg font-semibold">Launch Work Node</h2>
-                  <button onClick={() => setShowLaunch(false)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+                  <button onClick={() => setShowLaunch(false)} className="text-gray-400 hover:text-gray-600 text-xl">
+                    &times;
+                  </button>
                 </div>
 
-                {/* Step indicators */}
-                <div className="flex gap-2 mb-6">
-                  {[1, 2, 3, 4, 5, 6].map((s) => (
-                    <div key={s} className={`h-1 flex-1 rounded ${s <= launchStep ? "bg-indigo-600" : "bg-gray-200"}`} />
+                {/* Step indicator: 2 steps */}
+                <div className="px-6 pt-4 flex gap-2 shrink-0">
+                  {[1, 2].map((s) => (
+                    <div
+                      key={s}
+                      className={`h-1 flex-1 rounded ${s <= launchStep ? "bg-indigo-600" : "bg-gray-200"}`}
+                    />
                   ))}
                 </div>
 
-                {launchError && (
-                  <div className="bg-red-50 border border-red-200 rounded p-3 mb-4 text-sm text-red-700">{launchError}</div>
-                )}
-
-                {/* Step 1: Select project */}
-                {launchStep === 1 && (
-                  <div>
-                    <h3 className="font-medium mb-3">Select Project</h3>
-                    <div className="space-y-2 max-h-60 overflow-y-auto">
-                      {projects.map((p) => (
-                        <button
-                          key={p.id}
-                          onClick={() => handleProjectSelect(p.id)}
-                          className="w-full text-left p-3 border rounded-lg hover:border-indigo-400 hover:bg-indigo-50 transition-colors"
-                        >
-                          <div className="font-medium text-sm">{p.name}</div>
-                          {p.description && <div className="text-xs text-gray-500 mt-0.5">{p.description}</div>}
-                        </button>
-                      ))}
-                      {projects.length === 0 && <p className="text-sm text-gray-500">No projects found</p>}
+                <div className="p-6 space-y-5 overflow-y-auto flex-1">
+                  {launchError && (
+                    <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
+                      {launchError}
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {/* Step 2: Select input files */}
-                {launchStep === 2 && (
-                  <div>
-                    <h3 className="font-medium mb-3">Select Input Files</h3>
-                    <p className="text-xs text-gray-500 mb-3">Choose an experiment, then select files to copy to /data/ at boot (optional)</p>
-
-                    {/* Experiment selector */}
-                    {projectExperiments.length === 0 ? (
-                      <p className="text-sm text-gray-400">No experiments in this project.</p>
-                    ) : (
-                      <div className="mb-3">
-                        <label className="text-xs font-medium text-gray-600 block mb-1">Experiment</label>
-                        <select
-                          className="w-full border rounded px-3 py-2 text-sm"
-                          value={selectedExperimentId || ""}
-                          onChange={(e) => {
-                            const val = e.target.value ? Number(e.target.value) : null;
-                            if (val) handleExperimentSelect(val);
-                          }}
-                        >
-                          <option value="">Select an experiment...</option>
-                          {projectExperiments.map((exp) => (
-                            <option key={exp.id} value={exp.id}>
-                              {exp.name}{exp.code ? ` (${exp.code})` : ""}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                    {/* File picker (shown after experiment is selected) */}
-                    {selectedExperimentId && experimentFiles.length === 0 && (
-                      <p className="text-sm text-gray-400">No files found for this experiment.</p>
-                    )}
-                    {selectedExperimentId && experimentFiles.length > 0 && (
-                      <>
-                        <button
-                          onClick={() => setShowFileSelector(!showFileSelector)}
-                          className="text-xs text-indigo-600 hover:underline mb-2"
-                        >
-                          {showFileSelector ? "Hide file picker" : `Select files (${experimentFiles.length} available)`}
-                        </button>
-                        {showFileSelector && (
-                          <FileTreeSelector
-                            files={experimentFiles}
-                            sampleNames={sampleNames}
-                            onSelectionChange={setSelectedFileIds}
-                          />
-                        )}
-                        {!showFileSelector && selectedFileIds.length > 0 && (
-                          <p className="text-xs text-gray-500">{selectedFileIds.length} file(s) selected</p>
-                        )}
-                      </>
-                    )}
-
-                    <div className="flex gap-2 mt-4">
-                      <button onClick={() => setLaunchStep(1)} className="px-4 py-2 border rounded text-sm">Back</button>
-                      <button onClick={() => setLaunchStep(3)} className="px-4 py-2 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700">
-                        Next
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Step 3: Select environment */}
-                {launchStep === 3 && (
-                  <div>
-                    <h3 className="font-medium mb-3">Select Environment</h3>
-                    {environments.length === 0 ? (
-                      <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm text-yellow-700">
-                        No work node environments found. Create one from the <a href="/environments" className="underline font-medium">Environments</a> page with type &quot;Work Node&quot;.
-                      </div>
-                    ) : (
-                      <div className="space-y-2 max-h-60 overflow-y-auto">
-                        {environments.map((env) => (
-                          <button
-                            key={env.id}
-                            onClick={() => { handleEnvSelect(env.id); }}
-                            className={`w-full text-left p-3 border rounded-lg hover:border-indigo-400 transition-colors ${selectedEnvId === env.id ? "border-indigo-500 bg-indigo-50" : ""}`}
-                          >
-                            <div className="font-medium text-sm">{env.name}</div>
-                            {env.description && <div className="text-xs text-gray-500 mt-0.5">{env.description}</div>}
-                            {env.latest_version && (
-                              <div className="text-xs text-gray-400 mt-1">
-                                v{env.latest_version.version_number} - {env.latest_version.status}
-                              </div>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {envDetail && (
-                      <div className="mt-3">
-                        <label className="text-xs font-medium text-gray-600">Version</label>
-                        <select
-                          className="w-full mt-1 border rounded px-3 py-2 text-sm"
-                          value={selectedVersionId || ""}
-                          onChange={(e) => setSelectedVersionId(Number(e.target.value))}
-                        >
-                          <option value="">Select version</option>
-                          {envDetail.versions
-                            .filter((v) => v.status === "ready" && v.image_uri)
-                            .map((v) => (
-                              <option key={v.id} value={v.id}>v{v.version_number}.{v.build_number} (ready)</option>
+                  {launchStep === 1 && (
+                    <>
+                      <section>
+                        <h3 className="text-sm font-medium text-gray-700 mb-2">Select Project</h3>
+                        {projects.length === 0 ? (
+                          <p className="text-sm text-gray-500">No projects found</p>
+                        ) : (
+                          <div className="space-y-2 max-h-48 overflow-y-auto">
+                            {projects.map((p) => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => handleProjectSelect(p.id)}
+                                className={`w-full text-left p-3 border rounded-lg transition-colors ${
+                                  selectedProjectId === p.id
+                                    ? "border-indigo-500 bg-indigo-50"
+                                    : "border-gray-200 hover:border-gray-300"
+                                }`}
+                              >
+                                <div className="font-medium text-sm">{p.name}</div>
+                                {p.description && (
+                                  <div className="text-xs text-gray-500 mt-0.5">{p.description}</div>
+                                )}
+                              </button>
                             ))}
-                        </select>
-                      </div>
-                    )}
-                    <div className="flex gap-2 mt-4">
-                      <button onClick={() => setLaunchStep(2)} className="px-4 py-2 border rounded text-sm">Back</button>
-                      <button
-                        onClick={() => setLaunchStep(4)}
-                        disabled={!selectedVersionId}
-                        className="px-4 py-2 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700 disabled:opacity-50"
-                      >
-                        Next
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Step 4: Select GitHub repos */}
-                {launchStep === 4 && (
-                  <div>
-                    <h3 className="font-medium mb-3">Select GitHub Repos</h3>
-                    <p className="text-xs text-gray-500 mb-3">These repos will be cloned into ~/repos/ when the node boots.</p>
-                    {repos.length === 0 ? (
-                      <p className="text-sm text-gray-400">No repos configured. You can add them from the GitHub Repos section on this page.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {repos.map((repo) => (
-                          <label key={repo.id} className="flex items-start gap-3 p-3 border rounded-lg hover:bg-gray-50 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={selectedRepoIds.includes(repo.id)}
-                              onChange={() => toggleRepo(repo.id)}
-                              className="mt-0.5"
-                            />
-                            <div>
-                              <div className="text-sm font-medium">{repo.display_name}</div>
-                              <div className="text-xs text-gray-400 font-mono mt-0.5">{repo.git_ssh_url}</div>
-                            </div>
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                    <div className="flex gap-2 mt-4">
-                      <button onClick={() => setLaunchStep(3)} className="px-4 py-2 border rounded text-sm">Back</button>
-                      <button onClick={() => setLaunchStep(5)} className="px-4 py-2 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700">
-                        Next
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Step 5: Select machine type */}
-                {launchStep === 5 && (
-                  <div>
-                    <h3 className="font-medium mb-3">Select Machine Type</h3>
-                    {Object.entries(
-                      machineTypes.reduce<Record<string, MachineType[]>>((groups, mt) => {
-                        (groups[mt.category] = groups[mt.category] || []).push(mt);
-                        return groups;
-                      }, {})
-                    ).map(([category, types]) => (
-                      <div key={category} className="mb-4">
-                        <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">
-                          {CATEGORY_LABELS[category] || category}
-                        </h4>
-                        <div className="space-y-2">
-                          {types.map((mt) => (
-                            <button
-                              key={mt.name}
-                              onClick={() => setSelectedMachineType(mt.name)}
-                              className={`w-full text-left p-3 border rounded-lg hover:border-indigo-400 transition-colors ${selectedMachineType === mt.name ? "border-indigo-500 bg-indigo-50" : ""}`}
-                            >
-                              <div className="flex justify-between items-center">
-                                <span className="font-mono text-sm">{mt.name}</span>
-                                <span className="text-xs text-gray-500">
-                                  {mt.cpu} CPU / {mt.memory_gb} GB{mt.gpu ? ` / ${mt.gpu}` : ""}
-                                </span>
-                              </div>
-                              <div className="text-xs text-gray-500 mt-0.5">{mt.description}</div>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                    <div className="flex gap-2 mt-4">
-                      <button onClick={() => setLaunchStep(4)} className="px-4 py-2 border rounded text-sm">Back</button>
-                      <button
-                        onClick={() => setLaunchStep(6)}
-                        disabled={!selectedMachineType}
-                        className="px-4 py-2 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700 disabled:opacity-50"
-                      >
-                        Review
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Step 6: Review and launch */}
-                {launchStep === 6 && (
-                  <div>
-                    <h3 className="font-medium mb-3">Review</h3>
-                    <div className="space-y-2 text-sm bg-gray-50 rounded-lg p-4">
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">Project</span>
-                        <span>{projects.find((p) => p.id === selectedProjectId)?.name}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">Input Files</span>
-                        <span>{selectedFileIds.length > 0 ? selectedFileIds.length + " files" : "None"}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">Environment</span>
-                        <span>{environments.find((e) => e.id === selectedEnvId)?.name}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">Repos</span>
-                        <span>{selectedRepoIds.length > 0 ? selectedRepoIds.length + " repos" : "None"}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">Machine Type</span>
-                        <span className="font-mono">{selectedMachineType}</span>
-                      </div>
-                      {(() => {
-                        const mt = machineTypes.find((m) => m.name === selectedMachineType);
-                        return mt ? (
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Resources</span>
-                            <span>{mt.cpu} CPU / {mt.memory_gb} GB{mt.gpu ? ` / ${mt.gpu}` : ""}</span>
                           </div>
-                        ) : null;
-                      })()}
+                        )}
+                      </section>
+
+                      {selectedProjectId && (
+                        <section>
+                          <h3 className="text-sm font-medium text-gray-700 mb-2">Input Files (optional)</h3>
+                          {projectExperiments.length === 0 ? (
+                            <p className="text-xs text-gray-400">No experiments in this project.</p>
+                          ) : (
+                            <>
+                              <select
+                                className="w-full border rounded px-3 py-2 text-sm mb-2"
+                                value={selectedExperimentId || ""}
+                                onChange={(e) => {
+                                  const val = e.target.value ? Number(e.target.value) : null;
+                                  if (val) handleExperimentSelect(val);
+                                }}
+                              >
+                                <option value="">Select an experiment to browse files...</option>
+                                {projectExperiments.map((exp) => (
+                                  <option key={exp.id} value={exp.id}>
+                                    {exp.name}
+                                    {exp.code ? ` (${exp.code})` : ""}
+                                  </option>
+                                ))}
+                              </select>
+                              {selectedExperimentId &&
+                                experimentFiles.length === 0 && (
+                                  <p className="text-xs text-gray-400">No files found for this experiment.</p>
+                                )}
+                              {selectedExperimentId && experimentFiles.length > 0 && (
+                                <FileTreeSelector
+                                  files={experimentFiles}
+                                  sampleNames={sampleNames}
+                                  onSelectionChange={setSelectedFileIds}
+                                />
+                              )}
+                            </>
+                          )}
+                        </section>
+                      )}
+
+                      <section>
+                        <h3 className="text-sm font-medium text-gray-700 mb-2">Select Environment</h3>
+                        {environments.length === 0 ? (
+                          <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm text-yellow-700">
+                            No work node environments found. Create one from the{" "}
+                            <a href="/environments" className="underline font-medium">
+                              Environments
+                            </a>{" "}
+                            page with type &quot;Work Node&quot;.
+                          </div>
+                        ) : (
+                          <div className="flex gap-3">
+                            <select
+                              value={selectedEnvId || ""}
+                              onChange={(e) =>
+                                e.target.value ? handleEnvSelect(Number(e.target.value)) : null
+                              }
+                              className="border rounded px-3 py-2 text-sm flex-1"
+                            >
+                              <option value="">Select environment</option>
+                              {environments.map((env) => (
+                                <option key={env.id} value={env.id}>
+                                  {env.name}
+                                  {env.latest_version
+                                    ? ` (v${env.latest_version.version_number} - ${env.latest_version.status})`
+                                    : " (no versions)"}
+                                </option>
+                              ))}
+                            </select>
+                            {envDetail &&
+                              envDetail.versions.filter(
+                                (v) => v.status === "ready" && v.image_uri
+                              ).length > 0 && (
+                                <select
+                                  value={selectedVersionId || ""}
+                                  onChange={(e) =>
+                                    setSelectedVersionId(
+                                      e.target.value ? Number(e.target.value) : null
+                                    )
+                                  }
+                                  className="border rounded px-3 py-2 text-sm flex-1"
+                                >
+                                  {envDetail.versions
+                                    .filter((v) => v.status === "ready" && v.image_uri)
+                                    .map((v) => (
+                                      <option key={v.id} value={v.id}>
+                                        v{v.version_number}.{v.build_number} (ready)
+                                      </option>
+                                    ))}
+                                </select>
+                              )}
+                          </div>
+                        )}
+                      </section>
+
+                      <section>
+                        <h3 className="text-sm font-medium text-gray-700 mb-2">
+                          Select GitHub Repos (optional)
+                        </h3>
+                        <p className="text-xs text-gray-500 mb-2">
+                          Cloned into ~/repos/ when the node boots.
+                        </p>
+                        {repos.length === 0 ? (
+                          <p className="text-xs text-gray-400">
+                            No repos configured. Add one from the GitHub Repos section below.
+                          </p>
+                        ) : (
+                          <div className="space-y-1">
+                            {repos.map((repo) => (
+                              <label
+                                key={repo.id}
+                                className="flex items-start gap-3 p-2 border rounded-lg hover:bg-gray-50 cursor-pointer"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedRepoIds.includes(repo.id)}
+                                  onChange={() => toggleRepo(repo.id)}
+                                  className="mt-0.5"
+                                />
+                                <div>
+                                  <div className="text-sm font-medium">{repo.display_name}</div>
+                                  <div className="text-xs text-gray-400 font-mono mt-0.5">
+                                    {repo.git_ssh_url}
+                                  </div>
+                                </div>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                      </section>
+
+                      <section role="group" aria-label="Machine Profile">
+                        <h3 className="text-sm font-medium text-gray-700 mb-2">Machine Profile</h3>
+                        <div className="space-y-2">
+                          {workNodeProfiles.map((profile) => {
+                            const available = profile.machineType !== null;
+                            const selected =
+                              available && selectedMachineType === profile.machineType?.name;
+                            return (
+                              <button
+                                key={profile.id}
+                                type="button"
+                                disabled={!available}
+                                aria-pressed={selected}
+                                onClick={() => {
+                                  if (profile.machineType) {
+                                    setSelectedMachineType(profile.machineType.name);
+                                  }
+                                }}
+                                className={`w-full text-left p-3 border rounded-lg transition-colors ${
+                                  !available
+                                    ? "border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed"
+                                    : selected
+                                    ? "border-indigo-500 bg-indigo-50"
+                                    : "border-gray-200 hover:border-gray-300"
+                                }`}
+                              >
+                                <div className="flex justify-between items-center">
+                                  <span className="font-semibold text-sm flex items-center gap-2">
+                                    {profile.label}
+                                    {!available && (
+                                      <span className="text-[10px] font-medium uppercase tracking-wide text-gray-400 border border-gray-300 rounded px-1.5 py-0.5">
+                                        Unavailable
+                                      </span>
+                                    )}
+                                  </span>
+                                  {profile.machineType && (
+                                    <span className="text-xs text-gray-500">
+                                      {profile.machineType.cpu} CPU /{" "}
+                                      {profile.machineType.memory_gb} GB
+                                      {profile.machineType.gpu
+                                        ? ` / ${profile.machineType.gpu}`
+                                        : ""}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-gray-500 mt-0.5">
+                                  {profile.description}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <div className="mt-3">
+                          <button
+                            type="button"
+                            onClick={() => setShowAdvancedMachines(!showAdvancedMachines)}
+                            aria-expanded={showAdvancedMachines}
+                            className="text-xs text-indigo-600 hover:underline"
+                          >
+                            Advanced: choose a specific machine type{" "}
+                            {showAdvancedMachines ? "▼" : "▶"}
+                          </button>
+                          {showAdvancedMachines && (
+                            <div className="mt-2 space-y-3">
+                              {Object.entries(
+                                machineTypes.reduce<Record<string, MachineType[]>>(
+                                  (groups, mt) => {
+                                    (groups[mt.category] = groups[mt.category] || []).push(mt);
+                                    return groups;
+                                  },
+                                  {}
+                                )
+                              ).map(([category, types]) => (
+                                <div key={category}>
+                                  <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">
+                                    {CATEGORY_LABELS[category] || category}
+                                  </h4>
+                                  <div className="space-y-1">
+                                    {types.map((mt) => (
+                                      <button
+                                        key={mt.name}
+                                        type="button"
+                                        onClick={() => setSelectedMachineType(mt.name)}
+                                        className={`w-full text-left p-2 border rounded-lg text-xs transition-colors ${
+                                          selectedMachineType === mt.name
+                                            ? "border-indigo-500 bg-indigo-50"
+                                            : "border-gray-200 hover:border-gray-300"
+                                        }`}
+                                      >
+                                        <div className="flex justify-between items-center">
+                                          <span className="font-mono">{mt.name}</span>
+                                          <span className="text-gray-500">
+                                            {mt.cpu} CPU / {mt.memory_gb} GB
+                                            {mt.gpu ? ` / ${mt.gpu}` : ""}
+                                          </span>
+                                        </div>
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </section>
+                    </>
+                  )}
+
+                  {launchStep === 2 && (
+                    <div>
+                      <h3 className="text-sm font-medium text-gray-700 mb-3">Review</h3>
+                      <div className="space-y-2 text-sm bg-gray-50 rounded-lg p-4">
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Project</span>
+                          <span>{projects.find((p) => p.id === selectedProjectId)?.name}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Input Files</span>
+                          <span>
+                            {selectedFileIds.length > 0 ? selectedFileIds.length + " files" : "None"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Environment</span>
+                          <span>{environments.find((e) => e.id === selectedEnvId)?.name}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Repos</span>
+                          <span>
+                            {selectedRepoIds.length > 0 ? selectedRepoIds.length + " repos" : "None"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Machine Type</span>
+                          <span className="font-mono">{selectedMachineType}</span>
+                        </div>
+                        {(() => {
+                          const mt = machineTypes.find((m) => m.name === selectedMachineType);
+                          return mt ? (
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">Resources</span>
+                              <span>
+                                {mt.cpu} CPU / {mt.memory_gb} GB
+                                {mt.gpu ? ` / ${mt.gpu}` : ""}
+                              </span>
+                            </div>
+                          ) : null;
+                        })()}
+                      </div>
                     </div>
-                    <div className="flex gap-2 mt-4">
-                      <button onClick={() => setLaunchStep(5)} className="px-4 py-2 border rounded text-sm">Back</button>
+                  )}
+                </div>
+
+                <div className="p-6 border-t bg-gray-50 flex gap-3 shrink-0">
+                  {launchStep === 1 ? (
+                    <button
+                      type="button"
+                      onClick={() => setLaunchStep(2)}
+                      disabled={!selectedProjectId || !selectedVersionId || !selectedMachineType}
+                      className="flex-1 bg-indigo-600 text-white px-6 py-2.5 rounded-md text-sm hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      Next: Review
+                    </button>
+                  ) : (
+                    <>
                       <button
+                        type="button"
+                        onClick={() => setLaunchStep(1)}
+                        className="px-4 py-2.5 border rounded-md text-sm text-gray-600 hover:bg-gray-100"
+                      >
+                        Back
+                      </button>
+                      <button
+                        type="button"
                         onClick={handleLaunch}
                         disabled={launching}
-                        className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700 disabled:opacity-50"
+                        className="flex-1 bg-indigo-600 text-white px-6 py-2.5 rounded-md text-sm hover:bg-indigo-700 disabled:opacity-50"
                       >
-                        {launching ? "Launching..." : "Launch Work Node"}
+                        Launch Work Node
                       </button>
-                    </div>
-                  </div>
-                )}
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowLaunch(false)}
+                    className="px-4 py-2.5 border rounded-md text-sm text-gray-600 hover:bg-gray-100"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             </div>
           )}
