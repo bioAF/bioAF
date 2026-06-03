@@ -63,8 +63,20 @@ class KubernetesNotebookProvider(NotebookProvider):
         self._session_factory = session_factory
         self._api_client: client.ApiClient | None = None
         self._client_created_at: float = 0.0
+        # Fingerprint of the cluster the cached _api_client was built for.
+        # Used to invalidate the cache when platform_config now points at a
+        # different cluster (e.g. after a teardown + redeploy).
+        self._cached_cluster_fingerprint: tuple[str, str] = ("", "")
         self._cluster_config: dict | None = None
         self._namespace_ready = False
+
+    def _cluster_fingerprint(self) -> tuple[str, str]:
+        """(endpoint, ca_cert) identity of the cluster in the current config."""
+        cfg = self._cluster_config or {}
+        return (
+            cfg.get("gke_cluster_endpoint", "") or "",
+            cfg.get("gke_cluster_ca_cert", "") or "",
+        )
 
     @property
     def is_local(self) -> bool:
@@ -129,9 +141,6 @@ class KubernetesNotebookProvider(NotebookProvider):
                 ],
             )
 
-        if force:
-            self._api_client = None
-
         return self._cluster_config
 
     def _build_out_of_cluster_client(self) -> client.ApiClient:
@@ -160,10 +169,18 @@ class KubernetesNotebookProvider(NotebookProvider):
         configuration = client.Configuration()
         configuration.host = endpoint
         configuration.ssl_ca_cert = ca_file.name
-        configuration.api_key = {"authorization": f"Bearer {token}"}
+
+        api_client = client.ApiClient(configuration)
+        # The kubernetes-python client does not route Configuration.api_key
+        # into request headers unless an OpenAPI security scheme references
+        # it. The K8s OpenAPI spec the library ships with does not declare
+        # such a scheme for the simple bearer-token case, so api_key here is
+        # a silent no-op and every request goes out anonymously, yielding
+        # 401 Unauthorized. Set the header on the client directly instead.
+        api_client.set_default_header("Authorization", f"Bearer {token}")
 
         self._client_created_at = time.monotonic()
-        return client.ApiClient(configuration)
+        return api_client
 
     def _is_token_expired(self) -> bool:
         """Check if the cached GCP access token is older than the TTL."""
@@ -174,14 +191,31 @@ class KubernetesNotebookProvider(NotebookProvider):
     async def _get_api_client_async(self) -> client.ApiClient:
         """Get or create a K8s ApiClient, trying incluster first.
 
+        Re-reads platform_config on every call so that a cluster teardown +
+        redeploy (which rewrites gke_cluster_endpoint and gke_cluster_ca_cert)
+        invalidates the cached client. Without this check the backend keeps
+        the previous cluster's endpoint, CA, and bearer token in memory until
+        the GCP access token TTL elapses, and every notebook launch in that
+        window fails with 401 Unauthorized.
+
         Falls back to platform_config credentials when not running in a pod.
         """
-        if self._api_client is not None and not self._is_token_expired():
+        await self.load_cluster_config(force=True)
+        current_fp = self._cluster_fingerprint()
+
+        cluster_changed = self._api_client is not None and self._cached_cluster_fingerprint != current_fp
+        if self._api_client is not None and not self._is_token_expired() and not cluster_changed:
             return self._api_client
 
         if self._is_token_expired():
             logger.info("GCP access token approaching expiry, refreshing K8s client")
-            self._api_client = None
+        elif cluster_changed:
+            logger.info(
+                "Cluster identity changed in platform_config, rebuilding K8s client (old endpoint=%s, new endpoint=%s)",
+                self._cached_cluster_fingerprint[0],
+                current_fp[0],
+            )
+        self._api_client = None
 
         try:
             config.load_incluster_config()
@@ -189,13 +223,10 @@ class KubernetesNotebookProvider(NotebookProvider):
             logger.info("Using incluster K8s config")
         except Exception:
             logger.info("Not running in cluster, using platform_config credentials")
-            await self.load_cluster_config(force=True)
             try:
                 self._api_client = self._build_out_of_cluster_client()
-                logger.info(
-                    "K8s client built for endpoint %s",
-                    (self._cluster_config or {}).get("gke_cluster_endpoint"),
-                )
+                self._cached_cluster_fingerprint = current_fp
+                logger.info("K8s client built for endpoint %s", current_fp[0])
             except Exception:
                 logger.exception("Failed to build out-of-cluster K8s client")
                 raise
