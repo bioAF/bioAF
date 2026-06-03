@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import NotebooksPage from "./page";
 
@@ -220,6 +220,10 @@ describe("NotebooksPage launch modal", () => {
 
     fireEvent.click(screen.getByText("Launch RStudio"));
 
+    // No files selected -> confirmation modal opens; click through it.
+    const confirm = await screen.findByRole("dialog", { name: /launch without/i });
+    fireEvent.click(within(confirm).getByRole("button", { name: /launch anyway/i }));
+
     await waitFor(() => {
       expect(screen.getByText("The notebook image is currently building.")).toBeInTheDocument();
     });
@@ -307,6 +311,46 @@ describe("NotebooksPage launch button component gating", () => {
       expect(screen.getByText("Launch RStudio")).toBeInTheDocument();
       expect(screen.getByText("Launch Jupyter")).toBeInTheDocument();
     });
+  });
+});
+
+describe("NotebooksPage launch confirmation when no files selected", () => {
+  test("clicking Launch RStudio with no files selected opens a confirmation modal; Cancel keeps the launch modal open and skips POST", async () => {
+    const user = userEvent.setup();
+    setupMocks({ build_id: null, build_status: null, image_uri: null });
+    render(<NotebooksPage />);
+
+    await waitFor(() => expect(screen.getByText("Launch Session")).toBeInTheDocument());
+    await user.click(screen.getByText("Launch Session"));
+    await waitFor(() => expect(screen.getByText("Launch RStudio")).toBeInTheDocument());
+
+    await user.click(screen.getByText("Launch RStudio"));
+
+    const confirm = await screen.findByRole("dialog", { name: /launch without/i });
+    expect(within(confirm).getByText(/no input files/i)).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
+
+    await user.click(within(confirm).getByRole("button", { name: /^Cancel$/i }));
+    expect(screen.queryByRole("dialog", { name: /launch without/i })).not.toBeInTheDocument();
+    expect(screen.getByText("Launch Notebook Session")).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  test("clicking Launch anyway in the confirmation modal proceeds with the POST", async () => {
+    const user = userEvent.setup();
+    setupMocks({ build_id: null, build_status: null, image_uri: null });
+    mockPost.mockResolvedValue({});
+    render(<NotebooksPage />);
+
+    await waitFor(() => expect(screen.getByText("Launch Session")).toBeInTheDocument());
+    await user.click(screen.getByText("Launch Session"));
+    await waitFor(() => expect(screen.getByText("Launch RStudio")).toBeInTheDocument());
+
+    await user.click(screen.getByText("Launch RStudio"));
+    const confirm = await screen.findByRole("dialog", { name: /launch without/i });
+    await user.click(within(confirm).getByRole("button", { name: /launch anyway/i }));
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalled());
   });
 });
 

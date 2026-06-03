@@ -86,6 +86,7 @@ export default function WorkNodesPage() {
   const [showAdvancedMachines, setShowAdvancedMachines] = useState(false);
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
+  const [showConfirmLaunch, setShowConfirmLaunch] = useState(false);
   const [provisioningNotice, setProvisioningNotice] = useState<
     null | { kind: "info" | "error"; message: string }
   >(null);
@@ -253,8 +254,20 @@ export default function WorkNodesPage() {
     );
   }
 
-  async function handleLaunch() {
+  function handleLaunch() {
     if (!selectedProjectId || !selectedVersionId || !selectedMachineType) return;
+    const missingFiles = selectedFileIds.length === 0;
+    const missingRepos = repos.length > 0 && selectedRepoIds.length === 0;
+    if (missingFiles || missingRepos) {
+      setShowConfirmLaunch(true);
+      return;
+    }
+    void performLaunch();
+  }
+
+  async function performLaunch() {
+    if (!selectedProjectId || !selectedVersionId || !selectedMachineType) return;
+    setShowConfirmLaunch(false);
     setLaunching(true);
     setLaunchError(null);
     const req: WorkNodeLaunchRequest = {
@@ -1067,6 +1080,49 @@ export default function WorkNodesPage() {
                     className="px-4 py-2.5 border rounded-md text-sm text-gray-600 hover:bg-gray-100"
                   >
                     Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showConfirmLaunch && (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Launch without inputs"
+              className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center"
+            >
+              <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+                <h3 className="text-lg font-semibold mb-2">Launch without inputs?</h3>
+                <p className="text-sm text-gray-600 mb-3">
+                  You haven&apos;t added the following to this work node:
+                </p>
+                <ul className="text-sm text-gray-700 list-disc list-inside mb-4 space-y-1">
+                  {selectedFileIds.length === 0 && (
+                    <li>No input files attached to /data/</li>
+                  )}
+                  {repos.length > 0 && selectedRepoIds.length === 0 && (
+                    <li>No GitHub repos cloned into ~/repos/</li>
+                  )}
+                </ul>
+                <p className="text-sm text-gray-600 mb-4">
+                  You can launch without them, or go back and add them now.
+                </p>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmLaunch(false)}
+                    className="px-4 py-2 border rounded-md text-sm text-gray-700 hover:bg-gray-100"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => performLaunch()}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm hover:bg-indigo-700"
+                  >
+                    Launch anyway
                   </button>
                 </div>
               </div>

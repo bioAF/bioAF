@@ -309,6 +309,9 @@ describe("WorkNodesPage launch button posts project_id correctly", () => {
 
     await user.click(screen.getByRole("button", { name: /^Next: Review$/i }));
     await user.click(screen.getByRole("button", { name: /^Launch Work Node$/i }));
+    // Project scope -> no files possible -> confirmation modal opens; click through.
+    const confirm = await screen.findByRole("dialog", { name: /launch without/i });
+    await user.click(within(confirm).getByRole("button", { name: /launch anyway/i }));
 
     await waitFor(() => expect(mockPost).toHaveBeenCalled());
     const [, body] = mockPost.mock.calls[0];
@@ -332,6 +335,120 @@ async function advanceToStep2(user: ReturnType<typeof userEvent.setup>) {
   await user.selectOptions(scopeDropdown, "42");
   await user.click(screen.getByRole("button", { name: /^Next: Review$/i }));
 }
+
+describe("WorkNodesPage launch confirmation modal", () => {
+  function setupMocksWithRepos(repos: { id: number; display_name: string; git_ssh_url: string }[]) {
+    mockGet.mockImplementation((url: string) => {
+      if (url.includes("/api/v1/work-nodes/sessions")) return Promise.resolve({ sessions: [] });
+      if (url.includes("/api/v1/work-nodes/machine-types")) return Promise.resolve(machineTypes);
+      if (url.includes("/api/v1/github-repos")) return Promise.resolve({ repos });
+      if (url.includes("/api/v1/environments/1")) return Promise.resolve(envDetail);
+      if (url.includes("/api/v1/environments")) return Promise.resolve(environments);
+      if (url.includes("/api/projects")) return Promise.resolve(projects);
+      if (url.includes("/api/experiments/42/files")) return Promise.resolve(experimentFiles);
+      if (url.includes("/api/experiments/42/samples")) return Promise.resolve({ samples: [] });
+      if (url.includes("/api/experiments")) return Promise.resolve(experiments);
+      return Promise.resolve({});
+    });
+  }
+
+  async function fillFormAndAdvanceToStep2(
+    user: ReturnType<typeof userEvent.setup>,
+    { unselectFile }: { unselectFile?: boolean } = {}
+  ) {
+    render(<WorkNodesPage />);
+    const openButton = await screen.findByRole("button", { name: /^New Work Node$/i });
+    await user.click(openButton);
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: /Machine Profile/i })).toBeInTheDocument()
+    );
+    const profileGroup = screen.getByRole("group", { name: /machine profile/i });
+    await user.click(within(profileGroup).getByRole("button", { name: /^Medium\b/i }));
+    const envSelect = screen.getByRole("combobox", { name: /^Environment$/i });
+    await user.selectOptions(envSelect, "1");
+    await waitFor(() =>
+      expect(screen.getByRole("option", { name: /v1\.1 \(ready\)/i })).toBeInTheDocument()
+    );
+    const scopeGroup = screen.getByRole("group", { name: /link to/i });
+    const scopeDropdown = within(scopeGroup).getByRole("combobox");
+    await user.selectOptions(scopeDropdown, "42");
+    if (unselectFile) {
+      await waitFor(() =>
+        expect(screen.getByRole("group", { name: /file type filters/i })).toBeInTheDocument()
+      );
+      const fileCheckbox = screen.getByRole("checkbox", { name: "matrix.mtx.gz" });
+      await user.click(fileCheckbox);
+    }
+    await user.click(screen.getByRole("button", { name: /^Next: Review$/i }));
+  }
+
+  test("warns about both missing files and missing repos when repos exist but none selected", async () => {
+    const user = userEvent.setup();
+    setupMocksWithRepos([
+      { id: 1, display_name: "owner/repo", git_ssh_url: "git@github.com:owner/repo.git" },
+    ]);
+    mockPost.mockResolvedValue({});
+    await fillFormAndAdvanceToStep2(user, { unselectFile: true });
+
+    await user.click(screen.getByRole("button", { name: /^Launch Work Node$/i }));
+    const confirm = await screen.findByRole("dialog", { name: /launch without/i });
+    expect(within(confirm).getByText(/no input files/i)).toBeInTheDocument();
+    expect(within(confirm).getByText(/no github repos/i)).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  test("does NOT warn about repos when there are no configured repos at all", async () => {
+    const user = userEvent.setup();
+    setupMocksWithRepos([]);
+    mockPost.mockResolvedValue({});
+    await fillFormAndAdvanceToStep2(user, { unselectFile: true });
+
+    await user.click(screen.getByRole("button", { name: /^Launch Work Node$/i }));
+    const confirm = await screen.findByRole("dialog", { name: /launch without/i });
+    expect(within(confirm).getByText(/no input files/i)).toBeInTheDocument();
+    expect(within(confirm).queryByText(/no github repos/i)).not.toBeInTheDocument();
+  });
+
+  test("does NOT prompt at all when files are selected and repos do not exist", async () => {
+    const user = userEvent.setup();
+    setupMocksWithRepos([]);
+    mockPost.mockResolvedValue({});
+    await fillFormAndAdvanceToStep2(user);
+
+    await user.click(screen.getByRole("button", { name: /^Launch Work Node$/i }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalled());
+    expect(screen.queryByRole("dialog", { name: /launch without/i })).not.toBeInTheDocument();
+  });
+
+  test("Cancel in the confirmation modal returns user to the review step and skips POST", async () => {
+    const user = userEvent.setup();
+    setupMocksWithRepos([]);
+    mockPost.mockResolvedValue({});
+    await fillFormAndAdvanceToStep2(user, { unselectFile: true });
+
+    await user.click(screen.getByRole("button", { name: /^Launch Work Node$/i }));
+    const confirm = await screen.findByRole("dialog", { name: /launch without/i });
+    await user.click(within(confirm).getByRole("button", { name: /^Cancel$/i }));
+
+    expect(screen.queryByRole("dialog", { name: /launch without/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^Review$/i })).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  test("Launch anyway in the confirmation modal proceeds with the POST and closes the launch dialog", async () => {
+    const user = userEvent.setup();
+    setupMocksWithRepos([]);
+    mockPost.mockResolvedValue({});
+    await fillFormAndAdvanceToStep2(user, { unselectFile: true });
+
+    await user.click(screen.getByRole("button", { name: /^Launch Work Node$/i }));
+    const confirm = await screen.findByRole("dialog", { name: /launch without/i });
+    await user.click(within(confirm).getByRole("button", { name: /launch anyway/i }));
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalled());
+    expect(screen.queryByRole("dialog", { name: /launch without/i })).not.toBeInTheDocument();
+  });
+});
 
 describe("WorkNodesPage launch click feedback", () => {
   it("closes the dialog immediately when Launch Work Node is clicked, before POST resolves", async () => {
