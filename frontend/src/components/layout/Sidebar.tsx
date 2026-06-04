@@ -21,6 +21,25 @@ function ChevronIcon({ expanded }: { expanded: boolean }) {
   );
 }
 
+function CollapseToggleIcon({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg
+      className="w-5 h-5"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d={collapsed ? "M9 5l7 7-7 7" : "M15 19l-7-7 7-7"}
+      />
+    </svg>
+  );
+}
+
 function SidebarChildItem({
   child,
   isActive,
@@ -201,6 +220,8 @@ export function Sidebar() {
     setExpandedSection((prev) => (prev === label ? null : label));
   };
 
+  const [collapsed, setCollapsed] = useState(false);
+
   if (!backendReady || loading || componentsLoading) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900" data-testid="app-loading">
@@ -214,27 +235,49 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="w-64 bg-gray-900 text-white min-h-screen flex flex-col" data-testid="sidebar">
-      <div className="p-6 border-b border-gray-700">
-        <Link href="/dashboard" className="text-xl font-bold text-bioaf-400">
-          bioAF
-        </Link>
-        <p className="text-xs text-gray-400 mt-1">Comp Bio Automation Framework</p>
+    <aside
+      className={`${collapsed ? "w-12" : "w-64"} bg-gray-900 text-white min-h-screen flex flex-col transition-[width] duration-150`}
+      data-testid="sidebar"
+      data-collapsed={collapsed ? "true" : "false"}
+    >
+      <div className={`flex items-center border-b border-gray-700 ${collapsed ? "justify-center p-2" : "justify-between p-6"}`}>
+        {!collapsed && (
+          <div>
+            <Link href="/dashboard" className="text-xl font-bold text-bioaf-400">
+              bioAF
+            </Link>
+            <p className="text-xs text-gray-400 mt-1">Comp Bio Automation Framework</p>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!collapsed}
+          data-testid="sidebar-collapse-toggle"
+          className="p-1 rounded-md text-gray-400 hover:bg-gray-800 hover:text-white"
+        >
+          <CollapseToggleIcon collapsed={collapsed} />
+        </button>
       </div>
 
-      <nav className="flex-1 p-4 space-y-1 overflow-y-auto" data-testid="sidebar-nav">
-        {visibleSections.map((section) => (
-          <SidebarSection
-            key={section.label}
-            section={section}
-            pathname={pathname}
-            expanded={expandedSection === section.label}
-            onToggle={() => toggleSection(section.label)}
-          />
-        ))}
-      </nav>
+      {!collapsed && (
+        <nav className="flex-1 p-4 space-y-1 overflow-y-auto" data-testid="sidebar-nav">
+          {visibleSections.map((section) => (
+            <SidebarSection
+              key={section.label}
+              section={section}
+              pathname={pathname}
+              expanded={expandedSection === section.label}
+              onToggle={() => toggleSection(section.label)}
+            />
+          ))}
+        </nav>
+      )}
 
-      <div className="p-4 border-t border-gray-700">
+      {collapsed && <div className="flex-1" />}
+
+      <div className={`border-t border-gray-700 ${collapsed ? "p-2 text-center" : "p-4"}`}>
         <div className="text-xs text-gray-600">v{process.env.NEXT_PUBLIC_APP_VERSION}</div>
       </div>
     </aside>

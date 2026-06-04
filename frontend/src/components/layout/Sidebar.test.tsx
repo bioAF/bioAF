@@ -268,3 +268,57 @@ describe("Sidebar single-expanded behavior", () => {
     expect(screen.queryByTestId("children-Workbench")).not.toBeInTheDocument();
   });
 });
+
+describe("Sidebar collapse toggle", () => {
+  beforeEach(() => {
+    mockComponents.mockReturnValue({
+      components: [
+        makeComponent("nextflow_k8s", "pipeline_orchestration", true),
+        makeComponent("jupyterhub", "analysis", true),
+      ],
+      loading: false,
+      refetch: jest.fn(),
+    });
+  });
+
+  test("renders a collapse toggle button and starts expanded", () => {
+    render(<Sidebar />);
+
+    const sidebar = screen.getByTestId("sidebar");
+    expect(sidebar).toHaveAttribute("data-collapsed", "false");
+    expect(screen.getByTestId("sidebar-collapse-toggle")).toBeInTheDocument();
+    expect(screen.getByText("Pipelines")).toBeInTheDocument();
+  });
+
+  test("clicking the toggle collapses the sidebar and hides section labels", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+
+    const sidebar = screen.getByTestId("sidebar");
+    expect(sidebar).toHaveAttribute("data-collapsed", "true");
+    expect(screen.queryByText("Pipelines")).not.toBeInTheDocument();
+    expect(screen.queryByText("Workbench")).not.toBeInTheDocument();
+  });
+
+  test("clicking the toggle again re-expands the sidebar", () => {
+    render(<Sidebar />);
+
+    const toggle = screen.getByTestId("sidebar-collapse-toggle");
+    fireEvent.click(toggle);
+    fireEvent.click(toggle);
+
+    expect(screen.getByTestId("sidebar")).toHaveAttribute("data-collapsed", "false");
+    expect(screen.getByText("Pipelines")).toBeInTheDocument();
+  });
+
+  test("toggle button is reachable even when collapsed", () => {
+    render(<Sidebar />);
+
+    const toggle = screen.getByTestId("sidebar-collapse-toggle");
+    fireEvent.click(toggle);
+
+    // Still present after collapse, so the user can re-expand
+    expect(screen.getByTestId("sidebar-collapse-toggle")).toBeInTheDocument();
+  });
+});
