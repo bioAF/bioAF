@@ -11,6 +11,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
 import { resolveWorkNodeProfiles } from "@/lib/workNodeProfiles";
 import { SessionBucketFilter, type SessionBucket } from "@/components/shared/SessionBucketFilter";
+import { formatSessionStatusLabel, formatLinkedTo } from "@/lib/sessionStatus";
 import type {
   WorkNode,
   WorkNodeListResponse,
@@ -39,9 +40,14 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 function statusLabel(node: WorkNode): string {
-  if (node.status === "failed" && !node.access_url) return "Resource Failure";
   if (node.status === "stopping") return "Syncing outputs...";
-  return node.status;
+  // Prefer the backend-supplied failure taxonomy (failure_reason). Fall back
+  // to the historical "no access_url means resource failure" heuristic for
+  // sessions that predate the taxonomy migration.
+  if (node.status === "failed" && !node.failure_reason && !node.access_url) {
+    return "Resource Failure";
+  }
+  return formatSessionStatusLabel({ status: node.status, failure_reason: node.failure_reason });
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -506,6 +512,7 @@ export default function WorkNodesPage() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Linked to</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Machine Type</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Resources</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
@@ -518,6 +525,7 @@ export default function WorkNodesPage() {
                   {nodes.map((node) => (
                     <tr key={node.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setViewingNode(node)}>
                       <td className="px-4 py-3 text-sm">{node.user?.name || node.user?.email || "\u2014"}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700">{formatLinkedTo({ project: node.project }) ?? "\u2014"}</td>
                       <td className="px-4 py-3 text-sm text-gray-900">{node.machine_type || "\u2014"}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">{node.cpu_cores} CPU / {node.memory_gb} GB</td>
                       <td className="px-4 py-3">
@@ -586,7 +594,15 @@ export default function WorkNodesPage() {
                       {statusLabel(viewingNode)}
                     </span>
                   </div>
-                  {viewingNode.status === "failed" && !viewingNode.access_url && (
+                  {viewingNode.status === "failed" && viewingNode.failure_message && (
+                    <div className="bg-red-50 border border-red-200 rounded p-2 text-xs text-red-700">
+                      <div className="font-medium mb-1">
+                        {formatSessionStatusLabel({ status: viewingNode.status, failure_reason: viewingNode.failure_reason })}
+                      </div>
+                      <div className="font-mono whitespace-pre-wrap break-words">{viewingNode.failure_message}</div>
+                    </div>
+                  )}
+                  {viewingNode.status === "failed" && !viewingNode.failure_message && !viewingNode.access_url && (
                     <div className="bg-red-50 border border-red-200 rounded p-2 text-xs text-red-700">
                       GCP Resources Unavailable -- the VM could not be created. Try again later or choose a different machine type.
                     </div>
@@ -595,6 +611,12 @@ export default function WorkNodesPage() {
                     <span className="text-gray-500">User</span>
                     <span>{viewingNode.user?.name || viewingNode.user?.email || "\u2014"}</span>
                   </div>
+                  {formatLinkedTo({ project: viewingNode.project }) && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Linked to</span>
+                      <span>{formatLinkedTo({ project: viewingNode.project })}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span className="text-gray-500">Machine Type</span>
                     <span>{viewingNode.machine_type || "-"}</span>
@@ -603,6 +625,12 @@ export default function WorkNodesPage() {
                     <span className="text-gray-500">Resources</span>
                     <span>{viewingNode.cpu_cores} CPU / {viewingNode.memory_gb} GB RAM</span>
                   </div>
+                  {viewingNode.requested_disk_gb !== null && viewingNode.requested_disk_gb !== undefined && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Disk Size</span>
+                      <span>{viewingNode.requested_disk_gb} GB</span>
+                    </div>
+                  )}
                   {viewingNode.gce_instance_name && (
                     <div className="flex justify-between">
                       <span className="text-gray-500">VM Instance</span>

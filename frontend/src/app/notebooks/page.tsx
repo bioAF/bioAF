@@ -31,6 +31,7 @@ import type {
 import { RESOURCE_PROFILES } from "@/lib/types";
 import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
 import { SessionBucketFilter, type SessionBucket } from "@/components/shared/SessionBucketFilter";
+import { formatSessionStatusLabel, formatLinkedTo } from "@/lib/sessionStatus";
 
 const SESSION_STATUS_COLORS: Record<string, string> = {
   pending: "bg-gray-100 text-gray-800",
@@ -402,6 +403,7 @@ export default function NotebooksPage() {
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Linked to</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Resources</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start Time</th>
@@ -414,6 +416,7 @@ export default function NotebooksPage() {
                     <tr key={s.id} className={`cursor-pointer ${s.status === "idle" ? "bg-yellow-50 hover:bg-yellow-100" : "hover:bg-gray-50"}`} onClick={() => setViewingSession(s)}>
                       <td className="px-4 py-3 text-sm capitalize font-medium">{s.session_type}</td>
                       <td className="px-4 py-3 text-sm">{s.user?.name || s.user?.email || "\u2014"}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700">{formatLinkedTo({ experiment: s.experiment, project: s.project }) ?? "\u2014"}</td>
                       <td className="px-4 py-3 text-sm">{s.cpu_cores} CPU / {s.memory_gb} GB</td>
                       <td className="px-4 py-3">
                         {stoppingSessions.has(s.id) ? (
@@ -428,7 +431,7 @@ export default function NotebooksPage() {
                           </span>
                         ) : (
                           <span className={`text-xs px-2 py-1 rounded ${SESSION_STATUS_COLORS[s.status] || "bg-gray-100"}`}>
-                            {s.status}
+                            {formatSessionStatusLabel({ status: s.status, failure_reason: s.failure_reason })}
                           </span>
                         )}
                       </td>
@@ -483,6 +486,14 @@ export default function NotebooksPage() {
                   <button onClick={() => { setViewingSession(null); setProvenance(null); }} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
                 </div>
                 <div className="p-6 space-y-3">
+                  {viewingSession.status === "failed" && viewingSession.failure_message && (
+                    <div className="bg-red-50 border border-red-200 rounded p-3 text-xs text-red-700 mb-2">
+                      <div className="font-medium mb-1">
+                        {formatSessionStatusLabel({ status: viewingSession.status, failure_reason: viewingSession.failure_reason })}
+                      </div>
+                      <div className="font-mono whitespace-pre-wrap break-words">{viewingSession.failure_message}</div>
+                    </div>
+                  )}
                   {(() => {
                     // Resolve environment name from loaded environments
                     let envLabel: string | null = null;
@@ -508,11 +519,12 @@ export default function NotebooksPage() {
                     }
                     return [
                       { label: "Type", value: viewingSession.session_type },
-                      { label: "Status", value: viewingSession.status },
+                      { label: "Status", value: formatSessionStatusLabel({ status: viewingSession.status, failure_reason: viewingSession.failure_reason }) },
                       { label: "User", value: viewingSession.user?.name || viewingSession.user?.email },
                       { label: "Environment", value: envLabel },
                       { label: "Resources", value: `${viewingSession.cpu_cores} CPU / ${viewingSession.memory_gb} GB RAM` },
-                      { label: "Experiment", value: viewingSession.experiment?.name },
+                      { label: "Disk Size", value: viewingSession.requested_disk_gb != null ? `${viewingSession.requested_disk_gb} GB` : null },
+                      { label: "Linked to", value: formatLinkedTo({ experiment: viewingSession.experiment, project: viewingSession.project }) },
                       { label: "Started", value: viewingSession.started_at ? new Date(viewingSession.started_at).toLocaleString() : null },
                       { label: "Uptime", value: uptimeLabel },
                       { label: "Access URL", value: viewingSession.proxy_url || null },
