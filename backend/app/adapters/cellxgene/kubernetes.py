@@ -335,10 +335,15 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         configuration = client.Configuration()
         configuration.host = endpoint
         configuration.ssl_ca_cert = ca_file.name
-        configuration.api_key = {"authorization": f"Bearer {token}"}
+
+        api_client = client.ApiClient(configuration)
+        # See backend/app/adapters/notebooks/kubernetes.py for the reasoning:
+        # Configuration.api_key is a silent no-op on the kubernetes-python
+        # release we ship with, so the header must be installed directly.
+        api_client.set_default_header("Authorization", f"Bearer {token}")
 
         self._client_created_at = time.monotonic()
-        return client.ApiClient(configuration)
+        return api_client
 
     def _is_token_expired(self) -> bool:
         if self._client_created_at == 0.0:
@@ -510,7 +515,12 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
             api_client = self._get_api_client()
             k8s_config = api_client.configuration
             svc_url = f"{k8s_config.host}/api/v1/namespaces/{namespace}/services/{name}"
-            headers = {"Authorization": list(k8s_config.api_key.values())[0]}
+            auth = api_client.default_headers.get("Authorization")
+            if not auth:
+                raise RuntimeError(
+                    "K8s ApiClient has no Authorization header; _build_out_of_cluster_client did not set one."
+                )
+            headers = {"Authorization": auth}
 
             access_url = None
             for _ in range(36):

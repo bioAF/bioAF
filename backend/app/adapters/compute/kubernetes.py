@@ -371,10 +371,15 @@ class KubernetesComputeProvider(ComputeProvider):
         configuration = client.Configuration()
         configuration.host = endpoint
         configuration.ssl_ca_cert = ca_file.name
-        configuration.api_key = {"authorization": f"Bearer {token}"}
+
+        api_client = client.ApiClient(configuration)
+        # See backend/app/adapters/notebooks/kubernetes.py for the reasoning:
+        # Configuration.api_key is a silent no-op on the kubernetes-python
+        # release we ship with, so the header must be installed directly.
+        api_client.set_default_header("Authorization", f"Bearer {token}")
 
         self._client_created_at = time.monotonic()
-        return client.ApiClient(configuration)
+        return api_client
 
     def _is_token_expired(self) -> bool:
         """Check if the cached GCP access token is older than the TTL."""

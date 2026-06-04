@@ -198,3 +198,49 @@ class TestCellxgeneNamespaceSetup:
         mock_core_v1.create_namespace.assert_not_called()
         mock_core_v1.create_namespaced_service_account.assert_not_called()
         mock_rbac_v1.create_namespaced_role_binding.assert_not_called()
+
+
+import base64  # noqa: E402
+
+_DUMMY_CA_PEM = (
+    b"-----BEGIN CERTIFICATE-----\n"
+    b"MIIBkTCB+wIJAJxYn4q3CmCgMA0GCSqGSIb3DQEBCwUAMBMxETAPBgNVBAMMCHRl\n"
+    b"c3QtY2EwHhcNMjYwMTAxMDAwMDAwWhcNMjcwMTAxMDAwMDAwWjATMREwDwYDVQQD\n"
+    b"DAh0ZXN0LWNhMIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDF7Z2KvfuWkLlj\n"
+    b"-----END CERTIFICATE-----\n"
+)
+
+
+class TestCellxgeneOutOfClusterClientAuthHeader:
+    """The cellxgene K8s client must install Authorization via default_headers.
+
+    Mirrors backend/tests/test_k8s_notebook_adapter.py: Configuration.api_key
+    is a silent no-op on the kubernetes-python release we ship, so the bearer
+    token must be set via set_default_header. Without this, every cellxgene
+    deployment poll would hit the cluster anonymously and 401.
+    """
+
+    def test_builds_client_with_authorization_default_header(self, monkeypatch):
+        monkeypatch.delenv("BIOAF_COMPUTE_MODE", raising=False)
+        provider = KubernetesCellxgeneProvider()
+        provider._cluster_config = {
+            "gke_cluster_endpoint": "1.2.3.4",
+            "gke_cluster_ca_cert": base64.b64encode(_DUMMY_CA_PEM).decode(),
+            "gcp_credential_source": "vm_default",
+            "gcp_bootstrap_sa_email": "bioaf-bootstrap@example.iam.gserviceaccount.com",
+        }
+        fake_creds = MagicMock()
+        fake_creds.token = "test-token-xyz"
+        with patch(
+            "app.services.credential_injector.load_gcp_credentials",
+            return_value=fake_creds,
+        ):
+            api_client = provider._build_out_of_cluster_client()
+
+        headers = api_client.default_headers
+        auth_key = next((k for k in headers if k.lower() == "authorization"), None)
+        assert auth_key is not None, (
+            "ApiClient.default_headers has no Authorization entry; the kubernetes "
+            "client will send anonymous requests and the cluster will 401."
+        )
+        assert headers[auth_key] == "Bearer test-token-xyz"

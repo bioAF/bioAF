@@ -63,8 +63,20 @@ class KubernetesNotebookProvider(NotebookProvider):
         self._session_factory = session_factory
         self._api_client: client.ApiClient | None = None
         self._client_created_at: float = 0.0
+        # Fingerprint of the cluster the cached _api_client was built for.
+        # Used to invalidate the cache when platform_config now points at a
+        # different cluster (e.g. after a teardown + redeploy).
+        self._cached_cluster_fingerprint: tuple[str, str] = ("", "")
         self._cluster_config: dict | None = None
         self._namespace_ready = False
+
+    def _cluster_fingerprint(self) -> tuple[str, str]:
+        """(endpoint, ca_cert) identity of the cluster in the current config."""
+        cfg = self._cluster_config or {}
+        return (
+            cfg.get("gke_cluster_endpoint", "") or "",
+            cfg.get("gke_cluster_ca_cert", "") or "",
+        )
 
     @property
     def is_local(self) -> bool:
@@ -129,9 +141,6 @@ class KubernetesNotebookProvider(NotebookProvider):
                 ],
             )
 
-        if force:
-            self._api_client = None
-
         return self._cluster_config
 
     def _build_out_of_cluster_client(self) -> client.ApiClient:
@@ -160,10 +169,18 @@ class KubernetesNotebookProvider(NotebookProvider):
         configuration = client.Configuration()
         configuration.host = endpoint
         configuration.ssl_ca_cert = ca_file.name
-        configuration.api_key = {"authorization": f"Bearer {token}"}
+
+        api_client = client.ApiClient(configuration)
+        # The kubernetes-python client does not route Configuration.api_key
+        # into request headers unless an OpenAPI security scheme references
+        # it. The K8s OpenAPI spec the library ships with does not declare
+        # such a scheme for the simple bearer-token case, so api_key here is
+        # a silent no-op and every request goes out anonymously, yielding
+        # 401 Unauthorized. Set the header on the client directly instead.
+        api_client.set_default_header("Authorization", f"Bearer {token}")
 
         self._client_created_at = time.monotonic()
-        return client.ApiClient(configuration)
+        return api_client
 
     def _is_token_expired(self) -> bool:
         """Check if the cached GCP access token is older than the TTL."""
@@ -174,14 +191,31 @@ class KubernetesNotebookProvider(NotebookProvider):
     async def _get_api_client_async(self) -> client.ApiClient:
         """Get or create a K8s ApiClient, trying incluster first.
 
+        Re-reads platform_config on every call so that a cluster teardown +
+        redeploy (which rewrites gke_cluster_endpoint and gke_cluster_ca_cert)
+        invalidates the cached client. Without this check the backend keeps
+        the previous cluster's endpoint, CA, and bearer token in memory until
+        the GCP access token TTL elapses, and every notebook launch in that
+        window fails with 401 Unauthorized.
+
         Falls back to platform_config credentials when not running in a pod.
         """
-        if self._api_client is not None and not self._is_token_expired():
+        await self.load_cluster_config(force=True)
+        current_fp = self._cluster_fingerprint()
+
+        cluster_changed = self._api_client is not None and self._cached_cluster_fingerprint != current_fp
+        if self._api_client is not None and not self._is_token_expired() and not cluster_changed:
             return self._api_client
 
         if self._is_token_expired():
             logger.info("GCP access token approaching expiry, refreshing K8s client")
-            self._api_client = None
+        elif cluster_changed:
+            logger.info(
+                "Cluster identity changed in platform_config, rebuilding K8s client (old endpoint=%s, new endpoint=%s)",
+                self._cached_cluster_fingerprint[0],
+                current_fp[0],
+            )
+        self._api_client = None
 
         try:
             config.load_incluster_config()
@@ -189,13 +223,10 @@ class KubernetesNotebookProvider(NotebookProvider):
             logger.info("Using incluster K8s config")
         except Exception:
             logger.info("Not running in cluster, using platform_config credentials")
-            await self.load_cluster_config(force=True)
             try:
                 self._api_client = self._build_out_of_cluster_client()
-                logger.info(
-                    "K8s client built for endpoint %s",
-                    (self._cluster_config or {}).get("gke_cluster_endpoint"),
-                )
+                self._cached_cluster_fingerprint = current_fp
+                logger.info("K8s client built for endpoint %s", current_fp[0])
             except Exception:
                 logger.exception("Failed to build out-of-cluster K8s client")
                 raise
@@ -842,7 +873,14 @@ class KubernetesNotebookProvider(NotebookProvider):
                             break
                     if pod.status.phase in ("Failed", "Unknown"):
                         logger.error("Pod %s entered %s phase", pod_name, pod.status.phase)
-                        await self._update_session_in_db(session_id, status="failed", access_url=None)
+                        reason, message = await self._classify_pod_failure_from_api(core_client, pod_name, namespace)
+                        await self._update_session_in_db(
+                            session_id,
+                            status="failed",
+                            access_url=None,
+                            failure_reason=reason,
+                            failure_message=message,
+                        )
                         return
                 except Exception:
                     pass
@@ -850,7 +888,14 @@ class KubernetesNotebookProvider(NotebookProvider):
 
             if not pod_ready:
                 logger.error("Pod %s not ready after 5 min", pod_name)
-                await self._update_session_in_db(session_id, status="failed", access_url=None)
+                reason, message = await self._classify_pod_failure_from_api(core_client, pod_name, namespace)
+                await self._update_session_in_db(
+                    session_id,
+                    status="failed",
+                    access_url=None,
+                    failure_reason=reason,
+                    failure_message=message,
+                )
                 return
 
             # Wait for LoadBalancer external IP (up to 3 minutes)
@@ -861,7 +906,12 @@ class KubernetesNotebookProvider(NotebookProvider):
             api_client = self._get_api_client()
             config = api_client.configuration
             svc_url = f"{config.host}/api/v1/namespaces/{namespace}/services/{service_name}"
-            headers = {"Authorization": list(config.api_key.values())[0]}
+            auth = api_client.default_headers.get("Authorization")
+            if not auth:
+                raise RuntimeError(
+                    "K8s ApiClient has no Authorization header; _build_out_of_cluster_client did not set one."
+                )
+            headers = {"Authorization": auth}
 
             access_url = None
             for attempt in range(36):
@@ -895,17 +945,54 @@ class KubernetesNotebookProvider(NotebookProvider):
 
             await self._update_session_in_db(session_id, status="running", access_url=access_url)
 
-        except Exception:
+        except Exception as e:
+            from app.adapters.failure_classification import FAILURE_REASON_UNKNOWN
+
             logger.exception("Background poll failed for session %s", session_id)
-            await self._update_session_in_db(session_id, status="failed", access_url=None)
+            await self._update_session_in_db(
+                session_id,
+                status="failed",
+                access_url=None,
+                failure_reason=FAILURE_REASON_UNKNOWN,
+                failure_message=f"Background poll raised: {e}",
+            )
+
+    async def _classify_pod_failure_from_api(
+        self,
+        core_client,
+        pod_name: str,
+        namespace: str,
+    ) -> tuple[str, str]:
+        """Query the K8s API for events on `pod_name` and run them through the
+        shared classifier. Returns (failure_reason, failure_message) even if
+        the API call fails (falls back to "unknown")."""
+        from app.adapters.failure_classification import classify_pod_failure, FAILURE_REASON_UNKNOWN
+
+        events: list[dict] = []
+        try:
+            field_selector = f"involvedObject.name={pod_name}"
+            evt_list = core_client.list_namespaced_event(namespace=namespace, field_selector=field_selector)
+            for evt in evt_list.items or []:
+                events.append(
+                    {"reason": getattr(evt, "reason", "") or "", "message": getattr(evt, "message", "") or ""}
+                )
+        except Exception:
+            logger.exception("Failed to fetch pod events for %s/%s", namespace, pod_name)
+            return (FAILURE_REASON_UNKNOWN, "Pod did not become ready and pod events were unavailable.")
+        return classify_pod_failure(events)
 
     async def _update_session_in_db(
         self,
         session_id: int,
         status: str,
         access_url: str | None,
+        failure_reason: str | None = None,
+        failure_message: str | None = None,
     ) -> None:
-        """Update a notebook session's status and access_url in the DB."""
+        """Update a notebook session's status, access_url, and (on failure)
+        the failure_reason / failure_message taxonomy. Only writes the
+        failure fields when they are set so we don't clobber a row that was
+        already explained by the service layer."""
         if not self._session_factory:
             logger.warning("No session_factory, cannot update session %s in DB", session_id)
             return
@@ -914,16 +1001,34 @@ class KubernetesNotebookProvider(NotebookProvider):
             async with self._session_factory() as db:
                 from sqlalchemy import text
 
-                await db.execute(
-                    text("UPDATE compute_sessions SET status = :status, access_url = :url WHERE id = :id"),
-                    {"status": status, "url": access_url, "id": session_id},
-                )
+                if failure_reason is not None or failure_message is not None:
+                    await db.execute(
+                        text(
+                            "UPDATE compute_sessions "
+                            "SET status = :status, access_url = :url, "
+                            "    failure_reason = :reason, failure_message = :msg "
+                            "WHERE id = :id"
+                        ),
+                        {
+                            "status": status,
+                            "url": access_url,
+                            "reason": failure_reason,
+                            "msg": failure_message,
+                            "id": session_id,
+                        },
+                    )
+                else:
+                    await db.execute(
+                        text("UPDATE compute_sessions SET status = :status, access_url = :url WHERE id = :id"),
+                        {"status": status, "url": access_url, "id": session_id},
+                    )
                 await db.commit()
                 logger.info(
-                    "Updated session %s: status=%s access_url=%s",
+                    "Updated session %s: status=%s access_url=%s failure_reason=%s",
                     session_id,
                     status,
                     access_url,
+                    failure_reason,
                 )
         except Exception:
             logger.exception("Failed to update session %s in DB", session_id)

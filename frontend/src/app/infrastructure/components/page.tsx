@@ -18,6 +18,11 @@ import { GCP_REGIONS, zonesForRegion } from "@/lib/gcp-regions";
 import { api } from "@/lib/api";
 import { invalidateComponentCache } from "@/hooks/useComponents";
 import { notebookSupportForMachine } from "@/lib/notebookCapacity";
+import {
+  INTERACTIVE_MACHINE_OPTIONS,
+  PIPELINE_MACHINE_OPTIONS,
+  formatMachineOptionLabel,
+} from "@/lib/clusterMachineOptions";
 
 interface TerraformStatus {
   terraform_initialized: boolean;
@@ -94,21 +99,6 @@ interface ClusterConfig {
   k8s_interactive_machine_type: string;
   k8s_interactive_max_nodes: number;
 }
-
-const PIPELINE_MACHINE_OPTIONS = [
-  { value: "n2-highmem-8", label: "8 vCPU / 64 GB RAM", description: "Small pipelines" },
-  { value: "n2-highmem-16", label: "16 vCPU / 128 GB RAM", description: "Standard pipelines (recommended)" },
-  { value: "n2-highmem-32", label: "32 vCPU / 256 GB RAM", description: "Large or multi-sample pipelines" },
-];
-
-const INTERACTIVE_MACHINE_OPTIONS = [
-  { value: "n2-standard-4", label: "4 vCPU / 16 GB RAM", description: "Light analysis (recommended)" },
-  { value: "n2-standard-8", label: "8 vCPU / 32 GB RAM", description: "General-purpose analysis" },
-  { value: "n2-highmem-8", label: "8 vCPU / 64 GB RAM", description: "Large datasets" },
-  { value: "n2-highmem-16", label: "16 vCPU / 128 GB RAM", description: "Very large datasets" },
-  { value: "n2-standard-32", label: "32 vCPU / 128 GB RAM", description: "Compute-intensive analysis" },
-  { value: "n2-highmem-32", label: "32 vCPU / 256 GB RAM", description: "Extreme memory workloads" },
-];
 
 const CATEGORY_LABELS: Record<string, string> = {
   pipeline_orchestration: "Pipeline Orchestration",
@@ -773,7 +763,7 @@ export default function InfraComponentsPage() {
                             >
                               {PIPELINE_MACHINE_OPTIONS.map((opt) => (
                                 <option key={opt.value} value={opt.value}>
-                                  {opt.label} - {opt.description}
+                                  {formatMachineOptionLabel(opt)}
                                 </option>
                               ))}
                             </select>
@@ -851,7 +841,7 @@ export default function InfraComponentsPage() {
                             >
                               {INTERACTIVE_MACHINE_OPTIONS.map((opt) => (
                                 <option key={opt.value} value={opt.value}>
-                                  {opt.label} - {opt.description}
+                                  {formatMachineOptionLabel(opt)}
                                 </option>
                               ))}
                             </select>

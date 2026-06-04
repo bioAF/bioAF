@@ -10,6 +10,9 @@ import { api, ApiError } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
 import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
 import { resolveWorkNodeProfiles } from "@/lib/workNodeProfiles";
+import { SessionBucketFilter, type SessionBucket } from "@/components/shared/SessionBucketFilter";
+import { formatSessionStatusLabel, formatLinkedTo } from "@/lib/sessionStatus";
+import { prefillFromWorkNode } from "@/lib/sessionRecreate";
 import type {
   WorkNode,
   WorkNodeListResponse,
@@ -38,9 +41,14 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 function statusLabel(node: WorkNode): string {
-  if (node.status === "failed" && !node.access_url) return "Resource Failure";
   if (node.status === "stopping") return "Syncing outputs...";
-  return node.status;
+  // Prefer the backend-supplied failure taxonomy (failure_reason). Fall back
+  // to the historical "no access_url means resource failure" heuristic for
+  // sessions that predate the taxonomy migration.
+  if (node.status === "failed" && !node.failure_reason && !node.access_url) {
+    return "Resource Failure";
+  }
+  return formatSessionStatusLabel({ status: node.status, failure_reason: node.failure_reason });
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -54,6 +62,7 @@ export default function WorkNodesPage() {
   const { canAccess, loading: permLoading } = usePermissions();
 
   const [nodes, setNodes] = useState<WorkNode[]>([]);
+  const [bucket, setBucket] = useState<SessionBucket>("active");
   const [loading, setLoading] = useState(true);
   const [showLaunch, setShowLaunch] = useState(false);
   const [viewingNode, setViewingNode] = useState<WorkNode | null>(null);
@@ -101,7 +110,7 @@ export default function WorkNodesPage() {
     if (!canAccess("work_nodes", "view")) { router.push("/dashboard"); return; }
     loadNodes();
     loadRepos();
-  }, [router, permLoading, canAccess]);
+  }, [router, permLoading, canAccess, bucket]);
 
   // Auto-refresh while starting
   useEffect(() => {
@@ -113,14 +122,14 @@ export default function WorkNodesPage() {
 
   const loadNodes = useCallback(async () => {
     try {
-      const data = await api.get<WorkNodeListResponse>("/api/v1/work-nodes/sessions");
+      const data = await api.get<WorkNodeListResponse>(`/api/v1/work-nodes/sessions?bucket=${bucket}`);
       setNodes(data.sessions);
     } catch {
       // ignore
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [bucket]);
 
   async function loadRepos() {
     try {
@@ -184,6 +193,47 @@ export default function WorkNodesPage() {
       setMachineTypes(mtData);
       setEnvironments(envData.environments);
     } catch {}
+  }
+
+  async function handleRecreateWorkNode(source: WorkNode) {
+    const prefill = prefillFromWorkNode(source);
+    setLaunchError(null);
+    setShowLaunch(true);
+    setLaunchStep(1);
+    setScopeType("project");
+    setSelectedExperimentId(null);
+    setSelectedProjectId(prefill.project_id);
+    setSelectedMachineType(prefill.machine_type ?? "");
+    setSelectedFileIds(prefill.input_file_ids);
+    setSelectedRepoIds(prefill.github_repo_ids);
+    if (prefill.environment_version_id) {
+      // Try to resolve the environment that owns this version so the env
+      // selector renders the right card.
+      for (const env of environments) {
+        if (env.latest_version?.id === prefill.environment_version_id) {
+          setSelectedEnvId(env.id);
+          break;
+        }
+      }
+      setSelectedVersionId(prefill.environment_version_id);
+    }
+    setViewingNode(null);
+    // Ensure the reference data is loaded even if the user hasn't opened the
+    // launch dialog yet this session.
+    if (projects.length === 0 || machineTypes.length === 0 || environments.length === 0) {
+      try {
+        const [projectData, expData, mtData, envData] = await Promise.all([
+          api.get<ProjectListResponse>("/api/projects?page_size=100"),
+          api.get<ExperimentListResponse>("/api/experiments?page_size=100"),
+          api.get<MachineType[]>("/api/v1/work-nodes/machine-types"),
+          api.get<EnvironmentListResponse>("/api/v1/environments?type=work_node"),
+        ]);
+        setProjects(projectData.projects);
+        setExperiments(expData.experiments);
+        setMachineTypes(mtData);
+        setEnvironments(envData.environments);
+      } catch {}
+    }
   }
 
   function handleScopeChange(scope: "experiment" | "project") {
@@ -488,10 +538,14 @@ export default function WorkNodesPage() {
           </div>
 
           {/* Node list */}
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base font-semibold text-gray-900">Work Nodes</h2>
+            <SessionBucketFilter value={bucket} onChange={setBucket} />
+          </div>
           {nodes.length === 0 ? (
             <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
               <p className="text-gray-500">
-                No work nodes. Launch one to get an SSH-accessible compute environment.
+                No work nodes in this view.
               </p>
             </div>
           ) : (
@@ -500,6 +554,7 @@ export default function WorkNodesPage() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Linked to</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Machine Type</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Resources</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
@@ -512,6 +567,7 @@ export default function WorkNodesPage() {
                   {nodes.map((node) => (
                     <tr key={node.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setViewingNode(node)}>
                       <td className="px-4 py-3 text-sm">{node.user?.name || node.user?.email || "\u2014"}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700">{formatLinkedTo({ project: node.project }) ?? "\u2014"}</td>
                       <td className="px-4 py-3 text-sm text-gray-900">{node.machine_type || "\u2014"}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">{node.cpu_cores} CPU / {node.memory_gb} GB</td>
                       <td className="px-4 py-3">
@@ -550,6 +606,14 @@ export default function WorkNodesPage() {
                               Stop
                             </button>
                           )}
+                          {canAccess("work_nodes", "launch") && (
+                            <button
+                              onClick={() => handleRecreateWorkNode(node)}
+                              className="text-xs px-2 py-1 border border-green-600 text-green-700 rounded hover:bg-green-50"
+                            >
+                              Recreate
+                            </button>
+                          )}
                           <button
                             onClick={() => setViewingNode(node)}
                             className="text-xs px-2 py-1 border border-indigo-600 text-indigo-600 rounded hover:bg-indigo-50"
@@ -580,7 +644,15 @@ export default function WorkNodesPage() {
                       {statusLabel(viewingNode)}
                     </span>
                   </div>
-                  {viewingNode.status === "failed" && !viewingNode.access_url && (
+                  {viewingNode.status === "failed" && viewingNode.failure_message && (
+                    <div className="bg-red-50 border border-red-200 rounded p-2 text-xs text-red-700">
+                      <div className="font-medium mb-1">
+                        {formatSessionStatusLabel({ status: viewingNode.status, failure_reason: viewingNode.failure_reason })}
+                      </div>
+                      <div className="font-mono whitespace-pre-wrap break-words">{viewingNode.failure_message}</div>
+                    </div>
+                  )}
+                  {viewingNode.status === "failed" && !viewingNode.failure_message && !viewingNode.access_url && (
                     <div className="bg-red-50 border border-red-200 rounded p-2 text-xs text-red-700">
                       GCP Resources Unavailable -- the VM could not be created. Try again later or choose a different machine type.
                     </div>
@@ -589,6 +661,12 @@ export default function WorkNodesPage() {
                     <span className="text-gray-500">User</span>
                     <span>{viewingNode.user?.name || viewingNode.user?.email || "\u2014"}</span>
                   </div>
+                  {formatLinkedTo({ project: viewingNode.project }) && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Linked to</span>
+                      <span>{formatLinkedTo({ project: viewingNode.project })}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span className="text-gray-500">Machine Type</span>
                     <span>{viewingNode.machine_type || "-"}</span>
@@ -597,6 +675,12 @@ export default function WorkNodesPage() {
                     <span className="text-gray-500">Resources</span>
                     <span>{viewingNode.cpu_cores} CPU / {viewingNode.memory_gb} GB RAM</span>
                   </div>
+                  {viewingNode.requested_disk_gb !== null && viewingNode.requested_disk_gb !== undefined && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Disk Size</span>
+                      <span>{viewingNode.requested_disk_gb} GB</span>
+                    </div>
+                  )}
                   {viewingNode.gce_instance_name && (
                     <div className="flex justify-between">
                       <span className="text-gray-500">VM Instance</span>

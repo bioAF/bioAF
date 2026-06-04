@@ -19,6 +19,7 @@ from app.schemas.notebook_session import (
     SessionListResponse,
     UserSummary,
     ExperimentSummary,
+    ProjectSummary,
 )
 from app.services.notebook_service import NotebookService
 from app.adapters.registry import get_notebook_adapter
@@ -59,16 +60,37 @@ def _experiment_summary(experiment) -> ExperimentSummary | None:
     return ExperimentSummary(id=experiment.id, name=experiment.name)
 
 
+def _project_summary(project) -> ProjectSummary | None:
+    if not project:
+        return None
+    return ProjectSummary(id=project.id, name=project.name)
+
+
 def _session_response(ns) -> SessionResponse:
+    # accessed_files is the NotebookSessionFile join. Filter for input rows so
+    # the frontend's Recreate flow can re-select the same files.
+    input_file_ids = None
+    accessed = getattr(ns, "accessed_files", None)
+    if accessed is not None:
+        try:
+            input_file_ids = sorted(
+                {nsf.file_id for nsf in accessed if getattr(nsf, "access_type", "input") == "input"}
+            )
+        except Exception:
+            input_file_ids = None
     return SessionResponse(
         id=ns.id,
         session_type=ns.session_type,
         user=_user_summary(ns.user),
         experiment=_experiment_summary(ns.experiment),
+        project=_project_summary(getattr(ns, "project", None)),
         resource_profile=ns.resource_profile,
         cpu_cores=ns.cpu_cores,
         memory_gb=ns.memory_gb,
+        requested_disk_gb=ns.requested_disk_gb,
         status=ns.status,
+        failure_reason=ns.failure_reason,
+        failure_message=ns.failure_message,
         idle_since=ns.idle_since,
         proxy_url=ns.access_url or ns.proxy_url,
         started_at=ns.started_at,
@@ -77,6 +99,7 @@ def _session_response(ns) -> SessionResponse:
         git_branch_name=ns.git_branch_name,
         git_commit_hash=ns.git_commit_hash,
         environment_version_id=ns.environment_version_id,
+        input_file_ids=input_file_ids,
     )
 
 
@@ -147,7 +170,15 @@ async def _sync_session_from_k8s(ns, session: AsyncSession) -> None:
                 api_client = adapter._get_api_client()
                 config = api_client.configuration
                 url = f"{config.host}/api/v1/namespaces/{namespace}/services/{svc_name}"
-                headers = {"Authorization": list(config.api_key.values())[0]}
+                # Auth header lives on the ApiClient's default_headers, not on
+                # Configuration.api_key (which the kubernetes-python lib does
+                # not auto-route into requests). See _build_out_of_cluster_client.
+                auth = api_client.default_headers.get("Authorization")
+                if not auth:
+                    raise RuntimeError(
+                        "K8s ApiClient has no Authorization header; _build_out_of_cluster_client did not set one."
+                    )
+                headers = {"Authorization": auth}
                 resp = httpx.get(
                     url,
                     headers=headers,
@@ -204,6 +235,7 @@ async def list_resource_profiles(
 async def list_sessions(
     session_type: str | None = None,
     status: str | None = None,
+    bucket: Literal["active", "recent", "all"] | None = None,
     current_user: dict = require_permission("notebooks", "view"),
     session: AsyncSession = Depends(get_session),
 ):
@@ -218,6 +250,7 @@ async def list_sessions(
         user_id=filter_user_id,
         session_type=session_type,
         status=status,
+        bucket=bucket,
     )
 
     # Sync active sessions that are missing access_url or still starting

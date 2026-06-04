@@ -14,6 +14,13 @@ class UserSummary(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ProjectSummary(BaseModel):
+    id: int
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
 class WorkNodeLaunchRequest(BaseModel):
     project_id: int
     environment_version_id: int
@@ -27,13 +34,17 @@ class WorkNodeResponse(BaseModel):
     session_type: str
     user: UserSummary | None = None
     project_id: int | None = None
+    project: ProjectSummary | None = None
     environment_version_id: int | None = None
     machine_type: str | None = None
     input_file_ids: list[int] | None = None
     resource_profile: str
     cpu_cores: int
     memory_gb: int
+    requested_disk_gb: int | None = None
     status: str
+    failure_reason: str | None = None
+    failure_message: str | None = None
     access_url: str | None = None
     gce_instance_name: str | None = None
     gce_zone: str | None = None

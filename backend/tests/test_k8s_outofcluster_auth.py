@@ -66,7 +66,15 @@ class TestOutOfClusterAuth:
 
     @pytest.mark.asyncio
     async def test_out_of_cluster_client_uses_endpoint_and_ca(self, adapter_k8s_mode, platform_config):
-        """_build_out_of_cluster_client configures ApiClient with endpoint + CA."""
+        """_build_out_of_cluster_client configures ApiClient with endpoint + CA
+        and installs the bearer token via set_default_header.
+
+        Note: the bearer token must be set via ApiClient.set_default_header,
+        not Configuration.api_key. The kubernetes-python client we ship does
+        not route api_key into request headers unless an OpenAPI security
+        scheme references it, so api_key is a silent no-op and the cluster
+        sees anonymous requests -> 401.
+        """
         adapter_k8s_mode._cluster_config = platform_config
 
         with patch(
@@ -77,7 +85,9 @@ class TestOutOfClusterAuth:
                 mock_config = MagicMock()
                 mock_config_cls.return_value = mock_config
 
-                with patch("app.adapters.compute.kubernetes.client.ApiClient"):
+                with patch("app.adapters.compute.kubernetes.client.ApiClient") as mock_apiclient_cls:
+                    mock_apiclient = MagicMock()
+                    mock_apiclient_cls.return_value = mock_apiclient
                     with patch(
                         "app.adapters.compute.kubernetes._get_gcp_token",
                         return_value="fake-token",
@@ -86,7 +96,7 @@ class TestOutOfClusterAuth:
 
                 mock_config_cls.assert_called_once()
                 assert mock_config.host == "https://10.0.0.1"
-                assert mock_config.api_key == {"authorization": "Bearer fake-token"}
+                mock_apiclient.set_default_header.assert_called_once_with("Authorization", "Bearer fake-token")
 
     @pytest.mark.asyncio
     async def test_submit_job_works_with_out_of_cluster_auth(self, adapter_k8s_mode, platform_config):
