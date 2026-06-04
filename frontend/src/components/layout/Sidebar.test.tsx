@@ -218,3 +218,53 @@ describe("Sidebar component gating", () => {
     expect(screen.getByText("Pipelines")).toBeInTheDocument();
   });
 });
+
+describe("Sidebar single-expanded behavior", () => {
+  beforeEach(() => {
+    mockComponents.mockReturnValue({
+      components: [
+        makeComponent("nextflow_k8s", "pipeline_orchestration", true),
+        makeComponent("jupyterhub", "analysis", true),
+        makeComponent("qc_dashboard", "visualization", true),
+        makeComponent("cellxgene", "visualization", true),
+      ],
+      loading: false,
+      refetch: jest.fn(),
+    });
+  });
+
+  test("expanding a second section collapses the first", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByText("Pipelines"));
+    expect(screen.getByTestId("children-Pipelines")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Workbench"));
+
+    expect(screen.getByTestId("children-Workbench")).toBeInTheDocument();
+    expect(screen.queryByTestId("children-Pipelines")).not.toBeInTheDocument();
+  });
+
+  test("clicking an expanded section collapses it leaving none expanded", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByText("Pipelines"));
+    expect(screen.getByTestId("children-Pipelines")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Pipelines"));
+
+    expect(screen.queryByTestId("children-Pipelines")).not.toBeInTheDocument();
+  });
+
+  test("only one section is expanded at any time across many toggles", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByText("Pipelines"));
+    fireEvent.click(screen.getByText("Workbench"));
+    fireEvent.click(screen.getByText("Results"));
+
+    expect(screen.getByTestId("children-Results")).toBeInTheDocument();
+    expect(screen.queryByTestId("children-Pipelines")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("children-Workbench")).not.toBeInTheDocument();
+  });
+});

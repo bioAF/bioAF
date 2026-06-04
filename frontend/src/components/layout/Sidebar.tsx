@@ -165,46 +165,40 @@ export function Sidebar() {
       });
   }, [loading, roleName, passesPermission, passesComponentGate]);
 
-  // Initialize expanded state: auto-expand section containing active path
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(() => {
-    const initial = new Set<string>();
+  // Initialize expanded state: auto-expand the section containing active path.
+  // Only one section can be expanded at a time.
+  const [expandedSection, setExpandedSection] = useState<string | null>(() => {
     for (const section of navConfig) {
       if (section.children) {
         const hasActiveChild = section.children.some((c) =>
           isChildActive(pathname, c, section.children!),
         );
         if (hasActiveChild) {
-          initial.add(section.label);
+          return section.label;
         }
       }
     }
-    return initial;
+    return null;
   });
 
-  // Auto-expand when navigating to a new section
+  // Auto-expand when navigating to a new section. Replaces any previously
+  // expanded section so the one-at-a-time invariant holds.
   useEffect(() => {
     for (const section of visibleSections) {
       if (section.children) {
         const hasActiveChild = section.children.some((c) =>
           isChildActive(pathname, c, section.children!),
         );
-        if (hasActiveChild && !expandedSections.has(section.label)) {
-          setExpandedSections((prev) => new Set(prev).add(section.label));
+        if (hasActiveChild && expandedSection !== section.label) {
+          setExpandedSection(section.label);
+          return;
         }
       }
     }
   }, [pathname, visibleSections]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSection = (label: string) => {
-    setExpandedSections((prev) => {
-      const next = new Set(prev);
-      if (next.has(label)) {
-        next.delete(label);
-      } else {
-        next.add(label);
-      }
-      return next;
-    });
+    setExpandedSection((prev) => (prev === label ? null : label));
   };
 
   if (!backendReady || loading || componentsLoading) {
@@ -234,7 +228,7 @@ export function Sidebar() {
             key={section.label}
             section={section}
             pathname={pathname}
-            expanded={expandedSections.has(section.label)}
+            expanded={expandedSection === section.label}
             onToggle={() => toggleSection(section.label)}
           />
         ))}
