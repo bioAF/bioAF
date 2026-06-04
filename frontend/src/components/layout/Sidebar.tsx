@@ -250,14 +250,14 @@ export function Sidebar() {
       data-testid="sidebar"
       data-collapsed={collapsed ? "true" : "false"}
     >
-      <div className={`flex items-center border-b border-gray-700 ${collapsed ? "justify-center p-2" : "justify-between p-6"}`}>
+      <div
+        data-testid="sidebar-header"
+        className={`h-16 flex items-center border-b border-gray-700 ${collapsed ? "justify-center px-2" : "justify-between px-4"}`}
+      >
         {!collapsed && (
-          <div>
-            <Link href="/dashboard" className="text-xl font-bold text-bioaf-400">
-              bioAF
-            </Link>
-            <p className="text-xs text-gray-400 mt-1">Comp Bio Automation Framework</p>
-          </div>
+          <Link href="/dashboard" className="text-xl font-bold text-bioaf-400">
+            bioAF
+          </Link>
         )}
         <button
           type="button"

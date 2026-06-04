@@ -324,6 +324,44 @@ describe("Sidebar collapse toggle", () => {
   });
 });
 
+describe("Sidebar header height matches main header", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    mockComponents.mockReturnValue({
+      components: [
+        makeComponent("nextflow_k8s", "pipeline_orchestration", true),
+        makeComponent("jupyterhub", "analysis", true),
+      ],
+      loading: false,
+      refetch: jest.fn(),
+    });
+  });
+
+  test("brand header is the same h-16 the main top bar uses", () => {
+    render(<Sidebar />);
+
+    // Header.tsx renders <header className="h-16 ...">. The sidebar's brand
+    // block must use the same fixed height so the two top bars align.
+    const header = screen.getByTestId("sidebar-header");
+    expect(header.className).toMatch(/\bh-16\b/);
+  });
+
+  test("does not render the tagline (would overflow h-16 with the toggle)", () => {
+    render(<Sidebar />);
+
+    expect(screen.queryByText("Comp Bio Automation Framework")).not.toBeInTheDocument();
+  });
+
+  test("brand header keeps its h-16 height when collapsed", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+
+    const header = screen.getByTestId("sidebar-header");
+    expect(header.className).toMatch(/\bh-16\b/);
+  });
+});
+
 describe("Sidebar collapse persistence", () => {
   const STORAGE_KEY = "bioaf-sidebar-collapsed";
 
