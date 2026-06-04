@@ -10,6 +10,7 @@ import { api, ApiError } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
 import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
 import { resolveWorkNodeProfiles } from "@/lib/workNodeProfiles";
+import { SessionBucketFilter, type SessionBucket } from "@/components/shared/SessionBucketFilter";
 import type {
   WorkNode,
   WorkNodeListResponse,
@@ -54,6 +55,7 @@ export default function WorkNodesPage() {
   const { canAccess, loading: permLoading } = usePermissions();
 
   const [nodes, setNodes] = useState<WorkNode[]>([]);
+  const [bucket, setBucket] = useState<SessionBucket>("active");
   const [loading, setLoading] = useState(true);
   const [showLaunch, setShowLaunch] = useState(false);
   const [viewingNode, setViewingNode] = useState<WorkNode | null>(null);
@@ -101,7 +103,7 @@ export default function WorkNodesPage() {
     if (!canAccess("work_nodes", "view")) { router.push("/dashboard"); return; }
     loadNodes();
     loadRepos();
-  }, [router, permLoading, canAccess]);
+  }, [router, permLoading, canAccess, bucket]);
 
   // Auto-refresh while starting
   useEffect(() => {
@@ -113,14 +115,14 @@ export default function WorkNodesPage() {
 
   const loadNodes = useCallback(async () => {
     try {
-      const data = await api.get<WorkNodeListResponse>("/api/v1/work-nodes/sessions");
+      const data = await api.get<WorkNodeListResponse>(`/api/v1/work-nodes/sessions?bucket=${bucket}`);
       setNodes(data.sessions);
     } catch {
       // ignore
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [bucket]);
 
   async function loadRepos() {
     try {
@@ -488,10 +490,14 @@ export default function WorkNodesPage() {
           </div>
 
           {/* Node list */}
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base font-semibold text-gray-900">Work Nodes</h2>
+            <SessionBucketFilter value={bucket} onChange={setBucket} />
+          </div>
           {nodes.length === 0 ? (
             <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
               <p className="text-gray-500">
-                No work nodes. Launch one to get an SSH-accessible compute environment.
+                No work nodes in this view.
               </p>
             </div>
           ) : (

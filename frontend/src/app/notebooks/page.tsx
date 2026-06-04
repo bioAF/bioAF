@@ -30,6 +30,7 @@ import type {
 } from "@/lib/types";
 import { RESOURCE_PROFILES } from "@/lib/types";
 import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
+import { SessionBucketFilter, type SessionBucket } from "@/components/shared/SessionBucketFilter";
 
 const SESSION_STATUS_COLORS: Record<string, string> = {
   pending: "bg-gray-100 text-gray-800",
@@ -57,6 +58,7 @@ export default function NotebooksPage() {
   const jupyterEnabled = components.some((c) => c.key === "jupyterhub" && c.enabled);
   const rstudioEnabled = components.some((c) => c.key === "rstudio" && c.enabled);
   const [sessions, setSessions] = useState<NotebookSession[]>([]);
+  const [bucket, setBucket] = useState<SessionBucket>("active");
   const [viewingSession, setViewingSession] = useState<NotebookSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [imageBuildStatus, setImageBuildStatus] = useState<{
@@ -98,20 +100,20 @@ export default function NotebooksPage() {
       router.push("/login");
       return;
     }
-    loadSessions();
+    loadSessions(bucket);
     loadExperiments();
     loadProjects();
     loadBuildStatus();
     loadEnvironments();
     loadResourceProfiles();
-  }, [router]);
+  }, [router, bucket]);
 
   useEffect(() => {
     const hasStarting = sessions.some((s) => s.status === "starting");
     if (!hasStarting) return;
-    const interval = setInterval(() => loadSessions(), 10000);
+    const interval = setInterval(() => loadSessions(bucket), 10000);
     return () => clearInterval(interval);
-  }, [sessions]);
+  }, [sessions, bucket]);
 
   async function loadResourceProfiles() {
     try {
@@ -142,9 +144,11 @@ export default function NotebooksPage() {
     } catch {}
   }
 
-  async function loadSessions() {
+  async function loadSessions(currentBucket: SessionBucket = bucket) {
     try {
-      const data = await api.get<SessionListResponse>("/api/v1/notebooks/sessions");
+      const data = await api.get<SessionListResponse>(
+        `/api/v1/notebooks/sessions?bucket=${currentBucket}`,
+      );
       setSessions(data.sessions);
     } catch {
     } finally {
@@ -283,7 +287,7 @@ export default function NotebooksPage() {
       };
       await api.post("/api/v1/notebooks/sessions", req);
       setShowLaunchModal(false);
-      loadSessions();
+      loadSessions(bucket);
     } catch (err) {
       setLaunchError(err instanceof Error ? err.message : "Failed to launch session");
     } finally {
@@ -296,7 +300,7 @@ export default function NotebooksPage() {
     setStoppingSessions((prev) => new Set(prev).add(sessionId));
     try {
       await api.post(`/api/v1/notebooks/sessions/${sessionId}/stop`);
-      loadSessions();
+      loadSessions(bucket);
     } catch {
     } finally {
       setStoppingSessions((prev) => {
@@ -385,8 +389,9 @@ export default function NotebooksPage() {
 
           {/* Active Sessions */}
           <div className="bg-white rounded-lg shadow">
-            <div className="p-6 border-b">
-              <h2 className="text-lg font-semibold">Active Sessions</h2>
+            <div className="p-6 border-b flex items-center justify-between gap-4">
+              <h2 className="text-lg font-semibold">Sessions</h2>
+              <SessionBucketFilter value={bucket} onChange={setBucket} />
             </div>
 
             {loading ? (
