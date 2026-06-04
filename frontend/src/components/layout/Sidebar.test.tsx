@@ -305,9 +305,8 @@ describe("Sidebar collapse toggle", () => {
   test("clicking the toggle again re-expands the sidebar", () => {
     render(<Sidebar />);
 
-    const toggle = screen.getByTestId("sidebar-collapse-toggle");
-    fireEvent.click(toggle);
-    fireEvent.click(toggle);
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
 
     expect(screen.getByTestId("sidebar")).toHaveAttribute("data-collapsed", "false");
     expect(screen.getByText("Pipelines")).toBeInTheDocument();
@@ -321,6 +320,45 @@ describe("Sidebar collapse toggle", () => {
 
     // Still present after collapse, so the user can re-expand
     expect(screen.getByTestId("sidebar-collapse-toggle")).toBeInTheDocument();
+  });
+});
+
+describe("Sidebar brand logo", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    mockComponents.mockReturnValue({
+      components: [
+        makeComponent("nextflow_k8s", "pipeline_orchestration", true),
+        makeComponent("jupyterhub", "analysis", true),
+      ],
+      loading: false,
+      refetch: jest.fn(),
+    });
+  });
+
+  test("renders the bioAF mark in the header when expanded", () => {
+    render(<Sidebar />);
+
+    const logo = screen.getByTestId("sidebar-logo");
+    expect(logo).toBeInTheDocument();
+    expect(logo).toHaveAttribute("src", "/bioAF-logo.svg");
+    expect(logo).toHaveAttribute("alt", "bioAF");
+  });
+
+  test("keeps the bioAF mark in the header when collapsed", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+
+    const logo = screen.getByTestId("sidebar-logo");
+    expect(logo).toBeInTheDocument();
+    expect(logo).toHaveAttribute("src", "/bioAF-logo.svg");
+  });
+
+  test("shows the wordmark alongside the logo when expanded", () => {
+    render(<Sidebar />);
+
+    expect(screen.getByText("bioAF")).toBeInTheDocument();
   });
 });
 

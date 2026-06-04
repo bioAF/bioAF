@@ -254,21 +254,45 @@ export function Sidebar() {
         data-testid="sidebar-header"
         className={`h-16 flex items-center border-b border-gray-700 ${collapsed ? "justify-center px-2" : "justify-between px-4"}`}
       >
-        {!collapsed && (
-          <Link href="/dashboard" className="text-xl font-bold text-bioaf-400">
-            bioAF
-          </Link>
+        {collapsed ? (
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            aria-label="Expand sidebar"
+            aria-expanded={false}
+            data-testid="sidebar-collapse-toggle"
+            className="p-1 rounded-md hover:bg-gray-800"
+          >
+            <img
+              src="/bioAF-logo.svg"
+              alt="bioAF"
+              data-testid="sidebar-logo"
+              className="h-8 w-8"
+            />
+          </button>
+        ) : (
+          <>
+            <Link href="/dashboard" className="flex items-center gap-2">
+              <img
+                src="/bioAF-logo.svg"
+                alt="bioAF"
+                data-testid="sidebar-logo"
+                className="h-8 w-8"
+              />
+              <span className="text-xl font-bold text-bioaf-400">bioAF</span>
+            </Link>
+            <button
+              type="button"
+              onClick={() => setCollapsed(true)}
+              aria-label="Collapse sidebar"
+              aria-expanded={true}
+              data-testid="sidebar-collapse-toggle"
+              className="p-1 rounded-md text-gray-400 hover:bg-gray-800 hover:text-white"
+            >
+              <CollapseToggleIcon collapsed={false} />
+            </button>
+          </>
         )}
-        <button
-          type="button"
-          onClick={() => setCollapsed((c) => !c)}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          aria-expanded={!collapsed}
-          data-testid="sidebar-collapse-toggle"
-          className="p-1 rounded-md text-gray-400 hover:bg-gray-800 hover:text-white"
-        >
-          <CollapseToggleIcon collapsed={collapsed} />
-        </button>
       </div>
 
       {!collapsed && (
