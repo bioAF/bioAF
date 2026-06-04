@@ -271,6 +271,7 @@ describe("Sidebar single-expanded behavior", () => {
 
 describe("Sidebar collapse toggle", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     mockComponents.mockReturnValue({
       components: [
         makeComponent("nextflow_k8s", "pipeline_orchestration", true),
@@ -320,5 +321,54 @@ describe("Sidebar collapse toggle", () => {
 
     // Still present after collapse, so the user can re-expand
     expect(screen.getByTestId("sidebar-collapse-toggle")).toBeInTheDocument();
+  });
+});
+
+describe("Sidebar collapse persistence", () => {
+  const STORAGE_KEY = "bioaf-sidebar-collapsed";
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    mockComponents.mockReturnValue({
+      components: [
+        makeComponent("nextflow_k8s", "pipeline_orchestration", true),
+        makeComponent("jupyterhub", "analysis", true),
+      ],
+      loading: false,
+      refetch: jest.fn(),
+    });
+  });
+
+  test("starts collapsed when localStorage says so", () => {
+    window.localStorage.setItem(STORAGE_KEY, "true");
+
+    render(<Sidebar />);
+
+    expect(screen.getByTestId("sidebar")).toHaveAttribute("data-collapsed", "true");
+    expect(screen.queryByText("Pipelines")).not.toBeInTheDocument();
+  });
+
+  test("starts expanded when localStorage is empty", () => {
+    render(<Sidebar />);
+
+    expect(screen.getByTestId("sidebar")).toHaveAttribute("data-collapsed", "false");
+  });
+
+  test("starts expanded when localStorage value is not 'true'", () => {
+    window.localStorage.setItem(STORAGE_KEY, "garbage");
+
+    render(<Sidebar />);
+
+    expect(screen.getByTestId("sidebar")).toHaveAttribute("data-collapsed", "false");
+  });
+
+  test("writes the new state to localStorage when toggled", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe("true");
+
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe("false");
   });
 });

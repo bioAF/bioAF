@@ -8,6 +8,8 @@ import { useComponents } from "@/hooks/useComponents";
 import { useBackendReady } from "@/hooks/useBackendReady";
 import { navConfig, NavSection, NavChild, ComponentGate, PermissionRef, isChildActive } from "@/lib/navConfig";
 
+const SIDEBAR_COLLAPSED_KEY = "bioaf-sidebar-collapsed";
+
 function ChevronIcon({ expanded }: { expanded: boolean }) {
   return (
     <svg
@@ -220,7 +222,15 @@ export function Sidebar() {
     setExpandedSection((prev) => (prev === label ? null : label));
   };
 
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true";
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "true" : "false");
+  }, [collapsed]);
 
   if (!backendReady || loading || componentsLoading) {
     return (
