@@ -17,7 +17,6 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import text
 
 from app.services.auth_service import AuthService
 
@@ -39,9 +38,7 @@ def test_migration_file_exists():
 def test_migration_chains_to_093():
     content = MIGRATION_FILE.read_text()
     assert 'revision = "094"' in content
-    assert 'down_revision = "093"' in content, (
-        "migration 094 must chain to 093 so alembic upgrade head picks it up"
-    )
+    assert 'down_revision = "093"' in content, "migration 094 must chain to 093 so alembic upgrade head picks it up"
 
 
 def test_migration_adds_failure_taxonomy_columns():
@@ -51,9 +48,7 @@ def test_migration_adds_failure_taxonomy_columns():
     assert "requested_disk_gb" in content, "upgrade() must add requested_disk_gb column"
     # All three are nullable so the migration is non-blocking for existing rows.
     for col in ("failure_reason", "failure_message", "requested_disk_gb"):
-        assert (
-            f"'{col}'" in content or f'"{col}"' in content
-        ), f"migration must reference column {col} by name"
+        assert f"'{col}'" in content or f'"{col}"' in content, f"migration must reference column {col} by name"
 
 
 def test_migration_downgrade_drops_the_columns():
@@ -159,9 +154,7 @@ async def _seed_work_node(session, *, user_id, org_id, status, created_at=None):
 
 
 @pytest.mark.asyncio
-async def test_notebook_bucket_active_excludes_terminal_states(
-    client, session, comp_bio_user, comp_bio_token
-):
+async def test_notebook_bucket_active_excludes_terminal_states(client, session, comp_bio_user, comp_bio_token):
     """bucket=active returns sessions whose status is not stopped/failed."""
     org_id = comp_bio_user.organization_id
     for status in ("starting", "running", "stopped", "failed"):
@@ -211,9 +204,7 @@ async def test_notebook_bucket_recent_returns_last_24h_regardless_of_status(
 
 
 @pytest.mark.asyncio
-async def test_notebook_bucket_all_returns_everything(
-    client, session, comp_bio_user, comp_bio_token
-):
+async def test_notebook_bucket_all_returns_everything(client, session, comp_bio_user, comp_bio_token):
     org_id = comp_bio_user.organization_id
     for status in ("running", "stopped", "failed"):
         await _seed_notebook(session, user_id=comp_bio_user.id, org_id=org_id, status=status)
@@ -229,9 +220,7 @@ async def test_notebook_bucket_all_returns_everything(
 
 
 @pytest.mark.asyncio
-async def test_work_node_bucket_active_excludes_terminal_states(
-    client, session, comp_bio_user, comp_bio_token
-):
+async def test_work_node_bucket_active_excludes_terminal_states(client, session, comp_bio_user, comp_bio_token):
     org_id = comp_bio_user.organization_id
     for status in ("starting", "running", "stopped", "failed"):
         await _seed_work_node(session, user_id=comp_bio_user.id, org_id=org_id, status=status)
@@ -282,9 +271,7 @@ async def test_bucket_invalid_value_rejected(client, comp_bio_token):
 
 
 @pytest.mark.asyncio
-async def test_failure_reason_and_disk_round_trip_in_list_response(
-    client, session, comp_bio_user, comp_bio_token
-):
+async def test_failure_reason_and_disk_round_trip_in_list_response(client, session, comp_bio_user, comp_bio_token):
     """A session with failure_reason + failure_message + requested_disk_gb populated
     must surface those fields in the list response (notebook + work-node)."""
     from app.models.notebook_session import NotebookSession, ComputeSession

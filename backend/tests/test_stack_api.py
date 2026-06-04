@@ -272,9 +272,7 @@ class TestClusterConfigEndpoint:
         assert data["k8s_interactive_max_nodes"] == 5
 
     @pytest.mark.asyncio
-    async def test_cluster_config_falls_back_to_e2_standard_8_when_row_absent(
-        self, client, admin_token, session
-    ):
+    async def test_cluster_config_falls_back_to_e2_standard_8_when_row_absent(self, client, admin_token, session):
         """When platform_config holds no k8s_interactive_machine_type row,
         the GET endpoint must surface e2-standard-8 -- matching the new
         terraform default. The prior fallback was n2-standard-4, which is in
@@ -283,9 +281,7 @@ class TestClusterConfigEndpoint:
         # Explicitly delete any seeded value so the fallback path is exercised.
         from sqlalchemy import text as sa_text
 
-        await session.execute(
-            sa_text("DELETE FROM platform_config WHERE key = 'k8s_interactive_machine_type'")
-        )
+        await session.execute(sa_text("DELETE FROM platform_config WHERE key = 'k8s_interactive_machine_type'"))
         await session.commit()
 
         response = await client.get(

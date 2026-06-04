@@ -207,9 +207,7 @@ async def _seed_environment_version(session, *, org_id, env_type="work_node", st
     from sqlalchemy import select as sa_select
     from app.models.user import User
 
-    owner = (
-        await session.execute(sa_select(User).where(User.organization_id == org_id).limit(1))
-    ).scalar_one()
+    owner = (await session.execute(sa_select(User).where(User.organization_id == org_id).limit(1))).scalar_one()
     env = Environment(
         organization_id=org_id,
         name=f"failclass-env-{env_type}",
@@ -271,9 +269,7 @@ async def test_work_node_launch_sets_requested_disk_gb_from_config(
 
 
 @pytest.mark.asyncio
-async def test_notebook_launch_sets_requested_disk_gb_default(
-    client, session, comp_bio_user, comp_bio_token
-):
+async def test_notebook_launch_sets_requested_disk_gb_default(client, session, comp_bio_user, comp_bio_token):
     """Notebook launch must record requested_disk_gb so the detail modal can show it.
 
     Notebook pods land on the bioaf-interactive GKE pool, whose boot disk is
@@ -334,9 +330,7 @@ async def test_work_node_launch_records_resource_exhausted_when_adapter_says_so(
 
     fake_adapter = MagicMock()
     fake_adapter.launch_vm = AsyncMock(
-        side_effect=ValueError(
-            "GCP resources unavailable: no e2-standard-8 capacity in any us-central1 zone."
-        )
+        side_effect=ValueError("GCP resources unavailable: no e2-standard-8 capacity in any us-central1 zone.")
     )
 
     with patch("app.services.work_node_service.get_work_node_adapter", return_value=fake_adapter):

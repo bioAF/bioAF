@@ -32,9 +32,7 @@ def test_migration_file_exists():
 def test_migration_chains_to_092():
     content = MIGRATION_FILE.read_text()
     assert 'revision = "093"' in content
-    assert 'down_revision = "092"' in content, (
-        "migration 093 must chain to 092 so alembic upgrade head picks it up"
-    )
+    assert 'down_revision = "092"' in content, "migration 093 must chain to 092 so alembic upgrade head picks it up"
 
 
 def test_migration_only_updates_rows_that_still_hold_the_prior_default():
@@ -46,9 +44,7 @@ def test_migration_only_updates_rows_that_still_hold_the_prior_default():
     content = MIGRATION_FILE.read_text()
     assert "k8s_interactive_machine_type" in content
     assert "e2-standard-8" in content
-    assert "n2-standard-4" in content, (
-        "upgrade() must scope its UPDATE to rows whose value is still n2-standard-4"
-    )
+    assert "n2-standard-4" in content, "upgrade() must scope its UPDATE to rows whose value is still n2-standard-4"
     # The WHERE clause must include both the key and the prior-default guard;
     # a bare UPDATE on the key would overwrite user-customized values.
     assert "WHERE key = 'k8s_interactive_machine_type' AND value = 'n2-standard-4'" in content, (
@@ -89,18 +85,14 @@ async def test_migration_sql_flips_only_default_rows(session):
     await session.commit()
 
     row = (
-        await session.execute(
-            text("SELECT value FROM platform_config WHERE key = 'k8s_interactive_machine_type'")
-        )
+        await session.execute(text("SELECT value FROM platform_config WHERE key = 'k8s_interactive_machine_type'"))
     ).fetchone()
     assert row is not None
     assert row[0] == "e2-standard-8"
 
     # Unrelated row must be untouched.
     row = (
-        await session.execute(
-            text("SELECT value FROM platform_config WHERE key = 'k8s_interactive_max_nodes'")
-        )
+        await session.execute(text("SELECT value FROM platform_config WHERE key = 'k8s_interactive_max_nodes'"))
     ).fetchone()
     assert row is not None
     assert row[0] == "5"
@@ -128,9 +120,7 @@ async def test_migration_sql_leaves_user_customized_rows_alone(session):
     await session.commit()
 
     row = (
-        await session.execute(
-            text("SELECT value FROM platform_config WHERE key = 'k8s_interactive_machine_type'")
-        )
+        await session.execute(text("SELECT value FROM platform_config WHERE key = 'k8s_interactive_machine_type'"))
     ).fetchone()
     assert row is not None
     assert row[0] == "n2-highmem-16"

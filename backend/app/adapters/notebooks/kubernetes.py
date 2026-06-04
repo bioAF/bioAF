@@ -873,9 +873,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                             break
                     if pod.status.phase in ("Failed", "Unknown"):
                         logger.error("Pod %s entered %s phase", pod_name, pod.status.phase)
-                        reason, message = await self._classify_pod_failure_from_api(
-                            core_client, pod_name, namespace
-                        )
+                        reason, message = await self._classify_pod_failure_from_api(core_client, pod_name, namespace)
                         await self._update_session_in_db(
                             session_id,
                             status="failed",
@@ -890,9 +888,7 @@ class KubernetesNotebookProvider(NotebookProvider):
 
             if not pod_ready:
                 logger.error("Pod %s not ready after 5 min", pod_name)
-                reason, message = await self._classify_pod_failure_from_api(
-                    core_client, pod_name, namespace
-                )
+                reason, message = await self._classify_pod_failure_from_api(core_client, pod_name, namespace)
                 await self._update_session_in_db(
                     session_id,
                     status="failed",
@@ -977,7 +973,9 @@ class KubernetesNotebookProvider(NotebookProvider):
             field_selector = f"involvedObject.name={pod_name}"
             evt_list = core_client.list_namespaced_event(namespace=namespace, field_selector=field_selector)
             for evt in evt_list.items or []:
-                events.append({"reason": getattr(evt, "reason", "") or "", "message": getattr(evt, "message", "") or ""})
+                events.append(
+                    {"reason": getattr(evt, "reason", "") or "", "message": getattr(evt, "message", "") or ""}
+                )
         except Exception:
             logger.exception("Failed to fetch pod events for %s/%s", namespace, pod_name)
             return (FAILURE_REASON_UNKNOWN, "Pod did not become ready and pod events were unavailable.")

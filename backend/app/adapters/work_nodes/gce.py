@@ -497,8 +497,11 @@ class GCEWorkNodeProvider(WorkNodeProvider):
                             instances_client, project, zone, instance_name, last_terminal_status
                         )
                         await self._update_session_in_db(
-                            session_id, status="failed", access_url=None,
-                            failure_reason=reason, failure_message=message,
+                            session_id,
+                            status="failed",
+                            access_url=None,
+                            failure_reason=reason,
+                            failure_message=message,
                         )
                         return
                 except Exception:
@@ -511,8 +514,11 @@ class GCEWorkNodeProvider(WorkNodeProvider):
                     instances_client, project, zone, instance_name, last_terminal_status
                 )
                 await self._update_session_in_db(
-                    session_id, status="failed", access_url=None,
-                    failure_reason=reason, failure_message=message,
+                    session_id,
+                    status="failed",
+                    access_url=None,
+                    failure_reason=reason,
+                    failure_message=message,
                 )
                 return
 
@@ -526,7 +532,9 @@ class GCEWorkNodeProvider(WorkNodeProvider):
 
             logger.exception("Background poll failed for VM session %s", session_id)
             await self._update_session_in_db(
-                session_id, status="failed", access_url=None,
+                session_id,
+                status="failed",
+                access_url=None,
                 failure_reason=FAILURE_REASON_UNKNOWN,
                 failure_message=f"Background poll raised: {e}",
             )
@@ -543,12 +551,20 @@ class GCEWorkNodeProvider(WorkNodeProvider):
         error string through the classifier. Returns (failure_reason,
         failure_message) even when the operations API call fails."""
         from app.adapters.failure_classification import classify_gce_vm_failure, FAILURE_REASON_UNKNOWN
+
         try:
             from google.cloud import compute_v1
 
             ops_client = compute_v1.ZoneOperationsClient(credentials=self._get_gcp_credentials())
             filter_expr = f'targetLink eq ".*/instances/{instance_name}"'
-            ops = list(ops_client.list(project=project, zone=zone, filter=filter_expr, max_results=20))
+            # google-cloud-compute requires positional fields packed into a request object.
+            request = compute_v1.ListZoneOperationsRequest(
+                project=project,
+                zone=zone,
+                filter=filter_expr,
+                max_results=20,
+            )
+            ops = list(ops_client.list(request=request))
             for op in ops:
                 if op.error and op.error.errors:
                     err = op.error.errors[0]

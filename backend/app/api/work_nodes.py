@@ -115,7 +115,11 @@ async def list_work_nodes(
     filter_user_id = None if can_view_all else user_id
 
     sessions_list, total = await WorkNodeService.list_work_nodes(
-        session, org_id, user_id=filter_user_id, status=status, bucket=bucket,
+        session,
+        org_id,
+        user_id=filter_user_id,
+        status=status,
+        bucket=bucket,
     )
 
     return WorkNodeListResponse(
