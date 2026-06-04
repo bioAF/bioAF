@@ -387,6 +387,7 @@ class NotebookService:
                 selectinload(NotebookSession.user),
                 selectinload(NotebookSession.experiment),
                 selectinload(NotebookSession.project),
+                selectinload(NotebookSession.accessed_files),
             )
             .where(
                 NotebookSession.organization_id == org_id,
@@ -431,6 +432,7 @@ class NotebookService:
                 selectinload(NotebookSession.user),
                 selectinload(NotebookSession.experiment),
                 selectinload(NotebookSession.project),
+                selectinload(NotebookSession.accessed_files),
             )
             .where(NotebookSession.id == session_id)
         )

@@ -12,6 +12,7 @@ import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
 import { resolveWorkNodeProfiles } from "@/lib/workNodeProfiles";
 import { SessionBucketFilter, type SessionBucket } from "@/components/shared/SessionBucketFilter";
 import { formatSessionStatusLabel, formatLinkedTo } from "@/lib/sessionStatus";
+import { prefillFromWorkNode } from "@/lib/sessionRecreate";
 import type {
   WorkNode,
   WorkNodeListResponse,
@@ -192,6 +193,47 @@ export default function WorkNodesPage() {
       setMachineTypes(mtData);
       setEnvironments(envData.environments);
     } catch {}
+  }
+
+  async function handleRecreateWorkNode(source: WorkNode) {
+    const prefill = prefillFromWorkNode(source);
+    setLaunchError(null);
+    setShowLaunch(true);
+    setLaunchStep(1);
+    setScopeType("project");
+    setSelectedExperimentId(null);
+    setSelectedProjectId(prefill.project_id);
+    setSelectedMachineType(prefill.machine_type ?? "");
+    setSelectedFileIds(prefill.input_file_ids);
+    setSelectedRepoIds(prefill.github_repo_ids);
+    if (prefill.environment_version_id) {
+      // Try to resolve the environment that owns this version so the env
+      // selector renders the right card.
+      for (const env of environments) {
+        if (env.latest_version?.id === prefill.environment_version_id) {
+          setSelectedEnvId(env.id);
+          break;
+        }
+      }
+      setSelectedVersionId(prefill.environment_version_id);
+    }
+    setViewingNode(null);
+    // Ensure the reference data is loaded even if the user hasn't opened the
+    // launch dialog yet this session.
+    if (projects.length === 0 || machineTypes.length === 0 || environments.length === 0) {
+      try {
+        const [projectData, expData, mtData, envData] = await Promise.all([
+          api.get<ProjectListResponse>("/api/projects?page_size=100"),
+          api.get<ExperimentListResponse>("/api/experiments?page_size=100"),
+          api.get<MachineType[]>("/api/v1/work-nodes/machine-types"),
+          api.get<EnvironmentListResponse>("/api/v1/environments?type=work_node"),
+        ]);
+        setProjects(projectData.projects);
+        setExperiments(expData.experiments);
+        setMachineTypes(mtData);
+        setEnvironments(envData.environments);
+      } catch {}
+    }
   }
 
   function handleScopeChange(scope: "experiment" | "project") {
@@ -562,6 +604,14 @@ export default function WorkNodesPage() {
                               className="text-xs px-2 py-1 border border-red-600 text-red-600 rounded hover:bg-red-50"
                             >
                               Stop
+                            </button>
+                          )}
+                          {canAccess("work_nodes", "launch") && (
+                            <button
+                              onClick={() => handleRecreateWorkNode(node)}
+                              className="text-xs px-2 py-1 border border-green-600 text-green-700 rounded hover:bg-green-50"
+                            >
+                              Recreate
                             </button>
                           )}
                           <button

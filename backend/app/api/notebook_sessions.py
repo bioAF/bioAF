@@ -67,6 +67,17 @@ def _project_summary(project) -> ProjectSummary | None:
 
 
 def _session_response(ns) -> SessionResponse:
+    # accessed_files is the NotebookSessionFile join. Filter for input rows so
+    # the frontend's Recreate flow can re-select the same files.
+    input_file_ids = None
+    accessed = getattr(ns, "accessed_files", None)
+    if accessed is not None:
+        try:
+            input_file_ids = sorted(
+                {nsf.file_id for nsf in accessed if getattr(nsf, "access_type", "input") == "input"}
+            )
+        except Exception:
+            input_file_ids = None
     return SessionResponse(
         id=ns.id,
         session_type=ns.session_type,
@@ -88,6 +99,7 @@ def _session_response(ns) -> SessionResponse:
         git_branch_name=ns.git_branch_name,
         git_commit_hash=ns.git_commit_hash,
         environment_version_id=ns.environment_version_id,
+        input_file_ids=input_file_ids,
     )
 
 

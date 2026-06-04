@@ -32,6 +32,7 @@ import { RESOURCE_PROFILES } from "@/lib/types";
 import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
 import { SessionBucketFilter, type SessionBucket } from "@/components/shared/SessionBucketFilter";
 import { formatSessionStatusLabel, formatLinkedTo } from "@/lib/sessionStatus";
+import { prefillFromNotebookSession } from "@/lib/sessionRecreate";
 
 const SESSION_STATUS_COLORS: Record<string, string> = {
   pending: "bg-gray-100 text-gray-800",
@@ -208,6 +209,37 @@ export default function NotebooksPage() {
     setSampleNames({});
     setShowFileSelector(false);
     setActiveBranchCount(0);
+  }
+
+  async function handleRecreateSession(source: NotebookSession) {
+    const prefill = prefillFromNotebookSession(source);
+    setLaunchError(null);
+    setPendingLaunch(prefill.session_type);
+    setSelectedProfile(prefill.resource_profile);
+    setScopeType(prefill.scope_type);
+    setSelectedExperiment(prefill.experiment_id);
+    setSelectedProject(prefill.project_id);
+    if (prefill.environment_version_id) {
+      // Try to resolve the environment that owns this version so the
+      // environment selector renders the right name.
+      for (const env of environments) {
+        if (env.latest_version?.id === prefill.environment_version_id) {
+          setSelectedEnvId(env.id);
+          break;
+        }
+      }
+      setSelectedVersionId(prefill.environment_version_id);
+    }
+    setSelectedFileIds(prefill.input_file_ids);
+    if (prefill.scope_type === "experiment" && prefill.experiment_id) {
+      try {
+        await loadFilesForExperiment(prefill.experiment_id);
+        // loadFilesForExperiment clears selectedFileIds; restore the snapshot.
+        setSelectedFileIds(prefill.input_file_ids);
+      } catch {}
+    }
+    setShowLaunchModal(true);
+    setViewingSession(null);
   }
 
   async function loadFilesForExperiment(experimentId: number) {
@@ -457,6 +489,12 @@ export default function NotebooksPage() {
                               Stop
                             </button>
                           )}
+                          <button
+                            onClick={() => handleRecreateSession(s)}
+                            className="text-xs px-2 py-1 border border-green-600 text-green-700 rounded hover:bg-green-50"
+                          >
+                            Recreate
+                          </button>
                           <button
                             onClick={() => setViewingSession(s)}
                             className="text-xs px-2 py-1 border border-bioaf-600 text-bioaf-600 rounded hover:bg-bioaf-50"

@@ -538,6 +538,7 @@ export interface NotebookSession {
   git_branch_name: string | null;
   git_commit_hash: string | null;
   environment_version_id: number | null;
+  input_file_ids: number[] | null;
 }
 
 export interface SessionListResponse {
