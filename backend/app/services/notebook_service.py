@@ -18,6 +18,7 @@ from app.services.event_bus import event_bus
 from app.services.event_types import SESSION_IDLE
 from app.services.quota_service import QuotaService
 from app.services.machine_types import machine_type_capacity
+from app.services.session_bucket import _bucket_filter
 from app.adapters.registry import get_notebook_adapter
 
 logger = logging.getLogger("bioaf.notebooks")
@@ -27,7 +28,7 @@ logger = logging.getLogger("bioaf.notebooks")
 # (POST /api/v1/infrastructure/cluster/config), NOT the vestigial
 # k8s_interactive_pool component config field. Default matches the tfvar default.
 INTERACTIVE_POOL_MACHINE_TYPE_KEY = "k8s_interactive_machine_type"
-DEFAULT_INTERACTIVE_POOL_MACHINE_TYPE = "n2-standard-4"
+DEFAULT_INTERACTIVE_POOL_MACHINE_TYPE = "e2-standard-8"
 
 # (cpu_cores, memory_gb) per profile. Memory-weighted toward the high end
 # because single-cell work (Seurat/scanpy objects, multi-sample integration)
@@ -119,6 +120,11 @@ class NotebookService:
             resource_profile=resource_profile,
             cpu_cores=cpu_cores,
             memory_gb=memory_gb,
+            # Notebook pods land on the bioaf-interactive GKE node pool, whose
+            # boot disk defaults to 100 GB (see backend/terraform/modules/compute).
+            # Surfaced in the detail modal so the user sees the available
+            # workspace size without leaving the page.
+            requested_disk_gb=100,
             status="pending",
             started_at=datetime.now(timezone.utc),
         )
@@ -234,11 +240,21 @@ class NotebookService:
                         )
                     )
 
-        except ValueError:
+        except ValueError as e:
+            from app.adapters.failure_classification import classify_gce_vm_failure
+
             notebook_session.status = "failed"
+            reason, message = classify_gce_vm_failure(str(e))
+            notebook_session.failure_reason = reason
+            notebook_session.failure_message = message
             raise
         except Exception as e:
+            from app.adapters.failure_classification import classify_gce_vm_failure
+
             notebook_session.status = "failed"
+            reason, message = classify_gce_vm_failure(str(e))
+            notebook_session.failure_reason = reason
+            notebook_session.failure_message = message
             logger.error("Failed to launch notebook session %d: %s", notebook_session.id, e)
             if "not found or not accessible" in str(e):
                 raise
@@ -363,10 +379,16 @@ class NotebookService:
         user_id: int | None = None,
         session_type: str | None = None,
         status: str | None = None,
+        bucket: str | None = None,
     ) -> tuple[list[NotebookSession], int]:
         query = (
             select(NotebookSession)
-            .options(selectinload(NotebookSession.user), selectinload(NotebookSession.experiment))
+            .options(
+                selectinload(NotebookSession.user),
+                selectinload(NotebookSession.experiment),
+                selectinload(NotebookSession.project),
+                selectinload(NotebookSession.accessed_files),
+            )
             .where(
                 NotebookSession.organization_id == org_id,
                 NotebookSession.session_type != "ssh",
@@ -387,6 +409,11 @@ class NotebookService:
             query = query.where(NotebookSession.status == status)
             count_query = count_query.where(NotebookSession.status == status)
 
+        bucket_filter = _bucket_filter(NotebookSession, bucket)
+        if bucket_filter is not None:
+            query = query.where(bucket_filter)
+            count_query = count_query.where(bucket_filter)
+
         query = query.order_by(NotebookSession.created_at.desc())
 
         result = await session.execute(query)
@@ -401,7 +428,12 @@ class NotebookService:
     async def get_session(session: AsyncSession, session_id: int) -> NotebookSession | None:
         result = await session.execute(
             select(NotebookSession)
-            .options(selectinload(NotebookSession.user), selectinload(NotebookSession.experiment))
+            .options(
+                selectinload(NotebookSession.user),
+                selectinload(NotebookSession.experiment),
+                selectinload(NotebookSession.project),
+                selectinload(NotebookSession.accessed_files),
+            )
             .where(NotebookSession.id == session_id)
         )
         return result.scalar_one_or_none()

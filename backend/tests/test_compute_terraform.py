@@ -152,6 +152,35 @@ def test_system_pool_default_machine_is_e2_standard_2():
     )
 
 
+def test_interactive_pool_default_machine_is_e2_standard_8():
+    """Default machine type for the interactive node pool must be e2-standard-8.
+
+    n2-standard-8 is in the deprioritized Intel Cascade Lake (n2) family and has
+    repeatedly stocked out in us-central1-a for fresh interactive pool scale-ups
+    (see local/gke-capacity/gke-capacity-issue.md). e2-standard-8 has the same
+    8 vCPU / 32 GB shape but is allocated against any compatible host
+    generation, so it almost never stocks out -- which is the right trade-off
+    for interactive notebook workloads where "can I launch" beats peak CPU.
+
+    The prior default was n2-standard-4 (4 vCPU / 16 GB), which only supported
+    Small notebooks. Bumping the default to e2-standard-8 also unlocks Medium
+    notebooks out of the box without changing the cluster config.
+    """
+    variables_tf = (COMPUTE_MODULE_DIR / "variables.tf").read_text()
+
+    marker = 'variable "k8s_interactive_machine_type"'
+    assert marker in variables_tf, "k8s_interactive_machine_type variable must exist"
+    start = variables_tf.index(marker)
+    end = variables_tf.find("\nvariable ", start + 1)
+    if end == -1:
+        end = len(variables_tf)
+    block = variables_tf[start:end]
+
+    assert 'default     = "e2-standard-8"' in block or 'default = "e2-standard-8"' in block, (
+        "k8s_interactive_machine_type default must be e2-standard-8 to avoid n2 capacity stockouts"
+    )
+
+
 def test_notebook_runner_workload_identity_depends_on_system_pool():
     """The notebook_runner_workload_identity binding's depends_on must include
     the system pool, mirroring the existing pattern for the other two pools.

@@ -272,6 +272,27 @@ class TestClusterConfigEndpoint:
         assert data["k8s_interactive_max_nodes"] == 5
 
     @pytest.mark.asyncio
+    async def test_cluster_config_falls_back_to_e2_standard_8_when_row_absent(self, client, admin_token, session):
+        """When platform_config holds no k8s_interactive_machine_type row,
+        the GET endpoint must surface e2-standard-8 -- matching the new
+        terraform default. The prior fallback was n2-standard-4, which is in
+        the deprioritized n2 family that has been stocking out in
+        us-central1-a (see local/gke-capacity/gke-capacity-issue.md)."""
+        # Explicitly delete any seeded value so the fallback path is exercised.
+        from sqlalchemy import text as sa_text
+
+        await session.execute(sa_text("DELETE FROM platform_config WHERE key = 'k8s_interactive_machine_type'"))
+        await session.commit()
+
+        response = await client.get(
+            "/api/v1/infrastructure/cluster/config",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["k8s_interactive_machine_type"] == "e2-standard-8"
+
+    @pytest.mark.asyncio
     async def test_cluster_config_update_auto_applies(self, client, admin_token, session):
         """Test 23: Config update plans and auto-applies."""
         await _set_config(session, "compute_deployed", "true")

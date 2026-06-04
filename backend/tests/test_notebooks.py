@@ -129,11 +129,15 @@ async def test_session_launch_large_profiles(client, comp_bio_token, profile, cp
 
 
 @pytest.mark.asyncio
-async def test_resource_profiles_default_pool_only_small_fits(client, comp_bio_token):
-    """With the default n2-standard-4 interactive pool (4/16), only Small fits.
+async def test_resource_profiles_default_pool_small_and_medium_fit(client, comp_bio_token):
+    """With the default e2-standard-8 interactive pool (8/32), Small and Medium fit.
 
     Notebook pods run with requests==limits on the interactive pool, so a tier
-    only schedules if it is strictly smaller than a single node.
+    only schedules if it is strictly smaller than a single node. The default
+    moved from n2-standard-4 (only Small fit) to e2-standard-8 to dodge n2
+    family stockouts in us-central1-a; a side benefit is that Medium now
+    schedules without operator intervention. Large (8/32) still doesn't fit
+    because the strict-less-than rule blocks an exact-match request.
     """
     resp = await client.get(
         "/api/v1/notebooks/resource-profiles",
@@ -141,12 +145,13 @@ async def test_resource_profiles_default_pool_only_small_fits(client, comp_bio_t
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["pool_machine_type"] == "n2-standard-4"
+    assert data["pool_machine_type"] == "e2-standard-8"
     avail = {p["name"]: p["available"] for p in data["profiles"]}
-    # All five tiers are present (visible), but only small is schedulable.
+    # All five tiers are present (visible); small + medium are schedulable.
     assert set(avail) == {"small", "medium", "large", "xlarge", "2xlarge"}
     assert avail["small"] is True
-    assert avail["medium"] is False
+    assert avail["medium"] is True
+    assert avail["large"] is False
     assert avail["2xlarge"] is False
 
 

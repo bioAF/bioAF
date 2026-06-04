@@ -50,6 +50,10 @@ class ComputeSession(Base):
     gce_project_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     github_repo_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
+    failure_reason: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    failure_message: Mapped[str | None] = mapped_column(String, nullable=True)
+    requested_disk_gb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     user = relationship("User")
     organization = relationship("Organization")
     experiment = relationship("Experiment")

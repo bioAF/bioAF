@@ -19,6 +19,7 @@ from app.schemas.work_node import (
     WorkNodeListResponse,
     MachineTypeResponse,
     UserSummary,
+    ProjectSummary,
     WorkNodeSettings,
 )
 from app.services.audit_service import log_action
@@ -35,19 +36,29 @@ def _user_summary(user) -> UserSummary | None:
     return UserSummary(id=user.id, name=user.name, email=user.email)
 
 
+def _project_summary(project) -> ProjectSummary | None:
+    if not project:
+        return None
+    return ProjectSummary(id=project.id, name=project.name)
+
+
 def _work_node_response(cs) -> WorkNodeResponse:
     return WorkNodeResponse(
         id=cs.id,
         session_type=cs.session_type,
         user=_user_summary(cs.user) if hasattr(cs, "user") and cs.user else None,
         project_id=cs.project_id,
+        project=_project_summary(getattr(cs, "project", None)),
         environment_version_id=cs.environment_version_id,
         machine_type=cs.machine_type,
         input_file_ids=[v for v in (cs.data_mount_paths or []) if isinstance(v, int)],
         resource_profile=cs.resource_profile,
         cpu_cores=cs.cpu_cores,
         memory_gb=cs.memory_gb,
+        requested_disk_gb=cs.requested_disk_gb,
         status=cs.status,
+        failure_reason=cs.failure_reason,
+        failure_message=cs.failure_message,
         access_url=cs.access_url,
         gce_instance_name=cs.gce_instance_name,
         gce_zone=cs.gce_zone,
@@ -94,6 +105,7 @@ async def list_machine_types(
 @router.get("/sessions", response_model=WorkNodeListResponse)
 async def list_work_nodes(
     status: str | None = None,
+    bucket: str | None = None,
     current_user: dict = require_permission("work_nodes", "view"),
     session: AsyncSession = Depends(get_session),
 ):
@@ -102,7 +114,13 @@ async def list_work_nodes(
     can_view_all = await role_service.has_permission(session, int(current_user["role_id"]), "users", "deactivate")
     filter_user_id = None if can_view_all else user_id
 
-    sessions_list, total = await WorkNodeService.list_work_nodes(session, org_id, user_id=filter_user_id, status=status)
+    sessions_list, total = await WorkNodeService.list_work_nodes(
+        session,
+        org_id,
+        user_id=filter_user_id,
+        status=status,
+        bucket=bucket,
+    )
 
     return WorkNodeListResponse(
         sessions=[_work_node_response(s) for s in sessions_list],

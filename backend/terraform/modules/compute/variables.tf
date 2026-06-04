@@ -62,8 +62,8 @@ variable "k8s_pipeline_head_max_nodes" {
 
 variable "k8s_interactive_machine_type" {
   type        = string
-  default     = "n2-standard-4"
-  description = "Machine type for the interactive node pool"
+  default     = "e2-standard-8"
+  description = "Machine type for the interactive node pool. Defaults to e2-standard-8 (8 vCPU / 32 GB): the e2 family is allocated against any compatible host generation so it almost never stocks out, while n2-standard-* in us-central1-a has repeatedly hit GCE-out-of-resources for fresh interactive pool scale-ups. The 8-vCPU / 32 GB shape is large enough that both Small (2/8) and Medium (4/16) notebook tiers schedule on the same node."
 }
 
 variable "k8s_interactive_max_nodes" {

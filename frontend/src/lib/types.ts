@@ -522,10 +522,14 @@ export interface NotebookSession {
   session_type: SessionType;
   user: UserSummary | null;
   experiment: ExperimentSummary | null;
+  project: ProjectSummary | null;
   resource_profile: ResourceProfile;
   cpu_cores: number;
   memory_gb: number;
+  requested_disk_gb: number | null;
   status: SessionStatus;
+  failure_reason: string | null;
+  failure_message: string | null;
   idle_since: string | null;
   proxy_url: string | null;
   started_at: string | null;
@@ -534,6 +538,7 @@ export interface NotebookSession {
   git_branch_name: string | null;
   git_commit_hash: string | null;
   environment_version_id: number | null;
+  input_file_ids: number[] | null;
 }
 
 export interface SessionListResponse {
@@ -1814,13 +1819,17 @@ export interface WorkNode {
   session_type: string;
   user: UserSummary | null;
   project_id: number | null;
+  project: ProjectSummary | null;
   environment_version_id: number | null;
   machine_type: string | null;
   input_file_ids: number[] | null;
   resource_profile: string;
   cpu_cores: number;
   memory_gb: number;
+  requested_disk_gb: number | null;
   status: string;
+  failure_reason: string | null;
+  failure_message: string | null;
   access_url: string | null;
   gce_instance_name: string | null;
   gce_zone: string | null;
