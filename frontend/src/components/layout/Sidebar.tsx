@@ -261,25 +261,40 @@ export function Sidebar() {
             aria-label="Expand sidebar"
             aria-expanded={false}
             data-testid="sidebar-collapse-toggle"
-            className="p-1 rounded-md hover:bg-gray-800"
+            className="rounded-md hover:bg-gray-800"
           >
-            <img
-              src="/bioAF-logo.svg"
-              alt="bioAF"
-              data-testid="sidebar-logo"
-              className="h-8 w-8"
-            />
-          </button>
-        ) : (
-          <>
-            <Link href="/dashboard" className="flex items-center gap-2">
+            <span
+              data-testid="sidebar-logo-backdrop"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10"
+            >
               <img
                 src="/bioAF-logo.svg"
                 alt="bioAF"
                 data-testid="sidebar-logo"
-                className="h-8 w-8"
+                className="h-7 w-7"
               />
-              <span className="text-xl font-bold text-bioaf-400">bioAF</span>
+            </span>
+          </button>
+        ) : (
+          <>
+            <Link href="/dashboard" className="flex items-center gap-2">
+              <span
+                data-testid="sidebar-logo-backdrop"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10"
+              >
+                <img
+                  src="/bioAF-logo.svg"
+                  alt="bioAF"
+                  data-testid="sidebar-logo"
+                  className="h-7 w-7"
+                />
+              </span>
+              <span className="flex flex-col leading-none">
+                <span className="text-base font-bold text-bioaf-400">bioAF</span>
+                <span className="mt-0.5 text-[10px] tracking-tight text-gray-400 whitespace-nowrap">
+                  Comp Bio Automation Framework
+                </span>
+              </span>
             </Link>
             <button
               type="button"

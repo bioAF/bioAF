@@ -360,6 +360,30 @@ describe("Sidebar brand logo", () => {
 
     expect(screen.getByText("bioAF")).toBeInTheDocument();
   });
+
+  test("shows the tagline under the wordmark when expanded", () => {
+    render(<Sidebar />);
+
+    expect(screen.getByText("Comp Bio Automation Framework")).toBeInTheDocument();
+  });
+
+  test("does not show the tagline when collapsed", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+
+    expect(screen.queryByText("Comp Bio Automation Framework")).not.toBeInTheDocument();
+  });
+
+  test("renders a backdrop element behind the logo for contrast", () => {
+    render(<Sidebar />);
+
+    const backdrop = screen.getByTestId("sidebar-logo-backdrop");
+    expect(backdrop).toBeInTheDocument();
+    // The backdrop should be present in both expanded and collapsed states
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+    expect(screen.getByTestId("sidebar-logo-backdrop")).toBeInTheDocument();
+  });
 });
 
 describe("Sidebar header height matches main header", () => {
@@ -382,12 +406,6 @@ describe("Sidebar header height matches main header", () => {
     // block must use the same fixed height so the two top bars align.
     const header = screen.getByTestId("sidebar-header");
     expect(header.className).toMatch(/\bh-16\b/);
-  });
-
-  test("does not render the tagline (would overflow h-16 with the toggle)", () => {
-    render(<Sidebar />);
-
-    expect(screen.queryByText("Comp Bio Automation Framework")).not.toBeInTheDocument();
   });
 
   test("brand header keeps its h-16 height when collapsed", () => {
