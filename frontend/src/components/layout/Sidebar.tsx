@@ -8,6 +8,8 @@ import { useComponents } from "@/hooks/useComponents";
 import { useBackendReady } from "@/hooks/useBackendReady";
 import { navConfig, NavSection, NavChild, ComponentGate, PermissionRef, isChildActive } from "@/lib/navConfig";
 
+const SIDEBAR_COLLAPSED_KEY = "bioaf-sidebar-collapsed";
+
 function ChevronIcon({ expanded }: { expanded: boolean }) {
   return (
     <svg
@@ -17,6 +19,25 @@ function ChevronIcon({ expanded }: { expanded: boolean }) {
       viewBox="0 0 24 24"
     >
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+    </svg>
+  );
+}
+
+function CollapseToggleIcon({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg
+      className="w-5 h-5"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d={collapsed ? "M9 5l7 7-7 7" : "M15 19l-7-7 7-7"}
+      />
     </svg>
   );
 }
@@ -165,47 +186,51 @@ export function Sidebar() {
       });
   }, [loading, roleName, passesPermission, passesComponentGate]);
 
-  // Initialize expanded state: auto-expand section containing active path
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(() => {
-    const initial = new Set<string>();
+  // Initialize expanded state: auto-expand the section containing active path.
+  // Only one section can be expanded at a time.
+  const [expandedSection, setExpandedSection] = useState<string | null>(() => {
     for (const section of navConfig) {
       if (section.children) {
         const hasActiveChild = section.children.some((c) =>
           isChildActive(pathname, c, section.children!),
         );
         if (hasActiveChild) {
-          initial.add(section.label);
+          return section.label;
         }
       }
     }
-    return initial;
+    return null;
   });
 
-  // Auto-expand when navigating to a new section
+  // Auto-expand when navigating to a new section. Replaces any previously
+  // expanded section so the one-at-a-time invariant holds.
   useEffect(() => {
     for (const section of visibleSections) {
       if (section.children) {
         const hasActiveChild = section.children.some((c) =>
           isChildActive(pathname, c, section.children!),
         );
-        if (hasActiveChild && !expandedSections.has(section.label)) {
-          setExpandedSections((prev) => new Set(prev).add(section.label));
+        if (hasActiveChild && expandedSection !== section.label) {
+          setExpandedSection(section.label);
+          return;
         }
       }
     }
   }, [pathname, visibleSections]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSection = (label: string) => {
-    setExpandedSections((prev) => {
-      const next = new Set(prev);
-      if (next.has(label)) {
-        next.delete(label);
-      } else {
-        next.add(label);
-      }
-      return next;
-    });
+    setExpandedSection((prev) => (prev === label ? null : label));
   };
+
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true";
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "true" : "false");
+  }, [collapsed]);
 
   if (!backendReady || loading || componentsLoading) {
     return (
@@ -220,27 +245,88 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="w-64 bg-gray-900 text-white min-h-screen flex flex-col" data-testid="sidebar">
-      <div className="p-6 border-b border-gray-700">
-        <Link href="/dashboard" className="text-xl font-bold text-bioaf-400">
-          bioAF
-        </Link>
-        <p className="text-xs text-gray-400 mt-1">Comp Bio Automation Framework</p>
+    <aside
+      className={`${collapsed ? "w-12" : "w-64"} bg-gray-900 text-white min-h-screen flex flex-col transition-[width] duration-150`}
+      data-testid="sidebar"
+      data-collapsed={collapsed ? "true" : "false"}
+    >
+      <div
+        data-testid="sidebar-header"
+        className={`h-16 flex items-center border-b border-gray-700 ${collapsed ? "justify-center px-2" : "justify-between px-4"}`}
+      >
+        {collapsed ? (
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            aria-label="Expand sidebar"
+            aria-expanded={false}
+            data-testid="sidebar-collapse-toggle"
+            className="rounded-md hover:bg-gray-800"
+          >
+            <span
+              data-testid="sidebar-logo-backdrop"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10"
+            >
+              <img
+                src="/bioAF-logo.svg"
+                alt="bioAF"
+                data-testid="sidebar-logo"
+                className="h-7 w-7"
+              />
+            </span>
+          </button>
+        ) : (
+          <>
+            <Link href="/dashboard" className="flex items-center gap-2">
+              <span
+                data-testid="sidebar-logo-backdrop"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10"
+              >
+                <img
+                  src="/bioAF-logo.svg"
+                  alt="bioAF"
+                  data-testid="sidebar-logo"
+                  className="h-7 w-7"
+                />
+              </span>
+              <span className="flex flex-col leading-none">
+                <span className="text-base font-bold text-bioaf-400">bioAF</span>
+                <span className="mt-0.5 text-[10px] tracking-tight text-gray-400 whitespace-nowrap">
+                  Comp Bio Automation Framework
+                </span>
+              </span>
+            </Link>
+            <button
+              type="button"
+              onClick={() => setCollapsed(true)}
+              aria-label="Collapse sidebar"
+              aria-expanded={true}
+              data-testid="sidebar-collapse-toggle"
+              className="p-1 rounded-md text-gray-400 hover:bg-gray-800 hover:text-white"
+            >
+              <CollapseToggleIcon collapsed={false} />
+            </button>
+          </>
+        )}
       </div>
 
-      <nav className="flex-1 p-4 space-y-1 overflow-y-auto" data-testid="sidebar-nav">
-        {visibleSections.map((section) => (
-          <SidebarSection
-            key={section.label}
-            section={section}
-            pathname={pathname}
-            expanded={expandedSections.has(section.label)}
-            onToggle={() => toggleSection(section.label)}
-          />
-        ))}
-      </nav>
+      {!collapsed && (
+        <nav className="flex-1 p-4 space-y-1 overflow-y-auto" data-testid="sidebar-nav">
+          {visibleSections.map((section) => (
+            <SidebarSection
+              key={section.label}
+              section={section}
+              pathname={pathname}
+              expanded={expandedSection === section.label}
+              onToggle={() => toggleSection(section.label)}
+            />
+          ))}
+        </nav>
+      )}
 
-      <div className="p-4 border-t border-gray-700">
+      {collapsed && <div className="flex-1" />}
+
+      <div className={`border-t border-gray-700 ${collapsed ? "p-2 text-center" : "p-4"}`}>
         <div className="text-xs text-gray-600">v{process.env.NEXT_PUBLIC_APP_VERSION}</div>
       </div>
     </aside>

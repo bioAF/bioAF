@@ -218,3 +218,251 @@ describe("Sidebar component gating", () => {
     expect(screen.getByText("Pipelines")).toBeInTheDocument();
   });
 });
+
+describe("Sidebar single-expanded behavior", () => {
+  beforeEach(() => {
+    mockComponents.mockReturnValue({
+      components: [
+        makeComponent("nextflow_k8s", "pipeline_orchestration", true),
+        makeComponent("jupyterhub", "analysis", true),
+        makeComponent("qc_dashboard", "visualization", true),
+        makeComponent("cellxgene", "visualization", true),
+      ],
+      loading: false,
+      refetch: jest.fn(),
+    });
+  });
+
+  test("expanding a second section collapses the first", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByText("Pipelines"));
+    expect(screen.getByTestId("children-Pipelines")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Workbench"));
+
+    expect(screen.getByTestId("children-Workbench")).toBeInTheDocument();
+    expect(screen.queryByTestId("children-Pipelines")).not.toBeInTheDocument();
+  });
+
+  test("clicking an expanded section collapses it leaving none expanded", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByText("Pipelines"));
+    expect(screen.getByTestId("children-Pipelines")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Pipelines"));
+
+    expect(screen.queryByTestId("children-Pipelines")).not.toBeInTheDocument();
+  });
+
+  test("only one section is expanded at any time across many toggles", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByText("Pipelines"));
+    fireEvent.click(screen.getByText("Workbench"));
+    fireEvent.click(screen.getByText("Results"));
+
+    expect(screen.getByTestId("children-Results")).toBeInTheDocument();
+    expect(screen.queryByTestId("children-Pipelines")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("children-Workbench")).not.toBeInTheDocument();
+  });
+});
+
+describe("Sidebar collapse toggle", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    mockComponents.mockReturnValue({
+      components: [
+        makeComponent("nextflow_k8s", "pipeline_orchestration", true),
+        makeComponent("jupyterhub", "analysis", true),
+      ],
+      loading: false,
+      refetch: jest.fn(),
+    });
+  });
+
+  test("renders a collapse toggle button and starts expanded", () => {
+    render(<Sidebar />);
+
+    const sidebar = screen.getByTestId("sidebar");
+    expect(sidebar).toHaveAttribute("data-collapsed", "false");
+    expect(screen.getByTestId("sidebar-collapse-toggle")).toBeInTheDocument();
+    expect(screen.getByText("Pipelines")).toBeInTheDocument();
+  });
+
+  test("clicking the toggle collapses the sidebar and hides section labels", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+
+    const sidebar = screen.getByTestId("sidebar");
+    expect(sidebar).toHaveAttribute("data-collapsed", "true");
+    expect(screen.queryByText("Pipelines")).not.toBeInTheDocument();
+    expect(screen.queryByText("Workbench")).not.toBeInTheDocument();
+  });
+
+  test("clicking the toggle again re-expands the sidebar", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+
+    expect(screen.getByTestId("sidebar")).toHaveAttribute("data-collapsed", "false");
+    expect(screen.getByText("Pipelines")).toBeInTheDocument();
+  });
+
+  test("toggle button is reachable even when collapsed", () => {
+    render(<Sidebar />);
+
+    const toggle = screen.getByTestId("sidebar-collapse-toggle");
+    fireEvent.click(toggle);
+
+    // Still present after collapse, so the user can re-expand
+    expect(screen.getByTestId("sidebar-collapse-toggle")).toBeInTheDocument();
+  });
+});
+
+describe("Sidebar brand logo", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    mockComponents.mockReturnValue({
+      components: [
+        makeComponent("nextflow_k8s", "pipeline_orchestration", true),
+        makeComponent("jupyterhub", "analysis", true),
+      ],
+      loading: false,
+      refetch: jest.fn(),
+    });
+  });
+
+  test("renders the bioAF mark in the header when expanded", () => {
+    render(<Sidebar />);
+
+    const logo = screen.getByTestId("sidebar-logo");
+    expect(logo).toBeInTheDocument();
+    expect(logo).toHaveAttribute("src", "/bioAF-logo.svg");
+    expect(logo).toHaveAttribute("alt", "bioAF");
+  });
+
+  test("keeps the bioAF mark in the header when collapsed", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+
+    const logo = screen.getByTestId("sidebar-logo");
+    expect(logo).toBeInTheDocument();
+    expect(logo).toHaveAttribute("src", "/bioAF-logo.svg");
+  });
+
+  test("shows the wordmark alongside the logo when expanded", () => {
+    render(<Sidebar />);
+
+    expect(screen.getByText("bioAF")).toBeInTheDocument();
+  });
+
+  test("shows the tagline under the wordmark when expanded", () => {
+    render(<Sidebar />);
+
+    expect(screen.getByText("Comp Bio Automation Framework")).toBeInTheDocument();
+  });
+
+  test("does not show the tagline when collapsed", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+
+    expect(screen.queryByText("Comp Bio Automation Framework")).not.toBeInTheDocument();
+  });
+
+  test("renders a backdrop element behind the logo for contrast", () => {
+    render(<Sidebar />);
+
+    const backdrop = screen.getByTestId("sidebar-logo-backdrop");
+    expect(backdrop).toBeInTheDocument();
+    // The backdrop should be present in both expanded and collapsed states
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+    expect(screen.getByTestId("sidebar-logo-backdrop")).toBeInTheDocument();
+  });
+});
+
+describe("Sidebar header height matches main header", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    mockComponents.mockReturnValue({
+      components: [
+        makeComponent("nextflow_k8s", "pipeline_orchestration", true),
+        makeComponent("jupyterhub", "analysis", true),
+      ],
+      loading: false,
+      refetch: jest.fn(),
+    });
+  });
+
+  test("brand header is the same h-16 the main top bar uses", () => {
+    render(<Sidebar />);
+
+    // Header.tsx renders <header className="h-16 ...">. The sidebar's brand
+    // block must use the same fixed height so the two top bars align.
+    const header = screen.getByTestId("sidebar-header");
+    expect(header.className).toMatch(/\bh-16\b/);
+  });
+
+  test("brand header keeps its h-16 height when collapsed", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+
+    const header = screen.getByTestId("sidebar-header");
+    expect(header.className).toMatch(/\bh-16\b/);
+  });
+});
+
+describe("Sidebar collapse persistence", () => {
+  const STORAGE_KEY = "bioaf-sidebar-collapsed";
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    mockComponents.mockReturnValue({
+      components: [
+        makeComponent("nextflow_k8s", "pipeline_orchestration", true),
+        makeComponent("jupyterhub", "analysis", true),
+      ],
+      loading: false,
+      refetch: jest.fn(),
+    });
+  });
+
+  test("starts collapsed when localStorage says so", () => {
+    window.localStorage.setItem(STORAGE_KEY, "true");
+
+    render(<Sidebar />);
+
+    expect(screen.getByTestId("sidebar")).toHaveAttribute("data-collapsed", "true");
+    expect(screen.queryByText("Pipelines")).not.toBeInTheDocument();
+  });
+
+  test("starts expanded when localStorage is empty", () => {
+    render(<Sidebar />);
+
+    expect(screen.getByTestId("sidebar")).toHaveAttribute("data-collapsed", "false");
+  });
+
+  test("starts expanded when localStorage value is not 'true'", () => {
+    window.localStorage.setItem(STORAGE_KEY, "garbage");
+
+    render(<Sidebar />);
+
+    expect(screen.getByTestId("sidebar")).toHaveAttribute("data-collapsed", "false");
+  });
+
+  test("writes the new state to localStorage when toggled", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe("true");
+
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe("false");
+  });
+});
