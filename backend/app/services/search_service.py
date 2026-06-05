@@ -15,6 +15,7 @@ from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.models.pipeline_run import PipelineRun
 from app.models.project import Project
 from app.models.sample import Sample, sample_files
+from app.models.sdr import ScientificDecisionRecord, SdrCategory
 
 logger = logging.getLogger("bioaf.search_service")
 
@@ -30,6 +31,7 @@ FULL_SEARCH_TYPES = [
     "literature_paper",
     "lab_document",
     "lab_glossary_term",
+    "sdr",
 ]
 
 # Per-type fetch cap and overall merged cap. Both 300 so a single selected type can
@@ -162,6 +164,25 @@ class SearchService:
                 {"entity_type": "lab_glossary_term", "entity_id": t.id, "name": t.term, "experiment_id": None}
             )
 
+        sdr_rows = await session.execute(
+            select(ScientificDecisionRecord)
+            .where(
+                ScientificDecisionRecord.organization_id == org_id,
+                ScientificDecisionRecord.title.ilike(pattern),
+            )
+            .order_by(ScientificDecisionRecord.sdr_number.desc())
+            .limit(limit_per_type)
+        )
+        for s in sdr_rows.scalars():
+            results.append(
+                {
+                    "entity_type": "sdr",
+                    "entity_id": s.id,
+                    "name": f"SDR-{s.sdr_number:03d}: {s.title}",
+                    "experiment_id": None,
+                }
+            )
+
         return results
 
     @staticmethod
@@ -214,6 +235,7 @@ class SearchService:
             "literature_paper": SearchService._literature_hits,
             "lab_document": SearchService._lab_document_hits,
             "lab_glossary_term": SearchService._lab_glossary_hits,
+            "sdr": SearchService._sdr_hits,
         }
         raw: list[dict] = []
         for t in result_types:
@@ -320,6 +342,27 @@ class SearchService:
                     func.array_to_string(LabGlossaryTerm.aliases, " ").ilike(pattern),
                     LabGlossaryTerm.category.ilike(pattern),
                     LabGlossaryTerm.context.ilike(pattern),
+                ),
+            )
+        if t == "sdr":
+            # "SDR-017" formatted number, bare number, title, decision,
+            # justification, and category name are all searchable (F-LKC-09).
+            sdr_number_label = func.concat(
+                "SDR-", func.lpad(cast(ScientificDecisionRecord.sdr_number, Text), 3, "0")
+            )
+            return ScientificDecisionRecord, and_(
+                ScientificDecisionRecord.organization_id == org_id,
+                or_(
+                    ScientificDecisionRecord.title.ilike(pattern),
+                    ScientificDecisionRecord.decision.ilike(pattern),
+                    ScientificDecisionRecord.justification.ilike(pattern),
+                    cast(ScientificDecisionRecord.sdr_number, Text).ilike(pattern),
+                    sdr_number_label.ilike(pattern),
+                    ScientificDecisionRecord.category_id.in_(
+                        select(SdrCategory.id).where(
+                            SdrCategory.organization_id == org_id, SdrCategory.name.ilike(pattern)
+                        )
+                    ),
                 ),
             )
         raise ValueError(f"unknown search type: {t}")
@@ -592,6 +635,33 @@ class SearchService:
                 "_recency": _ts(t.updated_at),
             }
             for t in rows
+        ]
+
+    @staticmethod
+    async def _sdr_hits(session: AsyncSession, org_id: int, pattern: str) -> list[dict]:
+        model, where = SearchService._type_where("sdr", org_id, pattern)
+        rows = (
+            (
+                await session.execute(
+                    select(model).where(where).order_by(model.updated_at.desc(), model.id.desc()).limit(_PER_TYPE_FETCH)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [
+            {
+                "entity_type": "sdr",
+                "entity_id": s.id,
+                "title": f"SDR-{s.sdr_number:03d}: {s.title}",
+                "snippet": _join(["Decision Record", (s.decision or "")[:120] or None]),
+                "url": f"/lab-knowledge/decision-records?sdr={s.id}",
+                "experiment_id": None,
+                "relevance_score": None,
+                "_match_name": s.title,
+                "_recency": _ts(s.updated_at),
+            }
+            for s in rows
         ]
 
     @staticmethod
