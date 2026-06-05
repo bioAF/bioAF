@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.document import Document
 from app.models.experiment import Experiment
 from app.models.file import File
+from app.models.lab_document import LabDocument
 from app.models.literature import LiteraturePaper
 from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.models.pipeline_run import PipelineRun
@@ -26,6 +27,7 @@ FULL_SEARCH_TYPES = [
     "project",
     "pipeline_definition",
     "literature_paper",
+    "lab_document",
 ]
 
 # Per-type fetch cap and overall merged cap. Both 300 so a single selected type can
@@ -129,6 +131,21 @@ class SearchService:
                 }
             )
 
+        lab_doc_rows = await session.execute(
+            select(LabDocument)
+            .where(
+                LabDocument.organization_id == org_id,
+                LabDocument.is_archived.is_(False),
+                LabDocument.title.ilike(pattern),
+            )
+            .order_by(LabDocument.title)
+            .limit(limit_per_type)
+        )
+        for d in lab_doc_rows.scalars():
+            results.append(
+                {"entity_type": "lab_document", "entity_id": d.id, "name": d.title, "experiment_id": None}
+            )
+
         return results
 
     @staticmethod
@@ -179,6 +196,7 @@ class SearchService:
             "project": SearchService._project_hits,
             "pipeline_definition": SearchService._pipeline_definition_hits,
             "literature_paper": SearchService._literature_hits,
+            "lab_document": SearchService._lab_document_hits,
         }
         raw: list[dict] = []
         for t in result_types:
@@ -265,6 +283,15 @@ class SearchService:
                     LiteraturePaper.journal.ilike(pattern),
                     LiteraturePaper.abstract.ilike(pattern),
                     cast(LiteraturePaper.authors_json, Text).ilike(pattern),
+                ),
+            )
+        if t == "lab_document":
+            return LabDocument, and_(
+                LabDocument.organization_id == org_id,
+                LabDocument.is_archived.is_(False),
+                or_(
+                    LabDocument.title.ilike(pattern),
+                    LabDocument.description.ilike(pattern),
                 ),
             )
         raise ValueError(f"unknown search type: {t}")
@@ -483,6 +510,33 @@ class SearchService:
                 "_recency": _ts(paper.created_at),
             }
             for paper in rows
+        ]
+
+    @staticmethod
+    async def _lab_document_hits(session: AsyncSession, org_id: int, pattern: str) -> list[dict]:
+        model, where = SearchService._type_where("lab_document", org_id, pattern)
+        rows = (
+            (
+                await session.execute(
+                    select(model).where(where).order_by(model.updated_at.desc(), model.id.desc()).limit(_PER_TYPE_FETCH)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [
+            {
+                "entity_type": "lab_document",
+                "entity_id": d.id,
+                "title": d.title,
+                "snippet": _join(["Lab Document", (d.description or "")[:120] or None]),
+                "url": f"/lab-knowledge/documents?doc={d.id}",
+                "experiment_id": None,
+                "relevance_score": None,
+                "_match_name": d.title,
+                "_recency": _ts(d.updated_at),
+            }
+            for d in rows
         ]
 
     @staticmethod
