@@ -24,6 +24,12 @@ describe("searchHitHref", () => {
       "/data/files?file=77",
     );
   });
+
+  it("links a lab document hit to the Lab Knowledge documents page", () => {
+    expect(searchHitHref({ entity_type: "lab_document", entity_id: 3, name: "Manual" })).toBe(
+      "/lab-knowledge/documents?doc=3",
+    );
+  });
 });
 
 describe("searchHitTypeLabel", () => {
@@ -32,5 +38,6 @@ describe("searchHitTypeLabel", () => {
     expect(searchHitTypeLabel("pipeline_run")).toBe("Run");
     expect(searchHitTypeLabel("file")).toBe("File");
     expect(searchHitTypeLabel("sample")).toBe("Sample");
+    expect(searchHitTypeLabel("lab_document")).toBe("Lab Document");
   });
 });

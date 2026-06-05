@@ -161,3 +161,39 @@ async def test_audit_log_records_document_ops(client, admin_token, session):
 async def test_get_missing_document_404(client, admin_token):
     resp = await client.get("/api/lab-knowledge/documents/99999", headers=_auth(admin_token))
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_download_missing_document_404(client, admin_token):
+    resp = await client.get("/api/lab-knowledge/documents/99999/download", headers=_auth(admin_token))
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_download_returns_signed_url_and_audits(client, admin_token, session):
+    from sqlalchemy import select
+    from app.models.audit_log import AuditLog
+
+    created = (await _create_doc(client, admin_token)).json()
+
+    blob = type("Blob", (), {"generate_signed_url": lambda self, **kw: "https://signed.example/get"})()
+    bucket = type("Bucket", (), {"blob": lambda self, p: blob})()
+    fake_client = type("Client", (), {"bucket": lambda self, b: bucket})()
+
+    with patch("app.services.gcs_storage.GcsStorageService.get_credentials", new_callable=AsyncMock, return_value=None), patch(
+        "google.cloud.storage.Client", return_value=fake_client
+    ):
+        resp = await client.get(
+            f"/api/lab-knowledge/documents/{created['id']}/download", headers=_auth(admin_token)
+        )
+    assert resp.status_code == 200
+    assert resp.json()["download_url"] == "https://signed.example/get"
+
+    actions = (
+        await session.execute(
+            select(AuditLog.action).where(
+                AuditLog.entity_type == "lab_document", AuditLog.entity_id == created["id"]
+            )
+        )
+    ).scalars().all()
+    assert "downloaded" in actions

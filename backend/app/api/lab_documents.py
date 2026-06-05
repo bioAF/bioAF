@@ -253,6 +253,52 @@ async def upload_version(
     return _doc_response(doc)
 
 
+@router.get("/documents/{document_id}/download")
+async def download_document(
+    document_id: int,
+    version: int | None = Query(default=None),
+    current_user: dict = require_permission("lab_documents", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    doc = await LabDocumentService.get_document(session, document_id=document_id, org_id=org_id)
+    if doc is None:
+        raise HTTPException(404, "Document not found")
+
+    target = version or doc.current_version
+    gcs_uri = next((v.gcs_uri for v in doc.versions if v.version_number == target), None)
+    if gcs_uri is None:
+        raise HTTPException(404, "Version not found")
+
+    try:
+        from google.cloud import storage as gcs_storage
+
+        from app.services.gcs_storage import GcsStorageService
+
+        credentials = await GcsStorageService.get_credentials(session)
+        client = gcs_storage.Client(credentials=credentials)
+        parts = gcs_uri.replace("gs://", "").split("/", 1)
+        url = client.bucket(parts[0]).blob(parts[1]).generate_signed_url(
+            version="v4", expiration=3600, method="GET"
+        )
+    except Exception:
+        raise HTTPException(502, "Could not generate download URL")
+
+    from app.services.audit_service import log_action
+
+    await log_action(
+        session,
+        user_id=user_id,
+        entity_type="lab_document",
+        entity_id=doc.id,
+        action="downloaded",
+        details={"version_number": target, "method": "signed_url"},
+    )
+    await session.commit()
+    return {"download_url": url}
+
+
 @router.post("/documents/{document_id}/archive", response_model=LabDocumentResponse)
 async def archive_document(
     document_id: int,
