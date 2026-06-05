@@ -190,8 +190,8 @@ class LabDocumentService:
         result = await session.execute(
             select(LabDocument)
             .options(
-                selectinload(LabDocument.versions),
-                selectinload(LabDocument.tag_assignments),
+                selectinload(LabDocument.versions).selectinload(LabDocumentVersion.uploaded_by),
+                selectinload(LabDocument.tag_assignments).selectinload(LabDocumentTagAssignment.tag),
                 selectinload(LabDocument.created_by),
             )
             .where(LabDocument.id == document_id, LabDocument.organization_id == org_id)
@@ -236,7 +236,10 @@ class LabDocumentService:
         total = (await session.execute(count_base)).scalar() or 0
         offset = (page - 1) * page_size
         base = (
-            base.options(selectinload(LabDocument.tag_assignments), selectinload(LabDocument.created_by))
+            base.options(
+                selectinload(LabDocument.tag_assignments).selectinload(LabDocumentTagAssignment.tag),
+                selectinload(LabDocument.created_by),
+            )
             .order_by(LabDocument.updated_at.desc())
             .offset(offset)
             .limit(page_size)
