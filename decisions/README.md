@@ -54,6 +54,12 @@
 | [ADR-050](ADR-050-external-ids-and-idempotent-writes.md) | External IDs and Idempotent Writes | Accepted | 2026-05-13 |
 | [ADR-051](ADR-051-outbound-webhook-delivery.md) | Outbound Webhook Delivery | Accepted | 2026-05-13 |
 | [ADR-058](ADR-058-naming-profile-parse-only.md) | Naming Profiles are Parse-Only with Template-Driven Vocabulary | Accepted | 2026-06-02 |
+| [ADR-059](ADR-059-lab-knowledge-institutional-memory.md) | Lab Knowledge as Institutional Memory Layer | Proposed | 2026-06-05 |
+| [ADR-060](ADR-060-lab-document-tag-organization.md) | Tag-Based Document Organization for Lab Knowledge | Proposed | 2026-06-05 |
+| [ADR-061](ADR-061-lab-document-versioning.md) | Upload-New-Version Versioning Model for Lab Documents | Proposed | 2026-06-05 |
+| [ADR-062](ADR-062-glossary-ai-population-human-review.md) | AI-Assisted Glossary Population with Mandatory Human Review | Proposed | 2026-06-05 |
+| [ADR-063](ADR-063-sdr-status-machine.md) | Scientific Decision Records (SDR) Status Machine | Proposed | 2026-06-05 |
+| [ADR-064](ADR-064-sdr-reassessment-triggers.md) | Date-Based SDR Re-Assessment Triggers | Proposed | 2026-06-05 |
 
 ## How to Use This Directory
 
