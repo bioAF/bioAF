@@ -21,6 +21,7 @@ _TYPE_PERMISSIONS: dict[str, tuple[str, str]] = {
     "pipeline_definition": ("pipelines", "view"),
     "literature_paper": ("literature", "view"),
     "lab_document": ("lab_documents", "view"),
+    "lab_glossary_term": ("lab_glossary", "view"),
 }
 
 

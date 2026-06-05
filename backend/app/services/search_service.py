@@ -9,6 +9,7 @@ from app.models.document import Document
 from app.models.experiment import Experiment
 from app.models.file import File
 from app.models.lab_document import LabDocument
+from app.models.lab_glossary import LabGlossaryTerm
 from app.models.literature import LiteraturePaper
 from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.models.pipeline_run import PipelineRun
@@ -28,6 +29,7 @@ FULL_SEARCH_TYPES = [
     "pipeline_definition",
     "literature_paper",
     "lab_document",
+    "lab_glossary_term",
 ]
 
 # Per-type fetch cap and overall merged cap. Both 300 so a single selected type can
@@ -146,6 +148,20 @@ class SearchService:
                 {"entity_type": "lab_document", "entity_id": d.id, "name": d.title, "experiment_id": None}
             )
 
+        glossary_rows = await session.execute(
+            select(LabGlossaryTerm)
+            .where(
+                LabGlossaryTerm.organization_id == org_id,
+                LabGlossaryTerm.term.ilike(pattern),
+            )
+            .order_by(LabGlossaryTerm.term)
+            .limit(limit_per_type)
+        )
+        for t in glossary_rows.scalars():
+            results.append(
+                {"entity_type": "lab_glossary_term", "entity_id": t.id, "name": t.term, "experiment_id": None}
+            )
+
         return results
 
     @staticmethod
@@ -197,6 +213,7 @@ class SearchService:
             "pipeline_definition": SearchService._pipeline_definition_hits,
             "literature_paper": SearchService._literature_hits,
             "lab_document": SearchService._lab_document_hits,
+            "lab_glossary_term": SearchService._lab_glossary_hits,
         }
         raw: list[dict] = []
         for t in result_types:
@@ -292,6 +309,17 @@ class SearchService:
                 or_(
                     LabDocument.title.ilike(pattern),
                     LabDocument.description.ilike(pattern),
+                ),
+            )
+        if t == "lab_glossary_term":
+            return LabGlossaryTerm, and_(
+                LabGlossaryTerm.organization_id == org_id,
+                or_(
+                    LabGlossaryTerm.term.ilike(pattern),
+                    LabGlossaryTerm.definition.ilike(pattern),
+                    func.array_to_string(LabGlossaryTerm.aliases, " ").ilike(pattern),
+                    LabGlossaryTerm.category.ilike(pattern),
+                    LabGlossaryTerm.context.ilike(pattern),
                 ),
             )
         raise ValueError(f"unknown search type: {t}")
@@ -537,6 +565,33 @@ class SearchService:
                 "_recency": _ts(d.updated_at),
             }
             for d in rows
+        ]
+
+    @staticmethod
+    async def _lab_glossary_hits(session: AsyncSession, org_id: int, pattern: str) -> list[dict]:
+        model, where = SearchService._type_where("lab_glossary_term", org_id, pattern)
+        rows = (
+            (
+                await session.execute(
+                    select(model).where(where).order_by(model.updated_at.desc(), model.id.desc()).limit(_PER_TYPE_FETCH)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [
+            {
+                "entity_type": "lab_glossary_term",
+                "entity_id": t.id,
+                "title": t.term,
+                "snippet": _join(["Glossary", (t.definition or "")[:120] or None]),
+                "url": f"/lab-knowledge/glossary?term={t.id}",
+                "experiment_id": None,
+                "relevance_score": None,
+                "_match_name": t.term,
+                "_recency": _ts(t.updated_at),
+            }
+            for t in rows
         ]
 
     @staticmethod
