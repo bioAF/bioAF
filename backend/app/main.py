@@ -238,6 +238,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Could not mark orphaned LLM review jobs: %s", e)
 
+    # Fail any glossary scan jobs left in-flight by a restart (ADR-062).
+    from app.services import lab_glossary_scan_service
+
+    try:
+        async with notif_session_factory() as orphan_session:
+            count = await lab_glossary_scan_service.mark_orphaned_on_startup(orphan_session)
+            await orphan_session.commit()
+            if count:
+                logger.info("Marked %d orphaned glossary scan jobs as failed on startup", count)
+    except Exception as e:
+        logger.warning("Could not mark orphaned glossary scan jobs: %s", e)
+
     logger.info("bioAF backend started successfully")
 
     # Start background tasks

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.lab_glossary import LabGlossaryTerm, LabGlossaryTermHistory
 from app.services.audit_service import log_action
@@ -174,9 +175,9 @@ class LabGlossaryService:
         session: AsyncSession, *, term_id: int, org_id: int
     ) -> LabGlossaryTerm | None:
         result = await session.execute(
-            select(LabGlossaryTerm).where(
-                LabGlossaryTerm.id == term_id, LabGlossaryTerm.organization_id == org_id
-            )
+            select(LabGlossaryTerm)
+            .options(selectinload(LabGlossaryTerm.created_by))
+            .where(LabGlossaryTerm.id == term_id, LabGlossaryTerm.organization_id == org_id)
         )
         return result.scalar_one_or_none()
 
@@ -215,6 +216,11 @@ class LabGlossaryService:
 
         total = (await session.execute(count_base)).scalar() or 0
         offset = (page - 1) * page_size
-        base = base.order_by(func.lower(LabGlossaryTerm.term).asc()).offset(offset).limit(page_size)
+        base = (
+            base.options(selectinload(LabGlossaryTerm.created_by))
+            .order_by(func.lower(LabGlossaryTerm.term).asc())
+            .offset(offset)
+            .limit(page_size)
+        )
         rows = list((await session.execute(base)).scalars().all())
         return rows, total
