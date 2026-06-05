@@ -220,6 +220,12 @@ async def create_admin(body: CreateAdminRequest, request: Request, session: Asyn
         status="active",
     )
 
+    # Seed default Lab Knowledge vocabularies (document tags) now that an admin
+    # user exists to own them (ADR-060).
+    from app.services.bootstrap_lab_knowledge import seed_default_lab_document_tags
+
+    await seed_default_lab_document_tags(session, org.id, user.id)
+
     # Initialize component states
     await ComponentService.initialize_states(session)
 

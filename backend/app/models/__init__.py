@@ -91,6 +91,12 @@ from app.models.literature import (
     LiteratureSearchResult,
     LiteratureSourcesConfig,
 )
+from app.models.lab_document import (
+    LabDocument,
+    LabDocumentTag,
+    LabDocumentTagAssignment,
+    LabDocumentVersion,
+)
 
 __all__ = [
     "User",
@@ -191,4 +197,8 @@ __all__ = [
     "LiteratureSearch",
     "LiteratureSearchResult",
     "LiteratureSourcesConfig",
+    "LabDocument",
+    "LabDocumentVersion",
+    "LabDocumentTag",
+    "LabDocumentTagAssignment",
 ]

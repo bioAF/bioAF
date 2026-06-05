@@ -83,6 +83,11 @@ async def create_admin_user(
     session.add(user)
     await session.flush()
 
+    # Seed default Lab Knowledge vocabularies (ADR-060).
+    from app.services.bootstrap_lab_knowledge import seed_default_lab_document_tags
+
+    await seed_default_lab_document_tags(session, org.id, user.id)
+
     # Set org_slug in platform_config
     await session.execute(
         text(
