@@ -97,6 +97,13 @@ from app.models.lab_document import (
     LabDocumentTagAssignment,
     LabDocumentVersion,
 )
+from app.models.lab_glossary import (
+    LabGlossaryRejectedProposal,
+    LabGlossaryScanJob,
+    LabGlossaryScanProposal,
+    LabGlossaryTerm,
+    LabGlossaryTermHistory,
+)
 
 __all__ = [
     "User",
@@ -201,4 +208,9 @@ __all__ = [
     "LabDocumentVersion",
     "LabDocumentTag",
     "LabDocumentTagAssignment",
+    "LabGlossaryTerm",
+    "LabGlossaryTermHistory",
+    "LabGlossaryRejectedProposal",
+    "LabGlossaryScanJob",
+    "LabGlossaryScanProposal",
 ]
