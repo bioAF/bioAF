@@ -451,11 +451,20 @@ async def _extract_document_text(session: AsyncSession, job: LabGlossaryScanJob)
 
 
 async def _collect_platform_content(session: AsyncSession, job: LabGlossaryScanJob) -> str:
-    """Gather org content (experiment names/hypotheses/notes, sample metadata,
-    pipeline run params, SDR text) into a single chunkable payload."""
+    """Gather org content into a single chunkable payload: experiment
+    names/hypotheses/descriptions, sample metadata, and pipeline run names.
+
+    SDR text and Lab Knowledge document bodies are intentionally not collected
+    here yet (SDRs land in Phase C; per-document GCS extraction is deferred to
+    avoid fanning out downloads on every platform scan)."""
     from app.models.experiment import Experiment
+    from app.models.pipeline_run import PipelineRun
+    from app.models.sample import Sample
 
     chunks: list[str] = []
+
+    org_exp_ids = select(Experiment.id).where(Experiment.organization_id == job.organization_id)
+
     exps = (
         await session.execute(
             select(Experiment.name, Experiment.hypothesis, Experiment.description).where(
@@ -465,6 +474,26 @@ async def _collect_platform_content(session: AsyncSession, job: LabGlossaryScanJ
     ).all()
     for name, hypothesis, description in exps:
         chunks.append(" | ".join([p for p in (name, hypothesis, description) if p]))
+
+    samples = (
+        await session.execute(
+            select(Sample.organism, Sample.tissue_type, Sample.treatment_condition).where(
+                Sample.experiment_id.in_(org_exp_ids)
+            )
+        )
+    ).all()
+    for organism, tissue, treatment in samples:
+        chunks.append(" | ".join([p for p in (organism, tissue, treatment) if p]))
+
+    runs = (
+        await session.execute(
+            select(PipelineRun.pipeline_name).where(PipelineRun.organization_id == job.organization_id)
+        )
+    ).all()
+    for (pipeline_name,) in runs:
+        if pipeline_name:
+            chunks.append(pipeline_name)
+
     return "\n".join(c for c in chunks if c)
 
 
