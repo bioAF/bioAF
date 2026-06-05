@@ -21,6 +21,8 @@ export function searchHitHref(hit: QuickSearchHit): string {
       return `/data/files?file=${hit.entity_id}`;
     case "lab_document":
       return `/lab-knowledge/documents?doc=${hit.entity_id}`;
+    case "lab_glossary_term":
+      return `/lab-knowledge/glossary?term=${hit.entity_id}`;
     default:
       return "/dashboard";
   }
@@ -45,6 +47,8 @@ export function searchHitTypeLabel(entityType: string): string {
       return "Paper";
     case "lab_document":
       return "Lab Document";
+    case "lab_glossary_term":
+      return "Glossary";
     default:
       return entityType;
   }
