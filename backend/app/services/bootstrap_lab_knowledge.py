@@ -12,8 +12,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.lab_document import LabDocumentTag
+from app.models.sdr import SdrCategory
 
 DEFAULT_DOCUMENT_TAGS = ["manual", "contact", "procedure", "policy", "standard"]
+DEFAULT_SDR_CATEGORIES = ["Protocol/Methods", "Analysis", "QC Thresholds", "Vendor/Reagent", "Operational"]
 
 
 async def seed_default_lab_document_tags(session: AsyncSession, org_id: int, user_id: int) -> None:
@@ -26,4 +28,17 @@ async def seed_default_lab_document_tags(session: AsyncSession, org_id: int, use
         if name in have:
             continue
         session.add(LabDocumentTag(organization_id=org_id, name=name, created_by_user_id=user_id))
+    await session.flush()
+
+
+async def seed_default_sdr_categories(session: AsyncSession, org_id: int, user_id: int) -> None:
+    """Seed the default SDR category vocabulary for an org (idempotent, ADR-063)."""
+    existing = await session.execute(
+        select(SdrCategory.name).where(SdrCategory.organization_id == org_id)
+    )
+    have = {row[0] for row in existing.fetchall()}
+    for name in DEFAULT_SDR_CATEGORIES:
+        if name in have:
+            continue
+        session.add(SdrCategory(organization_id=org_id, name=name, created_by_user_id=user_id))
     await session.flush()

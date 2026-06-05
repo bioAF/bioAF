@@ -104,6 +104,11 @@ from app.models.lab_glossary import (
     LabGlossaryTerm,
     LabGlossaryTermHistory,
 )
+from app.models.sdr import (
+    ScientificDecisionRecord,
+    SdrCategory,
+    SdrStatusTransition,
+)
 
 __all__ = [
     "User",
@@ -213,4 +218,7 @@ __all__ = [
     "LabGlossaryRejectedProposal",
     "LabGlossaryScanJob",
     "LabGlossaryScanProposal",
+    "SdrCategory",
+    "ScientificDecisionRecord",
+    "SdrStatusTransition",
 ]
