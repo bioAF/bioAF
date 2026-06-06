@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from kubernetes import client, config
 
 from app.adapters.base import CellxgeneProvider
+from app.adapters.capabilities import ProviderCapabilities
 
 logger = logging.getLogger("bioaf.adapters.cellxgene.k8s")
 
@@ -47,6 +48,10 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
     """
 
     _TOKEN_TTL_SECONDS = 2700  # 45 minutes
+
+    def capabilities(self) -> ProviderCapabilities:
+        """This backend provides cellxgene visualization instances."""
+        return ProviderCapabilities(cellxgene=True)
 
     def __init__(self, session_factory=None):
         self._session_factory = session_factory

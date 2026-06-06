@@ -10,6 +10,7 @@ import shutil
 import uuid
 
 from app.adapters.base import StorageProvider
+from app.adapters.capabilities import ProviderCapabilities
 
 logger = logging.getLogger("bioaf.adapters.storage.gcs")
 
@@ -22,6 +23,10 @@ class GcsStorageProvider(StorageProvider):
     def __init__(self, org_slug: str = "demo"):
         self._mode = os.environ.get("BIOAF_COMPUTE_MODE", "local")
         self._org_slug = org_slug
+
+    def capabilities(self) -> ProviderCapabilities:
+        """GCS supports signed-URL direct upload and per-tier storage metrics."""
+        return ProviderCapabilities(signed_url_upload=True, storage_tier_metrics=True)
 
     @property
     def is_local(self) -> bool:

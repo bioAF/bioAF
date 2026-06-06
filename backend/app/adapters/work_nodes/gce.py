@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timezone
 
 from app.adapters.base import WorkNodeProvider
+from app.adapters.capabilities import ProviderCapabilities
 from app.platform.credential_injector import load_gcp_credentials
 
 logger = logging.getLogger("bioaf.adapters.work_nodes.gce")
@@ -236,6 +237,10 @@ class GCEWorkNodeProvider(WorkNodeProvider):
         # In-memory store for sync SSH private keys, keyed by session_id.
         # Generated at launch, used at terminate to SSH in for output sync.
         self._sync_keys: dict[int, str] = {}
+
+    def capabilities(self) -> ProviderCapabilities:
+        """GCE provides on-demand work-node VMs."""
+        return ProviderCapabilities(work_nodes=True)
 
     @property
     def is_local(self) -> bool:

@@ -6,9 +6,20 @@ All service-layer code depends on these abstractions, never concrete implementat
 
 from abc import ABC, abstractmethod
 
+from app.adapters.capabilities import ProviderCapabilities
+
 
 class ComputeProvider(ABC):
     """Abstract interface for compute backends (Kubernetes, SLURM)."""
+
+    def capabilities(self) -> ProviderCapabilities:
+        """Declare what this backend can do. Default: nothing.
+
+        Stub backends (e.g. the SLURM compute stub) rely on this default to
+        honestly declare every capability unsupported until implemented. Real
+        adapters override to declare the flags they truly support.
+        """
+        return ProviderCapabilities()
 
     @abstractmethod
     async def submit_job(self, job_spec: dict) -> dict:
@@ -71,6 +82,10 @@ class ComputeProvider(ABC):
 class StorageProvider(ABC):
     """Abstract interface for storage backends (GCS, NFS)."""
 
+    def capabilities(self) -> ProviderCapabilities:
+        """Declare what this backend can do. Default: nothing (see ComputeProvider)."""
+        return ProviderCapabilities()
+
     @abstractmethod
     async def resolve_input_path(self, file_record: dict) -> str:
         """Resolve the path a pipeline container uses for input."""
@@ -94,6 +109,10 @@ class StorageProvider(ABC):
 
 class NotebookProvider(ABC):
     """Abstract interface for notebook session backends (Kubernetes, SLURM)."""
+
+    def capabilities(self) -> ProviderCapabilities:
+        """Declare what this backend can do. Default: nothing (see ComputeProvider)."""
+        return ProviderCapabilities()
 
     @abstractmethod
     async def launch_session(self, session_spec: dict) -> dict:
@@ -119,6 +138,10 @@ class NotebookProvider(ABC):
 class WorkNodeProvider(ABC):
     """Abstract interface for work node VM backends (GCE)."""
 
+    def capabilities(self) -> ProviderCapabilities:
+        """Declare what this backend can do. Default: nothing (see ComputeProvider)."""
+        return ProviderCapabilities()
+
     @abstractmethod
     async def launch_vm(self, vm_spec: dict) -> dict:
         """Create and start a GCE VM. Returns dict with instance_name, zone, status, external_ip."""
@@ -138,6 +161,10 @@ class WorkNodeProvider(ABC):
 
 class CellxgeneProvider(ABC):
     """Abstract interface for cellxgene visualization backends."""
+
+    def capabilities(self) -> ProviderCapabilities:
+        """Declare what this backend can do. Default: nothing (see ComputeProvider)."""
+        return ProviderCapabilities()
 
     @abstractmethod
     async def deploy(self, publication_id: int, gcs_uri: str, dataset_name: str) -> dict:

@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from kubernetes import client, config
 
 from app.adapters.base import ComputeProvider
+from app.adapters.capabilities import ProviderCapabilities
 
 logger = logging.getLogger("bioaf.adapters.compute.k8s")
 
@@ -87,6 +88,17 @@ class KubernetesComputeProvider(ComputeProvider):
     @property
     def is_local(self) -> bool:
         return self._mode == "local"
+
+    def capabilities(self) -> ProviderCapabilities:
+        """Kubernetes compute supports cost estimation, autoscaling, exec,
+        spot/preemption retry, and job reports."""
+        return ProviderCapabilities(
+            cost_estimation=True,
+            autoscaling=True,
+            ssh_exec=True,
+            spot_retry=True,
+            job_report=True,
+        )
 
     async def submit_job(self, job_spec: dict) -> dict:
         if self.is_local:

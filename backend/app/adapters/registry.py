@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.base import CellxgeneProvider, ComputeProvider, NotebookProvider, StorageProvider, WorkNodeProvider
+from app.adapters.capabilities import ProviderCapabilities
 
 logger = logging.getLogger("bioaf.adapters.registry")
 
@@ -134,6 +135,28 @@ def get_work_node_adapter() -> WorkNodeProvider:
     if not _initialized or _work_node_adapter is None:
         raise RuntimeError("Adapter registry not initialized. Call initialize_adapters() first.")
     return _work_node_adapter
+
+
+def get_active_capabilities() -> ProviderCapabilities:
+    """Aggregate the active stack's capabilities across all five adapters.
+
+    Each adapter declares the flags its backend truly supports; the registry
+    merges them (logical OR) into one capability surface that services and the
+    frontend (Phase 4b) read to decide what actions to expose.
+    """
+    if not _initialized:
+        raise RuntimeError("Adapter registry not initialized. Call initialize_adapters() first.")
+    caps = ProviderCapabilities()
+    for adapter in (
+        _compute_adapter,
+        _storage_adapter,
+        _notebook_adapter,
+        _cellxgene_adapter,
+        _work_node_adapter,
+    ):
+        if adapter is not None:
+            caps = caps.merge(adapter.capabilities())
+    return caps
 
 
 def reset_registry() -> None:

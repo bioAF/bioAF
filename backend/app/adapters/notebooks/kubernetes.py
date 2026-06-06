@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from kubernetes import client, config
 
 from app.adapters.base import NotebookProvider
+from app.adapters.capabilities import ProviderCapabilities
 from app.services.session_persistence import (
     generate_sync_in_command,
     generate_sync_out_command,
@@ -69,6 +70,10 @@ class KubernetesNotebookProvider(NotebookProvider):
         self._cached_cluster_fingerprint: tuple[str, str] = ("", "")
         self._cluster_config: dict | None = None
         self._namespace_ready = False
+
+    def capabilities(self) -> ProviderCapabilities:
+        """Kubernetes notebook backend supports interactive notebook sessions."""
+        return ProviderCapabilities(notebooks=True)
 
     def _cluster_fingerprint(self) -> tuple[str, str]:
         """(endpoint, ca_cert) identity of the cluster in the current config."""

@@ -76,3 +76,95 @@ def test_capability_not_supported_is_raisable():
     with pytest.raises(CapabilityNotSupported) as info:
         raise CapabilityNotSupported("autoscaling")
     assert info.value.capability == "autoscaling"
+
+
+# --- Per-adapter declarations -----------------------------------------------
+
+
+def _flags_true(caps: ProviderCapabilities) -> set[str]:
+    return {f for f in ALL_FLAGS if getattr(caps, f)}
+
+
+def test_base_provider_capabilities_default_to_nothing():
+    """A provider that does not override capabilities() declares nothing.
+
+    This is what the SLURM/NFS stubs rely on: until they implement a feature,
+    they honestly claim it is unsupported.
+    """
+    from app.adapters.compute.slurm import SlurmComputeProvider
+    from app.adapters.notebooks.slurm import SlurmNotebookProvider
+    from app.adapters.storage.nfs import NfsStorageProvider
+
+    for stub in (SlurmComputeProvider(), SlurmNotebookProvider(), NfsStorageProvider()):
+        assert _flags_true(stub.capabilities()) == set()
+
+
+def test_kubernetes_compute_declares_its_capabilities():
+    from app.adapters.compute.kubernetes import KubernetesComputeProvider
+
+    caps = KubernetesComputeProvider().capabilities()
+    assert _flags_true(caps) == {
+        "cost_estimation",
+        "autoscaling",
+        "ssh_exec",
+        "spot_retry",
+        "job_report",
+    }
+
+
+def test_gcs_storage_declares_its_capabilities():
+    from app.adapters.storage.gcs import GcsStorageProvider
+
+    caps = GcsStorageProvider().capabilities()
+    assert _flags_true(caps) == {"signed_url_upload", "storage_tier_metrics"}
+
+
+def test_kubernetes_notebook_declares_notebooks():
+    from app.adapters.notebooks.kubernetes import KubernetesNotebookProvider
+
+    assert _flags_true(KubernetesNotebookProvider().capabilities()) == {"notebooks"}
+
+
+def test_kubernetes_cellxgene_declares_cellxgene():
+    from app.adapters.cellxgene.kubernetes import KubernetesCellxgeneProvider
+
+    assert _flags_true(KubernetesCellxgeneProvider().capabilities()) == {"cellxgene"}
+
+
+def test_gce_work_node_declares_work_nodes():
+    from app.adapters.work_nodes.gce import GCEWorkNodeProvider
+
+    assert _flags_true(GCEWorkNodeProvider().capabilities()) == {"work_nodes"}
+
+
+# --- Registry aggregation ----------------------------------------------------
+
+
+@pytest.fixture
+def _reset_registry():
+    from app.adapters import registry
+
+    registry.reset_registry()
+    yield
+    registry.reset_registry()
+
+
+def test_registry_aggregates_active_capabilities(_reset_registry):
+    from app.adapters import registry
+
+    registry.initialize_adapters_sync("kubernetes")
+    caps = registry.get_active_capabilities()
+    assert _flags_true(caps) == {
+        "cost_estimation",
+        "autoscaling",
+        "ssh_exec",
+        "spot_retry",
+        "job_report",
+        "signed_url_upload",
+        "storage_tier_metrics",
+        "notebooks",
+        "cellxgene",
+        "work_nodes",
+    }
+    assert caps.messaging is False
+    assert caps.billing is False
