@@ -7,6 +7,7 @@ All service-layer code depends on these abstractions, never concrete implementat
 from abc import ABC, abstractmethod
 
 from app.adapters.capabilities import ProviderCapabilities
+from app.adapters.models import CellxgeneInstance
 
 
 class ComputeProvider(ABC):
@@ -167,16 +168,17 @@ class CellxgeneProvider(ABC):
         return ProviderCapabilities()
 
     @abstractmethod
-    async def deploy(self, publication_id: int, gcs_uri: str, dataset_name: str) -> dict:
+    async def deploy(self, publication_id: int, gcs_uri: str, dataset_name: str) -> CellxgeneInstance:
         """Deploy a cellxgene instance for an h5ad dataset.
 
-        Returns dict with pod_name, namespace, status, and access_url.
+        Returns a CellxgeneInstance; backend specifics (pod name, namespace)
+        live in its provider_details.
         """
 
     @abstractmethod
-    async def teardown(self, publication_id: int) -> dict:
-        """Tear down a cellxgene instance. Returns confirmation dict."""
+    async def teardown(self, publication_id: int) -> CellxgeneInstance:
+        """Tear down a cellxgene instance. Returns a CellxgeneInstance (stopped)."""
 
     @abstractmethod
-    async def get_status(self, publication_id: int) -> dict:
+    async def get_status(self, publication_id: int) -> CellxgeneInstance:
         """Get the status of a cellxgene instance."""

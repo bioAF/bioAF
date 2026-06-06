@@ -17,6 +17,7 @@ from kubernetes import client, config
 
 from app.adapters.base import CellxgeneProvider
 from app.adapters.capabilities import ProviderCapabilities
+from app.adapters.models import CellxgeneInstance, ServiceState
 
 logger = logging.getLogger("bioaf.adapters.cellxgene.k8s")
 
@@ -217,15 +218,14 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         # Poll for readiness in background
         asyncio.create_task(self._poll_deployment_ready(publication_id, name, namespace))
 
-        return {
-            "publication_id": publication_id,
-            "pod_name": name,
-            "namespace": namespace,
-            "status": "starting",
-            "access_url": None,
-        }
+        return CellxgeneInstance(
+            publication_id=publication_id,
+            status=ServiceState.STARTING,
+            access_url=None,
+            provider_details={"pod_name": name, "namespace": namespace},
+        )
 
-    async def teardown(self, publication_id: int) -> dict:
+    async def teardown(self, publication_id: int) -> CellxgeneInstance:
         await self._get_api_client_async()
 
         name = f"cellxgene-{publication_id}"
@@ -246,13 +246,13 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         except Exception as e:
             logger.warning("Failed to delete cellxgene service %s: %s", name, e)
 
-        return {
-            "publication_id": publication_id,
-            "status": "stopped",
-            "stopped_at": datetime.now(timezone.utc).isoformat(),
-        }
+        return CellxgeneInstance(
+            publication_id=publication_id,
+            status=ServiceState.STOPPED,
+            provider_details={"stopped_at": datetime.now(timezone.utc).isoformat()},
+        )
 
-    async def get_status(self, publication_id: int) -> dict:
+    async def get_status(self, publication_id: int) -> CellxgeneInstance:
         await self._get_api_client_async()
 
         name = f"cellxgene-{publication_id}"
@@ -262,20 +262,19 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         try:
             dep = apps_v1.read_namespaced_deployment_status(name=name, namespace=namespace)
             ready = dep.status.ready_replicas or 0
-            status = "running" if ready >= 1 else "starting"
+            status = ServiceState.RUNNING if ready >= 1 else ServiceState.STARTING
         except Exception:
-            return {
-                "publication_id": publication_id,
-                "status": "unknown",
-                "pod_name": name,
-            }
+            return CellxgeneInstance(
+                publication_id=publication_id,
+                status=ServiceState.UNKNOWN,
+                provider_details={"pod_name": name},
+            )
 
-        return {
-            "publication_id": publication_id,
-            "status": status,
-            "pod_name": name,
-            "namespace": namespace,
-        }
+        return CellxgeneInstance(
+            publication_id=publication_id,
+            status=status,
+            provider_details={"pod_name": name, "namespace": namespace},
+        )
 
     # -- Cluster config --
 

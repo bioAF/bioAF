@@ -52,17 +52,17 @@ class TestCellxgeneDeploy:
     @pytest.mark.asyncio
     async def test_deploy_returns_publication_id(self, adapter, mock_k8s):
         result = await adapter.deploy(42, "gs://bucket/data.h5ad", "My Dataset")
-        assert result["publication_id"] == 42
+        assert result.publication_id == 42
 
     @pytest.mark.asyncio
     async def test_deploy_returns_starting_status(self, adapter, mock_k8s):
         result = await adapter.deploy(1, "gs://bucket/data.h5ad", "Dataset")
-        assert result["status"] == "starting"
+        assert result.status == "starting"
 
     @pytest.mark.asyncio
     async def test_deploy_sets_pod_name(self, adapter, mock_k8s):
         result = await adapter.deploy(5, "gs://bucket/data.h5ad", "Dataset")
-        assert result["pod_name"] == "cellxgene-5"
+        assert result.provider_details["pod_name"] == "cellxgene-5"
 
     @pytest.mark.asyncio
     async def test_deploy_creates_deployment_and_service(self, adapter, mock_k8s):
@@ -103,7 +103,7 @@ class TestCellxgeneTeardown:
     @pytest.mark.asyncio
     async def test_teardown_returns_stopped(self, adapter, mock_k8s):
         result = await adapter.teardown(1)
-        assert result["status"] == "stopped"
+        assert result.status == "stopped"
 
     @pytest.mark.asyncio
     async def test_teardown_deletes_deployment_and_service(self, adapter, mock_k8s):
@@ -122,7 +122,7 @@ class TestCellxgeneTeardown:
         mock_k8s["apps"].delete_namespaced_deployment.side_effect = ApiException(status=404)
         mock_k8s["core"].delete_namespaced_service.side_effect = ApiException(status=404)
         result = await adapter.teardown(999)
-        assert result["status"] == "stopped"
+        assert result.status == "stopped"
 
 
 class TestCellxgeneGetStatus:
@@ -133,7 +133,7 @@ class TestCellxgeneGetStatus:
         mock_k8s["apps"].read_namespaced_deployment_status.return_value = mock_dep
 
         result = await adapter.get_status(1)
-        assert result["status"] == "running"
+        assert result.status == "running"
 
     @pytest.mark.asyncio
     async def test_status_starting(self, adapter, mock_k8s):
@@ -142,13 +142,13 @@ class TestCellxgeneGetStatus:
         mock_k8s["apps"].read_namespaced_deployment_status.return_value = mock_dep
 
         result = await adapter.get_status(1)
-        assert result["status"] == "starting"
+        assert result.status == "starting"
 
     @pytest.mark.asyncio
     async def test_status_unknown_on_error(self, adapter, mock_k8s):
         mock_k8s["apps"].read_namespaced_deployment_status.side_effect = Exception("gone")
         result = await adapter.get_status(999)
-        assert result["status"] == "unknown"
+        assert result.status == "unknown"
 
 
 class TestCellxgeneNamespaceSetup:
