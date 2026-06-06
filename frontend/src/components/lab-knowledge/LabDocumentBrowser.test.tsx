@@ -7,6 +7,11 @@ jest.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => ({ canAccess: (r: string, a: string) => canAccessImpl(r, a) }),
 }));
 
+const pushMock = jest.fn();
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock }),
+}));
+
 jest.mock("@/lib/api", () => ({
   api: { get: jest.fn(), post: jest.fn(), patch: jest.fn(), delete: jest.fn() },
 }));
@@ -35,6 +40,7 @@ const makeDoc = (overrides = {}) => ({
 
 beforeEach(() => {
   canAccessImpl = () => true;
+  pushMock.mockReset();
   mockGet.mockReset();
   mockPost.mockReset();
   mockGet.mockImplementation((url: string) => {
@@ -65,6 +71,17 @@ test("renders document rows", async () => {
   await waitFor(() => {
     expect(screen.getByText("Centrifuge Manual")).toBeInTheDocument();
   });
+});
+
+test("clicking a document row navigates to its detail page", async () => {
+  mockGet.mockImplementation((url: string) => {
+    if (url.includes("/document-tags")) return Promise.resolve([{ id: 7, name: "manual" }]);
+    return Promise.resolve({ documents: [makeDoc()], total: 1, page: 1, page_size: 25 });
+  });
+  render(<LabDocumentBrowser />);
+  await waitFor(() => screen.getByText("Centrifuge Manual"));
+  fireEvent.click(screen.getByText("Centrifuge Manual"));
+  expect(pushMock).toHaveBeenCalledWith("/lab-knowledge/documents/1");
 });
 
 test("upload button hidden without manage permission", async () => {

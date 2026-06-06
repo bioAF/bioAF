@@ -25,9 +25,9 @@ describe("searchHitHref", () => {
     );
   });
 
-  it("links a lab document hit to the Lab Knowledge documents page", () => {
+  it("links a lab document hit to its detail page", () => {
     expect(searchHitHref({ entity_type: "lab_document", entity_id: 3, name: "Manual" })).toBe(
-      "/lab-knowledge/documents?doc=3",
+      "/lab-knowledge/documents/3",
     );
   });
 

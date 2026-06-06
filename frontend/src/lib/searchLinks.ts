@@ -20,7 +20,7 @@ export function searchHitHref(hit: QuickSearchHit): string {
     case "file":
       return `/data/files?file=${hit.entity_id}`;
     case "lab_document":
-      return `/lab-knowledge/documents?doc=${hit.entity_id}`;
+      return `/lab-knowledge/documents/${hit.entity_id}`;
     case "lab_glossary_term":
       return `/lab-knowledge/glossary?term=${hit.entity_id}`;
     case "sdr":

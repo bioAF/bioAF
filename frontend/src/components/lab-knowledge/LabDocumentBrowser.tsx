@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { uploadFileResumable } from "@/lib/resumableUpload";
+import { uploadDocumentFile } from "@/lib/labDocuments";
 import { usePermissions } from "@/hooks/usePermissions";
 
 interface Tag {
@@ -32,16 +33,6 @@ interface LabDocument {
   updated_at: string;
 }
 
-interface DocVersion {
-  version_number: number;
-  file_name: string;
-  file_size_bytes: number | null;
-  md5_checksum: string | null;
-  change_note: string | null;
-  uploaded_by: UserSummary | null;
-  uploaded_at: string;
-}
-
 interface ListResponse {
   documents: LabDocument[];
   total: number;
@@ -49,33 +40,15 @@ interface ListResponse {
   page_size: number;
 }
 
-interface UploadUrlResponse {
-  upload_token: string;
-  signed_url: string;
-  gcs_uri: string;
-}
-
 const API_BASE = "/api/lab-knowledge";
-
-// Direct-to-GCS upload via the resumable session URL the server returns. Sending
-// the file size up front lets the server scope the session; the resumable PUT is
-// origin-aware so the cross-origin upload is accepted (fixes "Failed to fetch").
-async function uploadToGcs(file: File): Promise<string> {
-  const init = await api.post<UploadUrlResponse>(`${API_BASE}/documents/upload-url`, {
-    file_name: file.name,
-    mime_type: file.type || null,
-    size_bytes: file.size,
-  });
-  await uploadFileResumable(init.signed_url, file);
-  return init.upload_token;
-}
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
 }
 
-export function LabDocumentBrowser({ focusDocId }: { focusDocId?: number }) {
+export function LabDocumentBrowser() {
+  const router = useRouter();
   const { canAccess } = usePermissions();
   const canManage = canAccess("lab_documents", "manage");
   const canManageTags = canAccess("lab_document_tags", "manage");
@@ -89,7 +62,6 @@ export function LabDocumentBrowser({ focusDocId }: { focusDocId?: number }) {
   const [includeArchived, setIncludeArchived] = useState(false);
   const [query, setQuery] = useState("");
 
-  const [selected, setSelected] = useState<LabDocument | null>(null);
   const [showUpload, setShowUpload] = useState(false);
 
   const fetchTags = useCallback(async () => {
@@ -125,13 +97,6 @@ export function LabDocumentBrowser({ focusDocId }: { focusDocId?: number }) {
   useEffect(() => {
     fetchDocuments();
   }, [fetchDocuments]);
-
-  useEffect(() => {
-    if (focusDocId && documents.length) {
-      const match = documents.find((d) => d.id === focusDocId);
-      if (match) setSelected(match);
-    }
-  }, [focusDocId, documents]);
 
   const toggleTag = (id: number) => {
     setSelectedTagIds((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]));
@@ -211,7 +176,7 @@ export function LabDocumentBrowser({ focusDocId }: { focusDocId?: number }) {
             {documents.map((d) => (
               <tr
                 key={d.id}
-                onClick={() => setSelected(d)}
+                onClick={() => router.push(`/lab-knowledge/documents/${d.id}`)}
                 className="border-b hover:bg-gray-50 cursor-pointer"
               >
                 <td className="py-2 font-medium">
@@ -228,19 +193,6 @@ export function LabDocumentBrowser({ focusDocId }: { focusDocId?: number }) {
         </table>
       )}
 
-      {selected && (
-        <DocumentDetailPanel
-          doc={selected}
-          canManage={canManage}
-          tags={tags}
-          onClose={() => setSelected(null)}
-          onChanged={() => {
-            setSelected(null);
-            fetchDocuments();
-          }}
-        />
-      )}
-
       {showUpload && (
         <UploadDocumentModal
           tags={tags}
@@ -253,107 +205,6 @@ export function LabDocumentBrowser({ focusDocId }: { focusDocId?: number }) {
           }}
         />
       )}
-    </div>
-  );
-}
-
-function DocumentDetailPanel({
-  doc,
-  canManage,
-  tags,
-  onClose,
-  onChanged,
-}: {
-  doc: LabDocument;
-  canManage: boolean;
-  tags: Tag[];
-  onClose: () => void;
-  onChanged: () => void;
-}) {
-  const [versions, setVersions] = useState<DocVersion[]>([]);
-  const newVersionInput = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    api
-      .get<DocVersion[]>(`${API_BASE}/documents/${doc.id}/versions`)
-      .then(setVersions)
-      .catch(() => setVersions([]));
-  }, [doc.id]);
-
-  const download = async (version: number) => {
-    const { download_url } = await api.get<{ download_url: string }>(
-      `${API_BASE}/documents/${doc.id}/download?version=${version}`,
-    );
-    window.open(download_url, "_blank");
-  };
-
-  const archive = async () => {
-    await api.post(`${API_BASE}/documents/${doc.id}/archive?archived=${!doc.is_archived}`);
-    onChanged();
-  };
-
-  const uploadNewVersion = async () => {
-    const file = newVersionInput.current?.files?.[0];
-    if (!file) return;
-    const uploadToken = await uploadToGcs(file);
-    await api.post(`${API_BASE}/documents/${doc.id}/versions`, { upload_token: uploadToken });
-    onChanged();
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/30 flex justify-end z-50" onClick={onClose}>
-      <div className="bg-white w-[28rem] h-full overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between mb-4">
-          <h2 className="text-xl font-bold">{doc.title}</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-gray-400">
-            x
-          </button>
-        </div>
-        {doc.description && <p className="text-sm text-gray-600 mb-3">{doc.description}</p>}
-        <div className="text-xs text-gray-500 mb-4">
-          {doc.tags.map((t) => t.name).join(", ") || "No tags"}
-        </div>
-
-        <h3 className="font-semibold text-sm mb-2">Version history</h3>
-        <ul className="space-y-2 mb-4">
-          {versions.map((v) => (
-            <li key={v.version_number} className="text-sm flex items-center justify-between">
-              <span>
-                v{v.version_number} {v.change_note ? `- ${v.change_note}` : ""}{" "}
-                <span className="text-gray-400">({fmtDate(v.uploaded_at)})</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => download(v.version_number)}
-                className="text-blue-600 text-xs"
-              >
-                Download
-              </button>
-            </li>
-          ))}
-        </ul>
-
-        {canManage && (
-          <div className="border-t pt-4 space-y-3">
-            <div>
-              <label className="block text-sm font-medium mb-1">Upload new version</label>
-              <input ref={newVersionInput} type="file" aria-label="New version file" className="text-sm" />
-              <button
-                type="button"
-                onClick={uploadNewVersion}
-                className="ml-2 bg-blue-600 text-white text-xs rounded px-3 py-1"
-              >
-                Upload
-              </button>
-            </div>
-            <button type="button" onClick={archive} className="text-sm text-amber-700">
-              {doc.is_archived ? "Restore document" : "Archive document"}
-            </button>
-          </div>
-        )}
-        {/* tags list available for future inline editing */}
-        <input type="hidden" data-tag-count={tags.length} />
-      </div>
     </div>
   );
 }
@@ -406,7 +257,7 @@ function UploadDocumentModal({
         setBusy(false);
         return;
       }
-      const uploadToken = await uploadToGcs(file);
+      const uploadToken = await uploadDocumentFile(file);
       await api.post(`${API_BASE}/documents`, {
         upload_token: uploadToken,
         title: title || file.name,
