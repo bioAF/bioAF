@@ -10,6 +10,18 @@ class LabDocumentTagResponse(BaseModel):
     name: str
 
 
+class LabDocumentNoteCreate(BaseModel):
+    body: str = Field(..., min_length=1, max_length=10000)
+
+
+class LabDocumentNoteResponse(BaseModel):
+    id: int
+    body: str
+    user: UserSummary | None = None
+    created_at: datetime
+    deleted: bool = False
+
+
 class LabDocumentVersionResponse(BaseModel):
     version_number: int
     file_name: str

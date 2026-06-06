@@ -93,6 +93,7 @@ from app.models.literature import (
 )
 from app.models.lab_document import (
     LabDocument,
+    LabDocumentNote,
     LabDocumentTag,
     LabDocumentTagAssignment,
     LabDocumentVersion,
@@ -211,6 +212,7 @@ __all__ = [
     "LiteratureSourcesConfig",
     "LabDocument",
     "LabDocumentVersion",
+    "LabDocumentNote",
     "LabDocumentTag",
     "LabDocumentTagAssignment",
     "LabGlossaryTerm",

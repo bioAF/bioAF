@@ -70,6 +70,31 @@ class LabDocumentVersion(Base):
     uploaded_by = relationship("User")
 
 
+class LabDocumentNote(Base):
+    """A free-text note a user adds to a lab document (ADR-059). Mirrors the
+    literature paper-comment pattern: org-scoped, soft-deletable, ordered by
+    creation. Flat (no threading) in v1."""
+
+    __tablename__ = "lab_document_notes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    document_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("lab_documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+
+    document = relationship("LabDocument")
+    user = relationship("User", foreign_keys=[user_id])
+
+
 class LabDocumentTag(Base):
     """Org-scoped, admin-controlled tag vocabulary (ADR-060). Distinct from the
     global ``controlled_vocabularies`` table."""

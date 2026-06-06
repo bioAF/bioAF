@@ -7,6 +7,7 @@ into its versioned path, and creates the record.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +18,8 @@ from app.schemas.experiment import UserSummary
 from app.schemas.lab_document import (
     LabDocumentCreate,
     LabDocumentListResponse,
+    LabDocumentNoteCreate,
+    LabDocumentNoteResponse,
     LabDocumentResponse,
     LabDocumentTagCreate,
     LabDocumentTagResponse,
@@ -27,9 +30,13 @@ from app.schemas.lab_document import (
     LabDocumentVersionCreate,
     LabDocumentVersionResponse,
 )
+from app.services import role_service
 from app.services.lab_document_service import (
+    LabDocumentNoteService,
     LabDocumentService,
     LabDocumentTagService,
+    NoteNotFoundError,
+    NotePermissionError,
     TagInUseError,
 )
 from app.services.lab_document_upload_service import LabDocumentUploadService
@@ -359,6 +366,135 @@ async def download_document(
     )
     await session.commit()
     return {"download_url": url}
+
+
+async def _download_document_bytes(session: AsyncSession, gcs_uri: str) -> bytes | None:
+    """Fetch object bytes from GCS server-side (mirrors literature's PDF stream),
+    so the inline viewer never has to read across the GCS CORS boundary."""
+    import asyncio
+
+    from app.services.gcs_storage import GcsStorageService
+
+    try:
+        credentials = await GcsStorageService.get_credentials(session)
+        from google.cloud import storage as gcs
+
+        def _download() -> bytes:
+            client = gcs.Client(credentials=credentials)
+            parts = gcs_uri.replace("gs://", "").split("/", 1)
+            return client.bucket(parts[0]).blob(parts[1]).download_as_bytes()
+
+        return await asyncio.to_thread(_download)
+    except Exception:
+        return None
+
+
+@router.get("/documents/{document_id}/content")
+async def stream_document_content(
+    document_id: int,
+    version: int | None = Query(default=None),
+    current_user: dict = require_permission("lab_documents", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Stream the document bytes through the backend for inline viewing."""
+    org_id = int(current_user["org_id"])
+    doc = await LabDocumentService.get_document(session, document_id=document_id, org_id=org_id)
+    if doc is None:
+        raise HTTPException(404, "Document not found")
+
+    target = version or doc.current_version
+    chosen = next((v for v in doc.versions if v.version_number == target), None)
+    if chosen is None:
+        raise HTTPException(404, "Version not found")
+
+    data = await _download_document_bytes(session, chosen.gcs_uri)
+    if data is None:
+        raise HTTPException(502, "Could not fetch document")
+
+    media_type = doc.mime_type or "application/octet-stream"
+
+    def stream():
+        yield data
+
+    return StreamingResponse(
+        stream(),
+        media_type=media_type,
+        headers={"Content-Disposition": f'inline; filename="{chosen.file_name}"'},
+    )
+
+
+def _note_response(note) -> LabDocumentNoteResponse:
+    return LabDocumentNoteResponse(
+        id=note.id,
+        body="[deleted]" if note.deleted_at is not None else note.body,
+        user=_user_summary(getattr(note, "user", None)),
+        created_at=note.created_at,
+        deleted=note.deleted_at is not None,
+    )
+
+
+@router.get("/documents/{document_id}/notes", response_model=list[LabDocumentNoteResponse])
+async def list_notes(
+    document_id: int,
+    current_user: dict = require_permission("lab_documents", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    doc = await LabDocumentService.get_document(session, document_id=document_id, org_id=org_id)
+    if doc is None:
+        raise HTTPException(404, "Document not found")
+    notes = await LabDocumentNoteService.list_notes(session, org_id=org_id, document_id=document_id)
+    return [_note_response(n) for n in notes]
+
+
+@router.post("/documents/{document_id}/notes", response_model=LabDocumentNoteResponse)
+async def add_note(
+    document_id: int,
+    body: LabDocumentNoteCreate,
+    current_user: dict = require_permission("lab_documents", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Any user who can view documents can add a note (collaborative annotation)."""
+    org_id, user_id = int(current_user["org_id"]), int(current_user["sub"])
+    try:
+        note = await LabDocumentNoteService.add_note(
+            session, org_id=org_id, user_id=user_id, document_id=document_id, body=body.body
+        )
+    except NoteNotFoundError:
+        raise HTTPException(404, "Document not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    await session.commit()
+    return _note_response(note)
+
+
+@router.delete("/documents/{document_id}/notes/{note_id}")
+async def delete_note(
+    document_id: int,
+    note_id: int,
+    current_user: dict = require_permission("lab_documents", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Delete own note; deleting another user's note requires lab_documents:manage."""
+    org_id, user_id = int(current_user["org_id"]), int(current_user["sub"])
+    can_manage = await role_service.has_permission(
+        session, int(current_user["role_id"]), "lab_documents", "manage"
+    )
+    try:
+        await LabDocumentNoteService.delete_note(
+            session,
+            org_id=org_id,
+            user_id=user_id,
+            document_id=document_id,
+            note_id=note_id,
+            can_manage=can_manage,
+        )
+    except NoteNotFoundError:
+        raise HTTPException(404, "Note not found")
+    except NotePermissionError as e:
+        raise HTTPException(403, str(e))
+    await session.commit()
+    return {"status": "deleted"}
 
 
 @router.post("/documents/{document_id}/archive", response_model=LabDocumentResponse)

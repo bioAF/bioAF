@@ -235,6 +235,87 @@ async def test_audit_log_records_document_ops(client, admin_token, session):
 
 
 @pytest.mark.asyncio
+async def test_content_streams_document_bytes(client, admin_token):
+    # The inline viewer reads bytes through the backend (no GCS CORS), like the
+    # literature paper PDF viewer.
+    created = (await _create_doc(client, admin_token, file_name="manual.pdf")).json()
+    with patch(
+        "app.api.lab_documents._download_document_bytes",
+        new_callable=AsyncMock,
+        return_value=b"%PDF-1.4 inline bytes",
+    ):
+        resp = await client.get(
+            f"/api/lab-knowledge/documents/{created['id']}/content", headers=_auth(admin_token)
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.content == b"%PDF-1.4 inline bytes"
+    assert resp.headers["content-type"].startswith("application/pdf")
+
+
+@pytest.mark.asyncio
+async def test_content_missing_document_404(client, admin_token):
+    resp = await client.get("/api/lab-knowledge/documents/99999/content", headers=_auth(admin_token))
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_add_list_and_delete_notes(client, admin_token):
+    created = (await _create_doc(client, admin_token)).json()
+    doc_id = created["id"]
+
+    added = await client.post(
+        f"/api/lab-knowledge/documents/{doc_id}/notes",
+        json={"body": "Check section 3 for the spin protocol."},
+        headers=_auth(admin_token),
+    )
+    assert added.status_code == 200, added.text
+    note_id = added.json()["id"]
+    assert added.json()["body"] == "Check section 3 for the spin protocol."
+
+    listed = await client.get(f"/api/lab-knowledge/documents/{doc_id}/notes", headers=_auth(admin_token))
+    assert listed.status_code == 200
+    assert [n["id"] for n in listed.json()] == [note_id]
+
+    deleted = await client.delete(
+        f"/api/lab-knowledge/documents/{doc_id}/notes/{note_id}", headers=_auth(admin_token)
+    )
+    assert deleted.status_code == 200
+
+    after = await client.get(f"/api/lab-knowledge/documents/{doc_id}/notes", headers=_auth(admin_token))
+    # Soft-deleted notes remain listed but are flagged so the UI can show [deleted].
+    assert after.json()[0]["deleted"] is True
+
+
+@pytest.mark.asyncio
+async def test_viewer_can_add_note_but_not_delete_others(client, admin_token, viewer_token):
+    created = (await _create_doc(client, admin_token)).json()
+    doc_id = created["id"]
+
+    # An admin's note.
+    admin_note = (
+        await client.post(
+            f"/api/lab-knowledge/documents/{doc_id}/notes",
+            json={"body": "Admin note"},
+            headers=_auth(admin_token),
+        )
+    ).json()
+
+    # A viewer can read documents and add their own note.
+    viewer_add = await client.post(
+        f"/api/lab-knowledge/documents/{doc_id}/notes",
+        json={"body": "Viewer note"},
+        headers=_auth(viewer_token),
+    )
+    assert viewer_add.status_code == 200
+
+    # But cannot delete someone else's note (not the owner, lacks manage).
+    blocked = await client.delete(
+        f"/api/lab-knowledge/documents/{doc_id}/notes/{admin_note['id']}", headers=_auth(viewer_token)
+    )
+    assert blocked.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_get_missing_document_404(client, admin_token):
     resp = await client.get("/api/lab-knowledge/documents/99999", headers=_auth(admin_token))
     assert resp.status_code == 404

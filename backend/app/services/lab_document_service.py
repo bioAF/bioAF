@@ -12,8 +12,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from datetime import UTC, datetime
+
 from app.models.lab_document import (
     LabDocument,
+    LabDocumentNote,
     LabDocumentTag,
     LabDocumentTagAssignment,
     LabDocumentVersion,
@@ -283,6 +286,89 @@ class LabDocumentService:
         for tag_id in valid:
             doc.tag_assignments.append(LabDocumentTagAssignment(tag_id=tag_id))
         await session.flush()
+
+
+class NoteNotFoundError(Exception):
+    """Raised when a note does not exist for the document/org."""
+
+
+class NotePermissionError(Exception):
+    """Raised when a user may not delete a note they do not own."""
+
+
+class LabDocumentNoteService:
+    """Notes (comments) on a lab document. Org-scoped, soft-deleted, flat. Mirrors
+    the literature paper-comment behavior."""
+
+    @staticmethod
+    async def list_notes(session: AsyncSession, *, org_id: int, document_id: int) -> list[LabDocumentNote]:
+        rows = await session.execute(
+            select(LabDocumentNote)
+            .options(selectinload(LabDocumentNote.user))
+            .where(
+                LabDocumentNote.organization_id == org_id,
+                LabDocumentNote.document_id == document_id,
+            )
+            .order_by(LabDocumentNote.created_at.asc(), LabDocumentNote.id.asc())
+        )
+        return list(rows.scalars().all())
+
+    @staticmethod
+    async def add_note(
+        session: AsyncSession, *, org_id: int, user_id: int, document_id: int, body: str
+    ) -> LabDocumentNote:
+        body = (body or "").strip()
+        if not body:
+            raise ValueError("Note body is required")
+        doc = await LabDocumentService.get_document(session, document_id=document_id, org_id=org_id)
+        if doc is None:
+            raise NoteNotFoundError("Document not found")
+        note = LabDocumentNote(
+            organization_id=org_id, document_id=document_id, user_id=user_id, body=body
+        )
+        session.add(note)
+        await session.flush()
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="lab_document_note",
+            entity_id=note.id,
+            action="created",
+            details={"document_id": document_id},
+        )
+        await session.flush()
+        return await LabDocumentNoteService._get(session, org_id=org_id, note_id=note.id)
+
+    @staticmethod
+    async def delete_note(
+        session: AsyncSession, *, org_id: int, user_id: int, document_id: int, note_id: int, can_manage: bool
+    ) -> None:
+        note = await LabDocumentNoteService._get(session, org_id=org_id, note_id=note_id)
+        if note is None or note.document_id != document_id or note.deleted_at is not None:
+            raise NoteNotFoundError("Note not found")
+        if note.user_id != user_id and not can_manage:
+            raise NotePermissionError("You can only delete your own notes")
+        note.deleted_at = datetime.now(UTC)
+        note.deleted_by_user_id = user_id
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="lab_document_note",
+            entity_id=note.id,
+            action="deleted",
+            details={"document_id": document_id},
+        )
+        await session.flush()
+
+    @staticmethod
+    async def _get(session: AsyncSession, *, org_id: int, note_id: int) -> LabDocumentNote | None:
+        return (
+            await session.execute(
+                select(LabDocumentNote)
+                .options(selectinload(LabDocumentNote.user))
+                .where(LabDocumentNote.id == note_id, LabDocumentNote.organization_id == org_id)
+            )
+        ).scalar_one_or_none()
 
 
 class LabDocumentTagService:
