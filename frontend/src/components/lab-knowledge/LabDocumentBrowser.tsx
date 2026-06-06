@@ -42,6 +42,13 @@ interface ListResponse {
 
 const API_BASE = "/api/lab-knowledge";
 
+interface UrlImport {
+  id: number;
+  status: string;
+  document_id: number | null;
+  error_message: string | null;
+}
+
 function fmtDate(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
@@ -242,12 +249,30 @@ function UploadDocumentModal({
           setBusy(false);
           return;
         }
-        await api.post(`${API_BASE}/documents/import-url`, {
+        // The server fetches the URL out-of-band; poll the import job until the
+        // document is created (or the import fails).
+        const job = await api.post<UrlImport>(`${API_BASE}/documents/import-url`, {
           url: sourceUrl.trim(),
           title: title || null,
           description: description || null,
           tag_ids: tagIds,
         });
+        const deadline = Date.now() + 90_000;
+        let current = job;
+        while (current.status === "pending" || current.status === "running") {
+          if (Date.now() > deadline) {
+            setErr("Import is taking longer than expected; it will appear once it finishes.");
+            setBusy(false);
+            return;
+          }
+          await new Promise((r) => setTimeout(r, 800));
+          current = await api.get<UrlImport>(`${API_BASE}/documents/url-imports/${job.id}`);
+        }
+        if (current.status === "failed") {
+          setErr(current.error_message || "Import failed.");
+          setBusy(false);
+          return;
+        }
         onUploaded();
         return;
       }

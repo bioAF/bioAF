@@ -83,6 +83,13 @@ class LabDocumentUrlImportRequest(BaseModel):
     tag_ids: list[int] = []
 
 
+class LabDocumentUrlImportResponse(BaseModel):
+    id: int
+    status: str
+    document_id: int | None = None
+    error_message: str | None = None
+
+
 class LabDocumentVersionCreate(BaseModel):
     upload_token: str
     change_note: str | None = Field(default=None, max_length=500)

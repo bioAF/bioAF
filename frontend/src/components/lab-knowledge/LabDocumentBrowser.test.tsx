@@ -161,8 +161,14 @@ test("device upload requests a sized resumable URL and PUTs to the session", asy
   global.fetch = realFetch;
 });
 
-test("URL import posts to the import-url endpoint", async () => {
-  mockPost.mockResolvedValue({ id: 99 });
+test("URL import enqueues a job and polls it to completion", async () => {
+  mockPost.mockResolvedValue({ id: 99, status: "pending", document_id: null, error_message: null });
+  mockGet.mockImplementation((url: string) => {
+    if (url.includes("/document-tags")) return Promise.resolve([{ id: 7, name: "manual" }]);
+    if (url.includes("/url-imports/99"))
+      return Promise.resolve({ id: 99, status: "complete", document_id: 5, error_message: null });
+    return Promise.resolve({ documents: [], total: 0, page: 1, page_size: 25 });
+  });
   render(<LabDocumentBrowser />);
   await waitFor(() => screen.getByText("No documents found."));
   fireEvent.click(screen.getByRole("button", { name: /upload document/i }));
@@ -176,5 +182,9 @@ test("URL import posts to the import-url endpoint", async () => {
       "/api/lab-knowledge/documents/import-url",
       expect.objectContaining({ url: "https://example.com/policy.pdf" }),
     );
+  });
+  // It polls the import job status until it completes.
+  await waitFor(() => {
+    expect(mockGet.mock.calls.some(([u]) => u.includes("/url-imports/99"))).toBe(true);
   });
 });

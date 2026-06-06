@@ -96,6 +96,7 @@ from app.models.lab_document import (
     LabDocumentNote,
     LabDocumentTag,
     LabDocumentTagAssignment,
+    LabDocumentUrlImport,
     LabDocumentVersion,
 )
 from app.models.lab_glossary import (
@@ -213,6 +214,7 @@ __all__ = [
     "LabDocument",
     "LabDocumentVersion",
     "LabDocumentNote",
+    "LabDocumentUrlImport",
     "LabDocumentTag",
     "LabDocumentTagAssignment",
     "LabGlossaryTerm",

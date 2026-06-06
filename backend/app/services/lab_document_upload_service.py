@@ -5,7 +5,9 @@ Origin so the browser's cross-origin PUT is accepted, mirroring the references
 upload flow), then the server reads GCS's own md5Hash/size on finalize and moves
 the object into the versioned path
 ``lab-knowledge/documents/{document_id}/v{n}/{file_name}``. A second entry point
-(``initiate_from_url``) lets the server pull the bytes from a public URL instead.
+(``create_url_import`` + the ``run_url_import`` background executor) lets the
+server pull the bytes from a public URL instead, reading the URL back from a
+persisted job so the user-supplied URL is not fetched in the request handler.
 Kept separate from LabDocumentService so the DB logic stays testable and the GCS
 calls here are the patch points in tests (mirroring GcsStorageService elsewhere).
 """
@@ -17,9 +19,10 @@ import logging
 import os
 import socket
 import uuid
+from datetime import UTC, datetime
 from urllib.parse import unquote, urljoin, urlparse
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.gcs_storage import GcsStorageService
@@ -232,13 +235,121 @@ class LabDocumentUploadService:
 
         await asyncio.to_thread(_do_upload)
 
+    # --- URL import job (fetch decoupled from the request) -------------------
+
     @staticmethod
-    async def initiate_from_url(session: AsyncSession, org_id: int, *, url: str, file_name: str | None = None) -> dict:
-        """Fetch a document from a URL into the uploads area and register a pending
-        token, so the existing finalize path (read_metadata -> create -> place)
-        can complete it exactly like a browser upload."""
-        content, fetched_name, mime_type = await LabDocumentUploadService._fetch_url(url)
-        name = file_name or fetched_name or "document"
+    async def create_url_import(
+        session: AsyncSession,
+        *,
+        org_id: int,
+        user_id: int,
+        url: str,
+        title: str | None,
+        description: str | None,
+        tag_ids: list[int],
+    ):
+        """Persist a pending URL-import job. The actual fetch is run later by a
+        background task that reads the URL back from this row, so the user-supplied
+        URL never flows straight into an outbound request in the request handler
+        (matching the Reference Data importer and the glossary scan job)."""
+        from app.models.lab_document import LabDocumentUrlImport
+
+        row = LabDocumentUrlImport(
+            organization_id=org_id,
+            initiated_by_user_id=user_id,
+            url=url,
+            title=title,
+            description=description,
+            tag_ids=tag_ids or None,
+            status="pending",
+        )
+        session.add(row)
+        await session.flush()
+        return row
+
+    @staticmethod
+    async def get_url_import(session: AsyncSession, *, org_id: int, import_id: int):
+        from app.models.lab_document import LabDocumentUrlImport
+
+        return (
+            await session.execute(
+                select(LabDocumentUrlImport).where(
+                    LabDocumentUrlImport.id == import_id,
+                    LabDocumentUrlImport.organization_id == org_id,
+                )
+            )
+        ).scalar_one_or_none()
+
+    @staticmethod
+    async def run_url_import(session_factory, *, import_id: int, fetch_override=None) -> None:
+        """Background executor for a URL import. Owns its DB session so it can run
+        outside the request. Reads the URL from the persisted job row (not from the
+        request), fetches it (SSRF-guarded), stores it, and creates the v1 document,
+        recording success/failure on the job. ``fetch_override`` replaces the network
+        fetch in tests."""
+        from app.models.lab_document import LabDocumentUrlImport
+
+        try:
+            async with session_factory() as session:
+                row = (
+                    await session.execute(select(LabDocumentUrlImport).where(LabDocumentUrlImport.id == import_id))
+                ).scalar_one()
+                row.status = "running"
+                org_id = row.organization_id
+                user_id = row.initiated_by_user_id
+                url = row.url  # read back from the DB, decoupled from the request
+                title = row.title
+                description = row.description
+                tag_ids = list(row.tag_ids or [])
+                await session.commit()
+
+            async with session_factory() as session:
+                doc_id = await LabDocumentUploadService._import_url_to_document(
+                    session,
+                    org_id=org_id,
+                    user_id=user_id,
+                    url=url,
+                    title=title,
+                    description=description,
+                    tag_ids=tag_ids,
+                    fetch_override=fetch_override,
+                )
+                await session.commit()
+
+            async with session_factory() as session:
+                row = (
+                    await session.execute(select(LabDocumentUrlImport).where(LabDocumentUrlImport.id == import_id))
+                ).scalar_one()
+                row.status = "complete"
+                row.document_id = doc_id
+                row.completed_at = datetime.now(UTC)
+                await session.commit()
+        except Exception as exc:  # noqa: BLE001 - last-resort guard; nothing re-raised
+            logger.exception("lab document URL import failed: import_id=%d", import_id)
+            await LabDocumentUploadService._fail_url_import(session_factory, import_id, str(exc))
+
+    @staticmethod
+    async def _import_url_to_document(
+        session: AsyncSession,
+        *,
+        org_id: int,
+        user_id: int,
+        url: str,
+        title: str | None,
+        description: str | None,
+        tag_ids: list[int],
+        fetch_override=None,
+    ) -> int:
+        """Fetch the URL (SSRF-guarded), store the bytes in GCS, and create the v1
+        document. Returns the new document id."""
+        from sqlalchemy import update as sa_update
+
+        from app.models.lab_document import LabDocumentVersion
+        from app.services.lab_document_service import LabDocumentService
+
+        fetch = fetch_override or LabDocumentUploadService._fetch_url
+        content, fetched_name, mime_type = await fetch(url)
+        name = fetched_name or "document"
         token = str(uuid.uuid4())
         bucket = await LabDocumentUploadService._get_working_bucket(session)
         gcs_path = f"{PREFIX}/uploads/{token}/{name}"
@@ -253,7 +364,48 @@ class LabDocumentUploadService:
             "gcs_path": gcs_path,
             "gcs_uri": gcs_uri,
         }
-        return {"upload_token": token, "file_name": name, "mime_type": mime_type, "gcs_uri": gcs_uri}
+        meta = await LabDocumentUploadService.read_metadata(session, upload_token=token, org_id=org_id)
+        doc = await LabDocumentService.create_document(
+            session,
+            org_id=org_id,
+            user_id=user_id,
+            title=title or meta["file_name"],
+            description=description,
+            file_name=meta["file_name"],
+            gcs_uri=f"gs://pending/{token}",
+            file_size_bytes=meta["size_bytes"],
+            mime_type=meta["mime_type"],
+            md5_checksum=meta["md5"],
+            tag_ids=tag_ids,
+        )
+        dest_uri = await LabDocumentUploadService.place(
+            session, upload_token=token, org_id=org_id, document_id=doc.id, version=1
+        )
+        doc.gcs_uri = dest_uri
+        await session.execute(
+            sa_update(LabDocumentVersion)
+            .where(LabDocumentVersion.document_id == doc.id, LabDocumentVersion.version_number == 1)
+            .values(gcs_uri=dest_uri)
+        )
+        return doc.id
+
+    @staticmethod
+    async def _fail_url_import(session_factory, import_id: int, error: str) -> None:
+        from app.models.lab_document import LabDocumentUrlImport
+
+        try:
+            async with session_factory() as session:
+                row = (
+                    await session.execute(select(LabDocumentUrlImport).where(LabDocumentUrlImport.id == import_id))
+                ).scalar_one_or_none()
+                if row is None or row.status in ("complete", "failed"):
+                    return
+                row.status = "failed"
+                row.error_message = error[:4000]
+                row.completed_at = datetime.now(UTC)
+                await session.commit()
+        except Exception:  # noqa: BLE001 - never raise from the guard
+            logger.exception("failed to mark URL import failed: import_id=%d", import_id)
 
     @staticmethod
     def _peek(token: str, org_id: int) -> dict:

@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import (
+    ARRAY,
     BigInteger,
     Boolean,
     DateTime,
@@ -69,6 +70,28 @@ class LabDocumentVersion(Base):
 
     document = relationship("LabDocument", back_populates="versions")
     uploaded_by = relationship("User")
+
+
+class LabDocumentUrlImport(Base):
+    """Tracks a server-side "import from URL" request (ADR-061). The user-supplied
+    URL is persisted here and the fetch runs in a background task that reads it back
+    from this row, decoupling the request from the outbound fetch (the same shape as
+    the Reference Data importer and the glossary scan job)."""
+
+    __tablename__ = "lab_document_url_imports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    initiated_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tag_ids: Mapped[list[int] | None] = mapped_column(ARRAY(Integer), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), server_default="pending", nullable=False)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    document_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("lab_documents.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class LabDocumentNote(Base):

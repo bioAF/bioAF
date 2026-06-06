@@ -97,15 +97,31 @@ async def test_upload_url_returns_resumable_session_scoped_to_request_origin(cli
 
 
 @pytest.mark.asyncio
-async def test_import_from_url_creates_document_v1(client, admin_token):
+async def test_import_from_url_enqueues_then_executor_creates_document(client, admin_token):
     # AC: a manager can add a document by having the server pull it from a URL,
-    # matching the Reference Data "URL import" option.
+    # matching the Reference Data "URL import" option. The fetch is decoupled from
+    # the request: the POST enqueues a job, and a background task reads the URL back
+    # from the DB and runs the SSRF-guarded fetch. A numeric public IP avoids DNS so
+    # the endpoint's up-front validation works offline.
+    import app.database as database_module
+    from app.services.lab_document_upload_service import LabDocumentUploadService
+
+    # Stub the executor so the auto-dispatched background task is a no-op; we run
+    # the real executor explicitly below with the network + GCS patched.
+    with patch(f"{UPLOAD}.run_url_import", new_callable=AsyncMock):
+        resp = await client.post(
+            "/api/lab-knowledge/documents/import-url",
+            json={"url": "http://8.8.8.8/policy.pdf", "tag_ids": []},
+            headers=_auth(admin_token),
+        )
+    assert resp.status_code == 202, resp.text
+    import_id = resp.json()["id"]
+    assert resp.json()["status"] == "pending"
+
+    async def fake_fetch(url):
+        return (b"%PDF-1.4 body", "policy.pdf", "application/pdf")
+
     with (
-        patch(
-            f"{UPLOAD}._fetch_url",
-            new_callable=AsyncMock,
-            return_value=(b"%PDF-1.4 body", "policy.pdf", "application/pdf"),
-        ),
         patch(f"{UPLOAD}._get_working_bucket", new_callable=AsyncMock, return_value="wb"),
         patch(
             "app.services.upload_service.UploadService._get_gcs_credentials", new_callable=AsyncMock, return_value=None
@@ -113,19 +129,42 @@ async def test_import_from_url_creates_document_v1(client, admin_token):
         patch(f"{UPLOAD}._upload_bytes", new_callable=AsyncMock, return_value=None),
         _patched_upload(file_name="policy.pdf", md5="urlmd5", size=12, mime="application/pdf"),
     ):
-        resp = await client.post(
-            "/api/lab-knowledge/documents/import-url",
-            json={"url": "https://example.com/policy.pdf", "tag_ids": []},
-            headers=_auth(admin_token),
+        await LabDocumentUploadService.run_url_import(
+            database_module.async_session_factory, import_id=import_id, fetch_override=fake_fetch
         )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["file_name"] == "policy.pdf"
-    assert body["current_version"] == 1
-    assert body["md5_checksum"] == "urlmd5"
+
+    status = await client.get(f"/api/lab-knowledge/documents/url-imports/{import_id}", headers=_auth(admin_token))
+    assert status.status_code == 200, status.text
+    assert status.json()["status"] == "complete"
+    assert status.json()["document_id"] is not None
 
     listed = await client.get("/api/lab-knowledge/documents", headers=_auth(admin_token))
     assert listed.json()["total"] == 1
+    assert listed.json()["documents"][0]["file_name"] == "policy.pdf"
+
+
+@pytest.mark.asyncio
+async def test_url_import_executor_marks_failed_on_fetch_error(client, admin_token):
+    import app.database as database_module
+    from app.services.lab_document_upload_service import LabDocumentUploadService
+
+    with patch(f"{UPLOAD}.run_url_import", new_callable=AsyncMock):
+        resp = await client.post(
+            "/api/lab-knowledge/documents/import-url",
+            json={"url": "http://8.8.8.8/missing.pdf"},
+            headers=_auth(admin_token),
+        )
+    import_id = resp.json()["id"]
+
+    async def boom(url):
+        raise ValueError("Could not fetch URL (HTTP 404)")
+
+    await LabDocumentUploadService.run_url_import(
+        database_module.async_session_factory, import_id=import_id, fetch_override=boom
+    )
+    status = await client.get(f"/api/lab-knowledge/documents/url-imports/{import_id}", headers=_auth(admin_token))
+    assert status.json()["status"] == "failed"
+    assert status.json()["document_id"] is None
 
 
 @pytest.mark.asyncio
