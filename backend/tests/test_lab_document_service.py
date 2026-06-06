@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models.audit_log import AuditLog
-from app.models.lab_document import LabDocument, LabDocumentTag, LabDocumentVersion
+from app.models.lab_document import LabDocumentTag, LabDocumentVersion
 from app.services.lab_document_service import LabDocumentService, LabDocumentTagService, TagInUseError
 
 
@@ -22,12 +22,14 @@ async def _seed_tag(session, org_id, user_id, name):
 
 async def _audit_actions(session, entity_type, entity_id):
     rows = (
-        await session.execute(
-            select(AuditLog.action).where(
-                AuditLog.entity_type == entity_type, AuditLog.entity_id == entity_id
+        (
+            await session.execute(
+                select(AuditLog.action).where(AuditLog.entity_type == entity_type, AuditLog.entity_id == entity_id)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return list(rows)
 
 
@@ -50,8 +52,10 @@ async def test_create_document_makes_v1_and_audit(session, admin_user):
     )
     assert doc.current_version == 1
     versions = (
-        await session.execute(select(LabDocumentVersion).where(LabDocumentVersion.document_id == doc.id))
-    ).scalars().all()
+        (await session.execute(select(LabDocumentVersion).where(LabDocumentVersion.document_id == doc.id)))
+        .scalars()
+        .all()
+    )
     assert len(versions) == 1 and versions[0].version_number == 1
     assert versions[0].md5_checksum == "deadbeef"
     assert "created" in await _audit_actions(session, "lab_document", doc.id)
@@ -61,20 +65,32 @@ async def test_create_document_makes_v1_and_audit(session, admin_user):
 async def test_new_version_increments_and_updates_current(session, admin_user):
     org_id, uid = admin_user.organization_id, admin_user.id
     doc = await LabDocumentService.create_document(
-        session, org_id=org_id, user_id=uid, title="Policy", file_name="p.pdf",
-        gcs_uri="gs://wb/.../v1/p.pdf", md5_checksum="v1hash",
+        session,
+        org_id=org_id,
+        user_id=uid,
+        title="Policy",
+        file_name="p.pdf",
+        gcs_uri="gs://wb/.../v1/p.pdf",
+        md5_checksum="v1hash",
     )
     updated = await LabDocumentService.add_version(
-        session, org_id=org_id, user_id=uid, document_id=doc.id,
-        gcs_uri="gs://wb/.../v2/p.pdf", file_name="p.pdf", md5_checksum="v2hash",
+        session,
+        org_id=org_id,
+        user_id=uid,
+        document_id=doc.id,
+        gcs_uri="gs://wb/.../v2/p.pdf",
+        file_name="p.pdf",
+        md5_checksum="v2hash",
         change_note="Updated section 3",
     )
     assert updated.current_version == 2
     assert updated.gcs_uri.endswith("/v2/p.pdf")
     assert updated.md5_checksum == "v2hash"
     versions = (
-        await session.execute(select(LabDocumentVersion).where(LabDocumentVersion.document_id == doc.id))
-    ).scalars().all()
+        (await session.execute(select(LabDocumentVersion).where(LabDocumentVersion.document_id == doc.id)))
+        .scalars()
+        .all()
+    )
     assert sorted(v.version_number for v in versions) == [1, 2]
     assert "new_version_uploaded" in await _audit_actions(session, "lab_document", doc.id)
 
@@ -83,7 +99,12 @@ async def test_new_version_increments_and_updates_current(session, admin_user):
 async def test_archive_hides_from_default_list_and_restore_reveals(session, admin_user):
     org_id, uid = admin_user.organization_id, admin_user.id
     doc = await LabDocumentService.create_document(
-        session, org_id=org_id, user_id=uid, title="Old SOP", file_name="s.pdf", gcs_uri="gs://wb/v1/s.pdf",
+        session,
+        org_id=org_id,
+        user_id=uid,
+        title="Old SOP",
+        file_name="s.pdf",
+        gcs_uri="gs://wb/v1/s.pdf",
     )
     await LabDocumentService.set_archived(session, org_id=org_id, user_id=uid, document_id=doc.id, archived=True)
     docs, total = await LabDocumentService.list_documents(session, org_id=org_id)
@@ -100,12 +121,22 @@ async def test_list_filters_by_tag(session, admin_user):
     t_manual = await _seed_tag(session, org_id, uid, "manual")
     t_policy = await _seed_tag(session, org_id, uid, "policy")
     d1 = await LabDocumentService.create_document(
-        session, org_id=org_id, user_id=uid, title="Manual A", file_name="a.pdf",
-        gcs_uri="gs://wb/v1/a.pdf", tag_ids=[t_manual.id],
+        session,
+        org_id=org_id,
+        user_id=uid,
+        title="Manual A",
+        file_name="a.pdf",
+        gcs_uri="gs://wb/v1/a.pdf",
+        tag_ids=[t_manual.id],
     )
     await LabDocumentService.create_document(
-        session, org_id=org_id, user_id=uid, title="Policy B", file_name="b.pdf",
-        gcs_uri="gs://wb/v1/b.pdf", tag_ids=[t_policy.id],
+        session,
+        org_id=org_id,
+        user_id=uid,
+        title="Policy B",
+        file_name="b.pdf",
+        gcs_uri="gs://wb/v1/b.pdf",
+        tag_ids=[t_policy.id],
     )
     docs, total = await LabDocumentService.list_documents(session, org_id=org_id, tag_ids=[t_manual.id])
     assert total == 1 and docs[0].id == d1.id
@@ -117,11 +148,21 @@ async def test_update_metadata_and_set_tags_audited(session, admin_user):
     t1 = await _seed_tag(session, org_id, uid, "manual")
     t2 = await _seed_tag(session, org_id, uid, "procedure")
     doc = await LabDocumentService.create_document(
-        session, org_id=org_id, user_id=uid, title="Doc", file_name="d.pdf",
-        gcs_uri="gs://wb/v1/d.pdf", tag_ids=[t1.id],
+        session,
+        org_id=org_id,
+        user_id=uid,
+        title="Doc",
+        file_name="d.pdf",
+        gcs_uri="gs://wb/v1/d.pdf",
+        tag_ids=[t1.id],
     )
     await LabDocumentService.update_metadata(
-        session, org_id=org_id, user_id=uid, document_id=doc.id, title="Doc v2", tag_ids=[t2.id],
+        session,
+        org_id=org_id,
+        user_id=uid,
+        document_id=doc.id,
+        title="Doc v2",
+        tag_ids=[t2.id],
     )
     refreshed = await LabDocumentService.get_document(session, document_id=doc.id, org_id=org_id)
     assert refreshed.title == "Doc v2"
@@ -133,7 +174,12 @@ async def test_update_metadata_and_set_tags_audited(session, admin_user):
 async def test_org_isolation_on_get(session, admin_user):
     org_id, uid = admin_user.organization_id, admin_user.id
     doc = await LabDocumentService.create_document(
-        session, org_id=org_id, user_id=uid, title="Mine", file_name="m.pdf", gcs_uri="gs://wb/v1/m.pdf",
+        session,
+        org_id=org_id,
+        user_id=uid,
+        title="Mine",
+        file_name="m.pdf",
+        gcs_uri="gs://wb/v1/m.pdf",
     )
     assert await LabDocumentService.get_document(session, document_id=doc.id, org_id=org_id + 999) is None
 
@@ -155,8 +201,13 @@ async def test_delete_tag_in_use_raises(session, admin_user):
     org_id, uid = admin_user.organization_id, admin_user.id
     tag = await LabDocumentTagService.create_tag(session, org_id=org_id, user_id=uid, name="manual")
     await LabDocumentService.create_document(
-        session, org_id=org_id, user_id=uid, title="Doc", file_name="d.pdf",
-        gcs_uri="gs://wb/v1/d.pdf", tag_ids=[tag.id],
+        session,
+        org_id=org_id,
+        user_id=uid,
+        title="Doc",
+        file_name="d.pdf",
+        gcs_uri="gs://wb/v1/d.pdf",
+        tag_ids=[tag.id],
     )
     with pytest.raises(TagInUseError):
         await LabDocumentTagService.delete_tag(session, org_id=org_id, user_id=uid, tag_id=tag.id)

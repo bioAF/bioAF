@@ -273,9 +273,7 @@ async def get_scan_proposals(
     existing_defs: dict[int, str] = {}
     for p in proposals:
         if p.existing_term_id is not None:
-            existing = await LabGlossaryService.get_term(
-                session, term_id=p.existing_term_id, org_id=org_id
-            )
+            existing = await LabGlossaryService.get_term(session, term_id=p.existing_term_id, org_id=org_id)
             if existing is not None:
                 existing_defs[p.existing_term_id] = existing.definition
 
@@ -283,9 +281,7 @@ async def get_scan_proposals(
     changed_terms = [
         _proposal_response(p, existing_defs.get(p.existing_term_id)) for p in proposals if p.proposal_type == "changed"
     ]
-    return LabGlossaryProposalListResponse(
-        job=_job_response(job), new_terms=new_terms, changed_terms=changed_terms
-    )
+    return LabGlossaryProposalListResponse(job=_job_response(job), new_terms=new_terms, changed_terms=changed_terms)
 
 
 @router.post("/glossary/scan/{job_id}/review", response_model=LabGlossaryReviewResponse)

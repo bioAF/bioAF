@@ -84,9 +84,9 @@ async def test_tag_assignment_links_document_and_tag(session, admin_user):
     await session.flush()
 
     rows = (
-        await session.execute(
-            select(LabDocumentTagAssignment).where(LabDocumentTagAssignment.document_id == doc.id)
-        )
-    ).scalars().all()
+        (await session.execute(select(LabDocumentTagAssignment).where(LabDocumentTagAssignment.document_id == doc.id)))
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
     assert rows[0].tag_id == tag.id

@@ -20,9 +20,7 @@ DEFAULT_SDR_CATEGORIES = ["Protocol/Methods", "Analysis", "QC Thresholds", "Vend
 
 async def seed_default_lab_document_tags(session: AsyncSession, org_id: int, user_id: int) -> None:
     """Seed the default document tag vocabulary for an org (idempotent)."""
-    existing = await session.execute(
-        select(LabDocumentTag.name).where(LabDocumentTag.organization_id == org_id)
-    )
+    existing = await session.execute(select(LabDocumentTag.name).where(LabDocumentTag.organization_id == org_id))
     have = {row[0] for row in existing.fetchall()}
     for name in DEFAULT_DOCUMENT_TAGS:
         if name in have:
@@ -33,9 +31,7 @@ async def seed_default_lab_document_tags(session: AsyncSession, org_id: int, use
 
 async def seed_default_sdr_categories(session: AsyncSession, org_id: int, user_id: int) -> None:
     """Seed the default SDR category vocabulary for an org (idempotent, ADR-063)."""
-    existing = await session.execute(
-        select(SdrCategory.name).where(SdrCategory.organization_id == org_id)
-    )
+    existing = await session.execute(select(SdrCategory.name).where(SdrCategory.organization_id == org_id))
     have = {row[0] for row in existing.fetchall()}
     for name in DEFAULT_SDR_CATEGORIES:
         if name in have:

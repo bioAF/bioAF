@@ -18,12 +18,14 @@ from app.services.lab_glossary_service import (
 
 async def _audit_actions(session, entity_type, entity_id):
     rows = (
-        await session.execute(
-            select(AuditLog.action).where(
-                AuditLog.entity_type == entity_type, AuditLog.entity_id == entity_id
+        (
+            await session.execute(
+                select(AuditLog.action).where(AuditLog.entity_type == entity_type, AuditLog.entity_id == entity_id)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return list(rows)
 
 
@@ -55,9 +57,7 @@ async def test_duplicate_term_is_case_insensitive(session, admin_user):
         session, org_id=org_id, user_id=uid, term="Passage 3", definition="3rd passage."
     )
     with pytest.raises(DuplicateTermError) as exc:
-        await LabGlossaryService.create_term(
-            session, org_id=org_id, user_id=uid, term="passage 3", definition="dup"
-        )
+        await LabGlossaryService.create_term(session, org_id=org_id, user_id=uid, term="passage 3", definition="dup")
     assert exc.value.existing_term_id == first.id
 
 
@@ -68,16 +68,14 @@ async def test_update_term_writes_history_and_audits(session, admin_user):
     term = await LabGlossaryService.create_term(
         session, org_id=org_id, user_id=uid, term="Threshold", definition="old def", category="QC"
     )
-    await LabGlossaryService.update_term(
-        session, org_id=org_id, user_id=uid, term_id=term.id, definition="new def"
-    )
+    await LabGlossaryService.update_term(session, org_id=org_id, user_id=uid, term_id=term.id, definition="new def")
     refreshed = await LabGlossaryService.get_term(session, term_id=term.id, org_id=org_id)
     assert refreshed.definition == "new def"
     history = (
-        await session.execute(
-            select(LabGlossaryTermHistory).where(LabGlossaryTermHistory.term_id == term.id)
-        )
-    ).scalars().all()
+        (await session.execute(select(LabGlossaryTermHistory).where(LabGlossaryTermHistory.term_id == term.id)))
+        .scalars()
+        .all()
+    )
     assert len(history) == 1 and history[0].previous_definition == "old def"
     assert "updated" in await _audit_actions(session, "lab_glossary_term", term.id)
 
@@ -95,12 +93,14 @@ async def test_delete_term_records_content_in_audit(session, admin_user):
         await session.execute(select(LabGlossaryTerm).where(LabGlossaryTerm.id == term.id))
     ).scalar_one_or_none() is None
     rows = (
-        await session.execute(
-            select(AuditLog).where(
-                AuditLog.entity_type == "lab_glossary_term", AuditLog.action == "deleted"
+        (
+            await session.execute(
+                select(AuditLog).where(AuditLog.entity_type == "lab_glossary_term", AuditLog.action == "deleted")
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert rows and rows[0].details_json.get("term") == "Obsolete"
 
 
@@ -135,7 +135,5 @@ async def test_list_search_matches_term_and_definition(session, admin_user):
 @pytest.mark.asyncio
 async def test_org_isolation_on_get(session, admin_user):
     org_id, uid = admin_user.organization_id, admin_user.id
-    term = await LabGlossaryService.create_term(
-        session, org_id=org_id, user_id=uid, term="Mine", definition="d"
-    )
+    term = await LabGlossaryService.create_term(session, org_id=org_id, user_id=uid, term="Mine", definition="d")
     assert await LabGlossaryService.get_term(session, term_id=term.id, org_id=org_id + 999) is None

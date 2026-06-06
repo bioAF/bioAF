@@ -138,9 +138,7 @@ class LabDocumentUploadService:
         import httpx
 
         try:
-            async with httpx.AsyncClient(
-                follow_redirects=True, timeout=URL_FETCH_TIMEOUT_SECONDS
-            ) as http:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=URL_FETCH_TIMEOUT_SECONDS) as http:
                 async with http.stream("GET", url) as response:
                     response.raise_for_status()
                     declared = response.headers.get("content-length")
@@ -184,9 +182,7 @@ class LabDocumentUploadService:
         await asyncio.to_thread(_do_upload)
 
     @staticmethod
-    async def initiate_from_url(
-        session: AsyncSession, org_id: int, *, url: str, file_name: str | None = None
-    ) -> dict:
+    async def initiate_from_url(session: AsyncSession, org_id: int, *, url: str, file_name: str | None = None) -> dict:
         """Fetch a document from a URL into the uploads area and register a pending
         token, so the existing finalize path (read_metadata -> create -> place)
         can complete it exactly like a browser upload."""

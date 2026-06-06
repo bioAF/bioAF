@@ -15,14 +15,19 @@ UPLOAD = "app.services.lab_document_upload_service.LabDocumentUploadService"
 
 @contextmanager
 def _patched_upload(file_name="manual.pdf", md5="abc123", size=2048, mime="application/pdf"):
-    with patch(
-        f"{UPLOAD}.read_metadata",
-        new_callable=AsyncMock,
-        return_value={"file_name": file_name, "mime_type": mime, "size_bytes": size, "md5": md5},
-    ), patch(
-        f"{UPLOAD}.place",
-        new_callable=AsyncMock,
-        side_effect=lambda *a, **k: f"gs://wb/lab-knowledge/documents/{k['document_id']}/v{k['version']}/{file_name}",
+    with (
+        patch(
+            f"{UPLOAD}.read_metadata",
+            new_callable=AsyncMock,
+            return_value={"file_name": file_name, "mime_type": mime, "size_bytes": size, "md5": md5},
+        ),
+        patch(
+            f"{UPLOAD}.place",
+            new_callable=AsyncMock,
+            side_effect=lambda *a, **k: (
+                f"gs://wb/lab-knowledge/documents/{k['document_id']}/v{k['version']}/{file_name}"
+            ),
+        ),
     ):
         yield
 
@@ -44,7 +49,9 @@ async def _create_doc(client, token, *, title="Centrifuge Manual", tag_ids=None,
 @pytest.mark.asyncio
 async def test_upload_creates_document_v1_with_tags(client, admin_token):
     # AC-A01 / AC-A10
-    tag = (await client.post("/api/lab-knowledge/document-tags", json={"name": "manual"}, headers=_auth(admin_token))).json()
+    tag = (
+        await client.post("/api/lab-knowledge/document-tags", json={"name": "manual"}, headers=_auth(admin_token))
+    ).json()
     resp = await _create_doc(client, admin_token, tag_ids=[tag["id"]])
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -70,9 +77,13 @@ async def test_upload_url_returns_resumable_session_scoped_to_request_origin(cli
         captured["size_bytes"] = size_bytes
         return "https://storage.example/resumable/session"
 
-    with patch(f"{UPLOAD}._get_working_bucket", new_callable=AsyncMock, return_value="wb"), patch(
-        "app.services.upload_service.UploadService._get_gcs_credentials", new_callable=AsyncMock, return_value=None
-    ), patch(f"{UPLOAD}._create_resumable_session", side_effect=fake_session):
+    with (
+        patch(f"{UPLOAD}._get_working_bucket", new_callable=AsyncMock, return_value="wb"),
+        patch(
+            "app.services.upload_service.UploadService._get_gcs_credentials", new_callable=AsyncMock, return_value=None
+        ),
+        patch(f"{UPLOAD}._create_resumable_session", side_effect=fake_session),
+    ):
         resp = await client.post(
             "/api/lab-knowledge/documents/upload-url",
             json={"file_name": "manual.pdf", "mime_type": "application/pdf", "size_bytes": 2048},
@@ -89,14 +100,18 @@ async def test_upload_url_returns_resumable_session_scoped_to_request_origin(cli
 async def test_import_from_url_creates_document_v1(client, admin_token):
     # AC: a manager can add a document by having the server pull it from a URL,
     # matching the Reference Data "URL import" option.
-    with patch(
-        f"{UPLOAD}._fetch_url",
-        new_callable=AsyncMock,
-        return_value=(b"%PDF-1.4 body", "policy.pdf", "application/pdf"),
-    ), patch(f"{UPLOAD}._get_working_bucket", new_callable=AsyncMock, return_value="wb"), patch(
-        "app.services.upload_service.UploadService._get_gcs_credentials", new_callable=AsyncMock, return_value=None
-    ), patch(f"{UPLOAD}._upload_bytes", new_callable=AsyncMock, return_value=None), _patched_upload(
-        file_name="policy.pdf", md5="urlmd5", size=12, mime="application/pdf"
+    with (
+        patch(
+            f"{UPLOAD}._fetch_url",
+            new_callable=AsyncMock,
+            return_value=(b"%PDF-1.4 body", "policy.pdf", "application/pdf"),
+        ),
+        patch(f"{UPLOAD}._get_working_bucket", new_callable=AsyncMock, return_value="wb"),
+        patch(
+            "app.services.upload_service.UploadService._get_gcs_credentials", new_callable=AsyncMock, return_value=None
+        ),
+        patch(f"{UPLOAD}._upload_bytes", new_callable=AsyncMock, return_value=None),
+        _patched_upload(file_name="policy.pdf", md5="urlmd5", size=12, mime="application/pdf"),
     ):
         resp = await client.post(
             "/api/lab-knowledge/documents/import-url",
@@ -157,8 +172,12 @@ async def test_viewer_can_list(client, admin_token, viewer_token):
 @pytest.mark.asyncio
 async def test_filter_by_tag(client, admin_token):
     # AC-A03
-    t_manual = (await client.post("/api/lab-knowledge/document-tags", json={"name": "manual"}, headers=_auth(admin_token))).json()
-    t_policy = (await client.post("/api/lab-knowledge/document-tags", json={"name": "policy"}, headers=_auth(admin_token))).json()
+    t_manual = (
+        await client.post("/api/lab-knowledge/document-tags", json={"name": "manual"}, headers=_auth(admin_token))
+    ).json()
+    t_policy = (
+        await client.post("/api/lab-knowledge/document-tags", json={"name": "policy"}, headers=_auth(admin_token))
+    ).json()
     await _create_doc(client, admin_token, title="Manual A", tag_ids=[t_manual["id"]], file_name="a.pdf")
     await _create_doc(client, admin_token, title="Policy B", tag_ids=[t_policy["id"]], file_name="b.pdf")
 
@@ -210,7 +229,9 @@ async def test_new_tag_appears_in_selector(client, admin_token):
 @pytest.mark.asyncio
 async def test_delete_tag_in_use_returns_409(client, admin_token):
     # AC-A08
-    tag = (await client.post("/api/lab-knowledge/document-tags", json={"name": "manual"}, headers=_auth(admin_token))).json()
+    tag = (
+        await client.post("/api/lab-knowledge/document-tags", json={"name": "manual"}, headers=_auth(admin_token))
+    ).json()
     await _create_doc(client, admin_token, tag_ids=[tag["id"]])
     resp = await client.delete(f"/api/lab-knowledge/document-tags/{tag['id']}", headers=_auth(admin_token))
     assert resp.status_code == 409
@@ -225,12 +246,16 @@ async def test_audit_log_records_document_ops(client, admin_token, session):
     await client.post(f"/api/lab-knowledge/documents/{created['id']}/archive", headers=_auth(admin_token))
 
     actions = (
-        await session.execute(
-            select(AuditLog.action).where(
-                AuditLog.entity_type == "lab_document", AuditLog.entity_id == created["id"]
+        (
+            await session.execute(
+                select(AuditLog.action).where(
+                    AuditLog.entity_type == "lab_document", AuditLog.entity_id == created["id"]
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert "created" in actions and "archived" in actions
 
 
@@ -244,9 +269,7 @@ async def test_content_streams_document_bytes(client, admin_token):
         new_callable=AsyncMock,
         return_value=b"%PDF-1.4 inline bytes",
     ):
-        resp = await client.get(
-            f"/api/lab-knowledge/documents/{created['id']}/content", headers=_auth(admin_token)
-        )
+        resp = await client.get(f"/api/lab-knowledge/documents/{created['id']}/content", headers=_auth(admin_token))
     assert resp.status_code == 200, resp.text
     assert resp.content == b"%PDF-1.4 inline bytes"
     assert resp.headers["content-type"].startswith("application/pdf")
@@ -276,9 +299,7 @@ async def test_add_list_and_delete_notes(client, admin_token):
     assert listed.status_code == 200
     assert [n["id"] for n in listed.json()] == [note_id]
 
-    deleted = await client.delete(
-        f"/api/lab-knowledge/documents/{doc_id}/notes/{note_id}", headers=_auth(admin_token)
-    )
+    deleted = await client.delete(f"/api/lab-knowledge/documents/{doc_id}/notes/{note_id}", headers=_auth(admin_token))
     assert deleted.status_code == 200
 
     after = await client.get(f"/api/lab-knowledge/documents/{doc_id}/notes", headers=_auth(admin_token))
@@ -338,20 +359,23 @@ async def test_download_returns_signed_url_and_audits(client, admin_token, sessi
     bucket = type("Bucket", (), {"blob": lambda self, p: blob})()
     fake_client = type("Client", (), {"bucket": lambda self, b: bucket})()
 
-    with patch("app.services.gcs_storage.GcsStorageService.get_credentials", new_callable=AsyncMock, return_value=None), patch(
-        "google.cloud.storage.Client", return_value=fake_client
+    with (
+        patch("app.services.gcs_storage.GcsStorageService.get_credentials", new_callable=AsyncMock, return_value=None),
+        patch("google.cloud.storage.Client", return_value=fake_client),
     ):
-        resp = await client.get(
-            f"/api/lab-knowledge/documents/{created['id']}/download", headers=_auth(admin_token)
-        )
+        resp = await client.get(f"/api/lab-knowledge/documents/{created['id']}/download", headers=_auth(admin_token))
     assert resp.status_code == 200
     assert resp.json()["download_url"] == "https://signed.example/get"
 
     actions = (
-        await session.execute(
-            select(AuditLog.action).where(
-                AuditLog.entity_type == "lab_document", AuditLog.entity_id == created["id"]
+        (
+            await session.execute(
+                select(AuditLog.action).where(
+                    AuditLog.entity_type == "lab_document", AuditLog.entity_id == created["id"]
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert "downloaded" in actions

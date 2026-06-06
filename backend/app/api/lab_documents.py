@@ -201,9 +201,7 @@ async def import_document_from_url(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
     try:
-        token_info = await LabDocumentUploadService.initiate_from_url(
-            session, org_id, url=body.url, file_name=None
-        )
+        token_info = await LabDocumentUploadService.initiate_from_url(session, org_id, url=body.url, file_name=None)
         doc_id = await _finalize_document_from_token(
             session,
             org_id=org_id,
@@ -348,9 +346,7 @@ async def download_document(
         credentials = await GcsStorageService.get_credentials(session)
         client = gcs_storage.Client(credentials=credentials)
         parts = gcs_uri.replace("gs://", "").split("/", 1)
-        url = client.bucket(parts[0]).blob(parts[1]).generate_signed_url(
-            version="v4", expiration=3600, method="GET"
-        )
+        url = client.bucket(parts[0]).blob(parts[1]).generate_signed_url(version="v4", expiration=3600, method="GET")
     except Exception:
         raise HTTPException(502, "Could not generate download URL")
 
@@ -477,9 +473,7 @@ async def delete_note(
 ):
     """Delete own note; deleting another user's note requires lab_documents:manage."""
     org_id, user_id = int(current_user["org_id"]), int(current_user["sub"])
-    can_manage = await role_service.has_permission(
-        session, int(current_user["role_id"]), "lab_documents", "manage"
-    )
+    can_manage = await role_service.has_permission(session, int(current_user["role_id"]), "lab_documents", "manage")
     try:
         await LabDocumentNoteService.delete_note(
             session,

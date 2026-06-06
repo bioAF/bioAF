@@ -15,7 +15,6 @@ from app.models.lab_glossary import (
     LabGlossaryRejectedProposal,
     LabGlossaryScanJob,
     LabGlossaryScanProposal,
-    LabGlossaryTerm,
 )
 from app.services import lab_glossary_scan_service as scan_svc
 from app.services.lab_glossary_service import LabGlossaryService
@@ -27,16 +26,14 @@ def _factory(db_engine):
 
 async def _proposals(session, job_id):
     return (
-        await session.execute(
-            select(LabGlossaryScanProposal).where(LabGlossaryScanProposal.scan_job_id == job_id)
-        )
-    ).scalars().all()
+        (await session.execute(select(LabGlossaryScanProposal).where(LabGlossaryScanProposal.scan_job_id == job_id)))
+        .scalars()
+        .all()
+    )
 
 
 async def _audit_actions(session, entity_type):
-    return (
-        await session.execute(select(AuditLog.action).where(AuditLog.entity_type == entity_type))
-    ).scalars().all()
+    return (await session.execute(select(AuditLog.action).where(AuditLog.entity_type == entity_type))).scalars().all()
 
 
 # --- scan job creation + execution ------------------------------------------
@@ -89,9 +86,7 @@ async def test_execute_scan_writes_new_and_changed_and_skips_unchanged(session, 
     assert by_term["Cryoprotectant"].proposal_type == "new"
 
     async with _factory(db_engine)() as s2:  # fresh session: avoid stale identity-map copy
-        refreshed = (
-            await s2.execute(select(LabGlossaryScanJob).where(LabGlossaryScanJob.id == job.id))
-        ).scalar_one()
+        refreshed = (await s2.execute(select(LabGlossaryScanJob).where(LabGlossaryScanJob.id == job.id))).scalar_one()
         assert refreshed.status == "complete"
         assert refreshed.proposed_new_count == 1 and refreshed.proposed_changed_count == 1
 
@@ -135,9 +130,7 @@ async def test_execute_scan_failure_marks_job_failed(session, admin_user, db_eng
         _factory(db_engine), job_id=job.id, content_provider=lambda s, j: _async("x"), submit_override=boom
     )
     async with _factory(db_engine)() as s2:
-        refreshed = (
-            await s2.execute(select(LabGlossaryScanJob).where(LabGlossaryScanJob.id == job.id))
-        ).scalar_one()
+        refreshed = (await s2.execute(select(LabGlossaryScanJob).where(LabGlossaryScanJob.id == job.id))).scalar_one()
         assert refreshed.status == "failed" and refreshed.error_message
 
 
@@ -162,9 +155,7 @@ async def test_csv_import_missing_required_column_raises(session, admin_user):
     # AC-B04
     org_id, uid = admin_user.organization_id, admin_user.id
     with pytest.raises(scan_svc.CsvParseError):
-        await scan_svc.parse_csv_import(
-            session, org_id=org_id, user_id=uid, content="term,notes\nFoo,bar\n"
-        )
+        await scan_svc.parse_csv_import(session, org_id=org_id, user_id=uid, content="term,notes\nFoo,bar\n")
 
 
 @pytest.mark.asyncio
@@ -172,9 +163,7 @@ async def test_csv_import_rejects_over_500_rows(session, admin_user):
     org_id, uid = admin_user.organization_id, admin_user.id
     rows = "\n".join(f"T{i},def{i}" for i in range(501))
     with pytest.raises(scan_svc.CsvParseError):
-        await scan_svc.parse_csv_import(
-            session, org_id=org_id, user_id=uid, content="term,definition\n" + rows + "\n"
-        )
+        await scan_svc.parse_csv_import(session, org_id=org_id, user_id=uid, content="term,definition\n" + rows + "\n")
 
 
 # --- review / commit ---------------------------------------------------------
@@ -214,18 +203,16 @@ async def test_review_accept_changed_updates_term_and_history(session, admin_use
     )
     prop = (await _proposals(session, job.id))[0]
     assert prop.proposal_type == "changed"
-    await scan_svc.review_proposals(
-        session, org_id=org_id, user_id=uid, job_id=job.id, decisions={prop.id: "accepted"}
-    )
+    await scan_svc.review_proposals(session, org_id=org_id, user_id=uid, job_id=job.id, decisions={prop.id: "accepted"})
     refreshed = await LabGlossaryService.get_term(session, term_id=existing.id, org_id=org_id)
     assert refreshed.definition == "fraction of surface covered by cells"
     from app.models.lab_glossary import LabGlossaryTermHistory
 
     hist = (
-        await session.execute(
-            select(LabGlossaryTermHistory).where(LabGlossaryTermHistory.term_id == existing.id)
-        )
-    ).scalars().all()
+        (await session.execute(select(LabGlossaryTermHistory).where(LabGlossaryTermHistory.term_id == existing.id)))
+        .scalars()
+        .all()
+    )
     assert hist and hist[0].previous_definition == "old"
 
 
@@ -237,14 +224,12 @@ async def test_review_reject_writes_rejected_proposal(session, admin_user):
         session, org_id=org_id, user_id=uid, content="term,definition\nJunk,unwanted\n"
     )
     prop = (await _proposals(session, job.id))[0]
-    await scan_svc.review_proposals(
-        session, org_id=org_id, user_id=uid, job_id=job.id, decisions={prop.id: "rejected"}
-    )
+    await scan_svc.review_proposals(session, org_id=org_id, user_id=uid, job_id=job.id, decisions={prop.id: "rejected"})
     rejected = (
-        await session.execute(
-            select(LabGlossaryRejectedProposal).where(LabGlossaryRejectedProposal.term == "Junk")
-        )
-    ).scalars().all()
+        (await session.execute(select(LabGlossaryRejectedProposal).where(LabGlossaryRejectedProposal.term == "Junk")))
+        .scalars()
+        .all()
+    )
     assert len(rejected) == 1 and rejected[0].proposed_source == "import"
     assert await LabGlossaryService.get_by_term(session, org_id=org_id, term="Junk") is None
 
@@ -268,13 +253,9 @@ async def test_review_accept_all_remaining_commits_pending(session, admin_user):
 async def test_review_writes_audit_summary(session, admin_user):
     # AC-B12
     org_id, uid = admin_user.organization_id, admin_user.id
-    job = await scan_svc.parse_csv_import(
-        session, org_id=org_id, user_id=uid, content="term,definition\nA,da\n"
-    )
+    job = await scan_svc.parse_csv_import(session, org_id=org_id, user_id=uid, content="term,definition\nA,da\n")
     prop = (await _proposals(session, job.id))[0]
-    await scan_svc.review_proposals(
-        session, org_id=org_id, user_id=uid, job_id=job.id, decisions={prop.id: "accepted"}
-    )
+    await scan_svc.review_proposals(session, org_id=org_id, user_id=uid, job_id=job.id, decisions={prop.id: "accepted"})
     assert "proposals_reviewed" in await _audit_actions(session, "lab_glossary_proposals_reviewed")
 
 

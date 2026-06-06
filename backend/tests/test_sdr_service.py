@@ -5,14 +5,14 @@ AC-C04, AC-C11, AC-C13), supersession linkage (AC-C07), owner reassignment
 (AC-C08), and the daily re-assessment trigger evaluation (AC-C05, AC-C06).
 """
 
-from datetime import date, timedelta
+from datetime import date
 
 import pytest
 from sqlalchemy import select
 
 from app.models.audit_log import AuditLog
 from app.models.notification import Notification
-from app.models.sdr import ScientificDecisionRecord, SdrStatusTransition
+from app.models.sdr import SdrStatusTransition
 from app.services.sdr_service import (
     CategoryInUseError,
     InvalidTransitionError,
@@ -101,9 +101,7 @@ async def test_invalid_transition_rejected(session, admin_user):
     org_id, uid = admin_user.organization_id, admin_user.id
     sdr = await _make_sdr(session, org_id, uid)
     with pytest.raises(InvalidTransitionError):
-        await SdrService.transition(
-            session, org_id=org_id, user_id=uid, sdr_id=sdr.id, to_status="superseded"
-        )
+        await SdrService.transition(session, org_id=org_id, user_id=uid, sdr_id=sdr.id, to_status="superseded")
     # draft -> superseded is also invalid (must be active/flagged first)
 
 
@@ -113,16 +111,17 @@ async def test_flagged_to_active_requires_note(session, admin_user):
     org_id, uid = admin_user.organization_id, admin_user.id
     sdr = await _make_sdr(session, org_id, uid)
     await SdrService.transition(session, org_id=org_id, user_id=uid, sdr_id=sdr.id, to_status="active")
-    await SdrService.transition(
-        session, org_id=org_id, user_id=uid, sdr_id=sdr.id, to_status="flagged_for_review"
-    )
+    await SdrService.transition(session, org_id=org_id, user_id=uid, sdr_id=sdr.id, to_status="flagged_for_review")
     with pytest.raises(TransitionNoteRequiredError):
-        await SdrService.transition(
-            session, org_id=org_id, user_id=uid, sdr_id=sdr.id, to_status="active"
-        )
+        await SdrService.transition(session, org_id=org_id, user_id=uid, sdr_id=sdr.id, to_status="active")
     # With a note it succeeds
     await SdrService.transition(
-        session, org_id=org_id, user_id=uid, sdr_id=sdr.id, to_status="active", note="Decision upheld; data still supports it."
+        session,
+        org_id=org_id,
+        user_id=uid,
+        sdr_id=sdr.id,
+        to_status="active",
+        note="Decision upheld; data still supports it.",
     )
     refreshed = await SdrService.get_sdr(session, sdr_id=sdr.id, org_id=org_id)
     assert refreshed.status == "active"
@@ -137,9 +136,7 @@ async def test_supersede_requires_target_and_links_bidirectionally(session, admi
     await SdrService.transition(session, org_id=org_id, user_id=uid, sdr_id=old.id, to_status="active")
 
     with pytest.raises(SupersededByRequiredError):
-        await SdrService.transition(
-            session, org_id=org_id, user_id=uid, sdr_id=old.id, to_status="superseded"
-        )
+        await SdrService.transition(session, org_id=org_id, user_id=uid, sdr_id=old.id, to_status="superseded")
 
     await SdrService.transition(
         session, org_id=org_id, user_id=uid, sdr_id=old.id, to_status="superseded", superseded_by_sdr_id=new.id
@@ -172,9 +169,7 @@ async def test_edit_active_decision_logs_previous_value(session, admin_user):
     org_id, uid = admin_user.organization_id, admin_user.id
     sdr = await _make_sdr(session, org_id, uid, decision="old decision")
     await SdrService.transition(session, org_id=org_id, user_id=uid, sdr_id=sdr.id, to_status="active")
-    await SdrService.update_sdr(
-        session, org_id=org_id, user_id=uid, sdr_id=sdr.id, decision="new decision"
-    )
+    await SdrService.update_sdr(session, org_id=org_id, user_id=uid, sdr_id=sdr.id, decision="new decision")
     refreshed = await SdrService.get_sdr(session, sdr_id=sdr.id, org_id=org_id)
     assert refreshed.decision == "new decision"
     notes = [t for t in await _transitions(session, sdr.id) if t.from_status == t.to_status == "active"]
@@ -188,15 +183,11 @@ async def test_reassign_owner_audits_and_notifies(session, admin_user):
     role_map = admin_user._test_role_map
     new_owner = await _make_user(session, org_id, "newowner@test.com", role_map["comp_bio"])
     sdr = await _make_sdr(session, org_id, uid)
-    await SdrService.reassign_owner(
-        session, org_id=org_id, user_id=uid, sdr_id=sdr.id, new_owner_user_id=new_owner.id
-    )
+    await SdrService.reassign_owner(session, org_id=org_id, user_id=uid, sdr_id=sdr.id, new_owner_user_id=new_owner.id)
     refreshed = await SdrService.get_sdr(session, sdr_id=sdr.id, org_id=org_id)
     assert refreshed.owner_user_id == new_owner.id
     assert "owner_reassigned" in await _audit_actions(session, "sdr", sdr.id)
-    notifs = (
-        await session.execute(select(Notification).where(Notification.user_id == new_owner.id))
-    ).scalars().all()
+    notifs = (await session.execute(select(Notification).where(Notification.user_id == new_owner.id))).scalars().all()
     assert any(f"SDR-{sdr.sdr_number:03d}" in n.message for n in notifs)
 
 
@@ -213,9 +204,7 @@ async def test_trigger_reached_flags_and_notifies_owner(session, admin_user):
     # System transition recorded with a system note
     last = (await _transitions(session, sdr.id))[-1]
     assert last.to_status == "flagged_for_review" and last.transitioned_by_user_id is None
-    notifs = (
-        await session.execute(select(Notification).where(Notification.user_id == uid))
-    ).scalars().all()
+    notifs = (await session.execute(select(Notification).where(Notification.user_id == uid))).scalars().all()
     assert any("flagged for review" in n.message.lower() for n in notifs)
 
 
@@ -233,12 +222,16 @@ async def test_seven_day_warning_sent_once(session, admin_user):
     assert r2["warned"] == 0  # already warned, not re-sent
 
     warn_notifs = (
-        await session.execute(
-            select(Notification).where(
-                Notification.user_id == uid, Notification.event_type == "sdr_reassessment_warning"
+        (
+            await session.execute(
+                select(Notification).where(
+                    Notification.user_id == uid, Notification.event_type == "sdr_reassessment_warning"
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(warn_notifs) == 1
     # Still active (warning is not a status change)
     refreshed = await SdrService.get_sdr(session, sdr_id=sdr.id, org_id=org_id)
@@ -252,9 +245,7 @@ async def test_changing_trigger_date_resets_warning(session, admin_user):
     await SdrService.transition(session, org_id=org_id, user_id=uid, sdr_id=sdr.id, to_status="active")
     await SdrService.evaluate_triggers(session, today=date(2026, 6, 5))
     # Push the date out; warning bookkeeping resets so the next window warns again
-    await SdrService.update_sdr(
-        session, org_id=org_id, user_id=uid, sdr_id=sdr.id, trigger_date=date(2026, 12, 1)
-    )
+    await SdrService.update_sdr(session, org_id=org_id, user_id=uid, sdr_id=sdr.id, trigger_date=date(2026, 12, 1))
     refreshed = await SdrService.get_sdr(session, sdr_id=sdr.id, org_id=org_id)
     assert refreshed.trigger_warning_sent_at is None
     r = await SdrService.evaluate_triggers(session, today=date(2026, 11, 27))
@@ -302,21 +293,25 @@ async def test_org_isolation_on_get(session, admin_user):
 
 async def _audit_actions(session, entity_type, entity_id):
     rows = (
-        await session.execute(
-            select(AuditLog.action).where(
-                AuditLog.entity_type == entity_type, AuditLog.entity_id == entity_id
+        (
+            await session.execute(
+                select(AuditLog.action).where(AuditLog.entity_type == entity_type, AuditLog.entity_id == entity_id)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return list(rows)
 
 
 async def _transitions(session, sdr_id):
     rows = (
-        await session.execute(
-            select(SdrStatusTransition)
-            .where(SdrStatusTransition.sdr_id == sdr_id)
-            .order_by(SdrStatusTransition.id)
+        (
+            await session.execute(
+                select(SdrStatusTransition).where(SdrStatusTransition.sdr_id == sdr_id).order_by(SdrStatusTransition.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return list(rows)

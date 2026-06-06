@@ -113,9 +113,7 @@ class LabGlossaryScanJob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    proposals = relationship(
-        "LabGlossaryScanProposal", back_populates="scan_job", cascade="all, delete-orphan"
-    )
+    proposals = relationship("LabGlossaryScanProposal", back_populates="scan_job", cascade="all, delete-orphan")
 
 
 class LabGlossaryScanProposal(Base):
@@ -140,9 +138,7 @@ class LabGlossaryScanProposal(Base):
     proposed_category: Mapped[str | None] = mapped_column(String(200), nullable=True)
     proposed_context: Mapped[str | None] = mapped_column(Text, nullable=True)
     proposal_type: Mapped[str] = mapped_column(String(10), nullable=False)
-    existing_term_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("lab_glossary_terms.id"), nullable=True
-    )
+    existing_term_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("lab_glossary_terms.id"), nullable=True)
     source_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     previously_rejected: Mapped[bool] = mapped_column(Boolean, server_default="false", nullable=False)
     review_status: Mapped[str] = mapped_column(String(20), server_default="pending", nullable=False)

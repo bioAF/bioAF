@@ -213,9 +213,7 @@ class LabDocumentService:
         page_size: int = 25,
     ) -> tuple[list[LabDocument], int]:
         base = select(LabDocument).where(LabDocument.organization_id == org_id)
-        count_base = select(func.count(func.distinct(LabDocument.id))).where(
-            LabDocument.organization_id == org_id
-        )
+        count_base = select(func.count(func.distinct(LabDocument.id))).where(LabDocument.organization_id == org_id)
 
         if not include_archived:
             base = base.where(LabDocument.is_archived.is_(False))
@@ -223,9 +221,7 @@ class LabDocumentService:
 
         if tag_ids:
             base = base.join(LabDocumentTagAssignment).where(LabDocumentTagAssignment.tag_id.in_(tag_ids))
-            count_base = count_base.join(LabDocumentTagAssignment).where(
-                LabDocumentTagAssignment.tag_id.in_(tag_ids)
-            )
+            count_base = count_base.join(LabDocumentTagAssignment).where(LabDocumentTagAssignment.tag_id.in_(tag_ids))
 
         if query:
             ts_query = func.plainto_tsquery("english", query)
@@ -257,32 +253,38 @@ class LabDocumentService:
         if not tag_ids:
             return
         valid = (
-            await session.execute(
-                select(LabDocumentTag.id).where(
-                    LabDocumentTag.organization_id == org_id, LabDocumentTag.id.in_(tag_ids)
+            (
+                await session.execute(
+                    select(LabDocumentTag.id).where(
+                        LabDocumentTag.organization_id == org_id, LabDocumentTag.id.in_(tag_ids)
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for tag_id in valid:
             session.add(LabDocumentTagAssignment(document_id=document_id, tag_id=tag_id))
         await session.flush()
 
     @staticmethod
-    async def _replace_tags(
-        session: AsyncSession, org_id: int, doc: LabDocument, tag_ids: list[int]
-    ) -> None:
+    async def _replace_tags(session: AsyncSession, org_id: int, doc: LabDocument, tag_ids: list[int]) -> None:
         # Mutate through the relationship so delete-orphan removes stale rows
         # cleanly (deleting children still held by the parent collection would
         # otherwise be a no-op at flush).
         doc.tag_assignments.clear()
         await session.flush()
         valid = (
-            await session.execute(
-                select(LabDocumentTag.id).where(
-                    LabDocumentTag.organization_id == org_id, LabDocumentTag.id.in_(tag_ids)
+            (
+                await session.execute(
+                    select(LabDocumentTag.id).where(
+                        LabDocumentTag.organization_id == org_id, LabDocumentTag.id.in_(tag_ids)
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for tag_id in valid:
             doc.tag_assignments.append(LabDocumentTagAssignment(tag_id=tag_id))
         await session.flush()
@@ -323,9 +325,7 @@ class LabDocumentNoteService:
         doc = await LabDocumentService.get_document(session, document_id=document_id, org_id=org_id)
         if doc is None:
             raise NoteNotFoundError("Document not found")
-        note = LabDocumentNote(
-            organization_id=org_id, document_id=document_id, user_id=user_id, body=body
-        )
+        note = LabDocumentNote(organization_id=org_id, document_id=document_id, user_id=user_id, body=body)
         session.add(note)
         await session.flush()
         await log_action(
@@ -391,9 +391,7 @@ class LabDocumentTagService:
     @staticmethod
     async def list_tags(session: AsyncSession, *, org_id: int) -> list[LabDocumentTag]:
         rows = await session.execute(
-            select(LabDocumentTag)
-            .where(LabDocumentTag.organization_id == org_id)
-            .order_by(LabDocumentTag.name.asc())
+            select(LabDocumentTag).where(LabDocumentTag.organization_id == org_id).order_by(LabDocumentTag.name.asc())
         )
         return list(rows.scalars().all())
 
@@ -401,21 +399,23 @@ class LabDocumentTagService:
     async def delete_tag(session: AsyncSession, *, org_id: int, user_id: int, tag_id: int) -> bool:
         tag = (
             await session.execute(
-                select(LabDocumentTag).where(
-                    LabDocumentTag.id == tag_id, LabDocumentTag.organization_id == org_id
-                )
+                select(LabDocumentTag).where(LabDocumentTag.id == tag_id, LabDocumentTag.organization_id == org_id)
             )
         ).scalar_one_or_none()
         if tag is None:
             return False
 
         in_use = (
-            await session.execute(
-                select(LabDocument.title)
-                .join(LabDocumentTagAssignment, LabDocumentTagAssignment.document_id == LabDocument.id)
-                .where(LabDocumentTagAssignment.tag_id == tag_id)
+            (
+                await session.execute(
+                    select(LabDocument.title)
+                    .join(LabDocumentTagAssignment, LabDocumentTagAssignment.document_id == LabDocument.id)
+                    .where(LabDocumentTagAssignment.tag_id == tag_id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         if in_use:
             raise TagInUseError(list(in_use))
 

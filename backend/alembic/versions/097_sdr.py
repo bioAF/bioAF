@@ -75,9 +75,7 @@ def upgrade() -> None:
     op.create_table(
         "sdr_status_transitions",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column(
-            "sdr_id", sa.Integer(), sa.ForeignKey("scientific_decision_records.id"), nullable=False
-        ),
+        sa.Column("sdr_id", sa.Integer(), sa.ForeignKey("scientific_decision_records.id"), nullable=False),
         sa.Column("from_status", sa.String(length=20), nullable=False),
         sa.Column("to_status", sa.String(length=20), nullable=False),
         sa.Column("note", sa.Text(), nullable=True),

@@ -142,9 +142,7 @@ async def delete_category(
 ):
     org_id, user_id = int(current_user["org_id"]), int(current_user["sub"])
     try:
-        deleted = await SdrService.delete_category(
-            session, org_id=org_id, user_id=user_id, category_id=category_id
-        )
+        deleted = await SdrService.delete_category(session, org_id=org_id, user_id=user_id, category_id=category_id)
     except CategoryInUseError as exc:
         raise HTTPException(409, {"error": "category_in_use", "detail": str(exc)})
     if not deleted:
@@ -182,9 +180,7 @@ async def list_sdrs(
         page=page,
         page_size=page_size,
     )
-    return SdrListResponse(
-        sdrs=[_summary(s) for s in rows], total=total, page=page, page_size=page_size
-    )
+    return SdrListResponse(sdrs=[_summary(s) for s in rows], total=total, page=page, page_size=page_size)
 
 
 @router.post("/sdrs", response_model=SdrDetailResponse)

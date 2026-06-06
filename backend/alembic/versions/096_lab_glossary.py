@@ -39,8 +39,7 @@ def upgrade() -> None:
     # Case-insensitive uniqueness so "Passage" and "passage" cannot both exist;
     # the duplicate check in the service is case-insensitive to match.
     op.execute(
-        "CREATE UNIQUE INDEX uq_lab_glossary_terms_org_lower_term "
-        "ON lab_glossary_terms (organization_id, lower(term))"
+        "CREATE UNIQUE INDEX uq_lab_glossary_terms_org_lower_term ON lab_glossary_terms (organization_id, lower(term))"
     )
 
     op.create_table(

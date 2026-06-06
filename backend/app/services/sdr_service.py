@@ -59,9 +59,7 @@ class SdrReadOnlyError(Exception):
 class SdrService:
     # ------------------------------------------------------------------ reads
     @staticmethod
-    async def get_sdr(
-        session: AsyncSession, *, sdr_id: int, org_id: int
-    ) -> ScientificDecisionRecord | None:
+    async def get_sdr(session: AsyncSession, *, sdr_id: int, org_id: int) -> ScientificDecisionRecord | None:
         result = await session.execute(
             select(ScientificDecisionRecord)
             .options(
@@ -70,9 +68,7 @@ class SdrService:
                 selectinload(ScientificDecisionRecord.created_by),
                 selectinload(ScientificDecisionRecord.superseded_by),
                 selectinload(ScientificDecisionRecord.supersedes),
-                selectinload(ScientificDecisionRecord.transitions).selectinload(
-                    SdrStatusTransition.transitioned_by
-                ),
+                selectinload(ScientificDecisionRecord.transitions).selectinload(SdrStatusTransition.transitioned_by),
             )
             .where(
                 ScientificDecisionRecord.id == sdr_id,
@@ -95,9 +91,7 @@ class SdrService:
         page: int = 1,
         page_size: int = 50,
     ) -> tuple[list[ScientificDecisionRecord], int]:
-        base = select(ScientificDecisionRecord).where(
-            ScientificDecisionRecord.organization_id == org_id
-        )
+        base = select(ScientificDecisionRecord).where(ScientificDecisionRecord.organization_id == org_id)
         count_base = (
             select(func.count())
             .select_from(ScientificDecisionRecord)
@@ -295,13 +289,9 @@ class SdrService:
         if to_status == "superseded":
             target = None
             if superseded_by_sdr_id is not None:
-                target = await SdrService.get_sdr(
-                    session, sdr_id=superseded_by_sdr_id, org_id=org_id
-                )
+                target = await SdrService.get_sdr(session, sdr_id=superseded_by_sdr_id, org_id=org_id)
             if target is None or target.id == row.id:
-                raise SupersededByRequiredError(
-                    "A valid superseding SDR in the same organization is required"
-                )
+                raise SupersededByRequiredError("A valid superseding SDR in the same organization is required")
             row.superseded_by_sdr_id = target.id
             if target.supersedes_sdr_id is None:
                 target.supersedes_sdr_id = row.id
@@ -369,9 +359,7 @@ class SdrService:
         return row
 
     @staticmethod
-    async def delete_sdr(
-        session: AsyncSession, *, org_id: int, user_id: int, sdr_id: int
-    ) -> bool:
+    async def delete_sdr(session: AsyncSession, *, org_id: int, user_id: int, sdr_id: int) -> bool:
         row = await SdrService.get_sdr(session, sdr_id=sdr_id, org_id=org_id)
         if row is None:
             return False
@@ -391,20 +379,22 @@ class SdrService:
         )
         # Detach any other SDR that points at this one so FKs do not block delete.
         for other in (
-            await session.execute(
-                select(ScientificDecisionRecord).where(
-                    (ScientificDecisionRecord.superseded_by_sdr_id == row.id)
-                    | (ScientificDecisionRecord.supersedes_sdr_id == row.id)
+            (
+                await session.execute(
+                    select(ScientificDecisionRecord).where(
+                        (ScientificDecisionRecord.superseded_by_sdr_id == row.id)
+                        | (ScientificDecisionRecord.supersedes_sdr_id == row.id)
+                    )
                 )
             )
-        ).scalars().all():
+            .scalars()
+            .all()
+        ):
             if other.superseded_by_sdr_id == row.id:
                 other.superseded_by_sdr_id = None
             if other.supersedes_sdr_id == row.id:
                 other.supersedes_sdr_id = None
-        await session.execute(
-            SdrStatusTransition.__table__.delete().where(SdrStatusTransition.sdr_id == row.id)
-        )
+        await session.execute(SdrStatusTransition.__table__.delete().where(SdrStatusTransition.sdr_id == row.id))
         await session.delete(row)
         await session.flush()
         return True
@@ -413,30 +403,28 @@ class SdrService:
     @staticmethod
     async def list_categories(session: AsyncSession, *, org_id: int) -> list[SdrCategory]:
         rows = (
-            await session.execute(
-                select(SdrCategory)
-                .where(SdrCategory.organization_id == org_id)
-                .order_by(func.lower(SdrCategory.name))
+            (
+                await session.execute(
+                    select(SdrCategory)
+                    .where(SdrCategory.organization_id == org_id)
+                    .order_by(func.lower(SdrCategory.name))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return list(rows)
 
     @staticmethod
-    async def get_category(
-        session: AsyncSession, *, org_id: int, category_id: int
-    ) -> SdrCategory | None:
+    async def get_category(session: AsyncSession, *, org_id: int, category_id: int) -> SdrCategory | None:
         return (
             await session.execute(
-                select(SdrCategory).where(
-                    SdrCategory.id == category_id, SdrCategory.organization_id == org_id
-                )
+                select(SdrCategory).where(SdrCategory.id == category_id, SdrCategory.organization_id == org_id)
             )
         ).scalar_one_or_none()
 
     @staticmethod
-    async def create_category(
-        session: AsyncSession, *, org_id: int, user_id: int, name: str
-    ) -> SdrCategory:
+    async def create_category(session: AsyncSession, *, org_id: int, user_id: int, name: str) -> SdrCategory:
         row = SdrCategory(organization_id=org_id, name=name.strip(), created_by_user_id=user_id)
         session.add(row)
         await session.flush()
@@ -452,9 +440,7 @@ class SdrService:
         return row
 
     @staticmethod
-    async def delete_category(
-        session: AsyncSession, *, org_id: int, user_id: int, category_id: int
-    ) -> bool:
+    async def delete_category(session: AsyncSession, *, org_id: int, user_id: int, category_id: int) -> bool:
         row = await SdrService.get_category(session, org_id=org_id, category_id=category_id)
         if row is None:
             return False
@@ -506,6 +492,10 @@ class SdrService:
 
         flagged = warned = 0
         for row in rows:
+            # The query already excludes NULL trigger_date; this guard narrows the
+            # Optional for the type checker.
+            if row.trigger_date is None:
+                continue
             if row.trigger_date <= today:
                 await SdrService.transition(
                     session,

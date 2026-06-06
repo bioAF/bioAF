@@ -26,7 +26,6 @@ from app.models.lab_glossary import (
     LabGlossaryRejectedProposal,
     LabGlossaryScanJob,
     LabGlossaryScanProposal,
-    LabGlossaryTerm,
 )
 from app.services import audit_service, llm_provider_config_service
 from app.services.lab_glossary_service import LabGlossaryService
@@ -50,7 +49,7 @@ SCAN_PROMPT = (
 TOPIC_PROMPT = (
     "You are building a starter glossary for a biotech lab on the given topic. Generate "
     "the terms commonly used in this domain with concise, lab-appropriate definitions. "
-    "Return ONLY a JSON array; each element is an object with keys: \"term\", "
+    'Return ONLY a JSON array; each element is an object with keys: "term", '
     '"definition", and optionally "aliases" (array of strings), "category", "context".'
 )
 
@@ -122,9 +121,7 @@ async def execute_scan(
 
 async def _execute_scan_inner(session_factory, *, job_id, content_provider, submit_override) -> None:
     async with session_factory() as session:
-        job = (
-            await session.execute(select(LabGlossaryScanJob).where(LabGlossaryScanJob.id == job_id))
-        ).scalar_one()
+        job = (await session.execute(select(LabGlossaryScanJob).where(LabGlossaryScanJob.id == job_id))).scalar_one()
         job.status = "running"
         await session.flush()
 
@@ -151,9 +148,7 @@ async def _execute_scan_inner(session_factory, *, job_id, content_provider, subm
     extracted = _parse_llm_terms(response_text)
 
     async with session_factory() as session:
-        job = (
-            await session.execute(select(LabGlossaryScanJob).where(LabGlossaryScanJob.id == job_id))
-        ).scalar_one()
+        job = (await session.execute(select(LabGlossaryScanJob).where(LabGlossaryScanJob.id == job_id))).scalar_one()
         new_count, changed_count = await _build_proposals(session, job=job, extracted=extracted)
         job.status = "complete"
         job.proposed_new_count = new_count
@@ -218,10 +213,10 @@ async def mark_orphaned_on_startup(session: AsyncSession) -> int:
     """Fail any scan job left in-flight by a process restart (ADR-062), mirroring
     agent_review_job_service.mark_orphaned_on_startup."""
     rows = (
-        await session.execute(
-            select(LabGlossaryScanJob).where(LabGlossaryScanJob.status.in_(("pending", "running")))
-        )
-    ).scalars().all()
+        (await session.execute(select(LabGlossaryScanJob).where(LabGlossaryScanJob.status.in_(("pending", "running")))))
+        .scalars()
+        .all()
+    )
     for job in rows:
         job.status = "failed"
         job.error_message = "API process restarted while scan was in flight."
@@ -233,9 +228,7 @@ async def mark_orphaned_on_startup(session: AsyncSession) -> int:
 # --- CSV import --------------------------------------------------------------
 
 
-async def parse_csv_import(
-    session: AsyncSession, *, org_id: int, user_id: int, content: str
-) -> LabGlossaryScanJob:
+async def parse_csv_import(session: AsyncSession, *, org_id: int, user_id: int, content: str) -> LabGlossaryScanJob:
     """Parse CSV/TSV into proposals under a new ``import`` scan job. Required
     columns: term, definition. Optional: aliases (pipe- or comma-delimited within
     the cell), category, context. Unrecognized columns are ignored."""
@@ -313,9 +306,7 @@ def _split_aliases(value: str | None) -> list[str] | None:
 # --- proposal building (shared by scan + import) -----------------------------
 
 
-async def _build_proposals(
-    session: AsyncSession, *, job: LabGlossaryScanJob, extracted: list[dict]
-) -> tuple[int, int]:
+async def _build_proposals(session: AsyncSession, *, job: LabGlossaryScanJob, extracted: list[dict]) -> tuple[int, int]:
     """Write proposals, deduping against committed terms and flagging
     previously-rejected ones. Returns (new_count, changed_count)."""
     new_count = 0
@@ -428,9 +419,7 @@ async def _extract_document_text(session: AsyncSession, job: LabGlossaryScanJob)
         return ""
     doc = (
         await session.execute(
-            select(LabDocument).where(
-                LabDocument.id == doc_id, LabDocument.organization_id == job.organization_id
-            )
+            select(LabDocument).where(LabDocument.id == doc_id, LabDocument.organization_id == job.organization_id)
         )
     ).scalar_one_or_none()
     if doc is None:
@@ -531,13 +520,17 @@ async def review_proposals(
         raise ValueError("scan job not found")
 
     proposals = (
-        await session.execute(
-            select(LabGlossaryScanProposal).where(
-                LabGlossaryScanProposal.scan_job_id == job_id,
-                LabGlossaryScanProposal.review_status == "pending",
+        (
+            await session.execute(
+                select(LabGlossaryScanProposal).where(
+                    LabGlossaryScanProposal.scan_job_id == job_id,
+                    LabGlossaryScanProposal.review_status == "pending",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     term_source = "import" if job.scan_type == "import" else "llm_scan"
     counts = {"accepted": 0, "rejected": 0, "kept_existing": 0}
@@ -645,9 +638,7 @@ async def get_job(session: AsyncSession, *, org_id: int, job_id: int) -> LabGlos
     ).scalar_one_or_none()
 
 
-async def list_proposals(
-    session: AsyncSession, *, job_id: int
-) -> list[LabGlossaryScanProposal]:
+async def list_proposals(session: AsyncSession, *, job_id: int) -> list[LabGlossaryScanProposal]:
     return list(
         (
             await session.execute(
@@ -655,7 +646,9 @@ async def list_proposals(
                 .where(LabGlossaryScanProposal.scan_job_id == job_id)
                 .order_by(LabGlossaryScanProposal.proposal_type.asc(), LabGlossaryScanProposal.term.asc())
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
 
 
@@ -679,15 +672,19 @@ async def pending_review_job_ids(session: AsyncSession, *, org_id: int) -> list[
     """Scan/import job ids that still have proposals awaiting review, most recent
     first. The pending banner uses these to open the review flow."""
     rows = (
-        await session.execute(
-            select(LabGlossaryScanProposal.scan_job_id)
-            .join(LabGlossaryScanJob, LabGlossaryScanJob.id == LabGlossaryScanProposal.scan_job_id)
-            .where(
-                LabGlossaryScanJob.organization_id == org_id,
-                LabGlossaryScanProposal.review_status == "pending",
+        (
+            await session.execute(
+                select(LabGlossaryScanProposal.scan_job_id)
+                .join(LabGlossaryScanJob, LabGlossaryScanJob.id == LabGlossaryScanProposal.scan_job_id)
+                .where(
+                    LabGlossaryScanJob.organization_id == org_id,
+                    LabGlossaryScanProposal.review_status == "pending",
+                )
+                .group_by(LabGlossaryScanProposal.scan_job_id)
+                .order_by(LabGlossaryScanProposal.scan_job_id.desc())
             )
-            .group_by(LabGlossaryScanProposal.scan_job_id)
-            .order_by(LabGlossaryScanProposal.scan_job_id.desc())
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [int(r) for r in rows]

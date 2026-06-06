@@ -65,13 +65,9 @@ async def test_update_term(client, admin_token):
 async def test_delete_term_admin_only(client, admin_token, viewer_token):
     # AC-B11
     created = (await _create_term(client, admin_token)).json()
-    blocked = await client.delete(
-        f"/api/lab-knowledge/glossary/{created['id']}", headers=_auth(viewer_token)
-    )
+    blocked = await client.delete(f"/api/lab-knowledge/glossary/{created['id']}", headers=_auth(viewer_token))
     assert blocked.status_code == 403
-    ok = await client.delete(
-        f"/api/lab-knowledge/glossary/{created['id']}", headers=_auth(admin_token)
-    )
+    ok = await client.delete(f"/api/lab-knowledge/glossary/{created['id']}", headers=_auth(admin_token))
     assert ok.status_code == 200
     listed = await client.get("/api/lab-knowledge/glossary", headers=_auth(admin_token))
     assert listed.json()["total"] == 0
@@ -86,9 +82,7 @@ async def test_csv_import_then_review_accept_all(client, admin_token):
     assert resp.status_code == 200, resp.text
     job_id = resp.json()["id"]
 
-    props = await client.get(
-        f"/api/lab-knowledge/glossary/scan/{job_id}/proposals", headers=_auth(admin_token)
-    )
+    props = await client.get(f"/api/lab-knowledge/glossary/scan/{job_id}/proposals", headers=_auth(admin_token))
     assert len(props.json()["new_terms"]) == 2
 
     review = await client.post(

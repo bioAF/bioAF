@@ -42,11 +42,12 @@ class LabDocument(Base):
     organization = relationship("Organization")
     created_by = relationship("User")
     versions = relationship(
-        "LabDocumentVersion", back_populates="document", cascade="all, delete-orphan", order_by="LabDocumentVersion.version_number"
+        "LabDocumentVersion",
+        back_populates="document",
+        cascade="all, delete-orphan",
+        order_by="LabDocumentVersion.version_number",
     )
-    tag_assignments = relationship(
-        "LabDocumentTagAssignment", back_populates="document", cascade="all, delete-orphan"
-    )
+    tag_assignments = relationship("LabDocumentTagAssignment", back_populates="document", cascade="all, delete-orphan")
 
 
 class LabDocumentVersion(Base):
@@ -117,9 +118,7 @@ class LabDocumentTagAssignment(Base):
 
     __tablename__ = "lab_document_tag_assignments"
 
-    document_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("lab_documents.id"), primary_key=True
-    )
+    document_id: Mapped[int] = mapped_column(Integer, ForeignKey("lab_documents.id"), primary_key=True)
     tag_id: Mapped[int] = mapped_column(Integer, ForeignKey("lab_document_tags.id"), primary_key=True)
 
     document = relationship("LabDocument", back_populates="tag_assignments")

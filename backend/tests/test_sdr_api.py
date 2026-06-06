@@ -83,9 +83,13 @@ async def test_flagged_to_active_without_note_is_422(client, admin_token):
     # AC-C03
     created = (await _create(client, admin_token)).json()
     sid = created["id"]
-    await client.post(f"/api/lab-knowledge/sdrs/{sid}/transition", json={"to_status": "active"}, headers=_auth(admin_token))
     await client.post(
-        f"/api/lab-knowledge/sdrs/{sid}/transition", json={"to_status": "flagged_for_review"}, headers=_auth(admin_token)
+        f"/api/lab-knowledge/sdrs/{sid}/transition", json={"to_status": "active"}, headers=_auth(admin_token)
+    )
+    await client.post(
+        f"/api/lab-knowledge/sdrs/{sid}/transition",
+        json={"to_status": "flagged_for_review"},
+        headers=_auth(admin_token),
     )
     no_note = await client.post(
         f"/api/lab-knowledge/sdrs/{sid}/transition", json={"to_status": "active"}, headers=_auth(admin_token)
@@ -104,7 +108,9 @@ async def test_supersede_without_target_is_422_then_links(client, admin_token):
     # AC-C04, AC-C07
     old = (await _create(client, admin_token)).json()
     new = (await _create(client, admin_token, title="STARsolo v2")).json()
-    await client.post(f"/api/lab-knowledge/sdrs/{old['id']}/transition", json={"to_status": "active"}, headers=_auth(admin_token))
+    await client.post(
+        f"/api/lab-knowledge/sdrs/{old['id']}/transition", json={"to_status": "active"}, headers=_auth(admin_token)
+    )
     bad = await client.post(
         f"/api/lab-knowledge/sdrs/{old['id']}/transition", json={"to_status": "superseded"}, headers=_auth(admin_token)
     )
@@ -126,9 +132,15 @@ async def test_list_hides_historical_by_default(client, admin_token):
     # AC-C10
     a = (await _create(client, admin_token, title="Keeper")).json()
     b = (await _create(client, admin_token, title="Goner")).json()
-    await client.post(f"/api/lab-knowledge/sdrs/{a['id']}/transition", json={"to_status": "active"}, headers=_auth(admin_token))
-    await client.post(f"/api/lab-knowledge/sdrs/{b['id']}/transition", json={"to_status": "active"}, headers=_auth(admin_token))
-    await client.post(f"/api/lab-knowledge/sdrs/{b['id']}/transition", json={"to_status": "repealed"}, headers=_auth(admin_token))
+    await client.post(
+        f"/api/lab-knowledge/sdrs/{a['id']}/transition", json={"to_status": "active"}, headers=_auth(admin_token)
+    )
+    await client.post(
+        f"/api/lab-knowledge/sdrs/{b['id']}/transition", json={"to_status": "active"}, headers=_auth(admin_token)
+    )
+    await client.post(
+        f"/api/lab-knowledge/sdrs/{b['id']}/transition", json={"to_status": "repealed"}, headers=_auth(admin_token)
+    )
     default = await client.get("/api/lab-knowledge/sdrs", headers=_auth(admin_token))
     assert default.json()["total"] == 1
     histo = await client.get("/api/lab-knowledge/sdrs?include_historical=true", headers=_auth(admin_token))
@@ -162,9 +174,7 @@ async def test_categories_crud(client, admin_token):
     blocked = await client.delete(f"/api/lab-knowledge/sdr-categories/{cat_id}", headers=_auth(admin_token))
     assert blocked.status_code == 409
     # Clear the category, then delete works
-    await client.patch(
-        f"/api/lab-knowledge/sdrs/{sdr['id']}", json={"category_id": None}, headers=_auth(admin_token)
-    )
+    await client.patch(f"/api/lab-knowledge/sdrs/{sdr['id']}", json={"category_id": None}, headers=_auth(admin_token))
     ok = await client.delete(f"/api/lab-knowledge/sdr-categories/{cat_id}", headers=_auth(admin_token))
     assert ok.status_code == 200
 

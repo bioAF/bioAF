@@ -29,9 +29,7 @@ class DuplicateTermError(Exception):
 
 class LabGlossaryService:
     @staticmethod
-    async def get_by_term(
-        session: AsyncSession, *, org_id: int, term: str
-    ) -> LabGlossaryTerm | None:
+    async def get_by_term(session: AsyncSession, *, org_id: int, term: str) -> LabGlossaryTerm | None:
         """Case-insensitive lookup used for duplicate detection and scan dedup."""
         result = await session.execute(
             select(LabGlossaryTerm).where(
@@ -138,9 +136,7 @@ class LabGlossaryService:
         return row
 
     @staticmethod
-    async def delete_term(
-        session: AsyncSession, *, org_id: int, user_id: int, term_id: int
-    ) -> bool:
+    async def delete_term(session: AsyncSession, *, org_id: int, user_id: int, term_id: int) -> bool:
         row = await LabGlossaryService.get_term(session, term_id=term_id, org_id=org_id)
         if row is None:
             return False
@@ -161,19 +157,13 @@ class LabGlossaryService:
         )
         # Detach history rows so the FK does not block the delete; the deleted
         # content is preserved in the audit log above.
-        await session.execute(
-            LabGlossaryTermHistory.__table__.delete().where(
-                LabGlossaryTermHistory.term_id == row.id
-            )
-        )
+        await session.execute(LabGlossaryTermHistory.__table__.delete().where(LabGlossaryTermHistory.term_id == row.id))
         await session.delete(row)
         await session.flush()
         return True
 
     @staticmethod
-    async def get_term(
-        session: AsyncSession, *, term_id: int, org_id: int
-    ) -> LabGlossaryTerm | None:
+    async def get_term(session: AsyncSession, *, term_id: int, org_id: int) -> LabGlossaryTerm | None:
         result = await session.execute(
             select(LabGlossaryTerm)
             .options(selectinload(LabGlossaryTerm.created_by))
@@ -193,9 +183,7 @@ class LabGlossaryService:
         page_size: int = 50,
     ) -> tuple[list[LabGlossaryTerm], int]:
         base = select(LabGlossaryTerm).where(LabGlossaryTerm.organization_id == org_id)
-        count_base = select(func.count()).select_from(LabGlossaryTerm).where(
-            LabGlossaryTerm.organization_id == org_id
-        )
+        count_base = select(func.count()).select_from(LabGlossaryTerm).where(LabGlossaryTerm.organization_id == org_id)
 
         if category:
             base = base.where(LabGlossaryTerm.category == category)

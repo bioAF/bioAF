@@ -146,9 +146,7 @@ class SearchService:
             .limit(limit_per_type)
         )
         for d in lab_doc_rows.scalars():
-            results.append(
-                {"entity_type": "lab_document", "entity_id": d.id, "name": d.title, "experiment_id": None}
-            )
+            results.append({"entity_type": "lab_document", "entity_id": d.id, "name": d.title, "experiment_id": None})
 
         glossary_rows = await session.execute(
             select(LabGlossaryTerm)
@@ -347,9 +345,7 @@ class SearchService:
         if t == "sdr":
             # "SDR-017" formatted number, bare number, title, decision,
             # justification, and category name are all searchable (F-LKC-09).
-            sdr_number_label = func.concat(
-                "SDR-", func.lpad(cast(ScientificDecisionRecord.sdr_number, Text), 3, "0")
-            )
+            sdr_number_label = func.concat("SDR-", func.lpad(cast(ScientificDecisionRecord.sdr_number, Text), 3, "0"))
             return ScientificDecisionRecord, and_(
                 ScientificDecisionRecord.organization_id == org_id,
                 or_(
