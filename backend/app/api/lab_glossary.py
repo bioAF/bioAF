@@ -141,7 +141,8 @@ async def pending_review(
 ):
     org_id = int(current_user["org_id"])
     count = await scan_svc.pending_review_count(session, org_id=org_id)
-    return LabGlossaryPendingResponse(pending_review_count=count)
+    job_ids = await scan_svc.pending_review_job_ids(session, org_id=org_id)
+    return LabGlossaryPendingResponse(pending_review_count=count, job_ids=job_ids)
 
 
 @router.get("/glossary/{term_id}", response_model=LabGlossaryTermResponse)

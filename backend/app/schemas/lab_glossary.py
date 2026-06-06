@@ -104,3 +104,6 @@ class LabGlossaryReviewResponse(BaseModel):
 
 class LabGlossaryPendingResponse(BaseModel):
     pending_review_count: int
+    # Scan/import job ids that still have proposals awaiting review, most recent
+    # first, so the pending banner can open the review flow.
+    job_ids: list[int] = []

@@ -673,3 +673,21 @@ async def pending_review_count(session: AsyncSession, *, org_id: int) -> int:
         )
         or 0
     )
+
+
+async def pending_review_job_ids(session: AsyncSession, *, org_id: int) -> list[int]:
+    """Scan/import job ids that still have proposals awaiting review, most recent
+    first. The pending banner uses these to open the review flow."""
+    rows = (
+        await session.execute(
+            select(LabGlossaryScanProposal.scan_job_id)
+            .join(LabGlossaryScanJob, LabGlossaryScanJob.id == LabGlossaryScanProposal.scan_job_id)
+            .where(
+                LabGlossaryScanJob.organization_id == org_id,
+                LabGlossaryScanProposal.review_status == "pending",
+            )
+            .group_by(LabGlossaryScanProposal.scan_job_id)
+            .order_by(LabGlossaryScanProposal.scan_job_id.desc())
+        )
+    ).scalars().all()
+    return [int(r) for r in rows]

@@ -120,3 +120,36 @@ async def test_pending_review_count_reflects_unreviewed(client, admin_token):
     await client.post("/api/lab-knowledge/glossary/import", files=files, headers=_auth(admin_token))
     pending = await client.get("/api/lab-knowledge/glossary/pending", headers=_auth(admin_token))
     assert pending.json()["pending_review_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_pending_review_lists_jobs_awaiting_review(client, admin_token):
+    # The pending banner must be able to open a review: the response carries the
+    # ids of the jobs that still have proposals to review, most recent first.
+    csv1 = b"term,definition\nA,da\n"
+    csv2 = b"term,definition\nB,db\n"
+    j1 = await client.post(
+        "/api/lab-knowledge/glossary/import",
+        files={"file": ("a.csv", io.BytesIO(csv1), "text/csv")},
+        headers=_auth(admin_token),
+    )
+    j2 = await client.post(
+        "/api/lab-knowledge/glossary/import",
+        files={"file": ("b.csv", io.BytesIO(csv2), "text/csv")},
+        headers=_auth(admin_token),
+    )
+    job1_id, job2_id = j1.json()["id"], j2.json()["id"]
+
+    pending = await client.get("/api/lab-knowledge/glossary/pending", headers=_auth(admin_token))
+    body = pending.json()
+    assert body["pending_review_count"] == 2
+    assert body["job_ids"] == [job2_id, job1_id]
+
+    # Once a job's proposals are all reviewed, it drops out of the list.
+    await client.post(
+        f"/api/lab-knowledge/glossary/scan/{job2_id}/review",
+        json={"reject_all_remaining": True},
+        headers=_auth(admin_token),
+    )
+    pending2 = await client.get("/api/lab-knowledge/glossary/pending", headers=_auth(admin_token))
+    assert pending2.json()["job_ids"] == [job1_id]
