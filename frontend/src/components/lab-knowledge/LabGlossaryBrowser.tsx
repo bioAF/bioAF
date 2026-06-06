@@ -372,8 +372,14 @@ function TermDetailPanel({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/30 flex justify-end z-50" onClick={onClose}>
-      <div className="bg-white w-[28rem] h-full overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-lg w-[32rem] max-h-[85vh] overflow-y-auto p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-start justify-between mb-4">
           <h2 className="text-xl font-bold">{term.term}</h2>
           <button type="button" onClick={onClose} aria-label="Close" className="text-gray-400">

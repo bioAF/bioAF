@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
 
@@ -90,7 +91,8 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-export function SdrBrowser({ focusSdrId }: { focusSdrId?: number }) {
+export function SdrBrowser() {
+  const router = useRouter();
   const { canAccess } = usePermissions();
   const canAuthor = canAccess("sdr", "author");
   const canManage = canAccess("sdr", "manage");
@@ -105,7 +107,6 @@ export function SdrBrowser({ focusSdrId }: { focusSdrId?: number }) {
   const [sort, setSort] = useState("number");
   const [showHistorical, setShowHistorical] = useState(false);
 
-  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showCategories, setShowCategories] = useState(false);
 
@@ -143,10 +144,6 @@ export function SdrBrowser({ focusSdrId }: { focusSdrId?: number }) {
   useEffect(() => {
     fetchCategories();
   }, [fetchCategories]);
-
-  useEffect(() => {
-    if (focusSdrId) setSelectedId(focusSdrId);
-  }, [focusSdrId]);
 
   if (loading) {
     return (
@@ -259,7 +256,7 @@ export function SdrBrowser({ focusSdrId }: { focusSdrId?: number }) {
             {sdrs.map((s) => (
               <tr
                 key={s.id}
-                onClick={() => setSelectedId(s.id)}
+                onClick={() => router.push(`/lab-knowledge/decision-records/${s.id}`)}
                 className="hover:bg-gray-50 cursor-pointer"
               >
                 <td className="p-2 font-mono text-xs">{sdrCode(s.sdr_number)}</td>
@@ -274,17 +271,6 @@ export function SdrBrowser({ focusSdrId }: { focusSdrId?: number }) {
             ))}
           </tbody>
         </table>
-      )}
-
-      {selectedId !== null && (
-        <SdrDetailPanel
-          sdrId={selectedId}
-          categories={categories}
-          canAuthor={canAuthor}
-          canManage={canManage}
-          onClose={() => setSelectedId(null)}
-          onChanged={() => fetchSdrs()}
-        />
       )}
 
       {showCreate && (
@@ -309,22 +295,19 @@ export function SdrBrowser({ focusSdrId }: { focusSdrId?: number }) {
   );
 }
 
-function SdrDetailPanel({
+export function SdrDetailView({
   sdrId,
-  categories,
-  canAuthor,
-  canManage,
-  onClose,
-  onChanged,
+  onDeleted,
 }: {
   sdrId: number;
-  categories: Category[];
-  canAuthor: boolean;
-  canManage: boolean;
-  onClose: () => void;
-  onChanged: () => void;
+  onDeleted: () => void;
 }) {
+  const { canAccess } = usePermissions();
+  const canAuthor = canAccess("sdr", "author");
+  const canManage = canAccess("sdr", "manage");
+
   const [sdr, setSdr] = useState<SdrDetail | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -341,9 +324,15 @@ function SdrDetailPanel({
     load();
   }, [load]);
 
+  useEffect(() => {
+    api
+      .get<Category[]>(`${API_BASE}/sdr-categories`)
+      .then(setCategories)
+      .catch(() => setCategories([]));
+  }, []);
+
   const refresh = async () => {
     await load();
-    onChanged();
   };
 
   const transition = async (to: string, extra?: Record<string, unknown>) => {
@@ -362,49 +351,33 @@ function SdrDetailPanel({
   const remove = async () => {
     if (!window.confirm("Permanently delete this decision record?")) return;
     await api.delete(`${API_BASE}/sdrs/${sdrId}`);
-    onClose();
-    onChanged();
+    onDeleted();
   };
 
   if (!sdr) {
     return (
-      <div className="fixed inset-0 bg-black/30 flex justify-end z-50" onClick={onClose}>
-        <div className="bg-white w-[34rem] h-full p-6" onClick={(e) => e.stopPropagation()}>
-          <p data-testid="sdr-detail-loading" className="text-gray-500">
-            {err ?? "Loading..."}
-          </p>
-        </div>
-      </div>
+      <p data-testid="sdr-detail-loading" className="text-gray-500">
+        {err ?? "Loading..."}
+      </p>
     );
   }
 
   const isTerminal = sdr.status === "superseded" || sdr.status === "repealed";
 
   return (
-    <div className="fixed inset-0 bg-black/30 flex justify-end z-50" onClick={onClose}>
-      <div
-        className="bg-white w-[34rem] h-full overflow-y-auto p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between mb-3">
-          <div>
-            <span className="font-mono text-xs text-gray-400">{sdrCode(sdr.sdr_number)}</span>
-            <h2 className="text-xl font-bold">{sdr.title}</h2>
-            <div className="mt-1">
-              <StatusBadge status={sdr.status} />
-              {sdr.category && (
-                <span className="ml-2 text-xs text-gray-500">{sdr.category.name}</span>
-              )}
-            </div>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-gray-400">
-            x
-          </button>
+    <div className="bg-white rounded shadow p-6 max-w-3xl">
+      <div className="mb-3">
+        <span className="font-mono text-xs text-gray-400">{sdrCode(sdr.sdr_number)}</span>
+        <h2 className="text-xl font-bold">{sdr.title}</h2>
+        <div className="mt-1">
+          <StatusBadge status={sdr.status} />
+          {sdr.category && <span className="ml-2 text-xs text-gray-500">{sdr.category.name}</span>}
         </div>
+      </div>
 
-        {err && <div className="text-red-600 text-sm mb-3">{err}</div>}
+      {err && <div className="text-red-600 text-sm mb-3">{err}</div>}
 
-        {editing ? (
+      {editing ? (
           <EditSdrForm
             sdr={sdr}
             categories={categories}
@@ -484,7 +457,6 @@ function SdrDetailPanel({
             </section>
           </>
         )}
-      </div>
     </div>
   );
 }

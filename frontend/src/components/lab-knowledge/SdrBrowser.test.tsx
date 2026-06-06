@@ -1,10 +1,15 @@
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { SdrBrowser, sdrCode } from "./SdrBrowser";
+import { SdrBrowser, SdrDetailView, sdrCode } from "./SdrBrowser";
 
 let canAccessImpl = (_resource: string, _action: string) => true;
 
 jest.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => ({ canAccess: (r: string, a: string) => canAccessImpl(r, a) }),
+}));
+
+const pushMock = jest.fn();
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock }),
 }));
 
 jest.mock("@/lib/api", () => ({
@@ -30,6 +35,7 @@ const makeSdr = (overrides = {}) => ({
 
 beforeEach(() => {
   canAccessImpl = () => true;
+  pushMock.mockReset();
   mockGet.mockReset();
   mockGet.mockImplementation((url: string) => {
     if (url.includes("/sdr-categories")) return Promise.resolve([{ id: 2, name: "Analysis" }]);
@@ -68,6 +74,9 @@ test("renders SDR rows with code and status", async () => {
   expect(screen.getByText("SDR-001")).toBeInTheDocument();
   // "Active" also appears as a filter <option>; assert the row badge specifically.
   expect(screen.getAllByText("Active").some((el) => el.tagName === "SPAN")).toBe(true);
+
+  fireEvent.click(screen.getByText("Use STARsolo over CellRanger"));
+  expect(pushMock).toHaveBeenCalledWith("/lab-knowledge/decision-records/1");
 });
 
 test("New SDR hidden without author permission", async () => {
@@ -116,4 +125,37 @@ test("search requests records with the query", async () => {
   await waitFor(() => {
     expect(mockGet.mock.calls.some(([url]) => url.includes("q=starsolo"))).toBe(true);
   });
+});
+
+test("SdrDetailView renders decision, justification, and status history", async () => {
+  const detail = {
+    ...makeSdr(),
+    decision: "Adopt STARsolo for alignment",
+    justification: "Better doublet handling and speed.",
+    created_by: { id: 1, name: "Alice", email: "alice@example.com" },
+    trigger_warning_sent_at: null,
+    superseded_by: null,
+    supersedes: null,
+    transitions: [
+      {
+        id: 1,
+        from_status: "draft",
+        to_status: "active",
+        note: null,
+        transitioned_by: { id: 1, name: "Alice", email: "alice@example.com" },
+        transitioned_at: "2026-01-15T10:00:00Z",
+      },
+    ],
+  };
+  mockGet.mockImplementation((url: string) => {
+    if (url.includes("/sdr-categories")) return Promise.resolve([]);
+    if (url.includes("/sdrs/1")) return Promise.resolve(detail);
+    return Promise.resolve({});
+  });
+  render(<SdrDetailView sdrId={1} onDeleted={jest.fn()} />);
+  await waitFor(() =>
+    expect(screen.getByText("Adopt STARsolo for alignment")).toBeInTheDocument(),
+  );
+  expect(screen.getByText("Better doublet handling and speed.")).toBeInTheDocument();
+  expect(screen.getByText(/Status History/i)).toBeInTheDocument();
 });

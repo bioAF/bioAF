@@ -24,7 +24,7 @@ export function searchHitHref(hit: QuickSearchHit): string {
     case "lab_glossary_term":
       return `/lab-knowledge/glossary?term=${hit.entity_id}`;
     case "sdr":
-      return `/lab-knowledge/decision-records?sdr=${hit.entity_id}`;
+      return `/lab-knowledge/decision-records/${hit.entity_id}`;
     default:
       return "/dashboard";
   }
