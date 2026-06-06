@@ -53,12 +53,14 @@ spec itself identified as sufficient.
 ## Consequences
 
 **Positive:**
+
 - Labs are prompted to revisit decisions without relying on memory or calendar reminders.
 - The status machine does the work: SDRs visibly become `flagged_for_review` rather than carrying
   a silent overdue badge.
 - Reuses the existing recurring-task pattern and notification delivery; no new infrastructure.
 
 **Negative:**
+
 - Date-based triggers require predicting when a decision should be revisited, which is not always
   knowable upfront (event-based triggers, deferred to v2, would address this).
 - The daily loop runs in the API process; a process restart skips at most one tick, which is

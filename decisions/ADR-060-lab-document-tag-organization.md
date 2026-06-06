@@ -46,12 +46,14 @@ sprawl. The join table mirrors established many-to-many patterns already used in
 ## Consequences
 
 **Positive:**
+
 - Documents can belong to multiple logical categories simultaneously.
 - No disputes about folder hierarchy; filtering by tag is fast and intuitive.
 - New organizational dimensions can be added without restructuring.
 - Org-scoping is correct and isolated per tenant.
 
 **Negative:**
+
 - Tag discipline requires governance; the admin-controlled vocabulary addresses this.
 - Users accustomed to folders may need adjustment.
 - A second tag concept now exists in the platform (distinct from `files.tags_json` free-text

@@ -12,6 +12,7 @@ repealed. The status machine must enforce valid transitions and keep a complete,
 transition history.
 
 Two codebase facts shape the implementation:
+
 - **Org-scoped sequential numbering** already exists: `OrgCodeCounter`
   (`backend/app/models/org_code_counter.py`) plus `CodeService._next_counter(session, org_id, kind)`
   (`backend/app/services/code_service.py`), which allocates a per-org monotonic value under a
@@ -24,7 +25,7 @@ Two codebase facts shape the implementation:
 
 SDRs follow this status machine, enforced in the **service layer** (not only API validation):
 
-```
+```text
 draft               -> active
 active              -> flagged_for_review   (manual or system-triggered)
 active              -> superseded           (requires superseded_by_sdr_id)
@@ -69,6 +70,7 @@ direction.
 ## Consequences
 
 **Positive:**
+
 - Complete, auditable decision history; status reflects the real state of each decision.
 - Supersession chains enable tracing a decision's evolution over time.
 - Enforcing the "upheld" note on `flagged_for_review -> active` ensures re-assessments are
@@ -76,6 +78,7 @@ direction.
 - Numbering reuses an existing, concurrency-safe allocator.
 
 **Negative:**
+
 - The status machine is more complex than an active/inactive toggle.
 - Supersession requires the superseding SDR to exist before the old one can be marked superseded;
   teams must create the new SDR first.

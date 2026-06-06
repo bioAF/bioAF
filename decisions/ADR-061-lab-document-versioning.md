@@ -23,6 +23,7 @@ Version history is maintained through explicit "Upload New Version" actions. Inl
 not supported in v1.
 
 Data model:
+
 - `lab_documents` holds current-version metadata (`current_version`, `gcs_uri`, `file_name`,
   `file_size_bytes`, `mime_type`, `md5_checksum`, `is_archived`).
 - `lab_document_versions` holds one append-only row per version
@@ -30,6 +31,7 @@ Data model:
   `change_note`.
 
 Storage and upload:
+
 - Files live in the existing working bucket under a Lab Knowledge prefix:
   `gs://{working_bucket}/lab-knowledge/documents/{document_id}/v{n}/{file_name}`. Paths are
   constructed inline (consistent with `GcsStorageService.build_experiment_prefix` style); no new
@@ -59,12 +61,14 @@ and it matches how GCS already exposes integrity metadata.
 ## Consequences
 
 **Positive:**
+
 - Simple, predictable model that works for every file type.
 - Previous versions are always accessible for download.
 - Explicit upload intent reduces accidental overwrites.
 - Reuses the existing, hardened signed-URL upload path and GCS adapter.
 
 **Negative:**
+
 - No inline editing for text/markdown documents in v1; users download, edit, and re-upload.
 - Checksum is sourced from GCS metadata rather than computed by the API, so it attests to what
   GCS received rather than being independently recomputed by the app. This is an acceptable

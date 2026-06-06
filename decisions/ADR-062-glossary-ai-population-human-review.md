@@ -34,6 +34,7 @@ entries, and every proposal passes through a mandatory human review flow before 
 
 **Execution mechanism (reconciled):** a glossary scan is an in-process async job following the
 Agent Review pattern, **not** a Kubernetes Job:
+
 - A `lab_glossary_scan_jobs` row is created with `status="pending"`.
 - Execution is dispatched via `BackgroundTasks` (or `asyncio.create_task` where no request
   `BackgroundTasks` is available), mirroring `agent_review_job_service.execute_hosted`. The job
@@ -72,6 +73,7 @@ extraction implementation.
 ## Consequences
 
 **Positive:**
+
 - Human stays in the loop; glossary quality is maintained.
 - Rejection history prevents re-surfacing unwanted proposals without context.
 - Consistent review UX for both LLM and CSV import flows.
@@ -79,6 +81,7 @@ extraction implementation.
   text-extraction utilities; no new dispatch mechanism.
 
 **Negative:**
+
 - The review step adds friction; admins may skip large scans if the queue is long.
 - Platform-wide scans may produce many proposals for established orgs; chunking and the
   dedup/`previously_rejected` logic mitigate noise but do not eliminate it.

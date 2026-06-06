@@ -68,17 +68,20 @@ referenced by `audit_log.entity_id` without a type mismatch.
 ## Consequences
 
 **Positive:**
+
 - Labs gain a structured, searchable, auditable institutional memory.
 - New hires have a reference for lab-specific terminology.
 - Scientific decisions are documented with reasoning, not just outcomes.
 - All three components inherit the existing audit log and global search behavior for free.
 
 **Negative:**
+
 - Adds a new top-level navigation section (minor UI complexity).
 - Requires users to understand the distinction between Lab Knowledge Documents and the
   experiment-linked Documents feature. This must be communicated clearly in UI copy.
 
 **Risks:**
+
 - Adoption risk: teams may not develop the habit of maintaining SDRs and glossary entries.
   Entry must be as low-friction as possible (AI-assisted glossary population in ADR-062 is
   one mitigation).
