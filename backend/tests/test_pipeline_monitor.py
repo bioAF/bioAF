@@ -2,6 +2,7 @@ import pytest
 import pytest_asyncio
 from unittest.mock import AsyncMock, patch
 
+from app.adapters.models import StoredObject
 from app.models.pipeline_run import PipelineRun
 from app.services.pipeline_monitor_service import (
     PipelineMonitorService,
@@ -635,22 +636,18 @@ async def test_k8s_completion_registers_output_files(session, k8s_running_run):
     exp_id = k8s_running_run.experiment_id
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = [
-        {
-            "filename": "filtered.h5ad",
-            "gcs_uri": f"gs://bioaf-results-test/experiments/{exp_id}/pipeline-runs/{run_id}/filtered.h5ad",
-            "size_bytes": 50_000_000,
-            "md5_hash": "abc123",
-            "experiment_id": exp_id,
-            "pipeline_run_id": run_id,
-        },
-        {
-            "filename": "qc_plot.png",
-            "gcs_uri": f"gs://bioaf-results-test/experiments/{exp_id}/pipeline-runs/{run_id}/qc_plot.png",
-            "size_bytes": 50_000,
-            "md5_hash": "def456",
-            "experiment_id": exp_id,
-            "pipeline_run_id": run_id,
-        },
+        StoredObject(
+            filename="filtered.h5ad",
+            storage_uri=f"gs://bioaf-results-test/experiments/{exp_id}/pipeline-runs/{run_id}/filtered.h5ad",
+            size_bytes=50_000_000,
+            md5_hash="abc123",
+        ),
+        StoredObject(
+            filename="qc_plot.png",
+            storage_uri=f"gs://bioaf-results-test/experiments/{exp_id}/pipeline-runs/{run_id}/qc_plot.png",
+            size_bytes=50_000,
+            md5_hash="def456",
+        ),
     ]
 
     with (

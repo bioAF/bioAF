@@ -254,7 +254,7 @@ class CostService:
 
         storage_adapter = get_storage_adapter()
         storage_metrics = await storage_adapter.get_storage_metrics()
-        storage_cost_monthly = Decimal(str(storage_metrics.get("total_cost_monthly_usd", 0)))
+        storage_cost_monthly = Decimal(str(storage_metrics.total_cost_monthly_usd))
         if today.month == 12:
             days_in_month = 31
         else:

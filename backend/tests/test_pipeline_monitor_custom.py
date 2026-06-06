@@ -13,6 +13,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
+from app.adapters.models import StoredObject
 from app.models.custom_pipeline import CustomPipeline
 from app.models.custom_pipeline_version import CustomPipelineVersion
 from app.models.environment import Environment
@@ -116,9 +117,9 @@ async def _make_custom_run(
 
 def test_find_custom_report_prefers_html():
     collected = [
-        {"gcs_uri": "gs://b/exp/1/runs/2/report/report.md"},
-        {"gcs_uri": "gs://b/exp/1/runs/2/report/report.html"},
-        {"gcs_uri": "gs://b/exp/1/runs/2/data.csv"},
+        StoredObject(filename="f", storage_uri="gs://b/exp/1/runs/2/report/report.md"),
+        StoredObject(filename="f", storage_uri="gs://b/exp/1/runs/2/report/report.html"),
+        StoredObject(filename="f", storage_uri="gs://b/exp/1/runs/2/data.csv"),
     ]
     uri, fmt = _find_custom_report(collected)
     assert fmt == "html"
@@ -127,8 +128,8 @@ def test_find_custom_report_prefers_html():
 
 def test_find_custom_report_falls_back_to_md():
     collected = [
-        {"gcs_uri": "gs://b/exp/1/runs/2/report/report.md"},
-        {"gcs_uri": "gs://b/exp/1/runs/2/data.csv"},
+        StoredObject(filename="f", storage_uri="gs://b/exp/1/runs/2/report/report.md"),
+        StoredObject(filename="f", storage_uri="gs://b/exp/1/runs/2/data.csv"),
     ]
     uri, fmt = _find_custom_report(collected)
     assert fmt == "md"
@@ -136,27 +137,27 @@ def test_find_custom_report_falls_back_to_md():
 
 
 def test_find_custom_report_none_when_missing():
-    collected = [{"gcs_uri": "gs://b/exp/1/runs/2/data.csv"}]
+    collected = [StoredObject(filename="f", storage_uri="gs://b/exp/1/runs/2/data.csv")]
     assert _find_custom_report(collected) == (None, None)
 
 
 def test_find_custom_log_matches_outputs_relative_path():
     collected = [
-        {"gcs_uri": "gs://b/exp/1/runs/2/analysis.log"},
-        {"gcs_uri": "gs://b/exp/1/runs/2/data.csv"},
+        StoredObject(filename="f", storage_uri="gs://b/exp/1/runs/2/analysis.log"),
+        StoredObject(filename="f", storage_uri="gs://b/exp/1/runs/2/data.csv"),
     ]
     assert _find_custom_log(collected, "/outputs/analysis.log") == ("gs://b/exp/1/runs/2/analysis.log")
 
 
 def test_find_custom_log_supports_nested_path():
     collected = [
-        {"gcs_uri": "gs://b/exp/1/runs/2/logs/run.log"},
+        StoredObject(filename="f", storage_uri="gs://b/exp/1/runs/2/logs/run.log"),
     ]
     assert _find_custom_log(collected, "/outputs/logs/run.log") == ("gs://b/exp/1/runs/2/logs/run.log")
 
 
 def test_find_custom_log_returns_none_when_missing():
-    collected = [{"gcs_uri": "gs://b/exp/1/runs/2/data.csv"}]
+    collected = [StoredObject(filename="f", storage_uri="gs://b/exp/1/runs/2/data.csv")]
     assert _find_custom_log(collected, "/outputs/analysis.log") is None
 
 
@@ -264,18 +265,18 @@ async def test_custom_completion_detects_html_report(session, admin_user, env_ve
     mock_compute.get_job_status.return_value = {"status": "completed", "pod_name": "pod"}
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = [
-        {
-            "filename": "report.html",
-            "gcs_uri": f"gs://results/experiments/{exp_id}/pipeline-runs/{run.id}/report/report.html",
-            "size_bytes": 1024,
-            "md5_hash": "x",
-        },
-        {
-            "filename": "data.csv",
-            "gcs_uri": f"gs://results/experiments/{exp_id}/pipeline-runs/{run.id}/data.csv",
-            "size_bytes": 50,
-            "md5_hash": "y",
-        },
+        StoredObject(
+            filename="report.html",
+            storage_uri=f"gs://results/experiments/{exp_id}/pipeline-runs/{run.id}/report/report.html",
+            size_bytes=1024,
+            md5_hash="x",
+        ),
+        StoredObject(
+            filename="data.csv",
+            storage_uri=f"gs://results/experiments/{exp_id}/pipeline-runs/{run.id}/data.csv",
+            size_bytes=50,
+            md5_hash="y",
+        ),
     ]
 
     with (
@@ -299,12 +300,12 @@ async def test_custom_completion_detects_md_report_when_no_html(session, admin_u
     mock_compute.get_job_status.return_value = {"status": "completed", "pod_name": "pod"}
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = [
-        {
-            "filename": "report.md",
-            "gcs_uri": f"gs://results/experiments/{exp_id}/pipeline-runs/{run.id}/report/report.md",
-            "size_bytes": 256,
-            "md5_hash": "x",
-        },
+        StoredObject(
+            filename="report.md",
+            storage_uri=f"gs://results/experiments/{exp_id}/pipeline-runs/{run.id}/report/report.md",
+            size_bytes=256,
+            md5_hash="x",
+        ),
     ]
 
     with (
@@ -328,12 +329,12 @@ async def test_custom_completion_no_report_no_metadata(session, admin_user, env_
     mock_compute.get_job_status.return_value = {"status": "completed", "pod_name": "pod"}
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = [
-        {
-            "filename": "data.csv",
-            "gcs_uri": f"gs://results/experiments/{exp_id}/pipeline-runs/{run.id}/data.csv",
-            "size_bytes": 50,
-            "md5_hash": "y",
-        },
+        StoredObject(
+            filename="data.csv",
+            storage_uri=f"gs://results/experiments/{exp_id}/pipeline-runs/{run.id}/data.csv",
+            size_bytes=50,
+            md5_hash="y",
+        ),
     ]
 
     with (
@@ -357,12 +358,12 @@ async def test_custom_completion_records_custom_log_path(session, admin_user, en
     mock_compute.get_job_status.return_value = {"status": "completed", "pod_name": "pod"}
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = [
-        {
-            "filename": "analysis.log",
-            "gcs_uri": f"gs://results/experiments/{exp_id}/pipeline-runs/{run.id}/analysis.log",
-            "size_bytes": 100,
-            "md5_hash": "z",
-        },
+        StoredObject(
+            filename="analysis.log",
+            storage_uri=f"gs://results/experiments/{exp_id}/pipeline-runs/{run.id}/analysis.log",
+            size_bytes=100,
+            md5_hash="z",
+        ),
     ]
 
     with (

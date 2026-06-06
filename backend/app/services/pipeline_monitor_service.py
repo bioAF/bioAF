@@ -16,6 +16,7 @@ from app.models.pipeline_run import PipelineRun
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import PIPELINE_COMPLETED, PIPELINE_FAILED, PIPELINE_OOM
+from app.adapters.models import StoredObject
 from app.adapters.registry import get_compute_adapter, get_storage_adapter
 
 if TYPE_CHECKING:
@@ -509,7 +510,7 @@ class PipelineMonitorService:
                 {"id": run.id, "experiment_id": run.experiment_id},
             )
             if collected:
-                output_meta: dict = {"files": [f["filename"] for f in collected]}
+                output_meta: dict = {"files": [f.filename for f in collected]}
 
                 if is_custom:
                     report_uri, report_format = _find_custom_report(collected)
@@ -528,7 +529,19 @@ class PipelineMonitorService:
                 try:
                     from app.services.pipeline_output_service import PipelineOutputService
 
-                    await PipelineOutputService.register_outputs(session, run, collected)
+                    await PipelineOutputService.register_outputs(
+                        session,
+                        run,
+                        [
+                            {
+                                "filename": f.filename,
+                                "gcs_uri": f.storage_uri,
+                                "size_bytes": f.size_bytes,
+                                "md5_hash": f.md5_hash,
+                            }
+                            for f in collected
+                        ],
+                    )
                     logger.info("Registered %d output files for run %d", len(collected), run.id)
                 except Exception as reg_err:
                     logger.warning("Failed to register output files for run %d: %s", run.id, reg_err)
@@ -752,7 +765,7 @@ class PipelineMonitorService:
             return ""
 
 
-def _find_custom_report(collected: list[dict]) -> tuple[str | None, str | None]:
+def _find_custom_report(collected: list[StoredObject]) -> tuple[str | None, str | None]:
     """Detect a `report/report.html` or `report/report.md` artifact in collected outputs.
 
     HTML is preferred when both are present.
@@ -760,7 +773,7 @@ def _find_custom_report(collected: list[dict]) -> tuple[str | None, str | None]:
     html_uri: str | None = None
     md_uri: str | None = None
     for f in collected:
-        uri = f.get("gcs_uri") or ""
+        uri = f.storage_uri or ""
         if uri.endswith("/report/report.html"):
             html_uri = uri
         elif uri.endswith("/report/report.md"):
@@ -772,7 +785,7 @@ def _find_custom_report(collected: list[dict]) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _find_custom_log(collected: list[dict], log_file_path: str) -> str | None:
+def _find_custom_log(collected: list[StoredObject], log_file_path: str) -> str | None:
     """Find a custom log artifact whose GCS URI ends with the configured log path.
 
     `log_file_path` is the path inside the pod (e.g. `/outputs/analysis.log`);
@@ -786,7 +799,7 @@ def _find_custom_log(collected: list[dict], log_file_path: str) -> str | None:
         return None
     needle = "/" + relative
     for f in collected:
-        uri = f.get("gcs_uri") or ""
+        uri = f.storage_uri or ""
         if uri.endswith(needle):
             return uri
     return None

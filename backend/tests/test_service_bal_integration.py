@@ -138,7 +138,7 @@ class TestStorageAdapterLocalMode:
         adapter = registry.get_storage_adapter()
         assert isinstance(adapter, GcsStorageProvider)
         metrics = await adapter.get_storage_metrics()
-        assert "total_size_gb" in metrics
+        assert metrics.total_size_gb is not None
 
 
 class TestNotebookAdapterLocalMode:

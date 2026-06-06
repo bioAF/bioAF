@@ -92,15 +92,15 @@ class TestGcsCollectOutputs:
 
             collected = await adapter.collect_outputs(working, {"id": 10, "experiment_id": 3})
             assert len(collected) == 2
-            filenames = [c["filename"] for c in collected]
+            filenames = [c.filename for c in collected]
             assert "results.h5ad" in filenames
             assert "umap.png" in filenames
 
             for item in collected:
-                assert "local_path" in item
-                assert "gcs_uri" in item
-                assert "size_bytes" in item
-                assert item["gcs_uri"].startswith("gs://bioaf-results-testorg/")
+                assert "local_path" in item.provider_details
+                assert item.storage_uri
+                assert item.size_bytes is not None
+                assert item.storage_uri.startswith("gs://bioaf-results-testorg/")
         finally:
             gcs.LOCAL_DATA_ROOT = original_root
 
@@ -124,20 +124,19 @@ class TestGcsStorageMetrics:
     @pytest.mark.asyncio
     async def test_metrics_shape(self, adapter):
         result = await adapter.get_storage_metrics()
-        assert "buckets" in result
-        assert "total_size_gb" in result
-        assert "total_cost_monthly_usd" in result
-        assert len(result["buckets"]) == 5
+        assert result.total_size_gb is not None
+        assert result.total_cost_monthly_usd is not None
+        assert len(result.buckets) == 5
 
     @pytest.mark.asyncio
     async def test_bucket_names_contain_org_slug(self, adapter):
         result = await adapter.get_storage_metrics()
-        for bucket in result["buckets"]:
-            assert "testorg" in bucket["name"]
-            assert "size_gb" in bucket
-            assert "object_count" in bucket
-            assert "storage_class" in bucket
-            assert "cost_monthly_usd" in bucket
+        for bucket in result.buckets:
+            assert "testorg" in bucket.name
+            assert bucket.size_gb is not None
+            assert bucket.object_count is not None
+            assert bucket.storage_class is not None
+            assert bucket.cost_monthly_usd is not None
 
 
 class TestGcsBucketProperties:

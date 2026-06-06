@@ -7,7 +7,14 @@ All service-layer code depends on these abstractions, never concrete implementat
 from abc import ABC, abstractmethod
 
 from app.adapters.capabilities import ProviderCapabilities
-from app.adapters.models import CellxgeneInstance, TerminationResult, VmInfo, VmStatus
+from app.adapters.models import (
+    CellxgeneInstance,
+    StorageMetrics,
+    StoredObject,
+    TerminationResult,
+    VmInfo,
+    VmStatus,
+)
 
 
 class ComputeProvider(ABC):
@@ -100,11 +107,11 @@ class StorageProvider(ABC):
         """Prepare input files for a pipeline run. Returns list of local paths."""
 
     @abstractmethod
-    async def collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[dict]:
-        """Move outputs to permanent storage. Returns list of file records."""
+    async def collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[StoredObject]:
+        """Move outputs to permanent storage. Returns a list of StoredObject."""
 
     @abstractmethod
-    async def get_storage_metrics(self) -> dict:
+    async def get_storage_metrics(self) -> StorageMetrics:
         """Get storage usage and cost metrics."""
 
 

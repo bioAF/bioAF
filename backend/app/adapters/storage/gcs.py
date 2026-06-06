@@ -11,6 +11,7 @@ import uuid
 
 from app.adapters.base import StorageProvider
 from app.adapters.capabilities import ProviderCapabilities
+from app.adapters.models import BucketMetrics, StorageMetrics, StoredObject
 
 logger = logging.getLogger("bioaf.adapters.storage.gcs")
 
@@ -69,15 +70,34 @@ class GcsStorageProvider(StorageProvider):
             return await self._local_stage_inputs(file_records, working_dir)
         return await self._gcs_stage_inputs(file_records, working_dir)
 
-    async def collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[dict]:
-        if self.is_local:
-            return await self._local_collect_outputs(working_dir, pipeline_run)
-        return await self._gcs_collect_outputs(working_dir, pipeline_run)
+    async def collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[StoredObject]:
+        items = (
+            await self._local_collect_outputs(working_dir, pipeline_run)
+            if self.is_local
+            else await self._gcs_collect_outputs(working_dir, pipeline_run)
+        )
+        return [
+            StoredObject(
+                filename=d["filename"],
+                storage_uri=d.get("gcs_uri", ""),
+                size_bytes=d.get("size_bytes"),
+                md5_hash=d.get("md5_hash"),
+                provider_details={
+                    k: v
+                    for k, v in d.items()
+                    if k not in {"filename", "gcs_uri", "size_bytes", "md5_hash"}
+                },
+            )
+            for d in items
+        ]
 
-    async def get_storage_metrics(self) -> dict:
-        if self.is_local:
-            return self._local_storage_metrics()
-        return await self._gcs_storage_metrics()
+    async def get_storage_metrics(self) -> StorageMetrics:
+        d = self._local_storage_metrics() if self.is_local else await self._gcs_storage_metrics()
+        return StorageMetrics(
+            buckets=[BucketMetrics(**b) for b in d.get("buckets", [])],
+            total_size_gb=d.get("total_size_gb", 0.0),
+            total_cost_monthly_usd=d.get("total_cost_monthly_usd", 0.0),
+        )
 
     # -- Local mode implementations --
 
