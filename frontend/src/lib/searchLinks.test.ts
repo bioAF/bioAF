@@ -30,6 +30,12 @@ describe("searchHitHref", () => {
       "/lab-knowledge/documents?doc=3",
     );
   });
+
+  it("links an SDR hit to the Decision Records page focused on the SDR", () => {
+    expect(searchHitHref({ entity_type: "sdr", entity_id: 17, name: "SDR-017: STARsolo" })).toBe(
+      "/lab-knowledge/decision-records?sdr=17",
+    );
+  });
 });
 
 describe("searchHitTypeLabel", () => {
@@ -39,5 +45,6 @@ describe("searchHitTypeLabel", () => {
     expect(searchHitTypeLabel("file")).toBe("File");
     expect(searchHitTypeLabel("sample")).toBe("Sample");
     expect(searchHitTypeLabel("lab_document")).toBe("Lab Document");
+    expect(searchHitTypeLabel("sdr")).toBe("SDR");
   });
 });
