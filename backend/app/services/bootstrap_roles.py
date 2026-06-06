@@ -37,6 +37,12 @@ ALL_RESOURCES_ACTIONS: dict[str, list[str]] = {
         "run_lit_review",
         "configure_sources",
     ],
+    # Lab Knowledge (ADR-059..064). View is granted to every system role; manage
+    # and friends default to admin and are grantable to custom roles.
+    "lab_documents": ["view", "manage"],
+    "lab_document_tags": ["manage"],
+    "lab_glossary": ["view", "manage", "delete"],
+    "sdr": ["view", "author", "manage"],
 }
 
 BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
@@ -74,6 +80,10 @@ BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
                 "run_lit_review",
                 "configure_sources",
             ],
+            # Comp Bio can author SDRs (ADR-063); view-only on the rest of Lab Knowledge.
+            "lab_documents": ["view"],
+            "lab_glossary": ["view"],
+            "sdr": ["view", "author"],
         },
     ),
     "bench": (
@@ -96,6 +106,9 @@ BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
                 "delete_own_comment",
                 "run_search",
             ],
+            "lab_documents": ["view"],
+            "lab_glossary": ["view"],
+            "sdr": ["view"],
         },
     ),
     "viewer": (
@@ -109,6 +122,9 @@ BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
             "projects": ["view"],
             "references": ["view"],
             "literature": ["view"],
+            "lab_documents": ["view"],
+            "lab_glossary": ["view"],
+            "sdr": ["view"],
         },
     ),
 }

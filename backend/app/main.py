@@ -238,6 +238,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Could not mark orphaned LLM review jobs: %s", e)
 
+    # Fail any glossary scan jobs left in-flight by a restart (ADR-062).
+    from app.services import lab_glossary_scan_service
+
+    try:
+        async with notif_session_factory() as orphan_session:
+            count = await lab_glossary_scan_service.mark_orphaned_on_startup(orphan_session)
+            await orphan_session.commit()
+            if count:
+                logger.info("Marked %d orphaned glossary scan jobs as failed on startup", count)
+    except Exception as e:
+        logger.warning("Could not mark orphaned glossary scan jobs: %s", e)
+
     logger.info("bioAF backend started successfully")
 
     # Start background tasks
@@ -266,6 +278,7 @@ async def lifespan(app: FastAPI):
     background_tasks.append(asyncio.create_task(_work_node_heartbeat_loop()))
     background_tasks.append(asyncio.create_task(_export_cleanup_loop()))
     background_tasks.append(asyncio.create_task(_nf_core_registry_refresh_loop()))
+    background_tasks.append(asyncio.create_task(_sdr_trigger_loop()))
 
     # LIMS integration (ADR-051): subscribe webhook dispatcher to internal
     # events, start the delivery worker, and add an idempotency-key cleanup
@@ -622,6 +635,34 @@ async def _review_reminder_loop():
             break
         except Exception as e:
             logger.error("Review reminder error: %s", e)
+
+
+async def _sdr_trigger_loop():
+    """Evaluate SDR re-assessment triggers daily (ADR-064).
+
+    Flags active SDRs whose trigger date has been reached and sends the once-only
+    7-day advance warning. The actual logic lives in ``SdrService.evaluate_triggers``
+    so it is unit-testable with a controlled clock; the loop just ticks it.
+    """
+    from app.database import async_session_factory
+    from app.services.sdr_service import SdrService
+
+    while True:
+        try:
+            await asyncio.sleep(86400)  # 24 hours
+            async with async_session_factory() as session:
+                result = await SdrService.evaluate_triggers(session)
+                await session.commit()
+                if result["flagged"] or result["warned"]:
+                    logger.info(
+                        "SDR trigger sweep: flagged %d, warned %d",
+                        result["flagged"],
+                        result["warned"],
+                    )
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error("SDR trigger loop error: %s", e)
 
 
 async def _auto_run_launch_loop():

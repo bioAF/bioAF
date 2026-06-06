@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { FileBrowser } from "./FileBrowser";
 
 jest.mock("@/components/shared/ContentLoading", () => ({
@@ -177,6 +177,52 @@ test("focusFileId opens that file's detail directly", async () => {
   });
   expect(screen.getByText("focused.fastq.gz")).toBeInTheDocument();
   expect(mockGet).toHaveBeenCalledWith("/api/files/77");
+});
+
+const makeLabDocHit = (overrides = {}) => ({
+  kind: "lab_document",
+  id: 3,
+  name: "Assay SOP",
+  file_type: "application/pdf",
+  size_bytes: 4096,
+  updated_at: "2026-01-15T10:00:00Z",
+  href: "/lab-knowledge/documents/3",
+  experiment_id: null,
+  source: "lab_knowledge",
+  ...overrides,
+});
+
+test("search surfaces Lab Knowledge documents with a badge and detail link", async () => {
+  // LK-SPEC-D D3 / AC-D10
+  mockGet.mockImplementation((url: string) => {
+    if (url.includes("/api/projects")) return Promise.resolve({ projects: [] });
+    if (url.includes("/api/experiments")) return Promise.resolve({ experiments: [] });
+    if (url.includes("/api/files/search"))
+      return Promise.resolve({ items: [makeLabDocHit()] });
+    return Promise.resolve({ files: [makeFile()], total: 1, page: 1, page_size: 25 });
+  });
+
+  render(<FileBrowser showSearch />);
+  await waitFor(() => screen.getByText("sample.fastq.gz"));
+
+  fireEvent.change(screen.getByPlaceholderText(/search by filename/i), {
+    target: { value: "assay" },
+  });
+  fireEvent.submit(screen.getByPlaceholderText(/search by filename/i).closest("form")!);
+
+  await waitFor(() => {
+    expect(screen.getByText("Assay SOP")).toBeInTheDocument();
+  });
+  expect(screen.getByText("Lab Document")).toBeInTheDocument();
+  const link = screen.getByText("Assay SOP").closest("a");
+  expect(link).toHaveAttribute("href", "/lab-knowledge/documents/3");
+});
+
+test("lab documents are not fetched without an active search", async () => {
+  render(<FileBrowser showSearch />);
+  await waitFor(() => screen.getByText("No files found."));
+  const calls = mockGet.mock.calls.map(([url]: [string]) => url);
+  expect(calls.some((url: string) => url.includes("/api/files/search"))).toBe(false);
 });
 
 test("renders provenance breadcrumb when API returns provenance", async () => {

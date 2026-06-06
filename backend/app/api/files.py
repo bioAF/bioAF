@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import get_session
+from app.schemas.data_search import DataSearchItem, DataSearchResponse
 from app.schemas.experiment import UserSummary
 from app.schemas.file import (
     FileListResponse,
@@ -14,10 +15,19 @@ from app.schemas.file import (
     FileUploadInitiate,
     FileUploadInitiateResponse,
 )
+from app.services.data_search_service import unified_document_file_search
 from app.services.file_service import FileService
 from app.services.upload_service import UploadService
 
 router = APIRouter(prefix="/api/files", tags=["files"])
+
+
+def _scope_ok(user: dict, resource: str, action: str) -> bool:
+    """API-key requests are narrowed to the key's scope envelope (ADR-049); JWT
+    requests (api_key_id None) are not. Mirrors ``search.py::_scope_ok``."""
+    if user.get("api_key_id") is None:
+        return True
+    return f"{resource}:{action}" in (user.get("scopes") or [])
 
 
 def _file_response(f, sample_ids: list[int] | None = None, provenance: dict | None = None) -> FileResponse:
@@ -278,6 +288,47 @@ async def list_files(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/search", response_model=DataSearchResponse)
+async def data_search(
+    request: Request,
+    q: str = "",
+    limit: int = Query(default=50, ge=1, le=100),
+    session: AsyncSession = Depends(get_session),
+):
+    """Unified text search across Data & Files files AND Lab Knowledge documents.
+
+    A lab document is still a file-like thing, so a search here surfaces it too
+    (LK-SPEC-D, D3). Each store is gated independently on the caller's view
+    permission: a viewer without ``lab_documents:view`` gets files only, and vice
+    versa, with no 403 dead-end (mirrors the global-search permission model)."""
+    from app.services import role_service
+
+    current_user = request.state.current_user
+    org_id = int(current_user["org_id"])
+    if not q.strip():
+        return DataSearchResponse(items=[])
+    if "role_id" not in current_user:
+        return DataSearchResponse(items=[])
+    role_id = int(current_user["role_id"])
+
+    include_files = await role_service.has_permission(session, role_id, "files", "view") and _scope_ok(
+        current_user, "files", "view"
+    )
+    include_lab_documents = await role_service.has_permission(session, role_id, "lab_documents", "view") and _scope_ok(
+        current_user, "lab_documents", "view"
+    )
+
+    items = await unified_document_file_search(
+        session,
+        org_id=org_id,
+        query=q,
+        include_files=include_files,
+        include_lab_documents=include_lab_documents,
+        limit=limit,
+    )
+    return DataSearchResponse(items=[DataSearchItem(**i) for i in items])
 
 
 @router.get("/{file_id}", response_model=FileResponse)

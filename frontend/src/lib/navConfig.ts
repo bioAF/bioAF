@@ -84,6 +84,15 @@ export const navConfig: NavSection[] = [
     ],
   },
   {
+    label: "Lab Knowledge",
+    icon: "book",
+    children: [
+      { label: "Documents", path: "/lab-knowledge/documents", permission: { resource: "lab_documents", action: "view" } },
+      { label: "Glossary", path: "/lab-knowledge/glossary", permission: { resource: "lab_glossary", action: "view" } },
+      { label: "Decision Records", path: "/lab-knowledge/decision-records", permission: { resource: "sdr", action: "view" } },
+    ],
+  },
+  {
     label: "Infrastructure",
     icon: "server",
     children: [

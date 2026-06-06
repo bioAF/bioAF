@@ -24,6 +24,18 @@ describe("searchHitHref", () => {
       "/data/files?file=77",
     );
   });
+
+  it("links a lab document hit to its detail page", () => {
+    expect(searchHitHref({ entity_type: "lab_document", entity_id: 3, name: "Manual" })).toBe(
+      "/lab-knowledge/documents/3",
+    );
+  });
+
+  it("links an SDR hit to its detail page", () => {
+    expect(searchHitHref({ entity_type: "sdr", entity_id: 17, name: "SDR-017: STARsolo" })).toBe(
+      "/lab-knowledge/decision-records/17",
+    );
+  });
 });
 
 describe("searchHitTypeLabel", () => {
@@ -32,5 +44,7 @@ describe("searchHitTypeLabel", () => {
     expect(searchHitTypeLabel("pipeline_run")).toBe("Run");
     expect(searchHitTypeLabel("file")).toBe("File");
     expect(searchHitTypeLabel("sample")).toBe("Sample");
+    expect(searchHitTypeLabel("lab_document")).toBe("Lab Document");
+    expect(searchHitTypeLabel("sdr")).toBe("SDR");
   });
 });

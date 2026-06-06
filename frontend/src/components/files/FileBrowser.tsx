@@ -29,6 +29,19 @@ function isImageFile(ft: string) {
   return ["png", "jpg", "jpeg", "svg"].includes(ft.toLowerCase());
 }
 
+/** A Lab Knowledge document surfaced in the Data & Files search (LK-SPEC-D, D3). */
+interface LabDocHit {
+  kind: "file" | "lab_document";
+  id: number;
+  name: string;
+  file_type: string | null;
+  size_bytes: number | null;
+  updated_at: string;
+  href: string;
+  experiment_id: number | null;
+  source: string | null;
+}
+
 interface Props {
   experimentId?: number;
   projectId?: number;
@@ -52,6 +65,7 @@ export function FileBrowser({
   focusFileId,
 }: Props) {
   const [files, setFiles] = useState<FileResponse[]>([]);
+  const [labDocHits, setLabDocHits] = useState<LabDocHit[]>([]);
   const [loading, setLoading] = useState(true);
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
   const [experiments, setExperiments] = useState<{ id: number; name: string }[]>([]);
@@ -88,6 +102,7 @@ export function FileBrowser({
   const isAdmin = user?.role_name === "admin";
   const { canAccess } = usePermissions();
   const canDownload = canAccess("files", "download");
+  const canViewLabDocs = canAccess("lab_documents", "view");
 
   const fetchFiles = useCallback(async () => {
     setLoading(true);
@@ -107,6 +122,25 @@ export function FileBrowser({
       setFiles(data.files);
       setTotalFiles(data.total);
       setSelectedIds(new Set());
+
+      // D3: a Lab Knowledge document is still a file-like thing, so a free-text
+      // search here surfaces it too. Only on an active search, only when no
+      // file-only structural filter is set (lab documents carry none of that
+      // provenance), and only for a viewer who may see lab documents (OQ-3).
+      const noStructuralFilter =
+        !filterType && !filterSource && !filterSampleId && !effectiveExperimentId && !effectiveProjectId;
+      if (searchQuery && noStructuralFilter && canViewLabDocs) {
+        try {
+          const ds = await api.get<{ items: LabDocHit[] }>(
+            `/api/files/search?q=${encodeURIComponent(searchQuery)}`,
+          );
+          setLabDocHits(ds.items.filter((i) => i.kind === "lab_document"));
+        } catch {
+          setLabDocHits([]);
+        }
+      } else {
+        setLabDocHits([]);
+      }
     } catch {
       // ignore
     } finally {
@@ -122,6 +156,7 @@ export function FileBrowser({
     filterExperimentId,
     searchQuery,
     page,
+    canViewLabDocs,
   ]);
 
   const fetchMeta = useCallback(async () => {
@@ -610,7 +645,7 @@ export function FileBrowser({
 
       {loading ? (
         <ContentLoading />
-      ) : files.length === 0 ? (
+      ) : files.length === 0 && labDocHits.length === 0 ? (
         <p className="text-gray-400 text-sm py-8 text-center">No files found.</p>
       ) : (
         <div className="bg-white rounded-lg shadow overflow-x-auto">
@@ -733,6 +768,38 @@ export function FileBrowser({
                       )}
                     </td>
                   )}
+                </tr>
+              ))}
+              {/* Lab Knowledge documents matched by the search (D3). They carry no
+                  file provenance, so structural columns are empty; the row links to
+                  the document detail page rather than opening the file modal. */}
+              {labDocHits.map((doc) => (
+                <tr key={`labdoc-${doc.id}`} className="hover:bg-gray-50">
+                  <td className="px-4 py-3" />
+                  <td className="px-4 py-3 text-sm font-medium align-top">
+                    <div className="flex items-center gap-2">
+                      <a href={doc.href} className="text-blue-600 hover:underline">
+                        {doc.name}
+                      </a>
+                      <span className="text-xs shrink-0 rounded px-1.5 py-0.5 bg-indigo-50 text-indigo-700">
+                        Lab Document
+                      </span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-500 align-top">{doc.file_type || "-"}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500 align-top">{formatBytes(doc.size_bytes)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500 align-top">
+                    {new Date(doc.updated_at).toLocaleString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-500 align-top">-</td>
+                  <td className="px-4 py-3 text-sm text-gray-500 align-top">Lab Knowledge</td>
+                  {canDownload && <td className="px-4 py-3" />}
                 </tr>
               ))}
             </tbody>
