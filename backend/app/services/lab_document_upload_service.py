@@ -12,10 +12,12 @@ calls here are the patch points in tests (mirroring GcsStorageService elsewhere)
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
+import socket
 import uuid
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +33,43 @@ PREFIX = "lab-knowledge/documents"
 # or disk. Lab documents are small (manuals, policies, PDFs), so 100 MiB is ample.
 MAX_URL_DOWNLOAD_BYTES = 100 * 1024 * 1024
 URL_FETCH_TIMEOUT_SECONDS = 30.0
+# Bound the manual redirect chain (each hop is re-validated against the SSRF guard).
+MAX_URL_REDIRECTS = 5
+
+
+def _assert_public_url(url: str) -> None:
+    """SSRF guard for server-side URL fetches.
+
+    Rejects anything that is not http(s) or whose host resolves to a non-public
+    address: loopback, private ranges, link-local (which includes the cloud
+    instance metadata endpoint 169.254.169.254 / fd00:ec2::254), reserved,
+    multicast, or unspecified. Raises ValueError on any violation. Called for the
+    initial URL and again for every redirect target so an external host cannot
+    bounce the fetch onto an internal address.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("URL must start with http:// or https://")
+    host = parsed.hostname
+    if not host:
+        raise ValueError("URL has no host")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        raise ValueError("Could not resolve URL host")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            raise ValueError("URL host is not allowed (resolves to a non-public address)")
+
 
 # token -> pending upload metadata. In-memory, consistent with UploadService;
 # a process restart abandons in-flight tokens (the GCS object is simply unused).
@@ -127,42 +166,54 @@ class LabDocumentUploadService:
         """Download a document from a public http(s) URL.
 
         Returns ``(content, file_name, mime_type)``. Raises ValueError for a
-        non-http(s) scheme, a too-large body, or any transport/HTTP error. The
-        file name is derived from the URL path (or Content-Disposition). Kept as
-        a patch point so tests need no network.
+        non-http(s) scheme, a host that resolves to a non-public address (SSRF
+        guard), a too-large body, or any transport/HTTP error. Redirects are
+        followed manually so every hop is re-validated. The file name is derived
+        from the URL path (or Content-Disposition). Kept as a patch point so tests
+        need no network.
         """
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            raise ValueError("URL must start with http:// or https://")
-
         import httpx
 
+        current = url
         try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=URL_FETCH_TIMEOUT_SECONDS) as http:
-                async with http.stream("GET", url) as response:
-                    response.raise_for_status()
-                    declared = response.headers.get("content-length")
-                    if declared is not None and int(declared) > MAX_URL_DOWNLOAD_BYTES:
-                        raise ValueError("File at URL exceeds the 100 MB import limit")
-                    chunks: list[bytes] = []
-                    total = 0
-                    async for chunk in response.aiter_bytes():
-                        total += len(chunk)
-                        if total > MAX_URL_DOWNLOAD_BYTES:
+            # Redirects are disabled at the client; we follow them by hand so each
+            # target passes the SSRF guard before we connect to it.
+            async with httpx.AsyncClient(follow_redirects=False, timeout=URL_FETCH_TIMEOUT_SECONDS) as http:
+                for _ in range(MAX_URL_REDIRECTS + 1):
+                    _assert_public_url(current)
+                    async with http.stream("GET", current) as response:
+                        if response.is_redirect:
+                            location = response.headers.get("location")
+                            if not location:
+                                raise ValueError("Redirect without a location")
+                            current = urljoin(current, location)
+                            continue
+                        response.raise_for_status()
+                        declared = response.headers.get("content-length")
+                        if declared is not None and int(declared) > MAX_URL_DOWNLOAD_BYTES:
                             raise ValueError("File at URL exceeds the 100 MB import limit")
-                        chunks.append(chunk)
-                    content = b"".join(chunks)
-                    mime_type = (response.headers.get("content-type") or "").split(";")[0].strip() or None
-                    file_name = _filename_from_response(parsed, response.headers.get("content-disposition"))
+                        chunks: list[bytes] = []
+                        total = 0
+                        async for chunk in response.aiter_bytes():
+                            total += len(chunk)
+                            if total > MAX_URL_DOWNLOAD_BYTES:
+                                raise ValueError("File at URL exceeds the 100 MB import limit")
+                            chunks.append(chunk)
+                        content = b"".join(chunks)
+                        mime_type = (response.headers.get("content-type") or "").split(";")[0].strip() or None
+                        file_name = _filename_from_response(
+                            urlparse(current), response.headers.get("content-disposition")
+                        )
+                        if not content:
+                            raise ValueError("The URL returned an empty file")
+                        return content, file_name, mime_type
+                raise ValueError("Too many redirects")
         except ValueError:
             raise
         except httpx.HTTPStatusError as exc:
             raise ValueError(f"Could not fetch URL (HTTP {exc.response.status_code})")
         except httpx.HTTPError as exc:
             raise ValueError(f"Could not fetch URL: {exc}")
-        if not content:
-            raise ValueError("The URL returned an empty file")
-        return content, file_name, mime_type
 
     @staticmethod
     async def _upload_bytes(

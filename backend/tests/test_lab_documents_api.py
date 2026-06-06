@@ -149,6 +149,28 @@ async def test_import_from_url_rejects_non_http_scheme(client, admin_token):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://169.254.169.254/computeMetadata/v1/",  # cloud metadata endpoint
+        "http://127.0.0.1/secret",  # loopback
+        "http://10.0.0.5/internal",  # private range
+        "http://[::1]/secret",  # IPv6 loopback
+    ],
+)
+async def test_import_from_url_blocks_ssrf_to_internal_hosts(client, admin_token, url):
+    # SSRF guard: the server must refuse to fetch URLs that resolve to non-public
+    # addresses, so a user cannot reach the instance metadata service or other
+    # internal hosts. No network is needed (numeric IPs resolve locally).
+    resp = await client.post(
+        "/api/lab-knowledge/documents/import-url",
+        json={"url": url},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 400, resp.text
+
+
+@pytest.mark.asyncio
 async def test_viewer_cannot_upload(client, admin_token, viewer_token):
     # AC-A02
     resp = await _create_doc(client, viewer_token)
