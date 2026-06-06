@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { uploadFileResumable } from "@/lib/resumableUpload";
 import { usePermissions } from "@/hooks/usePermissions";
 
 interface Tag {
@@ -56,13 +57,17 @@ interface UploadUrlResponse {
 
 const API_BASE = "/api/lab-knowledge";
 
-async function putToGcs(signedUrl: string, file: File): Promise<void> {
-  const res = await fetch(signedUrl, {
-    method: "PUT",
-    headers: { "Content-Type": "application/octet-stream" },
-    body: file,
+// Direct-to-GCS upload via the resumable session URL the server returns. Sending
+// the file size up front lets the server scope the session; the resumable PUT is
+// origin-aware so the cross-origin upload is accepted (fixes "Failed to fetch").
+async function uploadToGcs(file: File): Promise<string> {
+  const init = await api.post<UploadUrlResponse>(`${API_BASE}/documents/upload-url`, {
+    file_name: file.name,
+    mime_type: file.type || null,
+    size_bytes: file.size,
   });
-  if (!res.ok) throw new Error(`Upload to storage failed (${res.status})`);
+  await uploadFileResumable(init.signed_url, file);
+  return init.upload_token;
 }
 
 function fmtDate(iso: string): string {
@@ -290,12 +295,8 @@ function DocumentDetailPanel({
   const uploadNewVersion = async () => {
     const file = newVersionInput.current?.files?.[0];
     if (!file) return;
-    const init = await api.post<UploadUrlResponse>(`${API_BASE}/documents/upload-url`, {
-      file_name: file.name,
-      mime_type: file.type || null,
-    });
-    await putToGcs(init.signed_url, file);
-    await api.post(`${API_BASE}/documents/${doc.id}/versions`, { upload_token: init.upload_token });
+    const uploadToken = await uploadToGcs(file);
+    await api.post(`${API_BASE}/documents/${doc.id}/versions`, { upload_token: uploadToken });
     onChanged();
   };
 
@@ -369,6 +370,8 @@ function UploadDocumentModal({
   onUploaded: () => void;
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
+  const [mode, setMode] = useState<"device" | "url">("device");
+  const [sourceUrl, setSourceUrl] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [tagIds, setTagIds] = useState<number[]>([]);
@@ -379,21 +382,33 @@ function UploadDocumentModal({
     setTagIds((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]));
 
   const submit = async () => {
-    const file = fileInput.current?.files?.[0];
-    if (!file) {
-      setErr("Choose a file to upload.");
-      return;
-    }
     setBusy(true);
     setErr(null);
     try {
-      const init = await api.post<UploadUrlResponse>(`${API_BASE}/documents/upload-url`, {
-        file_name: file.name,
-        mime_type: file.type || null,
-      });
-      await putToGcs(init.signed_url, file);
+      if (mode === "url") {
+        if (!sourceUrl.trim()) {
+          setErr("Enter a URL to import from.");
+          setBusy(false);
+          return;
+        }
+        await api.post(`${API_BASE}/documents/import-url`, {
+          url: sourceUrl.trim(),
+          title: title || null,
+          description: description || null,
+          tag_ids: tagIds,
+        });
+        onUploaded();
+        return;
+      }
+      const file = fileInput.current?.files?.[0];
+      if (!file) {
+        setErr("Choose a file to upload.");
+        setBusy(false);
+        return;
+      }
+      const uploadToken = await uploadToGcs(file);
       await api.post(`${API_BASE}/documents`, {
-        upload_token: init.upload_token,
+        upload_token: uploadToken,
         title: title || file.name,
         description: description || null,
         tag_ids: tagIds,
@@ -405,12 +420,43 @@ function UploadDocumentModal({
     }
   };
 
+  const modeButton = (value: "device" | "url", label: string, extra = "") => (
+    <button
+      type="button"
+      onClick={() => {
+        setMode(value);
+        setErr(null);
+      }}
+      aria-pressed={mode === value}
+      className={`px-3 py-1.5 text-sm ${extra} ${
+        mode === value ? "bg-blue-600 text-white" : "bg-white text-gray-700 hover:bg-gray-50"
+      }`}
+    >
+      {label}
+    </button>
+  );
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
       <div className="bg-white rounded-lg w-[30rem] p-6" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-lg font-bold mb-4">Upload Document</h2>
         <div className="space-y-3">
-          <input ref={fileInput} type="file" aria-label="Document file" className="text-sm block" />
+          <div className="inline-flex rounded-md border border-gray-300 overflow-hidden">
+            {modeButton("device", "From device")}
+            {modeButton("url", "From URL", "border-l border-gray-300")}
+          </div>
+          {mode === "device" ? (
+            <input ref={fileInput} type="file" aria-label="Document file" className="text-sm block" />
+          ) : (
+            <input
+              type="url"
+              value={sourceUrl}
+              onChange={(e) => setSourceUrl(e.target.value)}
+              placeholder="https://example.com/policy.pdf"
+              aria-label="Document URL"
+              className="border rounded px-3 py-1.5 text-sm w-full"
+            />
+          )}
           <input
             type="text"
             placeholder="Title"
@@ -457,7 +503,13 @@ function UploadDocumentModal({
             disabled={busy}
             className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
           >
-            {busy ? "Uploading..." : "Upload"}
+            {busy
+              ? mode === "url"
+                ? "Importing..."
+                : "Uploading..."
+              : mode === "url"
+                ? "Import"
+                : "Upload"}
           </button>
         </div>
       </div>

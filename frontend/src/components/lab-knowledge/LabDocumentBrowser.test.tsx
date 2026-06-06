@@ -14,6 +14,7 @@ jest.mock("@/lib/api", () => ({
 import { api } from "@/lib/api";
 
 const mockGet = api.get as jest.Mock;
+const mockPost = api.post as jest.Mock;
 
 const makeDoc = (overrides = {}) => ({
   id: 1,
@@ -35,6 +36,7 @@ const makeDoc = (overrides = {}) => ({
 beforeEach(() => {
   canAccessImpl = () => true;
   mockGet.mockReset();
+  mockPost.mockReset();
   mockGet.mockImplementation((url: string) => {
     if (url.includes("/document-tags")) return Promise.resolve([{ id: 7, name: "manual" }]);
     return Promise.resolve({ documents: [], total: 0, page: 1, page_size: 25 });
@@ -94,5 +96,68 @@ test("show-archived toggle requests archived documents", async () => {
   fireEvent.click(screen.getByLabelText(/show archived/i));
   await waitFor(() => {
     expect(mockGet.mock.calls.some(([url]) => url.includes("include_archived=true"))).toBe(true);
+  });
+});
+
+test("upload modal offers both device and URL sources", async () => {
+  render(<LabDocumentBrowser />);
+  await waitFor(() => screen.getByText("No documents found."));
+  fireEvent.click(screen.getByRole("button", { name: /upload document/i }));
+  expect(screen.getByRole("button", { name: /from device/i })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /from url/i })).toBeInTheDocument();
+});
+
+test("device upload requests a sized resumable URL and PUTs to the session", async () => {
+  // Regression for the "Failed to fetch" bug: the upload-url request now carries
+  // size_bytes, and the bytes go to the returned resumable session URL via PUT.
+  const realFetch = global.fetch;
+  global.fetch = jest
+    .fn()
+    .mockResolvedValue({ status: 200, ok: true, headers: { get: () => null } });
+  mockPost.mockImplementation((url: string) => {
+    if (url.includes("/documents/upload-url"))
+      return Promise.resolve({
+        upload_token: "tok",
+        signed_url: "https://storage.example/session",
+        gcs_uri: "gs://wb/x",
+      });
+    return Promise.resolve({ id: 1 });
+  });
+  render(<LabDocumentBrowser />);
+  await waitFor(() => screen.getByText("No documents found."));
+  fireEvent.click(screen.getByRole("button", { name: /upload document/i }));
+  const file = new File(["hello"], "manual.pdf", { type: "application/pdf" });
+  fireEvent.change(screen.getByLabelText(/document file/i), { target: { files: [file] } });
+  fireEvent.click(screen.getByRole("button", { name: /^upload$/i }));
+  await waitFor(() => {
+    expect(mockPost).toHaveBeenCalledWith(
+      "/api/lab-knowledge/documents/upload-url",
+      expect.objectContaining({ file_name: "manual.pdf", size_bytes: 5 }),
+    );
+  });
+  await waitFor(() => {
+    expect(global.fetch as jest.Mock).toHaveBeenCalledWith(
+      "https://storage.example/session",
+      expect.objectContaining({ method: "PUT" }),
+    );
+  });
+  global.fetch = realFetch;
+});
+
+test("URL import posts to the import-url endpoint", async () => {
+  mockPost.mockResolvedValue({ id: 99 });
+  render(<LabDocumentBrowser />);
+  await waitFor(() => screen.getByText("No documents found."));
+  fireEvent.click(screen.getByRole("button", { name: /upload document/i }));
+  fireEvent.click(screen.getByRole("button", { name: /from url/i }));
+  fireEvent.change(screen.getByLabelText(/document url/i), {
+    target: { value: "https://example.com/policy.pdf" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^import$/i }));
+  await waitFor(() => {
+    expect(mockPost).toHaveBeenCalledWith(
+      "/api/lab-knowledge/documents/import-url",
+      expect.objectContaining({ url: "https://example.com/policy.pdf" }),
+    );
   });
 });
