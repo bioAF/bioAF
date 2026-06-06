@@ -19,8 +19,13 @@
 
 - Maintain a shared glossary of lab-specific terms with definitions, aliases,
   categories, and context. Add terms manually, import a CSV/TSV, or run an AI
-  scan (from a topic, a document, or platform-wide) that uses the org's active
-  LLM provider.
+  scan (from an experiment, a document, or platform-wide) that uses the org's
+  active LLM provider.
+- The "from an experiment" scan reads exactly the material the AI Experiment
+  Review uses (experiment fields, samples, pipeline runs, and QC), grounding the
+  proposed terms in real lab work instead of an abstract topic.
+- The "from a document" scan picks its source by searching, spanning both Lab
+  Knowledge documents and Data & Files files, instead of typing a database id.
 - Every AI proposal and CSV import goes through human review before it is
   committed. A banner shows when proposals are awaiting review and opens the
   review flow; rejected proposals are remembered so future scans can flag them.
@@ -33,6 +38,12 @@
   records.
 - Date-based re-assessment triggers flag a record for review on its due date
   and notify the owner, with a one-time 7-day advance warning.
+
+#### Data & Files
+
+- Searching Data & Files now also surfaces matching Lab Knowledge documents
+  (a lab document is still a file-like thing), each badged "Lab Document" with a
+  link to its detail page. Visible only to users who can view lab documents.
 
 ### Fixes
 
