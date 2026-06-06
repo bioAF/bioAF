@@ -43,9 +43,9 @@ async def _audit_actions(session, entity_type):
 async def test_create_scan_job_is_pending_and_audited(session, admin_user):
     org_id, uid = admin_user.organization_id, admin_user.id
     job = await scan_svc.create_scan_job(
-        session, org_id=org_id, user_id=uid, scan_type="topic", scan_input="10x scRNA-seq"
+        session, org_id=org_id, user_id=uid, scan_type="platform_wide", scan_input=None
     )
-    assert job.status == "pending" and job.scan_type == "topic"
+    assert job.status == "pending" and job.scan_type == "platform_wide"
     await session.commit()
     assert "initiated" in await _audit_actions(session, "lab_glossary_scan_job")
 
@@ -120,7 +120,7 @@ async def test_execute_scan_flags_previously_rejected(session, admin_user, db_en
 @pytest.mark.asyncio
 async def test_execute_scan_failure_marks_job_failed(session, admin_user, db_engine):
     org_id, uid = admin_user.organization_id, admin_user.id
-    job = await scan_svc.create_scan_job(session, org_id=org_id, user_id=uid, scan_type="topic", scan_input="x")
+    job = await scan_svc.create_scan_job(session, org_id=org_id, user_id=uid, scan_type="platform_wide")
     await session.commit()
 
     async def boom(*, prompt, payload, model, api_key):
@@ -192,7 +192,7 @@ async def test_review_accept_changed_updates_term_and_history(session, admin_use
     existing = await LabGlossaryService.create_term(
         session, org_id=org_id, user_id=uid, term="Confluence", definition="old"
     )
-    job = await scan_svc.create_scan_job(session, org_id=org_id, user_id=uid, scan_type="topic", scan_input="x")
+    job = await scan_svc.create_scan_job(session, org_id=org_id, user_id=uid, scan_type="platform_wide")
     await session.commit()
 
     async def fake_submit(*, prompt, payload, model, api_key):

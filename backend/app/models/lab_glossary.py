@@ -89,8 +89,10 @@ class LabGlossaryScanJob(Base):
 
     __tablename__ = "lab_glossary_scan_jobs"
     __table_args__ = (
+        # 'topic' retained for historical rows (LK-SPEC-D, OQ-4 widen-only); new
+        # 'topic' jobs are rejected at the service layer in favor of 'experiment'.
         CheckConstraint(
-            "scan_type IN ('document', 'topic', 'platform_wide', 'import')",
+            "scan_type IN ('experiment', 'document', 'topic', 'platform_wide', 'import')",
             name="ck_lab_glossary_scan_jobs_type",
         ),
         CheckConstraint(

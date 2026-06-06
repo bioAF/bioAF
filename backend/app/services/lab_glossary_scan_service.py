@@ -46,16 +46,39 @@ SCAN_PROMPT = (
     '"category", "context". Do not include commentary outside the JSON array.'
 )
 
-TOPIC_PROMPT = (
-    "You are building a starter glossary for a biotech lab on the given topic. Generate "
-    "the terms commonly used in this domain with concise, lab-appropriate definitions. "
-    'Return ONLY a JSON array; each element is an object with keys: "term", '
-    '"definition", and optionally "aliases" (array of strings), "category", "context".'
-)
-
 
 class CsvParseError(Exception):
     """Raised when an uploaded CSV/TSV is malformed or violates import limits."""
+
+
+# Valid sources for a NEW LLM scan job (LK-SPEC-D, F-LKD-01). ``topic`` is gone:
+# it produced speculative, ungrounded terms, replaced by ``experiment``. ``import``
+# is created via ``parse_csv_import``, not here. Historical ``topic`` rows remain
+# readable (the CHECK constraint is widened, not replaced).
+VALID_SCAN_TYPES = ("experiment", "document", "platform_wide")
+
+# Source stores a ``document`` scan can target (LK-SPEC-D, F-LKD-03).
+DOCUMENT_SOURCES = ("lab_document", "file")
+
+
+def _parse_document_input(scan_input: str | None) -> tuple[str, int]:
+    """Resolve a ``document`` scan_input to ``(source, id)``.
+
+    Accepts ``lab_document:<id>``, ``file:<id>``, or a bare ``<int>`` (treated as
+    a Lab Knowledge document for back-compat). Raises ``ValueError`` on an unknown
+    prefix or non-numeric id so the API can reject it up front (AC-D06)."""
+    raw = (scan_input or "").strip()
+    if not raw:
+        raise ValueError("document scan requires a scan_input")
+    if ":" in raw:
+        source, _, ident = raw.partition(":")
+        if source not in DOCUMENT_SOURCES:
+            raise ValueError(f"unknown document source prefix: {source}")
+    else:
+        source, ident = "lab_document", raw
+    if not ident.isdigit():
+        raise ValueError(f"document scan_input must reference a numeric id: {scan_input!r}")
+    return source, int(ident)
 
 
 # --- scan job lifecycle ------------------------------------------------------
@@ -69,9 +92,17 @@ async def create_scan_job(
     scan_type: str,
     scan_input: str | None = None,
 ) -> LabGlossaryScanJob:
-    """Create a pending scan job. The API dispatches execution as a background task."""
-    if scan_type not in ("document", "topic", "platform_wide"):
+    """Create a pending scan job. The API dispatches execution as a background task.
+
+    ``scan_input`` is validated up front by type so a bad reference fails at
+    creation rather than inside the background task (AC-D06)."""
+    if scan_type not in VALID_SCAN_TYPES:
         raise ValueError(f"invalid scan_type for LLM scan: {scan_type}")
+    if scan_type == "experiment":
+        if not (scan_input or "").strip().isdigit():
+            raise ValueError("experiment scan requires a numeric experiment id")
+    elif scan_type == "document":
+        _parse_document_input(scan_input)  # raises ValueError on bad input
     job = LabGlossaryScanJob(
         organization_id=org_id,
         scan_type=scan_type,
@@ -140,7 +171,7 @@ async def _execute_scan_inner(session_factory, *, job_id, content_provider, subm
             api_key = provider_cfg.api_key
 
         payload = await content_provider(session, job)
-        prompt = TOPIC_PROMPT if job.scan_type == "topic" else SCAN_PROMPT
+        prompt = SCAN_PROMPT
         await session.commit()
 
     # LLM call outside any open transaction.
@@ -399,9 +430,10 @@ def _parse_llm_terms(text: str) -> list[dict]:
 
 async def _fetch_source_content(session: AsyncSession, job: LabGlossaryScanJob) -> str:
     """Default source-content fetch by scan type. Document and platform-wide
-    fetching reuse existing extraction utilities; topic uses the input verbatim."""
-    if job.scan_type == "topic":
-        return job.scan_input or ""
+    fetching reuse existing extraction utilities; experiment reuses the Experiment
+    Review context builder."""
+    if job.scan_type == "experiment":
+        return await _collect_experiment_content(session, job)
     if job.scan_type == "document":
         return await _extract_document_text(session, job)
     if job.scan_type == "platform_wide":
@@ -409,21 +441,85 @@ async def _fetch_source_content(session: AsyncSession, job: LabGlossaryScanJob) 
     return ""
 
 
+async def _collect_experiment_content(session: AsyncSession, job: LabGlossaryScanJob) -> str:
+    """Assemble the same material the AI Experiment Review reads (LK-SPEC-D, F-LKD-02).
+
+    Reuses ``agent_review_artifact_builder``: the experiment header (fields +
+    samples) plus, for every pipeline run on the experiment, the run metadata,
+    run samples, and QC dashboard. It does NOT read the experiment's associated
+    files; that matches Experiment Review and keeps the never-ship contract intact.
+
+    Raises ``ValueError`` if the experiment is missing or in another org so the
+    job fails cleanly with a clear error (AC-D04)."""
+    from app.models.experiment import Experiment
+    from app.models.pipeline_run import PipelineRun
+    from app.services.agent_review_artifact_builder import (
+        ArtifactBuildError,
+        build_experiment_header,
+        build_for_run,
+    )
+
+    experiment_id = int(job.scan_input)
+    exp = (
+        await session.execute(
+            select(Experiment).where(Experiment.id == experiment_id, Experiment.organization_id == job.organization_id)
+        )
+    ).scalar_one_or_none()
+    if exp is None:
+        raise ValueError(f"experiment {experiment_id} not found in this organization")
+
+    # All pipeline runs on the experiment feed the scan (LK-SPEC-D, OQ-2: all runs).
+    run_ids = list(
+        (
+            await session.execute(
+                select(PipelineRun.id).where(PipelineRun.experiment_id == exp.id).order_by(PipelineRun.id.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    chunks: list[str] = [await build_experiment_header(session, experiment_id=exp.id, included_run_ids=run_ids)]
+    for run_id in run_ids:
+        try:
+            artifact = await build_for_run(session, run_id)
+        except ArtifactBuildError:
+            # A run with no shippable output (e.g. still running) contributes
+            # nothing rather than failing the whole scan.
+            continue
+        chunks.append(artifact.markdown)
+    return "\n\n".join(c for c in chunks if c)
+
+
 async def _extract_document_text(session: AsyncSession, job: LabGlossaryScanJob) -> str:
-    """Extract text from the target lab document's current version. Reuses the
-    document text-extraction utility used elsewhere in the codebase."""
+    """Extract text from the document a ``document`` scan targets (LK-SPEC-D, F-LKD-03).
+
+    Dispatches on the ``scan_input`` source: ``lab_document:<id>`` (or a bare int)
+    reads the Lab Knowledge document's current version; ``file:<id>`` reads a
+    Data & Files ``File``. Both org-scope the row and reuse ``extract_text_from_gcs``.
+    A missing/foreign row contributes empty text (the scan does not crash)."""
+    source, ident = _parse_document_input(job.scan_input)
+    if source == "file":
+        gcs_uri = await _file_gcs_uri(session, ident, job.organization_id)
+    else:
+        gcs_uri = await _lab_document_gcs_uri(session, ident, job.organization_id)
+    if gcs_uri is None:
+        return ""
+    from app.services.lab_glossary_extraction import extract_text_from_gcs
+
+    return await extract_text_from_gcs(session, gcs_uri)
+
+
+async def _lab_document_gcs_uri(session: AsyncSession, doc_id: int, org_id: int) -> str | None:
     from app.models.lab_document import LabDocument, LabDocumentVersion
 
-    doc_id = int(job.scan_input) if job.scan_input and job.scan_input.isdigit() else None
-    if doc_id is None:
-        return ""
     doc = (
         await session.execute(
-            select(LabDocument).where(LabDocument.id == doc_id, LabDocument.organization_id == job.organization_id)
+            select(LabDocument).where(LabDocument.id == doc_id, LabDocument.organization_id == org_id)
         )
     ).scalar_one_or_none()
     if doc is None:
-        return ""
+        return None
     version = (
         await session.execute(
             select(LabDocumentVersion).where(
@@ -432,11 +528,16 @@ async def _extract_document_text(session: AsyncSession, job: LabGlossaryScanJob)
             )
         )
     ).scalar_one_or_none()
-    if version is None:
-        return ""
-    from app.services.lab_glossary_extraction import extract_text_from_gcs
+    return version.gcs_uri if version is not None else None
 
-    return await extract_text_from_gcs(session, version.gcs_uri)
+
+async def _file_gcs_uri(session: AsyncSession, file_id: int, org_id: int) -> str | None:
+    from app.models.file import File
+
+    f = (
+        await session.execute(select(File).where(File.id == file_id, File.organization_id == org_id))
+    ).scalar_one_or_none()
+    return f.gcs_uri if f is not None else None
 
 
 async def _collect_platform_content(session: AsyncSession, job: LabGlossaryScanJob) -> str:

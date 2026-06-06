@@ -46,7 +46,9 @@ class LabGlossaryTermUpdate(BaseModel):
 
 
 class LabGlossaryScanRequest(BaseModel):
-    scan_type: Literal["document", "topic", "platform_wide"]
+    # ``topic`` is gone (LK-SPEC-D, D1); ``experiment`` reuses the Experiment
+    # Review context. ``import`` is created via the dedicated CSV endpoint.
+    scan_type: Literal["experiment", "document", "platform_wide"]
     scan_input: str | None = None
 
 
