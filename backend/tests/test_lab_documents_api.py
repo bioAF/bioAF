@@ -57,6 +57,83 @@ async def test_upload_creates_document_v1_with_tags(client, admin_token):
 
 
 @pytest.mark.asyncio
+async def test_upload_url_returns_resumable_session_scoped_to_request_origin(client, admin_token):
+    # Regression for the "Failed to fetch" upload bug: the browser PUTs directly
+    # to GCS, so the upload URL must be a resumable session created with the
+    # request Origin (otherwise the cross-origin PUT preflight is rejected and
+    # nothing reaches the backend). Mirrors the references upload flow.
+    captured: dict = {}
+
+    def fake_session(bucket_name, blob_path, *, content_type, size_bytes, origin=None, credentials=None):
+        captured["origin"] = origin
+        captured["content_type"] = content_type
+        captured["size_bytes"] = size_bytes
+        return "https://storage.example/resumable/session"
+
+    with patch(f"{UPLOAD}._get_working_bucket", new_callable=AsyncMock, return_value="wb"), patch(
+        "app.services.upload_service.UploadService._get_gcs_credentials", new_callable=AsyncMock, return_value=None
+    ), patch(f"{UPLOAD}._create_resumable_session", side_effect=fake_session):
+        resp = await client.post(
+            "/api/lab-knowledge/documents/upload-url",
+            json={"file_name": "manual.pdf", "mime_type": "application/pdf", "size_bytes": 2048},
+            headers={**_auth(admin_token), "origin": "https://app.example"},
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["signed_url"] == "https://storage.example/resumable/session"
+    assert captured["origin"] == "https://app.example"
+    assert captured["content_type"] == "application/pdf"
+    assert captured["size_bytes"] == 2048
+
+
+@pytest.mark.asyncio
+async def test_import_from_url_creates_document_v1(client, admin_token):
+    # AC: a manager can add a document by having the server pull it from a URL,
+    # matching the Reference Data "URL import" option.
+    with patch(
+        f"{UPLOAD}._fetch_url",
+        new_callable=AsyncMock,
+        return_value=(b"%PDF-1.4 body", "policy.pdf", "application/pdf"),
+    ), patch(f"{UPLOAD}._get_working_bucket", new_callable=AsyncMock, return_value="wb"), patch(
+        "app.services.upload_service.UploadService._get_gcs_credentials", new_callable=AsyncMock, return_value=None
+    ), patch(f"{UPLOAD}._upload_bytes", new_callable=AsyncMock, return_value=None), _patched_upload(
+        file_name="policy.pdf", md5="urlmd5", size=12, mime="application/pdf"
+    ):
+        resp = await client.post(
+            "/api/lab-knowledge/documents/import-url",
+            json={"url": "https://example.com/policy.pdf", "tag_ids": []},
+            headers=_auth(admin_token),
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["file_name"] == "policy.pdf"
+    assert body["current_version"] == 1
+    assert body["md5_checksum"] == "urlmd5"
+
+    listed = await client.get("/api/lab-knowledge/documents", headers=_auth(admin_token))
+    assert listed.json()["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_viewer_cannot_import_from_url(client, viewer_token):
+    resp = await client.post(
+        "/api/lab-knowledge/documents/import-url",
+        json={"url": "https://example.com/policy.pdf"},
+        headers=_auth(viewer_token),
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_import_from_url_rejects_non_http_scheme(client, admin_token):
+    resp = await client.post(
+        "/api/lab-knowledge/documents/import-url",
+        json={"url": "ftp://example.com/policy.pdf"},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_viewer_cannot_upload(client, admin_token, viewer_token):
     # AC-A02
     resp = await _create_doc(client, viewer_token)

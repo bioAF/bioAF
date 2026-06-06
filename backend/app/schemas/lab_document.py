@@ -46,6 +46,7 @@ class LabDocumentListResponse(BaseModel):
 class LabDocumentUploadUrlRequest(BaseModel):
     file_name: str = Field(..., max_length=500)
     mime_type: str | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
 
 
 class LabDocumentUploadUrlResponse(BaseModel):
@@ -57,6 +58,15 @@ class LabDocumentUploadUrlResponse(BaseModel):
 class LabDocumentCreate(BaseModel):
     upload_token: str
     title: str = Field(..., max_length=500)
+    description: str | None = None
+    tag_ids: list[int] = []
+
+
+class LabDocumentUrlImportRequest(BaseModel):
+    # ``str`` (not HttpUrl) so the service can validate the scheme and return a
+    # friendly 400; an unparseable URL still fails there.
+    url: str = Field(..., min_length=1, max_length=2000)
+    title: str | None = Field(default=None, max_length=500)
     description: str | None = None
     tag_ids: list[int] = []
 

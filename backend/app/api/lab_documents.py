@@ -6,7 +6,7 @@ returned token, at which point the server reads the GCS checksum, moves the obje
 into its versioned path, and creates the record.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +23,7 @@ from app.schemas.lab_document import (
     LabDocumentUpdate,
     LabDocumentUploadUrlRequest,
     LabDocumentUploadUrlResponse,
+    LabDocumentUrlImportRequest,
     LabDocumentVersionCreate,
     LabDocumentVersionResponse,
 )
@@ -98,17 +99,63 @@ async def list_documents(
 @router.post("/documents/upload-url", response_model=LabDocumentUploadUrlResponse)
 async def create_upload_url(
     body: LabDocumentUploadUrlRequest,
+    request: Request,
     current_user: dict = require_permission("lab_documents", "manage"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
     try:
         result = await LabDocumentUploadService.initiate(
-            session, org_id, file_name=body.file_name, mime_type=body.mime_type
+            session,
+            org_id,
+            file_name=body.file_name,
+            mime_type=body.mime_type,
+            size_bytes=body.size_bytes,
+            origin=request.headers.get("origin"),
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
     return LabDocumentUploadUrlResponse(**result)
+
+
+async def _finalize_document_from_token(
+    session: AsyncSession,
+    *,
+    org_id: int,
+    user_id: int,
+    upload_token: str,
+    title: str,
+    description: str | None,
+    tag_ids: list[int],
+):
+    """Shared finalize path for both the browser-upload and URL-import flows:
+    read the stored object's checksum/size, create the v1 record, then move the
+    object into its versioned path and point the record at it."""
+    meta = await LabDocumentUploadService.read_metadata(session, upload_token=upload_token, org_id=org_id)
+    doc = await LabDocumentService.create_document(
+        session,
+        org_id=org_id,
+        user_id=user_id,
+        title=title or meta["file_name"],
+        description=description,
+        file_name=meta["file_name"],
+        gcs_uri=f"gs://pending/{upload_token}",
+        file_size_bytes=meta["size_bytes"],
+        mime_type=meta["mime_type"],
+        md5_checksum=meta["md5"],
+        tag_ids=tag_ids,
+    )
+    dest_uri = await LabDocumentUploadService.place(
+        session, upload_token=upload_token, org_id=org_id, document_id=doc.id, version=1
+    )
+    doc.gcs_uri = dest_uri
+    await session.execute(
+        update(LabDocumentVersion)
+        .where(LabDocumentVersion.document_id == doc.id, LabDocumentVersion.version_number == 1)
+        .values(gcs_uri=dest_uri)
+    )
+    await session.commit()
+    return doc.id
 
 
 @router.post("/documents", response_model=LabDocumentResponse)
@@ -120,33 +167,48 @@ async def create_document(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
     try:
-        meta = await LabDocumentUploadService.read_metadata(session, upload_token=body.upload_token, org_id=org_id)
-        doc = await LabDocumentService.create_document(
+        doc_id = await _finalize_document_from_token(
             session,
             org_id=org_id,
             user_id=user_id,
+            upload_token=body.upload_token,
             title=body.title,
             description=body.description,
-            file_name=meta["file_name"],
-            gcs_uri=f"gs://pending/{body.upload_token}",
-            file_size_bytes=meta["size_bytes"],
-            mime_type=meta["mime_type"],
-            md5_checksum=meta["md5"],
             tag_ids=body.tag_ids,
         )
-        dest_uri = await LabDocumentUploadService.place(
-            session, upload_token=body.upload_token, org_id=org_id, document_id=doc.id, version=1
-        )
-        doc.gcs_uri = dest_uri
-        await session.execute(
-            update(LabDocumentVersion)
-            .where(LabDocumentVersion.document_id == doc.id, LabDocumentVersion.version_number == 1)
-            .values(gcs_uri=dest_uri)
-        )
-        await session.commit()
     except ValueError as e:
         raise HTTPException(400, str(e))
-    doc = await LabDocumentService.get_document(session, document_id=doc.id, org_id=org_id)
+    doc = await LabDocumentService.get_document(session, document_id=doc_id, org_id=org_id)
+    return _doc_response(doc)
+
+
+@router.post("/documents/import-url", response_model=LabDocumentResponse)
+async def import_document_from_url(
+    body: LabDocumentUrlImportRequest,
+    current_user: dict = require_permission("lab_documents", "manage"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Add a document by having the server pull it from a public URL (matches the
+    Reference Data URL-import option). The fetch happens server-side, so it is not
+    subject to the browser's cross-origin restrictions."""
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    try:
+        token_info = await LabDocumentUploadService.initiate_from_url(
+            session, org_id, url=body.url, file_name=None
+        )
+        doc_id = await _finalize_document_from_token(
+            session,
+            org_id=org_id,
+            user_id=user_id,
+            upload_token=token_info["upload_token"],
+            title=body.title or token_info["file_name"],
+            description=body.description,
+            tag_ids=body.tag_ids,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    doc = await LabDocumentService.get_document(session, document_id=doc_id, org_id=org_id)
     return _doc_response(doc)
 
 
