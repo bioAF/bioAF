@@ -7,7 +7,7 @@ All service-layer code depends on these abstractions, never concrete implementat
 from abc import ABC, abstractmethod
 
 from app.adapters.capabilities import ProviderCapabilities
-from app.adapters.models import CellxgeneInstance
+from app.adapters.models import CellxgeneInstance, TerminationResult, VmInfo, VmStatus
 
 
 class ComputeProvider(ABC):
@@ -144,19 +144,19 @@ class WorkNodeProvider(ABC):
         return ProviderCapabilities()
 
     @abstractmethod
-    async def launch_vm(self, vm_spec: dict) -> dict:
-        """Create and start a GCE VM. Returns dict with instance_name, zone, status, external_ip."""
+    async def launch_vm(self, vm_spec: dict) -> VmInfo:
+        """Create and start a work-node VM. Returns a VmInfo."""
 
     @abstractmethod
-    async def terminate_vm(self, instance_name: str, zone: str, **kwargs) -> dict:
-        """Sync outputs, then stop and delete a VM. Returns output_files and gcs_output_prefix."""
+    async def terminate_vm(self, instance_name: str, zone: str, **kwargs) -> TerminationResult:
+        """Sync outputs, then stop and delete a VM. Returns a TerminationResult."""
 
     @abstractmethod
-    async def get_vm_status(self, instance_name: str, zone: str) -> dict:
+    async def get_vm_status(self, instance_name: str, zone: str) -> VmStatus:
         """Get VM status and external IP."""
 
     @abstractmethod
-    async def list_vms(self, filters: dict | None = None) -> list[dict]:
+    async def list_vms(self, filters: dict | None = None) -> list[VmStatus]:
         """List active work node VMs."""
 
 

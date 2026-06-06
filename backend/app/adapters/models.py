@@ -54,6 +54,30 @@ class ServiceState(str, Enum):
     UNKNOWN = "unknown"
 
 
+def to_service_state(value: str | None) -> ServiceState:
+    """Coerce a backend status string to a ServiceState; unrecognized -> UNKNOWN.
+
+    Backends emit raw status strings (e.g. a GCE ``TERMINATED``); this keeps an
+    unexpected value from crashing the boundary, mapping it to UNKNOWN instead.
+    """
+    try:
+        return ServiceState(value)
+    except ValueError:
+        return ServiceState.UNKNOWN
+
+
+def to_job_state(value: str | None) -> JobState:
+    """Coerce a backend status string to a JobState; unrecognized -> FAILED.
+
+    An unknown terminal-ish value is treated as FAILED rather than silently
+    dropped, so a job never appears stuck in a non-existent state.
+    """
+    try:
+        return JobState(value)
+    except ValueError:
+        return JobState.FAILED
+
+
 # --- Compute -----------------------------------------------------------------
 
 
@@ -216,6 +240,16 @@ class VmStatus(BaseModel):
     external_ip: str | None = None
     session_id: str | None = None
     user_id: str | None = None
+    provider_details: dict = Field(default_factory=dict)
+
+
+class TerminationResult(BaseModel):
+    """Returned from terminate_vm / terminate_session: the stopped resource and
+    any outputs synced to storage on the way down."""
+
+    status: ServiceState = ServiceState.STOPPED
+    output_files: list[StoredObject] = Field(default_factory=list)
+    output_prefix: str = ""
     provider_details: dict = Field(default_factory=dict)
 
 
