@@ -19,6 +19,12 @@ export function searchHitHref(hit: QuickSearchHit): string {
       return `/pipelines/runs/${hit.entity_id}`;
     case "file":
       return `/data/files?file=${hit.entity_id}`;
+    case "lab_document":
+      return `/lab-knowledge/documents/${hit.entity_id}`;
+    case "lab_glossary_term":
+      return `/lab-knowledge/glossary?term=${hit.entity_id}`;
+    case "sdr":
+      return `/lab-knowledge/decision-records/${hit.entity_id}`;
     default:
       return "/dashboard";
   }
@@ -41,6 +47,12 @@ export function searchHitTypeLabel(entityType: string): string {
       return "Pipeline";
     case "literature_paper":
       return "Paper";
+    case "lab_document":
+      return "Lab Document";
+    case "lab_glossary_term":
+      return "Glossary";
+    case "sdr":
+      return "SDR";
     default:
       return entityType;
   }

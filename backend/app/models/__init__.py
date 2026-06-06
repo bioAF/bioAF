@@ -91,6 +91,26 @@ from app.models.literature import (
     LiteratureSearchResult,
     LiteratureSourcesConfig,
 )
+from app.models.lab_document import (
+    LabDocument,
+    LabDocumentNote,
+    LabDocumentTag,
+    LabDocumentTagAssignment,
+    LabDocumentUrlImport,
+    LabDocumentVersion,
+)
+from app.models.lab_glossary import (
+    LabGlossaryRejectedProposal,
+    LabGlossaryScanJob,
+    LabGlossaryScanProposal,
+    LabGlossaryTerm,
+    LabGlossaryTermHistory,
+)
+from app.models.sdr import (
+    ScientificDecisionRecord,
+    SdrCategory,
+    SdrStatusTransition,
+)
 
 __all__ = [
     "User",
@@ -191,4 +211,18 @@ __all__ = [
     "LiteratureSearch",
     "LiteratureSearchResult",
     "LiteratureSourcesConfig",
+    "LabDocument",
+    "LabDocumentVersion",
+    "LabDocumentNote",
+    "LabDocumentUrlImport",
+    "LabDocumentTag",
+    "LabDocumentTagAssignment",
+    "LabGlossaryTerm",
+    "LabGlossaryTermHistory",
+    "LabGlossaryRejectedProposal",
+    "LabGlossaryScanJob",
+    "LabGlossaryScanProposal",
+    "SdrCategory",
+    "ScientificDecisionRecord",
+    "SdrStatusTransition",
 ]

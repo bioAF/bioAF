@@ -8,11 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.document import Document
 from app.models.experiment import Experiment
 from app.models.file import File
+from app.models.lab_document import LabDocument
+from app.models.lab_glossary import LabGlossaryTerm
 from app.models.literature import LiteraturePaper
 from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.models.pipeline_run import PipelineRun
 from app.models.project import Project
 from app.models.sample import Sample, sample_files
+from app.models.sdr import ScientificDecisionRecord, SdrCategory
 
 logger = logging.getLogger("bioaf.search_service")
 
@@ -26,6 +29,9 @@ FULL_SEARCH_TYPES = [
     "project",
     "pipeline_definition",
     "literature_paper",
+    "lab_document",
+    "lab_glossary_term",
+    "sdr",
 ]
 
 # Per-type fetch cap and overall merged cap. Both 300 so a single selected type can
@@ -129,6 +135,52 @@ class SearchService:
                 }
             )
 
+        lab_doc_rows = await session.execute(
+            select(LabDocument)
+            .where(
+                LabDocument.organization_id == org_id,
+                LabDocument.is_archived.is_(False),
+                LabDocument.title.ilike(pattern),
+            )
+            .order_by(LabDocument.title)
+            .limit(limit_per_type)
+        )
+        for d in lab_doc_rows.scalars():
+            results.append({"entity_type": "lab_document", "entity_id": d.id, "name": d.title, "experiment_id": None})
+
+        glossary_rows = await session.execute(
+            select(LabGlossaryTerm)
+            .where(
+                LabGlossaryTerm.organization_id == org_id,
+                LabGlossaryTerm.term.ilike(pattern),
+            )
+            .order_by(LabGlossaryTerm.term)
+            .limit(limit_per_type)
+        )
+        for t in glossary_rows.scalars():
+            results.append(
+                {"entity_type": "lab_glossary_term", "entity_id": t.id, "name": t.term, "experiment_id": None}
+            )
+
+        sdr_rows = await session.execute(
+            select(ScientificDecisionRecord)
+            .where(
+                ScientificDecisionRecord.organization_id == org_id,
+                ScientificDecisionRecord.title.ilike(pattern),
+            )
+            .order_by(ScientificDecisionRecord.sdr_number.desc())
+            .limit(limit_per_type)
+        )
+        for s in sdr_rows.scalars():
+            results.append(
+                {
+                    "entity_type": "sdr",
+                    "entity_id": s.id,
+                    "name": f"SDR-{s.sdr_number:03d}: {s.title}",
+                    "experiment_id": None,
+                }
+            )
+
         return results
 
     @staticmethod
@@ -179,6 +231,9 @@ class SearchService:
             "project": SearchService._project_hits,
             "pipeline_definition": SearchService._pipeline_definition_hits,
             "literature_paper": SearchService._literature_hits,
+            "lab_document": SearchService._lab_document_hits,
+            "lab_glossary_term": SearchService._lab_glossary_hits,
+            "sdr": SearchService._sdr_hits,
         }
         raw: list[dict] = []
         for t in result_types:
@@ -265,6 +320,45 @@ class SearchService:
                     LiteraturePaper.journal.ilike(pattern),
                     LiteraturePaper.abstract.ilike(pattern),
                     cast(LiteraturePaper.authors_json, Text).ilike(pattern),
+                ),
+            )
+        if t == "lab_document":
+            return LabDocument, and_(
+                LabDocument.organization_id == org_id,
+                LabDocument.is_archived.is_(False),
+                or_(
+                    LabDocument.title.ilike(pattern),
+                    LabDocument.description.ilike(pattern),
+                ),
+            )
+        if t == "lab_glossary_term":
+            return LabGlossaryTerm, and_(
+                LabGlossaryTerm.organization_id == org_id,
+                or_(
+                    LabGlossaryTerm.term.ilike(pattern),
+                    LabGlossaryTerm.definition.ilike(pattern),
+                    func.array_to_string(LabGlossaryTerm.aliases, " ").ilike(pattern),
+                    LabGlossaryTerm.category.ilike(pattern),
+                    LabGlossaryTerm.context.ilike(pattern),
+                ),
+            )
+        if t == "sdr":
+            # "SDR-017" formatted number, bare number, title, decision,
+            # justification, and category name are all searchable (F-LKC-09).
+            sdr_number_label = func.concat("SDR-", func.lpad(cast(ScientificDecisionRecord.sdr_number, Text), 3, "0"))
+            return ScientificDecisionRecord, and_(
+                ScientificDecisionRecord.organization_id == org_id,
+                or_(
+                    ScientificDecisionRecord.title.ilike(pattern),
+                    ScientificDecisionRecord.decision.ilike(pattern),
+                    ScientificDecisionRecord.justification.ilike(pattern),
+                    cast(ScientificDecisionRecord.sdr_number, Text).ilike(pattern),
+                    sdr_number_label.ilike(pattern),
+                    ScientificDecisionRecord.category_id.in_(
+                        select(SdrCategory.id).where(
+                            SdrCategory.organization_id == org_id, SdrCategory.name.ilike(pattern)
+                        )
+                    ),
                 ),
             )
         raise ValueError(f"unknown search type: {t}")
@@ -483,6 +577,87 @@ class SearchService:
                 "_recency": _ts(paper.created_at),
             }
             for paper in rows
+        ]
+
+    @staticmethod
+    async def _lab_document_hits(session: AsyncSession, org_id: int, pattern: str) -> list[dict]:
+        model, where = SearchService._type_where("lab_document", org_id, pattern)
+        rows = (
+            (
+                await session.execute(
+                    select(model).where(where).order_by(model.updated_at.desc(), model.id.desc()).limit(_PER_TYPE_FETCH)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [
+            {
+                "entity_type": "lab_document",
+                "entity_id": d.id,
+                "title": d.title,
+                "snippet": _join(["Lab Document", (d.description or "")[:120] or None]),
+                "url": f"/lab-knowledge/documents?doc={d.id}",
+                "experiment_id": None,
+                "relevance_score": None,
+                "_match_name": d.title,
+                "_recency": _ts(d.updated_at),
+            }
+            for d in rows
+        ]
+
+    @staticmethod
+    async def _lab_glossary_hits(session: AsyncSession, org_id: int, pattern: str) -> list[dict]:
+        model, where = SearchService._type_where("lab_glossary_term", org_id, pattern)
+        rows = (
+            (
+                await session.execute(
+                    select(model).where(where).order_by(model.updated_at.desc(), model.id.desc()).limit(_PER_TYPE_FETCH)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [
+            {
+                "entity_type": "lab_glossary_term",
+                "entity_id": t.id,
+                "title": t.term,
+                "snippet": _join(["Glossary", (t.definition or "")[:120] or None]),
+                "url": f"/lab-knowledge/glossary?term={t.id}",
+                "experiment_id": None,
+                "relevance_score": None,
+                "_match_name": t.term,
+                "_recency": _ts(t.updated_at),
+            }
+            for t in rows
+        ]
+
+    @staticmethod
+    async def _sdr_hits(session: AsyncSession, org_id: int, pattern: str) -> list[dict]:
+        model, where = SearchService._type_where("sdr", org_id, pattern)
+        rows = (
+            (
+                await session.execute(
+                    select(model).where(where).order_by(model.updated_at.desc(), model.id.desc()).limit(_PER_TYPE_FETCH)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [
+            {
+                "entity_type": "sdr",
+                "entity_id": s.id,
+                "title": f"SDR-{s.sdr_number:03d}: {s.title}",
+                "snippet": _join(["Decision Record", (s.decision or "")[:120] or None]),
+                "url": f"/lab-knowledge/decision-records?sdr={s.id}",
+                "experiment_id": None,
+                "relevance_score": None,
+                "_match_name": s.title,
+                "_recency": _ts(s.updated_at),
+            }
+            for s in rows
         ]
 
     @staticmethod

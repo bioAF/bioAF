@@ -70,6 +70,9 @@ from app.api.llm_config import router as llm_config_router
 from app.api.agent_reviews import router as agent_reviews_router
 from app.api.literature import router as literature_router
 from app.api.dashboards import router as dashboards_router
+from app.api.lab_documents import router as lab_documents_router
+from app.api.lab_glossary import router as lab_glossary_router
+from app.api.sdr import router as sdr_router
 
 api_router = APIRouter()
 
@@ -143,3 +146,6 @@ api_router.include_router(llm_config_router)
 api_router.include_router(agent_reviews_router)
 api_router.include_router(literature_router)
 api_router.include_router(dashboards_router)
+api_router.include_router(lab_documents_router)
+api_router.include_router(lab_glossary_router)
+api_router.include_router(sdr_router)
