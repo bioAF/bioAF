@@ -37,6 +37,9 @@ beforeEach(() => {
   mockGet.mockImplementation((url: string) => {
     if (url.includes("/glossary/pending"))
       return Promise.resolve({ pending_review_count: 0, job_ids: [] });
+    if (url.includes("/api/experiments"))
+      return Promise.resolve({ experiments: [], total: 0, page: 1, page_size: 500 });
+    if (url.includes("/api/files/search")) return Promise.resolve({ items: [] });
     return Promise.resolve({ terms: [], total: 0, page: 1, page_size: 50 });
   });
 });
@@ -120,10 +123,10 @@ test("the AI scan modal names AI and the org LLM provider", async () => {
 });
 
 test("shows a running banner while an AI scan is in progress", async () => {
-  mockPost.mockResolvedValue({ id: 7, scan_type: "topic", status: "pending" });
+  mockPost.mockResolvedValue({ id: 7, scan_type: "platform_wide", status: "pending" });
   mockGet.mockImplementation((url: string) => {
     if (url.includes("/glossary/scan/7"))
-      return Promise.resolve({ id: 7, scan_type: "topic", status: "running" });
+      return Promise.resolve({ id: 7, scan_type: "platform_wide", status: "running" });
     if (url.includes("/glossary/pending"))
       return Promise.resolve({ pending_review_count: 0, job_ids: [] });
     return Promise.resolve({ terms: [], total: 0, page: 1, page_size: 50 });
@@ -131,12 +134,110 @@ test("shows a running banner while an AI scan is in progress", async () => {
   render(<LabGlossaryBrowser />);
   await waitFor(() => screen.getByText(/No terms yet/i));
   fireEvent.click(screen.getByRole("button", { name: /ai scan/i }));
-  fireEvent.change(screen.getByLabelText(/topic/i), {
-    target: { value: "single-cell RNA-seq" },
+  fireEvent.change(screen.getByLabelText(/scan type/i), {
+    target: { value: "platform_wide" },
   });
   fireEvent.click(screen.getByRole("button", { name: /start ai scan/i }));
   await waitFor(() => {
     expect(screen.getByTestId("scan-running-banner")).toBeInTheDocument();
+  });
+});
+
+test("topic is no longer an available scan source", async () => {
+  render(<LabGlossaryBrowser />);
+  await waitFor(() => screen.getByText(/No terms yet/i));
+  fireEvent.click(screen.getByRole("button", { name: /ai scan/i }));
+  const select = screen.getByLabelText(/scan type/i) as HTMLSelectElement;
+  const values = Array.from(select.options).map((o) => o.value);
+  expect(values).toEqual(["experiment", "document", "platform_wide"]);
+});
+
+test("experiment scan submits scan_type=experiment with the experiment id", async () => {
+  mockPost.mockResolvedValue({ id: 8, scan_type: "experiment", status: "pending" });
+  mockGet.mockImplementation((url: string) => {
+    if (url.includes("/api/experiments"))
+      return Promise.resolve({
+        experiments: [{ id: 42, name: "Oocyte study", project: null }],
+        total: 1,
+        page: 1,
+        page_size: 500,
+      });
+    if (url.includes("/glossary/scan/8"))
+      return Promise.resolve({ id: 8, scan_type: "experiment", status: "running" });
+    if (url.includes("/glossary/pending"))
+      return Promise.resolve({ pending_review_count: 0, job_ids: [] });
+    return Promise.resolve({ terms: [], total: 0, page: 1, page_size: 50 });
+  });
+  render(<LabGlossaryBrowser />);
+  await waitFor(() => screen.getByText(/No terms yet/i));
+  fireEvent.click(screen.getByRole("button", { name: /ai scan/i }));
+  // Default mode is experiment; pick the seeded experiment.
+  await waitFor(() => screen.getByText("Oocyte study"));
+  fireEvent.change(screen.getByLabelText(/experiment/i), { target: { value: "42" } });
+  fireEvent.click(screen.getByRole("button", { name: /start ai scan/i }));
+  await waitFor(() => {
+    expect(mockPost).toHaveBeenCalledWith(
+      expect.stringContaining("/glossary/scan"),
+      expect.objectContaining({ scan_type: "experiment", scan_input: "42" }),
+    );
+  });
+});
+
+test("document scan searches both stores and submits a source-qualified id", async () => {
+  mockPost.mockResolvedValue({ id: 9, scan_type: "document", status: "pending" });
+  mockGet.mockImplementation((url: string) => {
+    if (url.includes("/api/files/search"))
+      return Promise.resolve({
+        items: [
+          {
+            kind: "lab_document",
+            id: 3,
+            name: "Assay SOP",
+            file_type: "application/pdf",
+            size_bytes: 100,
+            updated_at: "2026-01-01T00:00:00Z",
+            href: "/lab-knowledge/documents/3",
+            experiment_id: null,
+            source: "lab_knowledge",
+          },
+          {
+            kind: "file",
+            id: 7,
+            name: "assay_protocol.pdf",
+            file_type: "pdf",
+            size_bytes: 200,
+            updated_at: "2026-01-01T00:00:00Z",
+            href: "/data/files?file=7",
+            experiment_id: null,
+            source: "upload",
+          },
+        ],
+      });
+    if (url.includes("/glossary/scan/9"))
+      return Promise.resolve({ id: 9, scan_type: "document", status: "running" });
+    if (url.includes("/glossary/pending"))
+      return Promise.resolve({ pending_review_count: 0, job_ids: [] });
+    return Promise.resolve({ terms: [], total: 0, page: 1, page_size: 50 });
+  });
+  render(<LabGlossaryBrowser />);
+  await waitFor(() => screen.getByText(/No terms yet/i));
+  fireEvent.click(screen.getByRole("button", { name: /ai scan/i }));
+  fireEvent.change(screen.getByLabelText(/scan type/i), { target: { value: "document" } });
+  fireEvent.change(screen.getByLabelText(/search documents and files/i), {
+    target: { value: "assay" },
+  });
+  // Both stores show up, each with a source badge.
+  await waitFor(() => screen.getByText("Assay SOP"));
+  expect(screen.getByText("assay_protocol.pdf")).toBeInTheDocument();
+  expect(screen.getByText("Lab Document")).toBeInTheDocument();
+  // Pick the lab document; submit sends lab_document:3.
+  fireEvent.click(screen.getByText("Assay SOP"));
+  fireEvent.click(screen.getByRole("button", { name: /start ai scan/i }));
+  await waitFor(() => {
+    expect(mockPost).toHaveBeenCalledWith(
+      expect.stringContaining("/glossary/scan"),
+      expect.objectContaining({ scan_type: "document", scan_input: "lab_document:3" }),
+    );
   });
 });
 

@@ -607,6 +607,24 @@ function ImportModal({
   );
 }
 
+interface ExperimentOption {
+  id: number;
+  name: string;
+  project: { id: number; name: string } | null;
+}
+
+interface DataSearchItem {
+  kind: "file" | "lab_document";
+  id: number;
+  name: string;
+  file_type: string | null;
+  size_bytes: number | null;
+  updated_at: string;
+  href: string;
+  experiment_id: number | null;
+  source: string | null;
+}
+
 function ScanModal({
   onClose,
   onStarted,
@@ -614,10 +632,65 @@ function ScanModal({
   onClose: () => void;
   onStarted: (job: ScanJob) => void;
 }) {
-  const [scanType, setScanType] = useState("topic");
-  const [scanInput, setScanInput] = useState("");
+  // "topic" was removed (LK-SPEC-D, D1); "experiment" reuses the Experiment
+  // Review material, "document" picks a Lab Knowledge document OR a Data & Files
+  // file via search.
+  const [scanType, setScanType] = useState("experiment");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Experiment source.
+  const [experiments, setExperiments] = useState<ExperimentOption[]>([]);
+  const [experimentId, setExperimentId] = useState("");
+
+  // Document source: search-and-select across both stores (D2).
+  const [docQuery, setDocQuery] = useState("");
+  const [docResults, setDocResults] = useState<DataSearchItem[]>([]);
+  const [docSelected, setDocSelected] = useState<DataSearchItem | null>(null);
+
+  useEffect(() => {
+    api
+      .get<{ experiments: ExperimentOption[] }>("/api/experiments?page_size=500")
+      .then((d) =>
+        setExperiments(
+          d.experiments.map((e) => ({
+            id: e.id,
+            name: e.name,
+            project: e.project ? { id: e.project.id, name: e.project.name } : null,
+          })),
+        ),
+      )
+      .catch(() => setExperiments([]));
+  }, []);
+
+  // Debounced unified document/file search (D2 + D3 share the endpoint).
+  useEffect(() => {
+    if (scanType !== "document") return;
+    const q = docQuery.trim();
+    if (!q) {
+      setDocResults([]);
+      return;
+    }
+    const handle = setTimeout(() => {
+      api
+        .get<{ items: DataSearchItem[] }>(`/api/files/search?q=${encodeURIComponent(q)}`)
+        .then((d) => setDocResults(d.items))
+        .catch(() => setDocResults([]));
+    }, 200);
+    return () => clearTimeout(handle);
+  }, [docQuery, scanType]);
+
+  const scanInputFor = (): string | null => {
+    if (scanType === "experiment") return experimentId || null;
+    if (scanType === "document") return docSelected ? `${docSelected.kind}:${docSelected.id}` : null;
+    return null; // platform_wide
+  };
+
+  const canSubmit =
+    !busy &&
+    (scanType === "platform_wide" ||
+      (scanType === "experiment" && !!experimentId) ||
+      (scanType === "document" && !!docSelected));
 
   const submit = async () => {
     setBusy(true);
@@ -625,7 +698,7 @@ function ScanModal({
     try {
       const job = await api.post<ScanJob>(`${API_BASE}/glossary/scan`, {
         scan_type: scanType,
-        scan_input: scanInput.trim() || null,
+        scan_input: scanInputFor(),
       });
       onStarted(job);
     } catch (e) {
@@ -633,6 +706,8 @@ function ScanModal({
       setBusy(false);
     }
   };
+
+  const labelFor = (e: ExperimentOption) => (e.project ? `${e.project.name} > ${e.name}` : e.name);
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
@@ -651,28 +726,76 @@ function ScanModal({
             aria-label="Scan type"
             className="border rounded px-2 py-1.5 text-sm w-full"
           >
-            <option value="topic">From a topic</option>
+            <option value="experiment">From an experiment</option>
             <option value="document">From a document</option>
             <option value="platform_wide">Platform-wide</option>
           </select>
-          {scanType === "topic" && (
-            <input
-              value={scanInput}
-              onChange={(e) => setScanInput(e.target.value)}
-              placeholder="e.g. 10x Chromium single-cell RNA-seq"
-              aria-label="Topic"
-              className="border rounded px-3 py-1.5 text-sm w-full"
-            />
+
+          {scanType === "experiment" && (
+            <select
+              value={experimentId}
+              onChange={(e) => setExperimentId(e.target.value)}
+              aria-label="Experiment"
+              className="border rounded px-2 py-1.5 text-sm w-full"
+            >
+              <option value="">Select an experiment</option>
+              {experiments.map((e) => (
+                <option key={e.id} value={String(e.id)}>
+                  {labelFor(e)}
+                </option>
+              ))}
+            </select>
           )}
+
           {scanType === "document" && (
-            <input
-              value={scanInput}
-              onChange={(e) => setScanInput(e.target.value)}
-              placeholder="Document ID"
-              aria-label="Document ID"
-              className="border rounded px-3 py-1.5 text-sm w-full"
-            />
+            <div>
+              <input
+                value={docQuery}
+                onChange={(e) => {
+                  setDocQuery(e.target.value);
+                  setDocSelected(null);
+                }}
+                placeholder="Search Lab Knowledge documents and Data & Files"
+                aria-label="Search documents and files"
+                className="border rounded px-3 py-1.5 text-sm w-full"
+              />
+              {docResults.length > 0 && (
+                <ul className="mt-2 max-h-48 overflow-y-auto border rounded divide-y">
+                  {docResults.map((r) => (
+                    <li key={`${r.kind}:${r.id}`}>
+                      <button
+                        type="button"
+                        onClick={() => setDocSelected(r)}
+                        className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${
+                          docSelected && docSelected.kind === r.kind && docSelected.id === r.id
+                            ? "bg-blue-50"
+                            : ""
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate">{r.name}</span>
+                          <span className="text-xs shrink-0 rounded px-1.5 py-0.5 bg-gray-100 text-gray-600">
+                            {r.kind === "lab_document" ? "Lab Document" : "File"}
+                          </span>
+                        </div>
+                        {(r.file_type || r.experiment_id != null) && (
+                          <div className="text-xs text-gray-400 mt-0.5">
+                            {[r.file_type, r.experiment_id != null ? `Experiment ${r.experiment_id}` : null]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </div>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {docQuery.trim() && docResults.length === 0 && (
+                <p className="text-xs text-gray-400 mt-2">No matching documents or files.</p>
+              )}
+            </div>
           )}
+
           <p className="text-xs text-gray-500">
             The scan runs in the background. A banner will show while it is running, and you will be
             notified when the proposed terms are ready to review.
@@ -686,7 +809,7 @@ function ScanModal({
           <button
             type="button"
             onClick={submit}
-            disabled={busy}
+            disabled={!canSubmit}
             className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
           >
             {busy ? "Starting..." : "Start AI Scan"}
