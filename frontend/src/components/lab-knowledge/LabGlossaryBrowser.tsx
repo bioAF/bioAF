@@ -77,6 +77,9 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
   const [pendingCount, setPendingCount] = useState(0);
+  const [pendingJobIds, setPendingJobIds] = useState<number[]>([]);
+  const [activeScanJobId, setActiveScanJobId] = useState<number | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
 
   const [selected, setSelected] = useState<GlossaryTerm | null>(null);
   const [showAdd, setShowAdd] = useState(false);
@@ -102,8 +105,11 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
 
   const fetchPending = useCallback(async () => {
     try {
-      const data = await api.get<{ pending_review_count: number }>(`${API_BASE}/glossary/pending`);
+      const data = await api.get<{ pending_review_count: number; job_ids?: number[] }>(
+        `${API_BASE}/glossary/pending`,
+      );
       setPendingCount(data.pending_review_count);
+      setPendingJobIds(data.job_ids ?? []);
     } catch {
       /* non-critical */
     }
@@ -123,6 +129,35 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
       if (match) setSelected(match);
     }
   }, [focusTermId, terms]);
+
+  // Poll a dispatched AI scan until it finishes so the "scan is running" banner
+  // clears and the freshly proposed terms surface in the pending-review banner.
+  useEffect(() => {
+    if (activeScanJobId === null) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const job = await api.get<ScanJob>(`${API_BASE}/glossary/scan/${activeScanJobId}`);
+        if (cancelled) return;
+        if (job.status === "complete" || job.status === "failed") {
+          setActiveScanJobId(null);
+          if (job.status === "complete") {
+            fetchPending();
+          } else {
+            setScanError("The AI glossary scan could not be completed.");
+          }
+        }
+      } catch {
+        /* transient; keep polling */
+      }
+    };
+    poll();
+    const t = setInterval(poll, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [activeScanJobId, fetchPending]);
 
   if (loading) {
     return <div data-testid="glossary-loading" className="p-8 text-gray-500">Loading glossary...</div>;
@@ -172,24 +207,48 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
               type="button"
               onClick={() => setShowScan(true)}
               className="border rounded px-3 py-1.5 text-sm"
+              title="Use your org's LLM provider to propose glossary terms"
             >
-              Scan
+              AI Scan
             </button>
           </div>
         )}
       </div>
 
-      {canManage && pendingCount > 0 && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded px-4 py-2 mb-4 text-sm">
-          {pendingCount} proposed term{pendingCount === 1 ? "" : "s"} awaiting review.
+      {activeScanJobId !== null && (
+        <div
+          data-testid="scan-running-banner"
+          className="bg-blue-50 border border-blue-200 text-blue-800 rounded px-4 py-2 mb-4 text-sm flex items-center gap-2"
+        >
+          <span
+            className="inline-block h-3 w-3 rounded-full border-2 border-blue-400 border-t-transparent animate-spin"
+            aria-hidden="true"
+          />
+          AI glossary scan is running. Proposed terms will appear here for your review when it
+          finishes.
         </div>
       )}
 
+      {canManage && pendingCount > 0 && (
+        <button
+          type="button"
+          onClick={() => {
+            if (pendingJobIds.length) setReviewJobId(pendingJobIds[0]);
+          }}
+          disabled={pendingJobIds.length === 0}
+          className="block w-full text-left bg-amber-50 border border-amber-200 text-amber-800 rounded px-4 py-2 mb-4 text-sm hover:bg-amber-100 disabled:cursor-default"
+        >
+          {pendingCount} proposed term{pendingCount === 1 ? "" : "s"} awaiting review. Click to
+          review them.
+        </button>
+      )}
+
+      {scanError && <div className="text-red-600 text-sm mb-3">{scanError}</div>}
       {error && <div className="text-red-600 text-sm mb-3">{error}</div>}
 
       {terms.length === 0 ? (
         <div className="text-gray-500 py-12 text-center">
-          No terms yet. {canManage ? "Add one manually, import a CSV, or run a scan." : ""}
+          No terms yet. {canManage ? "Add one manually, import a CSV, or run an AI scan." : ""}
         </div>
       ) : (
         <ul className="divide-y border rounded">
@@ -250,9 +309,10 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
       {showScan && (
         <ScanModal
           onClose={() => setShowScan(false)}
-          onStarted={() => {
+          onStarted={(job) => {
             setShowScan(false);
-            fetchPending();
+            setScanError(null);
+            setActiveScanJobId(job.id);
           }}
         />
       )}
@@ -541,7 +601,13 @@ function ImportModal({
   );
 }
 
-function ScanModal({ onClose, onStarted }: { onClose: () => void; onStarted: () => void }) {
+function ScanModal({
+  onClose,
+  onStarted,
+}: {
+  onClose: () => void;
+  onStarted: (job: ScanJob) => void;
+}) {
   const [scanType, setScanType] = useState("topic");
   const [scanInput, setScanInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -551,11 +617,11 @@ function ScanModal({ onClose, onStarted }: { onClose: () => void; onStarted: () 
     setBusy(true);
     setErr(null);
     try {
-      await api.post(`${API_BASE}/glossary/scan`, {
+      const job = await api.post<ScanJob>(`${API_BASE}/glossary/scan`, {
         scan_type: scanType,
         scan_input: scanInput.trim() || null,
       });
-      onStarted();
+      onStarted(job);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not start scan");
       setBusy(false);
@@ -565,7 +631,13 @@ function ScanModal({ onClose, onStarted }: { onClose: () => void; onStarted: () 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
       <div className="bg-white rounded-lg w-[30rem] p-6" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-bold mb-4">Run Glossary Scan</h2>
+        <h2 className="text-lg font-bold mb-2">Run AI Glossary Scan</h2>
+        <p className="text-sm text-gray-500 mb-4">
+          This is an AI scan. It uses your organization&apos;s active LLM provider (the same
+          connection as the AI Literature Review and AI pipeline review) to read the selected
+          source and propose glossary terms. Nothing is added automatically: every proposed term
+          comes back to you for review first.
+        </p>
         <div className="space-y-3">
           <select
             value={scanType}
@@ -596,8 +668,8 @@ function ScanModal({ onClose, onStarted }: { onClose: () => void; onStarted: () 
             />
           )}
           <p className="text-xs text-gray-500">
-            The scan runs in the background. When it finishes you will be notified, and the proposed
-            terms appear under review.
+            The scan runs in the background. A banner will show while it is running, and you will be
+            notified when the proposed terms are ready to review.
           </p>
           {err && <div className="text-red-600 text-sm">{err}</div>}
         </div>
@@ -611,7 +683,7 @@ function ScanModal({ onClose, onStarted }: { onClose: () => void; onStarted: () 
             disabled={busy}
             className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
           >
-            {busy ? "Starting..." : "Start Scan"}
+            {busy ? "Starting..." : "Start AI Scan"}
           </button>
         </div>
       </div>
