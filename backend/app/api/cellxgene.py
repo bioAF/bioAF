@@ -143,7 +143,7 @@ async def inspect_file(
     from sqlalchemy import select as sa_select
 
     from app.models.file import File
-    from app.services.credential_injector import load_gcp_credentials
+    from app.platform.credential_injector import load_gcp_credentials
     from app.services.h5ad_inspector import inspect_h5ad
 
     current_user = request.state.current_user
@@ -155,7 +155,7 @@ async def inspect_file(
         raise HTTPException(404, "File not found")
 
     # Load GCP credentials from platform_config
-    from app.services.platform_config_service import PlatformConfigService
+    from app.platform.platform_config_service import PlatformConfigService
 
     config = await PlatformConfigService.get_many(
         session,

@@ -111,8 +111,8 @@ class GcsStorageService:
         Returns None on failure -- caller falls back to ADC, which
         works for non-signing operations only.
         """
-        from app.services import credential_injector
-        from app.services.platform_config_service import PlatformConfigService
+        from app.platform import credential_injector
+        from app.platform.platform_config_service import PlatformConfigService
 
         config = await PlatformConfigService.get_many(
             session,

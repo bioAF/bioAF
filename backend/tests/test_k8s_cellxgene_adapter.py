@@ -232,7 +232,7 @@ class TestCellxgeneOutOfClusterClientAuthHeader:
         fake_creds = MagicMock()
         fake_creds.token = "test-token-xyz"
         with patch(
-            "app.services.credential_injector.load_gcp_credentials",
+            "app.platform.credential_injector.load_gcp_credentials",
             return_value=fake_creds,
         ):
             api_client = provider._build_out_of_cluster_client()

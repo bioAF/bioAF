@@ -16,7 +16,7 @@ from __future__ import annotations
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services import encryption_service
+from app.platform import encryption_service
 
 SENSITIVE_PLATFORM_CONFIG_KEYS: frozenset[str] = frozenset({"gcp_service_account_key"})
 

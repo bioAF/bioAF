@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.activity_feed_service import ActivityFeedService
 from app.services.audit_service import log_action
 from app.services.component_queue import process_queued_components
-from app.services.credential_injector import load_gcp_credentials
+from app.platform.credential_injector import load_gcp_credentials
 from app.services.orphaned_resource_service import OrphanedResourceService
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
 from app.services.zone_capacity_probe import AllZonesExhaustedError, probe_zones

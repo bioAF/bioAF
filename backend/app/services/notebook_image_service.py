@@ -19,7 +19,7 @@ from google.cloud import storage
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.credential_injector import load_gcp_credentials
+from app.platform.credential_injector import load_gcp_credentials
 
 logger = logging.getLogger("bioaf.notebook_image")
 
@@ -108,7 +108,7 @@ async def _get_credentials(session: AsyncSession):
     `roles/cloudbuild.builds.editor` and `roles/artifactregistry.admin`,
     which bioaf-app does not).
     """
-    from app.services.platform_config_service import PlatformConfigService
+    from app.platform.platform_config_service import PlatformConfigService
 
     config = await PlatformConfigService.get_many(
         session,

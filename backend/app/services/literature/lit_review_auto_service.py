@@ -33,7 +33,7 @@ from app.models.sample import Sample
 from app.models.user import User
 from app.services import llm_provider_config_service
 from app.services.literature import lit_review_run_service
-from app.services.platform_config_service import PlatformConfigService
+from app.platform.platform_config_service import PlatformConfigService
 
 logger = logging.getLogger("bioaf.literature.lit_review_auto_service")
 

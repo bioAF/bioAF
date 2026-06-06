@@ -35,7 +35,7 @@ async def test_get_gcs_credentials_returns_impersonated_creds_in_vm_default(sess
 
     await _seed_vm_default(session)
     fake_creds = MagicMock(name="impersonated_creds")
-    with patch("app.services.credential_injector.load_gcp_credentials", return_value=fake_creds) as load:
+    with patch("app.platform.credential_injector.load_gcp_credentials", return_value=fake_creds) as load:
         result = await UploadService._get_gcs_credentials(session)
     load.assert_called_once()
     config_arg = load.call_args.args[0]
@@ -51,7 +51,7 @@ async def test_get_gcs_credentials_returns_none_when_injector_fails(session):
 
     await _seed_vm_default(session)
     with patch(
-        "app.services.credential_injector.load_gcp_credentials",
+        "app.platform.credential_injector.load_gcp_credentials",
         side_effect=RuntimeError("creds unavailable"),
     ):
         result = await UploadService._get_gcs_credentials(session)
@@ -73,7 +73,7 @@ async def test_storage_service_query_gcs_buckets_uses_impersonated_creds(session
     fake_storage_client.list_buckets.return_value = []  # empty result is fine
 
     with (
-        patch("app.services.credential_injector.load_gcp_credentials", return_value=fake_creds) as load,
+        patch("app.platform.credential_injector.load_gcp_credentials", return_value=fake_creds) as load,
         patch("google.cloud.storage.Client", return_value=fake_storage_client) as gcs_client_cls,
     ):
         await StorageService._query_gcs_buckets(session, org_id=1)
@@ -96,7 +96,7 @@ async def test_storage_service_falls_back_when_credentials_unavailable(session):
 
     with (
         patch(
-            "app.services.credential_injector.load_gcp_credentials",
+            "app.platform.credential_injector.load_gcp_credentials",
             side_effect=RuntimeError("no config"),
         ),
         patch("google.cloud.storage.Client", return_value=fake_storage_client) as gcs_client_cls,
@@ -127,7 +127,7 @@ async def test_initiate_upload_uses_signing_credentials(session):
     fake_creds = MagicMock(name="impersonated_creds")
 
     with (
-        patch("app.services.credential_injector.load_gcp_credentials", return_value=fake_creds),
+        patch("app.platform.credential_injector.load_gcp_credentials", return_value=fake_creds),
         patch.object(
             UploadService,
             "_generate_signed_upload_url",

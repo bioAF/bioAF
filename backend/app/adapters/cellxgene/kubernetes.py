@@ -28,7 +28,7 @@ def _get_gcp_token(cfg: dict) -> str:
     """
     import google.auth.transport.requests
 
-    from app.services import credential_injector
+    from app.platform import credential_injector
 
     credentials = credential_injector.load_gcp_credentials(cfg)
     credentials.refresh(google.auth.transport.requests.Request())
@@ -60,7 +60,7 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         if not self._session_factory:
             return {}
 
-        from app.services.platform_config_service import PlatformConfigService
+        from app.platform.platform_config_service import PlatformConfigService
 
         async with self._session_factory() as session:
             return await PlatformConfigService.get_many(session, list(keys))
@@ -290,7 +290,7 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
             return self._cluster_config
 
         async with self._session_factory() as session:
-            from app.services.platform_config_service import PlatformConfigService
+            from app.platform.platform_config_service import PlatformConfigService
 
             self._cluster_config = await PlatformConfigService.get_many(
                 session,

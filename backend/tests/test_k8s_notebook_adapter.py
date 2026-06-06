@@ -161,7 +161,7 @@ class TestOutOfClusterClientAuthHeader:
         fake_creds = MagicMock()
         fake_creds.token = "test-token-xyz"
         with patch(
-            "app.services.credential_injector.load_gcp_credentials",
+            "app.platform.credential_injector.load_gcp_credentials",
             return_value=fake_creds,
         ):
             api_client = provider_with_cfg._build_out_of_cluster_client()
@@ -179,7 +179,7 @@ class TestOutOfClusterClientAuthHeader:
         fake_creds = MagicMock()
         fake_creds.token = "t"
         with patch(
-            "app.services.credential_injector.load_gcp_credentials",
+            "app.platform.credential_injector.load_gcp_credentials",
             return_value=fake_creds,
         ):
             api_client = provider_with_cfg._build_out_of_cluster_client()
@@ -194,7 +194,7 @@ class TestOutOfClusterClientAuthHeader:
         fake_creds = MagicMock()
         fake_creds.token = "test-token-xyz"
         with patch(
-            "app.services.credential_injector.load_gcp_credentials",
+            "app.platform.credential_injector.load_gcp_credentials",
             return_value=fake_creds,
         ):
             api_client = provider_with_cfg._build_out_of_cluster_client()
@@ -232,7 +232,7 @@ class TestApiClientCacheInvalidation:
         """If platform_config now reports a different cluster, drop the cache."""
         # Force the out-of-cluster path: make load_incluster_config raise.
         from app.adapters.notebooks import kubernetes as kmod
-        from app.services import credential_injector as ci_mod
+        from app.platform import credential_injector as ci_mod
 
         monkeypatch.setattr(
             kmod.config,
@@ -273,7 +273,7 @@ class TestApiClientCacheInvalidation:
     async def test_unchanged_cluster_reuses_cached_client(self, provider, monkeypatch):
         """Don't churn the client when nothing relevant changed."""
         from app.adapters.notebooks import kubernetes as kmod
-        from app.services import credential_injector as ci_mod
+        from app.platform import credential_injector as ci_mod
 
         monkeypatch.setattr(
             kmod.config,

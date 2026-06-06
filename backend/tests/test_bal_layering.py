@@ -271,33 +271,27 @@ def _iter_adapter_modules():
         yield path.relative_to(_BACKEND_APP).as_posix(), path.read_text()
 
 
-# Every adapter -> service import that exists today, as
-# (adapter path relative to app/, imported app.services module). Phase 1
-# relocates config/credentials into app/platform/ and empties this set.
+# Every adapter -> service import that remains, as (adapter path relative to
+# app/, imported app.services module). Phase 1 relocated config/credentials
+# into app/platform/ and drained those entries. The remainder drain later:
+# storage/gcs.py's GcsStorageService in Phase 3, and notebooks' session_*
+# imports in Phase 5. This set only shrinks.
 ADAPTER_SERVICE_IMPORT_ALLOWLIST: set[tuple[str, str]] = {
-    ("adapters/cellxgene/kubernetes.py", "app.services.credential_injector"),
-    ("adapters/cellxgene/kubernetes.py", "app.services.platform_config_service"),
-    ("adapters/compute/kubernetes.py", "app.services.credential_injector"),
-    ("adapters/compute/kubernetes.py", "app.services.platform_config_service"),
-    ("adapters/notebooks/kubernetes.py", "app.services.credential_injector"),
-    ("adapters/notebooks/kubernetes.py", "app.services.platform_config_service"),
-    ("adapters/notebooks/kubernetes.py", "app.services.session_output_service"),
-    ("adapters/notebooks/kubernetes.py", "app.services.session_persistence"),
-    ("adapters/storage/gcs.py", "app.services.gcs_storage"),
-    ("adapters/work_nodes/gce.py", "app.services.credential_injector"),
-    ("adapters/work_nodes/gce.py", "app.services.platform_config_service"),
+    ("adapters/storage/gcs.py", "app.services.gcs_storage"),  # Phase 3
+    ("adapters/notebooks/kubernetes.py", "app.services.session_output_service"),  # Phase 5
+    ("adapters/notebooks/kubernetes.py", "app.services.session_persistence"),  # Phase 5
 }
 
 
 def test_service_import_detector_matches_both_forms():
     source = (
-        "from app.services import credential_injector\n"
+        "from app.services import session_persistence\n"
         "from app.services.gcs_storage import GcsStorageService\n"
         "import app.services.foo\n"
-        "from app.platform.config import PlatformConfig\n"
+        "from app.platform import credential_injector\n"
     )
     assert _service_imports_in_source(source) == {
-        "app.services.credential_injector",
+        "app.services.session_persistence",
         "app.services.gcs_storage",
         "app.services.foo",
     }
@@ -338,5 +332,55 @@ def test_adapter_service_allowlist_has_no_stale_entries():
 
 
 def test_adapter_service_allowlist_count_is_pinned():
-    """Pin the inversion count. Phase 1 drives it to 0."""
-    assert len(ADAPTER_SERVICE_IMPORT_ALLOWLIST) == 11
+    """Pin the inversion count. Phase 1 drained config/credentials (11 -> 3);
+    the rest drains in Phases 3 and 5 toward 0."""
+    assert len(ADAPTER_SERVICE_IMPORT_ALLOWLIST) == 3
+
+
+# --- Tree scan: the platform layer is leaf-ward (Phase 1) --------------------
+
+_PLATFORM = _BACKEND_APP / "platform"
+
+
+def _upward_imports_in_source(source: str) -> set[str]:
+    """Return any app.services / app.adapters modules imported by ``source``.
+
+    The platform layer sits beneath both services and adapters: it may import
+    app.config, app.database, app.models and leaf helpers, but never reach up
+    into app.services or app.adapters.
+    """
+    found: set[str] = set()
+    tree = ast.parse(source)
+    upward = ("app.services", "app.adapters")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if any(alias.name == u or alias.name.startswith(u + ".") for u in upward):
+                    found.add(alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            module = node.module
+            if module in upward:
+                for alias in node.names:
+                    found.add(f"{module}.{alias.name}")
+            elif any(module.startswith(u + ".") for u in upward):
+                found.add(module)
+    return found
+
+
+def test_platform_layer_has_no_upward_imports():
+    """app/platform/ must not import app.services or app.adapters.
+
+    This is what makes app.platform a layer adapters may depend on without
+    creating a cycle. There is no allowlist: the platform layer is clean by
+    construction from Phase 1 onward.
+    """
+    violations: list[str] = []
+    if _PLATFORM.exists():
+        for path in sorted(_PLATFORM.rglob("*.py")):
+            rel = path.relative_to(_BACKEND_APP).as_posix()
+            for mod in _upward_imports_in_source(path.read_text()):
+                violations.append(f"  {rel}: imports {mod}")
+    assert not violations, (
+        "app/platform/ must not import app.services or app.adapters (it is a "
+        "leaf-ward layer):\n" + "\n".join(sorted(violations))
+    )

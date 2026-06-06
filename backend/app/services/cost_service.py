@@ -190,7 +190,7 @@ class CostService:
         # Historical data from BQ (excludes today due to export lag)
         if project_id and dataset_id and table_id:
             try:
-                from app.services.credential_injector import load_gcp_credentials
+                from app.platform.credential_injector import load_gcp_credentials
 
                 try:
                     creds = load_gcp_credentials(bq_config)

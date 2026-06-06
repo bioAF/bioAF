@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.component import TerraformRun
 from app.services.activity_feed_service import ActivityFeedService
 from app.services.audit_service import log_action
-from app.services.credential_injector import GCPCredentialInjector
+from app.platform.credential_injector import GCPCredentialInjector
 from app.services.plan_parser import TerraformPlanParser
 
 logger = logging.getLogger("bioaf.terraform_executor")
@@ -1074,7 +1074,7 @@ class TerraformExecutor:
             "k8s_interactive_machine_type",
             "k8s_interactive_max_nodes",
         ]
-        from app.services.platform_config_service import PlatformConfigService
+        from app.platform.platform_config_service import PlatformConfigService
 
         config = await PlatformConfigService.get_many(session, keys)
         # vm_default mode: ensure the credential injector sees the bootstrap

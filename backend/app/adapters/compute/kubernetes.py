@@ -44,7 +44,7 @@ def _load_gcp_credentials(cfg: dict):
     impersonated bootstrap credentials and legacy installs get
     service_account.Credentials from the stored JSON key.
     """
-    from app.services import credential_injector
+    from app.platform import credential_injector
 
     return credential_injector.load_gcp_credentials(cfg)
 
@@ -743,7 +743,7 @@ class KubernetesComputeProvider(ComputeProvider):
         change, but credentials need a per-launch read so that keys saved or
         rotated through the Settings UI take effect without a backend restart.
         """
-        from app.services.platform_config_service import PlatformConfigService
+        from app.platform.platform_config_service import PlatformConfigService
 
         if not self._session_factory:
             return "vm_default", ""

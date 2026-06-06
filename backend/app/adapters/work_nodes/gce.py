@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime, timezone
 
 from app.adapters.base import WorkNodeProvider
-from app.services.credential_injector import load_gcp_credentials
+from app.platform.credential_injector import load_gcp_credentials
 
 logger = logging.getLogger("bioaf.adapters.work_nodes.gce")
 
@@ -251,7 +251,7 @@ class GCEWorkNodeProvider(WorkNodeProvider):
             return self._gcp_config
 
         async with self._session_factory() as session:
-            from app.services.platform_config_service import PlatformConfigService
+            from app.platform.platform_config_service import PlatformConfigService
 
             self._gcp_config = await PlatformConfigService.get_many(
                 session,
