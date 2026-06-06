@@ -233,3 +233,110 @@ def test_sdk_allowlist_count_is_pinned():
     Decrement this as phases drain leaks; it must reach 0 by end of Phase 9.
     """
     assert len(SDK_IMPORT_ALLOWLIST) == 46
+
+
+# --- Tree scan: no adapter imports services (the layering inversion) ---------
+
+_ADAPTERS = _BACKEND_APP / "adapters"
+
+
+def _service_imports_in_source(source: str) -> set[str]:
+    """Return the ``app.services`` modules imported by ``source``.
+
+    ``from app.services import x`` -> ``{"app.services.x"}``.
+    ``from app.services.x import Y`` -> ``{"app.services.x"}``.
+    ``import app.services.x`` -> ``{"app.services.x"}``.
+    """
+    found: set[str] = set()
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "app.services" or alias.name.startswith(
+                    "app.services."
+                ):
+                    found.add(alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            module = node.module
+            if module == "app.services":
+                for alias in node.names:
+                    found.add(f"app.services.{alias.name}")
+            elif module.startswith("app.services."):
+                found.add(module)
+    return found
+
+
+def _iter_adapter_modules():
+    for path in sorted(_ADAPTERS.rglob("*.py")):
+        yield path.relative_to(_BACKEND_APP).as_posix(), path.read_text()
+
+
+# Every adapter -> service import that exists today, as
+# (adapter path relative to app/, imported app.services module). Phase 1
+# relocates config/credentials into app/platform/ and empties this set.
+ADAPTER_SERVICE_IMPORT_ALLOWLIST: set[tuple[str, str]] = {
+    ("adapters/cellxgene/kubernetes.py", "app.services.credential_injector"),
+    ("adapters/cellxgene/kubernetes.py", "app.services.platform_config_service"),
+    ("adapters/compute/kubernetes.py", "app.services.credential_injector"),
+    ("adapters/compute/kubernetes.py", "app.services.platform_config_service"),
+    ("adapters/notebooks/kubernetes.py", "app.services.credential_injector"),
+    ("adapters/notebooks/kubernetes.py", "app.services.platform_config_service"),
+    ("adapters/notebooks/kubernetes.py", "app.services.session_output_service"),
+    ("adapters/notebooks/kubernetes.py", "app.services.session_persistence"),
+    ("adapters/storage/gcs.py", "app.services.gcs_storage"),
+    ("adapters/work_nodes/gce.py", "app.services.credential_injector"),
+    ("adapters/work_nodes/gce.py", "app.services.platform_config_service"),
+}
+
+
+def test_service_import_detector_matches_both_forms():
+    source = (
+        "from app.services import credential_injector\n"
+        "from app.services.gcs_storage import GcsStorageService\n"
+        "import app.services.foo\n"
+        "from app.platform.config import PlatformConfig\n"
+    )
+    assert _service_imports_in_source(source) == {
+        "app.services.credential_injector",
+        "app.services.gcs_storage",
+        "app.services.foo",
+    }
+
+
+def test_service_import_detector_ignores_non_service_imports():
+    source = "from app.platform import config\nfrom app.models import User\n"
+    assert _service_imports_in_source(source) == set()
+
+
+def test_no_adapter_imports_services():
+    violations: set[tuple[str, str]] = set()
+    for rel, source in _iter_adapter_modules():
+        for svc in _service_imports_in_source(source):
+            violations.add((rel, svc))
+
+    new_inversions = sorted(violations - ADAPTER_SERVICE_IMPORT_ALLOWLIST)
+    assert not new_inversions, (
+        "Adapter(s) import from app.services (layering inversion). Depend on "
+        "app.platform instead, or (pending Phase 1) add to "
+        "ADAPTER_SERVICE_IMPORT_ALLOWLIST:\n"
+        + "\n".join(f"  {rel}: imports {svc}" for rel, svc in new_inversions)
+    )
+
+
+def test_adapter_service_allowlist_has_no_stale_entries():
+    actual: set[tuple[str, str]] = set()
+    for rel, source in _iter_adapter_modules():
+        for svc in _service_imports_in_source(source):
+            actual.add((rel, svc))
+
+    stale = sorted(ADAPTER_SERVICE_IMPORT_ALLOWLIST - actual)
+    assert not stale, (
+        "Stale ADAPTER_SERVICE_IMPORT_ALLOWLIST entr(ies): the inversion is "
+        "gone but the allowlist still exempts it. Delete these entries:\n"
+        + "\n".join(f"  {rel}: {svc}" for rel, svc in stale)
+    )
+
+
+def test_adapter_service_allowlist_count_is_pinned():
+    """Pin the inversion count. Phase 1 drives it to 0."""
+    assert len(ADAPTER_SERVICE_IMPORT_ALLOWLIST) == 11
