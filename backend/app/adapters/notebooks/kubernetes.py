@@ -22,12 +22,56 @@ from kubernetes import client, config
 
 from app.adapters.base import NotebookProvider
 from app.adapters.capabilities import ProviderCapabilities
+from app.adapters.models import (
+    SessionInfo,
+    SessionStatus,
+    StoredObject,
+    TerminationResult,
+    to_service_state,
+)
 from app.services.session_persistence import (
     generate_sync_in_command,
     generate_sync_out_command,
 )
 
 logger = logging.getLogger("bioaf.adapters.notebooks.k8s")
+
+_SESSION_INFO_KEYS = {"session_id", "status", "access_url", "session_type", "created_at"}
+_SESSION_STATUS_KEYS = {"session_id", "status", "access_url", "session_type", "user_id"}
+
+
+def _session_info_from_dict(d: dict) -> SessionInfo:
+    return SessionInfo(
+        session_id=str(d.get("session_id", "")),
+        status=to_service_state(d.get("status")),
+        access_url=d.get("access_url"),
+        session_type=d.get("session_type"),
+        created_at=d.get("created_at"),
+        provider_details={k: v for k, v in d.items() if k not in _SESSION_INFO_KEYS},
+    )
+
+
+def _session_status_from_dict(d: dict) -> SessionStatus:
+    return SessionStatus(
+        session_id=str(d.get("session_id", "")),
+        status=to_service_state(d.get("status")),
+        access_url=d.get("access_url"),
+        session_type=d.get("session_type"),
+        user_id=d.get("user_id"),
+        provider_details={k: v for k, v in d.items() if k not in _SESSION_STATUS_KEYS},
+    )
+
+
+def _session_termination_from_dict(d: dict) -> TerminationResult:
+    return TerminationResult(
+        status=to_service_state(d.get("status")),
+        output_files=[
+            StoredObject(filename=o["filename"], storage_uri=o.get("gcs_uri", ""), size_bytes=o.get("size_bytes"))
+            for o in d.get("output_files", [])
+        ],
+        output_prefix=d.get("gcs_output_prefix", ""),
+        provider_details={"session_id": d.get("session_id"), "stopped_at": d.get("stopped_at")},
+    )
 
 
 def _get_gcp_token(gcp_config: dict) -> str:
@@ -87,25 +131,31 @@ class KubernetesNotebookProvider(NotebookProvider):
     def is_local(self) -> bool:
         return self._mode == "local"
 
-    async def launch_session(self, session_spec: dict) -> dict:
-        if self.is_local:
-            return self._local_launch_session(session_spec)
-        return await self._k8s_launch_session(session_spec)
+    async def launch_session(self, session_spec: dict) -> SessionInfo:
+        d = self._local_launch_session(session_spec) if self.is_local else await self._k8s_launch_session(
+            session_spec
+        )
+        return _session_info_from_dict(d)
 
-    async def terminate_session(self, session_id: str, **kwargs) -> dict:
-        if self.is_local:
-            return self._local_terminate_session(session_id)
-        return await self._k8s_terminate_session(session_id=session_id, **kwargs)
+    async def terminate_session(self, session_id: str, **kwargs) -> TerminationResult:
+        d = (
+            self._local_terminate_session(session_id)
+            if self.is_local
+            else await self._k8s_terminate_session(session_id=session_id, **kwargs)
+        )
+        return _session_termination_from_dict(d)
 
-    async def get_session_status(self, session_id: str, **kwargs) -> dict:
-        if self.is_local:
-            return self._local_get_session_status(session_id)
-        return await self._k8s_get_session_status(session_id=session_id, **kwargs)
+    async def get_session_status(self, session_id: str, **kwargs) -> SessionStatus:
+        d = (
+            self._local_get_session_status(session_id)
+            if self.is_local
+            else await self._k8s_get_session_status(session_id=session_id, **kwargs)
+        )
+        return _session_status_from_dict(d)
 
-    async def list_sessions(self, filters: dict | None = None) -> list[dict]:
-        if self.is_local:
-            return self._local_list_sessions(filters)
-        return await self._k8s_list_sessions(filters)
+    async def list_sessions(self, filters: dict | None = None) -> list[SessionStatus]:
+        items = self._local_list_sessions(filters) if self.is_local else await self._k8s_list_sessions(filters)
+        return [_session_status_from_dict(d) for d in items]
 
     async def get_connection_command(self, session_id: str) -> str:
         namespace = DEFAULT_NOTEBOOK_NAMESPACE

@@ -148,7 +148,7 @@ class TestNotebookAdapterLocalMode:
         assert isinstance(adapter, KubernetesNotebookProvider)
 
         result = await adapter.launch_session({"session_type": "jupyter"})
-        assert result["status"] == "running"
+        assert result.status == "running"
 
-        term = await adapter.terminate_session(result["session_id"])
-        assert term["status"] == "stopped"
+        term = await adapter.terminate_session(result.session_id)
+        assert term.status == "stopped"

@@ -26,57 +26,55 @@ class TestNotebookLaunchSession:
     @pytest.mark.asyncio
     async def test_launch_returns_session_id(self, adapter):
         result = await adapter.launch_session({"session_type": "jupyter", "resource_profile": "small"})
-        assert "session_id" in result
-        assert result["session_id"].startswith("local-")
+        assert result.session_id.startswith("local-")
 
     @pytest.mark.asyncio
     async def test_launch_returns_running_status(self, adapter):
         result = await adapter.launch_session({"session_type": "jupyter"})
-        assert result["status"] == "running"
+        assert result.status == "running"
 
     @pytest.mark.asyncio
     async def test_launch_returns_url(self, adapter):
         result = await adapter.launch_session({"session_type": "jupyter"})
-        assert "url" in result
-        assert "8888" in result["url"]
+        assert "8888" in result.provider_details["url"]
 
     @pytest.mark.asyncio
     async def test_launch_rstudio_url(self, adapter):
         result = await adapter.launch_session({"session_type": "rstudio"})
-        assert "8787" in result["url"]
+        assert "8787" in result.provider_details["url"]
 
     @pytest.mark.asyncio
     async def test_launch_stores_in_local_sessions(self, adapter):
         result = await adapter.launch_session({"session_type": "jupyter"})
-        assert result["session_id"] in _local_sessions
+        assert result.session_id in _local_sessions
 
 
 class TestNotebookTerminateSession:
     @pytest.mark.asyncio
     async def test_terminate_updates_status(self, adapter):
         launched = await adapter.launch_session({"session_type": "jupyter"})
-        result = await adapter.terminate_session(launched["session_id"])
-        assert result["status"] == "stopped"
-        assert "stopped_at" in result
+        result = await adapter.terminate_session(launched.session_id)
+        assert result.status == "stopped"
+        assert "stopped_at" in result.provider_details
 
     @pytest.mark.asyncio
     async def test_terminate_updates_local_store(self, adapter):
         launched = await adapter.launch_session({"session_type": "jupyter"})
-        await adapter.terminate_session(launched["session_id"])
-        assert _local_sessions[launched["session_id"]]["status"] == "stopped"
+        await adapter.terminate_session(launched.session_id)
+        assert _local_sessions[launched.session_id]["status"] == "stopped"
 
 
 class TestNotebookSessionStatus:
     @pytest.mark.asyncio
     async def test_status_of_running_session(self, adapter):
         launched = await adapter.launch_session({"session_type": "jupyter"})
-        result = await adapter.get_session_status(launched["session_id"])
-        assert result["status"] == "running"
+        result = await adapter.get_session_status(launched.session_id)
+        assert result.status == "running"
 
     @pytest.mark.asyncio
     async def test_status_of_unknown_session(self, adapter):
         result = await adapter.get_session_status("nonexistent-id")
-        assert result["status"] == "unknown"
+        assert result.status == "unknown"
 
 
 class TestNotebookListSessions:
@@ -98,7 +96,7 @@ class TestNotebookListSessions:
         await adapter.launch_session({"session_type": "rstudio"})
         result = await adapter.list_sessions({"session_type": "jupyter"})
         assert len(result) == 1
-        assert result[0]["session_type"] == "jupyter"
+        assert result[0].session_type == "jupyter"
 
 
 class TestNotebookConnectionCommand:

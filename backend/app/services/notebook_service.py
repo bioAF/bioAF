@@ -19,6 +19,7 @@ from app.services.event_types import SESSION_IDLE
 from app.services.quota_service import QuotaService
 from app.services.machine_types import machine_type_capacity
 from app.services.session_bucket import _bucket_filter
+from app.adapters.models import TerminationResult
 from app.adapters.registry import get_notebook_adapter
 
 logger = logging.getLogger("bioaf.notebooks")
@@ -213,13 +214,13 @@ class NotebookService:
 
             result = await notebook_adapter.launch_session(spec)
 
-            notebook_session.slurm_job_id = str(result.get("session_id", ""))
-            notebook_session.proxy_url = result.get("url")
-            notebook_session.k8s_pod_name = result.get("pod_name")
-            notebook_session.k8s_namespace = result.get("namespace")
-            notebook_session.access_url = result.get("access_url")
-            notebook_session.gcs_home_prefix = result.get("gcs_home_prefix")
-            adapter_status = result.get("status", "starting")
+            notebook_session.slurm_job_id = str(result.session_id or "")
+            notebook_session.proxy_url = result.provider_details.get("url")
+            notebook_session.k8s_pod_name = result.provider_details.get("pod_name")
+            notebook_session.k8s_namespace = result.provider_details.get("namespace")
+            notebook_session.access_url = result.access_url
+            notebook_session.gcs_home_prefix = result.provider_details.get("gcs_home_prefix")
+            adapter_status = result.status
             if adapter_status == "error":
                 notebook_session.status = "failed"
             elif adapter_status == "running":
@@ -299,7 +300,7 @@ class NotebookService:
                 working_bucket = val
 
         # Terminate via the notebook adapter
-        terminate_result: dict = {}
+        terminate_result = TerminationResult()
         if notebook_session.slurm_job_id or notebook_session.k8s_pod_name:
             try:
                 notebook_adapter = get_notebook_adapter()
@@ -315,7 +316,7 @@ class NotebookService:
                 logger.warning("Failed to terminate session %s: %s", notebook_session.slurm_job_id, e)
 
         # Register output files (ADR-040)
-        output_files = terminate_result.get("output_files", [])
+        output_files = terminate_result.output_files
         if output_files:
             try:
                 from app.services.session_output_service import SessionOutputService
@@ -327,12 +328,15 @@ class NotebookService:
                     project_id=notebook_session.project_id,
                     experiment_id=notebook_session.experiment_id,
                     user_id=notebook_session.user_id,
-                    gcs_files=output_files,
+                    gcs_files=[
+                        {"filename": o.filename, "gcs_uri": o.storage_uri, "size_bytes": o.size_bytes}
+                        for o in output_files
+                    ],
                 )
             except Exception as e:
                 logger.warning("Output registration failed for session %d: %s", session_id, e)
 
-        gcs_output_prefix = terminate_result.get("gcs_output_prefix", "")
+        gcs_output_prefix = terminate_result.output_prefix
         if gcs_output_prefix:
             notebook_session.gcs_output_prefix = gcs_output_prefix
 

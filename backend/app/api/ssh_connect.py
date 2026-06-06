@@ -165,10 +165,10 @@ async def list_running_pods(
     for s in sessions:
         pods.append(
             {
-                "name": s.get("session_id", "unknown"),
+                "name": s.session_id or "unknown",
                 "type": "notebook_session",
-                "status": s.get("status", "unknown"),
-                "namespace": s.get("namespace", "bioaf-interactive"),
+                "status": s.status,
+                "namespace": s.provider_details.get("namespace", "bioaf-interactive"),
             }
         )
 

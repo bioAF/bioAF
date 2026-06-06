@@ -9,6 +9,8 @@ from abc import ABC, abstractmethod
 from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.models import (
     CellxgeneInstance,
+    SessionInfo,
+    SessionStatus,
     StorageMetrics,
     StoredObject,
     TerminationResult,
@@ -123,19 +125,19 @@ class NotebookProvider(ABC):
         return ProviderCapabilities()
 
     @abstractmethod
-    async def launch_session(self, session_spec: dict) -> dict:
-        """Start a Jupyter/RStudio session. Returns session_id and URL."""
+    async def launch_session(self, session_spec: dict) -> SessionInfo:
+        """Start a Jupyter/RStudio session. Returns a SessionInfo."""
 
     @abstractmethod
-    async def terminate_session(self, session_id: str, **kwargs) -> dict:  # type: ignore[override]
-        """Stop a running session. Returns confirmation dict."""
+    async def terminate_session(self, session_id: str, **kwargs) -> TerminationResult:  # type: ignore[override]
+        """Stop a running session. Returns a TerminationResult."""
 
     @abstractmethod
-    async def get_session_status(self, session_id: str) -> dict:
+    async def get_session_status(self, session_id: str) -> SessionStatus:
         """Get session health and resource usage."""
 
     @abstractmethod
-    async def list_sessions(self, filters: dict | None = None) -> list[dict]:
+    async def list_sessions(self, filters: dict | None = None) -> list[SessionStatus]:
         """List active and recent sessions."""
 
     @abstractmethod
