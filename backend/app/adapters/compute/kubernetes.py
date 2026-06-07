@@ -21,8 +21,81 @@ from kubernetes import client, config
 
 from app.adapters.base import ComputeProvider
 from app.adapters.capabilities import ProviderCapabilities
+from app.adapters.models import (
+    ClusterMetrics,
+    ClusterStatus,
+    CostEstimate,
+    JobProgress,
+    JobStatus,
+    JobSubmitResult,
+    NodePoolMetrics,
+    NodePoolStatus,
+    ProcessInfo,
+    TerminationReason,
+    to_job_state,
+)
 
 logger = logging.getLogger("bioaf.adapters.compute.k8s")
+
+_JOB_STATUS_KEYS = {
+    "job_id",
+    "status",
+    "started_at",
+    "completed_at",
+    "created_at",
+    "exit_code",
+    "termination_reasons",
+}
+
+
+def _job_submit_result_from_dict(d: dict) -> JobSubmitResult:
+    ec = d.get("estimated_cost")
+    return JobSubmitResult(
+        job_id=d["job_id"],
+        status=to_job_state(d.get("status")),
+        estimated_cost=CostEstimate(**ec) if isinstance(ec, dict) else ec,
+        provider_details={k: v for k, v in d.items() if k not in {"job_id", "status", "estimated_cost"}},
+    )
+
+
+def _job_status_from_dict(d: dict) -> JobStatus:
+    return JobStatus(
+        job_id=str(d.get("job_id", "")),
+        status=to_job_state(d.get("status")),
+        started_at=d.get("started_at"),
+        completed_at=d.get("completed_at"),
+        created_at=d.get("created_at"),
+        exit_code=d.get("exit_code"),
+        termination_reasons=[TerminationReason(**r) for r in d.get("termination_reasons", [])],
+        provider_details={k: v for k, v in d.items() if k not in _JOB_STATUS_KEYS},
+    )
+
+
+def _cluster_status_from_dict(d: dict) -> ClusterStatus:
+    return ClusterStatus(
+        controller_status=d.get("controller_status"),
+        node_pools=[NodePoolStatus(**p) for p in d.get("node_pools", [])],
+        total_nodes=d.get("total_nodes", 0),
+        active_nodes=d.get("active_nodes", 0),
+        queue_depth=d.get("queue_depth", 0),
+        health=d.get("health"),
+    )
+
+
+def _cluster_metrics_from_dict(d: dict) -> ClusterMetrics:
+    return ClusterMetrics(
+        cpu_utilization_pct=d.get("cpu_utilization_pct"),
+        memory_utilization_pct=d.get("memory_utilization_pct"),
+        cost_burn_rate_hourly=d.get("cost_burn_rate_hourly"),
+        node_pools=[NodePoolMetrics(**p) for p in d.get("node_pools", [])],
+    )
+
+
+def _job_progress_from_dict(d: dict) -> JobProgress:
+    return JobProgress(
+        percent_complete=d.get("percent_complete", 0.0),
+        processes=[ProcessInfo(**p) for p in d.get("processes", [])],
+    )
 
 
 def _resolve_cfg(cfg: dict, key: str, env_key: str, default: str = "") -> str:
@@ -100,42 +173,36 @@ class KubernetesComputeProvider(ComputeProvider):
             job_report=True,
         )
 
-    async def submit_job(self, job_spec: dict) -> dict:
-        if self.is_local:
-            return await self._local_submit_job(job_spec)
-        return await self._k8s_submit_job(job_spec)
+    async def submit_job(self, job_spec: dict) -> JobSubmitResult:
+        d = await self._local_submit_job(job_spec) if self.is_local else await self._k8s_submit_job(job_spec)
+        return _job_submit_result_from_dict(d)
 
-    async def cancel_job(self, job_id: str) -> dict:
-        if self.is_local:
-            return await self._local_cancel_job(job_id)
-        return await self._k8s_cancel_job(job_id)
+    async def cancel_job(self, job_id: str) -> JobStatus:
+        d = await self._local_cancel_job(job_id) if self.is_local else await self._k8s_cancel_job(job_id)
+        return _job_status_from_dict(d)
 
-    async def get_job_status(self, job_id: str) -> dict:
-        if self.is_local:
-            return await self._local_get_job_status(job_id)
-        return await self._k8s_get_job_status(job_id)
+    async def get_job_status(self, job_id: str) -> JobStatus:
+        d = await self._local_get_job_status(job_id) if self.is_local else await self._k8s_get_job_status(job_id)
+        return _job_status_from_dict(d)
 
-    async def list_jobs(self, filters: dict | None = None) -> list[dict]:
-        if self.is_local:
-            return await self._local_list_jobs(filters)
-        return await self._k8s_list_jobs(filters)
+    async def list_jobs(self, filters: dict | None = None) -> list[JobStatus]:
+        items = await self._local_list_jobs(filters) if self.is_local else await self._k8s_list_jobs(filters)
+        return [_job_status_from_dict(d) for d in items]
 
     async def get_job_logs(self, job_id: str) -> str:
         if self.is_local:
             return f"[local mode] No logs available for job {job_id}"
         return await self._k8s_get_job_logs(job_id)
 
-    async def get_cluster_status(self) -> dict:
-        if self.is_local:
-            return self._local_cluster_status()
-        return await self._k8s_get_cluster_status()
+    async def get_cluster_status(self) -> ClusterStatus:
+        d = self._local_cluster_status() if self.is_local else await self._k8s_get_cluster_status()
+        return _cluster_status_from_dict(d)
 
-    async def get_cluster_metrics(self) -> dict:
-        if self.is_local:
-            return self._local_cluster_metrics()
-        return await self._k8s_get_cluster_metrics()
+    async def get_cluster_metrics(self) -> ClusterMetrics:
+        d = self._local_cluster_metrics() if self.is_local else await self._k8s_get_cluster_metrics()
+        return _cluster_metrics_from_dict(d)
 
-    async def get_cost_estimate(self, job_spec: dict) -> dict:
+    def _cost_estimate_dict(self, job_spec: dict) -> dict:
         # Return the hourly node rate for the pipeline pool so the UI
         # can show $/hr and let the user reason about total cost from
         # the run duration.  Trying to predict total cost is unreliable
@@ -156,6 +223,9 @@ class KubernetesComputeProvider(ComputeProvider):
             "basis": f"{machine_type} {'spot' if is_spot else 'on-demand'} $/hr",
         }
 
+    async def get_cost_estimate(self, job_spec: dict) -> CostEstimate:
+        return CostEstimate(**self._cost_estimate_dict(job_spec))
+
     async def get_job_report(self, job_id: str) -> str:
         """Read the Nextflow HTML report from GCS."""
         if self.is_local:
@@ -172,10 +242,9 @@ class KubernetesComputeProvider(ComputeProvider):
         cfg = self._cluster_config or {}
         return cfg.get("raw_bucket_name", "")
 
-    async def get_job_progress(self, job_id: str) -> dict:
-        if self.is_local:
-            return await self._local_get_job_progress(job_id)
-        return await self._k8s_get_job_progress(job_id)
+    async def get_job_progress(self, job_id: str) -> JobProgress:
+        d = await self._local_get_job_progress(job_id) if self.is_local else await self._k8s_get_job_progress(job_id)
+        return _job_progress_from_dict(d)
 
     async def get_connection_command(self, job_id: str) -> str:
         namespace = "bioaf-pipelines"
@@ -186,7 +255,7 @@ class KubernetesComputeProvider(ComputeProvider):
     async def _local_submit_job(self, job_spec: dict) -> dict:
         job_id = f"local-{uuid.uuid4().hex[:12]}"
         logger.info("Local mode: submitted job %s", job_id)
-        cost_estimate = await self.get_cost_estimate(job_spec)
+        cost_estimate = self._cost_estimate_dict(job_spec)
         return {
             "job_id": job_id,
             "status": "queued",
@@ -1104,7 +1173,7 @@ class KubernetesComputeProvider(ComputeProvider):
         batch_client = self._get_k8s_batch_client()
         batch_client.create_namespaced_job(namespace=namespace, body=job_manifest)
 
-        cost_estimate = await self.get_cost_estimate(job_spec)
+        cost_estimate = self._cost_estimate_dict(job_spec)
 
         return {
             "job_id": job_name,

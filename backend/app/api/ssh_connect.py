@@ -156,10 +156,10 @@ async def list_running_pods(
     for job in jobs:
         pods.append(
             {
-                "name": job.get("job_id", "unknown"),
+                "name": job.job_id or "unknown",
                 "type": "pipeline_job",
-                "status": job.get("status", "unknown"),
-                "namespace": job.get("namespace", "bioaf-pipelines"),
+                "status": job.status,
+                "namespace": job.provider_details.get("namespace", "bioaf-pipelines"),
             }
         )
     for s in sessions:

@@ -16,7 +16,7 @@ from app.models.pipeline_run import PipelineRun
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import PIPELINE_COMPLETED, PIPELINE_FAILED, PIPELINE_OOM
-from app.adapters.models import StoredObject
+from app.adapters.models import ProcessInfo, StoredObject
 from app.adapters.registry import get_compute_adapter, get_storage_adapter
 
 if TYPE_CHECKING:
@@ -192,8 +192,8 @@ class PipelineMonitorService:
             logger.warning("Failed to get K8s job status for run %d: %s", run.id, e)
             return
 
-        k8s_status = status_result.get("status", "")
-        pod_name = status_result.get("pod_name")
+        k8s_status = status_result.status
+        pod_name = status_result.provider_details.get("pod_name")
 
         # Update pod name if available
         if pod_name:
@@ -270,8 +270,8 @@ class PipelineMonitorService:
         """
         PREEMPTION_EXIT_CODES = {143, 137, 247}
 
-        termination_reasons = status_result.get("termination_reasons", [])
-        oom_detected = any(r.get("reason") == "OOMKilled" for r in termination_reasons)
+        termination_reasons = status_result.termination_reasons
+        oom_detected = any(r.reason == "OOMKilled" for r in termination_reasons)
 
         if oom_detected:
             machine_type = await PipelineMonitorService._get_pipeline_machine_type(session)
@@ -367,7 +367,7 @@ class PipelineMonitorService:
             logger.warning("Failed to get job progress for run %d: %s", run.id, e)
             return
 
-        adapter_processes = progress.get("processes", [])
+        adapter_processes = progress.processes
         if not adapter_processes:
             return
 
@@ -382,9 +382,9 @@ class PipelineMonitorService:
         # `attempt` is the authoritative final status.
         # task_id may be missing on older adapter outputs; fall back to
         # name so we don't crash, but log it so it can be diagnosed.
-        attempts_by_task: dict[str, list[dict]] = {}
+        attempts_by_task: dict[str, list[ProcessInfo]] = {}
         for proc_data in adapter_processes:
-            key = proc_data.get("task_id") or proc_data.get("name", "")
+            key = proc_data.task_id or proc_data.name or ""
             attempts_by_task.setdefault(key, []).append(proc_data)
 
         completed = 0
@@ -394,9 +394,9 @@ class PipelineMonitorService:
         retries: list[dict] = []
 
         for key, attempts in attempts_by_task.items():
-            final = max(attempts, key=lambda a: a.get("attempt", 1))
-            final_status = final.get("status", "")
-            name = final.get("name", "") or key
+            final = max(attempts, key=lambda a: a.attempt or 1)
+            final_status = final.status or ""
+            name = final.name or key
 
             if final_status == "completed":
                 completed += 1
@@ -407,11 +407,11 @@ class PipelineMonitorService:
             elif final_status == "cached":
                 cached += 1
 
-            max_attempt = max((a.get("attempt", 1) for a in attempts), default=1)
+            max_attempt = max((a.attempt or 1 for a in attempts), default=1)
             if max_attempt > 1 or len(attempts) > 1:
                 retries.append({"name": name, "attempts": max(max_attempt, len(attempts))})
 
-            task_id = final.get("task_id") or ""
+            task_id = final.task_id or ""
             if task_id and task_id in existing_by_task:
                 proc = existing_by_task[task_id]
             elif not task_id and name in existing_by_name:
@@ -426,18 +426,14 @@ class PipelineMonitorService:
 
             # Persist the final attempt's status + metrics.
             proc.status = final_status
-            exit_val = final.get("exit_code")
-            if exit_val is not None:
-                proc.exit_code = exit_val
-            cpu_val = final.get("cpu")
-            if cpu_val is not None:
-                proc.cpu_usage = cpu_val
-            mem_val = final.get("memory_gb")
-            if mem_val is not None:
-                proc.memory_peak_gb = mem_val
-            dur_val = final.get("duration_s")
-            if dur_val is not None:
-                proc.duration_seconds = dur_val
+            if final.exit_code is not None:
+                proc.exit_code = final.exit_code
+            if final.cpu is not None:
+                proc.cpu_usage = final.cpu
+            if final.memory_gb is not None:
+                proc.memory_peak_gb = final.memory_gb
+            if final.duration_s is not None:
+                proc.duration_seconds = final.duration_s
 
         total = len(attempts_by_task)
         pct = round((completed + cached) / total * 100, 1) if total > 0 else 0.0

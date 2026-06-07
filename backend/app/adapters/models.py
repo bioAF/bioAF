@@ -125,6 +125,7 @@ class ProcessInfo(BaseModel):
     duration_s: int | None = None
     task_id: str | None = None
     attempt: int | None = None
+    exit_code: int | None = None
 
 
 class JobProgress(BaseModel):

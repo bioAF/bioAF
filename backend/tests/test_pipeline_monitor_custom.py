@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
+
+from app.adapters.compute.kubernetes import _job_status_from_dict
 import pytest_asyncio
 from sqlalchemy import select
 
@@ -170,10 +172,10 @@ async def test_custom_completion_sets_simple_progress(session, admin_user, env_v
     run, _ = await _make_custom_run(session, admin_user, env_version)
 
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {
+    mock_compute.get_job_status.return_value = _job_status_from_dict({
         "status": "completed",
         "pod_name": "pod-xyz",
-    }
+    })
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = []
 
@@ -204,11 +206,11 @@ async def test_custom_failure_sets_simple_progress(session, admin_user, env_vers
     run, _ = await _make_custom_run(session, admin_user, env_version)
 
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {
+    mock_compute.get_job_status.return_value = _job_status_from_dict({
         "status": "failed",
         "pod_name": "pod-xyz",
         "termination_reasons": [],
-    }
+    })
     mock_compute.get_job_logs.return_value = "boom"
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = []
@@ -235,10 +237,10 @@ async def test_custom_completion_skips_nextflow_metadata(session, admin_user, en
     run, _ = await _make_custom_run(session, admin_user, env_version)
 
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {
+    mock_compute.get_job_status.return_value = _job_status_from_dict({
         "status": "completed",
         "pod_name": "pod-xyz",
-    }
+    })
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = []
 
@@ -262,7 +264,7 @@ async def test_custom_completion_detects_html_report(session, admin_user, env_ve
     exp_id = run.experiment_id
 
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {"status": "completed", "pod_name": "pod"}
+    mock_compute.get_job_status.return_value = _job_status_from_dict({"status": "completed", "pod_name": "pod"})
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = [
         StoredObject(
@@ -297,7 +299,7 @@ async def test_custom_completion_detects_md_report_when_no_html(session, admin_u
     exp_id = run.experiment_id
 
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {"status": "completed", "pod_name": "pod"}
+    mock_compute.get_job_status.return_value = _job_status_from_dict({"status": "completed", "pod_name": "pod"})
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = [
         StoredObject(
@@ -326,7 +328,7 @@ async def test_custom_completion_no_report_no_metadata(session, admin_user, env_
     exp_id = run.experiment_id
 
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {"status": "completed", "pod_name": "pod"}
+    mock_compute.get_job_status.return_value = _job_status_from_dict({"status": "completed", "pod_name": "pod"})
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = [
         StoredObject(
@@ -355,7 +357,7 @@ async def test_custom_completion_records_custom_log_path(session, admin_user, en
     exp_id = run.experiment_id
 
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {"status": "completed", "pod_name": "pod"}
+    mock_compute.get_job_status.return_value = _job_status_from_dict({"status": "completed", "pod_name": "pod"})
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = [
         StoredObject(
@@ -383,7 +385,7 @@ async def test_custom_completion_does_not_create_process_records(session, admin_
     run, _ = await _make_custom_run(session, admin_user, env_version)
 
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {"status": "completed", "pod_name": "pod"}
+    mock_compute.get_job_status.return_value = _job_status_from_dict({"status": "completed", "pod_name": "pod"})
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = []
 

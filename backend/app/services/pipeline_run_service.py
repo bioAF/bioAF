@@ -176,13 +176,12 @@ class PipelineRunService:
 
             run.status = "running"
             run.started_at = datetime.now(timezone.utc)
-            run.slurm_job_id = job_result.get("job_id", "")
-            run.k8s_job_name = job_result.get("job_id", "")
-            run.k8s_namespace = job_result.get("namespace", "")
+            run.slurm_job_id = job_result.job_id
+            run.k8s_job_name = job_result.job_id
+            run.k8s_namespace = job_result.provider_details.get("namespace", "")
 
-            estimated_cost = job_result.get("estimated_cost", {})
-            if estimated_cost:
-                run.cost_estimate = estimated_cost.get("estimated_cost_usd")
+            if job_result.estimated_cost:
+                run.cost_estimate = job_result.estimated_cost.estimated_cost_usd
 
             import asyncio
 

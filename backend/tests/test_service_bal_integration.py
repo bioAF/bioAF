@@ -112,24 +112,24 @@ class TestComputeAdapterLocalMode:
         assert isinstance(adapter, KubernetesComputeProvider)
 
         result = await adapter.submit_job({"pipeline": "test", "input_files": ["a.fq"]})
-        assert result["status"] == "queued"
-        job_id = result["job_id"]
+        assert result.status == "queued"
+        job_id = result.job_id
 
         cancel_result = await adapter.cancel_job(job_id)
-        assert cancel_result["status"] == "cancelled"
+        assert cancel_result.status == "cancelled"
 
     @pytest.mark.asyncio
     async def test_adapter_cluster_status(self):
         adapter = registry.get_compute_adapter()
         status = await adapter.get_cluster_status()
-        assert status["controller_status"] == "running"
-        assert len(status["node_pools"]) == 3
+        assert status.controller_status == "running"
+        assert len(status.node_pools) == 3
 
     @pytest.mark.asyncio
     async def test_adapter_cluster_metrics(self):
         adapter = registry.get_compute_adapter()
         metrics = await adapter.get_cluster_metrics()
-        assert "cost_burn_rate_hourly" in metrics
+        assert metrics.cost_burn_rate_hourly is not None
 
 
 class TestStorageAdapterLocalMode:

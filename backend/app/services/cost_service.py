@@ -245,9 +245,9 @@ class CostService:
         node_cost_daily = Decimal("0")
         compute_cost_daily = Decimal("0")
 
-        for pool in cluster_metrics.get("node_pools", []):
-            hourly = Decimal(str(pool.get("cost_rate_hourly", 0)))
-            if pool.get("name", "") == "bioaf-platform":
+        for pool in cluster_metrics.node_pools:
+            hourly = Decimal(str(pool.cost_rate_hourly or 0))
+            if pool.name == "bioaf-platform":
                 node_cost_daily += hourly * 24
             else:
                 compute_cost_daily += hourly * 24

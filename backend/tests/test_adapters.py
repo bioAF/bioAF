@@ -207,10 +207,8 @@ class TestGetJobProgress:
         provider = KubernetesComputeProvider()
         result = await provider.get_job_progress("local-abc123")
 
-        assert "percent_complete" in result
-        assert "processes" in result
-        assert isinstance(result["percent_complete"], (int, float))
-        assert isinstance(result["processes"], list)
+        assert isinstance(result.percent_complete, (int, float))
+        assert isinstance(result.processes, list)
 
     @pytest.mark.asyncio
     async def test_k8s_local_progress_has_process_fields(self):
@@ -220,9 +218,9 @@ class TestGetJobProgress:
         provider = KubernetesComputeProvider()
         result = await provider.get_job_progress("local-abc123")
 
-        for proc in result["processes"]:
-            assert "name" in proc
-            assert "status" in proc
+        for proc in result.processes:
+            assert proc.name
+            assert proc.status
 
     @pytest.mark.asyncio
     async def test_abc_requires_get_job_progress(self):

@@ -9,6 +9,12 @@ from abc import ABC, abstractmethod
 from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.models import (
     CellxgeneInstance,
+    ClusterMetrics,
+    ClusterStatus,
+    CostEstimate,
+    JobProgress,
+    JobStatus,
+    JobSubmitResult,
     SessionInfo,
     SessionStatus,
     StorageMetrics,
@@ -32,19 +38,19 @@ class ComputeProvider(ABC):
         return ProviderCapabilities()
 
     @abstractmethod
-    async def submit_job(self, job_spec: dict) -> dict:
-        """Submit a pipeline job. Returns dict with job_id and estimated_cost."""
+    async def submit_job(self, job_spec: dict) -> JobSubmitResult:
+        """Submit a pipeline job. Returns a JobSubmitResult."""
 
     @abstractmethod
-    async def cancel_job(self, job_id: str) -> dict:
-        """Cancel a running or queued job. Returns confirmation dict."""
+    async def cancel_job(self, job_id: str) -> JobStatus:
+        """Cancel a running or queued job. Returns the resulting JobStatus."""
 
     @abstractmethod
-    async def get_job_status(self, job_id: str) -> dict:
+    async def get_job_status(self, job_id: str) -> JobStatus:
         """Get normalized job status: queued, running, completed, failed, cancelled."""
 
     @abstractmethod
-    async def list_jobs(self, filters: dict | None = None) -> list[dict]:
+    async def list_jobs(self, filters: dict | None = None) -> list[JobStatus]:
         """List jobs with optional filtering."""
 
     @abstractmethod
@@ -52,25 +58,20 @@ class ComputeProvider(ABC):
         """Retrieve stdout/stderr for a job."""
 
     @abstractmethod
-    async def get_cluster_status(self) -> dict:
+    async def get_cluster_status(self) -> ClusterStatus:
         """Get cluster status: node count, capacity, queue depth, health."""
 
     @abstractmethod
-    async def get_cluster_metrics(self) -> dict:
+    async def get_cluster_metrics(self) -> ClusterMetrics:
         """Get cluster metrics: CPU, memory, cost rate."""
 
     @abstractmethod
-    async def get_cost_estimate(self, job_spec: dict) -> dict:
-        """Estimate cost for a job spec with confidence interval."""
+    async def get_cost_estimate(self, job_spec: dict) -> CostEstimate:
+        """Estimate cost for a job spec."""
 
     @abstractmethod
-    async def get_job_progress(self, job_id: str) -> dict:
-        """Get normalized progress for a running job.
-
-        Returns dict with percent_complete (float) and processes (list of dicts
-        with name, status, cpu, memory_gb, duration_s). Each adapter handles
-        engine-specific parsing internally.
-        """
+    async def get_job_progress(self, job_id: str) -> JobProgress:
+        """Get normalized progress for a running job (percent_complete + processes)."""
 
     @abstractmethod
     async def get_connection_command(self, job_id: str) -> str:
