@@ -16,7 +16,7 @@ from app.models.pipeline_run import PipelineRun
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import PIPELINE_COMPLETED, PIPELINE_FAILED, PIPELINE_OOM
-from app.adapters.models import ProcessInfo, StoredObject
+from app.adapters.models import ProcessInfo, StorageObjectNotFound, StoredObject
 from app.adapters.registry import get_compute_adapter, get_storage_adapter
 
 if TYPE_CHECKING:
@@ -802,25 +802,20 @@ def _find_custom_log(collected: list[StoredObject], log_file_path: str) -> str |
 
 
 async def _read_gcs_text(gcs_uri: str) -> str | None:
-    """Download a GCS object as text. Returns None if the object is missing or unreadable."""
+    """Download a storage object as text via the storage adapter.
+
+    Returns None if the object is missing or unreadable. Routing through the
+    adapter offloads the blocking SDK call to a worker thread (fixing the
+    event-loop stall the inline ``download_as_text`` previously caused).
+    """
     if not gcs_uri.startswith("gs://"):
         return None
     try:
-        from google.cloud import storage as gcs_storage
-    except ImportError:
+        return await get_storage_adapter().read_text(gcs_uri)
+    except StorageObjectNotFound:
         return None
-    try:
-        bucket_name, _, blob_path = gcs_uri[len("gs://") :].partition("/")
-        if not bucket_name or not blob_path:
-            return None
-        client = gcs_storage.Client()
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob(blob_path)
-        if not blob.exists():
-            return None
-        return blob.download_as_text()
     except Exception as e:
-        logger.warning("Failed to read GCS object %s: %s", gcs_uri, e)
+        logger.warning("Failed to read storage object %s: %s", gcs_uri, e)
         return None
 
 

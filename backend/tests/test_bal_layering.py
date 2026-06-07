@@ -156,7 +156,6 @@ SDK_IMPORT_ALLOWLIST: set[tuple[str, str]] = {
     ("services/literature/agent_review_payload.py", "google.cloud.storage"),
     ("services/literature/upload_service.py", "google.cloud.storage"),
     ("services/notebook_image_service.py", "google.cloud.storage"),
-    ("services/pipeline_monitor_service.py", "google.cloud.storage"),
     ("services/pipeline_output_service.py", "google.cloud.storage"),
     ("services/plot_archive_service.py", "google.cloud.storage"),
     ("services/qc/templates/scrnaseq.py", "google.cloud.storage"),
@@ -232,7 +231,7 @@ def test_sdk_allowlist_count_is_pinned():
 
     Decrement this as phases drain leaks; it must reach 0 by end of Phase 9.
     """
-    assert len(SDK_IMPORT_ALLOWLIST) == 46
+    assert len(SDK_IMPORT_ALLOWLIST) == 45
 
 
 # --- Tree scan: no adapter imports services (the layering inversion) ---------
