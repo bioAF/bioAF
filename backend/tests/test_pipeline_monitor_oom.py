@@ -38,6 +38,8 @@ async def k8s_failed_oom_run(session, admin_user):
         pipeline_version="2.7.1",
         status="running",
         k8s_job_name="bioaf-pipeline-oom-1",
+        compute_job_ref="bioaf-pipeline-oom-1",
+
         k8s_namespace="bioaf-pipelines",
         started_at=datetime.now(timezone.utc),
     )

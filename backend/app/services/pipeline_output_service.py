@@ -104,7 +104,7 @@ class PipelineOutputService:
         adapter (Phase 5) so no caller names a bucket; a backend without a RAW
         store configured yields no metadata.
         """
-        if not run.k8s_job_name:
+        if not run.compute_job_ref:
             return []
 
         from app.adapters.models import StorageStore
@@ -113,10 +113,10 @@ class PipelineOutputService:
         adapter = get_storage_adapter()
         try:
             report_uri = await adapter.resolve_uri(
-                StorageStore.RAW, f"nextflow-reports/{run.k8s_job_name}/report.html"
+                StorageStore.RAW, f"nextflow-reports/{run.compute_job_ref}/report.html"
             )
             trace_uri = await adapter.resolve_uri(
-                StorageStore.RAW, f"nextflow-traces/{run.k8s_job_name}/trace.tsv"
+                StorageStore.RAW, f"nextflow-traces/{run.compute_job_ref}/trace.tsv"
             )
         except ValueError:
             # No RAW store configured for this install.

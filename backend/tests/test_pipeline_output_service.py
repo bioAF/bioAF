@@ -56,6 +56,8 @@ async def pipeline_run(session, admin_user, experiment, samples):
         pipeline_version="2.7.1",
         status="completed",
         k8s_job_name="nf-scrnaseq-abc123",
+        compute_job_ref="nf-scrnaseq-abc123",
+
     )
     session.add(run)
     await session.flush()
@@ -205,6 +207,8 @@ async def project_scoped_run(session, admin_user, project):
         pipeline_version="1",
         status="completed",
         k8s_job_name="custom-projscope-xyz",
+        compute_job_ref="custom-projscope-xyz",
+
     )
     session.add(run)
     await session.flush()
@@ -401,6 +405,8 @@ async def test_register_nextflow_metadata_skips_without_k8s_job(session, admin_u
         pipeline_name="nf-core/scrnaseq",
         status="completed",
         k8s_job_name=None,
+        compute_job_ref=None,
+
     )
     session.add(run)
     await session.flush()

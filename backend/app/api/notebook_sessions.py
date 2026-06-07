@@ -121,15 +121,15 @@ async def _sync_session_from_k8s(ns, session: AsyncSession) -> None:
     (which resolves pod phase and the LoadBalancer URL) and maps it back onto
     the DB record. No backend privates or K8s service URLs leak in here.
     """
-    if not ns.k8s_pod_name:
+    if not ns.compute_job_ref:
         return
 
     try:
         adapter = get_notebook_adapter()
         status = await adapter.get_session_status(
             session_id=ns.id,
-            pod_name=ns.k8s_pod_name,
-            namespace=ns.k8s_namespace or "bioaf-notebooks",
+            pod_name=ns.compute_job_ref,
+            namespace=ns.provider_namespace or "bioaf-notebooks",
             session_type=ns.session_type,
         )
     except Exception:
@@ -351,13 +351,13 @@ async def sync_session(
         raise HTTPException(400, "Session is not running")
 
     # Attempt session storage sync (best-effort), via the notebook adapter.
-    if notebook_session.k8s_pod_name and notebook_session.gcs_home_prefix:
+    if notebook_session.compute_job_ref and notebook_session.gcs_home_prefix:
         try:
             adapter = get_notebook_adapter()
             await adapter.sync_session_storage(
                 session_id=notebook_session.id,
-                pod_name=notebook_session.k8s_pod_name,
-                namespace=notebook_session.k8s_namespace or "bioaf-notebooks",
+                pod_name=notebook_session.compute_job_ref,
+                namespace=notebook_session.provider_namespace or "bioaf-notebooks",
                 gcs_prefix=notebook_session.gcs_home_prefix,
             )
         except Exception:

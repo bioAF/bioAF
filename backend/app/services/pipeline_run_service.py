@@ -405,7 +405,7 @@ class PipelineRunService:
         old_status = run.status
 
         # Persist logs before killing the pod -- once deleted they're gone
-        job_id = run.k8s_job_name or run.slurm_job_id
+        job_id = run.compute_job_ref or run.slurm_job_id
         if job_id:
             try:
                 compute_adapter = get_compute_adapter()

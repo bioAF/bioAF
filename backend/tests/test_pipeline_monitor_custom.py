@@ -104,6 +104,8 @@ async def _make_custom_run(
         pipeline_version="1",
         status="running",
         k8s_job_name=f"bioaf-custom-{pipeline.id}",
+        compute_job_ref=f"bioaf-custom-{pipeline.id}",
+
         k8s_namespace="bioaf-pipelines",
         custom_pipeline_version_id=version.id,
         started_at=datetime.now(timezone.utc),

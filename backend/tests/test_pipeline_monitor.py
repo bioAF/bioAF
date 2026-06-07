@@ -157,6 +157,8 @@ async def test_get_run_report_strips_favicon_for_nextflow(session, admin_user):
         pipeline_version="2.7.1",
         status="completed",
         k8s_job_name="bioaf-pipeline-fav-1",
+        compute_job_ref="bioaf-pipeline-fav-1",
+
     )
     session.add(run)
     await session.flush()
@@ -243,6 +245,8 @@ async def k8s_running_run(session, admin_user):
         pipeline_version="1.0.0",
         status="running",
         k8s_job_name="bioaf-pipeline-99",
+        compute_job_ref="bioaf-pipeline-99",
+
         k8s_namespace="bioaf-pipelines",
         started_at=datetime.now(timezone.utc),
     )

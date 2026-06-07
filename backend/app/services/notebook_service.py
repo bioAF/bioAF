@@ -311,13 +311,13 @@ class NotebookService:
 
         # Terminate via the notebook adapter
         terminate_result = TerminationResult()
-        if notebook_session.slurm_job_id or notebook_session.k8s_pod_name:
+        if notebook_session.slurm_job_id or notebook_session.compute_job_ref:
             try:
                 notebook_adapter = get_notebook_adapter()
                 terminate_result = await notebook_adapter.terminate_session(
                     notebook_session.slurm_job_id or "",
-                    pod_name=notebook_session.k8s_pod_name or "",
-                    namespace=notebook_session.k8s_namespace or "bioaf-notebooks",
+                    pod_name=notebook_session.compute_job_ref or "",
+                    namespace=notebook_session.provider_namespace or "bioaf-notebooks",
                     gcs_home_prefix=notebook_session.gcs_home_prefix or "",
                     working_bucket=working_bucket,
                     session_type=notebook_session.session_type,
@@ -486,13 +486,13 @@ class NotebookService:
                         )
                         ns.status = "stopped"
                         ns.stopped_at = now
-                        if ns.slurm_job_id or ns.k8s_pod_name:
+                        if ns.slurm_job_id or ns.compute_job_ref:
                             try:
                                 notebook_adapter = get_notebook_adapter()
                                 await notebook_adapter.terminate_session(
                                     ns.slurm_job_id or "",
-                                    pod_name=ns.k8s_pod_name or "",
-                                    namespace=ns.k8s_namespace or "bioaf-notebooks",
+                                    pod_name=ns.compute_job_ref or "",
+                                    namespace=ns.provider_namespace or "bioaf-notebooks",
                                     gcs_home_prefix=ns.gcs_home_prefix or "",
                                 )
                             except Exception as e:

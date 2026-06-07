@@ -67,6 +67,13 @@ class ComputeSession(Base):
     environment_version = relationship("EnvironmentVersion")
     accessed_files = relationship("NotebookSessionFile", foreign_keys="NotebookSessionFile.session_id")
 
+    @property
+    def provider_namespace(self) -> str | None:
+        """Backend namespace from provider_metadata (BAL Phase 4), or None.
+
+        Callers apply their own default (e.g. ``or "bioaf-notebooks"``)."""
+        return (self.provider_metadata or {}).get("namespace")
+
 
 # Backwards-compatible alias for existing imports
 NotebookSession = ComputeSession

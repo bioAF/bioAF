@@ -108,10 +108,10 @@ class PipelineMonitorService:
         For K8s jobs (k8s_job_name set), uses direct K8s Job status polling.
         For Nextflow runs, falls back to trace file parsing.
         """
-        job_id = run.k8s_job_name or run.slurm_job_id or str(run.id)
+        job_id = run.compute_job_ref or run.slurm_job_id or str(run.id)
 
         # K8s direct status polling
-        if run.k8s_job_name:
+        if run.compute_job_ref:
             await PipelineMonitorService._sync_k8s_run(session, run, job_id)
             return
 
@@ -479,11 +479,11 @@ class PipelineMonitorService:
                     logger.warning("Could not advance experiment status: %s", e)
 
         # Persist pipeline logs to GCS while the pod is still alive
-        k8s_job_name = run.k8s_job_name
-        if k8s_job_name:
+        job_ref = run.compute_job_ref
+        if job_ref:
             try:
                 compute_adapter = get_compute_adapter()
-                await compute_adapter.persist_job_logs(k8s_job_name)
+                await compute_adapter.persist_job_logs(job_ref)
             except Exception as e:
                 logger.warning("Failed to persist logs for run %d: %s", run.id, e)
 
@@ -547,7 +547,7 @@ class PipelineMonitorService:
 
         # Register Nextflow report and trace from the RAW store (Nextflow only).
         # register_nextflow_metadata resolves the URIs via the storage adapter.
-        if run.k8s_job_name and not is_custom:
+        if run.compute_job_ref and not is_custom:
             try:
                 from app.services.pipeline_output_service import PipelineOutputService
 
@@ -640,14 +640,14 @@ class PipelineMonitorService:
         run_result = await session.execute(select(PipelineRun).where(PipelineRun.id == run_id))
         run = run_result.scalar_one_or_none()
 
-        if run is not None and run.k8s_job_name:
+        if run is not None and run.compute_job_ref:
             if run.custom_pipeline_version_id is not None:
                 return await PipelineMonitorService._get_custom_run_logs(run, force_pod_logs=force_pod_logs)
 
             stdout = ""
             try:
                 compute_adapter = get_compute_adapter()
-                stdout = await compute_adapter.get_job_logs(run.k8s_job_name)
+                stdout = await compute_adapter.get_job_logs(run.compute_job_ref)
             except Exception as e:
                 logger.warning("Failed to read K8s logs for run %d: %s", run_id, e)
             return {"stdout": stdout, "stderr": ""}
@@ -688,18 +688,18 @@ class PipelineMonitorService:
         log_file_path = version.log_file_path if version else None
 
         if not log_file_path:
-            return {"stdout": await _safe_pod_logs(run.k8s_job_name, run.id), "stderr": ""}
+            return {"stdout": await _safe_pod_logs(run.compute_job_ref, run.id), "stderr": ""}
 
         if force_pod_logs:
             return {
-                "stdout": await _safe_pod_logs(run.k8s_job_name, run.id),
+                "stdout": await _safe_pod_logs(run.compute_job_ref, run.id),
                 "stderr": "",
                 "log_source": "pod",
             }
 
         if run.status in ("running", "pending"):
             return {
-                "stdout": await _safe_pod_logs(run.k8s_job_name, run.id),
+                "stdout": await _safe_pod_logs(run.compute_job_ref, run.id),
                 "stderr": "",
                 "log_source": "pod",
                 "custom_log_pending": True,
@@ -717,7 +717,7 @@ class PipelineMonitorService:
                 }
 
         return {
-            "stdout": await _safe_pod_logs(run.k8s_job_name, run.id),
+            "stdout": await _safe_pod_logs(run.compute_job_ref, run.id),
             "stderr": "",
             "log_source": "pod",
             "custom_log_missing": True,
@@ -734,7 +734,7 @@ class PipelineMonitorService:
         run_result = await session.execute(select(PipelineRun).where(PipelineRun.id == run_id))
         run = run_result.scalar_one_or_none()
 
-        if run is None or not run.k8s_job_name:
+        if run is None or not run.compute_job_ref:
             return ""
 
         if run.custom_pipeline_version_id is not None:
@@ -746,7 +746,7 @@ class PipelineMonitorService:
 
         try:
             compute_adapter = get_compute_adapter()
-            report = await compute_adapter.get_job_report(run.k8s_job_name)
+            report = await compute_adapter.get_job_report(run.compute_job_ref)
             return _prepare_report_for_iframe(report)
         except Exception as e:
             logger.warning("Failed to read report for run %d: %s", run_id, e)

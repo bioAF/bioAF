@@ -18,8 +18,8 @@ from app.api.notebook_sessions import _sync_session_from_k8s
 def _ns(**overrides):
     base = dict(
         id=42,
-        k8s_pod_name="bioaf-notebook-42",
-        k8s_namespace="bioaf-notebooks",
+        compute_job_ref="bioaf-notebook-42",
+        provider_namespace="bioaf-notebooks",
         session_type="jupyter",
         status="starting",
         started_at=None,
@@ -83,7 +83,7 @@ async def test_passes_identity_to_adapter():
 
 @pytest.mark.asyncio
 async def test_no_pod_name_is_noop():
-    ns = _ns(k8s_pod_name=None)
+    ns = _ns(compute_job_ref=None)
     session = MagicMock()
     session.flush = AsyncMock()
     with patch("app.api.notebook_sessions.get_notebook_adapter") as get_adapter:
