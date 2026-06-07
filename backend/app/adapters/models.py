@@ -172,6 +172,49 @@ class ClusterMetrics(BaseModel):
 # --- Storage -----------------------------------------------------------------
 
 
+class StorageStore(str, Enum):
+    """The logical object stores the application writes to.
+
+    Callers name a *purpose* (where does this object belong) and the adapter
+    resolves it to a concrete backend location (a GCS bucket today, an S3
+    bucket or NFS export later). Callers never name a bucket. The members map
+    one-to-one onto the platform_config ``*_bucket_name`` keys.
+    """
+
+    INGEST = "ingest"
+    RAW = "raw"
+    WORKING = "working"
+    RESULTS = "results"
+    REFERENCES = "references"
+    LITERATURE = "literature"
+    CONFIG_BACKUPS = "config_backups"
+    BACKUPS = "backups"
+
+
+class StorageObjectNotFound(Exception):
+    """Raised when a read/download/metadata op targets an object that is absent.
+
+    Normalizes the backend's not-found error (GCS ``NotFound``, a missing NFS
+    path) so callers never catch ``google.api_core`` exceptions directly.
+    """
+
+    def __init__(self, uri: str, message: str | None = None) -> None:
+        self.uri = uri
+        super().__init__(message or f"Storage object not found: {uri}")
+
+
+class ObjectMetadata(BaseModel):
+    """Metadata for a single stored object (size/checksum without downloading)."""
+
+    uri: str
+    size_bytes: int | None = None
+    md5_hash: str | None = None
+    content_type: str | None = None
+    storage_class: str | None = None
+    updated: str | None = None
+    provider_details: dict = Field(default_factory=dict)
+
+
 class StoredObject(BaseModel):
     """A single output object recorded after collect_outputs."""
 
