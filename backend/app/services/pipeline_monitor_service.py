@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import csv
-import io
 import logging
 import re
 from datetime import datetime, timezone
@@ -18,6 +16,7 @@ from app.services.event_bus import event_bus
 from app.services.event_types import PIPELINE_COMPLETED, PIPELINE_FAILED, PIPELINE_OOM
 from app.adapters.models import ProcessInfo, StorageObjectNotFound, StoredObject
 from app.adapters.registry import get_compute_adapter, get_storage_adapter
+from app.pipeline import nextflow_trace
 
 if TYPE_CHECKING:
     from app.adapters.base import ComputeProvider
@@ -620,22 +619,15 @@ class PipelineMonitorService:
 
     @staticmethod
     def parse_trace_tsv(content: str) -> list[dict]:
-        """Parse a Nextflow trace.tsv file into a list of dicts."""
-        reader = csv.DictReader(io.StringIO(content), delimiter="\t")
-        return [dict(row) for row in reader]
+        """Parse a Nextflow trace.tsv file into a list of raw row dicts.
+
+        Delegates to the shared ``app.pipeline.nextflow_trace`` parser.
+        """
+        return nextflow_trace.parse_trace_rows(content)
 
     @staticmethod
     def _map_nf_status(nf_status: str) -> str:
-        mapping = {
-            "COMPLETED": "completed",
-            "RUNNING": "running",
-            "FAILED": "failed",
-            "CACHED": "cached",
-            "SUBMITTED": "pending",
-            "PENDING": "pending",
-            "ABORTED": "failed",
-        }
-        return mapping.get(nf_status.upper(), nf_status.lower())
+        return nextflow_trace.map_nf_status(nf_status)
 
     @staticmethod
     async def get_run_logs(
@@ -831,64 +823,10 @@ async def _safe_pod_logs(k8s_job_name: str | None, run_id: int) -> str:
         return ""
 
 
-def _safe_int(val) -> int | None:
-    if val is None or val == "" or val == "-":
-        return None
-    try:
-        return int(val)
-    except (ValueError, TypeError):
-        return None
-
-
-def _safe_float(val) -> float | None:
-    if val is None or val == "" or val == "-":
-        return None
-    try:
-        return float(str(val).replace("%", ""))
-    except (ValueError, TypeError):
-        return None
-
-
-def _parse_memory_gb(val) -> float | None:
-    """Parse memory values like '1.2 GB' or '500 MB'."""
-    if not val or val == "-":
-        return None
-    try:
-        val = str(val).strip()
-        if "GB" in val.upper():
-            return float(val.upper().replace("GB", "").strip())
-        if "MB" in val.upper():
-            return round(float(val.upper().replace("MB", "").strip()) / 1024, 2)
-        if "KB" in val.upper():
-            return round(float(val.upper().replace("KB", "").strip()) / (1024 * 1024), 4)
-        return float(val)
-    except (ValueError, TypeError):
-        return None
-
-
-def _parse_duration(val) -> int | None:
-    """Parse duration strings like '5m 30s' or '1h 2m 3s' into seconds."""
-    if not val or val == "-":
-        return None
-    try:
-        val = str(val).strip()
-        # Try direct milliseconds first (Nextflow trace uses ms)
-        if val.endswith("ms"):
-            return int(float(val[:-2]) / 1000)
-        if val.endswith("s") and "m" not in val and "h" not in val:
-            return int(float(val[:-1]))
-        # Parse h/m/s format
-        seconds = 0
-        if "h" in val:
-            parts = val.split("h")
-            seconds += int(parts[0].strip()) * 3600
-            val = parts[1].strip()
-        if "m" in val:
-            parts = val.split("m")
-            seconds += int(parts[0].strip()) * 60
-            val = parts[1].strip()
-        if val.endswith("s"):
-            seconds += int(float(val[:-1]))
-        return seconds if seconds > 0 else None
-    except (ValueError, TypeError):
-        return None
+# Trace-field normalizers. These are thin aliases of the shared
+# app.pipeline.nextflow_trace helpers (the single source of truth); kept as
+# module-level names because the monitor and its tests import them directly.
+_safe_int = nextflow_trace.safe_int
+_safe_float = nextflow_trace.safe_float
+_parse_memory_gb = nextflow_trace.parse_memory_gb
+_parse_duration = nextflow_trace.parse_duration_s

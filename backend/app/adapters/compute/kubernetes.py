@@ -34,6 +34,7 @@ from app.adapters.models import (
     TerminationReason,
     to_job_state,
 )
+from app.pipeline import nextflow_trace
 
 logger = logging.getLogger("bioaf.adapters.compute.k8s")
 
@@ -1518,98 +1519,12 @@ class KubernetesComputeProvider(ComputeProvider):
 
     @staticmethod
     def _parse_trace_to_progress(content: str) -> dict:
-        """Parse Nextflow trace TSV content into normalized progress structure."""
-        import csv
-        import io
+        """Parse Nextflow trace TSV content into normalized progress structure.
 
-        reader = csv.DictReader(io.StringIO(content), delimiter="\t")
-        rows = list(reader)
-
-        if not rows:
-            return {"percent_complete": 0.0, "processes": []}
-
-        status_map = {
-            "COMPLETED": "completed",
-            "RUNNING": "running",
-            "FAILED": "failed",
-            "CACHED": "cached",
-            "SUBMITTED": "pending",
-            "PENDING": "pending",
-            "ABORTED": "failed",
-        }
-
-        processes = []
-        completed_count = 0
-        for row in rows:
-            nf_status = row.get("status", "").upper()
-            mapped_status = status_map.get(nf_status, nf_status.lower())
-            if mapped_status in ("completed", "cached"):
-                completed_count += 1
-
-            cpu_raw = row.get("%cpu", "0")
-            try:
-                cpu = float(str(cpu_raw).replace("%", "")) if cpu_raw and cpu_raw != "-" else 0.0
-            except (ValueError, TypeError):
-                cpu = 0.0
-
-            mem_raw = row.get("peak_rss", "")
-            memory_gb = 0.0
-            if mem_raw and mem_raw != "-":
-                try:
-                    val = str(mem_raw).strip()
-                    if "GB" in val.upper():
-                        memory_gb = float(val.upper().replace("GB", "").strip())
-                    elif "MB" in val.upper():
-                        memory_gb = round(float(val.upper().replace("MB", "").strip()) / 1024, 2)
-                except (ValueError, TypeError):
-                    pass
-
-            dur_raw = row.get("realtime", "")
-            duration_s = 0
-            if dur_raw and dur_raw != "-":
-                try:
-                    dur_str = str(dur_raw).strip()
-                    if dur_str.endswith("ms"):
-                        duration_s = int(float(dur_str[:-2]) / 1000)
-                    elif dur_str.endswith("s") and "m" not in dur_str and "h" not in dur_str:
-                        duration_s = int(float(dur_str[:-1]))
-                    else:
-                        secs = 0
-                        if "h" in dur_str:
-                            parts = dur_str.split("h")
-                            secs += int(parts[0].strip()) * 3600
-                            dur_str = parts[1].strip()
-                        if "m" in dur_str:
-                            parts = dur_str.split("m")
-                            secs += int(parts[0].strip()) * 60
-                            dur_str = parts[1].strip()
-                        if dur_str.endswith("s"):
-                            secs += int(float(dur_str[:-1]))
-                        duration_s = secs
-                except (ValueError, TypeError):
-                    pass
-
-            try:
-                attempt = int(row.get("attempt", "1") or "1")
-            except (ValueError, TypeError):
-                attempt = 1
-
-            processes.append(
-                {
-                    "task_id": row.get("task_id", "") or "",
-                    "attempt": attempt,
-                    "name": row.get("name", "") or row.get("process", ""),
-                    "status": mapped_status,
-                    "cpu": cpu,
-                    "memory_gb": memory_gb,
-                    "duration_s": duration_s,
-                }
-            )
-
-        total = len(processes)
-        pct = round(completed_count / total * 100, 1) if total > 0 else 0.0
-
-        return {"percent_complete": pct, "processes": processes}
+        Delegates to the shared ``app.pipeline.nextflow_trace`` parser (the
+        single source of truth shared with the pipeline monitor).
+        """
+        return nextflow_trace.parse_trace_to_progress(content)
 
     @staticmethod
     def _extract_pod_termination_info(pod) -> str:
