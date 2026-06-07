@@ -488,6 +488,12 @@ class GcsStorageProvider(StorageProvider):
                     storage_uri=f"gs://{bucket}/{blob.name}",
                     size_bytes=blob.size,
                     md5_hash=blob.md5_hash,
+                    # Listing-time metadata callers may need (e.g. age-based
+                    # cleanup). Backend-specific, so kept in provider_details.
+                    provider_details={
+                        "time_created": blob.time_created,
+                        "updated": blob.updated,
+                    },
                 )
             )
         return results

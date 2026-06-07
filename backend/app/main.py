@@ -87,7 +87,8 @@ async def lifespan(app: FastAPI):
     # Attach Cloud Logging using the app's configured GCP credentials
     try:
         from app.database import async_session_factory as cl_session_factory
-        from app.services.gcs_storage import GcsStorageService
+        from app.platform import credential_injector
+        from app.platform.platform_config_service import PlatformConfigService
 
         async with cl_session_factory() as cl_session:
             result = await cl_session.execute(text("SELECT value FROM platform_config WHERE key = 'gcp_project_id'"))
@@ -95,7 +96,19 @@ async def lifespan(app: FastAPI):
             gcp_project_id = row[0] if row and row[0] and row[0] != "null" else ""
 
             if gcp_project_id:
-                credentials = await GcsStorageService.get_credentials(cl_session)
+                cred_config = await PlatformConfigService.get_many(
+                    cl_session,
+                    [
+                        "gcp_credential_source",
+                        "gcp_service_account_key",
+                        "gcp_service_account_email",
+                        "gcp_bootstrap_sa_email",
+                    ],
+                )
+                try:
+                    credentials = credential_injector.load_gcp_credentials(cred_config)
+                except Exception:
+                    credentials = None
                 attach_cloud_logging(gcp_project_id, credentials, debug=settings.debug)
     except Exception as e:
         logger.info("Cloud Logging not configured: %s", e)
@@ -796,8 +809,8 @@ async def _export_cleanup_loop():
 
     from sqlalchemy import text as sa_text
 
+    from app.adapters.registry import get_storage_adapter
     from app.database import async_session_factory
-    from app.services.gcs_storage import GcsStorageService
 
     while True:
         try:
@@ -811,16 +824,13 @@ async def _export_cleanup_loop():
                     continue
 
                 bucket_name = row[0]
-                credentials = await GcsStorageService.get_credentials(session)
-
-                from google.cloud import storage as gcs
-
-                client = gcs.Client(credentials=credentials)
+                adapter = get_storage_adapter()
                 cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
                 deleted = 0
-                for blob in client.list_blobs(bucket_name, prefix="exports/"):
-                    if blob.time_created and blob.time_created < cutoff:
-                        blob.delete()
+                for obj in await adapter.list_objects(f"gs://{bucket_name}/exports/"):
+                    created = obj.provider_details.get("time_created")
+                    if created and created < cutoff:
+                        await adapter.delete(obj.storage_uri)
                         deleted += 1
                 if deleted:
                     logger.info("Export cleanup: deleted %d expired ZIP(s) from gs://%s/exports/", deleted, bucket_name)
