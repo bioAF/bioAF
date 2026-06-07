@@ -253,6 +253,46 @@ class TestGcsModeOps:
         blob.delete.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_delete_with_generation(self, gcs_adapter):
+        """A specific object generation can be deleted (noncurrent-version wipe)."""
+        blob = MagicMock()
+        client = MagicMock()
+        bucket = MagicMock()
+        client.bucket.return_value = bucket
+        bucket.blob.return_value = blob
+        with patch.object(gcs_adapter, "_get_gcs_client", return_value=client):
+            await gcs_adapter.delete("gs://b/k", generation=42)
+        bucket.blob.assert_called_once_with("k", generation=42)
+        blob.delete.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_list_objects_includes_generation_with_versions(self, gcs_adapter):
+        b1 = MagicMock()
+        b1.name = "k"
+        b1.size = 1
+        b1.md5_hash = "h"
+        b1.generation = 99
+        client = MagicMock()
+        bucket = MagicMock()
+        client.bucket.return_value = bucket
+        bucket.list_blobs.return_value = [b1]
+        with patch.object(gcs_adapter, "_get_gcs_client", return_value=client):
+            objs = await gcs_adapter.list_objects("gs://b/", include_versions=True)
+        assert objs[0].provider_details.get("generation") == 99
+        assert bucket.list_blobs.call_args.kwargs.get("versions") is True
+
+    @pytest.mark.asyncio
+    async def test_get_bucket_info_versioning(self, gcs_adapter):
+        bucket = MagicMock()
+        bucket.versioning_enabled = True
+        client = MagicMock()
+        client.get_bucket.return_value = bucket
+        with patch.object(gcs_adapter, "_get_gcs_client", return_value=client):
+            info = await gcs_adapter.get_bucket_info("gs://b/some/key")
+        assert info["versioning_enabled"] is True
+        client.get_bucket.assert_called_once_with("b")
+
+    @pytest.mark.asyncio
     async def test_exists(self, gcs_adapter):
         blob = MagicMock()
         blob.exists.return_value = True

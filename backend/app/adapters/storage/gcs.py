@@ -300,14 +300,14 @@ class GcsStorageProvider(StorageProvider):
         creds = await self._get_credentials()
         await asyncio.to_thread(self._gcs_download_to_filename, uri, local_path, creds)
 
-    async def delete(self, uri: str) -> None:
+    async def delete(self, uri: str, *, generation: int | None = None) -> None:
         if self.is_local:
             path = self._local_path(uri)
             if os.path.exists(path):
                 await asyncio.to_thread(os.remove, path)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._gcs_delete, uri, creds)
+        await asyncio.to_thread(self._gcs_delete, uri, generation, creds)
 
     async def exists(self, uri: str) -> bool:
         if self.is_local:
@@ -355,6 +355,13 @@ class GcsStorageProvider(StorageProvider):
             return ObjectMetadata(uri=uri, size_bytes=size)
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._gcs_get_object_metadata, uri, creds)
+
+    async def get_bucket_info(self, uri: str) -> dict:
+        if self.is_local:
+            # The local filesystem store has no object versioning.
+            return {"versioning_enabled": False}
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._gcs_get_bucket_info, uri, creds)
 
     async def generate_signed_url(
         self,
@@ -466,11 +473,12 @@ class GcsStorageProvider(StorageProvider):
         except NotFound as e:
             raise StorageObjectNotFound(uri) from e
 
-    def _gcs_delete(self, uri: str, creds) -> None:
+    def _gcs_delete(self, uri: str, generation, creds) -> None:
         from google.api_core.exceptions import NotFound
 
         bucket, key = self._parse_uri(uri)
-        blob = self._get_gcs_client(creds).bucket(bucket).blob(key)
+        gcs_bucket = self._get_gcs_client(creds).bucket(bucket)
+        blob = gcs_bucket.blob(key, generation=generation) if generation is not None else gcs_bucket.blob(key)
         try:
             blob.delete()
         except NotFound:
@@ -502,10 +510,12 @@ class GcsStorageProvider(StorageProvider):
                     size_bytes=blob.size,
                     md5_hash=blob.md5_hash,
                     # Listing-time metadata callers may need (e.g. age-based
-                    # cleanup). Backend-specific, so kept in provider_details.
+                    # cleanup, versioned wipe). Backend-specific, so kept in
+                    # provider_details.
                     provider_details={
                         "time_created": blob.time_created,
                         "updated": blob.updated,
+                        "generation": blob.generation,
                     },
                 )
             )
@@ -558,6 +568,11 @@ class GcsStorageProvider(StorageProvider):
         if content_type is not None:
             kwargs["content_type"] = content_type
         return blob.generate_signed_url(**kwargs)
+
+    def _gcs_get_bucket_info(self, uri: str, creds) -> dict:
+        bucket_name, _ = self._parse_uri(uri)
+        bucket = self._get_gcs_client(creds).get_bucket(bucket_name)
+        return {"versioning_enabled": bool(bucket.versioning_enabled)}
 
     def _gcs_create_resumable_upload_url(self, uri: str, content_type, size_bytes, origin, creds) -> str:
         bucket, key = self._parse_uri(uri)

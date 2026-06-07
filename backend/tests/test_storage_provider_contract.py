@@ -36,6 +36,7 @@ OBJECT_STORE_METHODS = {
     "copy": ("gs://b/k", "gs://b/k2"),
     "move": ("gs://b/k", "gs://b/k2"),
     "get_object_metadata": ("gs://b/k",),
+    "get_bucket_info": ("gs://b/k",),
     "generate_signed_url": ("gs://b/k",),
     "create_resumable_upload_url": ("gs://b/k",),
     "resolve_uri": (StorageStore.INGEST, "some/key"),

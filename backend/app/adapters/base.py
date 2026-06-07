@@ -180,8 +180,12 @@ class StorageProvider(ABC):
         """Download an object to a local file path."""
         raise NotImplementedError
 
-    async def delete(self, uri: str) -> None:
-        """Delete an object. Idempotent: a missing object is not an error."""
+    async def delete(self, uri: str, *, generation: int | None = None) -> None:
+        """Delete an object. Idempotent: a missing object is not an error.
+
+        ``generation`` targets a specific object version (for wiping noncurrent
+        generations from a versioned store); None deletes the live object.
+        """
         raise NotImplementedError
 
     async def exists(self, uri: str) -> bool:
@@ -215,6 +219,15 @@ class StorageProvider(ABC):
         """Return size/checksum/content-type for an object without downloading it.
 
         Raises StorageObjectNotFound if the object is absent.
+        """
+        raise NotImplementedError
+
+    async def get_bucket_info(self, uri: str) -> dict:
+        """Return coarse container-level info (e.g. ``{"versioning_enabled": bool}``).
+
+        Backend-specific and intentionally coarse; backends without the concept
+        (NFS) raise or report None. Detailed bucket enumeration/lifecycle is a
+        Tier-2 concern (Phase 9), not part of this method.
         """
         raise NotImplementedError
 
