@@ -105,7 +105,7 @@ class PipelineMonitorService:
     async def _sync_single_run(session: AsyncSession, run: PipelineRun) -> None:
         """Sync a single run's status from the compute adapter.
 
-        For K8s jobs (k8s_job_name set), uses direct K8s Job status polling.
+        For backend-scheduled jobs (compute_job_ref set), uses direct status polling.
         For Nextflow runs, falls back to trace file parsing.
         """
         job_id = run.compute_job_ref or run.slurm_job_id or str(run.id)
@@ -811,13 +811,13 @@ async def _read_gcs_text(gcs_uri: str) -> str | None:
         return None
 
 
-async def _safe_pod_logs(k8s_job_name: str | None, run_id: int) -> str:
-    """Fetch pod logs via the compute adapter, returning empty string on error."""
-    if not k8s_job_name:
+async def _safe_pod_logs(job_ref: str | None, run_id: int) -> str:
+    """Fetch job logs via the compute adapter, returning empty string on error."""
+    if not job_ref:
         return ""
     try:
         compute_adapter = get_compute_adapter()
-        return await compute_adapter.get_job_logs(k8s_job_name)
+        return await compute_adapter.get_job_logs(job_ref)
     except Exception as e:
         logger.warning("Failed to read K8s logs for run %d: %s", run_id, e)
         return ""
