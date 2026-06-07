@@ -43,7 +43,7 @@ async def _insert_file(session, *, file_id: int, org_id: int, filename: str = "i
     """Insert a minimal file row and return its id."""
     await session.execute(
         text(
-            "INSERT INTO files (id, organization_id, filename, gcs_uri, file_type, source_type) "
+            "INSERT INTO files (id, organization_id, filename, storage_uri, file_type, source_type) "
             "VALUES (:id, :org, :fn, :uri, 'fastq', 'upload')"
         ),
         {"id": file_id, "org": org_id, "fn": filename, "uri": f"gs://bucket/{filename}"},

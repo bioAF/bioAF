@@ -324,7 +324,7 @@ async def test_finalize_import_writes_files_and_flips_dataset_to_active(session,
     rows = (
         await session.execute(
             text(
-                "SELECT filename, gcs_uri, size_bytes, md5_checksum FROM reference_dataset_files WHERE reference_dataset_id = :id"
+                "SELECT filename, storage_uri, size_bytes, md5_checksum FROM reference_dataset_files WHERE reference_dataset_id = :id"
             ),
             {"id": dataset_id},
         )
@@ -392,7 +392,7 @@ async def test_recover_finalize_lists_gcs_and_finalizes_a_stuck_dataset(session,
 
     rows = (
         await session.execute(
-            text("SELECT filename, gcs_uri, size_bytes FROM reference_dataset_files WHERE reference_dataset_id = :id"),
+            text("SELECT filename, storage_uri, size_bytes FROM reference_dataset_files WHERE reference_dataset_id = :id"),
             {"id": dataset_id},
         )
     ).fetchall()

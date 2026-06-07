@@ -71,7 +71,7 @@ async def _seed_experiment_with_data(session, org_id: int, owner_id: int) -> dic
     # Create raw file (result file inserted after pipeline run due to FK)
     await session.execute(
         text(
-            "INSERT INTO files (id, organization_id, filename, gcs_uri, file_type, size_bytes, "
+            "INSERT INTO files (id, organization_id, filename, storage_uri, file_type, size_bytes, "
             "md5_checksum, sha256_checksum, experiment_id, source_type, uploader_user_id, artifact_type) "
             "VALUES (1, :org, 'sample1.fastq.gz', 'gs://bucket/sample1.fastq.gz', 'fastq', 1048576, "
             "'abc123', 'def456', 1, 'upload', :owner, NULL)"
@@ -106,7 +106,7 @@ async def _seed_experiment_with_data(session, org_id: int, owner_id: int) -> dic
     # Create result file (references the pipeline run above)
     await session.execute(
         text(
-            "INSERT INTO files (id, organization_id, filename, gcs_uri, file_type, size_bytes, "
+            "INSERT INTO files (id, organization_id, filename, storage_uri, file_type, size_bytes, "
             "md5_checksum, sha256_checksum, experiment_id, source_type, uploader_user_id, "
             "source_pipeline_run_id, artifact_type) "
             "VALUES (2, :org, 'results.h5ad', 'gs://bucket/results.h5ad', 'h5ad', 52428800, "
@@ -402,7 +402,7 @@ class TestIntegration:
         # Raw input file
         await session.execute(
             text(
-                "INSERT INTO files (id, organization_id, filename, gcs_uri, file_type, size_bytes, source_type) "
+                "INSERT INTO files (id, organization_id, filename, storage_uri, file_type, size_bytes, source_type) "
                 "VALUES (800, :org, 'raw.fastq.gz', 'gs://bucket/raw.fastq.gz', 'fastq', 1000, 'upload')"
             ),
             {"org": org_id},

@@ -168,7 +168,7 @@ async def reconcile_stuck_files(
                 "SELECT id, experiment_id, file_type FROM files "
                 "WHERE organization_id = :org_id "
                 "AND experiment_id IS NOT NULL "
-                "AND gcs_uri LIKE :pattern"
+                "AND storage_uri LIKE :pattern"
             ).bindparams(org_id=org_id, pattern=f"gs://{ingest_bucket}/%")
         )
     ).fetchall()
@@ -200,7 +200,7 @@ async def reconcile_stuck_files(
                 "SELECT COUNT(*) FROM files "
                 "WHERE organization_id = :org_id "
                 "AND experiment_id IS NOT NULL "
-                "AND gcs_uri LIKE :pattern"
+                "AND storage_uri LIKE :pattern"
             ).bindparams(org_id=org_id, pattern=f"gs://{raw_bucket}/%")
         )
     ).scalar_one()

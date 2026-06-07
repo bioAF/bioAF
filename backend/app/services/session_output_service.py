@@ -111,7 +111,7 @@ class SessionOutputService:
     ) -> str:
         """Copy session outputs from working to results bucket, then delete from working.
 
-        Updates File.gcs_uri for all output files to point to the results bucket.
+        Updates File.storage_uri for all output files to point to the results bucket.
         Returns the new GCS output prefix in the results bucket.
         """
         from sqlalchemy import text as sa_text
@@ -142,8 +142,8 @@ class SessionOutputService:
             new_uri_prefix = f"gs://{results_bucket}/{dst_prefix}"
             await db.execute(
                 sa_text(
-                    "UPDATE files SET gcs_uri = REPLACE(gcs_uri, :old, :new) "
-                    "WHERE source_notebook_session_id = :sid AND gcs_uri LIKE :pattern"
+                    "UPDATE files SET storage_uri = REPLACE(storage_uri, :old, :new) "
+                    "WHERE source_notebook_session_id = :sid AND storage_uri LIKE :pattern"
                 ),
                 {
                     "old": old_uri_prefix,

@@ -87,7 +87,7 @@ async def test_migration_adds_experiment_id_to_files(session):
     await session.execute(
         text("""
         INSERT INTO files
-            (organization_id, gcs_uri, filename, file_type, experiment_id)
+            (organization_id, storage_uri, filename, file_type, experiment_id)
         VALUES
             (:org_id, 'gs://test/file.fastq.gz', 'file.fastq.gz', 'fastq', :exp_id)
         """).bindparams(org_id=org.id, exp_id=exp.id)
@@ -95,7 +95,7 @@ async def test_migration_adds_experiment_id_to_files(session):
     await session.commit()
 
     row = (
-        await session.execute(text("SELECT experiment_id FROM files WHERE gcs_uri = 'gs://test/file.fastq.gz'"))
+        await session.execute(text("SELECT experiment_id FROM files WHERE storage_uri = 'gs://test/file.fastq.gz'"))
     ).fetchone()
 
     assert row is not None
@@ -105,7 +105,7 @@ async def test_migration_adds_experiment_id_to_files(session):
     await session.execute(
         text("""
         INSERT INTO files
-            (organization_id, gcs_uri, filename, file_type, experiment_id)
+            (organization_id, storage_uri, filename, file_type, experiment_id)
         VALUES
             (:org_id, 'gs://test/unlinked.fastq.gz', 'unlinked.fastq.gz', 'fastq', NULL)
         """).bindparams(org_id=org.id)
@@ -113,7 +113,7 @@ async def test_migration_adds_experiment_id_to_files(session):
     await session.commit()
 
     row2 = (
-        await session.execute(text("SELECT experiment_id FROM files WHERE gcs_uri = 'gs://test/unlinked.fastq.gz'"))
+        await session.execute(text("SELECT experiment_id FROM files WHERE storage_uri = 'gs://test/unlinked.fastq.gz'"))
     ).fetchone()
     assert row2 is not None
     assert row2[0] is None

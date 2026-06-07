@@ -2,7 +2,7 @@ from datetime import datetime
 
 from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, String, Table, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, synonym
 
 from app.database import Base
 
@@ -57,7 +57,9 @@ class ReferenceDatasetFile(Base):
         Integer, ForeignKey("reference_datasets.id", ondelete="CASCADE"), nullable=False
     )
     filename: Mapped[str] = mapped_column(String(500), nullable=False)
-    gcs_uri: Mapped[str] = mapped_column(Text, nullable=False)
+    # BAL Phase 4 rename: gcs_uri -> storage_uri (gcs_uri kept as a synonym).
+    storage_uri: Mapped[str] = mapped_column(Text, nullable=False)
+    gcs_uri = synonym("storage_uri")
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     md5_checksum: Mapped[str | None] = mapped_column(String(32), nullable=True)
     file_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
