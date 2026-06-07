@@ -37,6 +37,15 @@ class ComputeProvider(ABC):
         """
         return ProviderCapabilities()
 
+    async def load_cluster_config(self) -> None:
+        """Optionally pre-load backend config at startup. No-op by default.
+
+        The registry calls this once on every adapter at startup so adapters
+        that need eager config (e.g. the K8s adapters reading GKE cluster
+        details) get it without the registry sniffing for the method.
+        """
+        return None
+
     @abstractmethod
     async def submit_job(self, job_spec: dict) -> JobSubmitResult:
         """Submit a pipeline job. Returns a JobSubmitResult."""
@@ -125,6 +134,10 @@ class NotebookProvider(ABC):
         """Declare what this backend can do. Default: nothing (see ComputeProvider)."""
         return ProviderCapabilities()
 
+    async def load_cluster_config(self) -> None:
+        """Optionally pre-load backend config at startup. No-op by default."""
+        return None
+
     @abstractmethod
     async def launch_session(self, session_spec: dict) -> SessionInfo:
         """Start a Jupyter/RStudio session. Returns a SessionInfo."""
@@ -176,6 +189,10 @@ class CellxgeneProvider(ABC):
     def capabilities(self) -> ProviderCapabilities:
         """Declare what this backend can do. Default: nothing (see ComputeProvider)."""
         return ProviderCapabilities()
+
+    async def load_cluster_config(self) -> None:
+        """Optionally pre-load backend config at startup. No-op by default."""
+        return None
 
     @abstractmethod
     async def deploy(self, publication_id: int, gcs_uri: str, dataset_name: str) -> CellxgeneInstance:

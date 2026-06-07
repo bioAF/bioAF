@@ -78,13 +78,12 @@ async def initialize_adapters(session: AsyncSession, session_factory=None) -> No
     _work_node_adapter = GCEWorkNodeProvider(session_factory=session_factory)
 
     # Eagerly load cluster config so adapters never need to run async DB
-    # queries from a sync context (which breaks asyncpg).
-    if hasattr(_compute_adapter, "load_cluster_config"):
-        await _compute_adapter.load_cluster_config()
-    if hasattr(_notebook_adapter, "load_cluster_config"):
-        await _notebook_adapter.load_cluster_config()
-    if hasattr(_cellxgene_adapter, "load_cluster_config"):
-        await _cellxgene_adapter.load_cluster_config()
+    # queries from a sync context (which breaks asyncpg). load_cluster_config
+    # is a base no-op, so this calls it unconditionally rather than sniffing
+    # for the method with hasattr.
+    await _compute_adapter.load_cluster_config()
+    await _notebook_adapter.load_cluster_config()
+    await _cellxgene_adapter.load_cluster_config()
     await _work_node_adapter.load_gcp_config()
 
     _initialized = True

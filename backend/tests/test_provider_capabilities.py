@@ -168,3 +168,23 @@ def test_registry_aggregates_active_capabilities(_reset_registry):
     }
     assert caps.messaging is False
     assert caps.billing is False
+
+
+def test_registry_has_no_hasattr_probe():
+    """The registry must resolve optional adapter methods via the typed contract
+    (a base no-op load_cluster_config), not by sniffing with hasattr."""
+    from pathlib import Path
+
+    registry_src = (Path(__file__).resolve().parent.parent / "app" / "adapters" / "registry.py").read_text()
+    assert "hasattr(" not in registry_src
+
+
+def test_load_cluster_config_is_a_noop_on_stubs(_reset_registry):
+    """Stub adapters inherit the base no-op so the registry can call it
+    unconditionally. Running full initialization must not raise."""
+    from app.adapters import registry
+
+    registry.initialize_adapters_sync("slurm")
+    # SLURM/NFS stubs have no load_cluster_config override; the base no-op
+    # means get_active_capabilities and method dispatch still work.
+    assert registry.get_compute_adapter() is not None
