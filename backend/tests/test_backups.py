@@ -400,18 +400,12 @@ async def test_restore_start_rejects_unsafe_filename(session, bad_filename):
 
     backup_service._restore_state["active"] = False
 
-    with (
-        patch("app.services.backup_service._get_backups_bucket", new_callable=AsyncMock) as mock_bucket,
-        patch("app.services.backup_service._get_gcs_credentials", new_callable=AsyncMock) as mock_creds,
-        patch("app.services.backup_service._get_gcs_client") as mock_client,
-    ):
+    with patch("app.services.backup_service._get_backups_bucket", new_callable=AsyncMock) as mock_bucket:
         result = await RestoreService.start(session, org_id=1, filename=bad_filename)
 
     assert result["status"] == "error"
     assert "filename" in result["message"].lower()
     mock_bucket.assert_not_called()
-    mock_creds.assert_not_called()
-    mock_client.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -475,34 +469,43 @@ def test_build_restore_url_preserves_password_containing_bioaf():
 # --- GCS backup status tests ---
 
 
-def _make_mock_blob(name: str, size: int = 1024):
-    blob = MagicMock()
-    blob.name = name
-    blob.size = size
-    return blob
+def _mock_status_adapter(object_names: list[str], *, size: int = 1024, versioning: bool = True):
+    """Build a storage-adapter mock for BackupService._gcs_status (Phase 3).
+
+    ``object_names`` are bucket-relative keys (e.g. "postgres/pgdump-...dump");
+    they are returned for every list_objects prefix and the service's regex
+    filters per tier, matching the old list_blobs behavior.
+    """
+    from app.adapters.models import StoredObject
+
+    objs = [
+        StoredObject(filename=name.split("/")[-1], storage_uri=f"gs://test-bucket/{name}", size_bytes=size)
+        for name in object_names
+    ]
+    adapter = AsyncMock()
+    adapter.list_objects.return_value = objs
+    adapter.get_bucket_info.return_value = {"versioning_enabled": versioning}
+    return adapter
 
 
 @pytest.mark.asyncio
 async def test_gcs_status_with_recent_postgres_backup():
-    """With a recent pg_dump blob in GCS, postgres tier shows healthy."""
+    """With a recent pg_dump object in storage, postgres tier shows healthy."""
     from app.services.backup_service import BackupService
 
     now = datetime.now(timezone.utc)
     recent_name = f"postgres/pgdump-{now.strftime('%Y%m%d-%H%M%S')}.dump"
-    mock_blob = _make_mock_blob(recent_name, size=50000)
+    adapter = _mock_status_adapter([recent_name], size=50000)
 
-    mock_client = MagicMock()
-    mock_client.list_blobs.return_value = [mock_blob]
-    mock_bucket = MagicMock()
-    mock_bucket.versioning_enabled = True
-    mock_client.get_bucket.return_value = mock_bucket
-
-    with patch("app.services.backup_service.settings") as mock_settings:
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=adapter),
+        patch("app.services.backup_service.settings") as mock_settings,
+    ):
         mock_settings.backup_postgres_interval_hours = 24
         mock_settings.backup_postgres_retention_days = 14
         mock_settings.backup_config_retention_days = 30
 
-        tiers = BackupService._gcs_status(mock_client, "test-bucket")
+        tiers = await BackupService._gcs_status("test-bucket")
 
     postgres = next(t for t in tiers if t["tier"] == "postgres")
     assert postgres["status"] == "healthy"
@@ -512,21 +515,20 @@ async def test_gcs_status_with_recent_postgres_backup():
 
 @pytest.mark.asyncio
 async def test_gcs_status_no_backups():
-    """With no blobs, postgres tier shows unknown."""
+    """With no objects, postgres tier shows unknown."""
     from app.services.backup_service import BackupService
 
-    mock_client = MagicMock()
-    mock_client.list_blobs.return_value = []
-    mock_bucket = MagicMock()
-    mock_bucket.versioning_enabled = True
-    mock_client.get_bucket.return_value = mock_bucket
+    adapter = _mock_status_adapter([])
 
-    with patch("app.services.backup_service.settings") as mock_settings:
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=adapter),
+        patch("app.services.backup_service.settings") as mock_settings,
+    ):
         mock_settings.backup_postgres_interval_hours = 24
         mock_settings.backup_postgres_retention_days = 14
         mock_settings.backup_config_retention_days = 30
 
-        tiers = BackupService._gcs_status(mock_client, "test-bucket")
+        tiers = await BackupService._gcs_status("test-bucket")
 
     postgres = next(t for t in tiers if t["tier"] == "postgres")
     assert postgres["status"] == "unknown"
@@ -540,20 +542,17 @@ async def test_gcs_status_old_backup_shows_warning():
 
     old = datetime.now(timezone.utc) - timedelta(hours=50)
     old_name = f"postgres/pgdump-{old.strftime('%Y%m%d-%H%M%S')}.dump"
-    mock_blob = _make_mock_blob(old_name)
+    adapter = _mock_status_adapter([old_name])
 
-    mock_client = MagicMock()
-    mock_client.list_blobs.return_value = [mock_blob]
-    mock_bucket = MagicMock()
-    mock_bucket.versioning_enabled = True
-    mock_client.get_bucket.return_value = mock_bucket
-
-    with patch("app.services.backup_service.settings") as mock_settings:
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=adapter),
+        patch("app.services.backup_service.settings") as mock_settings,
+    ):
         mock_settings.backup_postgres_interval_hours = 24
         mock_settings.backup_postgres_retention_days = 14
         mock_settings.backup_config_retention_days = 30
 
-        tiers = BackupService._gcs_status(mock_client, "test-bucket")
+        tiers = await BackupService._gcs_status("test-bucket")
 
     postgres = next(t for t in tiers if t["tier"] == "postgres")
     assert postgres["status"] == "warning"
@@ -568,13 +567,8 @@ async def test_run_postgres_backup_uploads_to_gcs():
     mock_process.returncode = 0
     mock_process.communicate = AsyncMock(return_value=(b"", b""))
 
-    mock_bucket = MagicMock()
-    mock_blob = MagicMock()
-    mock_bucket.blob.return_value = mock_blob
-
-    mock_gcs_client = MagicMock()
-    mock_gcs_client.bucket.return_value = mock_bucket
-    mock_gcs_client.list_blobs.return_value = []
+    adapter = AsyncMock()
+    adapter.list_objects.return_value = []  # rotation finds nothing to delete
 
     mock_session = AsyncMock()
     mock_result = MagicMock()
@@ -584,8 +578,7 @@ async def test_run_postgres_backup_uploads_to_gcs():
     with (
         patch("app.services.backup_service.settings") as mock_settings,
         patch("app.services.backup_service.asyncio") as mock_asyncio,
-        patch("app.services.backup_service._get_gcs_credentials", new_callable=AsyncMock, return_value=None),
-        patch("app.services.backup_service._get_gcs_client", return_value=mock_gcs_client),
+        patch("app.adapters.registry.get_storage_adapter", return_value=adapter),
         patch("app.services.backup_service.os.path.getsize", return_value=5000),
         patch("app.services.backup_service.os.path.exists", return_value=True),
         patch("app.services.backup_service.os.remove"),
@@ -598,8 +591,9 @@ async def test_run_postgres_backup_uploads_to_gcs():
 
     assert result["status"] == "completed"
     assert result["filename"].startswith("pgdump-")
-    # Verify upload was called
-    mock_blob.upload_from_filename.assert_called_once()
+    # Verify upload went through the storage adapter
+    adapter.upload_filename.assert_awaited_once()
+    assert adapter.upload_filename.call_args.args[0].startswith("gs://my-backups-bucket/postgres/pgdump-")
 
 
 @pytest.mark.asyncio

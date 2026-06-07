@@ -85,54 +85,44 @@ async def _get_backups_bucket(session: AsyncSession) -> str:
     return ""
 
 
-def _get_gcs_client(credentials=None):
-    """Get a Google Cloud Storage client."""
-    from google.cloud import storage
-
-    return storage.Client(credentials=credentials)
-
-
-async def _get_gcs_credentials(session: AsyncSession):
-    """Reuse the GcsStorageService credential loader."""
-    from app.services.gcs_storage import GcsStorageService
-
-    return await GcsStorageService.get_credentials(session)
-
-
-def _list_gcs_blobs(client, bucket_name: str, prefix: str, pattern: re.Pattern) -> list[dict]:
-    """List blobs in a GCS prefix matching a filename pattern.
+async def _list_gcs_blobs(bucket_name: str, prefix: str, pattern: re.Pattern) -> list[dict]:
+    """List storage objects under a prefix matching a filename pattern.
     Returns list sorted newest-first with filename, timestamp, size_bytes.
     """
+    from app.adapters.registry import get_storage_adapter
+
     try:
-        blobs = client.list_blobs(bucket_name, prefix=prefix)
+        objs = await get_storage_adapter().list_objects(f"gs://{bucket_name}/{prefix}")
         results = []
-        for blob in blobs:
-            name = blob.name.split("/")[-1]
+        for obj in objs:
+            name = obj.storage_uri.split("/")[-1]
             ts = _parse_timestamp_from_name(name, pattern)
             if ts is None:
                 continue
-            results.append({"filename": name, "timestamp": ts, "size_bytes": blob.size or 0})
+            results.append({"filename": name, "timestamp": ts, "size_bytes": obj.size_bytes or 0})
         results.sort(key=lambda x: x["timestamp"], reverse=True)
         return results
     except Exception as e:
-        logger.warning("Failed to list blobs gs://%s/%s: %s", bucket_name, prefix, e)
+        logger.warning("Failed to list objects gs://%s/%s: %s", bucket_name, prefix, e)
         return []
 
 
-def _rotate_gcs_blobs(client, bucket_name: str, prefix: str, pattern: re.Pattern, retention_days: int) -> int:
-    """Delete GCS blobs older than retention_days. Returns count deleted."""
+async def _rotate_gcs_blobs(bucket_name: str, prefix: str, pattern: re.Pattern, retention_days: int) -> int:
+    """Delete storage objects older than retention_days. Returns count deleted."""
+    from app.adapters.registry import get_storage_adapter
+
+    adapter = get_storage_adapter()
     cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
     deleted = 0
     try:
-        blobs = list(client.list_blobs(bucket_name, prefix=prefix))
-        for blob in blobs:
-            name = blob.name.split("/")[-1]
+        for obj in await adapter.list_objects(f"gs://{bucket_name}/{prefix}"):
+            name = obj.storage_uri.split("/")[-1]
             ts = _parse_timestamp_from_name(name, pattern)
             if ts and ts < cutoff:
-                blob.delete()
+                await adapter.delete(obj.storage_uri)
                 deleted += 1
     except Exception as e:
-        logger.warning("Failed to rotate blobs gs://%s/%s: %s", bucket_name, prefix, e)
+        logger.warning("Failed to rotate objects gs://%s/%s: %s", bucket_name, prefix, e)
     return deleted
 
 
@@ -145,9 +135,7 @@ class BackupService:
 
         if bucket_name:
             try:
-                credentials = await _get_gcs_credentials(session)
-                client = _get_gcs_client(credentials)
-                tiers.extend(BackupService._gcs_status(client, bucket_name))
+                tiers.extend(await BackupService._gcs_status(bucket_name))
             except Exception as e:
                 logger.warning("Failed to check GCS backup status: %s", e)
                 tiers.extend(BackupService._fallback_status())
@@ -166,13 +154,15 @@ class BackupService:
         return {"tiers": tiers, "overall_status": overall}
 
     @staticmethod
-    def _gcs_status(client, bucket_name: str) -> list[dict]:
-        """Build tier status by scanning GCS blobs."""
+    async def _gcs_status(bucket_name: str) -> list[dict]:
+        """Build tier status by scanning storage objects."""
+        from app.adapters.registry import get_storage_adapter
+
         tiers = []
         interval = settings.backup_postgres_interval_hours
 
         # PostgreSQL
-        pg_blobs = _list_gcs_blobs(client, bucket_name, "postgres/", _PG_FILENAME_RE)
+        pg_blobs = await _list_gcs_blobs(bucket_name, "postgres/", _PG_FILENAME_RE)
         pg_last = pg_blobs[0]["timestamp"] if pg_blobs else None
         pg_size = pg_blobs[0]["size_bytes"] if pg_blobs else None
         pg_status = _tier_status_from_age(pg_last, interval)
@@ -192,8 +182,8 @@ class BackupService:
 
         # GCS Object Versioning (check the backups bucket itself)
         try:
-            bucket = client.get_bucket(bucket_name)
-            versioning = bool(bucket.versioning_enabled)
+            info = await get_storage_adapter().get_bucket_info(f"gs://{bucket_name}/")
+            versioning = bool(info.get("versioning_enabled"))
             tiers.append(
                 {
                     "tier": "gcs",
@@ -223,7 +213,7 @@ class BackupService:
             )
 
         # Platform Config
-        config_blobs = _list_gcs_blobs(client, bucket_name, "config/", _CONFIG_FILENAME_RE)
+        config_blobs = await _list_gcs_blobs(bucket_name, "config/", _CONFIG_FILENAME_RE)
         config_last = config_blobs[0]["timestamp"] if config_blobs else None
         config_size = config_blobs[0]["size_bytes"] if config_blobs else None
         config_status = _tier_status_from_age(config_last, 24)
@@ -318,9 +308,7 @@ class BackupService:
             return [], 0
 
         try:
-            credentials = await _get_gcs_credentials(session)
-            client = _get_gcs_client(credentials)
-            files = _list_gcs_blobs(client, bucket_name, "config/", _CONFIG_FILENAME_RE)
+            files = await _list_gcs_blobs(bucket_name, "config/", _CONFIG_FILENAME_RE)
         except Exception as e:
             logger.warning("Failed to list config snapshots: %s", e)
             return [], 0
@@ -363,9 +351,7 @@ class BackupService:
             return [], 0
 
         try:
-            credentials = await _get_gcs_credentials(session)
-            client = _get_gcs_client(credentials)
-            files = _list_gcs_blobs(client, bucket_name, "postgres/", _PG_FILENAME_RE)
+            files = await _list_gcs_blobs(bucket_name, "postgres/", _PG_FILENAME_RE)
         except Exception as e:
             logger.warning("Failed to list postgres snapshots: %s", e)
             return [], 0
@@ -436,19 +422,17 @@ class BackupService:
 
             size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
 
-            # Upload to GCS
-            credentials = await _get_gcs_credentials(session)
-            client = _get_gcs_client(credentials)
-            bucket = client.bucket(bucket_name)
-            blob = bucket.blob(f"postgres/{filename}")
-            blob.upload_from_filename(output_path)
+            # Upload to storage
+            from app.adapters.registry import get_storage_adapter
+
+            await get_storage_adapter().upload_filename(f"gs://{bucket_name}/postgres/{filename}", output_path)
 
             # Remove local temp file
             os.remove(output_path)
 
-            # Rotate old backups in GCS (use DB-stored retention, not config default)
+            # Rotate old backups (use DB-stored retention, not config default)
             retention = await BackupService._get_setting(session, "postgres_retention_days")
-            deleted = _rotate_gcs_blobs(client, bucket_name, "postgres/", _PG_FILENAME_RE, retention)
+            deleted = await _rotate_gcs_blobs(bucket_name, "postgres/", _PG_FILENAME_RE, retention)
             if deleted:
                 logger.info("Rotated %d old postgres backups", deleted)
 
@@ -515,17 +499,19 @@ class BackupService:
             return []
 
         try:
-            credentials = await _get_gcs_credentials(session)
-            client = _get_gcs_client(credentials)
-            blobs = list(client.list_blobs(bucket_name))
+            from app.adapters.registry import get_storage_adapter
+
+            objs = await get_storage_adapter().list_objects(f"gs://{bucket_name}/")
             files = []
-            for blob in blobs:
-                if blob.name.endswith(".tfstate") or blob.name.endswith(".tflock"):
+            for obj in objs:
+                name = obj.storage_uri[len(f"gs://{bucket_name}/") :]
+                if name.endswith(".tfstate") or name.endswith(".tflock"):
+                    updated = obj.provider_details.get("updated")
                     files.append(
                         {
-                            "name": blob.name,
-                            "size_bytes": blob.size or 0,
-                            "updated": blob.updated.isoformat() if blob.updated else None,
+                            "name": name,
+                            "size_bytes": obj.size_bytes or 0,
+                            "updated": updated.isoformat() if updated else None,
                         }
                     )
             files.sort(key=lambda x: x.get("updated") or "", reverse=True)
@@ -544,13 +530,13 @@ class BackupService:
             return None
 
         try:
-            credentials = await _get_gcs_credentials(session)
-            client = _get_gcs_client(credentials)
-            bucket = client.bucket(bucket_name)
-            blob = bucket.blob(filename)
-            if not blob.exists():
+            from app.adapters.models import StorageObjectNotFound
+            from app.adapters.registry import get_storage_adapter
+
+            try:
+                return await get_storage_adapter().read_bytes(f"gs://{bucket_name}/{filename}")
+            except StorageObjectNotFound:
                 return None
-            return blob.download_as_bytes()
         except Exception as e:
             logger.warning("Failed to download tfstate %s: %s", filename, e)
             return None
@@ -579,18 +565,16 @@ class BackupService:
 
             size = os.path.getsize(output_path)
 
-            # Upload to GCS
-            credentials = await _get_gcs_credentials(session)
-            client = _get_gcs_client(credentials)
-            bucket = client.bucket(bucket_name)
-            blob = bucket.blob(f"config/{filename}")
-            blob.upload_from_filename(output_path)
+            # Upload to storage
+            from app.adapters.registry import get_storage_adapter
+
+            await get_storage_adapter().upload_filename(f"gs://{bucket_name}/config/{filename}", output_path)
 
             os.remove(output_path)
 
             # Rotate old config backups
             retention = await BackupService._get_setting(session, "config_retention_days")
-            deleted = _rotate_gcs_blobs(client, bucket_name, "config/", _CONFIG_FILENAME_RE, retention)
+            deleted = await _rotate_gcs_blobs(bucket_name, "config/", _CONFIG_FILENAME_RE, retention)
             if deleted:
                 logger.info("Rotated %d old config backups", deleted)
 
@@ -926,15 +910,17 @@ class RestoreService:
         dump_path = f"/tmp/{filename}"
 
         try:
-            # Download dump from GCS
-            credentials = await _get_gcs_credentials(session)
-            client = _get_gcs_client(credentials)
-            bucket = client.bucket(bucket_name)
-            blob = bucket.blob(f"postgres/{filename}")
-            if not blob.exists():
+            # Download dump from storage
+            from app.adapters.models import StorageObjectNotFound
+            from app.adapters.registry import get_storage_adapter
+
+            try:
+                await get_storage_adapter().download_to_filename(
+                    f"gs://{bucket_name}/postgres/{filename}", dump_path
+                )
+            except StorageObjectNotFound:
                 return {"status": "error", "message": f"Backup file not found: {filename}"}
-            blob.download_to_filename(dump_path)
-            logger.info("Downloaded %s from GCS (%d bytes)", filename, os.path.getsize(dump_path))
+            logger.info("Downloaded %s from storage (%d bytes)", filename, os.path.getsize(dump_path))
 
             # Create bioaf_restore database
             await _run_admin_sql(

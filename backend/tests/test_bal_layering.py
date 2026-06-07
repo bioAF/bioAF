@@ -138,7 +138,6 @@ def _iter_app_modules(*, exclude_adapters: bool):
 # gone fails the build as stale (see the stale-entry test below).
 SDK_IMPORT_ALLOWLIST: set[tuple[str, str]] = {
     # Object storage (GCS) -- the dominant leak. Drained in Phase 3.
-    ("services/backup_service.py", "google.cloud.storage"),
     ("services/gcs_storage.py", "google.cloud.storage"),
     ("services/reference_data_service.py", "google.cloud.storage"),
     ("services/storage_service.py", "google.cloud.storage"),
@@ -206,7 +205,7 @@ def test_sdk_allowlist_count_is_pinned():
 
     Decrement this as phases drain leaks; it must reach 0 by end of Phase 9.
     """
-    assert len(SDK_IMPORT_ALLOWLIST) == 20
+    assert len(SDK_IMPORT_ALLOWLIST) == 19
 
 
 # --- Tree scan: no adapter imports services (the layering inversion) ---------
