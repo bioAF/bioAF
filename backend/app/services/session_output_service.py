@@ -8,7 +8,6 @@ session via NotebookSessionFile with access_type=output.
 from __future__ import annotations
 
 import logging
-import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -27,31 +26,6 @@ _EXCLUDED_FILENAMES = {
     ".DS_Store",
 }
 _EXCLUDED_PREFIXES = (".git/", "__pycache__/", ".ipynb_checkpoints/", ".cache/", ".local/")
-
-
-def parse_gsutil_ls_output(raw_output: str) -> list[dict]:
-    """Parse gsutil ls -l -r output into a list of {gcs_uri, size_bytes}.
-
-    Each line looks like:
-       1234567  2026-04-04T12:00:00Z  gs://bucket/path/to/file.txt
-    The final summary line starts with TOTAL: and is skipped.
-    """
-    files: list[dict] = []
-    for line in raw_output.strip().splitlines():
-        line = line.strip()
-        if not line or line.startswith("TOTAL:"):
-            continue
-        match = re.match(r"^\s*(\d+)\s+\S+\s+(gs://.+)$", line)
-        if match:
-            size_bytes = int(match.group(1))
-            gcs_uri = match.group(2)
-            filename = gcs_uri.rsplit("/", 1)[-1] if "/" in gcs_uri else gcs_uri
-            if not filename or filename in _EXCLUDED_FILENAMES:
-                continue
-            if any(filename.startswith(p.rstrip("/")) for p in _EXCLUDED_PREFIXES):
-                continue
-            files.append({"gcs_uri": gcs_uri, "size_bytes": size_bytes, "filename": filename})
-    return files
 
 
 def _file_type_from_extension(filename: str) -> str:

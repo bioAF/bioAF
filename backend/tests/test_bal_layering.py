@@ -155,10 +155,6 @@ SDK_IMPORT_ALLOWLIST: set[tuple[str, str]] = {
     ("services/storage_service.py", "google.cloud.storage"),  # bucket enum -> Phase 9
     ("services/gcp_config.py", "google.cloud.storage"),  # Tier-2 bundle -> Phase 9
     ("services/orphaned_resource_service.py", "google.cloud.storage"),  # bucket delete -> Phase 9
-    # Compute/notebook Kubernetes leaks. Drained in Phase 5.
-    ("services/session_persistence.py", "kubernetes.client"),
-    ("services/session_persistence.py", "kubernetes.config"),
-    ("services/session_persistence.py", "kubernetes.stream"),
     # GCE capacity probe. Drained in Phase 6.
     ("services/zone_capacity_probe.py", "google.cloud.compute_v1"),
     # Tier 2 platform-service SDKs. Drained in Phase 9 (9A-9G).
@@ -215,7 +211,7 @@ def test_sdk_allowlist_count_is_pinned():
 
     Decrement this as phases drain leaks; it must reach 0 by end of Phase 9.
     """
-    assert len(SDK_IMPORT_ALLOWLIST) == 19
+    assert len(SDK_IMPORT_ALLOWLIST) == 16
 
 
 # --- Tree scan: no adapter imports services (the layering inversion) ---------
@@ -257,12 +253,11 @@ def _iter_adapter_modules():
 # Every adapter -> service import that remains, as (adapter path relative to
 # app/, imported app.services module). Phase 1 relocated config/credentials
 # into app/platform/ and drained those entries. Phase 3 folded GcsStorageService's
-# bucket metrics into storage/gcs.py, draining its entry. The remainder drains
-# in Phase 5 (notebooks' session_* imports). This set only shrinks.
-ADAPTER_SERVICE_IMPORT_ALLOWLIST: set[tuple[str, str]] = {
-    ("adapters/notebooks/kubernetes.py", "app.services.session_output_service"),  # Phase 5
-    ("adapters/notebooks/kubernetes.py", "app.services.session_persistence"),  # Phase 5
-}
+# bucket metrics into storage/gcs.py, draining its entry. Phase 5 drained the
+# last two (notebooks' session_persistence command builders + session_output_service
+# gsutil parser, moved into the adapter package / app.pipeline). The inversion is
+# now fully closed: adapters depend only on app.platform / app.pipeline leaves.
+ADAPTER_SERVICE_IMPORT_ALLOWLIST: set[tuple[str, str]] = set()
 
 
 def test_service_import_detector_matches_both_forms():
@@ -315,8 +310,9 @@ def test_adapter_service_allowlist_has_no_stale_entries():
 
 def test_adapter_service_allowlist_count_is_pinned():
     """Pin the inversion count. Phase 1 drained config/credentials (11 -> 3);
-    Phase 3 drained storage/gcs.py (3 -> 2); the rest drains in Phase 5 toward 0."""
-    assert len(ADAPTER_SERVICE_IMPORT_ALLOWLIST) == 2
+    Phase 3 drained storage/gcs.py (3 -> 2); Phase 5 drained the last two (2 -> 0).
+    The adapter->service inversion is now fully closed."""
+    assert len(ADAPTER_SERVICE_IMPORT_ALLOWLIST) == 0
 
 
 # --- Tree scan: the platform layer is leaf-ward (Phase 1) --------------------

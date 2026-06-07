@@ -300,6 +300,16 @@ class NotebookProvider(ABC):
     async def get_connection_command(self, session_id: str) -> str:
         """Get SSH/exec command for direct access to the session."""
 
+    async def sync_session_storage(self, session_id: str, **kwargs) -> None:
+        """Best-effort push of a running session's working files to durable storage.
+
+        Used to snapshot a live session on demand. Default no-op for backends
+        that don't need it (e.g. a shared-filesystem backend where the working
+        dir is already persistent); the K8s backend execs a gsutil rsync inside
+        the pod.
+        """
+        return None
+
 
 class WorkNodeProvider(ABC):
     """Abstract interface for work node VM backends (GCE)."""

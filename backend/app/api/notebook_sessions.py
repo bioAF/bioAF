@@ -349,12 +349,12 @@ async def sync_session(
     if notebook_session.status != "running":
         raise HTTPException(400, "Session is not running")
 
-    # Attempt GCS sync (best-effort)
+    # Attempt session storage sync (best-effort), via the notebook adapter.
     if notebook_session.k8s_pod_name and notebook_session.gcs_home_prefix:
         try:
-            from app.services.session_persistence import sync_session_to_gcs
-
-            await sync_session_to_gcs(
+            adapter = get_notebook_adapter()
+            await adapter.sync_session_storage(
+                session_id=notebook_session.id,
                 pod_name=notebook_session.k8s_pod_name,
                 namespace=notebook_session.k8s_namespace or "bioaf-notebooks",
                 gcs_prefix=notebook_session.gcs_home_prefix,

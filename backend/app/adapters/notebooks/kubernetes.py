@@ -29,9 +29,10 @@ from app.adapters.models import (
     TerminationResult,
     to_service_state,
 )
-from app.services.session_persistence import (
+from app.adapters.notebooks.gcs_sync import (
     generate_sync_in_command,
     generate_sync_out_command,
+    parse_gsutil_ls_output,
 )
 
 logger = logging.getLogger("bioaf.adapters.notebooks.k8s")
@@ -160,6 +161,36 @@ class KubernetesNotebookProvider(NotebookProvider):
     async def get_connection_command(self, session_id: str) -> str:
         namespace = DEFAULT_NOTEBOOK_NAMESPACE
         return f"kubectl exec -it -n {namespace} pod/bioaf-notebook-{session_id} -- /bin/bash"
+
+    async def sync_session_storage(
+        self,
+        session_id: str,
+        *,
+        pod_name: str,
+        namespace: str = DEFAULT_NOTEBOOK_NAMESPACE,
+        gcs_prefix: str,
+        local_dir: str = "/home/jovyan",
+        **kwargs,
+    ) -> None:
+        """Exec a gsutil rsync inside the running pod to persist its home dir to GCS."""
+        if self.is_local:
+            return
+        from kubernetes.stream import stream
+
+        core_client = self._get_k8s_core_client()
+        sync_cmd = generate_sync_out_command(local_dir, gcs_prefix)
+        logger.info("Syncing session data to GCS from pod %s", pod_name)
+        stream(
+            core_client.connect_get_namespaced_pod_exec,
+            name=pod_name,
+            namespace=namespace,
+            command=sync_cmd,
+            stderr=True,
+            stdin=False,
+            stdout=True,
+            tty=False,
+        )
+        logger.info("GCS sync complete for pod %s", pod_name)
 
     # -- K8s client helpers --
 
@@ -1239,8 +1270,6 @@ class KubernetesNotebookProvider(NotebookProvider):
                     _request_timeout=60,
                 )
                 if raw_output:
-                    from app.services.session_output_service import parse_gsutil_ls_output
-
                     output_files = parse_gsutil_ls_output(str(raw_output))
                     logger.info("Found %d output files for compute session", len(output_files))
             except Exception as e:
