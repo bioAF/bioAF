@@ -101,9 +101,12 @@ class UploadService:
         gcs_path = f"uploads/{upload_id}/{filename}"
         gcs_uri = f"gs://{bucket_name}/{gcs_path}"
 
-        # Generate signed URL via GCS client
-        credentials = await UploadService._get_gcs_credentials(session)
-        signed_url = await UploadService._generate_signed_upload_url(bucket_name, gcs_path, credentials=credentials)
+        # Generate signed PUT URL via the storage adapter
+        from app.adapters.registry import get_storage_adapter
+
+        signed_url = await get_storage_adapter().generate_signed_url(
+            gcs_uri, method="PUT", expiry_seconds=3600, content_type="application/octet-stream"
+        )
 
         _pending_uploads[upload_id] = {
             "org_id": org_id,
@@ -247,9 +250,10 @@ class UploadService:
         gcs_path = f"uploads/{upload_id}/{filename}"
         gcs_uri = f"gs://{bucket_name}/{gcs_path}"
 
-        # Upload to GCS -- raises on failure so no dangling DB records are created
-        credentials = await UploadService._get_gcs_credentials(session)
-        await UploadService._upload_file_to_gcs(bucket_name, gcs_path, file_obj, credentials=credentials)
+        # Stream to storage -- raises on failure so no dangling DB records are created
+        from app.adapters.registry import get_storage_adapter
+
+        await get_storage_adapter().upload_file(gcs_uri, file_obj)
 
         if not file_type:
             file_type = UploadService._detect_file_type(filename)
@@ -330,41 +334,3 @@ class UploadService:
             return "csv"
         return "other"
 
-    @staticmethod
-    async def _generate_signed_upload_url(bucket_name: str, gcs_path: str, credentials=None) -> str:
-        """Generate a signed URL for uploading to GCS.
-
-        Requires credentials with signing capability. Acceptable shapes:
-        service_account.Credentials (legacy installs) or
-        impersonated_credentials.Credentials (vm_default installs, signs via
-        the IAM SignBlob API on the target principal). Raw ADC has no signer
-        and would raise -- _get_gcs_credentials always returns one of the two
-        above on a properly configured install.
-        """
-        from google.cloud import storage as gcs_storage
-
-        client = gcs_storage.Client(credentials=credentials)
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob(gcs_path)
-        return blob.generate_signed_url(
-            version="v4",
-            expiration=3600,
-            method="PUT",
-            content_type="application/octet-stream",
-        )
-
-    @staticmethod
-    async def _upload_file_to_gcs(bucket_name: str, gcs_path: str, file_obj, credentials=None) -> None:
-        """Stream a file-like object to GCS. Raises on failure.
-
-        Uses upload_from_file so the full content is never held in memory at once.
-        """
-        from google.cloud import storage as gcs_storage
-
-        def _do_upload() -> None:
-            client = gcs_storage.Client(credentials=credentials)
-            bucket = client.bucket(bucket_name)
-            blob = bucket.blob(gcs_path)
-            blob.upload_from_file(file_obj, rewind=True)
-
-        await asyncio.to_thread(_do_upload)

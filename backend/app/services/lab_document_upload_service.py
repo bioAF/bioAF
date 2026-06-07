@@ -25,9 +25,6 @@ from urllib.parse import unquote, urljoin, urlparse
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.gcs_storage import GcsStorageService
-from app.services.upload_service import UploadService
-
 logger = logging.getLogger("bioaf.lab_document_upload")
 
 PREFIX = "lab-knowledge/documents"
@@ -103,29 +100,27 @@ class LabDocumentUploadService:
         return name
 
     @staticmethod
-    def _create_resumable_session(
+    async def _create_resumable_session(
         bucket_name: str,
         blob_path: str,
         *,
         content_type: str,
         size_bytes: int | None,
         origin: str | None = None,
-        credentials=None,
     ) -> str:
-        """Create a GCS resumable upload session and return its session URL.
+        """Create a resumable upload session and return its session URL.
 
         The browser PUTs bytes directly against this URL. Passing ``origin`` lets
-        GCS accept the cross-origin upload without bucket-level CORS config (this
-        is the fix for the "Failed to fetch" upload bug). Tests monkey-patch this
-        to avoid real GCS calls.
+        the backend accept the cross-origin upload without bucket-level CORS
+        config (the fix for the "Failed to fetch" upload bug). Tests monkey-patch
+        this to avoid real storage calls.
         """
-        from google.cloud import storage as gcs_storage
+        from app.adapters.registry import get_storage_adapter
 
-        client = gcs_storage.Client(credentials=credentials)
-        blob = client.bucket(bucket_name).blob(blob_path)
-        return blob.create_resumable_upload_session(
+        return await get_storage_adapter().create_resumable_upload_url(
+            f"gs://{bucket_name}/{blob_path}",
             content_type=content_type,
-            size=size_bytes,
+            size_bytes=size_bytes,
             origin=origin,
         )
 
@@ -143,14 +138,12 @@ class LabDocumentUploadService:
         bucket = await LabDocumentUploadService._get_working_bucket(session)
         gcs_path = f"{PREFIX}/uploads/{token}/{file_name}"
         gcs_uri = f"gs://{bucket}/{gcs_path}"
-        credentials = await UploadService._get_gcs_credentials(session)
-        signed_url = LabDocumentUploadService._create_resumable_session(
+        signed_url = await LabDocumentUploadService._create_resumable_session(
             bucket,
             gcs_path,
             content_type=mime_type or "application/octet-stream",
             size_bytes=size_bytes,
             origin=origin,
-            credentials=credentials,
         )
         _pending[token] = {
             "org_id": org_id,
@@ -219,21 +212,14 @@ class LabDocumentUploadService:
             raise ValueError(f"Could not fetch URL: {exc}")
 
     @staticmethod
-    async def _upload_bytes(
-        bucket_name: str, gcs_path: str, content: bytes, content_type: str | None, credentials=None
-    ) -> None:
-        """Upload in-memory bytes to GCS (server-side, no browser involved). Patch
-        point in tests."""
-        import asyncio
+    async def _upload_bytes(bucket_name: str, gcs_path: str, content: bytes, content_type: str | None) -> None:
+        """Upload in-memory bytes to storage (server-side, no browser involved).
+        Patch point in tests."""
+        from app.adapters.registry import get_storage_adapter
 
-        from google.cloud import storage as gcs_storage
-
-        def _do_upload() -> None:
-            client = gcs_storage.Client(credentials=credentials)
-            blob = client.bucket(bucket_name).blob(gcs_path)
-            blob.upload_from_string(content, content_type=content_type or "application/octet-stream")
-
-        await asyncio.to_thread(_do_upload)
+        await get_storage_adapter().write_bytes(
+            f"gs://{bucket_name}/{gcs_path}", content, content_type=content_type or "application/octet-stream"
+        )
 
     # --- URL import job (fetch decoupled from the request) -------------------
 
@@ -354,8 +340,7 @@ class LabDocumentUploadService:
         bucket = await LabDocumentUploadService._get_working_bucket(session)
         gcs_path = f"{PREFIX}/uploads/{token}/{name}"
         gcs_uri = f"gs://{bucket}/{gcs_path}"
-        credentials = await UploadService._get_gcs_credentials(session)
-        await LabDocumentUploadService._upload_bytes(bucket, gcs_path, content, mime_type, credentials)
+        await LabDocumentUploadService._upload_bytes(bucket, gcs_path, content, mime_type)
         _pending[token] = {
             "org_id": org_id,
             "file_name": name,
@@ -419,18 +404,18 @@ class LabDocumentUploadService:
         """Read size + GCS-computed md5 of the uploaded object. Leaves the token
         pending so the caller can still place() it after creating the record."""
         pending = LabDocumentUploadService._peek(upload_token, org_id)
-        credentials = await GcsStorageService.get_credentials(session)
-        from google.cloud import storage
+        from app.adapters.models import StorageObjectNotFound
+        from app.adapters.registry import get_storage_adapter
 
-        client = storage.Client(credentials=credentials) if credentials else storage.Client()
-        blob = client.bucket(pending["bucket"]).get_blob(pending["gcs_path"])
-        if blob is None:
+        try:
+            metadata = await get_storage_adapter().get_object_metadata(pending["gcs_uri"])
+        except StorageObjectNotFound:
             raise ValueError("Uploaded object not found in storage")
         return {
             "file_name": pending["file_name"],
             "mime_type": pending["mime_type"],
-            "size_bytes": blob.size,
-            "md5": blob.md5_hash,
+            "size_bytes": metadata.size_bytes,
+            "md5": metadata.md5_hash,
         }
 
     @staticmethod
@@ -439,6 +424,8 @@ class LabDocumentUploadService:
         pending = LabDocumentUploadService._peek(upload_token, org_id)
         dest_path = f"{PREFIX}/{document_id}/v{version}/{pending['file_name']}"
         dest_uri = f"gs://{pending['bucket']}/{dest_path}"
-        await GcsStorageService.move_file(pending["gcs_uri"], dest_uri)
+        from app.adapters.registry import get_storage_adapter
+
+        await get_storage_adapter().move(pending["gcs_uri"], dest_uri)
         _pending.pop(upload_token, None)
         return dest_uri
