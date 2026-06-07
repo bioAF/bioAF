@@ -303,28 +303,36 @@ async def test_upload_pdf_doi_conflict_prompts_then_merges(
 @pytest.mark.asyncio
 async def test_delete_paper_files_targets_paper_prefix(session, monkeypatch):
     """delete_paper_files runs a prefix-delete pass over papers/{id}/ when a
-    Literature bucket is provisioned."""
-    from app.services import gcs_storage
+    Literature bucket is provisioned.
+
+    Routes through the BAL storage adapter (Phase 3): list_objects under the
+    paper prefix, then delete each. Test mocks the adapter boundary."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.adapters.models import StoredObject
     from app.services.literature import storage, upload_service
 
     async def fake_bucket(_s):
         return "test-bucket"
 
-    async def fake_creds(_s):
-        return None
-
-    calls: list[tuple[str, str]] = []
-
-    def fake_delete_prefix(_credentials, bucket, prefix):
-        calls.append((bucket, prefix))
-
     monkeypatch.setattr(storage, "get_literature_bucket", fake_bucket)
-    monkeypatch.setattr(gcs_storage.GcsStorageService, "get_credentials", fake_creds)
-    monkeypatch.setattr(upload_service, "_delete_prefix", fake_delete_prefix)
 
-    ran = await upload_service.delete_paper_files(session, paper_id=123)
+    adapter = AsyncMock()
+    adapter.list_objects.return_value = [
+        StoredObject(filename="a.pdf", storage_uri="gs://test-bucket/papers/123/a.pdf"),
+        StoredObject(filename="b.txt", storage_uri="gs://test-bucket/papers/123/b.txt"),
+    ]
+
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        ran = await upload_service.delete_paper_files(session, paper_id=123)
+
     assert ran is True
-    assert calls == [("test-bucket", "papers/123/")]
+    adapter.list_objects.assert_awaited_once_with("gs://test-bucket/papers/123/")
+    deleted = {call.args[0] for call in adapter.delete.await_args_list}
+    assert deleted == {
+        "gs://test-bucket/papers/123/a.pdf",
+        "gs://test-bucket/papers/123/b.txt",
+    }
 
 
 @pytest.mark.asyncio
