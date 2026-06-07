@@ -82,6 +82,12 @@ class PipelineRunResponse(BaseModel):
     k8s_job_name: str | None = None
     k8s_namespace: str | None = None
     k8s_pod_name: str | None = None
+    # Backend-neutral fields (BAL Phase 4). compute_job_ref is the opaque compute
+    # handle; provider_metadata is the backend-specifics disclosure. The k8s_*
+    # fields above are retained during the transition and dropped once the
+    # frontend reads only the neutral fields.
+    compute_job_ref: str | None = None
+    provider_metadata: dict | None = None
     actual_cost: float | None = None
     reference_genome: str | None = None
     alignment_algorithm: str | None = None

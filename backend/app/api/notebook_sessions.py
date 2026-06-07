@@ -101,6 +101,7 @@ def _session_response(ns) -> SessionResponse:
         git_commit_hash=ns.git_commit_hash,
         environment_version_id=ns.environment_version_id,
         input_file_ids=input_file_ids,
+        provider_metadata=ns.provider_metadata,
     )
 
 

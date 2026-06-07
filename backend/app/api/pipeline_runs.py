@@ -53,6 +53,8 @@ def _run_response(run) -> PipelineRunResponse:
         k8s_job_name=run.k8s_job_name,
         k8s_namespace=run.k8s_namespace,
         k8s_pod_name=run.k8s_pod_name,
+        compute_job_ref=run.compute_job_ref,
+        provider_metadata=run.provider_metadata,
         actual_cost=float(run.actual_cost) if run.actual_cost else None,
         reference_genome=run.reference_genome,
         alignment_algorithm=run.alignment_algorithm,
