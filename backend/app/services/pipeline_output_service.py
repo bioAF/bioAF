@@ -96,26 +96,42 @@ class PipelineOutputService:
     async def register_nextflow_metadata(
         session: AsyncSession,
         run: PipelineRun,
-        raw_bucket: str,
     ) -> list[File]:
         """Register Nextflow report.html and trace.tsv as File records.
 
-        These files live in the raw bucket at deterministic paths based
-        on the K8s job name.
+        These files live in the RAW storage store at deterministic paths based
+        on the K8s job name. The URIs are resolved through the BAL storage
+        adapter (Phase 5) so no caller names a bucket; a backend without a RAW
+        store configured yields no metadata.
         """
-        if not run.k8s_job_name or not raw_bucket:
+        if not run.k8s_job_name:
+            return []
+
+        from app.adapters.models import StorageStore
+        from app.adapters.registry import get_storage_adapter
+
+        adapter = get_storage_adapter()
+        try:
+            report_uri = await adapter.resolve_uri(
+                StorageStore.RAW, f"nextflow-reports/{run.k8s_job_name}/report.html"
+            )
+            trace_uri = await adapter.resolve_uri(
+                StorageStore.RAW, f"nextflow-traces/{run.k8s_job_name}/trace.tsv"
+            )
+        except ValueError:
+            # No RAW store configured for this install.
             return []
 
         metadata_files = [
             {
                 "filename": "report.html",
-                "gcs_uri": f"gs://{raw_bucket}/nextflow-reports/{run.k8s_job_name}/report.html",
+                "gcs_uri": report_uri,
                 "artifact_type": "pipeline_report",
                 "file_type": "report",
             },
             {
                 "filename": "trace.tsv",
-                "gcs_uri": f"gs://{raw_bucket}/nextflow-traces/{run.k8s_job_name}/trace.tsv",
+                "gcs_uri": trace_uri,
                 "artifact_type": "pipeline_trace",
                 "file_type": "count_matrix",
             },
@@ -127,7 +143,7 @@ class PipelineOutputService:
         existing_uris: set[str] = {row[0] for row in existing.all()}
 
         # Check which blobs exist in GCS
-        existing_blobs = await _check_gcs_blobs(raw_bucket, metadata_files)
+        existing_blobs = await _check_gcs_blobs(metadata_files)
 
         created: list[File] = []
         for meta in metadata_files:
@@ -164,7 +180,7 @@ class PipelineOutputService:
         return created
 
 
-async def _check_gcs_blobs(bucket_name: str, metadata_files: list[dict]) -> dict[str, int | None]:
+async def _check_gcs_blobs(metadata_files: list[dict]) -> dict[str, int | None]:
     """Check which storage objects exist and return {storage_uri: size_bytes}."""
     from app.adapters.models import StorageObjectNotFound
     from app.adapters.registry import get_storage_adapter

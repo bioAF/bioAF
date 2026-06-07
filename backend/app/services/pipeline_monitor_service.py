@@ -543,15 +543,13 @@ class PipelineMonitorService:
         except Exception as e:
             logger.warning("Failed to collect output files for run %d: %s", run.id, e)
 
-        # Register Nextflow report and trace from the raw bucket (Nextflow only)
+        # Register Nextflow report and trace from the RAW store (Nextflow only).
+        # register_nextflow_metadata resolves the URIs via the storage adapter.
         if run.k8s_job_name and not is_custom:
             try:
                 from app.services.pipeline_output_service import PipelineOutputService
 
-                compute_adapter = get_compute_adapter()
-                raw_bucket = compute_adapter.get_raw_bucket_name()
-                if raw_bucket:
-                    await PipelineOutputService.register_nextflow_metadata(session, run, raw_bucket)
+                await PipelineOutputService.register_nextflow_metadata(session, run)
             except Exception as e:
                 logger.warning("Failed to register NF metadata for run %d: %s", run.id, e)
 

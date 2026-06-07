@@ -107,10 +107,6 @@ class ComputeProvider(ABC):
         """
         return ""
 
-    def get_raw_bucket_name(self) -> str:
-        """Return the raw data bucket name, or empty string if unavailable."""
-        return ""
-
 
 class StorageProvider(ABC):
     """Abstract interface for storage backends (GCS, NFS)."""
