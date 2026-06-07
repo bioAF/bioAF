@@ -232,12 +232,8 @@ async def _upload_version_build_context(
     version: EnvironmentVersion,
     env_name: str,
 ) -> str:
-    """Create a tar.gz with the build context and upload to GCS."""
-    from google.cloud import storage
-
-    credentials = await _get_credentials(session)
-    client = storage.Client(project=project_id, credentials=credentials)
-    bucket = client.bucket(working_bucket)
+    """Create a tar.gz with the build context and upload to storage."""
+    from app.adapters.registry import get_storage_adapter
 
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
@@ -267,8 +263,9 @@ async def _upload_version_build_context(
     buf.seek(0)
     safe_name = env_name.lower().replace(" ", "-").replace("_", "-")
     object_path = f"builds/{safe_name}/v{version.version_number}/source.tar.gz"
-    blob = bucket.blob(object_path)
-    blob.upload_from_file(buf, content_type="application/gzip")
+    await get_storage_adapter().upload_file(
+        f"gs://{working_bucket}/{object_path}", buf, content_type="application/gzip"
+    )
     logger.info("Uploaded build context to gs://%s/%s", working_bucket, object_path)
 
     return object_path
@@ -441,23 +438,24 @@ class EnvironmentBuildService:
         data = yaml.safe_load(version.definition_content)
         conda_env_name = data.get("name", "bioaf") if data else "bioaf"
 
-        # Upload environment.yml to GCS
-        from google.cloud import storage
+        # Upload environment.yml + Packer template to storage
+        from app.adapters.registry import get_storage_adapter
 
         credentials = await _get_credentials(session)
-        storage_client = storage.Client(project=project_id, credentials=credentials)
-        bucket = storage_client.bucket(working_bucket)
+        adapter = get_storage_adapter()
 
         safe_name = env.name.lower().replace(" ", "-").replace("_", "-")
         env_yml_path = f"builds/{safe_name}/v{version.version_number}/environment.yml"
-        blob = bucket.blob(env_yml_path)
-        blob.upload_from_string(version.definition_content, content_type="text/yaml")
+        await adapter.write_text(
+            f"gs://{working_bucket}/{env_yml_path}", version.definition_content, content_type="text/yaml"
+        )
         env_yml_gcs = f"gs://{working_bucket}/{env_yml_path}"
 
         # Upload Packer template
         packer_path = f"builds/{safe_name}/v{version.version_number}/work_node.pkr.hcl"
-        packer_blob = bucket.blob(packer_path)
-        packer_blob.upload_from_string(PACKER_VM_TEMPLATE, content_type="text/plain")
+        await adapter.write_text(
+            f"gs://{working_bucket}/{packer_path}", PACKER_VM_TEMPLATE, content_type="text/plain"
+        )
 
         # Build image name and URI
         image_name = _get_vm_image_name(env.name, version.version_number, version.build_number)

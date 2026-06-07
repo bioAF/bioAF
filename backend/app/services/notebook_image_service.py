@@ -15,7 +15,6 @@ import time
 
 import google.auth
 import google.auth.transport.requests
-from google.cloud import storage
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -210,9 +209,7 @@ async def _upload_build_context(session: AsyncSession, project_id: str, working_
 
     Returns the GCS object path (bucket-relative).
     """
-    credentials = await _get_credentials(session)
-    client = storage.Client(project=project_id, credentials=credentials)
-    bucket = client.bucket(working_bucket)
+    from app.adapters.registry import get_storage_adapter
 
     # Create tar.gz in memory with the Dockerfile
     buf = io.BytesIO()
@@ -225,8 +222,9 @@ async def _upload_build_context(session: AsyncSession, project_id: str, working_
 
     buf.seek(0)
     object_path = "builds/bioaf-scrna/source.tar.gz"
-    blob = bucket.blob(object_path)
-    blob.upload_from_file(buf, content_type="application/gzip")
+    await get_storage_adapter().upload_file(
+        f"gs://{working_bucket}/{object_path}", buf, content_type="application/gzip"
+    )
     logger.info("Uploaded build context to gs://%s/%s", working_bucket, object_path)
 
     return object_path
