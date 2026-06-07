@@ -112,52 +112,38 @@ async def test_file_ingest_receives_credentials(session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_copy_to_raw_passes_credentials_to_move_file(session: AsyncSession):
-    """copy_to_raw_bucket must forward credentials to GcsStorageService.move_file."""
+async def test_copy_to_raw_moves_via_storage_adapter(session: AsyncSession):
+    """copy_to_raw_bucket moves the object via the BAL storage adapter (Phase 3),
+    which owns credential resolution internally."""
     from app.services.ingest_service import copy_to_raw_bucket
 
-    fake_creds = MagicMock(name="fake-sa-credentials")
-
-    with patch(
-        "app.services.gcs_storage.GcsStorageService.move_file",
-        new_callable=AsyncMock,
-    ) as mock_move:
-        await copy_to_raw_bucket(
+    adapter = AsyncMock()
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        dest = await copy_to_raw_bucket(
             source_bucket="ingest-bucket",
             source_path="file.fastq.gz",
             raw_bucket="raw-bucket",
             destination_prefix="experiments/1/",
             filename="file.fastq.gz",
-            credentials=fake_creds,
         )
 
-        mock_move.assert_called_once()
-        call_kwargs = mock_move.call_args
-        assert call_kwargs.kwargs.get("credentials") is fake_creds or fake_creds in call_kwargs.args, (
-            "move_file was called without credentials"
-        )
+    assert dest == "gs://raw-bucket/experiments/1/file.fastq.gz"
+    adapter.move.assert_awaited_once_with(
+        "gs://ingest-bucket/file.fastq.gz", "gs://raw-bucket/experiments/1/file.fastq.gz"
+    )
 
 
 @pytest.mark.asyncio
-async def test_cleanup_ingest_uses_credentials(session: AsyncSession):
-    """cleanup_ingest_file must use stored credentials, not default SA."""
+async def test_cleanup_ingest_deletes_via_storage_adapter(session: AsyncSession):
+    """cleanup_ingest_file deletes via the storage adapter under delete_after_copy."""
     from app.services.ingest_service import cleanup_ingest_file
 
-    fake_creds = MagicMock(name="fake-sa-credentials")
-
-    with patch("google.cloud.storage") as mock_storage_mod:
-        mock_client = MagicMock()
-        mock_bucket = MagicMock()
-        mock_blob = MagicMock()
-        mock_storage_mod.Client.return_value = mock_client
-        mock_client.get_bucket.return_value = mock_bucket
-        mock_bucket.blob.return_value = mock_blob
-
+    adapter = AsyncMock()
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         await cleanup_ingest_file(
             source_bucket="ingest-bucket",
             source_path="file.fastq.gz",
             policy="delete_after_copy",
-            credentials=fake_creds,
         )
 
-        mock_storage_mod.Client.assert_called_once_with(credentials=fake_creds)
+    adapter.delete.assert_awaited_once_with("gs://ingest-bucket/file.fastq.gz")
