@@ -22,6 +22,7 @@ from app.schemas.notebook_session import (
     ProjectSummary,
 )
 from app.services.notebook_service import NotebookService
+from app.adapters.models import ServiceState
 from app.adapters.registry import get_notebook_adapter
 
 router = APIRouter(prefix="/api/v1/notebooks", tags=["notebook-sessions"])
@@ -113,110 +114,46 @@ async def _get_config_value(session: AsyncSession, key: str) -> str | None:
 
 
 async def _sync_session_from_k8s(ns, session: AsyncSession) -> None:
-    """Check K8s for pod status and LB IP, update session record if needed."""
+    """Reconcile a session's status and access_url from the notebook adapter.
+
+    Reads the normalized SessionStatus from the NotebookProvider interface
+    (which resolves pod phase and the LoadBalancer URL) and maps it back onto
+    the DB record. No backend privates or K8s service URLs leak in here.
+    """
     if not ns.k8s_pod_name:
         return
 
     try:
         adapter = get_notebook_adapter()
-        if adapter.is_local:
-            return
-
-        core_client = adapter._get_k8s_core_client()
-        namespace = ns.k8s_namespace or "bioaf-notebooks"
-        changed = False
-
-        # Check pod status
-        try:
-            pod = core_client.read_namespaced_pod(name=ns.k8s_pod_name, namespace=namespace)
-            phase = pod.status.phase
-            logger.info(
-                "Session %s pod %s phase=%s, db_status=%s, access_url=%s",
-                ns.id,
-                ns.k8s_pod_name,
-                phase,
-                ns.status,
-                ns.access_url,
-            )
-            if phase == "Running" and ns.status == "starting":
-                conditions = pod.status.conditions or []
-                ready = any(c.type == "Ready" and c.status == "True" for c in conditions)
-                if ready:
-                    ns.status = "running"
-                    if not ns.started_at:
-                        from datetime import datetime, timezone
-
-                        ns.started_at = datetime.now(timezone.utc)
-                    changed = True
-            elif phase in ("Failed", "Unknown") and ns.status not in ("stopped", "failed"):
-                ns.status = "failed"
-                changed = True
-        except Exception:
-            logger.exception("Failed to read pod %s", ns.k8s_pod_name)
-
-        # Check LB IP if we don't have an access_url yet
-        if not ns.access_url and ns.status in ("starting", "running"):
-            svc_name = f"bioaf-notebook-svc-{ns.id}"
-            logger.info(
-                "Checking LB IP for session %s, svc=%s, ns=%s",
-                ns.id,
-                svc_name,
-                namespace,
-            )
-            try:
-                # Use raw HTTP to bypass python client caching issues
-                import httpx
-
-                api_client = adapter._get_api_client()
-                config = api_client.configuration
-                url = f"{config.host}/api/v1/namespaces/{namespace}/services/{svc_name}"
-                # Auth header lives on the ApiClient's default_headers, not on
-                # Configuration.api_key (which the kubernetes-python lib does
-                # not auto-route into requests). See _build_out_of_cluster_client.
-                auth = api_client.default_headers.get("Authorization")
-                if not auth:
-                    raise RuntimeError(
-                        "K8s ApiClient has no Authorization header; _build_out_of_cluster_client did not set one."
-                    )
-                headers = {"Authorization": auth}
-                resp = httpx.get(
-                    url,
-                    headers=headers,
-                    verify=config.ssl_ca_cert or False,
-                    timeout=10,
-                )
-                logger.info(
-                    "Raw K8s API for %s: status=%s",
-                    svc_name,
-                    resp.status_code,
-                )
-                if resp.status_code == 200:
-                    svc_data = resp.json()
-                    ingress_list = svc_data.get("status", {}).get("loadBalancer", {}).get("ingress") or []
-                    logger.info("Service %s ingress: %s", svc_name, ingress_list)
-                    if ingress_list:
-                        ext_ip = ingress_list[0].get("ip") or ingress_list[0].get("hostname")
-                        port = 8888 if ns.session_type == "jupyter" else 8787
-                        ns.access_url = f"http://{ext_ip}:{port}"
-                        changed = True
-                        logger.info("Synced LB IP for session %s: %s", ns.id, ns.access_url)
-                    else:
-                        logger.warning("No ingress for service %s", svc_name)
-                else:
-                    logger.warning(
-                        "K8s API returned %s for %s: %s",
-                        resp.status_code,
-                        svc_name,
-                        resp.text[:200],
-                    )
-            except Exception:
-                logger.exception("Failed to read service %s", svc_name)
-
-        if changed:
-            await session.flush()
-
+        status = await adapter.get_session_status(
+            session_id=ns.id,
+            pod_name=ns.k8s_pod_name,
+            namespace=ns.k8s_namespace or "bioaf-notebooks",
+            session_type=ns.session_type,
+        )
     except Exception:
-        logger.debug("K8s sync failed for session %s", ns.id, exc_info=True)
+        logger.debug("Adapter session status failed for session %s", ns.id, exc_info=True)
+        return
+
+    changed = False
+
+    if status.status == ServiceState.RUNNING and ns.status == "starting":
+        ns.status = "running"
+        if not ns.started_at:
+            from datetime import datetime, timezone
+
+            ns.started_at = datetime.now(timezone.utc)
+        changed = True
+    elif status.status == ServiceState.ERROR and ns.status not in ("stopped", "failed"):
+        ns.status = "failed"
+        changed = True
+
+    if not ns.access_url and status.access_url and ns.status in ("starting", "running"):
+        ns.access_url = status.access_url
+        changed = True
+
+    if changed:
+        await session.flush()
 
 
 # -- Session endpoints --

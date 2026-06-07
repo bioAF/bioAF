@@ -953,43 +953,23 @@ class KubernetesNotebookProvider(NotebookProvider):
                 )
                 return
 
-            # Wait for LoadBalancer external IP (up to 3 minutes)
-            # Use raw httpx instead of python client (client returns stale
-            # ingress: None even when kubectl shows the IP).
-            import httpx
-
+            # Wait for LoadBalancer external IP (up to 3 minutes). The per-attempt
+            # lookup is shared with the status read path via _resolve_service_url
+            # (raw httpx, since the python client returns a stale ingress: None).
+            # Keep the auth pre-check here so a misconfigured client fails the
+            # background task loudly rather than silently spinning.
             api_client = self._get_api_client()
-            config = api_client.configuration
-            svc_url = f"{config.host}/api/v1/namespaces/{namespace}/services/{service_name}"
-            auth = api_client.default_headers.get("Authorization")
-            if not auth:
+            if not api_client.default_headers.get("Authorization"):
                 raise RuntimeError(
                     "K8s ApiClient has no Authorization header; _build_out_of_cluster_client did not set one."
                 )
-            headers = {"Authorization": auth}
 
             access_url = None
             for attempt in range(36):
-                try:
-                    resp = httpx.get(
-                        svc_url,
-                        headers=headers,
-                        verify=config.ssl_ca_cert or False,
-                        timeout=10,
-                    )
-                    if resp.status_code == 200:
-                        ingress_list = resp.json().get("status", {}).get("loadBalancer", {}).get("ingress") or []
-                        if ingress_list:
-                            ext_ip = ingress_list[0].get("ip") or ingress_list[0].get("hostname")
-                            access_url = f"http://{ext_ip}:{container_port}"
-                            logger.info(
-                                "External URL for session %s: %s",
-                                session_id,
-                                access_url,
-                            )
-                            break
-                except Exception:
-                    pass
+                access_url = self._resolve_service_url(service_name, namespace, container_port)
+                if access_url:
+                    logger.info("External URL for session %s: %s", session_id, access_url)
+                    break
                 await asyncio.sleep(5)
 
             if not access_url:
@@ -1294,8 +1274,14 @@ class KubernetesNotebookProvider(NotebookProvider):
         session_id: int | str = 0,
         pod_name: str = "",
         namespace: str = DEFAULT_NOTEBOOK_NAMESPACE,
+        session_type: str = "",
     ) -> dict:
-        """Query K8s API for pod status."""
+        """Query K8s API for pod status, resolving the LoadBalancer URL if live.
+
+        For a starting/running session this also resolves the service's external
+        URL so callers read access_url off the normalized SessionStatus rather
+        than reaching into the K8s client themselves.
+        """
         core_client = self._get_k8s_core_client()
 
         try:
@@ -1321,12 +1307,56 @@ class KubernetesNotebookProvider(NotebookProvider):
         else:
             status = "unknown"
 
-        return {
+        result = {
             "session_id": session_id,
             "status": status,
             "pod_name": pod_name,
             "namespace": namespace,
         }
+        if session_type:
+            result["session_type"] = session_type
+
+        # Resolve the LoadBalancer URL for live sessions so the API layer never
+        # builds K8s service URLs itself.
+        if status in ("running", "starting"):
+            container_port = 8888 if session_type == "jupyter" else 8787
+            url = self._resolve_service_url(f"bioaf-notebook-svc-{session_id}", namespace, container_port)
+            if url:
+                result["access_url"] = url
+
+        return result
+
+    def _resolve_service_url(self, service_name: str, namespace: str, container_port: int) -> str | None:
+        """Single-attempt LoadBalancer external-IP lookup -> http URL, or None.
+
+        Uses raw httpx instead of the python K8s client (which returns a stale
+        ``ingress: None`` even when kubectl shows the IP). Swallows every error
+        and returns None so read-path callers (status reconciliation) never
+        raise on a not-yet-ready or unreachable service.
+        """
+        import httpx
+
+        try:
+            api_client = self._get_api_client()
+            config = api_client.configuration
+            auth = api_client.default_headers.get("Authorization")
+            if not auth:
+                return None
+            svc_url = f"{config.host}/api/v1/namespaces/{namespace}/services/{service_name}"
+            resp = httpx.get(
+                svc_url,
+                headers={"Authorization": auth},
+                verify=config.ssl_ca_cert or False,
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                ingress_list = resp.json().get("status", {}).get("loadBalancer", {}).get("ingress") or []
+                if ingress_list:
+                    ext_ip = ingress_list[0].get("ip") or ingress_list[0].get("hostname")
+                    return f"http://{ext_ip}:{container_port}"
+        except Exception:
+            return None
+        return None
 
     async def _k8s_list_sessions(self, filters: dict | None = None) -> list[dict]:
         """List notebook pods in the namespace."""
