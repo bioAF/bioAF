@@ -369,6 +369,19 @@ class GcsStorageProvider(StorageProvider):
             self._gcs_generate_signed_url, uri, method, expiry_seconds, content_type, creds
         )
 
+    async def create_resumable_upload_url(
+        self,
+        uri: str,
+        *,
+        content_type: str = "application/octet-stream",
+        size_bytes: int | None = None,
+        origin: str | None = None,
+    ) -> str:
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(
+            self._gcs_create_resumable_upload_url, uri, content_type, size_bytes, origin, creds
+        )
+
     # -- Local-mode object-store helpers --
 
     def _local_list_objects(self, uri_prefix: str, max_results: int | None) -> list[StoredObject]:
@@ -545,6 +558,11 @@ class GcsStorageProvider(StorageProvider):
         if content_type is not None:
             kwargs["content_type"] = content_type
         return blob.generate_signed_url(**kwargs)
+
+    def _gcs_create_resumable_upload_url(self, uri: str, content_type, size_bytes, origin, creds) -> str:
+        bucket, key = self._parse_uri(uri)
+        blob = self._get_gcs_client(creds).bucket(bucket).blob(key)
+        return blob.create_resumable_upload_session(content_type=content_type, size=size_bytes, origin=origin)
 
     # -- Local mode implementations --
 

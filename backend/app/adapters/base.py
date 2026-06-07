@@ -233,6 +233,22 @@ class StorageProvider(ABC):
         """
         raise NotImplementedError
 
+    async def create_resumable_upload_url(
+        self,
+        uri: str,
+        *,
+        content_type: str = "application/octet-stream",
+        size_bytes: int | None = None,
+        origin: str | None = None,
+    ) -> str:
+        """Create a resumable upload session URL the client PUTs bytes to directly.
+
+        ``origin`` lets the backend accept the cross-origin upload without
+        bucket-level CORS config. Backends without direct client upload (NFS)
+        declare ``signed_url_upload=False`` and raise CapabilityNotSupported.
+        """
+        raise NotImplementedError
+
 
 class NotebookProvider(ABC):
     """Abstract interface for notebook session backends (Kubernetes, SLURM)."""

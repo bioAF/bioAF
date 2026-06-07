@@ -352,6 +352,19 @@ class TestSignedUrl:
     def test_gcs_declares_signed_url_capability(self, gcs_adapter):
         assert gcs_adapter.capabilities().signed_url_upload is True
 
+    @pytest.mark.asyncio
+    async def test_create_resumable_upload_url(self, gcs_adapter):
+        blob = MagicMock()
+        blob.create_resumable_upload_session.return_value = "https://resumable.example/session"
+        client, _ = _mock_client_with_blob(blob)
+        with patch.object(gcs_adapter, "_get_gcs_client", return_value=client):
+            url = await gcs_adapter.create_resumable_upload_url(
+                "gs://b/k", content_type="application/zip", size_bytes=123, origin="https://app.example"
+            )
+        assert url == "https://resumable.example/session"
+        _, kwargs = blob.create_resumable_upload_session.call_args
+        assert kwargs == {"content_type": "application/zip", "size": 123, "origin": "https://app.example"}
+
 
 # --- storage metrics self-contained (inversion reversal) ---------------------
 
