@@ -38,11 +38,13 @@ async def _setup_config(session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_manifest_read_uses_stored_credentials(session: AsyncSession):
-    """read_object_text should receive credentials from platform_config, not None."""
+async def test_manifest_read_uses_storage_adapter(session: AsyncSession):
+    """The manifest body is read via the BAL storage adapter (Phase 3), which
+    owns credential resolution internally."""
     await _setup_config(session)
 
-    fake_creds = MagicMock(name="fake-sa-credentials")
+    adapter = AsyncMock()
+    adapter.read_text.return_value = "# batch: B1\nhash  file.fastq.gz\n"
     listener = PubSubListener()
     msg_data = {
         "bucket": "my-ingest-bucket",
@@ -52,16 +54,7 @@ async def test_manifest_read_uses_stored_credentials(session: AsyncSession):
     }
 
     with (
-        patch(
-            "app.services.gcs_storage.GcsStorageService.get_credentials",
-            new_callable=AsyncMock,
-            return_value=fake_creds,
-        ),
-        patch(
-            "app.services.gcs_storage.GcsStorageService.read_object_text",
-            new_callable=AsyncMock,
-            return_value="# batch: B1\nhash  file.fastq.gz\n",
-        ) as mock_read,
+        patch("app.adapters.registry.get_storage_adapter", return_value=adapter),
         patch(
             "app.services.manifest_ingest_service.process_manifest_ingest",
             new_callable=AsyncMock,
@@ -69,12 +62,7 @@ async def test_manifest_read_uses_stored_credentials(session: AsyncSession):
     ):
         await listener._handle_message(msg_data, session)
 
-        mock_read.assert_called_once()
-        call_kwargs = mock_read.call_args
-        # credentials must be passed, not left as default None
-        assert fake_creds in call_kwargs.args or call_kwargs.kwargs.get("credentials") is fake_creds, (
-            "read_object_text was called without passing stored credentials"
-        )
+        adapter.read_text.assert_awaited_once_with("gs://my-ingest-bucket/delivery/md5.txt")
 
 
 @pytest.mark.asyncio

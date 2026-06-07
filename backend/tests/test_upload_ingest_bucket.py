@@ -7,6 +7,19 @@ import pytest
 import pytest_asyncio
 
 
+def _storage_adapter():
+    """Adapter mock for the upload + file-organization flows (Phase 3).
+
+    The upload endpoints mint signed URLs / stream uploads via the BAL storage
+    adapter, and file-linking moves objects through it; both go through this one
+    adapter. move() echoes the destination URI.
+    """
+    adapter = AsyncMock()
+    adapter.generate_signed_url.return_value = "https://storage.googleapis.com/fake-signed-url"
+    adapter.move.side_effect = lambda src, dst: dst
+    return adapter
+
+
 @pytest_asyncio.fixture
 async def configured_ingest_bucket(session, admin_user):
     """Insert ingest_bucket_name into platform_config for this org's deployment."""
@@ -34,13 +47,7 @@ async def test_initiate_upload_requires_bucket_config(client, admin_token):
 @pytest.mark.asyncio
 async def test_initiate_upload_uses_configured_bucket(client, admin_token, configured_ingest_bucket):
     """Upload initiate must use the bucket name stored in platform_config."""
-    from app.services.upload_service import UploadService
-
-    with patch.object(
-        UploadService,
-        "_generate_signed_upload_url",
-        new=AsyncMock(return_value="https://storage.googleapis.com/fake-signed-url"),
-    ):
+    with patch("app.adapters.registry.get_storage_adapter", return_value=_storage_adapter()):
         resp = await client.post(
             "/api/files/upload/initiate",
             json={"filename": "sample.fastq.gz", "expected_size_bytes": 1_000_000},
@@ -92,13 +99,7 @@ async def test_simple_upload_links_experiment_id(client, admin_token, configured
     await session.flush()
     await session.commit()
 
-    async def fake_move(source_uri, dest_uri, credentials=None):
-        return dest_uri
-
-    with (
-        patch("app.services.upload_service.UploadService._upload_file_to_gcs", new_callable=AsyncMock),
-        patch("app.services.gcs_storage.GcsStorageService.move_file", side_effect=fake_move),
-    ):
+    with patch("app.adapters.registry.get_storage_adapter", return_value=_storage_adapter()):
         resp = await client.post(
             f"/api/files/upload/simple?experiment_id={exp.id}",
             files={"file": ("sample.fastq.gz", io.BytesIO(b"data"), "application/gzip")},
@@ -120,7 +121,7 @@ async def test_simple_upload_without_experiment_id(client, admin_token, configur
     from app.models.file import File
     from sqlalchemy import select
 
-    with patch("app.services.upload_service.UploadService._upload_file_to_gcs", new_callable=AsyncMock):
+    with patch("app.adapters.registry.get_storage_adapter", return_value=_storage_adapter()):
         resp = await client.post(
             "/api/files/upload/simple",
             files={"file": ("noexp.fastq.gz", io.BytesIO(b"data"), "application/gzip")},
@@ -141,12 +142,10 @@ async def test_simple_upload_without_experiment_id(client, admin_token, configur
 @pytest.mark.asyncio
 async def test_simple_upload_returns_500_on_gcs_failure(client, admin_token, configured_ingest_bucket):
     """GCS upload failure must return 500, not silently create a dangling file record."""
-    from app.services.upload_service import UploadService
+    adapter = _storage_adapter()
+    adapter.upload_file.side_effect = Exception("403 Provided scope(s) are not authorized")
 
-    async def fake_upload_file_to_gcs(*args, **kwargs):
-        raise Exception("403 Provided scope(s) are not authorized")
-
-    with patch.object(UploadService, "_upload_file_to_gcs", side_effect=fake_upload_file_to_gcs):
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         resp = await client.post(
             "/api/files/upload/simple",
             files={"file": ("fail.fastq.gz", io.BytesIO(b"data"), "application/gzip")},
@@ -220,20 +219,12 @@ async def test_get_gcs_credentials_parses_sa_key(session):
 
 
 @pytest.mark.asyncio
-async def test_simple_upload_passes_credentials_to_gcs(client, admin_token, configured_ingest_bucket, session):
-    """simple_upload passes credentials from _get_gcs_credentials to _upload_file_to_gcs."""
-    from app.services.upload_service import UploadService
+async def test_simple_upload_routes_through_storage_adapter(client, admin_token, configured_ingest_bucket, session):
+    """simple_upload streams the file to storage via the adapter (which owns
+    credential resolution internally after Phase 3)."""
+    adapter = _storage_adapter()
 
-    mock_creds = MagicMock()
-    captured = {}
-
-    async def fake_upload(bucket_name, gcs_path, file_obj, credentials=None):
-        captured["credentials"] = credentials
-
-    with (
-        patch.object(UploadService, "_get_gcs_credentials", new=AsyncMock(return_value=mock_creds)),
-        patch.object(UploadService, "_upload_file_to_gcs", side_effect=fake_upload),
-    ):
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         resp = await client.post(
             "/api/files/upload/simple",
             files={"file": ("creds_test.fastq.gz", io.BytesIO(b"data"), "application/gzip")},
@@ -241,25 +232,26 @@ async def test_simple_upload_passes_credentials_to_gcs(client, admin_token, conf
         )
 
     assert resp.status_code == 200
-    assert captured["credentials"] is mock_creds
+    adapter.upload_file.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_simple_upload_streams_file_without_buffering(client, admin_token, configured_ingest_bucket, session):
-    """simple_upload must pass a file-like object to _upload_file_to_gcs, not bytes.
+    """simple_upload must pass a file-like object to the adapter, not bytes.
 
     This prevents OOM crashes when uploading large FASTQ files.
     """
-    from app.services.upload_service import UploadService
-
     captured = {}
 
-    async def fake_upload(bucket_name, gcs_path, file_obj, credentials=None):
+    async def fake_upload(uri, file_obj, *, content_type=None):
         # file_obj must be a readable IO object, not bytes
         assert hasattr(file_obj, "read"), "Expected a file-like object, got bytes or other type"
         captured["file_obj"] = file_obj
 
-    with patch.object(UploadService, "_upload_file_to_gcs", side_effect=fake_upload):
+    adapter = _storage_adapter()
+    adapter.upload_file.side_effect = fake_upload
+
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         resp = await client.post(
             "/api/files/upload/simple",
             files={"file": ("stream_test.fastq.gz", io.BytesIO(b"hello fastq"), "application/gzip")},
@@ -294,19 +286,7 @@ async def test_signed_upload_links_experiment_id(client, admin_token, configured
     await session.flush()
     await session.commit()
 
-    from app.services.upload_service import UploadService
-
-    async def fake_move(source_uri, dest_uri, credentials=None):
-        return dest_uri
-
-    with (
-        patch.object(
-            UploadService,
-            "_generate_signed_upload_url",
-            new=AsyncMock(return_value="https://storage.googleapis.com/fake-signed-url"),
-        ),
-        patch("app.services.gcs_storage.GcsStorageService.move_file", side_effect=fake_move),
-    ):
+    with patch("app.adapters.registry.get_storage_adapter", return_value=_storage_adapter()):
         initiate_resp = await client.post(
             "/api/files/upload/initiate",
             json={
@@ -357,22 +337,9 @@ async def test_signed_upload_moves_file_to_raw_bucket(client, admin_token, confi
     await session.flush()
     await session.commit()
 
-    from app.services.upload_service import UploadService
+    adapter = _storage_adapter()
 
-    move_calls = []
-
-    async def fake_move(source_uri, dest_uri, credentials=None):
-        move_calls.append((source_uri, dest_uri))
-        return dest_uri
-
-    with (
-        patch.object(
-            UploadService,
-            "_generate_signed_upload_url",
-            new=AsyncMock(return_value="https://storage.googleapis.com/fake-signed-url"),
-        ),
-        patch("app.services.gcs_storage.GcsStorageService.move_file", side_effect=fake_move),
-    ):
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         initiate_resp = await client.post(
             "/api/files/upload/initiate",
             json={
@@ -393,9 +360,9 @@ async def test_signed_upload_moves_file_to_raw_bucket(client, admin_token, confi
 
     assert complete_resp.status_code == 200
 
-    # File should have been moved from ingest to raw bucket
-    assert len(move_calls) == 1
-    src, dest = move_calls[0]
+    # File should have been moved from ingest to raw bucket via the adapter
+    adapter.move.assert_awaited_once()
+    src, dest = adapter.move.call_args.args
     assert "uploads/" in src
     assert f"experiments/{exp.id}/" in dest
     assert "bioaf-raw-test-abc123" in dest
@@ -412,13 +379,8 @@ async def test_signed_upload_without_experiment_id(client, admin_token, configur
     """Signed upload flow without experiment_id must leave experiment_id as None."""
     from app.models.file import File
     from sqlalchemy import select
-    from app.services.upload_service import UploadService
 
-    with patch.object(
-        UploadService,
-        "_generate_signed_upload_url",
-        new=AsyncMock(return_value="https://storage.googleapis.com/fake-signed-url"),
-    ):
+    with patch("app.adapters.registry.get_storage_adapter", return_value=_storage_adapter()):
         initiate_resp = await client.post(
             "/api/files/upload/initiate",
             json={"filename": "nolink.fastq.gz", "expected_size_bytes": 5000},

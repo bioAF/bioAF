@@ -2,6 +2,20 @@ import pytest
 import pytest_asyncio
 
 
+def _echo_move_adapter():
+    """Storage-adapter mock whose move() echoes the destination URI.
+
+    Phase 3 routes file moves through the BAL storage adapter (file linking /
+    reconcile), so these API tests patch the adapter boundary rather than the
+    retired GcsStorageService.move_file.
+    """
+    from unittest.mock import AsyncMock
+
+    adapter = AsyncMock()
+    adapter.move.side_effect = lambda src, dst: dst
+    return adapter
+
+
 @pytest_asyncio.fixture
 async def sample_experiment(session, admin_user):
     from app.models.experiment import Experiment
@@ -217,13 +231,9 @@ async def test_list_files_null_experiment_id(client, admin_token, sample_file):
 
 @pytest.mark.asyncio
 async def test_link_file_to_experiment(client, admin_token, sample_file, sample_experiment):
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import patch
 
-    with patch(
-        "app.services.file_organization.GcsStorageService.move_file",
-        new_callable=AsyncMock,
-        return_value=f"gs://test-bucket/experiments/{sample_experiment.id}/test-file.fastq.gz",
-    ):
+    with patch("app.adapters.registry.get_storage_adapter", return_value=_echo_move_adapter()):
         resp = await client.post(
             f"/api/files/{sample_file.id}/link",
             json={"experiment_id": sample_experiment.id},
@@ -241,7 +251,7 @@ async def test_link_file_to_experiment(client, admin_token, sample_file, sample_
 @pytest.mark.asyncio
 async def test_link_already_linked_file_does_not_move_gcs(client, admin_token, session, admin_user):
     """Re-linking a file to the same experiment must not attempt a GCS move."""
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import patch
 
     from app.models.experiment import Experiment
     from app.models.file import File
@@ -269,8 +279,8 @@ async def test_link_already_linked_file_does_not_move_gcs(client, admin_token, s
     await session.flush()
     await session.commit()
 
-    mock_move = AsyncMock()
-    with patch("app.services.file_organization.GcsStorageService.move_file", mock_move):
+    adapter = _echo_move_adapter()
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         resp = await client.post(
             f"/api/files/{f.id}/link",
             json={"experiment_id": exp.id, "sample_id": None},
@@ -278,13 +288,13 @@ async def test_link_already_linked_file_does_not_move_gcs(client, admin_token, s
         )
 
     assert resp.status_code == 200
-    mock_move.assert_not_called()
+    adapter.move.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_link_file_moves_to_raw_bucket(client, admin_token, session, admin_user):
     """Linking a file should call FileOrganizationService to move it in GCS."""
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import patch
 
     from app.models.experiment import Experiment
     from app.models.file import File
@@ -320,11 +330,7 @@ async def test_link_file_moves_to_raw_bucket(client, admin_token, session, admin
     await session.flush()
     await session.commit()
 
-    with patch(
-        "app.services.file_organization.GcsStorageService.move_file",
-        new_callable=AsyncMock,
-        return_value=f"gs://bioaf-raw-test/experiments/{exp.id}/reads.fastq.gz",
-    ):
+    with patch("app.adapters.registry.get_storage_adapter", return_value=_echo_move_adapter()):
         resp = await client.post(
             f"/api/files/{f.id}/link",
             json={"experiment_id": exp.id},
@@ -342,7 +348,7 @@ async def test_link_file_moves_to_raw_bucket(client, admin_token, session, admin
 @pytest.mark.asyncio
 async def test_link_fastq_transitions_experiment_to_fastq_uploaded(client, admin_token, session, admin_user):
     """Linking a FASTQ file to a registered experiment should advance status."""
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import patch
 
     from app.models.experiment import Experiment
     from app.models.file import File
@@ -377,11 +383,7 @@ async def test_link_fastq_transitions_experiment_to_fastq_uploaded(client, admin
     await session.flush()
     await session.commit()
 
-    with patch(
-        "app.services.file_organization.GcsStorageService.move_file",
-        new_callable=AsyncMock,
-        return_value=f"gs://bioaf-raw-test/experiments/{exp.id}/sample.fastq.gz",
-    ):
+    with patch("app.adapters.registry.get_storage_adapter", return_value=_echo_move_adapter()):
         resp = await client.post(
             f"/api/files/{f.id}/link",
             json={"experiment_id": exp.id},
@@ -399,7 +401,7 @@ async def test_link_fastq_transitions_experiment_to_fastq_uploaded(client, admin
 @pytest.mark.asyncio
 async def test_reconcile_moves_stuck_ingest_files_to_raw(client, admin_token, session, admin_user):
     """Files stuck in ingest bucket with an experiment_id should be moved to raw."""
-    from unittest.mock import patch
+    from unittest.mock import AsyncMock, patch
 
     from app.models.experiment import Experiment
     from app.models.file import File
@@ -455,11 +457,13 @@ async def test_reconcile_moves_stuck_ingest_files_to_raw(client, admin_token, se
 
     move_calls = []
 
-    async def fake_move(source, dest, credentials=None):
+    async def fake_move(source, dest):
         move_calls.append((source, dest))
         return dest
 
-    with patch("app.services.file_organization.GcsStorageService.move_file", side_effect=fake_move):
+    adapter = AsyncMock()
+    adapter.move.side_effect = fake_move
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         resp = await client.post(
             "/api/files/reconcile",
             headers={"Authorization": f"Bearer {admin_token}"},
@@ -775,7 +779,7 @@ async def test_file_response_includes_project_id(client, admin_token, sample_fil
 @pytest.mark.asyncio
 async def test_link_file_to_experiment_inherits_project_id(client, admin_token, session, admin_user):
     """Linking a file to an experiment should set project_id from the experiment's project."""
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import patch
 
     from app.models.experiment import Experiment
     from app.models.file import File
@@ -812,11 +816,7 @@ async def test_link_file_to_experiment_inherits_project_id(client, admin_token, 
     await session.flush()
     await session.commit()
 
-    with patch(
-        "app.services.file_organization.GcsStorageService.move_file",
-        new_callable=AsyncMock,
-        return_value=f"gs://test-bucket/experiments/{exp.id}/inherit.fastq.gz",
-    ):
+    with patch("app.adapters.registry.get_storage_adapter", return_value=_echo_move_adapter()):
         resp = await client.post(
             f"/api/files/{f.id}/link",
             json={"experiment_id": exp.id},

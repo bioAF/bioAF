@@ -1,8 +1,17 @@
-"""GCS Storage Service.
+"""GCS bucket-metrics + credential helper (legacy).
 
-Wraps the google-cloud-storage Python client for bucket metrics,
-file moves, and prefix management. All methods read bucket names
-from platform_config.
+After Phase 3 of the BAL rework, all object-store operations (upload/download/
+move/read/delete/list/signed-URL) go through ``get_storage_adapter()``; this
+module no longer performs object I/O. What remains is intentionally Tier-2 /
+support-only and drains in Phase 9:
+
+  - ``get_bucket_metrics``: per-bucket size/lifecycle/versioning enumeration
+    (bucket-level admin metrics; the owner scoped bucket lifecycle/enumeration
+    to Phase 9, so it keeps the google-cloud-storage import here).
+  - ``get_credentials``: GCP credential resolution used by get_bucket_metrics
+    and a few non-storage callers (terraform subprocess, pubsub). This belongs
+    in ``app.platform.credential_injector``; relocate when Phase 9 lands.
+  - ``build_*_prefix`` / ``_parse_gcs_uri``: pure path helpers (no SDK).
 """
 
 from __future__ import annotations
@@ -129,43 +138,6 @@ class GcsStorageService:
         except Exception as e:
             logger.warning("Failed to load GCS credentials from platform_config: %s", e)
             return None
-
-    @staticmethod
-    async def move_file(source_uri: str, destination_uri: str, credentials=None) -> str:
-        """Copy an object from source to destination in GCS, then delete source.
-
-        Returns the destination URI. If copy fails, source is NOT deleted (fail-safe).
-        Pass credentials from get_credentials() for service account auth;
-        omit to fall back to ADC.
-        """
-        src_bucket_name, src_blob_path = GcsStorageService._parse_gcs_uri(source_uri)
-        dst_bucket_name, dst_blob_path = GcsStorageService._parse_gcs_uri(destination_uri)
-
-        client = storage.Client(credentials=credentials)
-        src_bucket = client.get_bucket(src_bucket_name)
-        dst_bucket = client.get_bucket(dst_bucket_name)
-        src_blob = src_bucket.blob(src_blob_path)
-
-        # Copy first - if this fails, source is preserved
-        dst_bucket.copy_blob(src_blob, dst_bucket, dst_blob_path)
-
-        # Verify the copy succeeded before deleting
-        dst_blob = dst_bucket.blob(dst_blob_path)
-        if not dst_blob.exists():
-            raise RuntimeError(f"Copy verification failed: {destination_uri} does not exist after copy")
-
-        # Safe to delete source now
-        src_blob.delete()
-
-        return destination_uri
-
-    @staticmethod
-    async def read_object_text(bucket_name: str, object_path: str, credentials=None) -> str:
-        """Download a GCS object as UTF-8 text."""
-        client = storage.Client(credentials=credentials)
-        bucket = client.get_bucket(bucket_name)
-        blob = bucket.blob(object_path)
-        return blob.download_as_text()
 
     @staticmethod
     def build_experiment_prefix(experiment_id: int) -> str:

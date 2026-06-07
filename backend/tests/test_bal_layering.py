@@ -139,8 +139,10 @@ def _iter_app_modules(*, exclude_adapters: bool):
 SDK_IMPORT_ALLOWLIST: set[tuple[str, str]] = {
     # Object storage (GCS). Phase 3 drained all object-CRUD callers (46 -> 19).
     # The entries below remain by deliberate scope decision, not omission:
-    #   - gcs_storage.py: the legacy GcsStorageService. Deleted once its last
-    #     credential/prefix callers move to app.platform (tail of Phase 3 / 5).
+    #   - gcs_storage.py: object I/O (move/read) was removed in Phase 3 (now via
+    #     the adapter); what's left is get_bucket_metrics (bucket-level lifecycle/
+    #     versioning enumeration = Tier-2 -> Phase 9) plus get_credentials + path
+    #     helpers. The SDK import stays for get_bucket_metrics; drains in Phase 9.
     #   - reference_data_service.py: hands a raw client to the half-built GKE-Job
     #     ReferenceImporter; drains when the importer is addressed.
     #   - storage_service.py / gcp_config.py / orphaned_resource_service.py: these

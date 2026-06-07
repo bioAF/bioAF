@@ -156,7 +156,9 @@ class PubSubListener:
         manifest_config = await read_manifest_config(session)
         if is_manifest_filename(filename, manifest_config["manifest_filename"]):
             logger.info("Detected manifest file: %s", filename)
-            content = await GcsStorageService.read_object_text(bucket, object_name, credentials=credentials)
+            from app.adapters.registry import get_storage_adapter
+
+            content = await get_storage_adapter().read_text(f"gs://{bucket}/{object_name}")
             await process_manifest_ingest(
                 manifest_content=content,
                 manifest_format=manifest_config["manifest_format"],
