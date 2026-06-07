@@ -10,12 +10,9 @@ blocking the async event loop.
 
 import asyncio
 import logging
-from functools import partial
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.services.gcs_storage import GcsStorageService
 
 logger = logging.getLogger("bioaf.thumbnail_service")
 
@@ -53,83 +50,44 @@ class ThumbnailService:
             return None
 
     @staticmethod
-    def _download_render_upload(
-        credentials,
-        source_gcs_uri: str,
-        plot_entry_id: int,
-    ) -> str | None:
-        """Blocking helper that runs in a thread: download PDF, render, upload.
-
-        Returns the thumbnail GCS URI, or None on failure.
-        """
-        from google.cloud import storage as gcs_storage
-
-        client = gcs_storage.Client(credentials=credentials)
-
-        parts = source_gcs_uri.replace("gs://", "").split("/", 1)
-        bucket_name = parts[0]
-        blob_path = parts[1]
-        bucket = client.bucket(bucket_name)
-
-        # Download source PDF
-        pdf_bytes = bucket.blob(blob_path).download_as_bytes()
-
-        # Render thumbnail (CPU-heavy)
-        png_bytes = ThumbnailService.render_pdf_thumbnail(pdf_bytes)
-        if not png_bytes:
-            return None
-
-        # Upload to _thumbnails/ prefix
-        thumb_path = f"{THUMBNAIL_PREFIX}plot_{plot_entry_id}.png"
-        thumb_blob = bucket.blob(thumb_path)
-        thumb_blob.upload_from_string(png_bytes, content_type="image/png")
-
-        thumb_uri = f"gs://{bucket_name}/{thumb_path}"
-        logger.info("Generated thumbnail for plot %d: %s", plot_entry_id, thumb_uri)
-        return thumb_uri
-
-    @staticmethod
     async def generate_and_upload(
         session: AsyncSession,
         source_gcs_uri: str,
         plot_entry_id: int,
     ) -> str | None:
-        """Download a PDF from GCS, render thumbnail, upload to _thumbnails/.
+        """Download a PDF from storage, render thumbnail, upload to _thumbnails/.
 
-        All blocking work (GCS I/O + PDF rendering) is offloaded to a
-        thread so the async event loop stays responsive.
-
-        Returns the thumbnail GCS URI, or None on failure.
+        Object I/O goes through the storage adapter (which offloads blocking SDK
+        calls); the CPU-heavy PDF render is offloaded to a thread so the async
+        event loop stays responsive. Returns the thumbnail URI, or None.
         """
+        from app.adapters.registry import get_storage_adapter
+
         try:
-            credentials = await GcsStorageService.get_credentials(session)
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
-                None,
-                partial(
-                    ThumbnailService._download_render_upload,
-                    credentials,
-                    source_gcs_uri,
-                    plot_entry_id,
-                ),
-            )
+            adapter = get_storage_adapter()
+            pdf_bytes = await adapter.read_bytes(source_gcs_uri)
+
+            png_bytes = await asyncio.to_thread(ThumbnailService.render_pdf_thumbnail, pdf_bytes)
+            if not png_bytes:
+                return None
+
+            bucket_name = source_gcs_uri.replace("gs://", "").split("/", 1)[0]
+            thumb_uri = f"gs://{bucket_name}/{THUMBNAIL_PREFIX}plot_{plot_entry_id}.png"
+            await adapter.write_bytes(thumb_uri, png_bytes, content_type="image/png")
+
+            logger.info("Generated thumbnail for plot %d: %s", plot_entry_id, thumb_uri)
+            return thumb_uri
         except Exception as e:
             logger.warning("Failed to generate thumbnail for plot %d: %s", plot_entry_id, e)
             return None
 
     @staticmethod
     async def delete_thumbnail(session: AsyncSession, thumbnail_gcs_uri: str) -> bool:
-        """Delete a thumbnail blob from GCS."""
+        """Delete a thumbnail object from storage."""
+        from app.adapters.registry import get_storage_adapter
+
         try:
-            from google.cloud import storage as gcs_storage
-
-            credentials = await GcsStorageService.get_credentials(session)
-            client = gcs_storage.Client(credentials=credentials)
-
-            parts = thumbnail_gcs_uri.replace("gs://", "").split("/", 1)
-            bucket = client.bucket(parts[0])
-            blob = bucket.blob(parts[1])
-            blob.delete()
+            await get_storage_adapter().delete(thumbnail_gcs_uri)
             logger.info("Deleted thumbnail: %s", thumbnail_gcs_uri)
             return True
         except Exception as e:
