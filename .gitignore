@@ -3,6 +3,12 @@
 # Claude Code project settings
 .claude/
 
+# Graphify
+.graphifyignore
+graphify-out/
+.graphify-runs/
+.graphify-corpus/
+
 # Local-only working documents (specs, scratch, plans)
 local/
 documentation/
