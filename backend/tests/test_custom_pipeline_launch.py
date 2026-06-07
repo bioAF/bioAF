@@ -595,6 +595,12 @@ async def test_pipeline_run_fields(session, admin_user, ready_env_version, exper
     assert db_run.pipeline_version == "1"
     assert db_run.status == "running"
     assert db_run.k8s_job_name == "bioaf-pipeline-test-123"
+    # Backend-neutral fields dual-written (BAL Phase 4).
+    assert db_run.compute_job_ref == "bioaf-pipeline-test-123"
+    assert db_run.provider_metadata == {
+        "job_name": "bioaf-pipeline-test-123",
+        "namespace": "bioaf-pipelines",
+    }
 
     input_link_count = (
         (await session.execute(select(PipelineRunInputFile).where(PipelineRunInputFile.pipeline_run_id == run.id)))

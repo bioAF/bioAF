@@ -781,6 +781,13 @@ class CustomPipelineService:
             run.k8s_job_name = job_result.job_id
             run.k8s_namespace = job_result.provider_details.get("namespace", "")
             run.slurm_job_id = job_result.job_id
+            # Backend-neutral handle + provider detail (BAL Phase 4); dual-written.
+            run.compute_job_ref = job_result.job_id
+            run.provider_metadata = {
+                k: v
+                for k, v in {"job_name": job_result.job_id, **(job_result.provider_details or {})}.items()
+                if v is not None
+            }
             if job_result.estimated_cost:
                 run.cost_estimate = job_result.estimated_cost.estimated_cost_usd
             await session.flush()

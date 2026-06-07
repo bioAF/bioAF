@@ -218,6 +218,16 @@ class NotebookService:
             notebook_session.proxy_url = result.provider_details.get("url")
             notebook_session.k8s_pod_name = result.provider_details.get("pod_name")
             notebook_session.k8s_namespace = result.provider_details.get("namespace")
+            # Backend-neutral handle + provider detail (BAL Phase 4); dual-written.
+            notebook_session.compute_job_ref = result.provider_details.get("pod_name")
+            notebook_session.provider_metadata = {
+                k: v
+                for k, v in {
+                    "pod_name": result.provider_details.get("pod_name"),
+                    "namespace": result.provider_details.get("namespace"),
+                }.items()
+                if v is not None
+            }
             notebook_session.access_url = result.access_url
             notebook_session.gcs_home_prefix = result.provider_details.get("gcs_home_prefix")
             adapter_status = result.status

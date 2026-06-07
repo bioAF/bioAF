@@ -197,6 +197,8 @@ class PipelineMonitorService:
         # Update pod name if available
         if pod_name:
             run.k8s_pod_name = pod_name
+            # Mirror into the neutral provider_metadata (BAL Phase 4).
+            run.provider_metadata = {**(run.provider_metadata or {}), "pod_name": pod_name}
 
         is_custom = run.custom_pipeline_version_id is not None
 
