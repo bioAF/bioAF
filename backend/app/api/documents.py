@@ -122,13 +122,11 @@ async def download_document(
         raise HTTPException(404, "Document not found")
 
     try:
-        from google.cloud import storage as gcs_storage
+        from app.adapters.registry import get_storage_adapter
 
-        client = gcs_storage.Client()
-        parts = doc.file.gcs_uri.replace("gs://", "").split("/", 1)
-        bucket = client.bucket(parts[0])
-        blob = bucket.blob(parts[1])
-        url = blob.generate_signed_url(version="v4", expiration=3600, method="GET")
+        url = await get_storage_adapter().generate_signed_url(
+            doc.file.gcs_uri, method="GET", expiry_seconds=3600
+        )
         return {"download_url": url}
     except Exception:
         return {"download_url": doc.file.gcs_uri if doc.file else ""}
