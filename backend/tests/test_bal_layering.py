@@ -143,7 +143,6 @@ SDK_IMPORT_ALLOWLIST: set[tuple[str, str]] = {
     ("services/ingest_service.py", "google.cloud.storage"),
     ("services/reference_data_service.py", "google.cloud.storage"),
     ("services/storage_service.py", "google.cloud.storage"),
-    ("services/terraform_executor.py", "google.cloud.storage"),
     # GCS object ops that also do Tier 2 work; the storage import drains in
     # Phase 3, the others in Phase 6/9.
     ("services/gcp_config.py", "google.cloud.storage"),
@@ -209,7 +208,7 @@ def test_sdk_allowlist_count_is_pinned():
 
     Decrement this as phases drain leaks; it must reach 0 by end of Phase 9.
     """
-    assert len(SDK_IMPORT_ALLOWLIST) == 23
+    assert len(SDK_IMPORT_ALLOWLIST) == 22
 
 
 # --- Tree scan: no adapter imports services (the layering inversion) ---------

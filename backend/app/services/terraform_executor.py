@@ -20,8 +20,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import AsyncIterator
 
-from google.api_core.exceptions import NotFound
-from google.cloud import storage
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1228,24 +1226,17 @@ class TerraformExecutor:
         lock_path: str,
         credentials=None,
     ) -> None:
-        """Delete a Terraform lock file from a GCS bucket.
+        """Delete a Terraform lock object from the state store via the adapter.
 
-        Uses the app's configured credentials when available; falls back
-        to ADC. Failures are logged but not raised since the run is
-        already marked cancelled/failed.
+        The adapter's delete is idempotent (a missing object is not an error)
+        and owns credential resolution. Failures are logged but not raised since
+        the run is already marked cancelled/failed.
         """
-
-        def _delete() -> None:
-            client = storage.Client(credentials=credentials) if credentials else storage.Client()
-            bucket = client.bucket(bucket_name)
-            blob = bucket.blob(lock_path)
-            blob.delete()
+        from app.adapters.registry import get_storage_adapter
 
         try:
-            await asyncio.to_thread(_delete)
+            await get_storage_adapter().delete(f"gs://{bucket_name}/{lock_path}")
             logger.info("Deleted lock file gs://%s/%s", bucket_name, lock_path)
-        except NotFound:
-            logger.info("Lock file gs://%s/%s already gone", bucket_name, lock_path)
         except Exception as exc:
             logger.warning("Error deleting lock file gs://%s/%s: %s", bucket_name, lock_path, exc)
 
