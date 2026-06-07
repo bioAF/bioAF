@@ -18,7 +18,6 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pipeline_run import PipelineRun
-from app.services.gcs_storage import GcsStorageService
 from app.services.qc.extractors.gcs_helpers import get_results_bucket
 
 logger = logging.getLogger("bioaf.qc.scrnaseq")
@@ -622,64 +621,58 @@ async def extract(
         run.id,
     )
 
-    credentials = await GcsStorageService.get_credentials(session)
-
     try:
-        from google.cloud import storage
+        from app.adapters.models import StorageObjectNotFound
+        from app.adapters.registry import get_storage_adapter
 
-        client = storage.Client(credentials=credentials)
-        bucket = client.bucket(results_bucket)
+        adapter = get_storage_adapter()
         prefix = f"experiments/{run.experiment_id}/pipeline-runs/{run.id}/"
+        base = f"gs://{results_bucket}/"
 
-        blobs_at_prefix = [b.name for b in bucket.list_blobs(prefix=prefix, max_results=20)]
-        logger.info("Files at prefix for run %d: %s", run.id, blobs_at_prefix)
+        sample = await adapter.list_objects(f"{base}{prefix}", max_results=20)
+        logger.info("Files at prefix for run %d: %s", run.id, [o.storage_uri[len(base) :] for o in sample])
 
-        cache_blob = bucket.blob(f"{prefix}qc_metrics.json")
-        if not skip_cache and cache_blob.exists():
-            cached = json.loads(cache_blob.download_as_text())
-            logger.info("Using cached qc_metrics.json for run %d", run.id)
-            return cached
+        cache_uri = f"{base}{prefix}qc_metrics.json"
+        if not skip_cache:
+            try:
+                cached = json.loads(await adapter.read_text(cache_uri))
+                logger.info("Using cached qc_metrics.json for run %d", run.id)
+                return cached
+            except StorageObjectNotFound:
+                pass
 
         metrics = dict(EMPTY_METRICS)
 
-        starsolo_blob = None
-        for blob in bucket.list_blobs(prefix=f"{prefix}star/"):
-            if blob.name.endswith("Solo.out/Gene/Summary.csv"):
-                starsolo_blob = blob
-                break
-
-        if starsolo_blob:
+        star_objs = await adapter.list_objects(f"{base}{prefix}star/")
+        starsolo_uri = next(
+            (o.storage_uri for o in star_objs if o.storage_uri.endswith("Solo.out/Gene/Summary.csv")), None
+        )
+        if starsolo_uri:
             logger.info("Found STARsolo Summary.csv for run %d", run.id)
-            summary_text = starsolo_blob.download_as_text()
+            summary_text = await adapter.read_text(starsolo_uri)
             starsolo_metrics = read_starsolo_summary(summary_text)
             for k, v in starsolo_metrics.items():
                 if v is not None:
                     metrics[k] = v
 
         if metrics["cell_count"] is None:
-            h5ad_blob = None
-            for blob in bucket.list_blobs(prefix=prefix):
-                if blob.name.endswith(".h5ad"):
-                    h5ad_blob = blob
-                    break
+            all_objs = await adapter.list_objects(f"{base}{prefix}")
+            h5ad_uri = next((o.storage_uri for o in all_objs if o.storage_uri.endswith(".h5ad")), None)
 
-            if h5ad_blob:
+            if h5ad_uri:
                 with tempfile.NamedTemporaryFile(suffix=".h5ad") as tmp:
-                    h5ad_blob.download_to_filename(tmp.name)
+                    await adapter.download_to_filename(h5ad_uri, tmp.name)
                     h5ad_metrics = read_h5ad_metrics(tmp.name)
                     for k, v in h5ad_metrics.items():
                         if v is not None and metrics.get(k) is None:
                             metrics[k] = v
 
-        multiqc_blob = None
-        for blob in bucket.list_blobs(prefix=f"{prefix}multiqc/multiqc_data/"):
-            if blob.name.endswith("multiqc_data.json"):
-                multiqc_blob = blob
-                break
+        multiqc_objs = await adapter.list_objects(f"{base}{prefix}multiqc/multiqc_data/")
+        multiqc_uri = next((o.storage_uri for o in multiqc_objs if o.storage_uri.endswith("multiqc_data.json")), None)
 
-        if multiqc_blob:
+        if multiqc_uri:
             logger.info("Found multiqc_data.json for run %d", run.id)
-            multiqc_text = multiqc_blob.download_as_text()
+            multiqc_text = await adapter.read_text(multiqc_uri)
             multiqc_metrics = read_multiqc_metrics(multiqc_text)
             for k, v in multiqc_metrics.items():
                 if v is not None and metrics.get(k) is None:
@@ -689,32 +682,32 @@ async def extract(
             if chart_data:
                 metrics["chart_data"] = chart_data
 
-        umi_sorted_blob = None
-        for blob in bucket.list_blobs(prefix=f"{prefix}star/"):
-            if blob.name.endswith("Solo.out/Gene/UMIperCellSorted.txt"):
-                umi_sorted_blob = blob
-                break
+        umi_sorted_uri = next(
+            (o.storage_uri for o in star_objs if o.storage_uri.endswith("Solo.out/Gene/UMIperCellSorted.txt")), None
+        )
 
-        if umi_sorted_blob:
+        if umi_sorted_uri:
             logger.info("Found UMIperCellSorted.txt for barcode rank plot, run %d", run.id)
             try:
-                barcode_rank = read_umi_per_cell_sorted(umi_sorted_blob.download_as_text())
+                barcode_rank = read_umi_per_cell_sorted(await adapter.read_text(umi_sorted_uri))
                 if barcode_rank:
                     metrics["barcode_rank_data"] = barcode_rank
             except Exception as e:
                 logger.warning("Barcode rank extraction failed for run %d: %s", run.id, e)
         else:
-            raw_matrix_blob = None
-            for blob in bucket.list_blobs(prefix=f"{prefix}star/"):
-                if blob.name.endswith("Solo.out/Gene/raw/UniqueAndMult-EM.mtx") or blob.name.endswith(
-                    "Solo.out/Gene/raw/matrix.mtx"
-                ):
-                    raw_matrix_blob = blob
-                    break
-            if raw_matrix_blob:
+            raw_matrix_uri = next(
+                (
+                    o.storage_uri
+                    for o in star_objs
+                    if o.storage_uri.endswith("Solo.out/Gene/raw/UniqueAndMult-EM.mtx")
+                    or o.storage_uri.endswith("Solo.out/Gene/raw/matrix.mtx")
+                ),
+                None,
+            )
+            if raw_matrix_uri:
                 logger.info("Found raw matrix for barcode rank plot, run %d", run.id)
                 try:
-                    barcode_rank = extract_barcode_rank_from_mtx(raw_matrix_blob.download_as_text())
+                    barcode_rank = extract_barcode_rank_from_mtx(await adapter.read_text(raw_matrix_uri))
                     if barcode_rank:
                         metrics["barcode_rank_data"] = barcode_rank
                 except Exception as e:
@@ -725,17 +718,13 @@ async def extract(
             logger.info("No metrics found for run %d from any source", run.id)
             return dict(EMPTY_METRICS)
 
-        cache_upload_blob = bucket.blob(f"{prefix}qc_metrics.json")
-        cache_upload_blob.upload_from_string(
-            json.dumps(metrics, indent=2),
-            content_type="application/json",
-        )
+        await adapter.write_text(cache_uri, json.dumps(metrics, indent=2), content_type="application/json")
         logger.info("Wrote qc_metrics.json cache for run %d", run.id)
 
         return metrics
 
     except Exception as e:
-        logger.warning("Metric extraction from GCS failed for run %d: %s", run.id, e)
+        logger.warning("Metric extraction from storage failed for run %d: %s", run.id, e)
         return dict(EMPTY_METRICS)
 
 

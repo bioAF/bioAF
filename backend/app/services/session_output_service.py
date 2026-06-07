@@ -140,29 +140,26 @@ class SessionOutputService:
         Updates File.gcs_uri for all output files to point to the results bucket.
         Returns the new GCS output prefix in the results bucket.
         """
-        from google.cloud import storage
         from sqlalchemy import text as sa_text
 
-        from app.platform.platform_config_service import PlatformConfigService
+        from app.adapters.registry import get_storage_adapter
 
-        config = await PlatformConfigService.get_many(db, ["gcp_credential_source", "gcp_service_account_key"])
-
-        from app.platform.credential_injector import load_gcp_credentials
-
-        credentials = load_gcp_credentials(config)
-        client = storage.Client(credentials=credentials)
+        adapter = get_storage_adapter()
 
         src_prefix = f"sessions/{session_id}/"
         dst_prefix = f"sessions/{session_id}/"
-
-        src_bucket = client.bucket(working_bucket)
-        dst_bucket = client.bucket(results_bucket)
+        src_uri_prefix = f"gs://{working_bucket}/{src_prefix}"
 
         copied = 0
-        blobs = list(src_bucket.list_blobs(prefix=src_prefix))
-        for blob in blobs:
-            dst_name = dst_prefix + blob.name[len(src_prefix) :]
-            src_bucket.copy_blob(blob, dst_bucket, new_name=dst_name)
+        src_uris: list[str] = []
+        objs = await adapter.list_objects(src_uri_prefix)
+        for obj in objs:
+            src_uri = obj.storage_uri
+            key = src_uri[len(f"gs://{working_bucket}/") :]
+            dst_name = dst_prefix + key[len(src_prefix) :]
+            dst_uri = f"gs://{results_bucket}/{dst_name}"
+            await adapter.copy(src_uri, dst_uri)
+            src_uris.append(src_uri)
             copied += 1
 
         # Update File.gcs_uri to point to results bucket
@@ -183,8 +180,8 @@ class SessionOutputService:
             )
 
         # Delete from working bucket
-        for blob in blobs:
-            blob.delete()
+        for src_uri in src_uris:
+            await adapter.delete(src_uri)
 
         logger.info(
             "Moved %d output files for session %d from %s to %s",
