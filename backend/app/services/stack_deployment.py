@@ -762,27 +762,21 @@ _BUCKET_CONFIG_KEYS = [
 
 
 async def _empty_gcs_bucket(session: AsyncSession, bucket_name: str) -> int:
-    """Delete all objects (including noncurrent versions) from a GCS bucket.
+    """Delete all objects (including noncurrent versions) from a bucket.
 
-    Returns the number of objects deleted. Uses the same credential
-    resolution as GcsStorageService so it works with SA keys stored
-    in platform_config.
+    Returns the number of objects deleted. Routes through the storage adapter,
+    which owns credential resolution; ``include_versions`` enumerates every
+    generation and each is deleted by its generation id (versioned-wipe).
     """
-    from google.cloud import storage as gcs_storage
+    from app.adapters.registry import get_storage_adapter
 
-    from app.services.gcs_storage import GcsStorageService
-
-    credentials = await GcsStorageService.get_credentials(session)
-    client = gcs_storage.Client(credentials=credentials)
+    adapter = get_storage_adapter()
+    uri_prefix = f"gs://{bucket_name}/"
 
     deleted = 0
-    # Delete current objects
-    for blob in client.list_blobs(bucket_name):
-        blob.delete()
-        deleted += 1
-    # Delete noncurrent versions (versioned buckets retain old copies)
-    for blob in client.list_blobs(bucket_name, versions=True):
-        blob.delete()
+    for obj in await adapter.list_objects(uri_prefix, include_versions=True):
+        generation = obj.provider_details.get("generation")
+        await adapter.delete(obj.storage_uri, generation=generation)
         deleted += 1
 
     return deleted

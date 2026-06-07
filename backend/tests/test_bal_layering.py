@@ -146,7 +146,6 @@ SDK_IMPORT_ALLOWLIST: set[tuple[str, str]] = {
     # Phase 3, the others in Phase 6/9.
     ("services/gcp_config.py", "google.cloud.storage"),
     ("services/orphaned_resource_service.py", "google.cloud.storage"),
-    ("services/stack_deployment.py", "google.cloud.storage"),
     # Compute/notebook Kubernetes leaks. Drained in Phase 5.
     ("services/session_persistence.py", "kubernetes.client"),
     ("services/session_persistence.py", "kubernetes.config"),
@@ -207,7 +206,7 @@ def test_sdk_allowlist_count_is_pinned():
 
     Decrement this as phases drain leaks; it must reach 0 by end of Phase 9.
     """
-    assert len(SDK_IMPORT_ALLOWLIST) == 21
+    assert len(SDK_IMPORT_ALLOWLIST) == 20
 
 
 # --- Tree scan: no adapter imports services (the layering inversion) ---------
