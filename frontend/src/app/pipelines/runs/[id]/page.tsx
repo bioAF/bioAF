@@ -296,34 +296,34 @@ export default function PipelineRunDetailPage() {
 
   useEffect(() => {
     if (activeTab !== "logs") return;
-    if (run?.k8s_job_name) {
+    if (run?.compute_job_ref) {
       loadLogs();
     } else if (selectedProcess) {
       loadLogs(selectedProcess);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedProcess, activeTab, run?.k8s_job_name]);
+  }, [selectedProcess, activeTab, run?.compute_job_ref]);
 
   // Poll logs on a 5s interval while the run is active and the logs tab is
   // open. The run-metadata poller above runs every 10s but is dep'd on
-  // run.k8s_job_name, so without this sibling interval logs only reload
+  // run.compute_job_ref, so without this sibling interval logs only reload
   // when that field changes (usually once, very early), leaving the user
   // staring at stale output until they refresh the page. Polls suppress
   // the spinner so the <pre> stays mounted and scroll position survives.
   useEffect(() => {
     if (activeTab !== "logs") return;
     if (!run || !["running", "pending"].includes(run.status)) return;
-    if (!run.k8s_job_name && !selectedProcess) return;
+    if (!run.compute_job_ref && !selectedProcess) return;
     const interval = setInterval(() => {
       if (selectedProcess) {
         loadLogs(selectedProcess, false);
-      } else if (run.k8s_job_name) {
+      } else if (run.compute_job_ref) {
         loadLogs(undefined, false);
       }
     }, 5000);
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, run?.status, run?.k8s_job_name, selectedProcess]);
+  }, [activeTab, run?.status, run?.compute_job_ref, selectedProcess]);
 
   if (!loading && !run) {
     return (
@@ -571,17 +571,20 @@ export default function PipelineRunDetailPage() {
             </div>
           )}
 
-          {/* K8s metadata */}
-          {run.k8s_job_name && (
-            <div className="bg-white rounded-lg shadow p-4 mb-6 flex gap-6" data-testid="k8s-metadata">
-              <div><span className="text-xs text-gray-500">K8s Job</span><p className="text-sm font-mono">{run.k8s_job_name}</p></div>
-              {run.k8s_pod_name && (
-                <div><span className="text-xs text-gray-500">Pod</span><p className="text-sm font-mono">{run.k8s_pod_name}</p></div>
-              )}
-              {run.k8s_namespace && (
-                <div><span className="text-xs text-gray-500">Namespace</span><p className="text-sm font-mono">{run.k8s_namespace}</p></div>
-              )}
-            </div>
+          {/* Provider details: backend-specific metadata, rendered generically
+              from provider_metadata so it works for any compute backend. */}
+          {run.provider_metadata && Object.keys(run.provider_metadata).length > 0 && (
+            <details className="bg-white rounded-lg shadow p-4 mb-6" data-testid="provider-details">
+              <summary className="text-sm text-gray-600 cursor-pointer">Provider details</summary>
+              <div className="mt-3 flex flex-wrap gap-6">
+                {Object.entries(run.provider_metadata).map(([key, value]) => (
+                  <div key={key}>
+                    <span className="text-xs text-gray-500">{key}</span>
+                    <p className="text-sm font-mono break-all">{String(value)}</p>
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
 
           {/* Tabs */}
@@ -699,7 +702,7 @@ export default function PipelineRunDetailPage() {
             <div className="bg-white rounded-lg shadow p-6">
               <div className="flex items-center gap-4 mb-4">
                 <h2 className="text-lg font-semibold">Logs</h2>
-                {!run.k8s_job_name && run.processes.length > 0 && (
+                {!run.compute_job_ref && run.processes.length > 0 && (
                   <select value={selectedProcess} onChange={(e) => setSelectedProcess(e.target.value)} className="border rounded px-3 py-1.5 text-sm">
                     <option value="">Select process...</option>
                     {run.processes.map((p) => <option key={p.id} value={p.process_name}>{p.process_name}</option>)}
@@ -737,7 +740,7 @@ export default function PipelineRunDetailPage() {
                 </div>
               )}
 
-              {(run.k8s_job_name || selectedProcess) ? (
+              {(run.compute_job_ref || selectedProcess) ? (
                 logsLoading ? (
                   <div className="flex items-center gap-2 text-gray-400"><LoadingSpinner size="sm" /><span>Loading logs...</span></div>
                 ) : (
