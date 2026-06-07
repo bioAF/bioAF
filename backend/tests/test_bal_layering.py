@@ -137,14 +137,22 @@ def _iter_app_modules(*, exclude_adapters: bool):
 # entries. A new leak not listed here fails the build; an entry whose import is
 # gone fails the build as stale (see the stale-entry test below).
 SDK_IMPORT_ALLOWLIST: set[tuple[str, str]] = {
-    # Object storage (GCS) -- the dominant leak. Drained in Phase 3.
+    # Object storage (GCS). Phase 3 drained all object-CRUD callers (46 -> 19).
+    # The entries below remain by deliberate scope decision, not omission:
+    #   - gcs_storage.py: the legacy GcsStorageService. Deleted once its last
+    #     credential/prefix callers move to app.platform (tail of Phase 3 / 5).
+    #   - reference_data_service.py: hands a raw client to the half-built GKE-Job
+    #     ReferenceImporter; drains when the importer is addressed.
+    #   - storage_service.py / gcp_config.py / orphaned_resource_service.py: these
+    #     do bucket-level work (bucket enumeration+lifecycle, whole-bucket delete)
+    #     that the owner scoped to Tier-2 -> Phase 9, not the Phase 3 object-store
+    #     interface. (Object-store bucket *versioning* + generation-aware delete
+    #     were added in Phase 3 for backup_service / stack_deployment.)
     ("services/gcs_storage.py", "google.cloud.storage"),
     ("services/reference_data_service.py", "google.cloud.storage"),
-    ("services/storage_service.py", "google.cloud.storage"),
-    # GCS object ops that also do Tier 2 work; the storage import drains in
-    # Phase 3, the others in Phase 6/9.
-    ("services/gcp_config.py", "google.cloud.storage"),
-    ("services/orphaned_resource_service.py", "google.cloud.storage"),
+    ("services/storage_service.py", "google.cloud.storage"),  # bucket enum -> Phase 9
+    ("services/gcp_config.py", "google.cloud.storage"),  # Tier-2 bundle -> Phase 9
+    ("services/orphaned_resource_service.py", "google.cloud.storage"),  # bucket delete -> Phase 9
     # Compute/notebook Kubernetes leaks. Drained in Phase 5.
     ("services/session_persistence.py", "kubernetes.client"),
     ("services/session_persistence.py", "kubernetes.config"),
