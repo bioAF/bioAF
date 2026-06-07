@@ -2,11 +2,6 @@
 
 import logging
 
-try:
-    from google.cloud import storage as gcs_storage
-except ImportError:
-    gcs_storage = None  # type: ignore[assignment]
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -170,21 +165,20 @@ class PipelineOutputService:
 
 
 async def _check_gcs_blobs(bucket_name: str, metadata_files: list[dict]) -> dict[str, int | None]:
-    """Check which GCS blobs exist and return {gcs_uri: size_bytes} for existing ones."""
-    try:
-        if gcs_storage is None:
-            return {}
-        client = gcs_storage.Client()
-        bucket = client.bucket(bucket_name)
-        result: dict[str, int | None] = {}
-        for meta in metadata_files:
-            gcs_uri = meta["gcs_uri"]
-            blob_path = gcs_uri.replace(f"gs://{bucket_name}/", "")
-            blob = bucket.blob(blob_path)
-            if blob.exists():
-                blob.reload()
-                result[gcs_uri] = blob.size
-        return result
-    except Exception as e:
-        logger.warning("Could not check GCS blobs in %s: %s", bucket_name, e)
-        return {}
+    """Check which storage objects exist and return {storage_uri: size_bytes}."""
+    from app.adapters.models import StorageObjectNotFound
+    from app.adapters.registry import get_storage_adapter
+
+    adapter = get_storage_adapter()
+    result: dict[str, int | None] = {}
+    for meta in metadata_files:
+        gcs_uri = meta["gcs_uri"]
+        try:
+            metadata = await adapter.get_object_metadata(gcs_uri)
+        except StorageObjectNotFound:
+            continue
+        except Exception as e:
+            logger.warning("Could not check storage object %s: %s", gcs_uri, e)
+            continue
+        result[gcs_uri] = metadata.size_bytes
+    return result
