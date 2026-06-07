@@ -186,6 +186,32 @@ class TestAdapterRegistry:
             registry.get_compute_adapter()
 
 
+# -- get_job_report tests --
+
+
+class TestGetJobReport:
+    """ComputeProvider.get_job_report is a base method (BAL rework, Phase 5)."""
+
+    @pytest.mark.asyncio
+    async def test_base_default_returns_empty_string(self):
+        """A backend without a run-report artifact inherits a soft '' default.
+
+        Promoted to the base in Phase 5 so pipeline_monitor can call it on the
+        interface; the SLURM stub (no report) returns '' instead of raising
+        AttributeError.
+        """
+        provider = SlurmComputeProvider()
+        assert await provider.get_job_report("job-123") == ""
+
+    @pytest.mark.asyncio
+    async def test_k8s_local_returns_empty_report(self):
+        """K8s local mode has no GCS report, so returns ''."""
+        from app.adapters.compute.kubernetes import KubernetesComputeProvider
+
+        provider = KubernetesComputeProvider()
+        assert await provider.get_job_report("local-abc123") == ""
+
+
 # -- get_job_progress tests --
 
 

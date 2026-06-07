@@ -97,6 +97,16 @@ class ComputeProvider(ABC):
         """
         return False
 
+    async def get_job_report(self, job_id: str) -> str:
+        """Return an HTML run report for a job, or '' if the backend has none.
+
+        Gated by the ``job_report`` capability. Backends that produce a report
+        artifact (e.g. the Nextflow HTML report on Kubernetes) override this;
+        backends without one inherit the empty-string default rather than
+        raising, so callers can invoke it on the interface unconditionally.
+        """
+        return ""
+
     def get_raw_bucket_name(self) -> str:
         """Return the raw data bucket name, or empty string if unavailable."""
         return ""
