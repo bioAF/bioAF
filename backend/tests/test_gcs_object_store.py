@@ -351,3 +351,56 @@ class TestSignedUrl:
 
     def test_gcs_declares_signed_url_capability(self, gcs_adapter):
         assert gcs_adapter.capabilities().signed_url_upload is True
+
+
+# --- storage metrics self-contained (inversion reversal) ---------------------
+
+
+class TestGcsStorageMetricsSelfContained:
+    @pytest.mark.asyncio
+    async def test_metrics_enumerate_configured_buckets(self, gcs_adapter, monkeypatch):
+        async def fake_storage_config():
+            return {
+                "storage_deployed": "true",
+                "raw_bucket_name": "bioaf-raw",
+                "results_bucket_name": "bioaf-results",
+            }
+
+        monkeypatch.setattr(gcs_adapter, "_read_storage_config", fake_storage_config)
+
+        def make_blob(size):
+            b = MagicMock()
+            b.size = size
+            return b
+
+        client = MagicMock()
+        bucket = MagicMock()
+        bucket.storage_class = "STANDARD"
+        client.get_bucket.return_value = bucket
+        client.list_blobs.return_value = [make_blob(1024**3), make_blob(1024**3)]  # 2 GiB
+
+        with patch.object(gcs_adapter, "_get_gcs_client", return_value=client):
+            result = await gcs_adapter._gcs_storage_metrics()
+
+        names = sorted(b["name"] for b in result["buckets"])
+        assert names == ["bioaf-raw", "bioaf-results"]
+        assert all(b["size_gb"] == 2.0 for b in result["buckets"])
+        assert all(b["object_count"] == 2 for b in result["buckets"])
+
+    @pytest.mark.asyncio
+    async def test_metrics_raises_when_not_deployed(self, gcs_adapter, monkeypatch):
+        async def fake_storage_config():
+            return {"storage_deployed": "false"}
+
+        monkeypatch.setattr(gcs_adapter, "_read_storage_config", fake_storage_config)
+        with pytest.raises(ValueError):
+            await gcs_adapter._gcs_storage_metrics()
+
+    def test_adapter_does_not_import_gcs_storage_service(self):
+        """The inversion is reversed: the adapter module must not import the
+        service it used to delegate to."""
+        import app.adapters.storage.gcs as mod
+
+        src = open(mod.__file__).read()
+        assert "from app.services.gcs_storage import" not in src
+        assert "import app.services.gcs_storage" not in src

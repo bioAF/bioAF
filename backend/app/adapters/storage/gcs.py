@@ -39,6 +39,19 @@ _CREDENTIAL_CONFIG_KEYS = [
     "gcp_bootstrap_sa_email",
 ]
 
+# The logical stores enumerated for storage metrics (parity with the buckets
+# the prior GcsStorageService.get_bucket_metrics iterated: BACKUPS is not a
+# managed-metrics bucket).
+_METRICS_STORES = (
+    StorageStore.INGEST,
+    StorageStore.RAW,
+    StorageStore.WORKING,
+    StorageStore.RESULTS,
+    StorageStore.REFERENCES,
+    StorageStore.LITERATURE,
+    StorageStore.CONFIG_BACKUPS,
+)
+
 
 def _read_file_bytes(path: str) -> bytes:
     with open(path, "rb") as f:
@@ -690,33 +703,48 @@ class GcsStorageProvider(StorageProvider):
 
         return collected
 
-    async def _gcs_storage_metrics(self) -> dict:
-        """Delegate to GcsStorageService for live bucket metrics.
+    async def _read_storage_config(self) -> dict[str, str]:
+        """Read storage_deployed + the per-store bucket-name keys.
 
-        Requires a DB session to read platform_config. Since the BAL adapter
-        interface does not pass a session, we create a short-lived one here.
+        Self-contained (Phase 3): this replaces the read that previously lived
+        in GcsStorageService, so the adapter no longer imports the service.
         """
         from app.database import async_session_factory
-        from app.services.gcs_storage import GcsStorageService
+        from app.platform.platform_config_service import PlatformConfigService
 
+        keys = ["storage_deployed", *[f"{s.value}_bucket_name" for s in _METRICS_STORES]]
         async with async_session_factory() as session:
-            metrics = await GcsStorageService.get_bucket_metrics(session)
+            return await PlatformConfigService.get_many(session, keys)
 
-        # Convert to the dict format expected by the adapter interface
+    async def _gcs_storage_metrics(self) -> dict:
+        """Compute live per-bucket metrics directly via the GCS client.
+
+        The adapter is now the single owner of GCS object/bucket operations;
+        bucket enumeration that previously lived in GcsStorageService moved
+        here, reversing the adapter -> service layering inversion. Blocking SDK
+        calls run off the event loop.
+        """
+        config = await self._read_storage_config()
+        if config.get("storage_deployed", "false") != "true":
+            raise ValueError("Storage infrastructure has not been deployed yet")
+
+        creds = await self._get_credentials()
+        raw = await asyncio.to_thread(self._gcs_collect_bucket_metrics, config, creds)
+
         buckets: list[dict[str, object]] = []
         total_gb = 0.0
         total_cost = 0.0
-        for m in metrics:
-            size_gb = m.size_bytes / (1024**3)
+        for name, size_bytes, object_count, storage_class in raw:
+            size_gb = size_bytes / (1024**3)
             cost = round(size_gb * 0.026, 2)
             total_gb += size_gb
             total_cost += cost
             buckets.append(
                 {
-                    "name": m.bucket_name,
+                    "name": name,
                     "size_gb": round(size_gb, 2),
-                    "object_count": m.object_count,
-                    "storage_class": m.storage_class,
+                    "object_count": object_count,
+                    "storage_class": storage_class,
                     "cost_monthly_usd": cost,
                 }
             )
@@ -726,3 +754,18 @@ class GcsStorageProvider(StorageProvider):
             "total_size_gb": round(total_gb, 2),
             "total_cost_monthly_usd": round(total_cost, 2),
         }
+
+    def _gcs_collect_bucket_metrics(self, config: dict, creds) -> list[tuple]:
+        """Enumerate configured buckets and return (name, size_bytes, count, class)."""
+        client = self._get_gcs_client(creds)
+        out: list[tuple] = []
+        for store in _METRICS_STORES:
+            bucket_name = config.get(f"{store.value}_bucket_name", "")
+            if not bucket_name or bucket_name == "null":
+                continue
+            bucket = client.get_bucket(bucket_name)
+            blobs = list(client.list_blobs(bucket_name))
+            total_size = sum(b.size or 0 for b in blobs)
+            storage_class = bucket.storage_class or "STANDARD"
+            out.append((bucket_name, total_size, len(blobs), storage_class))
+        return out

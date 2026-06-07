@@ -273,11 +273,10 @@ def _iter_adapter_modules():
 
 # Every adapter -> service import that remains, as (adapter path relative to
 # app/, imported app.services module). Phase 1 relocated config/credentials
-# into app/platform/ and drained those entries. The remainder drain later:
-# storage/gcs.py's GcsStorageService in Phase 3, and notebooks' session_*
-# imports in Phase 5. This set only shrinks.
+# into app/platform/ and drained those entries. Phase 3 folded GcsStorageService's
+# bucket metrics into storage/gcs.py, draining its entry. The remainder drains
+# in Phase 5 (notebooks' session_* imports). This set only shrinks.
 ADAPTER_SERVICE_IMPORT_ALLOWLIST: set[tuple[str, str]] = {
-    ("adapters/storage/gcs.py", "app.services.gcs_storage"),  # Phase 3
     ("adapters/notebooks/kubernetes.py", "app.services.session_output_service"),  # Phase 5
     ("adapters/notebooks/kubernetes.py", "app.services.session_persistence"),  # Phase 5
 }
@@ -333,8 +332,8 @@ def test_adapter_service_allowlist_has_no_stale_entries():
 
 def test_adapter_service_allowlist_count_is_pinned():
     """Pin the inversion count. Phase 1 drained config/credentials (11 -> 3);
-    the rest drains in Phases 3 and 5 toward 0."""
-    assert len(ADAPTER_SERVICE_IMPORT_ALLOWLIST) == 3
+    Phase 3 drained storage/gcs.py (3 -> 2); the rest drains in Phase 5 toward 0."""
+    assert len(ADAPTER_SERVICE_IMPORT_ALLOWLIST) == 2
 
 
 # --- Tree scan: the platform layer is leaf-ward (Phase 1) --------------------
