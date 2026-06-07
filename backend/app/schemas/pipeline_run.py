@@ -79,13 +79,11 @@ class PipelineRunResponse(BaseModel):
     failure_reason: str | None = None
     work_dir: str | None = None
     slurm_job_id: str | None = None
-    k8s_job_name: str | None = None
-    k8s_namespace: str | None = None
-    k8s_pod_name: str | None = None
-    # Backend-neutral fields (BAL Phase 4). compute_job_ref is the opaque compute
-    # handle; provider_metadata is the backend-specifics disclosure. The k8s_*
-    # fields above are retained during the transition and dropped once the
-    # frontend reads only the neutral fields.
+    # Backend-neutral compute fields (BAL Phase 4). compute_job_ref is the opaque
+    # compute handle; provider_metadata is the backend-specifics disclosure. The
+    # former top-level k8s_job_name/namespace/pod_name were removed here (they now
+    # live inside provider_metadata); the DB columns persist until a later drop
+    # migration once internal readers are migrated.
     compute_job_ref: str | None = None
     provider_metadata: dict | None = None
     actual_cost: float | None = None
