@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -25,6 +26,11 @@ class ComputeSession(Base):
     proxy_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     k8s_pod_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     k8s_namespace: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Backend-neutral compute handle + provider-specific detail (BAL rework,
+    # Phase 4); mirrors pipeline_run. compute_job_ref is the opaque session
+    # handle; provider_metadata holds backend specifics for disclosure.
+    compute_job_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    provider_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     access_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     gcs_home_prefix: Mapped[str | None] = mapped_column(String(500), nullable=True)
     last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

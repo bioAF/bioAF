@@ -32,6 +32,12 @@ class PipelineRun(Base):
     k8s_job_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     k8s_namespace: Mapped[str | None] = mapped_column(String(100), nullable=True)
     k8s_pod_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Backend-neutral compute handle + provider-specific detail (BAL rework,
+    # Phase 4). compute_job_ref is the opaque job handle the active compute
+    # adapter round-trips; provider_metadata holds backend specifics (e.g.
+    # {"kubernetes": {"job_name", "namespace", "pod_name"}}) for disclosure.
+    compute_job_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    provider_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     actual_cost: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     reference_genome: Mapped[str | None] = mapped_column(String(200), nullable=True)
     alignment_algorithm: Mapped[str | None] = mapped_column(String(200), nullable=True)
