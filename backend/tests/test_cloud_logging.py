@@ -114,7 +114,7 @@ class TestAttachCloudLogging:
         mock_client.get_default_handler.return_value = mock_handler
         mock_creds = MagicMock()
 
-        with patch("app.logging_config.cloud_logging") as mock_module:
+        with patch("app.adapters.observability.gcp.cloud_logging") as mock_module:
             mock_module.Client.return_value = mock_client
             attach_cloud_logging("test-project", mock_creds, debug=False)
             mock_module.Client.assert_called_once_with(project="test-project", credentials=mock_creds)
@@ -133,7 +133,7 @@ class TestAttachCloudLogging:
         mock_handler.level = logging.NOTSET
         mock_client.get_default_handler.return_value = mock_handler
 
-        with patch("app.logging_config.cloud_logging") as mock_module:
+        with patch("app.adapters.observability.gcp.cloud_logging") as mock_module:
             mock_module.Client.return_value = mock_client
             attach_cloud_logging("test-project", None, debug=False)
             mock_module.Client.assert_called_once_with(project="test-project", credentials=None)
@@ -147,7 +147,7 @@ class TestAttachCloudLogging:
 
         configure_logging(debug=False)
 
-        with patch("app.logging_config.cloud_logging") as mock_module:
+        with patch("app.adapters.observability.gcp.cloud_logging") as mock_module:
             mock_module.Client.side_effect = Exception("Bad credentials")
             attach_cloud_logging("test-project", MagicMock(), debug=False)
 
@@ -160,7 +160,7 @@ class TestAttachCloudLogging:
 
         configure_logging(debug=False)
 
-        with patch("app.logging_config.cloud_logging", None):
+        with patch("app.adapters.observability.gcp.cloud_logging", None):
             attach_cloud_logging("test-project", MagicMock(), debug=False)
 
         bioaf_logger = logging.getLogger("bioaf")

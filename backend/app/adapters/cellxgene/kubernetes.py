@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from kubernetes import client, config
 
 from app.adapters.base import CellxgeneProvider
+from app.adapters.capabilities import ProviderCapabilities
+from app.adapters.models import CellxgeneInstance, ServiceState
 
 logger = logging.getLogger("bioaf.adapters.cellxgene.k8s")
 
@@ -28,7 +30,7 @@ def _get_gcp_token(cfg: dict) -> str:
     """
     import google.auth.transport.requests
 
-    from app.services import credential_injector
+    from app.platform import credential_injector
 
     credentials = credential_injector.load_gcp_credentials(cfg)
     credentials.refresh(google.auth.transport.requests.Request())
@@ -48,6 +50,10 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
 
     _TOKEN_TTL_SECONDS = 2700  # 45 minutes
 
+    def capabilities(self) -> ProviderCapabilities:
+        """This backend provides cellxgene visualization instances."""
+        return ProviderCapabilities(cellxgene=True)
+
     def __init__(self, session_factory=None):
         self._session_factory = session_factory
         self._api_client: client.ApiClient | None = None
@@ -60,7 +66,7 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         if not self._session_factory:
             return {}
 
-        from app.services.platform_config_service import PlatformConfigService
+        from app.platform.platform_config_service import PlatformConfigService
 
         async with self._session_factory() as session:
             return await PlatformConfigService.get_many(session, list(keys))
@@ -106,7 +112,7 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
             else:
                 raise
 
-    async def deploy(self, publication_id: int, gcs_uri: str, dataset_name: str) -> dict:
+    async def deploy(self, publication_id: int, gcs_uri: str, dataset_name: str) -> dict:  # type: ignore[override]
         await self._get_api_client_async()
         image = await self._resolve_image()
 
@@ -212,15 +218,14 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         # Poll for readiness in background
         asyncio.create_task(self._poll_deployment_ready(publication_id, name, namespace))
 
-        return {
-            "publication_id": publication_id,
-            "pod_name": name,
-            "namespace": namespace,
-            "status": "starting",
-            "access_url": None,
-        }
+        return CellxgeneInstance(
+            publication_id=publication_id,
+            status=ServiceState.STARTING,
+            access_url=None,
+            provider_details={"pod_name": name, "namespace": namespace},
+        )
 
-    async def teardown(self, publication_id: int) -> dict:
+    async def teardown(self, publication_id: int) -> CellxgeneInstance:
         await self._get_api_client_async()
 
         name = f"cellxgene-{publication_id}"
@@ -241,13 +246,13 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         except Exception as e:
             logger.warning("Failed to delete cellxgene service %s: %s", name, e)
 
-        return {
-            "publication_id": publication_id,
-            "status": "stopped",
-            "stopped_at": datetime.now(timezone.utc).isoformat(),
-        }
+        return CellxgeneInstance(
+            publication_id=publication_id,
+            status=ServiceState.STOPPED,
+            provider_details={"stopped_at": datetime.now(timezone.utc).isoformat()},
+        )
 
-    async def get_status(self, publication_id: int) -> dict:
+    async def get_status(self, publication_id: int) -> CellxgeneInstance:
         await self._get_api_client_async()
 
         name = f"cellxgene-{publication_id}"
@@ -257,20 +262,19 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         try:
             dep = apps_v1.read_namespaced_deployment_status(name=name, namespace=namespace)
             ready = dep.status.ready_replicas or 0
-            status = "running" if ready >= 1 else "starting"
+            status = ServiceState.RUNNING if ready >= 1 else ServiceState.STARTING
         except Exception:
-            return {
-                "publication_id": publication_id,
-                "status": "unknown",
-                "pod_name": name,
-            }
+            return CellxgeneInstance(
+                publication_id=publication_id,
+                status=ServiceState.UNKNOWN,
+                provider_details={"pod_name": name},
+            )
 
-        return {
-            "publication_id": publication_id,
-            "status": status,
-            "pod_name": name,
-            "namespace": namespace,
-        }
+        return CellxgeneInstance(
+            publication_id=publication_id,
+            status=status,
+            provider_details={"pod_name": name, "namespace": namespace},
+        )
 
     # -- Cluster config --
 
@@ -290,7 +294,7 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
             return self._cluster_config
 
         async with self._session_factory() as session:
-            from app.services.platform_config_service import PlatformConfigService
+            from app.platform.platform_config_service import PlatformConfigService
 
             self._cluster_config = await PlatformConfigService.get_many(
                 session,

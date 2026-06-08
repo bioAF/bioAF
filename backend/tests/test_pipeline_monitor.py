@@ -1,7 +1,10 @@
 import pytest
+
+from app.adapters.compute.kubernetes import _job_progress_from_dict, _job_status_from_dict
 import pytest_asyncio
 from unittest.mock import AsyncMock, patch
 
+from app.adapters.models import StoredObject
 from app.models.pipeline_run import PipelineRun
 from app.services.pipeline_monitor_service import (
     PipelineMonitorService,
@@ -154,6 +157,7 @@ async def test_get_run_report_strips_favicon_for_nextflow(session, admin_user):
         pipeline_version="2.7.1",
         status="completed",
         k8s_job_name="bioaf-pipeline-fav-1",
+        compute_job_ref="bioaf-pipeline-fav-1",
     )
     session.add(run)
     await session.flush()
@@ -240,6 +244,7 @@ async def k8s_running_run(session, admin_user):
         pipeline_version="1.0.0",
         status="running",
         k8s_job_name="bioaf-pipeline-99",
+        compute_job_ref="bioaf-pipeline-99",
         k8s_namespace="bioaf-pipelines",
         started_at=datetime.now(timezone.utc),
     )
@@ -253,18 +258,22 @@ async def k8s_running_run(session, admin_user):
 async def test_k8s_monitor_uses_adapter_progress_on_completion(session, k8s_running_run):
     """Monitor fetches adapter.get_job_progress() at completion, not while running."""
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {
-        "status": "completed",
-        "pod_name": "bioaf-pipeline-99-xyz",
-    }
-    mock_compute.get_job_progress.return_value = {
-        "percent_complete": 100.0,
-        "processes": [
-            {"name": "STARSOLO", "status": "completed", "cpu": 85.0, "memory_gb": 4.5, "duration_s": 1800},
-            {"name": "SAMTOOLS_SORT", "status": "completed", "cpu": 50.0, "memory_gb": 2.1, "duration_s": 300},
-            {"name": "FASTQC", "status": "completed", "cpu": 20.0, "memory_gb": 0.5, "duration_s": 270},
-        ],
-    }
+    mock_compute.get_job_status.return_value = _job_status_from_dict(
+        {
+            "status": "completed",
+            "pod_name": "bioaf-pipeline-99-xyz",
+        }
+    )
+    mock_compute.get_job_progress.return_value = _job_progress_from_dict(
+        {
+            "percent_complete": 100.0,
+            "processes": [
+                {"name": "STARSOLO", "status": "completed", "cpu": 85.0, "memory_gb": 4.5, "duration_s": 1800},
+                {"name": "SAMTOOLS_SORT", "status": "completed", "cpu": 50.0, "memory_gb": 2.1, "duration_s": 300},
+                {"name": "FASTQC", "status": "completed", "cpu": 20.0, "memory_gb": 0.5, "duration_s": 270},
+            ],
+        }
+    )
 
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = []
@@ -292,17 +301,21 @@ async def test_k8s_monitor_uses_adapter_progress_on_completion(session, k8s_runn
 async def test_k8s_monitor_creates_process_records_on_completion(session, k8s_running_run):
     """Monitor creates PipelineProcess records from adapter progress at completion."""
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {
-        "status": "completed",
-        "pod_name": "bioaf-pipeline-99-xyz",
-    }
-    mock_compute.get_job_progress.return_value = {
-        "percent_complete": 100.0,
-        "processes": [
-            {"name": "STARSOLO", "status": "completed", "cpu": 85.0, "memory_gb": 4.5, "duration_s": 1800},
-            {"name": "SAMTOOLS_SORT", "status": "completed", "cpu": 50.0, "memory_gb": 2.1, "duration_s": 300},
-        ],
-    }
+    mock_compute.get_job_status.return_value = _job_status_from_dict(
+        {
+            "status": "completed",
+            "pod_name": "bioaf-pipeline-99-xyz",
+        }
+    )
+    mock_compute.get_job_progress.return_value = _job_progress_from_dict(
+        {
+            "percent_complete": 100.0,
+            "processes": [
+                {"name": "STARSOLO", "status": "completed", "cpu": 85.0, "memory_gb": 4.5, "duration_s": 1800},
+                {"name": "SAMTOOLS_SORT", "status": "completed", "cpu": 50.0, "memory_gb": 2.1, "duration_s": 300},
+            ],
+        }
+    )
 
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = []
@@ -330,10 +343,12 @@ async def test_progress_dedupes_retries_by_name(session, k8s_running_run):
     the trace (one row per attempt). Progress should count unique processes,
     not attempts, so the user sees the actual pipeline shape on the UI."""
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {
-        "status": "completed",
-        "pod_name": "bioaf-pipeline-99-xyz",
-    }
+    mock_compute.get_job_status.return_value = _job_status_from_dict(
+        {
+            "status": "completed",
+            "pod_name": "bioaf-pipeline-99-xyz",
+        }
+    )
     # 17 unique tasks; 3 of them have an extra failed attempt before the
     # final completed one. Total trace rows = 17 + 3 = 20. In Nextflow's
     # trace the retried task keeps its task_id and the `attempt` column
@@ -350,10 +365,12 @@ async def test_progress_dedupes_retries_by_name(session, k8s_running_run):
         processes.append({"task_id": str(tid), "attempt": 1, "name": name, **failed})
         processes.append({"task_id": str(tid), "attempt": 2, "name": name, **completed})
 
-    mock_compute.get_job_progress.return_value = {
-        "percent_complete": 85.0,  # adapter's raw count gets this wrong; we recompute
-        "processes": processes,
-    }
+    mock_compute.get_job_progress.return_value = _job_progress_from_dict(
+        {
+            "percent_complete": 85.0,  # adapter's raw count gets this wrong; we recompute
+            "processes": processes,
+        }
+    )
 
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = []
@@ -387,17 +404,21 @@ async def test_progress_dedupes_retries_by_name(session, k8s_running_run):
 async def test_progress_no_retries_omits_or_empties_list(session, k8s_running_run):
     """A clean run with no retries should not surface a retries UI."""
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {
-        "status": "completed",
-        "pod_name": "bioaf-pipeline-99-xyz",
-    }
-    mock_compute.get_job_progress.return_value = {
-        "percent_complete": 100.0,
-        "processes": [
-            {"name": "TASK_A", "status": "completed", "cpu": 50.0, "memory_gb": 1.0, "duration_s": 100},
-            {"name": "TASK_B", "status": "completed", "cpu": 50.0, "memory_gb": 1.0, "duration_s": 100},
-        ],
-    }
+    mock_compute.get_job_status.return_value = _job_status_from_dict(
+        {
+            "status": "completed",
+            "pod_name": "bioaf-pipeline-99-xyz",
+        }
+    )
+    mock_compute.get_job_progress.return_value = _job_progress_from_dict(
+        {
+            "percent_complete": 100.0,
+            "processes": [
+                {"name": "TASK_A", "status": "completed", "cpu": 50.0, "memory_gb": 1.0, "duration_s": 100},
+                {"name": "TASK_B", "status": "completed", "cpu": 50.0, "memory_gb": 1.0, "duration_s": 100},
+            ],
+        }
+    )
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = []
 
@@ -434,10 +455,12 @@ async def test_progress_counts_parallel_tasks_with_same_name(session, k8s_runnin
     observed.
     """
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {
-        "status": "completed",
-        "pod_name": "bioaf-pipeline-99-xyz",
-    }
+    mock_compute.get_job_status.return_value = _job_status_from_dict(
+        {
+            "status": "completed",
+            "pod_name": "bioaf-pipeline-99-xyz",
+        }
+    )
     completed = {"status": "completed", "cpu": 50.0, "memory_gb": 1.0, "duration_s": 300}
     # 11 tasks each with a unique name and unique task_id, no retries.
     processes = [{"task_id": str(i), "attempt": 1, "name": f"TASK_{i}", **completed} for i in range(1, 12)]
@@ -464,10 +487,12 @@ async def test_progress_counts_parallel_tasks_with_same_name(session, k8s_runnin
         )
     assert len(processes) == 17
 
-    mock_compute.get_job_progress.return_value = {
-        "percent_complete": 100.0,
-        "processes": processes,
-    }
+    mock_compute.get_job_progress.return_value = _job_progress_from_dict(
+        {
+            "percent_complete": 100.0,
+            "processes": processes,
+        }
+    )
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = []
 
@@ -497,10 +522,12 @@ async def test_progress_counts_parallel_tasks_with_same_name(session, k8s_runnin
 async def test_k8s_monitor_keeps_running(session, k8s_running_run):
     """Monitor keeps running status when K8s reports running, does not fetch progress."""
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {
-        "status": "running",
-        "pod_name": "bioaf-pipeline-99-xyz",
-    }
+    mock_compute.get_job_status.return_value = _job_status_from_dict(
+        {
+            "status": "running",
+            "pod_name": "bioaf-pipeline-99-xyz",
+        }
+    )
 
     with patch(
         "app.services.pipeline_monitor_service.get_compute_adapter",
@@ -523,14 +550,18 @@ async def test_k8s_monitor_keeps_running(session, k8s_running_run):
 async def test_k8s_monitor_detects_completion(session, k8s_running_run):
     """Test 21: monitor detects K8s job completion."""
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {
-        "status": "completed",
-        "pod_name": "bioaf-pipeline-99-xyz",
-    }
-    mock_compute.get_job_progress.return_value = {
-        "percent_complete": 100.0,
-        "processes": [],
-    }
+    mock_compute.get_job_status.return_value = _job_status_from_dict(
+        {
+            "status": "completed",
+            "pod_name": "bioaf-pipeline-99-xyz",
+        }
+    )
+    mock_compute.get_job_progress.return_value = _job_progress_from_dict(
+        {
+            "percent_complete": 100.0,
+            "processes": [],
+        }
+    )
 
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = []
@@ -554,14 +585,18 @@ async def test_k8s_monitor_detects_completion(session, k8s_running_run):
 async def test_k8s_monitor_detects_failure(session, k8s_running_run):
     """Test 22: monitor detects K8s job failure and populates error_message."""
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {
-        "status": "failed",
-        "pod_name": "bioaf-pipeline-99-xyz",
-    }
-    mock_compute.get_job_progress.return_value = {
-        "percent_complete": 0.0,
-        "processes": [],
-    }
+    mock_compute.get_job_status.return_value = _job_status_from_dict(
+        {
+            "status": "failed",
+            "pod_name": "bioaf-pipeline-99-xyz",
+        }
+    )
+    mock_compute.get_job_progress.return_value = _job_progress_from_dict(
+        {
+            "percent_complete": 0.0,
+            "processes": [],
+        }
+    )
     mock_compute.get_job_logs.return_value = "Error: container exited with code 1"
 
     with (
@@ -582,14 +617,18 @@ async def test_k8s_monitor_detects_failure(session, k8s_running_run):
 async def test_k8s_monitor_sends_completion_audit(session, k8s_running_run):
     """Test 23: monitor writes audit log on completion."""
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {
-        "status": "completed",
-        "pod_name": "bioaf-pipeline-99-xyz",
-    }
-    mock_compute.get_job_progress.return_value = {
-        "percent_complete": 100.0,
-        "processes": [],
-    }
+    mock_compute.get_job_status.return_value = _job_status_from_dict(
+        {
+            "status": "completed",
+            "pod_name": "bioaf-pipeline-99-xyz",
+        }
+    )
+    mock_compute.get_job_progress.return_value = _job_progress_from_dict(
+        {
+            "percent_complete": 100.0,
+            "processes": [],
+        }
+    )
 
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = []
@@ -622,35 +661,35 @@ async def test_k8s_monitor_sends_completion_audit(session, k8s_running_run):
 async def test_k8s_completion_registers_output_files(session, k8s_running_run):
     """Completion creates File records for collected outputs."""
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {
-        "status": "completed",
-        "pod_name": "bioaf-pipeline-99-xyz",
-    }
-    mock_compute.get_job_progress.return_value = {
-        "percent_complete": 100.0,
-        "processes": [],
-    }
+    mock_compute.get_job_status.return_value = _job_status_from_dict(
+        {
+            "status": "completed",
+            "pod_name": "bioaf-pipeline-99-xyz",
+        }
+    )
+    mock_compute.get_job_progress.return_value = _job_progress_from_dict(
+        {
+            "percent_complete": 100.0,
+            "processes": [],
+        }
+    )
 
     run_id = k8s_running_run.id
     exp_id = k8s_running_run.experiment_id
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = [
-        {
-            "filename": "filtered.h5ad",
-            "gcs_uri": f"gs://bioaf-results-test/experiments/{exp_id}/pipeline-runs/{run_id}/filtered.h5ad",
-            "size_bytes": 50_000_000,
-            "md5_hash": "abc123",
-            "experiment_id": exp_id,
-            "pipeline_run_id": run_id,
-        },
-        {
-            "filename": "qc_plot.png",
-            "gcs_uri": f"gs://bioaf-results-test/experiments/{exp_id}/pipeline-runs/{run_id}/qc_plot.png",
-            "size_bytes": 50_000,
-            "md5_hash": "def456",
-            "experiment_id": exp_id,
-            "pipeline_run_id": run_id,
-        },
+        StoredObject(
+            filename="filtered.h5ad",
+            storage_uri=f"gs://bioaf-results-test/experiments/{exp_id}/pipeline-runs/{run_id}/filtered.h5ad",
+            size_bytes=50_000_000,
+            md5_hash="abc123",
+        ),
+        StoredObject(
+            filename="qc_plot.png",
+            storage_uri=f"gs://bioaf-results-test/experiments/{exp_id}/pipeline-runs/{run_id}/qc_plot.png",
+            size_bytes=50_000,
+            md5_hash="def456",
+        ),
     ]
 
     with (
@@ -694,7 +733,7 @@ COMPLETED_TRACE = """task_id\thash\tnative_id\tprocess\ttag\tname\tstatus\texit\
 async def test_sync_detects_completion(session, running_pipeline_run):
     """Monitor detects when all processes are completed."""
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {"status": "running"}
+    mock_compute.get_job_status.return_value = _job_status_from_dict({"status": "running"})
     mock_compute.get_job_logs.return_value = COMPLETED_TRACE
 
     with (
@@ -732,7 +771,7 @@ FAILED_TRACE = """task_id\thash\tnative_id\tprocess\ttag\tname\tstatus\texit\tsu
 async def test_sync_detects_failure(session, running_pipeline_run):
     """Monitor detects when a process has failed."""
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {"status": "running"}
+    mock_compute.get_job_status.return_value = _job_status_from_dict({"status": "running"})
     mock_compute.get_job_logs.return_value = FAILED_TRACE
 
     with (
@@ -760,7 +799,7 @@ async def test_sync_detects_failure(session, running_pipeline_run):
 async def test_sync_creates_process_records(session, running_pipeline_run):
     """Monitor creates PipelineProcess records from trace."""
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {"status": "running"}
+    mock_compute.get_job_status.return_value = _job_status_from_dict({"status": "running"})
     mock_compute.get_job_logs.return_value = COMPLETED_TRACE
 
     with (

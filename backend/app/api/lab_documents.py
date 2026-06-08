@@ -370,14 +370,9 @@ async def download_document(
         raise HTTPException(404, "Version not found")
 
     try:
-        from google.cloud import storage as gcs_storage
+        from app.adapters.registry import get_storage_adapter
 
-        from app.services.gcs_storage import GcsStorageService
-
-        credentials = await GcsStorageService.get_credentials(session)
-        client = gcs_storage.Client(credentials=credentials)
-        parts = gcs_uri.replace("gs://", "").split("/", 1)
-        url = client.bucket(parts[0]).blob(parts[1]).generate_signed_url(version="v4", expiration=3600, method="GET")
+        url = await get_storage_adapter().generate_signed_url(gcs_uri, method="GET", expiry_seconds=3600)
     except Exception:
         raise HTTPException(502, "Could not generate download URL")
 
@@ -396,22 +391,12 @@ async def download_document(
 
 
 async def _download_document_bytes(session: AsyncSession, gcs_uri: str) -> bytes | None:
-    """Fetch object bytes from GCS server-side (mirrors literature's PDF stream),
-    so the inline viewer never has to read across the GCS CORS boundary."""
-    import asyncio
-
-    from app.services.gcs_storage import GcsStorageService
+    """Fetch object bytes server-side (mirrors literature's PDF stream), so the
+    inline viewer never has to read across the storage CORS boundary."""
+    from app.adapters.registry import get_storage_adapter
 
     try:
-        credentials = await GcsStorageService.get_credentials(session)
-        from google.cloud import storage as gcs
-
-        def _download() -> bytes:
-            client = gcs.Client(credentials=credentials)
-            parts = gcs_uri.replace("gs://", "").split("/", 1)
-            return client.bucket(parts[0]).blob(parts[1]).download_as_bytes()
-
-        return await asyncio.to_thread(_download)
+        return await get_storage_adapter().read_bytes(gcs_uri)
     except Exception:
         return None
 

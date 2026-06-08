@@ -55,6 +55,8 @@ class SessionResponse(BaseModel):
     git_commit_hash: str | None = None
     environment_version_id: int | None = None
     input_file_ids: list[int] | None = None
+    # Backend-neutral provider-details disclosure (BAL Phase 4).
+    provider_metadata: dict | None = None
 
     model_config = {"from_attributes": True}
 

@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapters.registry import get_compute_adapter, get_notebook_adapter
+from app.adapters.registry import get_compute_adapter, get_notebook_adapter, require_capability
 from app.api.dependencies import require_permission
 from app.database import get_session
 from app.models.notebook_session import NotebookSession
@@ -42,6 +42,7 @@ async def connect_pipeline_run(
     current_user: dict = require_permission("notebooks", "launch"),
 ):
     """Generate connection command for a running pipeline job."""
+    require_capability("ssh_exec")
     result = await session.execute(
         select(PipelineRun).where(
             PipelineRun.id == run_id,
@@ -96,6 +97,7 @@ async def connect_notebook_session(
     current_user: dict = require_permission("notebooks", "launch"),
 ):
     """Generate connection command for an active notebook session."""
+    require_capability("ssh_exec")
     result = await session.execute(
         select(NotebookSession).where(
             NotebookSession.id == session_id,
@@ -156,19 +158,19 @@ async def list_running_pods(
     for job in jobs:
         pods.append(
             {
-                "name": job.get("job_id", "unknown"),
+                "name": job.job_id or "unknown",
                 "type": "pipeline_job",
-                "status": job.get("status", "unknown"),
-                "namespace": job.get("namespace", "bioaf-pipelines"),
+                "status": job.status,
+                "namespace": job.provider_details.get("namespace", "bioaf-pipelines"),
             }
         )
     for s in sessions:
         pods.append(
             {
-                "name": s.get("session_id", "unknown"),
+                "name": s.session_id or "unknown",
                 "type": "notebook_session",
-                "status": s.get("status", "unknown"),
-                "namespace": s.get("namespace", "bioaf-interactive"),
+                "status": s.status,
+                "namespace": s.provider_details.get("namespace", "bioaf-interactive"),
             }
         )
 

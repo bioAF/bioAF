@@ -35,7 +35,7 @@ async def test_get_gcs_credentials_returns_impersonated_creds_in_vm_default(sess
 
     await _seed_vm_default(session)
     fake_creds = MagicMock(name="impersonated_creds")
-    with patch("app.services.credential_injector.load_gcp_credentials", return_value=fake_creds) as load:
+    with patch("app.platform.credential_injector.load_gcp_credentials", return_value=fake_creds) as load:
         result = await UploadService._get_gcs_credentials(session)
     load.assert_called_once()
     config_arg = load.call_args.args[0]
@@ -51,7 +51,7 @@ async def test_get_gcs_credentials_returns_none_when_injector_fails(session):
 
     await _seed_vm_default(session)
     with patch(
-        "app.services.credential_injector.load_gcp_credentials",
+        "app.platform.credential_injector.load_gcp_credentials",
         side_effect=RuntimeError("creds unavailable"),
     ):
         result = await UploadService._get_gcs_credentials(session)
@@ -73,7 +73,7 @@ async def test_storage_service_query_gcs_buckets_uses_impersonated_creds(session
     fake_storage_client.list_buckets.return_value = []  # empty result is fine
 
     with (
-        patch("app.services.credential_injector.load_gcp_credentials", return_value=fake_creds) as load,
+        patch("app.platform.credential_injector.load_gcp_credentials", return_value=fake_creds) as load,
         patch("google.cloud.storage.Client", return_value=fake_storage_client) as gcs_client_cls,
     ):
         await StorageService._query_gcs_buckets(session, org_id=1)
@@ -96,7 +96,7 @@ async def test_storage_service_falls_back_when_credentials_unavailable(session):
 
     with (
         patch(
-            "app.services.credential_injector.load_gcp_credentials",
+            "app.platform.credential_injector.load_gcp_credentials",
             side_effect=RuntimeError("no config"),
         ),
         patch("google.cloud.storage.Client", return_value=fake_storage_client) as gcs_client_cls,
@@ -110,8 +110,8 @@ async def test_storage_service_falls_back_when_credentials_unavailable(session):
 
 @pytest.mark.asyncio
 async def test_initiate_upload_uses_signing_credentials(session):
-    """End-to-end: initiate_upload pulls credentials and passes them to
-    generate_signed_upload_url so v4 signing works on vm_default installs.
+    """End-to-end: initiate_upload mints the signed PUT URL via the BAL storage
+    adapter (Phase 3), which owns signing-credential resolution internally.
     """
     from app.services.upload_service import UploadService
 
@@ -124,16 +124,10 @@ async def test_initiate_upload_uses_signing_credentials(session):
     )
     await session.commit()
 
-    fake_creds = MagicMock(name="impersonated_creds")
+    adapter = AsyncMock()
+    adapter.generate_signed_url.return_value = "https://signed.example/?sig=…"
 
-    with (
-        patch("app.services.credential_injector.load_gcp_credentials", return_value=fake_creds),
-        patch.object(
-            UploadService,
-            "_generate_signed_upload_url",
-            new=AsyncMock(return_value="https://signed.example/?sig=…"),
-        ) as gen,
-    ):
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         result = await UploadService.initiate_upload(
             session,
             org_id=1,
@@ -145,5 +139,7 @@ async def test_initiate_upload_uses_signing_credentials(session):
         )
 
     assert result["signed_url"] == "https://signed.example/?sig=…"
-    # The credentials passed to the signer are the ones from credential_injector
-    assert gen.call_args.kwargs["credentials"] is fake_creds
+    # Signed URL minted for a PUT against the ingest object.
+    _, kwargs = adapter.generate_signed_url.call_args
+    assert kwargs["method"] == "PUT"
+    assert adapter.generate_signed_url.call_args.args[0].startswith("gs://bioaf-1-ingest/uploads/")

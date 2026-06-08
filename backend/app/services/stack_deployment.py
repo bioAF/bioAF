@@ -18,10 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.activity_feed_service import ActivityFeedService
 from app.services.audit_service import log_action
 from app.services.component_queue import process_queued_components
-from app.services.credential_injector import load_gcp_credentials
 from app.services.orphaned_resource_service import OrphanedResourceService
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
-from app.services.zone_capacity_probe import AllZonesExhaustedError, probe_zones
+from app.adapters.work_nodes.gce_capacity import AllZonesExhaustedError
 
 logger = logging.getLogger("bioaf.stack_deployment")
 
@@ -111,23 +110,6 @@ def _get_gke_client(credentials=None):
     return container_v1.ClusterManagerClient()
 
 
-async def _gcp_credentials_config(session: AsyncSession) -> dict:
-    """Collect the platform_config keys that load_gcp_credentials needs.
-
-    Pulls credential source, optional SA key JSON, and bootstrap SA email
-    so the loader can either use a JSON key directly or fall back to ADC
-    with bioaf-bootstrap impersonation.
-    """
-    result = await session.execute(
-        text(
-            "SELECT key, value FROM platform_config WHERE key IN ("
-            "'gcp_credential_source', 'gcp_service_account_key', "
-            "'gcp_bootstrap_sa_email', 'gcp_service_account_email')"
-        )
-    )
-    return {r[0]: r[1] for r in result.fetchall()}
-
-
 async def _select_default_pool_zone(session: AsyncSession, compute_region: str | None) -> str:
     """Run the pre-flight capacity probe and return the winning zone.
 
@@ -136,22 +118,14 @@ async def _select_default_pool_zone(session: AsyncSession, compute_region: str |
     the first one with e2-medium capacity. Raises AllZonesExhaustedError
     if every candidate zone is stocked out.
     """
+    from app.adapters.registry import get_work_node_adapter
     from app.gcp_zones import zones_for_region
 
     probe_region = compute_region or (await _read_config(session, "gcp_region")) or "us-central1"
-    probe_project_id = (await _read_config(session, "gcp_project_id")) or ""
     candidate_zones = zones_for_region(probe_region)
-    credentials_config = await _gcp_credentials_config(session)
-    credentials = load_gcp_credentials(credentials_config)
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None,
-        lambda: probe_zones(
-            zones=candidate_zones,
-            project_id=probe_project_id,
-            credentials=credentials,
-        ),
-    )
+    # The work-node adapter owns GCE access and resolves project + credentials
+    # itself (Phase 6); capacity probing is no longer a service-level concern.
+    return await get_work_node_adapter().probe_zone_capacity(candidate_zones)
 
 
 async def get_cluster_status(session: AsyncSession) -> StackStatus:
@@ -762,27 +736,21 @@ _BUCKET_CONFIG_KEYS = [
 
 
 async def _empty_gcs_bucket(session: AsyncSession, bucket_name: str) -> int:
-    """Delete all objects (including noncurrent versions) from a GCS bucket.
+    """Delete all objects (including noncurrent versions) from a bucket.
 
-    Returns the number of objects deleted. Uses the same credential
-    resolution as GcsStorageService so it works with SA keys stored
-    in platform_config.
+    Returns the number of objects deleted. Routes through the storage adapter,
+    which owns credential resolution; ``include_versions`` enumerates every
+    generation and each is deleted by its generation id (versioned-wipe).
     """
-    from google.cloud import storage as gcs_storage
+    from app.adapters.registry import get_storage_adapter
 
-    from app.services.gcs_storage import GcsStorageService
-
-    credentials = await GcsStorageService.get_credentials(session)
-    client = gcs_storage.Client(credentials=credentials)
+    adapter = get_storage_adapter()
+    uri_prefix = f"gs://{bucket_name}/"
 
     deleted = 0
-    # Delete current objects
-    for blob in client.list_blobs(bucket_name):
-        blob.delete()
-        deleted += 1
-    # Delete noncurrent versions (versioned buckets retain old copies)
-    for blob in client.list_blobs(bucket_name, versions=True):
-        blob.delete()
+    for obj in await adapter.list_objects(uri_prefix, include_versions=True):
+        generation = obj.provider_details.get("generation")
+        await adapter.delete(obj.storage_uri, generation=generation)
         deleted += 1
 
     return deleted

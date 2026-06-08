@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { useCapabilities } from "@/hooks/useCapabilities";
 import { suggestFilename, splitExtension, todayDateStr } from "@/lib/fileNaming";
 import type { ExperimentDetail, FileResponse, Project } from "@/lib/types";
 
@@ -28,6 +29,7 @@ interface Props {
 }
 
 export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Props) {
+  const { has } = useCapabilities();
   const [expanded, setExpanded] = useState(false);
   const [items, setItems] = useState<FileItem[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -145,8 +147,11 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
       const item = items[i];
       const useFilename =
         item.nameAccepted === false ? undefined : item.suggestedName ?? undefined;
+      // Signed direct-to-storage upload when the backend supports it; otherwise
+      // the server-proxied path (e.g. NFS, signed_url_upload=False).
+      const upload = has("signed_url_upload") ? api.uploadSigned : api.uploadProxied;
       try {
-        await api.uploadSigned<FileResponse>(item.file, {
+        await upload<FileResponse>(item.file, {
           ...opts,
           filename: useFilename,
           onProgress: (pct) => setItemState(i, { progress: pct }),

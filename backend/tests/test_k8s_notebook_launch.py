@@ -243,6 +243,60 @@ class TestGetSessionStatus:
 
         assert result["status"] == "error"
 
+    @pytest.mark.asyncio
+    async def test_running_resolves_loadbalancer_access_url(self, adapter, mock_k8s_clients):
+        """A live session resolves its LoadBalancer URL so the status endpoint can
+        read access_url off the normalized SessionStatus (Phase 5)."""
+        mock_core, _ = mock_k8s_clients
+        adapter._get_k8s_core_client = MagicMock(return_value=mock_core)
+        adapter._resolve_service_url = MagicMock(return_value="http://1.2.3.4:8888")
+
+        result = await adapter._k8s_get_session_status(
+            session_id=42,
+            pod_name="bioaf-notebook-42",
+            namespace="bioaf-notebooks",
+            session_type="jupyter",
+        )
+
+        assert result["status"] == "running"
+        assert result["access_url"] == "http://1.2.3.4:8888"
+        adapter._resolve_service_url.assert_called_once_with("bioaf-notebook-svc-42", "bioaf-notebooks", 8888)
+
+    @pytest.mark.asyncio
+    async def test_rstudio_resolves_port_8787(self, adapter, mock_k8s_clients):
+        """RStudio sessions resolve the URL on the RStudio port."""
+        mock_core, _ = mock_k8s_clients
+        adapter._get_k8s_core_client = MagicMock(return_value=mock_core)
+        adapter._resolve_service_url = MagicMock(return_value="http://1.2.3.4:8787")
+
+        result = await adapter._k8s_get_session_status(
+            session_id=9,
+            pod_name="bioaf-notebook-9",
+            namespace="bioaf-notebooks",
+            session_type="rstudio",
+        )
+
+        adapter._resolve_service_url.assert_called_once_with("bioaf-notebook-svc-9", "bioaf-notebooks", 8787)
+        assert result["access_url"] == "http://1.2.3.4:8787"
+
+    @pytest.mark.asyncio
+    async def test_error_status_skips_url_resolution(self, adapter, mock_k8s_clients):
+        """A failed pod resolves no URL (no live service)."""
+        mock_core, _ = mock_k8s_clients
+        mock_pod = MagicMock()
+        mock_pod.status.phase = "Failed"
+        mock_pod.status.conditions = []
+        mock_core.read_namespaced_pod.return_value = mock_pod
+        adapter._get_k8s_core_client = MagicMock(return_value=mock_core)
+        adapter._resolve_service_url = MagicMock(return_value="http://nope:8888")
+
+        result = await adapter._k8s_get_session_status(
+            session_id=42, pod_name="bioaf-notebook-42", namespace="bioaf-notebooks", session_type="jupyter"
+        )
+
+        assert result["status"] == "error"
+        adapter._resolve_service_url.assert_not_called()
+
 
 class TestNamespaceSetup:
     @pytest.mark.asyncio

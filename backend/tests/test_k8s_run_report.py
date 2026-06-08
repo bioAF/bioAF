@@ -22,7 +22,7 @@ class TestRunReport:
     async def test_report_uses_get_job_report(self, mock_session):
         """get_run_report should call get_job_report, not get_job_logs."""
         mock_run = MagicMock()
-        mock_run.k8s_job_name = "bioaf-pipeline-11"
+        mock_run.compute_job_ref = "bioaf-pipeline-11"
         mock_run.custom_pipeline_version_id = None
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = mock_run

@@ -11,6 +11,15 @@ jest.mock("@/lib/api", () => ({
   api: { post: (...args: unknown[]) => mockApiPost(...args) },
 }));
 
+const mockHas = jest.fn();
+jest.mock("@/hooks/useCapabilities", () => ({
+  useCapabilities: () => ({
+    has: (flag: string) => mockHas(flag),
+    capabilities: {},
+    loading: false,
+  }),
+}));
+
 const mockConnection = {
   command: "kubectl exec -it -n bioaf-pipelines job/pipeline-run-1 -- /bin/bash",
   setup_guide: "1. Install gcloud CLI\n2. Authenticate\n3. Get credentials",
@@ -25,6 +34,14 @@ describe("ConnectButton", () => {
     mockGetCurrentUser.mockReturnValue({ email: "test@bioaf.org", role_name: "comp_bio", sub: "1" });
     mockApiPost.mockReset();
     mockApiPost.mockResolvedValue(mockConnection);
+    mockHas.mockReset();
+    mockHas.mockReturnValue(true);
+  });
+
+  it("is hidden when the backend lacks the ssh_exec capability", () => {
+    mockHas.mockImplementation((flag: string) => flag !== "ssh_exec");
+    render(<ConnectButton targetType="pipeline_run" targetId={1} />);
+    expect(screen.queryByTestId("connect-button")).not.toBeInTheDocument();
   });
 
   it("renders when user has comp_bio role", () => {

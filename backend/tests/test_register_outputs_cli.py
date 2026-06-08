@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import select
 
+from app.adapters.models import StoredObject
 from app.cli.register_outputs import register_outputs_for_run
 from app.models.experiment import Experiment
 from app.models.file import File
@@ -55,14 +56,12 @@ async def test_register_outputs_for_run_creates_files(session, completed_run):
     run = completed_run
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = [
-        {
-            "filename": "results.h5ad",
-            "gcs_uri": f"gs://bucket/experiments/{run.experiment_id}/pipeline-runs/{run.id}/results.h5ad",
-            "size_bytes": 10_000_000,
-            "md5_hash": "aaa111",
-            "experiment_id": run.experiment_id,
-            "pipeline_run_id": run.id,
-        },
+        StoredObject(
+            filename="results.h5ad",
+            storage_uri=f"gs://bucket/experiments/{run.experiment_id}/pipeline-runs/{run.id}/results.h5ad",
+            size_bytes=10_000_000,
+            md5_hash="aaa111",
+        ),
     ]
 
     with patch("app.cli.register_outputs.get_storage_adapter", return_value=mock_storage):

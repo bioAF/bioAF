@@ -61,7 +61,19 @@ async def register_outputs_for_run(
     if not collected:
         return 0
 
-    files = await PipelineOutputService.register_outputs(session, run, collected)
+    files = await PipelineOutputService.register_outputs(
+        session,
+        run,
+        [
+            {
+                "filename": f.filename,
+                "gcs_uri": f.storage_uri,
+                "size_bytes": f.size_bytes,
+                "md5_hash": f.md5_hash,
+            }
+            for f in collected
+        ],
+    )
     return len(files)
 
 

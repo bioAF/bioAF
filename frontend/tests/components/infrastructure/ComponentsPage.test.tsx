@@ -41,6 +41,15 @@ jest.mock("@/lib/auth", () => ({
   getCurrentUser: () => ({ role: "admin", email: "test@test.com" }),
 }));
 
+const mockHasCapability = jest.fn().mockReturnValue(true);
+jest.mock("@/hooks/useCapabilities", () => ({
+  useCapabilities: () => ({
+    has: (flag: string) => mockHasCapability(flag),
+    capabilities: {},
+    loading: false,
+  }),
+}));
+
 // Mock router - return stable reference to avoid infinite useEffect loops
 const mockPush = jest.fn();
 const mockRouter = { push: mockPush };
@@ -136,6 +145,46 @@ describe("InfraComponentsPage", () => {
     mockApiGet.mockReset();
     mockApiPost.mockReset();
     mockPush.mockReset();
+    mockHasCapability.mockReset();
+    mockHasCapability.mockReturnValue(true);
+  });
+
+  // Phase 4b: cluster autoscaling (Max Nodes) and spot controls are gated on
+  // the autoscaling / spot_retry capabilities, so a backend without them (e.g.
+  // a fixed SLURM partition) shows no dead config inputs.
+  it("hides Max Nodes and Spot controls when autoscaling/spot_retry are absent", async () => {
+    mockHasCapability.mockImplementation(
+      (flag: string) => flag !== "autoscaling" && flag !== "spot_retry",
+    );
+    mockApiGet.mockImplementation((url: string) => {
+      if (url.includes("terraform/status")) return Promise.resolve(mockTfStatus());
+      if (url.includes("terraform/runs")) return Promise.resolve({ runs: [] });
+      if (url.includes("stack/status")) return Promise.resolve(mockClusterStatus());
+      if (url.includes("stack/components")) return Promise.resolve(mockStackComponents([]));
+      if (url.includes("storage/buckets")) return Promise.resolve({ buckets: [] });
+      if (url.includes("cluster/config"))
+        return Promise.resolve({
+          k8s_pipeline_machine_type: "n2-highmem-8",
+          k8s_pipeline_max_nodes: 20,
+          k8s_pipeline_use_spot: true,
+          k8s_interactive_machine_type: "n2-standard-4",
+          k8s_interactive_max_nodes: 5,
+        });
+      return Promise.reject(new Error("Not found"));
+    });
+
+    await act(async () => {
+      render(<InfraComponentsPage />);
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/Configure/i)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText(/Configure/i));
+    await waitFor(() => {
+      expect(screen.getByText(/Pipeline Pool/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Max Nodes")).not.toBeInTheDocument();
+    expect(screen.queryByText("Spot Instances")).not.toBeInTheDocument();
   });
 
   // Test 24: Stack cards when no stack

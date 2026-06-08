@@ -89,69 +89,8 @@ async def test_get_bucket_metrics_requires_deployed(session):
         await GcsStorageService.get_bucket_metrics(session)
 
 
-@pytest.mark.asyncio
-async def test_move_file_copies_and_deletes(session):
-    """Mock GCS client. Call move_file. Assert copy then delete on source."""
-    mock_source_blob = MagicMock()
-    mock_dest_blob = MagicMock()
-    mock_dest_blob.exists.return_value = True
-
-    mock_source_bucket = MagicMock()
-    mock_source_bucket.blob.return_value = mock_source_blob
-
-    mock_dest_bucket = MagicMock()
-    mock_dest_bucket.blob.return_value = mock_dest_blob
-    mock_dest_bucket.copy_blob.return_value = mock_dest_blob
-
-    mock_client = MagicMock()
-
-    def get_bucket_side_effect(name):
-        if name == "source-bucket":
-            return mock_source_bucket
-        return mock_dest_bucket
-
-    mock_client.get_bucket.side_effect = get_bucket_side_effect
-
-    with patch("app.services.gcs_storage.storage.Client", return_value=mock_client):
-        from app.services.gcs_storage import GcsStorageService
-
-        result = await GcsStorageService.move_file(
-            "gs://source-bucket/path/file.txt",
-            "gs://dest-bucket/new/path/file.txt",
-        )
-
-    assert result == "gs://dest-bucket/new/path/file.txt"
-    mock_dest_bucket.copy_blob.assert_called_once()
-    mock_source_bucket.blob.return_value.delete.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_move_file_no_delete_on_copy_failure(session):
-    """Mock copy to raise. Assert delete is NOT called."""
-    mock_source_blob = MagicMock()
-    mock_source_bucket = MagicMock()
-    mock_source_bucket.blob.return_value = mock_source_blob
-
-    mock_dest_bucket = MagicMock()
-    mock_dest_bucket.copy_blob.side_effect = Exception("Copy failed")
-
-    mock_client = MagicMock()
-
-    def get_bucket_side_effect(name):
-        if name == "source-bucket":
-            return mock_source_bucket
-        return mock_dest_bucket
-
-    mock_client.get_bucket.side_effect = get_bucket_side_effect
-
-    with patch("app.services.gcs_storage.storage.Client", return_value=mock_client):
-        from app.services.gcs_storage import GcsStorageService
-
-        with pytest.raises(Exception, match="Copy failed"):
-            await GcsStorageService.move_file(
-                "gs://source-bucket/path/file.txt",
-                "gs://dest-bucket/new/path/file.txt",
-            )
-
-    # Source should NOT be deleted if copy failed
-    mock_source_blob.delete.assert_not_called()
+# NOTE: move_file / read_object_text were removed from GcsStorageService in
+# Phase 3 of the BAL rework; object I/O now goes through the storage adapter.
+# The fail-safe copy-verify-delete move behavior is covered by
+# test_gcs_object_store.py (test_move_is_failsafe_on_partial_failure and
+# test_move_deletes_source_after_verified_copy).

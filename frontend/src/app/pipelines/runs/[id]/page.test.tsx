@@ -51,7 +51,7 @@ function mockApiResponses(runStatus: string, extraRunFields: Record<string, unkn
       return Promise.resolve({
         id: 1,
         status: runStatus,
-        k8s_job_name: "bioaf-pipeline-1",
+        compute_job_ref: "bioaf-pipeline-1",
         pipeline_name: "nf-core/scrnaseq",
         custom_pipeline_version_id: null,
         organization_id: 1,
@@ -370,5 +370,34 @@ describe("PipelineRunDetailPage step retries surface", () => {
     expect(screen.queryByText("NFCORE_SCRNASEQ:SCRNASEQ:STARSOLO:STAR_ALIGN")).toBeTruthy();
     expect(screen.queryByText("NFCORE_SCRNASEQ:SCRNASEQ:STARSOLO:STAR_GENOMEGENERATE")).toBeTruthy();
     expect(screen.queryByText("NFCORE_SCRNASEQ:SCRNASEQ:MTX_CONVERSION:MTX_TO_H5AD")).toBeTruthy();
+  });
+});
+
+describe("PipelineRunDetailPage provider details (BAL Phase 4)", () => {
+  test("renders provider_metadata generically in a provider-details disclosure", async () => {
+    mockApiResponses("completed", {
+      provider_metadata: { job_name: "bioaf-pipeline-1", namespace: "bioaf-pipelines", pod_name: "pod-xyz" },
+    });
+    render(<PipelineRunDetailPage />);
+
+    const panel = await waitFor(() => {
+      const el = screen.queryByTestId("provider-details");
+      if (!el) throw new Error("provider-details not rendered yet");
+      return el;
+    });
+    // Renders the backend-specific keys + values generically (no hardcoded K8s labels).
+    expect(panel.textContent).toContain("namespace");
+    expect(panel.textContent).toContain("bioaf-pipelines");
+    expect(panel.textContent).toContain("pod_name");
+    expect(panel.textContent).toContain("pod-xyz");
+  });
+
+  test("omits the disclosure when there is no provider_metadata", async () => {
+    mockApiResponses("completed", { provider_metadata: null });
+    render(<PipelineRunDetailPage />);
+    // Wait for the run to load (the API was queried and the page settled).
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith("/api/pipeline-runs/1"));
+    await waitFor(() => expect(screen.queryByText(/scrnaseq/i)).toBeTruthy());
+    expect(screen.queryByTestId("provider-details")).toBeNull();
   });
 });

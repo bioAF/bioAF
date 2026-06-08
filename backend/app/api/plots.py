@@ -147,16 +147,9 @@ async def get_thumbnail_content(
         raise HTTPException(404, "No thumbnail available")
 
     try:
-        from google.cloud import storage as gcs_storage
+        from app.adapters.registry import get_storage_adapter
 
-        from app.services.gcs_storage import GcsStorageService
-
-        credentials = await GcsStorageService.get_credentials(session)
-        client = gcs_storage.Client(credentials=credentials)
-        parts = plot.thumbnail_gcs_uri.replace("gs://", "").split("/", 1)
-        bucket = client.bucket(parts[0])
-        blob = bucket.blob(parts[1])
-        data = blob.download_as_bytes()
+        data = await get_storage_adapter().read_bytes(plot.thumbnail_gcs_uri)
 
         return Response(
             content=data,

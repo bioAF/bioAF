@@ -71,7 +71,7 @@ async def test_upload_url_returns_resumable_session_scoped_to_request_origin(cli
     # nothing reaches the backend). Mirrors the references upload flow.
     captured: dict = {}
 
-    def fake_session(bucket_name, blob_path, *, content_type, size_bytes, origin=None, credentials=None):
+    def fake_session(bucket_name, blob_path, *, content_type, size_bytes, origin=None):
         captured["origin"] = origin
         captured["content_type"] = content_type
         captured["size_bytes"] = size_bytes
@@ -79,10 +79,7 @@ async def test_upload_url_returns_resumable_session_scoped_to_request_origin(cli
 
     with (
         patch(f"{UPLOAD}._get_working_bucket", new_callable=AsyncMock, return_value="wb"),
-        patch(
-            "app.services.upload_service.UploadService._get_gcs_credentials", new_callable=AsyncMock, return_value=None
-        ),
-        patch(f"{UPLOAD}._create_resumable_session", side_effect=fake_session),
+        patch(f"{UPLOAD}._create_resumable_session", new_callable=AsyncMock, side_effect=fake_session),
     ):
         resp = await client.post(
             "/api/lab-knowledge/documents/upload-url",

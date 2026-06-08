@@ -84,9 +84,12 @@ const mockRunWithK8s = {
   error_message: null,
   work_dir: "/data/working/nextflow/run-42",
   slurm_job_id: null,
-  k8s_job_name: "bioaf-pipeline-42",
-  k8s_namespace: "bioaf-pipelines",
-  k8s_pod_name: "bioaf-pipeline-42-abc12",
+  compute_job_ref: "bioaf-pipeline-42",
+  provider_metadata: {
+    job_name: "bioaf-pipeline-42",
+    namespace: "bioaf-pipelines",
+    pod_name: "bioaf-pipeline-42-abc12",
+  },
   actual_cost: null,
   reference_genome: null,
   alignment_algorithm: null,
@@ -143,9 +146,11 @@ describe("Pipeline Run Detail - References Used", () => {
   });
 });
 
-describe("Pipeline Run Detail - K8s Fields (Test 28)", () => {
-  test("shows k8s_job_name when present", async () => {
-    // Mock API calls
+describe("Pipeline Run Detail - Provider details (Test 28)", () => {
+  // Phase 4 neutralized the hardcoded "Kubernetes metadata" panel into a
+  // backend-agnostic "Provider details" disclosure rendered from
+  // provider_metadata, so it works for any compute backend (K8s, SLURM, ...).
+  test("renders the generic Provider details disclosure from provider_metadata", async () => {
     mockApiGet.mockImplementation((url: string) => {
       if (url.includes("/api/pipeline-runs/42/references")) {
         return Promise.resolve([]);
@@ -158,31 +163,15 @@ describe("Pipeline Run Detail - K8s Fields (Test 28)", () => {
     render(<PipelineRunDetailPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("bioaf-pipeline-42")).toBeInTheDocument();
+      expect(screen.getByText("Provider details")).toBeInTheDocument();
     });
 
-    // Check K8s metadata section
-    expect(screen.getByText("K8s Job")).toBeInTheDocument();
+    // Backend-specific keys/values are rendered generically, not under
+    // hardcoded "K8s Job"/"Pod" labels.
+    expect(screen.getByText("job_name")).toBeInTheDocument();
     expect(screen.getByText("bioaf-pipeline-42")).toBeInTheDocument();
-  });
-
-  test("shows k8s pod name when present", async () => {
-    mockApiGet.mockImplementation((url: string) => {
-      if (url.includes("/api/pipeline-runs/42/references")) {
-        return Promise.resolve([]);
-      }
-      return Promise.resolve(mockRunWithK8s);
-    });
-
-    const PipelineRunDetailPage =
-      require("@/app/pipelines/runs/[id]/page").default;
-    render(<PipelineRunDetailPage />);
-
-    await waitFor(() => {
-      expect(screen.getByText("bioaf-pipeline-42-abc12")).toBeInTheDocument();
-    });
-
-    expect(screen.getByText("Pod")).toBeInTheDocument();
+    expect(screen.getByText("pod_name")).toBeInTheDocument();
+    expect(screen.getByText("bioaf-pipeline-42-abc12")).toBeInTheDocument();
   });
 });
 

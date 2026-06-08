@@ -54,7 +54,7 @@ class UploadService:
         that signs locally with its private key. Either way, the returned
         credentials work for blob.generate_signed_url(version="v4").
         """
-        from app.services import credential_injector
+        from app.platform import credential_injector
 
         result = await session.execute(
             text(
@@ -101,9 +101,12 @@ class UploadService:
         gcs_path = f"uploads/{upload_id}/{filename}"
         gcs_uri = f"gs://{bucket_name}/{gcs_path}"
 
-        # Generate signed URL via GCS client
-        credentials = await UploadService._get_gcs_credentials(session)
-        signed_url = await UploadService._generate_signed_upload_url(bucket_name, gcs_path, credentials=credentials)
+        # Generate signed PUT URL via the storage adapter
+        from app.adapters.registry import get_storage_adapter
+
+        signed_url = await get_storage_adapter().generate_signed_url(
+            gcs_uri, method="PUT", expiry_seconds=3600, content_type="application/octet-stream"
+        )
 
         _pending_uploads[upload_id] = {
             "org_id": org_id,
@@ -240,16 +243,24 @@ class UploadService:
         project_id: int | None = None,
         experiment_id: int | None = None,
         sample_ids: list[int] | None = None,
+        is_global: bool = False,
     ) -> File:
-        """Stream a file directly to GCS without buffering the full content in memory."""
-        upload_id = str(uuid.uuid4())
-        bucket_name = await UploadService._get_ingest_bucket(session)
-        gcs_path = f"uploads/{upload_id}/{filename}"
-        gcs_uri = f"gs://{bucket_name}/{gcs_path}"
+        """Stream a file directly to storage without buffering the full content.
 
-        # Upload to GCS -- raises on failure so no dangling DB records are created
-        credentials = await UploadService._get_gcs_credentials(session)
-        await UploadService._upload_file_to_gcs(bucket_name, gcs_path, file_obj, credentials=credentials)
+        Builds the write URI via the adapter's backend-neutral resolve_uri so the
+        proxied upload path works on any storage backend (GCS, NFS, ...), not just
+        object stores (Phase 7).
+        """
+        upload_id = str(uuid.uuid4())
+        gcs_path = f"uploads/{upload_id}/{filename}"
+
+        # Stream to storage -- raises on failure so no dangling DB records are created
+        from app.adapters.models import StorageStore
+        from app.adapters.registry import get_storage_adapter
+
+        adapter = get_storage_adapter()
+        gcs_uri = await adapter.resolve_uri(StorageStore.INGEST, gcs_path)
+        await adapter.upload_file(gcs_uri, file_obj)
 
         if not file_type:
             file_type = UploadService._detect_file_type(filename)
@@ -265,6 +276,7 @@ class UploadService:
             file_type=file_type,
             project_id=project_id,
             experiment_id=experiment_id,
+            is_global=is_global,
         )
 
         if sample_ids:
@@ -329,42 +341,3 @@ class UploadService:
         if lower.endswith(".csv"):
             return "csv"
         return "other"
-
-    @staticmethod
-    async def _generate_signed_upload_url(bucket_name: str, gcs_path: str, credentials=None) -> str:
-        """Generate a signed URL for uploading to GCS.
-
-        Requires credentials with signing capability. Acceptable shapes:
-        service_account.Credentials (legacy installs) or
-        impersonated_credentials.Credentials (vm_default installs, signs via
-        the IAM SignBlob API on the target principal). Raw ADC has no signer
-        and would raise -- _get_gcs_credentials always returns one of the two
-        above on a properly configured install.
-        """
-        from google.cloud import storage as gcs_storage
-
-        client = gcs_storage.Client(credentials=credentials)
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob(gcs_path)
-        return blob.generate_signed_url(
-            version="v4",
-            expiration=3600,
-            method="PUT",
-            content_type="application/octet-stream",
-        )
-
-    @staticmethod
-    async def _upload_file_to_gcs(bucket_name: str, gcs_path: str, file_obj, credentials=None) -> None:
-        """Stream a file-like object to GCS. Raises on failure.
-
-        Uses upload_from_file so the full content is never held in memory at once.
-        """
-        from google.cloud import storage as gcs_storage
-
-        def _do_upload() -> None:
-            client = gcs_storage.Client(credentials=credentials)
-            bucket = client.bucket(bucket_name)
-            blob = bucket.blob(gcs_path)
-            blob.upload_from_file(file_obj, rewind=True)
-
-        await asyncio.to_thread(_do_upload)

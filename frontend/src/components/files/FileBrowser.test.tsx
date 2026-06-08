@@ -17,6 +17,10 @@ jest.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => ({ canAccess: () => true }),
 }));
 
+jest.mock("@/hooks/useCapabilities", () => ({
+  useCapabilities: () => ({ has: () => true, capabilities: {}, loading: false }),
+}));
+
 jest.mock("@/lib/api", () => ({
   api: {
     get: jest.fn(),

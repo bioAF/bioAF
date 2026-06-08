@@ -244,6 +244,8 @@ async def test_stop_session_with_k8s_fields(client, session, comp_bio_user, comp
         slurm_job_id="local-abc123",
         k8s_pod_name="bioaf-notebook-99",
         k8s_namespace="bioaf-notebooks",
+        compute_job_ref="bioaf-notebook-99",
+        provider_metadata={"namespace": "bioaf-notebooks", "pod_name": "bioaf-notebook-99"},
         gcs_home_prefix="gs://bioaf-working/notebooks/1/",
     )
     session.add(ns)

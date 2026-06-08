@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import require_permission
 from app.database import get_session
 from app.services.billing_export_service import BillingExportService
-from app.services.credential_injector import load_gcp_credentials
+from app.platform.credential_injector import load_gcp_credentials
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
 
 logger = logging.getLogger("bioaf.billing_export_api")
@@ -70,7 +70,7 @@ BILLING_EXPORT_CONFIG_KEYS = [
 
 
 async def _read_billing_config(session: AsyncSession) -> dict:
-    from app.services.platform_config_service import PlatformConfigService
+    from app.platform.platform_config_service import PlatformConfigService
 
     return await PlatformConfigService.get_many(session, BILLING_EXPORT_CONFIG_KEYS)
 

@@ -3,6 +3,8 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from app.adapters.compute.kubernetes import _job_submit_result_from_dict
 import pytest_asyncio
 from sqlalchemy import text as sa_text
 
@@ -171,12 +173,14 @@ def _mock_compute_adapter():
 
     async def capture_submit(job_spec):
         captured["job_spec"] = job_spec
-        return {
-            "job_id": "bioaf-pipeline-api-1",
-            "namespace": "bioaf-pipelines",
-            "status": "queued",
-            "estimated_cost": {"estimated_cost_usd": 0.10},
-        }
+        return _job_submit_result_from_dict(
+            {
+                "job_id": "bioaf-pipeline-api-1",
+                "namespace": "bioaf-pipelines",
+                "status": "queued",
+                "estimated_cost": {"estimated_cost_usd": 0.10},
+            }
+        )
 
     adapter = MagicMock()
     adapter.submit_job = AsyncMock(side_effect=capture_submit)

@@ -11,12 +11,65 @@ import uuid
 from datetime import datetime, timezone
 
 from app.adapters.base import WorkNodeProvider
-from app.services.credential_injector import load_gcp_credentials
+from app.adapters.capabilities import ProviderCapabilities
+from app.adapters.models import (
+    StoredObject,
+    TerminationResult,
+    VmInfo,
+    VmStatus,
+    to_service_state,
+)
+from app.platform.credential_injector import load_gcp_credentials
 
 logger = logging.getLogger("bioaf.adapters.work_nodes.gce")
 
 # In-memory session store for local mode
 _local_vms: dict[str, dict] = {}
+
+_VM_INFO_KEYS = {"instance_name", "status", "zone", "access_url", "created_at"}
+_VM_STATUS_KEYS = {"instance_name", "status", "zone", "external_ip", "session_id", "user_id"}
+
+
+def _vm_info_from_dict(d: dict) -> VmInfo:
+    return VmInfo(
+        instance_name=d["instance_name"],
+        status=to_service_state(d.get("status")),
+        zone=d.get("zone"),
+        access_url=d.get("access_url"),
+        created_at=d.get("created_at"),
+        provider_details={k: v for k, v in d.items() if k not in _VM_INFO_KEYS},
+    )
+
+
+def _vm_status_from_dict(d: dict) -> VmStatus:
+    return VmStatus(
+        instance_name=d["instance_name"],
+        status=to_service_state(d.get("status")),
+        zone=d.get("zone"),
+        external_ip=d.get("external_ip"),
+        session_id=d.get("session_id"),
+        user_id=d.get("user_id"),
+        provider_details={k: v for k, v in d.items() if k not in _VM_STATUS_KEYS},
+    )
+
+
+def _termination_result_from_dict(d: dict) -> TerminationResult:
+    return TerminationResult(
+        status=to_service_state(d.get("status")),
+        output_files=[
+            StoredObject(
+                filename=o["filename"],
+                storage_uri=o.get("gcs_uri", ""),
+                size_bytes=o.get("size_bytes"),
+            )
+            for o in d.get("output_files", [])
+        ],
+        output_prefix=d.get("gcs_output_prefix", ""),
+        provider_details={
+            "instance_name": d.get("instance_name"),
+            "stopped_at": d.get("stopped_at"),
+        },
+    )
 
 
 def _build_startup_script(vm_spec: dict) -> str:
@@ -237,6 +290,10 @@ class GCEWorkNodeProvider(WorkNodeProvider):
         # Generated at launch, used at terminate to SSH in for output sync.
         self._sync_keys: dict[int, str] = {}
 
+    def capabilities(self) -> ProviderCapabilities:
+        """GCE provides on-demand work-node VMs."""
+        return ProviderCapabilities(work_nodes=True)
+
     @property
     def is_local(self) -> bool:
         return self._mode == "local"
@@ -251,7 +308,7 @@ class GCEWorkNodeProvider(WorkNodeProvider):
             return self._gcp_config
 
         async with self._session_factory() as session:
-            from app.services.platform_config_service import PlatformConfigService
+            from app.platform.platform_config_service import PlatformConfigService
 
             self._gcp_config = await PlatformConfigService.get_many(
                 session,
@@ -280,25 +337,51 @@ class GCEWorkNodeProvider(WorkNodeProvider):
         cfg = self._gcp_config or {}
         return load_gcp_credentials(cfg)
 
-    async def launch_vm(self, vm_spec: dict) -> dict:
-        if self.is_local:
-            return self._local_launch_vm(vm_spec)
-        return await self._gce_launch_vm(vm_spec)
+    async def launch_vm(self, vm_spec: dict) -> VmInfo:
+        d = self._local_launch_vm(vm_spec) if self.is_local else await self._gce_launch_vm(vm_spec)
+        return _vm_info_from_dict(d)
 
-    async def terminate_vm(self, instance_name: str, zone: str, **kwargs) -> dict:
-        if self.is_local:
-            return self._local_terminate_vm(instance_name)
-        return await self._gce_terminate_vm(instance_name, zone, **kwargs)
+    async def terminate_vm(self, instance_name: str, zone: str, **kwargs) -> TerminationResult:
+        d = (
+            self._local_terminate_vm(instance_name)
+            if self.is_local
+            else await self._gce_terminate_vm(instance_name, zone, **kwargs)
+        )
+        return _termination_result_from_dict(d)
 
-    async def get_vm_status(self, instance_name: str, zone: str) -> dict:
-        if self.is_local:
-            return self._local_get_vm_status(instance_name)
-        return await self._gce_get_vm_status(instance_name, zone)
+    async def get_vm_status(self, instance_name: str, zone: str) -> VmStatus:
+        d = (
+            self._local_get_vm_status(instance_name)
+            if self.is_local
+            else await self._gce_get_vm_status(instance_name, zone)
+        )
+        return _vm_status_from_dict(d)
 
-    async def list_vms(self, filters: dict | None = None) -> list[dict]:
-        if self.is_local:
-            return self._local_list_vms(filters)
-        return await self._gce_list_vms(filters)
+    async def list_vms(self, filters: dict | None = None) -> list[VmStatus]:
+        items = self._local_list_vms(filters) if self.is_local else await self._gce_list_vms(filters)
+        return [_vm_status_from_dict(d) for d in items]
+
+    async def probe_zone_capacity(self, zones: list[str], machine_type: str = "e2-medium") -> str:
+        """Return the first zone with GCE capacity for ``machine_type``.
+
+        Resolves project + credentials internally from a freshly reloaded config
+        (the registry singleton may have cached an empty config at startup, before
+        setup wrote gcp_project_id), then runs the blocking probe off the event
+        loop. Raises AllZonesExhaustedError if every candidate zone is stocked out.
+        """
+        from app.adapters.work_nodes.gce_capacity import probe_zones
+
+        await self.load_gcp_config(force=True)
+        cfg = self._gcp_config or {}
+        project_id = cfg.get("gcp_project_id", "")
+        credentials = self._get_gcp_credentials()
+        return await asyncio.to_thread(
+            probe_zones,
+            zones=zones,
+            project_id=project_id,
+            credentials=credentials,
+            machine_type=machine_type,
+        )
 
     # -- GCE API implementations --
 

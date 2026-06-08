@@ -40,6 +40,8 @@ async def running_session(session, comp_bio_user):
         status="running",
         k8s_pod_name="bioaf-notebook-99",
         k8s_namespace="bioaf-notebooks",
+        compute_job_ref="bioaf-notebook-99",
+        provider_metadata={"namespace": "bioaf-notebooks", "pod_name": "bioaf-notebook-99"},
         gcs_home_prefix=f"gs://bioaf-working/notebooks/{comp_bio_user.id}/",
         started_at=datetime.now(timezone.utc) - timedelta(hours=6),
         last_activity_at=datetime.now(timezone.utc) - timedelta(hours=5),
@@ -77,6 +79,8 @@ async def test_monitor_sends_warning_before_shutdown(session, comp_bio_user):
         status="running",
         k8s_pod_name="bioaf-notebook-100",
         k8s_namespace="bioaf-notebooks",
+        compute_job_ref="bioaf-notebook-100",
+        provider_metadata={"namespace": "bioaf-notebooks", "pod_name": "bioaf-notebook-100"},
         started_at=datetime.now(timezone.utc) - timedelta(hours=4),
         last_activity_at=datetime.now(timezone.utc) - timedelta(hours=3, minutes=50),
     )
@@ -109,6 +113,8 @@ async def test_monitor_ignores_active_session(session, comp_bio_user):
         status="running",
         k8s_pod_name="bioaf-notebook-101",
         k8s_namespace="bioaf-notebooks",
+        compute_job_ref="bioaf-notebook-101",
+        provider_metadata={"namespace": "bioaf-notebooks", "pod_name": "bioaf-notebook-101"},
         started_at=datetime.now(timezone.utc) - timedelta(hours=1),
         last_activity_at=datetime.now(timezone.utc) - timedelta(minutes=5),
     )
@@ -141,6 +147,8 @@ async def test_monitor_handles_missing_metrics(session, comp_bio_user):
         status="running",
         k8s_pod_name="bioaf-notebook-102",
         k8s_namespace="bioaf-notebooks",
+        compute_job_ref="bioaf-notebook-102",
+        provider_metadata={"namespace": "bioaf-notebooks", "pod_name": "bioaf-notebook-102"},
         started_at=datetime.now(timezone.utc) - timedelta(hours=6),
         last_activity_at=None,
     )

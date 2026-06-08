@@ -18,19 +18,13 @@ logger = logging.getLogger("bioaf.lab_glossary_extraction")
 
 
 async def extract_text_from_gcs(session: AsyncSession, gcs_uri: str) -> str:
-    """Download a lab document version from GCS and return its text. PDFs go
+    """Download a lab document version from storage and return its text. PDFs go
     through pdfplumber; everything else is decoded as UTF-8 best-effort."""
-    from google.cloud import storage as gcs_storage
+    from app.adapters.registry import get_storage_adapter
 
-    from app.services.gcs_storage import GcsStorageService
+    content = await get_storage_adapter().read_bytes(gcs_uri)
 
-    bucket_name, object_path = GcsStorageService._parse_gcs_uri(gcs_uri)
-    credentials = await GcsStorageService.get_credentials(session)
-    client = gcs_storage.Client(credentials=credentials)
-    blob = client.bucket(bucket_name).blob(object_path)
-    content = blob.download_as_bytes()
-
-    if object_path.lower().endswith(".pdf"):
+    if gcs_uri.lower().endswith(".pdf"):
         return _extract_pdf_text(content)
     try:
         return content.decode("utf-8", errors="ignore")

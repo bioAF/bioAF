@@ -23,6 +23,7 @@ from app.services.event_types import (
 )
 from app.services.machine_types import MACHINE_TYPES, get_machine_type
 from app.services.session_bucket import _bucket_filter
+from app.adapters.models import TerminationResult
 from app.adapters.registry import get_work_node_adapter
 
 logger = logging.getLogger("bioaf.work_nodes")
@@ -256,10 +257,10 @@ class WorkNodeService:
 
             result = await adapter.launch_vm(vm_spec)
 
-            compute_session.gce_instance_name = result.get("instance_name")
-            compute_session.gce_zone = result.get("zone")
-            compute_session.gce_project_id = result.get("gcp_project_id")
-            adapter_status = result.get("status", "starting")
+            compute_session.gce_instance_name = result.instance_name
+            compute_session.gce_zone = result.zone
+            compute_session.gce_project_id = result.provider_details.get("gcp_project_id")
+            adapter_status = result.status
             if adapter_status == "error":
                 compute_session.status = "failed"
             elif adapter_status == "running":
@@ -268,9 +269,8 @@ class WorkNodeService:
                 compute_session.status = "running"
             # adapter_status == "starting": leave the start -> running/failed
             # transition to the background readiness poll, do not overwrite it.
-            result_url = result.get("access_url")
-            if result_url:
-                compute_session.access_url = result_url
+            if result.access_url:
+                compute_session.access_url = result.access_url
         except Exception as e:
             from app.adapters.failure_classification import classify_gce_vm_failure
 
@@ -345,7 +345,7 @@ class WorkNodeService:
             if val and val != "null":
                 working_bucket = val
 
-        terminate_result: dict = {}
+        terminate_result = TerminationResult()
         if compute_session.gce_instance_name:
             try:
                 adapter = get_work_node_adapter()
@@ -360,7 +360,7 @@ class WorkNodeService:
                 logger.warning("Failed to terminate work node %d: %s", session_id, e)
 
         # Register output files (ADR-040)
-        output_files = terminate_result.get("output_files", [])
+        output_files = terminate_result.output_files
         if output_files:
             try:
                 from app.services.session_output_service import SessionOutputService
@@ -372,13 +372,16 @@ class WorkNodeService:
                     project_id=compute_session.project_id,
                     experiment_id=compute_session.experiment_id,
                     user_id=compute_session.user_id,
-                    gcs_files=output_files,
+                    gcs_files=[
+                        {"filename": o.filename, "gcs_uri": o.storage_uri, "size_bytes": o.size_bytes}
+                        for o in output_files
+                    ],
                     source_type="work_node_output",
                 )
             except Exception as e:
                 logger.warning("Output registration failed for work node %d: %s", session_id, e)
 
-        gcs_output_prefix = terminate_result.get("gcs_output_prefix", "")
+        gcs_output_prefix = terminate_result.output_prefix
         if gcs_output_prefix:
             compute_session.gcs_output_prefix = gcs_output_prefix
 

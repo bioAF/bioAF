@@ -229,6 +229,42 @@ async def test_cleanup_gcs_bucket(session, admin_user):
 
 
 @pytest.mark.asyncio
+async def test_cleanup_service_account_routes_through_iam_provider(session, admin_user):
+    """SA cleanup goes through the BAL IamProvider, not the GCP SDK directly."""
+    from app.services.orphaned_resource_service import OrphanedResourceService
+
+    await _seed_platform_config(session)
+    resource = await OrphanedResourceService.log_resource(
+        session,
+        resource_type="service_account",
+        resource_name="bioaf-notebook-runner",
+        gcp_project_id="test-project",
+        stack_uid="sa-cleanup-uid",
+    )
+    await session.flush()
+
+    creds = MagicMock()
+    provider = MagicMock()
+
+    with (
+        patch(
+            "app.services.stack_deployment._get_gke_credentials",
+            new_callable=AsyncMock,
+            return_value=creds,
+        ),
+        patch(
+            "app.adapters.iam.create_iam_provider",
+            return_value=provider,
+        ) as create,
+    ):
+        result = await OrphanedResourceService.cleanup_resource(session, resource.id, admin_user.id)
+
+    assert result.status == "cleaned"
+    create.assert_called_once_with(credentials=creds)
+    provider.delete_service_account.assert_called_once_with("test-project", "bioaf-notebook-runner")
+
+
+@pytest.mark.asyncio
 async def test_cleanup_failure_sets_status_failed(session, admin_user):
     from app.services.orphaned_resource_service import OrphanedResourceService
 

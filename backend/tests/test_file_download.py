@@ -1,6 +1,6 @@
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from app.services.auth_service import AuthService
 
@@ -60,27 +60,22 @@ async def other_org_token(other_org_user) -> str:
     )
 
 
-def _mock_gcs():
-    """Return stacked patches for GCS signed URL generation."""
-    mock_client_cls = MagicMock()
-    mock_blob = mock_client_cls.return_value.bucket.return_value.blob.return_value
-    mock_blob.generate_signed_url.return_value = "https://storage.googleapis.com/signed-url"
+def _mock_storage_adapter(**methods):
+    """Patch the storage adapter used by the files router.
 
-    return (
-        patch("google.cloud.storage.Client", mock_client_cls),
-        patch(
-            "app.services.gcs_storage.GcsStorageService.get_credentials",
-            new_callable=AsyncMock,
-            return_value=None,
-        ),
-    )
+    The download/content endpoints depend on the BAL storage adapter
+    (Phase 3), not the GCS SDK, so tests mock the adapter boundary.
+    """
+    adapter = AsyncMock()
+    for name, value in methods.items():
+        getattr(adapter, name).return_value = value
+    return patch("app.adapters.registry.get_storage_adapter", return_value=adapter)
 
 
 @pytest.mark.asyncio
 async def test_single_file_download_returns_signed_url(client, admin_token, sample_file):
     """GET /api/files/{id}/download returns a signed URL for an admin user."""
-    gcs_patch, creds_patch = _mock_gcs()
-    with gcs_patch, creds_patch:
+    with _mock_storage_adapter(generate_signed_url="https://storage.googleapis.com/signed-url"):
         resp = await client.get(
             f"/api/files/{sample_file.id}/download",
             headers={"Authorization": f"Bearer {admin_token}"},
@@ -97,8 +92,7 @@ async def test_single_file_download_creates_audit_log(client, admin_token, admin
     """Download creates an audit log entry with file ID, filename, and size."""
     from sqlalchemy import text
 
-    gcs_patch, creds_patch = _mock_gcs()
-    with gcs_patch, creds_patch:
+    with _mock_storage_adapter(generate_signed_url="https://storage.googleapis.com/signed-url"):
         resp = await client.get(
             f"/api/files/{sample_file.id}/download",
             headers={"Authorization": f"Bearer {admin_token}"},
@@ -164,18 +158,7 @@ async def test_content_endpoint_does_not_create_audit_log(client, admin_token, s
     used for inline image display, not user-initiated downloads."""
     from sqlalchemy import text
 
-    mock_client_cls = MagicMock()
-    mock_blob = mock_client_cls.return_value.bucket.return_value.blob.return_value
-    mock_blob.download_as_bytes.return_value = b"\x89PNG fake image bytes"
-
-    with (
-        patch("google.cloud.storage.Client", mock_client_cls),
-        patch(
-            "app.services.gcs_storage.GcsStorageService.get_credentials",
-            new_callable=AsyncMock,
-            return_value=None,
-        ),
-    ):
+    with _mock_storage_adapter(read_bytes=b"\x89PNG fake image bytes"):
         resp = await client.get(
             f"/api/files/{sample_file.id}/content",
             headers={"Authorization": f"Bearer {admin_token}"},

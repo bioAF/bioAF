@@ -13,12 +13,23 @@ jest.mock("@/lib/auth", () => ({
 }));
 
 const mockUploadSigned = jest.fn();
+const mockUploadProxied = jest.fn();
 const mockGet = jest.fn();
 jest.mock("@/lib/api", () => ({
   api: {
     uploadSigned: (...args: unknown[]) => mockUploadSigned(...args),
+    uploadProxied: (...args: unknown[]) => mockUploadProxied(...args),
     get: (...args: unknown[]) => mockGet(...args),
   },
+}));
+
+const mockHas = jest.fn();
+jest.mock("@/hooks/useCapabilities", () => ({
+  useCapabilities: () => ({
+    has: (flag: string) => mockHas(flag),
+    capabilities: {},
+    loading: false,
+  }),
 }));
 
 const projectsResponse = {
@@ -37,8 +48,12 @@ const experimentsResponse = {
 };
 
 beforeEach(() => {
+  mockHas.mockReset();
+  mockHas.mockReturnValue(true);
   mockUploadSigned.mockReset();
   mockUploadSigned.mockResolvedValue({ id: 1, filename: "sample.fastq.gz" });
+  mockUploadProxied.mockReset();
+  mockUploadProxied.mockResolvedValue({ id: 1, filename: "sample.fastq.gz" });
   mockGet.mockReset();
   mockGet.mockImplementation((path: string) => {
     if (path.startsWith("/api/projects")) return Promise.resolve(projectsResponse);
@@ -48,6 +63,26 @@ beforeEach(() => {
 });
 
 describe("DataUploadPage", () => {
+  it("uploads via the proxied path when signed_url_upload is absent", async () => {
+    mockHas.mockImplementation((flag: string) => flag !== "signed_url_upload");
+    render(<DataUploadPage />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: /scope/i }), {
+      target: { value: "global" },
+    });
+    const file = new File(["data"], "sample.fastq.gz", { type: "application/gzip" });
+    const input = document.querySelector("input[type='file']") as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => screen.getByText(/Upload 1 file/));
+    fireEvent.click(screen.getByText(/Upload 1 file/));
+
+    await waitFor(() => expect(mockUploadProxied).toHaveBeenCalledTimes(1));
+    expect(mockUploadSigned).not.toHaveBeenCalled();
+    const [, opts] = mockUploadProxied.mock.calls[0];
+    expect(opts.isGlobal).toBe(true);
+  });
+
   it("calls uploadSigned when uploading a file", async () => {
     render(<DataUploadPage />);
 

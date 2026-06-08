@@ -31,7 +31,7 @@ def _reload_encryption_with(raw_keys: str):
     from app import config
 
     config.settings.encryption_keys = raw_keys
-    from app.services import encryption_service
+    from app.platform import encryption_service
 
     importlib.reload(encryption_service)
     # rotate_encryption_keys imports encryption_service by name, so reload
@@ -159,7 +159,7 @@ async def test_rotation_aborts_if_keyring_cannot_decrypt(db_engine):
 @pytest.mark.asyncio
 async def test_rotation_handles_platform_config_sensitive_keys(db_engine):
     """The sensitive platform_config row must be re-encrypted alongside columns."""
-    from app.services.platform_config_service import PlatformConfigService
+    from app.platform.platform_config_service import PlatformConfigService
 
     _reload_encryption_with(KEY_A)
     async with _factory(db_engine)() as session:

@@ -63,14 +63,14 @@ class SessionMonitorService:
         """Terminate an idle session and notify the owner."""
         from app.adapters.registry import get_notebook_adapter
 
-        logger.info("Terminating idle session %d (pod %s)", ns.id, ns.k8s_pod_name)
+        logger.info("Terminating idle session %d (pod %s)", ns.id, ns.compute_job_ref)
 
         try:
             notebook_adapter = get_notebook_adapter()
             await notebook_adapter.terminate_session(
                 session_id=ns.id,
-                pod_name=ns.k8s_pod_name or "",
-                namespace=ns.k8s_namespace or "bioaf-notebooks",
+                pod_name=ns.compute_job_ref or "",
+                namespace=ns.provider_namespace or "bioaf-notebooks",
                 gcs_home_prefix=ns.gcs_home_prefix or "",
             )
         except Exception as e:

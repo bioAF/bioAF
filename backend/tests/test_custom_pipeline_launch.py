@@ -4,6 +4,8 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from app.adapters.compute.kubernetes import _job_submit_result_from_dict
 import pytest_asyncio
 from sqlalchemy import select, text as sa_text
 
@@ -198,12 +200,14 @@ def _mock_compute_adapter():
 
     async def capture_submit(job_spec):
         captured["job_spec"] = job_spec
-        return {
-            "job_id": "bioaf-pipeline-test-123",
-            "namespace": "bioaf-pipelines",
-            "status": "queued",
-            "estimated_cost": {"estimated_cost_usd": 0.25},
-        }
+        return _job_submit_result_from_dict(
+            {
+                "job_id": "bioaf-pipeline-test-123",
+                "namespace": "bioaf-pipelines",
+                "status": "queued",
+                "estimated_cost": {"estimated_cost_usd": 0.25},
+            }
+        )
 
     adapter = MagicMock()
     adapter.submit_job = AsyncMock(side_effect=capture_submit)
@@ -593,6 +597,12 @@ async def test_pipeline_run_fields(session, admin_user, ready_env_version, exper
     assert db_run.pipeline_version == "1"
     assert db_run.status == "running"
     assert db_run.k8s_job_name == "bioaf-pipeline-test-123"
+    # Backend-neutral fields dual-written (BAL Phase 4).
+    assert db_run.compute_job_ref == "bioaf-pipeline-test-123"
+    assert db_run.provider_metadata == {
+        "job_name": "bioaf-pipeline-test-123",
+        "namespace": "bioaf-pipelines",
+    }
 
     input_link_count = (
         (await session.execute(select(PipelineRunInputFile).where(PipelineRunInputFile.pipeline_run_id == run.id)))

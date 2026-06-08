@@ -56,12 +56,10 @@ async def test_manifest_routes_to_manifest_ingest(session: AsyncSession):
         "md5Hash": "abc",
     }
 
+    adapter = AsyncMock()
+    adapter.read_text.return_value = manifest_content
     with (
-        patch(
-            "app.services.gcs_storage.GcsStorageService.read_object_text",
-            new_callable=AsyncMock,
-            return_value=manifest_content,
-        ) as mock_read,
+        patch("app.adapters.registry.get_storage_adapter", return_value=adapter),
         patch(
             "app.services.manifest_ingest_service.process_manifest_ingest",
             new_callable=AsyncMock,
@@ -73,7 +71,7 @@ async def test_manifest_routes_to_manifest_ingest(session: AsyncSession):
     ):
         await listener._handle_message(msg_data, session)
 
-        mock_read.assert_called_once_with("my-ingest-bucket", "delivery/md5.txt", credentials=None)
+        adapter.read_text.assert_awaited_once_with("gs://my-ingest-bucket/delivery/md5.txt")
         mock_manifest.assert_called_once()
         mock_ingest.assert_not_called()
 
@@ -121,12 +119,10 @@ async def test_custom_manifest_filename(session: AsyncSession):
         "size": "50",
     }
 
+    _adapter = AsyncMock()
+    _adapter.read_text.return_value = "# batch: B1\nhash  file.fastq.gz\n"
     with (
-        patch(
-            "app.services.gcs_storage.GcsStorageService.read_object_text",
-            new_callable=AsyncMock,
-            return_value="# batch: B1\nhash  file.fastq.gz\n",
-        ),
+        patch("app.adapters.registry.get_storage_adapter", return_value=_adapter),
         patch(
             "app.services.manifest_ingest_service.process_manifest_ingest",
             new_callable=AsyncMock,
@@ -175,12 +171,10 @@ async def test_manifest_detection_case_insensitive(session: AsyncSession):
         "size": "50",
     }
 
+    _adapter = AsyncMock()
+    _adapter.read_text.return_value = "# batch: B1\nhash  file.fastq.gz\n"
     with (
-        patch(
-            "app.services.gcs_storage.GcsStorageService.read_object_text",
-            new_callable=AsyncMock,
-            return_value="# batch: B1\nhash  file.fastq.gz\n",
-        ),
+        patch("app.adapters.registry.get_storage_adapter", return_value=_adapter),
         patch(
             "app.services.manifest_ingest_service.process_manifest_ingest",
             new_callable=AsyncMock,

@@ -3,6 +3,8 @@ to the compute adapter, including pipeline_name for K8s Job labels.
 """
 
 import pytest
+
+from app.adapters.compute.kubernetes import _job_submit_result_from_dict
 import pytest_asyncio
 from unittest.mock import AsyncMock, patch, MagicMock
 
@@ -86,12 +88,14 @@ class TestLaunchRunJobSpec:
 
         async def capture_submit(job_spec):
             captured_spec.update(job_spec)
-            return {
-                "job_id": "bioaf-pipeline-test",
-                "namespace": "bioaf-pipelines",
-                "status": "queued",
-                "estimated_cost": {"estimated_cost_usd": 0.50},
-            }
+            return _job_submit_result_from_dict(
+                {
+                    "job_id": "bioaf-pipeline-test",
+                    "namespace": "bioaf-pipelines",
+                    "status": "queued",
+                    "estimated_cost": {"estimated_cost_usd": 0.50},
+                }
+            )
 
         mock_adapter = MagicMock()
         mock_adapter.submit_job = AsyncMock(side_effect=capture_submit)
@@ -127,12 +131,14 @@ class TestLaunchRunJobSpec:
 
         async def capture_submit(job_spec):
             captured_spec.update(job_spec)
-            return {
-                "job_id": "bioaf-pipeline-test",
-                "namespace": "bioaf-pipelines",
-                "status": "queued",
-                "estimated_cost": {"estimated_cost_usd": 0.50},
-            }
+            return _job_submit_result_from_dict(
+                {
+                    "job_id": "bioaf-pipeline-test",
+                    "namespace": "bioaf-pipelines",
+                    "status": "queued",
+                    "estimated_cost": {"estimated_cost_usd": 0.50},
+                }
+            )
 
         mock_adapter = MagicMock()
         mock_adapter.submit_job = AsyncMock(side_effect=capture_submit)
@@ -165,12 +171,14 @@ class TestLaunchRunJobSpec:
 
         async def capture_submit(job_spec):
             captured_spec.update(job_spec)
-            return {
-                "job_id": "bioaf-pipeline-test",
-                "namespace": "bioaf-pipelines",
-                "status": "queued",
-                "estimated_cost": {"estimated_cost_usd": 0.50},
-            }
+            return _job_submit_result_from_dict(
+                {
+                    "job_id": "bioaf-pipeline-test",
+                    "namespace": "bioaf-pipelines",
+                    "status": "queued",
+                    "estimated_cost": {"estimated_cost_usd": 0.50},
+                }
+            )
 
         mock_adapter = MagicMock()
         mock_adapter.submit_job = AsyncMock(side_effect=capture_submit)

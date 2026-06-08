@@ -2,11 +2,6 @@
 
 import logging
 
-try:
-    from google.cloud import storage as gcs_storage
-except ImportError:
-    gcs_storage = None  # type: ignore[assignment]
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -101,26 +96,40 @@ class PipelineOutputService:
     async def register_nextflow_metadata(
         session: AsyncSession,
         run: PipelineRun,
-        raw_bucket: str,
     ) -> list[File]:
         """Register Nextflow report.html and trace.tsv as File records.
 
-        These files live in the raw bucket at deterministic paths based
-        on the K8s job name.
+        These files live in the RAW storage store at deterministic paths based
+        on the K8s job name. The URIs are resolved through the BAL storage
+        adapter (Phase 5) so no caller names a bucket; a backend without a RAW
+        store configured yields no metadata.
         """
-        if not run.k8s_job_name or not raw_bucket:
+        if not run.compute_job_ref:
+            return []
+
+        from app.adapters.models import StorageStore
+        from app.adapters.registry import get_storage_adapter
+
+        adapter = get_storage_adapter()
+        try:
+            report_uri = await adapter.resolve_uri(
+                StorageStore.RAW, f"nextflow-reports/{run.compute_job_ref}/report.html"
+            )
+            trace_uri = await adapter.resolve_uri(StorageStore.RAW, f"nextflow-traces/{run.compute_job_ref}/trace.tsv")
+        except ValueError:
+            # No RAW store configured for this install.
             return []
 
         metadata_files = [
             {
                 "filename": "report.html",
-                "gcs_uri": f"gs://{raw_bucket}/nextflow-reports/{run.k8s_job_name}/report.html",
+                "gcs_uri": report_uri,
                 "artifact_type": "pipeline_report",
                 "file_type": "report",
             },
             {
                 "filename": "trace.tsv",
-                "gcs_uri": f"gs://{raw_bucket}/nextflow-traces/{run.k8s_job_name}/trace.tsv",
+                "gcs_uri": trace_uri,
                 "artifact_type": "pipeline_trace",
                 "file_type": "count_matrix",
             },
@@ -132,7 +141,7 @@ class PipelineOutputService:
         existing_uris: set[str] = {row[0] for row in existing.all()}
 
         # Check which blobs exist in GCS
-        existing_blobs = await _check_gcs_blobs(raw_bucket, metadata_files)
+        existing_blobs = await _check_gcs_blobs(metadata_files)
 
         created: list[File] = []
         for meta in metadata_files:
@@ -169,22 +178,21 @@ class PipelineOutputService:
         return created
 
 
-async def _check_gcs_blobs(bucket_name: str, metadata_files: list[dict]) -> dict[str, int | None]:
-    """Check which GCS blobs exist and return {gcs_uri: size_bytes} for existing ones."""
-    try:
-        if gcs_storage is None:
-            return {}
-        client = gcs_storage.Client()
-        bucket = client.bucket(bucket_name)
-        result: dict[str, int | None] = {}
-        for meta in metadata_files:
-            gcs_uri = meta["gcs_uri"]
-            blob_path = gcs_uri.replace(f"gs://{bucket_name}/", "")
-            blob = bucket.blob(blob_path)
-            if blob.exists():
-                blob.reload()
-                result[gcs_uri] = blob.size
-        return result
-    except Exception as e:
-        logger.warning("Could not check GCS blobs in %s: %s", bucket_name, e)
-        return {}
+async def _check_gcs_blobs(metadata_files: list[dict]) -> dict[str, int | None]:
+    """Check which storage objects exist and return {storage_uri: size_bytes}."""
+    from app.adapters.models import StorageObjectNotFound
+    from app.adapters.registry import get_storage_adapter
+
+    adapter = get_storage_adapter()
+    result: dict[str, int | None] = {}
+    for meta in metadata_files:
+        gcs_uri = meta["gcs_uri"]
+        try:
+            metadata = await adapter.get_object_metadata(gcs_uri)
+        except StorageObjectNotFound:
+            continue
+        except Exception as e:
+            logger.warning("Could not check storage object %s: %s", gcs_uri, e)
+            continue
+        result[gcs_uri] = metadata.size_bytes
+    return result

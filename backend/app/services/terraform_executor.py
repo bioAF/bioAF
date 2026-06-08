@@ -20,15 +20,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import AsyncIterator
 
-from google.api_core.exceptions import NotFound
-from google.cloud import storage
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.component import TerraformRun
 from app.services.activity_feed_service import ActivityFeedService
 from app.services.audit_service import log_action
-from app.services.credential_injector import GCPCredentialInjector
+from app.platform.credential_injector import GCPCredentialInjector
 from app.services.plan_parser import TerraformPlanParser
 
 logger = logging.getLogger("bioaf.terraform_executor")
@@ -1074,7 +1072,7 @@ class TerraformExecutor:
             "k8s_interactive_machine_type",
             "k8s_interactive_max_nodes",
         ]
-        from app.services.platform_config_service import PlatformConfigService
+        from app.platform.platform_config_service import PlatformConfigService
 
         config = await PlatformConfigService.get_many(session, keys)
         # vm_default mode: ensure the credential injector sees the bootstrap
@@ -1228,24 +1226,17 @@ class TerraformExecutor:
         lock_path: str,
         credentials=None,
     ) -> None:
-        """Delete a Terraform lock file from a GCS bucket.
+        """Delete a Terraform lock object from the state store via the adapter.
 
-        Uses the app's configured credentials when available; falls back
-        to ADC. Failures are logged but not raised since the run is
-        already marked cancelled/failed.
+        The adapter's delete is idempotent (a missing object is not an error)
+        and owns credential resolution. Failures are logged but not raised since
+        the run is already marked cancelled/failed.
         """
-
-        def _delete() -> None:
-            client = storage.Client(credentials=credentials) if credentials else storage.Client()
-            bucket = client.bucket(bucket_name)
-            blob = bucket.blob(lock_path)
-            blob.delete()
+        from app.adapters.registry import get_storage_adapter
 
         try:
-            await asyncio.to_thread(_delete)
+            await get_storage_adapter().delete(f"gs://{bucket_name}/{lock_path}")
             logger.info("Deleted lock file gs://%s/%s", bucket_name, lock_path)
-        except NotFound:
-            logger.info("Lock file gs://%s/%s already gone", bucket_name, lock_path)
         except Exception as exc:
             logger.warning("Error deleting lock file gs://%s/%s: %s", bucket_name, lock_path, exc)
 

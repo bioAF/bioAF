@@ -1,6 +1,6 @@
 # ADR-020: BioAF Adapter Layer (BAL)
 
-**Status:** Accepted
+**Status:** Superseded by [ADR-065](ADR-065-bal-normalized-contract.md)
 **Date:** 2026-03-10
 **Deciders:** Brent (repository owner), informed by feedback from computational biology practitioners
 

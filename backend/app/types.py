@@ -4,7 +4,7 @@ EncryptedString
     TypeDecorator that transparently encrypts column values at write time
     and decrypts at read time, so models can declare sensitive columns
     without leaking the encryption boundary into application code. Backed
-    by app.services.encryption_service (Fernet / MultiFernet).
+    by app.platform.encryption_service (Fernet / MultiFernet).
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 from sqlalchemy import Text
 from sqlalchemy.types import TypeDecorator
 
-from app.services import encryption_service
+from app.platform import encryption_service
 
 
 class EncryptedString(TypeDecorator):

@@ -104,35 +104,29 @@ class TestSlurmStubs:
             await slurm_notebook.get_connection_command("123")
 
 
-class TestNfsStubs:
+class TestNfsImplemented:
+    """NFS is a real backend as of Phase 7 (no more NotImplementedError stubs).
+
+    Full per-method coverage lives in test_nfs_storage_adapter.py; this just
+    confirms the once-stubbed methods now work and capabilities are honest.
+    """
+
     @pytest.fixture
-    def nfs_storage(self):
-        return NfsStorageProvider()
+    def nfs_storage(self, tmp_path):
+        return NfsStorageProvider(root=str(tmp_path))
+
+    def test_capabilities_declare_no_signed_url(self, nfs_storage):
+        assert nfs_storage.capabilities().signed_url_upload is False
 
     @pytest.mark.asyncio
-    async def test_resolve_input_path_raises(self, nfs_storage):
-        with pytest.raises(NotImplementedError, match="NFS storage backend coming soon"):
-            await nfs_storage.resolve_input_path({})
+    async def test_stage_inputs_works(self, nfs_storage, tmp_path):
+        staged = await nfs_storage.stage_inputs([{"filename": "x.txt"}], str(tmp_path / "work"))
+        assert len(staged) == 1
 
     @pytest.mark.asyncio
-    async def test_resolve_output_path_raises(self, nfs_storage):
-        with pytest.raises(NotImplementedError, match="NFS storage backend coming soon"):
-            await nfs_storage.resolve_output_path({}, "file.h5ad")
-
-    @pytest.mark.asyncio
-    async def test_stage_inputs_raises(self, nfs_storage):
-        with pytest.raises(NotImplementedError, match="NFS storage backend coming soon"):
-            await nfs_storage.stage_inputs([], "/tmp/work")
-
-    @pytest.mark.asyncio
-    async def test_collect_outputs_raises(self, nfs_storage):
-        with pytest.raises(NotImplementedError, match="NFS storage backend coming soon"):
-            await nfs_storage.collect_outputs("/tmp/work", {})
-
-    @pytest.mark.asyncio
-    async def test_get_storage_metrics_raises(self, nfs_storage):
-        with pytest.raises(NotImplementedError, match="NFS storage backend coming soon"):
-            await nfs_storage.get_storage_metrics()
+    async def test_get_storage_metrics_works(self, nfs_storage):
+        metrics = await nfs_storage.get_storage_metrics()
+        assert metrics.total_size_gb >= 0.0
 
 
 # -- Registry tests --
@@ -186,6 +180,32 @@ class TestAdapterRegistry:
             registry.get_compute_adapter()
 
 
+# -- get_job_report tests --
+
+
+class TestGetJobReport:
+    """ComputeProvider.get_job_report is a base method (BAL rework, Phase 5)."""
+
+    @pytest.mark.asyncio
+    async def test_base_default_returns_empty_string(self):
+        """A backend without a run-report artifact inherits a soft '' default.
+
+        Promoted to the base in Phase 5 so pipeline_monitor can call it on the
+        interface; the SLURM stub (no report) returns '' instead of raising
+        AttributeError.
+        """
+        provider = SlurmComputeProvider()
+        assert await provider.get_job_report("job-123") == ""
+
+    @pytest.mark.asyncio
+    async def test_k8s_local_returns_empty_report(self):
+        """K8s local mode has no GCS report, so returns ''."""
+        from app.adapters.compute.kubernetes import KubernetesComputeProvider
+
+        provider = KubernetesComputeProvider()
+        assert await provider.get_job_report("local-abc123") == ""
+
+
 # -- get_job_progress tests --
 
 
@@ -207,10 +227,8 @@ class TestGetJobProgress:
         provider = KubernetesComputeProvider()
         result = await provider.get_job_progress("local-abc123")
 
-        assert "percent_complete" in result
-        assert "processes" in result
-        assert isinstance(result["percent_complete"], (int, float))
-        assert isinstance(result["processes"], list)
+        assert isinstance(result.percent_complete, (int, float))
+        assert isinstance(result.processes, list)
 
     @pytest.mark.asyncio
     async def test_k8s_local_progress_has_process_fields(self):
@@ -220,37 +238,37 @@ class TestGetJobProgress:
         provider = KubernetesComputeProvider()
         result = await provider.get_job_progress("local-abc123")
 
-        for proc in result["processes"]:
-            assert "name" in proc
-            assert "status" in proc
+        for proc in result.processes:
+            assert proc.name
+            assert proc.status
 
     @pytest.mark.asyncio
     async def test_abc_requires_get_job_progress(self):
         """ComputeProvider subclass missing get_job_progress cannot instantiate."""
 
         class IncompleteProvider(ComputeProvider):
-            async def submit_job(self, job_spec: dict) -> dict:
+            async def submit_job(self, job_spec: dict) -> dict:  # type: ignore[override]
                 return {}
 
-            async def cancel_job(self, job_id: str) -> dict:
+            async def cancel_job(self, job_id: str) -> dict:  # type: ignore[override]
                 return {}
 
-            async def get_job_status(self, job_id: str) -> dict:
+            async def get_job_status(self, job_id: str) -> dict:  # type: ignore[override]
                 return {}
 
-            async def list_jobs(self, filters: dict | None = None) -> list[dict]:
+            async def list_jobs(self, filters: dict | None = None) -> list[dict]:  # type: ignore[override]
                 return []
 
             async def get_job_logs(self, job_id: str) -> str:
                 return ""
 
-            async def get_cluster_status(self) -> dict:
+            async def get_cluster_status(self) -> dict:  # type: ignore[override]
                 return {}
 
-            async def get_cluster_metrics(self) -> dict:
+            async def get_cluster_metrics(self) -> dict:  # type: ignore[override]
                 return {}
 
-            async def get_cost_estimate(self, job_spec: dict) -> dict:
+            async def get_cost_estimate(self, job_spec: dict) -> dict:  # type: ignore[override]
                 return {}
 
             async def get_connection_command(self, job_id: str) -> str:

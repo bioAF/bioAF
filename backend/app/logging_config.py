@@ -13,11 +13,6 @@ from typing import Any
 
 from app.config import settings
 
-try:
-    import google.cloud.logging as cloud_logging
-except ImportError:  # pragma: no cover
-    cloud_logging = None  # type: ignore[assignment]
-
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 _GCE_METADATA_URL = "http://169.254.169.254/computeMetadata/v1/project/project-id"
 _METADATA_HEADERS = {"Metadata-Flavor": "Google"}
@@ -113,23 +108,23 @@ def attach_cloud_logging(
     *,
     debug: bool = False,
 ) -> None:
-    """Attach a Cloud Logging handler to the ``bioaf`` logger.
+    """Attach a centralized-logging handler to the ``bioaf`` logger.
 
-    Uses the provided *credentials* (typically the app's configured service
-    account).  When *credentials* is ``None``, the client falls back to
-    Application Default Credentials.
+    The backend-specific handler is built by the BAL LogSinkProvider (Phase 9G),
+    so this module holds no cloud SDK. Uses the provided *credentials* (typically
+    the app's configured service account); when ``None`` the GCP client falls
+    back to Application Default Credentials. Secret redaction and the stdout
+    fallback stay here.
     """
-    if cloud_logging is None:
-        logging.getLogger("bioaf").warning("google-cloud-logging not installed, Cloud Logging unavailable")
-        return
+    from app.adapters.observability import create_log_sink_provider
 
     bioaf_logger = logging.getLogger("bioaf")
-    try:
-        client = cloud_logging.Client(project=project_id, credentials=credentials)
-        cloud_handler = client.get_default_handler()
-        cloud_handler.setLevel(logging.DEBUG if debug else logging.INFO)
-        cloud_handler.addFilter(RedactSecretsFilter())
-        bioaf_logger.addHandler(cloud_handler)
-        bioaf_logger.info("Cloud Logging enabled (project=%s)", project_id)
-    except Exception as exc:
-        bioaf_logger.warning("Cloud Logging unavailable, stdout only: %s", exc)
+    provider = create_log_sink_provider(project_id, credentials)
+    handler = provider.build_handler(debug=debug)
+    if handler is None:
+        bioaf_logger.warning("Centralized logging unavailable, stdout only")
+        return
+
+    handler.addFilter(RedactSecretsFilter())
+    bioaf_logger.addHandler(handler)
+    bioaf_logger.info("Cloud Logging enabled (project=%s)", project_id)

@@ -28,7 +28,7 @@ from app.models.pipeline_run import PipelineRun
 from app.models.sample import Sample
 from app.services.literature import lit_review_auto_service, lit_review_run_service
 from app.services.literature.sources import PaperRecord
-from app.services.platform_config_service import PlatformConfigService
+from app.platform.platform_config_service import PlatformConfigService
 
 
 # ---------------------------------------------------------------------------

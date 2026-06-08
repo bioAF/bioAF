@@ -7,7 +7,7 @@ single resource, expire quickly, and carry no user identity.
 
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from httpx import AsyncClient
 
@@ -119,18 +119,11 @@ async def test_create_content_token_nonexistent_file(client: AsyncClient, admin_
 # -- Token usage on content endpoints --
 
 
-def _mock_gcs_content():
-    mock_client_cls = MagicMock()
-    mock_blob = mock_client_cls.return_value.bucket.return_value.blob.return_value
-    mock_blob.download_as_bytes.return_value = b"\x89PNG fake image"
-    return (
-        patch("google.cloud.storage.Client", mock_client_cls),
-        patch(
-            "app.services.gcs_storage.GcsStorageService.get_credentials",
-            new_callable=AsyncMock,
-            return_value=None,
-        ),
-    )
+def _mock_storage_content():
+    """Patch the BAL storage adapter the content endpoint depends on (Phase 3)."""
+    adapter = AsyncMock()
+    adapter.read_bytes.return_value = b"\x89PNG fake image"
+    return patch("app.adapters.registry.get_storage_adapter", return_value=adapter)
 
 
 @pytest.mark.asyncio
@@ -145,8 +138,7 @@ async def test_content_endpoint_accepts_content_token(client: AsyncClient, admin
     content_token = resp.json()["token"]
 
     # Step 2: use it on the content endpoint
-    gcs_patch, creds_patch = _mock_gcs_content()
-    with gcs_patch, creds_patch:
+    with _mock_storage_content():
         resp = await client.get(f"/api/files/{sample_file.id}/content?token={content_token}")
     assert resp.status_code == 200
 
@@ -176,8 +168,7 @@ async def test_content_token_rejected_on_wrong_resource(client: AsyncClient, adm
     )
     content_token = resp.json()["token"]
 
-    gcs_patch, creds_patch = _mock_gcs_content()
-    with gcs_patch, creds_patch:
+    with _mock_storage_content():
         resp = await client.get(f"/api/files/{other_file.id}/content?token={content_token}")
     assert resp.status_code == 401
 
@@ -185,7 +176,6 @@ async def test_content_token_rejected_on_wrong_resource(client: AsyncClient, adm
 @pytest.mark.asyncio
 async def test_session_jwt_rejected_in_content_query_param(client: AsyncClient, admin_token: str, sample_file):
     """Full session JWTs must no longer be accepted as query param tokens."""
-    gcs_patch, creds_patch = _mock_gcs_content()
-    with gcs_patch, creds_patch:
+    with _mock_storage_content():
         resp = await client.get(f"/api/files/{sample_file.id}/content?token={admin_token}")
     assert resp.status_code == 401

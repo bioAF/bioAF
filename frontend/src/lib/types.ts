@@ -42,6 +42,9 @@ export interface BootstrapStatus {
   smtp_configured?: boolean; // only present for authenticated callers
   has_setup_code: boolean;
   has_admin: boolean;
+  // Active BAL provider capabilities; only present for authenticated callers.
+  // See useCapabilities() and the backend ProviderCapabilities model.
+  capabilities?: Partial<Record<string, boolean>>;
 }
 
 export interface ComponentState {
@@ -717,9 +720,9 @@ export interface PipelineRun {
   failure_reason: "oom" | "preemption_exhausted" | "task_error" | null;
   work_dir: string | null;
   slurm_job_id: string | null;
-  k8s_job_name: string | null;
-  k8s_namespace: string | null;
-  k8s_pod_name: string | null;
+  // Backend-neutral compute handle + provider-specifics disclosure (BAL Phase 4).
+  compute_job_ref: string | null;
+  provider_metadata: Record<string, unknown> | null;
   actual_cost: number | null;
   reference_genome: string | null;
   alignment_algorithm: string | null;

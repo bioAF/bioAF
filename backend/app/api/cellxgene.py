@@ -48,6 +48,9 @@ async def publish_dataset(
     current_user: dict = require_permission("experiments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
+    from app.adapters.registry import require_capability
+
+    require_capability("cellxgene")
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
@@ -143,7 +146,6 @@ async def inspect_file(
     from sqlalchemy import select as sa_select
 
     from app.models.file import File
-    from app.services.credential_injector import load_gcp_credentials
     from app.services.h5ad_inspector import inspect_h5ad
 
     current_user = request.state.current_user
@@ -154,16 +156,7 @@ async def inspect_file(
     if not file:
         raise HTTPException(404, "File not found")
 
-    # Load GCP credentials from platform_config
-    from app.services.platform_config_service import PlatformConfigService
-
-    config = await PlatformConfigService.get_many(
-        session,
-        ["gcp_credential_source", "gcp_service_account_key", "gcp_service_account_email"],
-    )
-    credentials = load_gcp_credentials(config)
-
-    info = inspect_h5ad(file.gcs_uri, credentials=credentials)
+    info = await inspect_h5ad(file.gcs_uri)
     return info
 
 

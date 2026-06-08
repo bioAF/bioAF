@@ -29,8 +29,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import settings, validate_encryption_keys
-from app.services import encryption_service
-from app.services.platform_config_service import SENSITIVE_PLATFORM_CONFIG_KEYS
+from app.platform import encryption_service
+from app.platform.platform_config_service import SENSITIVE_PLATFORM_CONFIG_KEYS
 
 # Same shape as migration 076's table list. Kept in sync manually because the
 # migration is frozen-in-time; this command is the moving target.

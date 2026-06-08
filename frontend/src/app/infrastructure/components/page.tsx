@@ -14,6 +14,7 @@ import { DeployRecoveryModal } from "@/components/infrastructure/DeployRecoveryM
 import { InfraUpdatesCard } from "@/components/infrastructure/InfraUpdatesCard";
 import { useDeploymentProgress } from "@/hooks/useDeploymentProgress";
 import { isAuthenticated } from "@/lib/auth";
+import { useCapabilities } from "@/hooks/useCapabilities";
 import { GCP_REGIONS, zonesForRegion } from "@/lib/gcp-regions";
 import { api } from "@/lib/api";
 import { invalidateComponentCache } from "@/hooks/useComponents";
@@ -116,6 +117,7 @@ const CATEGORY_ORDER = [
 
 export default function InfraComponentsPage() {
   const router = useRouter();
+  const { has } = useCapabilities();
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const [tfStatus, setTfStatus] = useState<TerraformStatus | null>(null);
@@ -768,6 +770,7 @@ export default function InfraComponentsPage() {
                               ))}
                             </select>
                           </div>
+                          {has("autoscaling") && (
                           <div>
                             <label className="text-xs text-gray-500">Max Nodes</label>
                             <input
@@ -778,6 +781,8 @@ export default function InfraComponentsPage() {
                               disabled={configSaving}
                             />
                           </div>
+                          )}
+                          {has("spot_retry") && (
                           <div className="flex items-center gap-2">
                             <label className="text-xs text-gray-500">Spot Instances</label>
                             <div className="relative">
@@ -826,6 +831,7 @@ export default function InfraComponentsPage() {
                               {(configEdits.k8s_pipeline_use_spot ?? clusterConfig.k8s_pipeline_use_spot) ? "On" : "Off"}
                             </span>
                           </div>
+                          )}
                         </div>
 
                         {/* Interactive Nodes column */}
@@ -855,6 +861,7 @@ export default function InfraComponentsPage() {
                               ) : null;
                             })()}
                           </div>
+                          {has("autoscaling") && (
                           <div>
                             <label className="text-xs text-gray-500">Max Nodes</label>
                             <input
@@ -865,6 +872,7 @@ export default function InfraComponentsPage() {
                               disabled={configSaving}
                             />
                           </div>
+                          )}
                         </div>
                       </div>
                       <div className="flex gap-2 mt-4">

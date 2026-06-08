@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getCurrentUser, removeToken } from "@/lib/auth";
 import { clearPermissionsCache } from "@/hooks/usePermissions";
+import { clearCapabilitiesCache } from "@/hooks/useCapabilities";
 import { api } from "@/lib/api";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { DeploymentBanner } from "@/components/infrastructure/DeploymentBanner";
@@ -32,6 +33,7 @@ export function Header() {
     }
     removeToken();
     clearPermissionsCache();
+    clearCapabilitiesCache();
     router.push("/login");
   };
 

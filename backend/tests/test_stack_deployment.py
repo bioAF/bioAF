@@ -316,7 +316,7 @@ async def test_deploy_stack_skips_compute_when_all_zones_exhausted(session):
     apply when we already know capacity is gone just burns 40 minutes.
     """
     from app.services.stack_deployment import deploy_stack
-    from app.services.zone_capacity_probe import AllZonesExhaustedError
+    from app.adapters.work_nodes.gce_capacity import AllZonesExhaustedError
 
     _, user_id = await _seed_org_and_user(session)
 

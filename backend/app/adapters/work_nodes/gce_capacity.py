@@ -1,22 +1,26 @@
-"""Pre-flight GCE capacity probe.
+"""Pre-flight GCE zone capacity probe (BAL work-node backend internal).
 
-GKE Standard clusters provision a throwaway default node pool at create
-time with ``initial_node_count = 1`` per zone (for regional clusters).
-That pool has no autoscaling and no ``location_policy``, so if any one
-zone is out of capacity for the requested machine type, the per-zone IGM
-hangs for ~70 minutes before GKE gives up. Terraform times out at 40 min
-and the cluster is stuck in ``RUNNING_WITH_ERROR``.
+Relocated from app/services/zone_capacity_probe.py into the adapter layer in
+Phase 6 so that the only `compute_v1` usage lives under `adapters/`. The probe
+logic is unchanged: GKE Standard clusters provision a throwaway default node
+pool at create time with ``initial_node_count = 1`` per zone (for regional
+clusters). That pool has no autoscaling and no ``location_policy``, so if any
+one zone is out of capacity for the requested machine type, the per-zone IGM
+hangs for ~70 minutes before GKE gives up. Terraform times out at 40 min and the
+cluster is stuck in ``RUNNING_WITH_ERROR``.
 
-Random suffixes on cluster names defend against name collisions; they do
-nothing against per-zone capacity stockouts. This module checks capacity
-before the cluster create so we can pin the default pool's
-``node_locations`` to a single zone that we have just observed to have
-capacity.
+Random suffixes on cluster names defend against name collisions; they do nothing
+against per-zone capacity stockouts. This module checks capacity before the
+cluster create so we can pin the default pool's ``node_locations`` to a single
+zone that we have just observed to have capacity.
 
-The probe attempts a real instance insert in each candidate zone in
-order. The first zone whose insert succeeds wins. If the insert returns
-``ZONE_RESOURCE_POOL_EXHAUSTED`` or ``GCE_STOCKOUT``, we move on. The
-probe instance is deleted before we return.
+The probe attempts a real instance insert in each candidate zone in order. The
+first zone whose insert succeeds wins. If the insert returns
+``ZONE_RESOURCE_POOL_EXHAUSTED`` or ``GCE_STOCKOUT``, we move on. The probe
+instance is deleted before we return.
+
+It is exposed to application code through ``WorkNodeProvider.probe_zone_capacity``
+(the GCE work-node adapter); callers never import this module or the SDK.
 """
 
 from __future__ import annotations
@@ -25,7 +29,7 @@ import logging
 import uuid
 from typing import Any
 
-logger = logging.getLogger("bioaf.zone_capacity_probe")
+logger = logging.getLogger("bioaf.adapters.work_nodes.gce_capacity")
 
 # Compute Engine error codes that indicate "no capacity in this zone for
 # this machine type right now." Anything else (quota, permission, bad

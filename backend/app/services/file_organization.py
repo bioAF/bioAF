@@ -67,8 +67,9 @@ class FileOrganizationService:
 
         # Move file in GCS if URIs differ
         if old_uri != new_uri:
-            credentials = await GcsStorageService.get_credentials(session)
-            new_uri = await GcsStorageService.move_file(old_uri, new_uri, credentials=credentials)
+            from app.adapters.registry import get_storage_adapter
+
+            new_uri = await get_storage_adapter().move(old_uri, new_uri)
 
         # Look up the experiment's project so we can denormalize project_id onto the file
         exp_row = (
@@ -81,7 +82,7 @@ class FileOrganizationService:
         # Update DB
         await session.execute(
             text(
-                "UPDATE files SET experiment_id = :exp_id, gcs_uri = :uri"
+                "UPDATE files SET experiment_id = :exp_id, gcs_uri = :uri, storage_uri = :uri"
                 + (", project_id = :proj_id" if exp_project_id is not None else "")
                 + " WHERE id = :fid"
             ).bindparams(
@@ -138,8 +139,9 @@ class FileOrganizationService:
 
         # Move in GCS
         if old_uri != new_uri:
-            credentials = await GcsStorageService.get_credentials(session)
-            new_uri = await GcsStorageService.move_file(old_uri, new_uri, credentials=credentials)
+            from app.adapters.registry import get_storage_adapter
+
+            new_uri = await get_storage_adapter().move(old_uri, new_uri)
 
         # Look up the new experiment's project_id to keep file.project_id in sync
         new_exp_row = (
@@ -152,7 +154,7 @@ class FileOrganizationService:
         # Update DB
         await session.execute(
             text(
-                "UPDATE files SET experiment_id = :exp_id, gcs_uri = :uri"
+                "UPDATE files SET experiment_id = :exp_id, gcs_uri = :uri, storage_uri = :uri"
                 + (", project_id = :proj_id" if new_exp_project_id is not None else "")
                 + " WHERE id = :fid"
             ).bindparams(
@@ -209,14 +211,15 @@ class FileOrganizationService:
 
         # Move in GCS
         if old_uri != new_uri:
-            credentials = await GcsStorageService.get_credentials(session)
-            new_uri = await GcsStorageService.move_file(old_uri, new_uri, credentials=credentials)
+            from app.adapters.registry import get_storage_adapter
+
+            new_uri = await get_storage_adapter().move(old_uri, new_uri)
 
         # Update DB
         await session.execute(
-            text("UPDATE files SET experiment_id = NULL, gcs_uri = :uri WHERE id = :fid").bindparams(
-                uri=new_uri, fid=file_id
-            )
+            text(
+                "UPDATE files SET experiment_id = NULL, gcs_uri = :uri, storage_uri = :uri WHERE id = :fid"
+            ).bindparams(uri=new_uri, fid=file_id)
         )
 
         await log_action(
