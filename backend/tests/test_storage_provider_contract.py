@@ -3,9 +3,10 @@
 Phase 3 grows StorageProvider from the pipeline-centric staging methods into a
 full object-store interface (read/write/upload/download/delete/exists/list/
 copy/move/metadata/signed-url) plus a logical-store resolver. These tests pin
-the *contract*: the methods exist, the base default is "unimplemented" so a new
-backend must override, and the NFS stub honestly raises NotImplementedError
-until Phase 7 builds it. GCS behavior is tested separately.
+the *contract*: the methods exist and the base default is "unimplemented" so a
+new backend must override each one. GCS and NFS behavior is tested separately
+(test_gcs_object_store.py, test_nfs_storage_adapter.py). Phase 7 implemented the
+real NFS adapter, so the old "NFS stub raises NotImplementedError" test is gone.
 """
 
 from __future__ import annotations
@@ -16,7 +17,6 @@ import pytest
 
 from app.adapters.base import StorageProvider
 from app.adapters.models import ObjectMetadata, StorageStore
-from app.adapters.storage.nfs import NfsStorageProvider
 
 # The object-store methods Phase 3 adds to the interface, with the minimal
 # positional args each needs (beyond self) to be invoked for the default-raise
@@ -100,13 +100,5 @@ class _BareStorage(StorageProvider):
 @pytest.mark.parametrize("name,args", list(OBJECT_STORE_METHODS.items()))
 async def test_base_default_is_unimplemented(name, args):
     provider = _BareStorage()
-    with pytest.raises(NotImplementedError):
-        await getattr(provider, name)(*args)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("name,args", list(OBJECT_STORE_METHODS.items()))
-async def test_nfs_stub_raises_not_implemented(name, args):
-    provider = NfsStorageProvider()
     with pytest.raises(NotImplementedError):
         await getattr(provider, name)(*args)
