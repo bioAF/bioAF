@@ -254,8 +254,11 @@ export default function DataUploadPage() {
           ? undefined // keep original (don't pass override)
           : item.suggestedName ?? undefined;
 
+      // Signed direct-to-storage upload when the backend supports it; otherwise
+      // the server-proxied path (e.g. NFS, signed_url_upload=False).
+      const upload = has("signed_url_upload") ? api.uploadSigned : api.uploadProxied;
       try {
-        await api.uploadSigned<FileResponse>(item.file, {
+        await upload<FileResponse>(item.file, {
           ...opts,
           filename: useFilename,
           onProgress: (pct) => setItemState(i, { progress: pct }),
@@ -300,11 +303,6 @@ export default function DataUploadPage() {
         <main className="flex-1 overflow-y-auto p-6">
           <h1 className="text-2xl font-bold mb-6">Data Upload</h1>
 
-          {!has("signed_url_upload") ? (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800" data-testid="upload-unsupported">
-              Direct file upload is not supported by the active storage backend.
-            </div>
-          ) : (
           <div className="space-y-6">
             {/* Drop zone */}
             <div
@@ -518,7 +516,6 @@ export default function DataUploadPage() {
               </div>
             )}
           </div>
-          )}
         </main>
       </div>
     </div>

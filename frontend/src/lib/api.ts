@@ -197,6 +197,68 @@ async function uploadFileSigned<T>(
   });
 }
 
+// Server-proxied upload: the file bytes transit the backend (POST multipart to
+// /api/files/upload/simple), which streams them to storage via the adapter. This
+// is the fallback when the active storage backend cannot mint signed URLs (e.g.
+// NFS, signed_url_upload=False). Same options as uploadFileSigned.
+async function uploadFileProxied<T>(
+  file: File,
+  options: SignedUploadOptions = {},
+): Promise<T> {
+  const params = new URLSearchParams();
+  if (options.projectId != null) params.set("project_id", String(options.projectId));
+  if (options.experimentId != null) params.set("experiment_id", String(options.experimentId));
+  if (options.sampleId != null) params.set("sample_ids", String(options.sampleId));
+  if (options.isGlobal) params.set("is_global", "true");
+  const qs = params.toString();
+  const path = `/api/files/upload/simple${qs ? `?${qs}` : ""}`;
+
+  const token = getToken();
+  const upload = options.filename
+    ? new File([file], options.filename, { type: file.type })
+    : file;
+  const formData = new FormData();
+  formData.append("file", upload);
+
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_URL}${path}`);
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && options.onProgress) {
+        options.onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText) as T);
+        } catch {
+          resolve(undefined as T);
+        }
+      } else if (xhr.status === 401) {
+        removeToken();
+        clearPermissionsCache();
+        clearCapabilitiesCache();
+        if (typeof window !== "undefined") window.location.href = "/login";
+        reject(new ApiError(401, "Unauthorized"));
+      } else {
+        let message = "Upload failed";
+        try {
+          message = extractErrorMessage(JSON.parse(xhr.responseText));
+        } catch {
+          // keep default
+        }
+        reject(new ApiError(xhr.status, message));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error during upload"));
+    xhr.send(formData);
+  });
+}
+
 async function fetchWithRetry<T>(
   path: string,
   options: RequestInit = {},
@@ -297,6 +359,8 @@ export const api = {
     uploadFile<T>(path, file, extraFields),
   uploadSigned: <T>(file: File, options?: SignedUploadOptions) =>
     uploadFileSigned<T>(file, options),
+  uploadProxied: <T>(file: File, options?: SignedUploadOptions) =>
+    uploadFileProxied<T>(file, options),
   download: (path: string, method?: "GET" | "POST", body?: unknown) =>
     downloadFile(path, method, body),
 };

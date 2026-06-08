@@ -147,8 +147,11 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
       const item = items[i];
       const useFilename =
         item.nameAccepted === false ? undefined : item.suggestedName ?? undefined;
+      // Signed direct-to-storage upload when the backend supports it; otherwise
+      // the server-proxied path (e.g. NFS, signed_url_upload=False).
+      const upload = has("signed_url_upload") ? api.uploadSigned : api.uploadProxied;
       try {
-        await api.uploadSigned<FileResponse>(item.file, {
+        await upload<FileResponse>(item.file, {
           ...opts,
           filename: useFilename,
           onProgress: (pct) => setItemState(i, { progress: pct }),
@@ -176,22 +179,6 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
     }
     return "Whole experiment";
   };
-
-  // Direct upload relies on storage signed URLs. A storage backend without
-  // signed_url_upload (e.g. NFS) cannot mint them, so disable the control with a
-  // clear reason rather than presenting an Upload button that would fail.
-  if (!has("signed_url_upload")) {
-    return (
-      <button
-        type="button"
-        disabled
-        title="Direct upload is not supported by the active storage backend"
-        className="px-3 py-1.5 bg-gray-200 text-gray-400 rounded-md text-sm cursor-not-allowed"
-      >
-        Upload
-      </button>
-    );
-  }
 
   return (
     <>

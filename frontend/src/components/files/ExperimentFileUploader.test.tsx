@@ -6,6 +6,7 @@ jest.mock("@/lib/api", () => ({
   api: {
     get: jest.fn(),
     uploadSigned: jest.fn(),
+    uploadProxied: jest.fn(),
   },
 }));
 
@@ -22,6 +23,7 @@ import { api } from "@/lib/api";
 
 const mockGet = api.get as jest.Mock;
 const mockUploadSigned = api.uploadSigned as jest.Mock;
+const mockUploadProxied = api.uploadProxied as jest.Mock;
 
 const SAMPLES = [
   { id: 10, label: "S010" },
@@ -31,6 +33,7 @@ const SAMPLES = [
 beforeEach(() => {
   mockGet.mockReset();
   mockUploadSigned.mockReset();
+  mockUploadProxied.mockReset();
   mockHas.mockReset();
   mockHas.mockReturnValue(true);
   mockGet.mockImplementation((url: string) => {
@@ -49,9 +52,10 @@ beforeEach(() => {
   });
 });
 
-test("disables upload and explains when the backend lacks signed_url_upload", async () => {
+test("uploads via the proxied path when the backend lacks signed_url_upload", async () => {
   const user = userEvent.setup();
   mockHas.mockImplementation((flag: string) => flag !== "signed_url_upload");
+  mockUploadProxied.mockResolvedValue({ id: 1 });
   render(
     <ExperimentFileUploader
       experimentId={42}
@@ -59,11 +63,16 @@ test("disables upload and explains when the backend lacks signed_url_upload", as
       onUploaded={() => {}}
     />,
   );
-  const btn = screen.getByRole("button", { name: /upload/i });
-  expect(btn).toBeDisabled();
-  // Clicking does not open the drag & drop panel
-  await user.click(btn);
-  expect(screen.queryByText(/drag & drop/i)).not.toBeInTheDocument();
+  // The uploader still works (no dead control); it expands and uploads.
+  await user.click(screen.getByRole("button", { name: /upload/i }));
+  expect(screen.getByText(/drag & drop/i)).toBeInTheDocument();
+
+  const input = screen.getByTestId("upload-file-input") as HTMLInputElement;
+  await user.upload(input, new File(["x"], "reads.fastq.gz", { type: "" }));
+  await user.click(screen.getByRole("button", { name: /upload 1 file/i }));
+
+  await waitFor(() => expect(mockUploadProxied).toHaveBeenCalledTimes(1));
+  expect(mockUploadSigned).not.toHaveBeenCalled();
 });
 
 test("renders an Upload toggle button collapsed by default", () => {
