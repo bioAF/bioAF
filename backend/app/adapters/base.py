@@ -334,6 +334,16 @@ class WorkNodeProvider(ABC):
     async def list_vms(self, filters: dict | None = None) -> list[VmStatus]:
         """List active work node VMs."""
 
+    async def probe_zone_capacity(self, zones: list[str], machine_type: str = "e2-medium") -> str:
+        """Return the first zone in ``zones`` with capacity for ``machine_type``.
+
+        Pre-flight check before provisioning so a per-zone stockout does not hang
+        the deploy. Backend-specific; the default raises so a backend that cannot
+        probe capacity fails loudly rather than silently. The GCE adapter
+        implements it via a throwaway instance insert.
+        """
+        raise NotImplementedError("This work-node backend cannot probe zone capacity")
+
 
 class CellxgeneProvider(ABC):
     """Abstract interface for cellxgene visualization backends."""

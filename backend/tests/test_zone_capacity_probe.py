@@ -1,4 +1,4 @@
-"""Tests for app.services.zone_capacity_probe.
+"""Tests for the GCE zone-capacity probe (app.adapters.work_nodes.gce_capacity).
 
 The probe selects a zone with e2-medium (or specified type) capacity by
 attempting a throwaway instance insert in each candidate zone. The first
@@ -25,8 +25,8 @@ import pytest
 from google.cloud.compute_v1.types import Errors as ProtoErrorsItem
 from google.cloud.compute_v1.types import Operation as ProtoOperation
 
-from app.services import zone_capacity_probe
-from app.services.zone_capacity_probe import (
+from app.adapters.work_nodes import gce_capacity as zone_capacity_probe
+from app.adapters.work_nodes.gce_capacity import (
     AllZonesExhaustedError,
     probe_zones,
 )

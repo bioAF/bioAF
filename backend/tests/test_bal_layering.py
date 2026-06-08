@@ -155,8 +155,9 @@ SDK_IMPORT_ALLOWLIST: set[tuple[str, str]] = {
     ("services/storage_service.py", "google.cloud.storage"),  # bucket enum -> Phase 9
     ("services/gcp_config.py", "google.cloud.storage"),  # Tier-2 bundle -> Phase 9
     ("services/orphaned_resource_service.py", "google.cloud.storage"),  # bucket delete -> Phase 9
-    # GCE capacity probe. Drained in Phase 6.
-    ("services/zone_capacity_probe.py", "google.cloud.compute_v1"),
+    # GCE capacity probe was drained in Phase 6 (folded into the GCE work-node
+    # adapter as WorkNodeProvider.probe_zone_capacity; the compute_v1 import now
+    # lives in adapters/work_nodes/gce_capacity.py).
     # Tier 2 platform-service SDKs. Drained in Phase 9 (9A-9G).
     ("services/gcp_config.py", "google.cloud.container_v1"),
     ("services/gcp_config.py", "google.cloud.resourcemanager_v3"),
@@ -211,7 +212,7 @@ def test_sdk_allowlist_count_is_pinned():
 
     Decrement this as phases drain leaks; it must reach 0 by end of Phase 9.
     """
-    assert len(SDK_IMPORT_ALLOWLIST) == 16
+    assert len(SDK_IMPORT_ALLOWLIST) == 15
 
 
 # --- Tree scan: no adapter imports services (the layering inversion) ---------

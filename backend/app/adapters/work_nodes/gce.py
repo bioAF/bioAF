@@ -357,6 +357,28 @@ class GCEWorkNodeProvider(WorkNodeProvider):
         items = self._local_list_vms(filters) if self.is_local else await self._gce_list_vms(filters)
         return [_vm_status_from_dict(d) for d in items]
 
+    async def probe_zone_capacity(self, zones: list[str], machine_type: str = "e2-medium") -> str:
+        """Return the first zone with GCE capacity for ``machine_type``.
+
+        Resolves project + credentials internally from a freshly reloaded config
+        (the registry singleton may have cached an empty config at startup, before
+        setup wrote gcp_project_id), then runs the blocking probe off the event
+        loop. Raises AllZonesExhaustedError if every candidate zone is stocked out.
+        """
+        from app.adapters.work_nodes.gce_capacity import probe_zones
+
+        await self.load_gcp_config(force=True)
+        cfg = self._gcp_config or {}
+        project_id = cfg.get("gcp_project_id", "")
+        credentials = self._get_gcp_credentials()
+        return await asyncio.to_thread(
+            probe_zones,
+            zones=zones,
+            project_id=project_id,
+            credentials=credentials,
+            machine_type=machine_type,
+        )
+
     # -- GCE API implementations --
 
     async def _gce_launch_vm(self, vm_spec: dict) -> dict:
