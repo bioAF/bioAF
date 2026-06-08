@@ -7,6 +7,7 @@ import { Header } from "@/components/layout/Header";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { useCapabilities } from "@/hooks/useCapabilities";
 import { ReviewBadge } from "@/components/experiments/ReviewBadge";
 import type { PipelineRun, PipelineRunListResponse, PipelineRunStatus } from "@/lib/types";
 
@@ -20,6 +21,8 @@ const STATUS_COLORS: Record<PipelineRunStatus, string> = {
 
 export default function PipelineRunsPage() {
   const router = useRouter();
+  const { has } = useCapabilities();
+  const showCost = has("cost_estimation");
   const [runs, setRuns] = useState<PipelineRun[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -116,7 +119,7 @@ export default function PipelineRunsPage() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Submitter</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Started</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Est. $/hr</th>
+                  {showCost && <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Est. $/hr</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
@@ -150,11 +153,11 @@ export default function PipelineRunsPage() {
                     <td className="px-4 py-3 text-sm">{r.submitted_by?.name || r.submitted_by?.email || "—"}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">{formatDateTime(r.started_at)}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">{formatDuration(r.started_at, r.completed_at)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-500">{r.cost_estimate ? `$${r.cost_estimate.toFixed(2)}/hr` : "—"}</td>
+                    {showCost && <td className="px-4 py-3 text-sm text-gray-500">{r.cost_estimate ? `$${r.cost_estimate.toFixed(2)}/hr` : "—"}</td>}
                   </tr>
                 ))}
                 {runs.length === 0 && (
-                  <tr><td colSpan={10} className="px-4 py-12 text-center text-gray-400">No pipeline runs</td></tr>
+                  <tr><td colSpan={showCost ? 10 : 9} className="px-4 py-12 text-center text-gray-400">No pipeline runs</td></tr>
                 )}
               </tbody>
             </table>
