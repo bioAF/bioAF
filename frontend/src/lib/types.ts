@@ -42,6 +42,9 @@ export interface BootstrapStatus {
   smtp_configured?: boolean; // only present for authenticated callers
   has_setup_code: boolean;
   has_admin: boolean;
+  // Active BAL provider capabilities; only present for authenticated callers.
+  // See useCapabilities() and the backend ProviderCapabilities model.
+  capabilities?: Partial<Record<string, boolean>>;
 }
 
 export interface ComponentState {

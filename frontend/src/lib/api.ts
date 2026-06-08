@@ -1,5 +1,6 @@
 import { getToken, removeToken } from "./auth";
 import { clearPermissionsCache } from "@/hooks/usePermissions";
+import { clearCapabilitiesCache } from "@/hooks/useCapabilities";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -62,6 +63,7 @@ async function fetchApi<T>(
   if (response.status === 401) {
     removeToken();
     clearPermissionsCache();
+    clearCapabilitiesCache();
     if (typeof window !== "undefined") {
       window.location.href = "/login";
     }
@@ -108,6 +110,7 @@ async function uploadFile<T>(path: string, file: File, extraFields?: Record<stri
   if (response.status === 401) {
     removeToken();
     clearPermissionsCache();
+    clearCapabilitiesCache();
     if (typeof window !== "undefined") {
       window.location.href = "/login";
     }
@@ -238,6 +241,7 @@ async function downloadFile(
   if (response.status === 401) {
     removeToken();
     clearPermissionsCache();
+    clearCapabilitiesCache();
     if (typeof window !== "undefined") {
       window.location.href = "/login";
     }
