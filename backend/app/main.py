@@ -915,12 +915,20 @@ def create_app() -> FastAPI:
 
     application.add_exception_handler(CapabilityNotSupported, _capability_not_supported_handler)
 
+    # Map the domain exception hierarchy (app.exceptions) to its declared
+    # status codes and {detail, code} envelope, so services can raise typed
+    # errors and routes need no per-call except ValueError blocks.
+    from app.error_handlers import register_error_handlers
+
+    register_error_handlers(application)
+
     # Public integration API sub-app (ADR-048). Owns its own OpenAPI document;
     # docs are served in production regardless of the main app's gating.
     from app.api.v1.integrations import build_integrations_app
 
     integrations_app = build_integrations_app()
     integrations_app.add_exception_handler(CapabilityNotSupported, _capability_not_supported_handler)
+    register_error_handlers(integrations_app)
     application.mount("/api/v1/integrations", integrations_app)
     return application
 
