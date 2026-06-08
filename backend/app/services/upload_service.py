@@ -244,16 +244,22 @@ class UploadService:
         experiment_id: int | None = None,
         sample_ids: list[int] | None = None,
     ) -> File:
-        """Stream a file directly to GCS without buffering the full content in memory."""
+        """Stream a file directly to storage without buffering the full content.
+
+        Builds the write URI via the adapter's backend-neutral resolve_uri so the
+        proxied upload path works on any storage backend (GCS, NFS, ...), not just
+        object stores (Phase 7).
+        """
         upload_id = str(uuid.uuid4())
-        bucket_name = await UploadService._get_ingest_bucket(session)
         gcs_path = f"uploads/{upload_id}/{filename}"
-        gcs_uri = f"gs://{bucket_name}/{gcs_path}"
 
         # Stream to storage -- raises on failure so no dangling DB records are created
+        from app.adapters.models import StorageStore
         from app.adapters.registry import get_storage_adapter
 
-        await get_storage_adapter().upload_file(gcs_uri, file_obj)
+        adapter = get_storage_adapter()
+        gcs_uri = await adapter.resolve_uri(StorageStore.INGEST, gcs_path)
+        await adapter.upload_file(gcs_uri, file_obj)
 
         if not file_type:
             file_type = UploadService._detect_file_type(filename)

@@ -17,6 +17,9 @@ def _storage_adapter():
     adapter = AsyncMock()
     adapter.generate_signed_url.return_value = "https://storage.googleapis.com/fake-signed-url"
     adapter.move.side_effect = lambda src, dst: dst
+    # resolve_uri is the backend-neutral URI factory (Phase 7); echo a realistic
+    # store-scoped URI so callers that build write URIs through it get a string.
+    adapter.resolve_uri.side_effect = lambda store, key: f"gs://bioaf-{store.value}-test/{key}"
     return adapter
 
 
@@ -233,6 +236,30 @@ async def test_simple_upload_routes_through_storage_adapter(client, admin_token,
 
     assert resp.status_code == 200
     adapter.upload_file.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_simple_upload_resolves_uri_via_adapter(client, admin_token, configured_ingest_bucket, session):
+    """simple_upload builds its write URI through the adapter's resolve_uri
+    (backend-neutral), so the proxied upload path works on NFS as well as GCS
+    rather than hardcoding a gs:// URI (Phase 7)."""
+    from app.adapters.models import StorageStore
+
+    adapter = _storage_adapter()
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        resp = await client.post(
+            "/api/files/upload/simple",
+            files={"file": ("neutral.fastq.gz", io.BytesIO(b"data"), "application/gzip")},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+    assert resp.status_code == 200
+    adapter.resolve_uri.assert_awaited_once()
+    store_arg = adapter.resolve_uri.call_args.args[0]
+    assert store_arg == StorageStore.INGEST
+    # The URI handed to upload_file is the one resolve_uri produced.
+    upload_uri = adapter.upload_file.call_args.args[0]
+    assert upload_uri.startswith("gs://bioaf-ingest-test/")
 
 
 @pytest.mark.asyncio
