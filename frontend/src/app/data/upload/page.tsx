@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { api } from "@/lib/api";
+import { useCapabilities } from "@/hooks/useCapabilities";
 import { suggestFilename, splitExtension, todayDateStr } from "@/lib/fileNaming";
 import type {
   ExperimentListResponse,
@@ -43,6 +44,7 @@ interface FileItem {
 }
 
 export default function DataUploadPage() {
+  const { has } = useCapabilities();
   const [items, setItems] = useState<FileItem[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -298,6 +300,11 @@ export default function DataUploadPage() {
         <main className="flex-1 overflow-y-auto p-6">
           <h1 className="text-2xl font-bold mb-6">Data Upload</h1>
 
+          {!has("signed_url_upload") ? (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800" data-testid="upload-unsupported">
+              Direct file upload is not supported by the active storage backend.
+            </div>
+          ) : (
           <div className="space-y-6">
             {/* Drop zone */}
             <div
@@ -511,6 +518,7 @@ export default function DataUploadPage() {
               </div>
             )}
           </div>
+          )}
         </main>
       </div>
     </div>

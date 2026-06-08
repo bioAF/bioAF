@@ -21,6 +21,15 @@ jest.mock("@/lib/api", () => ({
   },
 }));
 
+const mockHas = jest.fn();
+jest.mock("@/hooks/useCapabilities", () => ({
+  useCapabilities: () => ({
+    has: (flag: string) => mockHas(flag),
+    capabilities: {},
+    loading: false,
+  }),
+}));
+
 const projectsResponse = {
   projects: [{ id: 1, name: "Alpha Project", status: "active" }],
   total: 1,
@@ -37,6 +46,8 @@ const experimentsResponse = {
 };
 
 beforeEach(() => {
+  mockHas.mockReset();
+  mockHas.mockReturnValue(true);
   mockUploadSigned.mockReset();
   mockUploadSigned.mockResolvedValue({ id: 1, filename: "sample.fastq.gz" });
   mockGet.mockReset();
@@ -48,6 +59,13 @@ beforeEach(() => {
 });
 
 describe("DataUploadPage", () => {
+  it("shows an unsupported notice instead of the upload UI when signed_url_upload is absent", async () => {
+    mockHas.mockImplementation((flag: string) => flag !== "signed_url_upload");
+    render(<DataUploadPage />);
+    expect(screen.getByTestId("upload-unsupported")).toBeInTheDocument();
+    expect(screen.queryByText(/drag & drop/i)).not.toBeInTheDocument();
+  });
+
   it("calls uploadSigned when uploading a file", async () => {
     render(<DataUploadPage />);
 

@@ -9,6 +9,15 @@ jest.mock("@/lib/api", () => ({
   },
 }));
 
+const mockHas = jest.fn();
+jest.mock("@/hooks/useCapabilities", () => ({
+  useCapabilities: () => ({
+    has: (flag: string) => mockHas(flag),
+    capabilities: {},
+    loading: false,
+  }),
+}));
+
 import { api } from "@/lib/api";
 
 const mockGet = api.get as jest.Mock;
@@ -22,6 +31,8 @@ const SAMPLES = [
 beforeEach(() => {
   mockGet.mockReset();
   mockUploadSigned.mockReset();
+  mockHas.mockReset();
+  mockHas.mockReturnValue(true);
   mockGet.mockImplementation((url: string) => {
     if (url === "/api/experiments/42") {
       return Promise.resolve({
@@ -36,6 +47,23 @@ beforeEach(() => {
     }
     return Promise.resolve({});
   });
+});
+
+test("disables upload and explains when the backend lacks signed_url_upload", async () => {
+  const user = userEvent.setup();
+  mockHas.mockImplementation((flag: string) => flag !== "signed_url_upload");
+  render(
+    <ExperimentFileUploader
+      experimentId={42}
+      samples={SAMPLES}
+      onUploaded={() => {}}
+    />,
+  );
+  const btn = screen.getByRole("button", { name: /upload/i });
+  expect(btn).toBeDisabled();
+  // Clicking does not open the drag & drop panel
+  await user.click(btn);
+  expect(screen.queryByText(/drag & drop/i)).not.toBeInTheDocument();
 });
 
 test("renders an Upload toggle button collapsed by default", () => {

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { useCapabilities } from "@/hooks/useCapabilities";
 import { suggestFilename, splitExtension, todayDateStr } from "@/lib/fileNaming";
 import type { ExperimentDetail, FileResponse, Project } from "@/lib/types";
 
@@ -28,6 +29,7 @@ interface Props {
 }
 
 export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Props) {
+  const { has } = useCapabilities();
   const [expanded, setExpanded] = useState(false);
   const [items, setItems] = useState<FileItem[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -174,6 +176,22 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
     }
     return "Whole experiment";
   };
+
+  // Direct upload relies on storage signed URLs. A storage backend without
+  // signed_url_upload (e.g. NFS) cannot mint them, so disable the control with a
+  // clear reason rather than presenting an Upload button that would fail.
+  if (!has("signed_url_upload")) {
+    return (
+      <button
+        type="button"
+        disabled
+        title="Direct upload is not supported by the active storage backend"
+        className="px-3 py-1.5 bg-gray-200 text-gray-400 rounded-md text-sm cursor-not-allowed"
+      >
+        Upload
+      </button>
+    );
+  }
 
   return (
     <>
