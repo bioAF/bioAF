@@ -2,7 +2,9 @@ from datetime import datetime
 
 from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, String, Table, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship, synonym
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.models._storage_uri_sync import register_storage_uri_sync
 
 from app.database import Base
 
@@ -57,12 +59,16 @@ class ReferenceDatasetFile(Base):
         Integer, ForeignKey("reference_datasets.id", ondelete="CASCADE"), nullable=False
     )
     filename: Mapped[str] = mapped_column(String(500), nullable=False)
-    # BAL Phase 4: physical column stays gcs_uri; storage_uri is the code alias.
+    # BAL Phase 4 expand/contract: gcs_uri + storage_uri kept in sync until a
+    # later migration drops gcs_uri (see _storage_uri_sync).
     gcs_uri: Mapped[str] = mapped_column(Text, nullable=False)
-    storage_uri = synonym("gcs_uri")
+    storage_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     md5_checksum: Mapped[str | None] = mapped_column(String(32), nullable=True)
     file_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     reference_dataset = relationship("ReferenceDataset", back_populates="files")
+
+
+register_storage_uri_sync(ReferenceDatasetFile)

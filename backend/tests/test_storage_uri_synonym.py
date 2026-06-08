@@ -1,10 +1,10 @@
-"""storage_uri is the honest column name; gcs_uri stays as a synonym (BAL Phase 4).
+"""storage_uri is a real backend-neutral column kept in sync with gcs_uri.
 
-The opaque object-store URI column was named gcs_uri, which is dishonest once a
-non-GCS backend (S3/NFS) is in play. It is renamed to storage_uri, with a
-SQLAlchemy synonym so existing code (and API responses) that use `gcs_uri` keep
-resolving during the transition. Both names must read/write/query the same
-column.
+BAL rework, Phase 4 (expand/contract). storage_uri is being introduced as the
+physical column to eventually replace the GCS-presuming gcs_uri. During the
+transition BOTH are real columns and must hold the same value (so live installs
+and external readers of gcs_uri keep working until a later migration drops it).
+The ORM mirrors them on every write (app.models._storage_uri_sync).
 """
 
 import pytest
@@ -14,8 +14,7 @@ from app.models.file import File
 
 
 @pytest.mark.asyncio
-async def test_both_names_resolve_on_a_persisted_file(session, admin_user):
-    # Construct via the legacy name; read via the new name.
+async def test_write_legacy_name_mirrors_to_storage_uri(session, admin_user):
     f = File(
         organization_id=admin_user.organization_id,
         gcs_uri="gs://bioaf-raw/x/y.h5ad",
@@ -29,14 +28,16 @@ async def test_both_names_resolve_on_a_persisted_file(session, admin_user):
     assert f.gcs_uri == "gs://bioaf-raw/x/y.h5ad"
     assert f.storage_uri == "gs://bioaf-raw/x/y.h5ad"
 
-    # Both attributes are usable as query expressions over the same column.
+    # Both columns are real and query the same value.
     by_legacy = (await session.execute(select(File).where(File.gcs_uri == "gs://bioaf-raw/x/y.h5ad"))).scalar_one()
     by_neutral = (await session.execute(select(File).where(File.storage_uri == "gs://bioaf-raw/x/y.h5ad"))).scalar_one()
     assert by_legacy.id == by_neutral.id == f.id
 
 
 @pytest.mark.asyncio
-async def test_write_via_neutral_name_reads_via_legacy(session, admin_user):
+async def test_write_neutral_name_backfills_gcs_uri(session, admin_user):
+    # New-style write that only sets storage_uri must still populate gcs_uri
+    # (which is NOT NULL during the transition).
     f = File(
         organization_id=admin_user.organization_id,
         storage_uri="gs://bioaf-raw/a/b.bam",
@@ -47,3 +48,21 @@ async def test_write_via_neutral_name_reads_via_legacy(session, admin_user):
     session.add(f)
     await session.flush()
     assert f.gcs_uri == "gs://bioaf-raw/a/b.bam"
+    assert f.storage_uri == "gs://bioaf-raw/a/b.bam"
+
+
+@pytest.mark.asyncio
+async def test_orm_update_to_gcs_uri_resyncs_storage_uri(session, admin_user):
+    f = File(
+        organization_id=admin_user.organization_id,
+        gcs_uri="gs://bioaf-ingest/old.fastq.gz",
+        filename="old.fastq.gz",
+        file_type="fastq",
+        source_type="upload",
+    )
+    session.add(f)
+    await session.flush()
+
+    f.gcs_uri = "gs://bioaf-raw/new.fastq.gz"  # ORM update (e.g. a file move)
+    await session.flush()
+    assert f.storage_uri == "gs://bioaf-raw/new.fastq.gz"

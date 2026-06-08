@@ -82,7 +82,7 @@ class FileOrganizationService:
         # Update DB
         await session.execute(
             text(
-                "UPDATE files SET experiment_id = :exp_id, gcs_uri = :uri"
+                "UPDATE files SET experiment_id = :exp_id, gcs_uri = :uri, storage_uri = :uri"
                 + (", project_id = :proj_id" if exp_project_id is not None else "")
                 + " WHERE id = :fid"
             ).bindparams(
@@ -154,7 +154,7 @@ class FileOrganizationService:
         # Update DB
         await session.execute(
             text(
-                "UPDATE files SET experiment_id = :exp_id, gcs_uri = :uri"
+                "UPDATE files SET experiment_id = :exp_id, gcs_uri = :uri, storage_uri = :uri"
                 + (", project_id = :proj_id" if new_exp_project_id is not None else "")
                 + " WHERE id = :fid"
             ).bindparams(
@@ -217,7 +217,7 @@ class FileOrganizationService:
 
         # Update DB
         await session.execute(
-            text("UPDATE files SET experiment_id = NULL, gcs_uri = :uri WHERE id = :fid").bindparams(
+            text("UPDATE files SET experiment_id = NULL, gcs_uri = :uri, storage_uri = :uri WHERE id = :fid").bindparams(
                 uri=new_uri, fid=file_id
             )
         )
