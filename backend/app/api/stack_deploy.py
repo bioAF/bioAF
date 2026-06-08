@@ -1080,6 +1080,9 @@ async def update_cluster_config(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Update cluster config, plan, and auto-apply."""
+    from app.adapters.registry import require_capability
+
+    require_capability("autoscaling")
     # Verify compute is deployed
     deployed = (
         await session.execute(text("SELECT value FROM platform_config WHERE key = 'compute_deployed'"))

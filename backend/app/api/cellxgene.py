@@ -48,6 +48,9 @@ async def publish_dataset(
     current_user: dict = require_permission("experiments", "create"),
     session: AsyncSession = Depends(get_session),
 ):
+    from app.adapters.registry import require_capability
+
+    require_capability("cellxgene")
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 

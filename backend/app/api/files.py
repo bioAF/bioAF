@@ -60,6 +60,9 @@ async def initiate_upload(
     current_user: dict = require_permission("files", "upload"),
     session: AsyncSession = Depends(get_session),
 ):
+    from app.adapters.registry import require_capability
+
+    require_capability("signed_url_upload")
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 

@@ -39,3 +39,51 @@ async def test_ssh_connect_session_4xx_when_ssh_exec_unsupported(client: AsyncCl
     )
     assert resp.status_code == 422
     assert resp.json()["capability"] == "ssh_exec"
+
+
+@pytest.mark.asyncio
+async def test_signed_url_upload_4xx_when_unsupported(client: AsyncClient, admin_token, monkeypatch):
+    _force_incapable(monkeypatch)
+    resp = await client.post(
+        "/api/files/upload/initiate",
+        json={"filename": "reads.fastq.gz"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["capability"] == "signed_url_upload"
+
+
+@pytest.mark.asyncio
+async def test_cellxgene_publish_4xx_when_unsupported(client: AsyncClient, admin_token, monkeypatch):
+    _force_incapable(monkeypatch)
+    resp = await client.post(
+        "/api/cellxgene/publish",
+        json={"file_id": 1, "dataset_name": "demo"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["capability"] == "cellxgene"
+
+
+@pytest.mark.asyncio
+async def test_work_node_launch_4xx_when_unsupported(client: AsyncClient, admin_token, monkeypatch):
+    _force_incapable(monkeypatch)
+    resp = await client.post(
+        "/api/v1/work-nodes/sessions",
+        json={"project_id": 1, "environment_version_id": 1, "machine_type": "n2-standard-4"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["capability"] == "work_nodes"
+
+
+@pytest.mark.asyncio
+async def test_cluster_autoscale_config_4xx_when_unsupported(client: AsyncClient, admin_token, monkeypatch):
+    _force_incapable(monkeypatch)
+    resp = await client.post(
+        "/api/v1/infrastructure/cluster/config",
+        json={"k8s_pipeline_max_nodes": 10},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["capability"] == "autoscaling"
