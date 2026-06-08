@@ -12,11 +12,11 @@ class File(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False)
-    # Opaque object-store URI (BAL Phase 4 rename: gcs_uri -> storage_uri). The
-    # gcs_uri synonym keeps existing callers + API responses working during the
-    # transition; it is dropped once they migrate to storage_uri.
-    storage_uri: Mapped[str] = mapped_column(String(1000), nullable=False)
-    gcs_uri = synonym("storage_uri")
+    # Opaque object-store URI. The physical column stays gcs_uri (no schema
+    # change, so existing live installs migrate with zero risk); storage_uri is
+    # the backend-neutral code-level alias new code should use (BAL Phase 4).
+    gcs_uri: Mapped[str] = mapped_column(String(1000), nullable=False)
+    storage_uri = synonym("gcs_uri")
     filename: Mapped[str] = mapped_column(String(500), nullable=False)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     md5_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)

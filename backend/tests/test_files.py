@@ -339,7 +339,7 @@ async def test_link_file_moves_to_raw_bucket(client, admin_token, session, admin
 
     assert resp.status_code == 200
 
-    row = (await session.execute(text("SELECT storage_uri FROM files WHERE id = :fid").bindparams(fid=f.id))).fetchone()
+    row = (await session.execute(text("SELECT gcs_uri FROM files WHERE id = :fid").bindparams(fid=f.id))).fetchone()
     # File should have moved to the raw bucket under the experiment prefix
     assert "bioaf-raw-test" in row[0], f"Expected raw bucket in URI, got {row[0]}"
     assert f"experiments/{exp.id}/" in row[0]
@@ -477,7 +477,7 @@ async def test_reconcile_moves_stuck_ingest_files_to_raw(client, admin_token, se
     # Verify stuck files now point to raw bucket
     for sf in stuck_files:
         row = (
-            await session.execute(text("SELECT storage_uri FROM files WHERE id = :fid").bindparams(fid=sf.id))
+            await session.execute(text("SELECT gcs_uri FROM files WHERE id = :fid").bindparams(fid=sf.id))
         ).fetchone()
         assert "bioaf-raw-test" in row[0], f"Expected raw bucket, got {row[0]}"
         assert f"experiments/{exp.id}/" in row[0]

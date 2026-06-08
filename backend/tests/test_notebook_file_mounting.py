@@ -19,7 +19,7 @@ async def experiment_with_files(session, admin_user):
     for i, (filename, size) in enumerate([("matrix.h5ad", 450_000_000), ("counts.csv", 12_000_000)], start=1):
         await session.execute(
             text(
-                "INSERT INTO files (id, organization_id, storage_uri, filename, size_bytes, file_type, experiment_id, source_type) "
+                "INSERT INTO files (id, organization_id, gcs_uri, filename, size_bytes, file_type, experiment_id, source_type) "
                 "VALUES (:id, :org_id, :gcs_uri, :filename, :size, :ftype, :exp_id, 'upload')"
             ),
             {

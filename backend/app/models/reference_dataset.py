@@ -57,9 +57,9 @@ class ReferenceDatasetFile(Base):
         Integer, ForeignKey("reference_datasets.id", ondelete="CASCADE"), nullable=False
     )
     filename: Mapped[str] = mapped_column(String(500), nullable=False)
-    # BAL Phase 4 rename: gcs_uri -> storage_uri (gcs_uri kept as a synonym).
-    storage_uri: Mapped[str] = mapped_column(Text, nullable=False)
-    gcs_uri = synonym("storage_uri")
+    # BAL Phase 4: physical column stays gcs_uri; storage_uri is the code alias.
+    gcs_uri: Mapped[str] = mapped_column(Text, nullable=False)
+    storage_uri = synonym("gcs_uri")
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     md5_checksum: Mapped[str | None] = mapped_column(String(32), nullable=True)
     file_type: Mapped[str | None] = mapped_column(String(50), nullable=True)

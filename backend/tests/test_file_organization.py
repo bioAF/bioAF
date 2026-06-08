@@ -74,7 +74,7 @@ async def _create_file(session, org_id, gcs_uri, experiment_id=None):
     """Insert a file record and return its id."""
     result = await session.execute(
         text("""
-        INSERT INTO files (organization_id, storage_uri, filename, file_type, experiment_id)
+        INSERT INTO files (organization_id, gcs_uri, filename, file_type, experiment_id)
         VALUES (:org_id, :uri, :fname, 'fastq', :exp_id)
         RETURNING id
         """).bindparams(
@@ -107,7 +107,7 @@ async def test_assign_file_to_experiment_moves_from_unlinked(session):
         await FileOrganizationService.assign_file_to_experiment(session, file_id, exp1.id, user.id)
 
     row = (
-        await session.execute(text("SELECT experiment_id, storage_uri FROM files WHERE id = :fid").bindparams(fid=file_id))
+        await session.execute(text("SELECT experiment_id, gcs_uri FROM files WHERE id = :fid").bindparams(fid=file_id))
     ).fetchone()
     assert row[0] == exp1.id
     assert "experiments/" in row[1]
@@ -194,7 +194,7 @@ async def test_reassign_file_between_experiments(session):
         await FileOrganizationService.reassign_file_to_experiment(session, file_id, exp2.id, user.id)
 
     row = (
-        await session.execute(text("SELECT experiment_id, storage_uri FROM files WHERE id = :fid").bindparams(fid=file_id))
+        await session.execute(text("SELECT experiment_id, gcs_uri FROM files WHERE id = :fid").bindparams(fid=file_id))
     ).fetchone()
     assert row[0] == exp2.id
     assert f"experiments/{exp2.id}/" in row[1]
@@ -223,7 +223,7 @@ async def test_unlink_file_moves_to_unlinked(session):
         await FileOrganizationService.unlink_file_from_experiment(session, file_id, user.id)
 
     row = (
-        await session.execute(text("SELECT experiment_id, storage_uri FROM files WHERE id = :fid").bindparams(fid=file_id))
+        await session.execute(text("SELECT experiment_id, gcs_uri FROM files WHERE id = :fid").bindparams(fid=file_id))
     ).fetchone()
     assert row[0] is None
     assert "unlinked/" in row[1]

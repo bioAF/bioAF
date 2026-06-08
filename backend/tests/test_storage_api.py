@@ -209,7 +209,7 @@ async def test_file_assign_endpoint(client, session, admin_user, admin_token):
 
     file_id_row = await session.execute(
         text("""
-        INSERT INTO files (organization_id, storage_uri, filename, file_type)
+        INSERT INTO files (organization_id, gcs_uri, filename, file_type)
         VALUES (:org_id, 'gs://bioaf-raw-demo/unlinked/test.fastq.gz', 'test.fastq.gz', 'fastq')
         RETURNING id
         """).bindparams(org_id=admin_user.organization_id)
@@ -247,7 +247,7 @@ async def test_file_unlink_endpoint(client, session, admin_user, admin_token):
     """Unlink file returns 200."""
     file_id_row = await session.execute(
         text("""
-        INSERT INTO files (organization_id, storage_uri, filename, file_type, experiment_id)
+        INSERT INTO files (organization_id, gcs_uri, filename, file_type, experiment_id)
         VALUES (:org_id, 'gs://bioaf-raw-demo/experiments/1/test.fastq.gz', 'test.fastq.gz', 'fastq', NULL)
         RETURNING id
         """).bindparams(org_id=admin_user.organization_id)

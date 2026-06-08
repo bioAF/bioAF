@@ -31,7 +31,7 @@ async def _insert_file(
 ) -> int:
     result = await session.execute(
         text(
-            "INSERT INTO files (organization_id, storage_uri, filename, file_type, source_type, "
+            "INSERT INTO files (organization_id, gcs_uri, filename, file_type, source_type, "
             "project_id, experiment_id, tags_json) "
             "VALUES (:o, :u, :f, 'fastq', :s, :p, :e, '[]'::jsonb) RETURNING id"
         ),

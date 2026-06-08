@@ -27,9 +27,9 @@ class LabDocument(Base):
     organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # BAL Phase 4 rename: gcs_uri -> storage_uri (gcs_uri kept as a synonym).
-    storage_uri: Mapped[str] = mapped_column(String(1000), nullable=False)
-    gcs_uri = synonym("storage_uri")
+    # BAL Phase 4: physical column stays gcs_uri; storage_uri is the code alias.
+    gcs_uri: Mapped[str] = mapped_column(String(1000), nullable=False)
+    storage_uri = synonym("gcs_uri")
     current_version: Mapped[int] = mapped_column(Integer, server_default="1", nullable=False)
     file_name: Mapped[str] = mapped_column(String(500), nullable=False)
     file_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -62,9 +62,9 @@ class LabDocumentVersion(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     document_id: Mapped[int] = mapped_column(Integer, ForeignKey("lab_documents.id"), nullable=False, index=True)
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    # BAL Phase 4 rename: gcs_uri -> storage_uri (gcs_uri kept as a synonym).
-    storage_uri: Mapped[str] = mapped_column(String(1000), nullable=False)
-    gcs_uri = synonym("storage_uri")
+    # BAL Phase 4: physical column stays gcs_uri; storage_uri is the code alias.
+    gcs_uri: Mapped[str] = mapped_column(String(1000), nullable=False)
+    storage_uri = synonym("gcs_uri")
     file_name: Mapped[str] = mapped_column(String(500), nullable=False)
     file_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     md5_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)

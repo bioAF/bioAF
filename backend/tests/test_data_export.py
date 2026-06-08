@@ -62,7 +62,7 @@ async def _seed_file(
 ) -> None:
     await session.execute(
         text(
-            "INSERT INTO files (id, organization_id, filename, storage_uri, file_type, size_bytes, "
+            "INSERT INTO files (id, organization_id, filename, gcs_uri, file_type, size_bytes, "
             "md5_checksum, experiment_id, source_type, uploader_user_id) "
             "VALUES (:fid, :org, :fname, :uri, :ftype, :size, 'abc', :eid, 'upload', :owner)"
         ),
