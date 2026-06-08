@@ -104,35 +104,29 @@ class TestSlurmStubs:
             await slurm_notebook.get_connection_command("123")
 
 
-class TestNfsStubs:
+class TestNfsImplemented:
+    """NFS is a real backend as of Phase 7 (no more NotImplementedError stubs).
+
+    Full per-method coverage lives in test_nfs_storage_adapter.py; this just
+    confirms the once-stubbed methods now work and capabilities are honest.
+    """
+
     @pytest.fixture
-    def nfs_storage(self):
-        return NfsStorageProvider()
+    def nfs_storage(self, tmp_path):
+        return NfsStorageProvider(root=str(tmp_path))
+
+    def test_capabilities_declare_no_signed_url(self, nfs_storage):
+        assert nfs_storage.capabilities().signed_url_upload is False
 
     @pytest.mark.asyncio
-    async def test_resolve_input_path_raises(self, nfs_storage):
-        with pytest.raises(NotImplementedError, match="NFS storage backend coming soon"):
-            await nfs_storage.resolve_input_path({})
+    async def test_stage_inputs_works(self, nfs_storage, tmp_path):
+        staged = await nfs_storage.stage_inputs([{"filename": "x.txt"}], str(tmp_path / "work"))
+        assert len(staged) == 1
 
     @pytest.mark.asyncio
-    async def test_resolve_output_path_raises(self, nfs_storage):
-        with pytest.raises(NotImplementedError, match="NFS storage backend coming soon"):
-            await nfs_storage.resolve_output_path({}, "file.h5ad")
-
-    @pytest.mark.asyncio
-    async def test_stage_inputs_raises(self, nfs_storage):
-        with pytest.raises(NotImplementedError, match="NFS storage backend coming soon"):
-            await nfs_storage.stage_inputs([], "/tmp/work")
-
-    @pytest.mark.asyncio
-    async def test_collect_outputs_raises(self, nfs_storage):
-        with pytest.raises(NotImplementedError, match="NFS storage backend coming soon"):
-            await nfs_storage.collect_outputs("/tmp/work", {})
-
-    @pytest.mark.asyncio
-    async def test_get_storage_metrics_raises(self, nfs_storage):
-        with pytest.raises(NotImplementedError, match="NFS storage backend coming soon"):
-            await nfs_storage.get_storage_metrics()
+    async def test_get_storage_metrics_works(self, nfs_storage):
+        metrics = await nfs_storage.get_storage_metrics()
+        assert metrics.total_size_gb >= 0.0
 
 
 # -- Registry tests --
