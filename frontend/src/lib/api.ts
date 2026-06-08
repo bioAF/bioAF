@@ -1,6 +1,6 @@
 import { getToken, removeToken } from "./auth";
 import { clearPermissionsCache } from "@/hooks/usePermissions";
-import { clearCapabilitiesCache } from "@/hooks/useCapabilities";
+import { clearCapabilitiesCache } from "@/hooks/capabilitiesCache";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 

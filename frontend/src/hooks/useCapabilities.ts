@@ -3,82 +3,38 @@
 import { useEffect, useState, useCallback } from "react";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
+import {
+  capabilitiesCache,
+  normalizeCapabilities,
+  MINIMAL_CAPABILITIES,
+  type CapabilityFlag,
+} from "./capabilitiesCache";
 
-// The active backend's capability flags, mirroring the backend
-// ProviderCapabilities model (app/adapters/capabilities.py). A flag is True
-// only when a real implementation backs it; the UI hides or degrades a control
-// whose capability is False so swapping to a backend that lacks it (SLURM/NFS)
-// never presents a dead button. Capability (can the backend ever) is distinct
-// from availability (is the component provisioned now); this hook is about
-// capability only.
-export type CapabilityFlag =
-  | "cost_estimation"
-  | "autoscaling"
-  | "ssh_exec"
-  | "spot_retry"
-  | "job_report"
-  | "signed_url_upload"
-  | "storage_tier_metrics"
-  | "notebooks"
-  | "cellxgene"
-  | "work_nodes"
-  | "messaging"
-  | "billing";
+// Re-export the cache primitives so consumers keep a single import surface
+// ("@/hooks/useCapabilities"). The cache itself lives in a leaf module to avoid
+// an import cycle with the api client (see capabilitiesCache.ts).
+export {
+  clearCapabilitiesCache,
+  CAPABILITY_FLAGS,
+  MINIMAL_CAPABILITIES,
+} from "./capabilitiesCache";
+export type { CapabilityFlag, Capabilities } from "./capabilitiesCache";
 
-export type Capabilities = Record<CapabilityFlag, boolean>;
-
-export const CAPABILITY_FLAGS: CapabilityFlag[] = [
-  "cost_estimation",
-  "autoscaling",
-  "ssh_exec",
-  "spot_retry",
-  "job_report",
-  "signed_url_upload",
-  "storage_tier_metrics",
-  "notebooks",
-  "cellxgene",
-  "work_nodes",
-  "messaging",
-  "billing",
-];
-
-// Fail-safe default: assume nothing is supported. Hiding an optional control is
-// safe; showing one that 500s on use is the bug we are preventing.
-export const MINIMAL_CAPABILITIES: Capabilities = CAPABILITY_FLAGS.reduce(
-  (acc, flag) => {
-    acc[flag] = false;
-    return acc;
-  },
-  {} as Capabilities,
-);
-
+// The active backend's capability flags mirror the backend ProviderCapabilities
+// model (app/adapters/capabilities.py). A flag is True only when a real
+// implementation backs it; the UI hides or degrades a control whose capability
+// is False so swapping to a backend that lacks it (SLURM/NFS) never presents a
+// dead button. Capability (can the backend ever) is distinct from availability
+// (is the component provisioned now); this hook is about capability only.
 interface BootstrapStatusWithCapabilities {
   capabilities?: Partial<Record<CapabilityFlag, boolean>>;
 }
 
-let cachedCapabilities: Capabilities | null = null;
-let fetchPromise: Promise<void> | null = null;
-
-function normalize(
-  raw: Partial<Record<CapabilityFlag, boolean>> | undefined,
-): Capabilities {
-  if (!raw) return { ...MINIMAL_CAPABILITIES };
-  return CAPABILITY_FLAGS.reduce((acc, flag) => {
-    acc[flag] = raw[flag] === true;
-    return acc;
-  }, {} as Capabilities);
-}
-
-export function clearCapabilitiesCache(): void {
-  cachedCapabilities = null;
-  fetchPromise = null;
-}
-
 export function useCapabilities() {
-  const [capabilities, setCapabilities] = useState<Capabilities>(
-    cachedCapabilities ?? { ...MINIMAL_CAPABILITIES },
+  const [capabilities, setCapabilities] = useState(
+    capabilitiesCache.value ?? { ...MINIMAL_CAPABILITIES },
   );
-  const [loading, setLoading] = useState(!cachedCapabilities);
+  const [loading, setLoading] = useState(!capabilitiesCache.value);
 
   useEffect(() => {
     // Capabilities are exposed to authenticated callers (the same gating as the
@@ -90,25 +46,25 @@ export function useCapabilities() {
       return;
     }
 
-    if (cachedCapabilities) {
-      setCapabilities(cachedCapabilities);
+    if (capabilitiesCache.value) {
+      setCapabilities(capabilitiesCache.value);
       setLoading(false);
       return;
     }
 
-    if (!fetchPromise) {
-      fetchPromise = api
+    if (!capabilitiesCache.promise) {
+      capabilitiesCache.promise = api
         .get<BootstrapStatusWithCapabilities>("/api/bootstrap/status")
         .then((status) => {
-          cachedCapabilities = normalize(status.capabilities);
+          capabilitiesCache.value = normalizeCapabilities(status.capabilities);
         })
         .catch(() => {
-          cachedCapabilities = { ...MINIMAL_CAPABILITIES };
+          capabilitiesCache.value = { ...MINIMAL_CAPABILITIES };
         });
     }
 
-    fetchPromise.then(() => {
-      setCapabilities(cachedCapabilities!);
+    capabilitiesCache.promise.then(() => {
+      setCapabilities(capabilitiesCache.value!);
       setLoading(false);
     });
   }, []);
