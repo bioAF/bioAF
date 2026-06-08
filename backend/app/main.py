@@ -87,7 +87,8 @@ async def lifespan(app: FastAPI):
     # Attach Cloud Logging using the app's configured GCP credentials
     try:
         from app.database import async_session_factory as cl_session_factory
-        from app.services.gcs_storage import GcsStorageService
+        from app.platform import credential_injector
+        from app.platform.platform_config_service import PlatformConfigService
 
         async with cl_session_factory() as cl_session:
             result = await cl_session.execute(text("SELECT value FROM platform_config WHERE key = 'gcp_project_id'"))
@@ -95,7 +96,19 @@ async def lifespan(app: FastAPI):
             gcp_project_id = row[0] if row and row[0] and row[0] != "null" else ""
 
             if gcp_project_id:
-                credentials = await GcsStorageService.get_credentials(cl_session)
+                cred_config = await PlatformConfigService.get_many(
+                    cl_session,
+                    [
+                        "gcp_credential_source",
+                        "gcp_service_account_key",
+                        "gcp_service_account_email",
+                        "gcp_bootstrap_sa_email",
+                    ],
+                )
+                try:
+                    credentials = credential_injector.load_gcp_credentials(cred_config)
+                except Exception:
+                    credentials = None
                 attach_cloud_logging(gcp_project_id, credentials, debug=settings.debug)
     except Exception as e:
         logger.info("Cloud Logging not configured: %s", e)
@@ -796,8 +809,8 @@ async def _export_cleanup_loop():
 
     from sqlalchemy import text as sa_text
 
+    from app.adapters.registry import get_storage_adapter
     from app.database import async_session_factory
-    from app.services.gcs_storage import GcsStorageService
 
     while True:
         try:
@@ -811,16 +824,13 @@ async def _export_cleanup_loop():
                     continue
 
                 bucket_name = row[0]
-                credentials = await GcsStorageService.get_credentials(session)
-
-                from google.cloud import storage as gcs
-
-                client = gcs.Client(credentials=credentials)
+                adapter = get_storage_adapter()
                 cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
                 deleted = 0
-                for blob in client.list_blobs(bucket_name, prefix="exports/"):
-                    if blob.time_created and blob.time_created < cutoff:
-                        blob.delete()
+                for obj in await adapter.list_objects(f"gs://{bucket_name}/exports/"):
+                    created = obj.provider_details.get("time_created")
+                    if created and created < cutoff:
+                        await adapter.delete(obj.storage_uri)
                         deleted += 1
                 if deleted:
                     logger.info("Export cleanup: deleted %d expired ZIP(s) from gs://%s/exports/", deleted, bucket_name)
@@ -885,11 +895,33 @@ def create_app() -> FastAPI:
 
     application.include_router(api_router)
 
+    # Map CapabilityNotSupported (raised by require_capability guards) to a clean
+    # 4xx envelope instead of a 500 (Phase 4b). Registered on both the main app
+    # and the mounted integration sub-app, since a mounted Starlette sub-app does
+    # not inherit the parent's exception handlers.
+    from app.adapters.capabilities import CapabilityNotSupported
+    from fastapi import Request
+    from fastapi.responses import JSONResponse
+
+    async def _capability_not_supported_handler(request: Request, exc: CapabilityNotSupported) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": str(exc),
+                "code": "capability_not_supported",
+                "capability": exc.capability,
+            },
+        )
+
+    application.add_exception_handler(CapabilityNotSupported, _capability_not_supported_handler)
+
     # Public integration API sub-app (ADR-048). Owns its own OpenAPI document;
     # docs are served in production regardless of the main app's gating.
     from app.api.v1.integrations import build_integrations_app
 
-    application.mount("/api/v1/integrations", build_integrations_app())
+    integrations_app = build_integrations_app()
+    integrations_app.add_exception_handler(CapabilityNotSupported, _capability_not_supported_handler)
+    application.mount("/api/v1/integrations", integrations_app)
     return application
 
 

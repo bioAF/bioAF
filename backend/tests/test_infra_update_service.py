@@ -12,7 +12,7 @@ from sqlalchemy import select, text
 
 from app.models.component import TerraformRun
 from app.services import infra_update_service
-from app.services.platform_config_service import PlatformConfigService
+from app.platform.platform_config_service import PlatformConfigService
 from app.services.terraform_executor import TerraformExecutor
 
 

@@ -251,6 +251,8 @@ async def test_sync_triggers_gcs_sync(client, session, comp_bio_user, comp_bio_t
         status="running",
         k8s_pod_name="bioaf-notebook-sync-test",
         k8s_namespace="bioaf-notebooks",
+        compute_job_ref="bioaf-notebook-sync-test",
+        provider_metadata={"namespace": "bioaf-notebooks", "pod_name": "bioaf-notebook-sync-test"},
         gcs_home_prefix=f"gs://bioaf-working/notebooks/{comp_bio_user.id}/",
     )
     session.add(ns)

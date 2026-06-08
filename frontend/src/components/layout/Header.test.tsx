@@ -5,6 +5,7 @@ jest.mock("@/lib/auth", () => ({
   removeToken: jest.fn(),
 }));
 jest.mock("@/hooks/usePermissions", () => ({ clearPermissionsCache: jest.fn() }));
+jest.mock("@/hooks/useCapabilities", () => ({ clearCapabilitiesCache: jest.fn() }));
 jest.mock("@/lib/api", () => ({ api: { post: jest.fn() } }));
 jest.mock("next/navigation", () => ({ useRouter: () => ({ push: jest.fn() }) }));
 jest.mock("@/components/notifications/NotificationBell", () => ({

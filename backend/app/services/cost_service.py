@@ -190,7 +190,7 @@ class CostService:
         # Historical data from BQ (excludes today due to export lag)
         if project_id and dataset_id and table_id:
             try:
-                from app.services.credential_injector import load_gcp_credentials
+                from app.platform.credential_injector import load_gcp_credentials
 
                 try:
                     creds = load_gcp_credentials(bq_config)
@@ -245,16 +245,16 @@ class CostService:
         node_cost_daily = Decimal("0")
         compute_cost_daily = Decimal("0")
 
-        for pool in cluster_metrics.get("node_pools", []):
-            hourly = Decimal(str(pool.get("cost_rate_hourly", 0)))
-            if pool.get("name", "") == "bioaf-platform":
+        for pool in cluster_metrics.node_pools:
+            hourly = Decimal(str(pool.cost_rate_hourly or 0))
+            if pool.name == "bioaf-platform":
                 node_cost_daily += hourly * 24
             else:
                 compute_cost_daily += hourly * 24
 
         storage_adapter = get_storage_adapter()
         storage_metrics = await storage_adapter.get_storage_metrics()
-        storage_cost_monthly = Decimal(str(storage_metrics.get("total_cost_monthly_usd", 0)))
+        storage_cost_monthly = Decimal(str(storage_metrics.total_cost_monthly_usd))
         if today.month == 12:
             days_in_month = 31
         else:

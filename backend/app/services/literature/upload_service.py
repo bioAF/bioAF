@@ -49,59 +49,37 @@ async def upload_pdf_to_gcs(
     path = storage.pdf_blob_path(paper_id)
     uri = storage.gcs_uri(bucket, path)
 
-    from app.services.gcs_storage import GcsStorageService
+    from app.adapters.registry import get_storage_adapter
 
     try:
-        credentials = await GcsStorageService.get_credentials(session)
-        from google.cloud import storage as gcs
-
-        loop = asyncio.get_running_loop()
-
-        def _upload() -> None:
-            client = gcs.Client(credentials=credentials)
-            bucket_obj = client.bucket(bucket)
-            blob = bucket_obj.blob(path)
-            blob.upload_from_string(pdf_bytes, content_type="application/pdf")
-
-        await loop.run_in_executor(None, _upload)
+        await get_storage_adapter().write_bytes(uri, pdf_bytes, content_type="application/pdf")
         return uri
     except Exception as e:
-        logger.warning("Failed to upload paper %s PDF to GCS: %s", paper_id, e)
+        logger.warning("Failed to upload paper %s PDF to storage: %s", paper_id, e)
         return None
 
 
-def _delete_prefix(credentials, bucket: str, prefix: str) -> None:
-    """Delete every blob under `prefix` in `bucket`. Runs in a thread
-    executor; isolated as a seam so the deletion can be exercised in tests
-    without the google.cloud.storage client."""
-    from google.cloud import storage as gcs
-
-    client = gcs.Client(credentials=credentials)
-    bucket_obj = client.bucket(bucket)
-    for blob in client.list_blobs(bucket_obj, prefix=prefix):
-        blob.delete()
-
-
 async def delete_paper_files(session: AsyncSession, *, paper_id: int) -> bool:
-    """Best-effort deletion of every GCS object under papers/{paper_id}/.
+    """Best-effort deletion of every object under papers/{paper_id}/.
 
     Returns True when a delete pass ran against a provisioned bucket, False
     when no Literature bucket is configured (dev install / storage stack not
-    deployed). Never raises: a GCS failure is logged and the caller proceeds,
+    deployed). Never raises: a storage failure is logged and the caller proceeds,
     so a paper is never left undeletable because storage is unavailable."""
     bucket = await storage.get_literature_bucket(session)
     if not bucket:
         return False
     prefix = storage.paper_blob_prefix(paper_id)
-    from app.services.gcs_storage import GcsStorageService
+    from app.adapters.registry import get_storage_adapter
 
     try:
-        credentials = await GcsStorageService.get_credentials(session)
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, _delete_prefix, credentials, bucket, prefix)
+        adapter = get_storage_adapter()
+        objs = await adapter.list_objects(f"gs://{bucket}/{prefix}")
+        for obj in objs:
+            await adapter.delete(obj.storage_uri)
         return True
     except Exception as e:
-        logger.warning("Failed to delete GCS objects for paper %s: %s", paper_id, e)
+        logger.warning("Failed to delete storage objects for paper %s: %s", paper_id, e)
         return False
 
 
@@ -116,24 +94,13 @@ async def upload_extracted_text_to_gcs(
         return None
     path = storage.extracted_text_blob_path(paper_id)
     uri = storage.gcs_uri(bucket, path)
-    from app.services.gcs_storage import GcsStorageService
+    from app.adapters.registry import get_storage_adapter
 
     try:
-        credentials = await GcsStorageService.get_credentials(session)
-        from google.cloud import storage as gcs
-
-        loop = asyncio.get_running_loop()
-
-        def _upload() -> None:
-            client = gcs.Client(credentials=credentials)
-            bucket_obj = client.bucket(bucket)
-            blob = bucket_obj.blob(path)
-            blob.upload_from_string(text.encode("utf-8"), content_type="text/plain; charset=utf-8")
-
-        await loop.run_in_executor(None, _upload)
+        await get_storage_adapter().write_text(uri, text, content_type="text/plain; charset=utf-8")
         return uri
     except Exception as e:
-        logger.warning("Failed to upload paper %s extracted text to GCS: %s", paper_id, e)
+        logger.warning("Failed to upload paper %s extracted text to storage: %s", paper_id, e)
         return None
 
 

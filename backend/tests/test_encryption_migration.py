@@ -12,8 +12,8 @@ import pytest
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.services import encryption_service
-from app.services.platform_config_service import (
+from app.platform import encryption_service
+from app.platform.platform_config_service import (
     SENSITIVE_PLATFORM_CONFIG_KEYS,
     PlatformConfigService,
 )

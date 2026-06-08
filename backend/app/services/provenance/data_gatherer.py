@@ -477,8 +477,7 @@ class ProvenanceDataGatherer:
                     "cost": {"estimated": _dec(r.cost_estimate), "actual": _dec(r.actual_cost)},
                     "environment": {
                         "container_versions": r.container_versions_json,
-                        "k8s_namespace": r.k8s_namespace,
-                        "k8s_pod_name": r.k8s_pod_name,
+                        "provider_metadata": r.provider_metadata,
                         "work_dir": r.work_dir,
                     },
                     "processes": [
@@ -741,8 +740,7 @@ class ProvenanceDataGatherer:
                 "parameters": run.parameters_json,
                 "environment": {
                     "container_versions": run.container_versions_json,
-                    "k8s_namespace": run.k8s_namespace,
-                    "k8s_pod_name": run.k8s_pod_name,
+                    "provider_metadata": run.provider_metadata,
                     "work_dir": run.work_dir,
                 },
                 "reference_genome": run.reference_genome,

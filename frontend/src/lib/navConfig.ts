@@ -18,6 +18,9 @@ export interface NavChild {
    * `permission` (which still must pass if set). */
   anyPermissions?: PermissionRef[];
   componentGate?: ComponentGate;
+  /** Hidden when the active backend lacks this BAL capability (distinct from
+   * componentGate availability). See useCapabilities / ProviderCapabilities. */
+  capability?: string;
 }
 
 export interface NavSection {
@@ -29,6 +32,7 @@ export interface NavSection {
   permission?: PermissionRef;
   anyPermissions?: PermissionRef[];
   componentGate?: ComponentGate;
+  capability?: string;
 }
 
 export const navConfig: NavSection[] = [
@@ -59,7 +63,7 @@ export const navConfig: NavSection[] = [
     icon: "chart",
     children: [
       { label: "QC Dashboards", path: "/results/qc-dashboards", anyPermissions: [{ resource: "experiments", action: "view" }, { resource: "pipelines", action: "view" }], componentGate: { keys: ["qc_dashboard"] } },
-      { label: "Cellxgene", path: "/results/cellxgene", anyPermissions: [{ resource: "experiments", action: "view" }, { resource: "pipelines", action: "view" }], componentGate: { keys: ["cellxgene"] } },
+      { label: "Cellxgene", path: "/results/cellxgene", anyPermissions: [{ resource: "experiments", action: "view" }, { resource: "pipelines", action: "view" }], componentGate: { keys: ["cellxgene"] }, capability: "cellxgene" },
       { label: "Plot Archive", path: "/results/plot-archive", anyPermissions: [{ resource: "experiments", action: "view" }, { resource: "pipelines", action: "view" }] },
     ],
   },
@@ -68,7 +72,7 @@ export const navConfig: NavSection[] = [
     icon: "notebook",
     children: [
       { label: "Notebooks", path: "/notebooks", permission: { resource: "notebooks", action: "view" }, componentGate: { keys: ["jupyterhub", "rstudio"] } },
-      { label: "Work Nodes", path: "/workbench/work-nodes", permission: { resource: "notebooks", action: "view" } },
+      { label: "Work Nodes", path: "/workbench/work-nodes", permission: { resource: "notebooks", action: "view" }, capability: "work_nodes" },
       { label: "Compute Environments", path: "/environments", permission: { resource: "environments", action: "view" } },
     ],
   },
@@ -110,7 +114,7 @@ export const navConfig: NavSection[] = [
       { label: "Roles & Permissions", path: "/settings/roles", permission: { resource: "roles", action: "view" } },
       { label: "Audit Log", path: "/settings/audit-log", permission: { resource: "audit_log", action: "view" } },
       { label: "Integrations", path: "/settings/integrations", permission: { resource: "infrastructure", action: "configure" } },
-      { label: "Workbench Settings", path: "/settings/work-nodes", permission: { resource: "work_nodes", action: "configure" } },
+      { label: "Workbench Settings", path: "/settings/work-nodes", permission: { resource: "work_nodes", action: "configure" }, capability: "work_nodes" },
       { label: "Networking", path: "/settings/networking", permission: { resource: "infrastructure", action: "edit" } },
       { label: "Information", path: "/settings/info", permission: { resource: "infrastructure", action: "view" } },
     ],

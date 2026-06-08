@@ -140,15 +140,12 @@ class PlotArchiveService:
 
     @staticmethod
     async def scan_and_index(session: AsyncSession) -> int:
-        """Scan GCS results bucket for new image files and auto-index them."""
+        """Scan the results store for new image files and auto-index them."""
         indexed = 0
         try:
-            from google.cloud import storage as gcs_storage
+            from app.adapters.registry import get_storage_adapter
 
-            from app.services.gcs_storage import GcsStorageService
-
-            credentials = await GcsStorageService.get_credentials(session)
-            client = gcs_storage.Client(credentials=credentials)
+            adapter = get_storage_adapter()
 
             # Get all organizations (simplified -- in practice scope by active orgs)
             from app.models.organization import Organization
@@ -167,33 +164,29 @@ class PlotArchiveService:
             for org in orgs:
                 org_id = org.id
                 bucket_name = results_bucket
-                last = _last_scan.get(org_id)
 
                 try:
-                    bucket = client.bucket(bucket_name)
-                    blobs = bucket.list_blobs()
+                    objs = await adapter.list_objects(f"gs://{bucket_name}/")
 
-                    for blob in blobs:
+                    for obj in objs:
+                        gcs_uri = obj.storage_uri
+                        name = gcs_uri[len(f"gs://{bucket_name}/") :]
+
                         # Skip generated thumbnails
-                        if blob.name.startswith(THUMBNAIL_PREFIX):
+                        if name.startswith(THUMBNAIL_PREFIX):
                             continue
 
                         # Filter image files
-                        if not blob.name.lower().endswith((".png", ".svg", ".pdf")):
-                            continue
-
-                        # Skip if already indexed
-                        if last and blob.updated and blob.updated < last:
+                        if not name.lower().endswith((".png", ".svg", ".pdf")):
                             continue
 
                         # Check not already in archive
-                        gcs_uri = f"gs://{bucket_name}/{blob.name}"
                         existing = await session.execute(select(File.id).where(File.gcs_uri == gcs_uri))
                         if existing.scalar_one_or_none():
                             continue
 
                         # Determine file type
-                        ext = blob.name.rsplit(".", 1)[-1].lower()
+                        ext = name.rsplit(".", 1)[-1].lower()
                         file_type = ext if ext in ("png", "svg", "pdf") else "other"
 
                         # Extract context from path
@@ -204,9 +197,9 @@ class PlotArchiveService:
                             session,
                             org_id=org_id,
                             user_id=None,
-                            filename=blob.name.split("/")[-1],
+                            filename=name.split("/")[-1],
                             gcs_uri=gcs_uri,
-                            size_bytes=blob.size,
+                            size_bytes=obj.size_bytes,
                             md5_checksum=None,
                             file_type=file_type,
                             experiment_id=experiment_id,
@@ -221,7 +214,7 @@ class PlotArchiveService:
                             file_id=file.id,
                             experiment_id=experiment_id,
                             pipeline_run_id=pipeline_run_id,
-                            title=blob.name.split("/")[-1],
+                            title=name.split("/")[-1],
                         )
 
                         # Generate PDF thumbnail
@@ -241,8 +234,6 @@ class PlotArchiveService:
                 await session.commit()
                 logger.info("Plot archive watcher indexed %d new plots", indexed)
 
-        except ImportError:
-            logger.debug("google-cloud-storage not installed, plot watcher inactive")
         except Exception as e:
             logger.error("Plot archive scan failed: %s", e)
 

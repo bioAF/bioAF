@@ -25,6 +25,10 @@ jest.mock("@/hooks/useBackendReady", () => ({
   useBackendReady: () => ({ ready: true }),
 }));
 
+jest.mock("@/hooks/useCapabilities", () => ({
+  useCapabilities: () => ({ has: () => true, capabilities: {}, loading: false }),
+}));
+
 const mockPermissions = jest.fn();
 jest.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => mockPermissions(),

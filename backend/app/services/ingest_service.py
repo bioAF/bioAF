@@ -179,12 +179,12 @@ async def copy_to_raw_bucket(
 
     Returns the destination GCS URI.
     """
-    from app.services.gcs_storage import GcsStorageService
+    from app.adapters.registry import get_storage_adapter
 
     source_uri = f"gs://{source_bucket}/{source_path}"
     destination_uri = f"gs://{raw_bucket}/{destination_prefix}{filename}"
 
-    await GcsStorageService.move_file(source_uri, destination_uri, credentials=credentials)
+    await get_storage_adapter().move(source_uri, destination_uri)
     return destination_uri
 
 
@@ -200,12 +200,9 @@ async def cleanup_ingest_file(
     With retain_* policies, leave it in place.
     """
     if policy == "delete_after_copy":
-        from google.cloud import storage
+        from app.adapters.registry import get_storage_adapter
 
-        client = storage.Client(credentials=credentials)
-        bucket = client.get_bucket(source_bucket)
-        blob = bucket.blob(source_path)
-        blob.delete()
+        await get_storage_adapter().delete(f"gs://{source_bucket}/{source_path}")
         logger.info("Deleted ingest file gs://%s/%s", source_bucket, source_path)
     else:
         logger.info(

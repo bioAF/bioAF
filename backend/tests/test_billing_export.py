@@ -275,7 +275,7 @@ async def test_query_mtd_costs_returns_mapped_data():
     mock_bq_client = MagicMock()
     mock_bq_client.query.return_value = mock_query_job
 
-    with patch("app.services.billing_export_service.bigquery.Client", return_value=mock_bq_client):
+    with patch("app.adapters.billing.gcp.bigquery.Client", return_value=mock_bq_client):
         results = await BillingExportService.query_mtd_costs(
             "test-project", "billing_export", "gcp_billing_export_v1_ABC123"
         )
@@ -300,7 +300,7 @@ async def test_verify_dataset_finds_resource_prefix_table():
     mock_bq_client = MagicMock()
     mock_bq_client.list_tables.return_value = [resource_table]
 
-    with patch("app.services.billing_export_service.bigquery.Client", return_value=mock_bq_client):
+    with patch("app.adapters.billing.gcp.bigquery.Client", return_value=mock_bq_client):
         result = await BillingExportService.verify_dataset("proj", "ds")
 
     assert result["found"] is True
@@ -316,7 +316,7 @@ async def test_verify_dataset_passes_credentials_to_bq_client():
     mock_bq_client = MagicMock()
     mock_bq_client.list_tables.return_value = []
 
-    with patch("app.services.billing_export_service.bigquery.Client", return_value=mock_bq_client) as mock_ctor:
+    with patch("app.adapters.billing.gcp.bigquery.Client", return_value=mock_bq_client) as mock_ctor:
         await BillingExportService.verify_dataset("proj", "ds", credentials=mock_creds)
         mock_ctor.assert_called_once_with(project="proj", credentials=mock_creds)
 
@@ -332,7 +332,7 @@ async def test_query_mtd_costs_passes_credentials_to_bq_client():
     mock_bq_client = MagicMock()
     mock_bq_client.query.return_value = mock_query_job
 
-    with patch("app.services.billing_export_service.bigquery.Client", return_value=mock_bq_client) as mock_ctor:
+    with patch("app.adapters.billing.gcp.bigquery.Client", return_value=mock_bq_client) as mock_ctor:
         await BillingExportService.query_mtd_costs("proj", "ds", "table", credentials=mock_creds)
         mock_ctor.assert_called_once_with(project="proj", credentials=mock_creds)
 

@@ -6,7 +6,7 @@ import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.platform_config_service import PlatformConfigService
+from app.platform.platform_config_service import PlatformConfigService
 
 logger = logging.getLogger("bioaf.literature.storage")
 

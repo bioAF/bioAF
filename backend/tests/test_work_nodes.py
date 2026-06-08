@@ -9,6 +9,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select, text
 
+from app.adapters.models import ServiceState, VmInfo
 from app.services.auth_service import AuthService
 
 
@@ -252,13 +253,13 @@ async def test_launch_passes_configured_boot_disk_to_vm_spec(
 
     mock_adapter = MagicMock()
     mock_adapter.launch_vm = AsyncMock(
-        return_value={
-            "instance_name": "bioaf-worknode-1",
-            "zone": "us-central1-c",
-            "gcp_project_id": "proj",
-            "status": "starting",
-            "access_url": None,
-        }
+        return_value=VmInfo(
+            instance_name="bioaf-worknode-1",
+            zone="us-central1-c",
+            status=ServiceState.STARTING,
+            access_url=None,
+            provider_details={"gcp_project_id": "proj"},
+        )
     )
 
     with patch(
@@ -311,13 +312,13 @@ async def test_launch_does_not_clobber_running_status_set_during_launch(
                 {"id": sid},
             )
             await poll_db.commit()
-        return {
-            "instance_name": f"bioaf-worknode-{sid}",
-            "zone": "us-central1-b",
-            "gcp_project_id": "proj",
-            "status": "starting",
-            "access_url": None,
-        }
+        return VmInfo(
+            instance_name=f"bioaf-worknode-{sid}",
+            zone="us-central1-b",
+            status=ServiceState.STARTING,
+            access_url=None,
+            provider_details={"gcp_project_id": "proj"},
+        )
 
     mock_adapter = MagicMock()
     mock_adapter.launch_vm = AsyncMock(side_effect=fake_launch)

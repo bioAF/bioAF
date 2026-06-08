@@ -13,7 +13,7 @@ import logging
 import zipfile
 from datetime import datetime, timezone
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.experiment import Experiment
@@ -253,32 +253,16 @@ async def _upload_zip_to_gcs(
     name: str,
     session: AsyncSession,
 ) -> str:
-    """Upload zip_bytes to the config_backups bucket and return a signed URL."""
-    from google.cloud import storage
-    from app.services.gcs_storage import GcsStorageService
+    """Upload zip_bytes to the config_backups store and return a 24h signed URL."""
+    from app.adapters.models import StorageStore
+    from app.adapters.registry import get_storage_adapter
 
-    result = await session.execute(text("SELECT value FROM platform_config WHERE key = 'config_backups_bucket_name'"))
-    row = result.fetchone()
-    if not row or not row[0] or row[0] == "null":
-        raise RuntimeError("config_backups_bucket_name not configured")
-
-    bucket_name = row[0]
-    credentials = await GcsStorageService.get_credentials(session)
-    client = storage.Client(credentials=credentials)
-
+    adapter = get_storage_adapter()
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    blob_path = f"exports/{org_id}/{ts}_{_safe_name(name)}.zip"
-
-    bucket = client.bucket(bucket_name)
-    blob = bucket.blob(blob_path)
-    blob.upload_from_string(zip_bytes, content_type="application/zip")
-
-    signed_url = blob.generate_signed_url(
-        expiration=86400,  # 24 hours
-        method="GET",
-        credentials=credentials,
-    )
-    return signed_url
+    key = f"exports/{org_id}/{ts}_{_safe_name(name)}.zip"
+    uri = await adapter.resolve_uri(StorageStore.CONFIG_BACKUPS, key)
+    await adapter.write_bytes(uri, zip_bytes, content_type="application/zip")
+    return await adapter.generate_signed_url(uri, method="GET", expiry_seconds=86400)
 
 
 # ---------------------------------------------------------------------------

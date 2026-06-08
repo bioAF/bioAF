@@ -16,7 +16,6 @@ from app.models.pipeline_run import PipelineRun
 from app.models.qc_dashboard import QCDashboard
 from app.services.audit_service import log_action
 from app.services.file_service import FileService
-from app.services.gcs_storage import GcsStorageService
 from app.services.qc.extractors.gcs_helpers import get_results_bucket
 from app.services.qc.resolver import resolve_template_for_run
 from app.services.qc.templates import get_template, scrnaseq as scrnaseq_template
@@ -161,23 +160,19 @@ class QCDashboardService:
             logger.warning("No results bucket configured, cannot extract metrics")
             return {}
 
-        credentials = await GcsStorageService.get_credentials(session)
-
         try:
             import json as _json
 
-            from google.cloud import storage
+            from app.adapters.models import StorageObjectNotFound
+            from app.adapters.registry import get_storage_adapter
 
-            client = storage.Client(credentials=credentials)
-            bucket = client.bucket(results_bucket)
             prefix = f"experiments/{run.experiment_id}/pipeline-runs/{run.id}/"
-
-            cache_blob = bucket.blob(f"{prefix}qc_metrics.json")
-            if cache_blob.exists():
-                return _json.loads(cache_blob.download_as_text())
-
-            logger.info("No qc_metrics.json found for custom pipeline run %d", run.id)
-            return {}
+            uri = f"gs://{results_bucket}/{prefix}qc_metrics.json"
+            try:
+                return _json.loads(await get_storage_adapter().read_text(uri))
+            except StorageObjectNotFound:
+                logger.info("No qc_metrics.json found for custom pipeline run %d", run.id)
+                return {}
         except Exception as e:
             logger.warning("Custom-pipeline metric extraction failed for run %d: %s", run.id, e)
             return {}
@@ -218,34 +213,30 @@ class QCDashboardService:
             return plots_meta
 
         try:
-            from google.cloud import storage
+            from app.adapters.registry import get_storage_adapter
 
-            credentials = await GcsStorageService.get_credentials(session)
-            client = storage.Client(credentials=credentials)
-            bucket = client.bucket(results_bucket)
             prefix = f"experiments/{run.experiment_id}/pipeline-runs/{run.id}/"
-
             plot_prefix = f"{prefix}multiqc/multiqc_plots/png/"
-            available: dict[str, "storage.Blob"] = {}
-            for blob in bucket.list_blobs(prefix=plot_prefix):
-                if blob.name.endswith(".png"):
-                    filename = blob.name.rsplit("/", 1)[-1]
-                    available[filename] = blob
+
+            objs = await get_storage_adapter().list_objects(f"gs://{results_bucket}/{plot_prefix}")
+            available: dict[str, object] = {}
+            for obj in objs:
+                if obj.storage_uri.endswith(".png"):
+                    filename = obj.storage_uri.rsplit("/", 1)[-1]
+                    available[filename] = obj
 
             for png_name, title, plot_type in scrnaseq_template.MULTIQC_PLOTS:
-                blob_obj = available.get(png_name)
-                if not blob_obj:
+                obj = available.get(png_name)
+                if not obj:
                     continue
-
-                gcs_uri = f"gs://{results_bucket}/{blob_obj.name}"
 
                 file = await FileService.create_file_record(
                     session,
                     org_id=org_id,
                     user_id=None,
                     filename=png_name,
-                    gcs_uri=gcs_uri,
-                    size_bytes=blob_obj.size,
+                    gcs_uri=obj.storage_uri,
+                    size_bytes=obj.size_bytes,
                     md5_checksum=None,
                     file_type="png",
                     tags=["qc_plot", plot_type],
@@ -255,10 +246,10 @@ class QCDashboardService:
                 )
                 plots_meta.append({"plot_type": plot_type, "title": title, "file_id": file.id})
 
-            logger.info("Collected %d plots from GCS for run %d", len(plots_meta), run.id)
+            logger.info("Collected %d plots from storage for run %d", len(plots_meta), run.id)
 
         except Exception as e:
-            logger.warning("Plot collection from GCS failed for run %d: %s", run.id, e)
+            logger.warning("Plot collection from storage failed for run %d: %s", run.id, e)
 
         return plots_meta
 

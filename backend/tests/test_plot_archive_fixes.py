@@ -126,16 +126,16 @@ async def test_platform_config_rejects_duplicate_keys(session):
 
 
 @pytest.mark.asyncio
-async def test_scan_and_index_uses_app_credentials(session):
-    """scan_and_index must use GcsStorageService.get_credentials, not bare
-    ADC, to authenticate with GCS."""
+async def test_scan_and_index_lists_through_storage_adapter(session, admin_user):
+    """scan_and_index must enumerate objects via the BAL storage adapter
+    (Phase 3), which owns credential resolution -- not a bare GCS client.
+
+    admin_user seeds an organization so the per-org scan loop actually runs.
+    """
     from app.services.plot_archive_service import PlotArchiveService
 
-    mock_creds = MagicMock()
-    mock_get_creds = AsyncMock(return_value=mock_creds)
-    mock_client_cls = MagicMock()
-    mock_bucket = mock_client_cls.return_value.bucket.return_value
-    mock_bucket.list_blobs.return_value = []
+    adapter = AsyncMock()
+    adapter.list_objects.return_value = []
 
     # Insert results_bucket_name so the scanner doesn't bail early
     await session.execute(
@@ -147,20 +147,13 @@ async def test_scan_and_index_uses_app_credentials(session):
     )
     await session.commit()
 
-    with (
-        patch("google.cloud.storage.Client", mock_client_cls),
-        patch(
-            "app.services.gcs_storage.GcsStorageService.get_credentials",
-            mock_get_creds,
-        ),
-    ):
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         await PlotArchiveService.scan_and_index(session)
 
-    # Verify get_credentials was called
-    mock_get_creds.assert_called_once()
-
-    # Verify Client was instantiated with those credentials
-    mock_client_cls.assert_called_once_with(credentials=mock_creds)
+    # Listing routed through the adapter against the configured results bucket.
+    adapter.list_objects.assert_awaited()
+    called_uri = adapter.list_objects.call_args.args[0]
+    assert called_uri == "gs://test-results-bucket/"
 
 
 # -- File content endpoint: SVG content type --
@@ -170,18 +163,10 @@ async def test_scan_and_index_uses_app_credentials(session):
 async def test_content_endpoint_returns_svg_content_type(client, admin_token, sample_svg_file):
     """GET /api/files/{id}/content for an SVG file must return
     Content-Type: image/svg+xml."""
-    mock_client_cls = MagicMock()
-    mock_blob = mock_client_cls.return_value.bucket.return_value.blob.return_value
-    mock_blob.download_as_bytes.return_value = b"<svg></svg>"
+    adapter = AsyncMock()
+    adapter.read_bytes.return_value = b"<svg></svg>"
 
-    with (
-        patch("google.cloud.storage.Client", mock_client_cls),
-        patch(
-            "app.services.gcs_storage.GcsStorageService.get_credentials",
-            new_callable=AsyncMock,
-            return_value=None,
-        ),
-    ):
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         resp = await client.get(
             f"/api/files/{sample_svg_file.id}/content",
             headers={"Authorization": f"Bearer {admin_token}"},
@@ -198,18 +183,10 @@ async def test_content_endpoint_returns_svg_content_type(client, admin_token, sa
 async def test_content_endpoint_returns_pdf_content_type(client, admin_token, sample_pdf_file):
     """GET /api/files/{id}/content for a PDF file must return
     Content-Type: application/pdf."""
-    mock_client_cls = MagicMock()
-    mock_blob = mock_client_cls.return_value.bucket.return_value.blob.return_value
-    mock_blob.download_as_bytes.return_value = b"%PDF-1.4 fake"
+    adapter = AsyncMock()
+    adapter.read_bytes.return_value = b"%PDF-1.4 fake"
 
-    with (
-        patch("google.cloud.storage.Client", mock_client_cls),
-        patch(
-            "app.services.gcs_storage.GcsStorageService.get_credentials",
-            new_callable=AsyncMock,
-            return_value=None,
-        ),
-    ):
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         resp = await client.get(
             f"/api/files/{sample_pdf_file.id}/content",
             headers={"Authorization": f"Bearer {admin_token}"},
@@ -330,18 +307,10 @@ async def test_thumbnail_content_endpoint_returns_png(client, admin_token, sessi
     await session.flush()
     await session.commit()
 
-    mock_client_cls = MagicMock()
-    mock_blob = mock_client_cls.return_value.bucket.return_value.blob.return_value
-    mock_blob.download_as_bytes.return_value = b"\x89PNG fake thumbnail"
+    adapter = AsyncMock()
+    adapter.read_bytes.return_value = b"\x89PNG fake thumbnail"
 
-    with (
-        patch("google.cloud.storage.Client", mock_client_cls),
-        patch(
-            "app.services.gcs_storage.GcsStorageService.get_credentials",
-            new_callable=AsyncMock,
-            return_value=None,
-        ),
-    ):
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         resp = await client.get(
             f"/api/plots/{plot.id}/thumbnail/content",
             headers={"Authorization": f"Bearer {admin_token}"},

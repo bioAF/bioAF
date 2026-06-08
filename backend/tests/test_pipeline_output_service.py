@@ -1,6 +1,6 @@
 """Tests for PipelineOutputService - registers pipeline outputs as File records."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -56,6 +56,7 @@ async def pipeline_run(session, admin_user, experiment, samples):
         pipeline_version="2.7.1",
         status="completed",
         k8s_job_name="nf-scrnaseq-abc123",
+        compute_job_ref="nf-scrnaseq-abc123",
     )
     session.add(run)
     await session.flush()
@@ -205,6 +206,7 @@ async def project_scoped_run(session, admin_user, project):
         pipeline_version="1",
         status="completed",
         k8s_job_name="custom-projscope-xyz",
+        compute_job_ref="custom-projscope-xyz",
     )
     session.add(run)
     await session.flush()
@@ -270,16 +272,8 @@ async def test_register_outputs_experiment_scoped_does_not_set_project_id(sessio
 @pytest.mark.asyncio
 async def test_register_nextflow_metadata_project_scoped(session, project_scoped_run, project):
     """Nextflow metadata for project-scoped runs is registered with project_id, not experiment_id."""
-    mock_bucket = MagicMock()
-    mock_bucket.blob.return_value = _mock_blob(exists=True, size=8000)
-
-    mock_client = MagicMock()
-    mock_client.bucket.return_value = mock_bucket
-
-    with patch("app.services.pipeline_output_service.gcs_storage") as mock_gcs:
-        mock_gcs.Client.return_value = mock_client
-
-        files = await PipelineOutputService.register_nextflow_metadata(session, project_scoped_run, "bioaf-raw-testorg")
+    with _mock_storage_adapter_metadata(exists=True, size=8000):
+        files = await PipelineOutputService.register_nextflow_metadata(session, project_scoped_run)
         await session.commit()
 
     assert len(files) == 2
@@ -320,26 +314,29 @@ async def test_register_outputs_no_samples(session, admin_user, experiment):
 # --- Nextflow metadata registration ---
 
 
-def _mock_blob(exists: bool = True, size: int = 1000) -> MagicMock:
-    blob = MagicMock()
-    blob.exists.return_value = exists
-    blob.size = size
-    return blob
+def _mock_storage_adapter_metadata(*, exists: bool = True, size: int = 1000):
+    """Patch the storage adapter so get_object_metadata reports object presence.
+
+    The metadata check routes through the BAL storage adapter (Phase 3): an
+    existing object returns ObjectMetadata(size_bytes=...); a missing one
+    raises StorageObjectNotFound. The report/trace URIs are resolved via the
+    adapter's RAW store (Phase 5), so resolve_uri is stubbed to the raw bucket."""
+    from app.adapters.models import ObjectMetadata, StorageObjectNotFound
+
+    adapter = AsyncMock()
+    adapter.resolve_uri.side_effect = lambda store, key: f"gs://bioaf-raw-testorg/{key}"
+    if exists:
+        adapter.get_object_metadata.side_effect = lambda uri: ObjectMetadata(uri=uri, size_bytes=size)
+    else:
+        adapter.get_object_metadata.side_effect = StorageObjectNotFound("missing")
+    return patch("app.adapters.registry.get_storage_adapter", return_value=adapter)
 
 
 @pytest.mark.asyncio
 async def test_register_nextflow_metadata_creates_records(session, pipeline_run, experiment):
-    """Report and trace files are registered when blobs exist in GCS."""
-    mock_bucket = MagicMock()
-    mock_bucket.blob.return_value = _mock_blob(exists=True, size=5000)
-
-    mock_client = MagicMock()
-    mock_client.bucket.return_value = mock_bucket
-
-    with patch("app.services.pipeline_output_service.gcs_storage") as mock_gcs:
-        mock_gcs.Client.return_value = mock_client
-
-        files = await PipelineOutputService.register_nextflow_metadata(session, pipeline_run, "bioaf-raw-testorg")
+    """Report and trace files are registered when objects exist in storage."""
+    with _mock_storage_adapter_metadata(exists=True, size=5000):
+        files = await PipelineOutputService.register_nextflow_metadata(session, pipeline_run)
         await session.commit()
 
     assert len(files) == 2
@@ -356,18 +353,42 @@ async def test_register_nextflow_metadata_creates_records(session, pipeline_run,
 
 
 @pytest.mark.asyncio
+async def test_register_nextflow_metadata_resolves_raw_store(session, pipeline_run):
+    """Report/trace URIs are resolved via the storage adapter's RAW store, not a
+    compute-adapter bucket name (Phase 5: get_raw_bucket_name retired)."""
+    from app.adapters.models import StorageStore
+
+    with _mock_storage_adapter_metadata(exists=True, size=100) as p:
+        adapter = p.return_value
+        await PipelineOutputService.register_nextflow_metadata(session, pipeline_run)
+        await session.commit()
+
+    stores = {call.args[0] for call in adapter.resolve_uri.call_args_list}
+    keys = {call.args[1] for call in adapter.resolve_uri.call_args_list}
+    assert stores == {StorageStore.RAW}
+    assert keys == {
+        f"nextflow-reports/{pipeline_run.k8s_job_name}/report.html",
+        f"nextflow-traces/{pipeline_run.k8s_job_name}/trace.tsv",
+    }
+
+
+@pytest.mark.asyncio
+async def test_register_nextflow_metadata_skips_when_raw_store_unconfigured(session, pipeline_run):
+    """No RAW store configured (resolve_uri raises ValueError) -> no metadata."""
+    from app.adapters.models import ObjectMetadata  # noqa: F401
+
+    adapter = AsyncMock()
+    adapter.resolve_uri.side_effect = ValueError("No bucket configured for store 'raw'")
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        files = await PipelineOutputService.register_nextflow_metadata(session, pipeline_run)
+    assert files == []
+
+
+@pytest.mark.asyncio
 async def test_register_nextflow_metadata_skips_missing_blobs(session, pipeline_run):
-    """No records created when blobs do not exist."""
-    mock_bucket = MagicMock()
-    mock_bucket.blob.return_value = _mock_blob(exists=False)
-
-    mock_client = MagicMock()
-    mock_client.bucket.return_value = mock_bucket
-
-    with patch("app.services.pipeline_output_service.gcs_storage") as mock_gcs:
-        mock_gcs.Client.return_value = mock_client
-
-        files = await PipelineOutputService.register_nextflow_metadata(session, pipeline_run, "bioaf-raw-testorg")
+    """No records created when objects do not exist."""
+    with _mock_storage_adapter_metadata(exists=False):
+        files = await PipelineOutputService.register_nextflow_metadata(session, pipeline_run)
 
     assert files == []
 
@@ -382,10 +403,11 @@ async def test_register_nextflow_metadata_skips_without_k8s_job(session, admin_u
         pipeline_name="nf-core/scrnaseq",
         status="completed",
         k8s_job_name=None,
+        compute_job_ref=None,
     )
     session.add(run)
     await session.flush()
     await session.commit()
 
-    files = await PipelineOutputService.register_nextflow_metadata(session, run, "bioaf-raw-testorg")
+    files = await PipelineOutputService.register_nextflow_metadata(session, run)
     assert files == []

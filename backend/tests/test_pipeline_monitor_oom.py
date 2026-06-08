@@ -6,6 +6,8 @@ message, and emit a PIPELINE_OOM event.
 """
 
 import pytest
+
+from app.adapters.compute.kubernetes import _job_progress_from_dict, _job_status_from_dict
 import pytest_asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
@@ -36,6 +38,7 @@ async def k8s_failed_oom_run(session, admin_user):
         pipeline_version="2.7.1",
         status="running",
         k8s_job_name="bioaf-pipeline-oom-1",
+        compute_job_ref="bioaf-pipeline-oom-1",
         k8s_namespace="bioaf-pipelines",
         started_at=datetime.now(timezone.utc),
     )
@@ -49,19 +52,21 @@ async def k8s_failed_oom_run(session, admin_user):
 async def test_oom_detection_sets_failure_reason(session, k8s_failed_oom_run):
     """When K8s reports OOMKilled, failure_reason should be 'oom'."""
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {
-        "status": "failed",
-        "pod_name": "bioaf-pipeline-oom-1-abc",
-        "node_name": "gke-node-1",
-        "termination_reasons": [
-            {
-                "container": "pipeline",
-                "exit_code": 137,
-                "reason": "OOMKilled",
-            }
-        ],
-    }
-    mock_compute.get_job_progress.return_value = {"percent_complete": 0.0, "processes": []}
+    mock_compute.get_job_status.return_value = _job_status_from_dict(
+        {
+            "status": "failed",
+            "pod_name": "bioaf-pipeline-oom-1-abc",
+            "node_name": "gke-node-1",
+            "termination_reasons": [
+                {
+                    "container": "pipeline",
+                    "exit_code": 137,
+                    "reason": "OOMKilled",
+                }
+            ],
+        }
+    )
+    mock_compute.get_job_progress.return_value = _job_progress_from_dict({"percent_complete": 0.0, "processes": []})
     mock_compute.get_job_logs.return_value = "STAR genome generate failed"
 
     mock_storage = AsyncMock()
@@ -89,19 +94,21 @@ async def test_oom_detection_sets_failure_reason(session, k8s_failed_oom_run):
 async def test_oom_detection_emits_pipeline_oom_event(session, k8s_failed_oom_run):
     """OOM failure should emit a PIPELINE_OOM event through the event bus."""
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {
-        "status": "failed",
-        "pod_name": "bioaf-pipeline-oom-1-abc",
-        "node_name": "gke-node-1",
-        "termination_reasons": [
-            {
-                "container": "pipeline",
-                "exit_code": 137,
-                "reason": "OOMKilled",
-            }
-        ],
-    }
-    mock_compute.get_job_progress.return_value = {"percent_complete": 0.0, "processes": []}
+    mock_compute.get_job_status.return_value = _job_status_from_dict(
+        {
+            "status": "failed",
+            "pod_name": "bioaf-pipeline-oom-1-abc",
+            "node_name": "gke-node-1",
+            "termination_reasons": [
+                {
+                    "container": "pipeline",
+                    "exit_code": 137,
+                    "reason": "OOMKilled",
+                }
+            ],
+        }
+    )
+    mock_compute.get_job_progress.return_value = _job_progress_from_dict({"percent_complete": 0.0, "processes": []})
     mock_compute.get_job_logs.return_value = "OOM killed"
 
     mock_storage = AsyncMock()
@@ -134,19 +141,21 @@ async def test_oom_detection_emits_pipeline_oom_event(session, k8s_failed_oom_ru
 async def test_non_oom_failure_does_not_set_oom_reason(session, k8s_failed_oom_run):
     """A regular task failure (no OOMKilled) should not set failure_reason='oom'."""
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = {
-        "status": "failed",
-        "pod_name": "bioaf-pipeline-oom-1-abc",
-        "node_name": "gke-node-1",
-        "termination_reasons": [
-            {
-                "container": "pipeline",
-                "exit_code": 1,
-                "reason": "Error",
-            }
-        ],
-    }
-    mock_compute.get_job_progress.return_value = {"percent_complete": 0.0, "processes": []}
+    mock_compute.get_job_status.return_value = _job_status_from_dict(
+        {
+            "status": "failed",
+            "pod_name": "bioaf-pipeline-oom-1-abc",
+            "node_name": "gke-node-1",
+            "termination_reasons": [
+                {
+                    "container": "pipeline",
+                    "exit_code": 1,
+                    "reason": "Error",
+                }
+            ],
+        }
+    )
+    mock_compute.get_job_progress.return_value = _job_progress_from_dict({"percent_complete": 0.0, "processes": []})
     mock_compute.get_job_logs.return_value = "Process exited with error"
 
     mock_storage = AsyncMock()

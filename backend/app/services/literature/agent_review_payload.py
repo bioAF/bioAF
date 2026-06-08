@@ -193,23 +193,10 @@ async def _load_full_text(session: AsyncSession, paper: LiteraturePaper) -> str 
     when the bucket is unconfigured or the blob cannot be read."""
     if not paper.has_full_text or not paper.extracted_text_uri:
         return None
-    import asyncio
-
-    from app.services.gcs_storage import GcsStorageService
+    from app.adapters.registry import get_storage_adapter
 
     try:
-        credentials = await GcsStorageService.get_credentials(session)
-        from google.cloud import storage as gcs
-
-        loop = asyncio.get_running_loop()
-
-        def _download() -> str:
-            client = gcs.Client(credentials=credentials)
-            parts = paper.extracted_text_uri.replace("gs://", "").split("/", 1)
-            blob = client.bucket(parts[0]).blob(parts[1])
-            return blob.download_as_text()
-
-        return await loop.run_in_executor(None, _download)
+        return await get_storage_adapter().read_text(paper.extracted_text_uri)
     except Exception:
         return None
 

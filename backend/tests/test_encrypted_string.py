@@ -13,7 +13,7 @@ import pytest_asyncio
 from sqlalchemy import Integer, Text, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from app.services import encryption_service
+from app.platform import encryption_service
 from app.types import EncryptedString
 
 

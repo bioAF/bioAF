@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { api } from "@/lib/api";
+import { useCapabilities } from "@/hooks/useCapabilities";
 import { suggestFilename, splitExtension, todayDateStr } from "@/lib/fileNaming";
 import type {
   ExperimentListResponse,
@@ -43,6 +44,7 @@ interface FileItem {
 }
 
 export default function DataUploadPage() {
+  const { has } = useCapabilities();
   const [items, setItems] = useState<FileItem[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -252,8 +254,11 @@ export default function DataUploadPage() {
           ? undefined // keep original (don't pass override)
           : item.suggestedName ?? undefined;
 
+      // Signed direct-to-storage upload when the backend supports it; otherwise
+      // the server-proxied path (e.g. NFS, signed_url_upload=False).
+      const upload = has("signed_url_upload") ? api.uploadSigned : api.uploadProxied;
       try {
-        await api.uploadSigned<FileResponse>(item.file, {
+        await upload<FileResponse>(item.file, {
           ...opts,
           filename: useFilename,
           onProgress: (pct) => setItemState(i, { progress: pct }),

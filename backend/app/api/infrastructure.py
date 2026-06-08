@@ -26,21 +26,21 @@ async def get_storage_metrics(
     metrics = await storage_adapter.get_storage_metrics()
 
     buckets = []
-    for bucket in metrics.get("buckets", []):
+    for bucket in metrics.buckets:
         buckets.append(
             BucketMetrics(
-                name=bucket.get("name", "unknown"),
-                size_gb=bucket.get("size_gb", 0.0),
-                object_count=bucket.get("object_count", 0),
-                storage_class=bucket.get("storage_class", "STANDARD"),
-                cost_monthly_usd=bucket.get("cost_monthly_usd", 0.0),
+                name=bucket.name or "unknown",
+                size_gb=bucket.size_gb or 0.0,
+                object_count=bucket.object_count or 0,
+                storage_class=bucket.storage_class or "STANDARD",
+                cost_monthly_usd=bucket.cost_monthly_usd or 0.0,
             )
         )
 
     return InfraStorageMetricsResponse(
         buckets=buckets,
-        total_size_gb=metrics.get("total_size_gb", 0.0),
-        total_cost_monthly_usd=metrics.get("total_cost_monthly_usd", 0.0),
+        total_size_gb=metrics.total_size_gb,
+        total_cost_monthly_usd=metrics.total_cost_monthly_usd,
     )
 
 

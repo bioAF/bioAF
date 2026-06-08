@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.services.credential_injector import GCPCredentialInjector, load_gcp_credentials
+from app.platform.credential_injector import GCPCredentialInjector, load_gcp_credentials
 
 
 # ---------------------------------------------------------------------------
@@ -135,10 +135,10 @@ def test_load_gcp_credentials_vm_default_uses_bootstrap_sa_email():
     fake_source = MagicMock(name="adc_source_credentials")
     with (
         patch(
-            "app.services.credential_injector._google_auth.default",
+            "app.platform.credential_injector._google_auth.default",
             return_value=(fake_source, "my-project"),
         ),
-        patch("app.services.credential_injector._impersonated_credentials.Credentials") as imp_cls,
+        patch("app.platform.credential_injector._impersonated_credentials.Credentials") as imp_cls,
     ):
         load_gcp_credentials(config)
         imp_cls.assert_called_once()
@@ -156,10 +156,10 @@ def test_load_gcp_credentials_vm_default_falls_back_to_service_account_email():
     fake_source = MagicMock(name="adc_source_credentials")
     with (
         patch(
-            "app.services.credential_injector._google_auth.default",
+            "app.platform.credential_injector._google_auth.default",
             return_value=(fake_source, "my-project"),
         ),
-        patch("app.services.credential_injector._impersonated_credentials.Credentials") as imp_cls,
+        patch("app.platform.credential_injector._impersonated_credentials.Credentials") as imp_cls,
     ):
         load_gcp_credentials(config)
         imp_cls.assert_called_once()
@@ -176,10 +176,10 @@ def test_load_gcp_credentials_vm_default_prefers_bootstrap_over_legacy():
     fake_source = MagicMock(name="adc_source_credentials")
     with (
         patch(
-            "app.services.credential_injector._google_auth.default",
+            "app.platform.credential_injector._google_auth.default",
             return_value=(fake_source, "my-project"),
         ),
-        patch("app.services.credential_injector._impersonated_credentials.Credentials") as imp_cls,
+        patch("app.platform.credential_injector._impersonated_credentials.Credentials") as imp_cls,
     ):
         load_gcp_credentials(config)
         assert imp_cls.call_args.kwargs["target_principal"] == "bioaf-bootstrap@my-project.iam.gserviceaccount.com"
@@ -191,10 +191,10 @@ def test_load_gcp_credentials_vm_default_no_emails_returns_raw_adc():
     fake_source = MagicMock(name="adc_source_credentials")
     with (
         patch(
-            "app.services.credential_injector._google_auth.default",
+            "app.platform.credential_injector._google_auth.default",
             return_value=(fake_source, "my-project"),
         ),
-        patch("app.services.credential_injector._impersonated_credentials.Credentials") as imp_cls,
+        patch("app.platform.credential_injector._impersonated_credentials.Credentials") as imp_cls,
     ):
         result = load_gcp_credentials(config)
         imp_cls.assert_not_called()

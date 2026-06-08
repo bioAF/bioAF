@@ -112,24 +112,24 @@ class TestComputeAdapterLocalMode:
         assert isinstance(adapter, KubernetesComputeProvider)
 
         result = await adapter.submit_job({"pipeline": "test", "input_files": ["a.fq"]})
-        assert result["status"] == "queued"
-        job_id = result["job_id"]
+        assert result.status == "queued"
+        job_id = result.job_id
 
         cancel_result = await adapter.cancel_job(job_id)
-        assert cancel_result["status"] == "cancelled"
+        assert cancel_result.status == "cancelled"
 
     @pytest.mark.asyncio
     async def test_adapter_cluster_status(self):
         adapter = registry.get_compute_adapter()
         status = await adapter.get_cluster_status()
-        assert status["controller_status"] == "running"
-        assert len(status["node_pools"]) == 3
+        assert status.controller_status == "running"
+        assert len(status.node_pools) == 3
 
     @pytest.mark.asyncio
     async def test_adapter_cluster_metrics(self):
         adapter = registry.get_compute_adapter()
         metrics = await adapter.get_cluster_metrics()
-        assert "cost_burn_rate_hourly" in metrics
+        assert metrics.cost_burn_rate_hourly is not None
 
 
 class TestStorageAdapterLocalMode:
@@ -138,7 +138,7 @@ class TestStorageAdapterLocalMode:
         adapter = registry.get_storage_adapter()
         assert isinstance(adapter, GcsStorageProvider)
         metrics = await adapter.get_storage_metrics()
-        assert "total_size_gb" in metrics
+        assert metrics.total_size_gb is not None
 
 
 class TestNotebookAdapterLocalMode:
@@ -148,7 +148,7 @@ class TestNotebookAdapterLocalMode:
         assert isinstance(adapter, KubernetesNotebookProvider)
 
         result = await adapter.launch_session({"session_type": "jupyter"})
-        assert result["status"] == "running"
+        assert result.status == "running"
 
-        term = await adapter.terminate_session(result["session_id"])
-        assert term["status"] == "stopped"
+        term = await adapter.terminate_session(result.session_id)
+        assert term.status == "stopped"

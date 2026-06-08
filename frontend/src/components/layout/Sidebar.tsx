@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useCapabilities, type CapabilityFlag } from "@/hooks/useCapabilities";
 import { useComponents } from "@/hooks/useComponents";
 import { useBackendReady } from "@/hooks/useBackendReady";
 import { navConfig, NavSection, NavChild, ComponentGate, PermissionRef, isChildActive } from "@/lib/navConfig";
@@ -127,6 +128,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const { ready: backendReady } = useBackendReady();
   const { canAccess, roleName, loading } = usePermissions();
+  const { has: hasCapability } = useCapabilities();
   const { components, loading: componentsLoading } = useComponents();
 
   const passesComponentGate = useCallback(
@@ -162,7 +164,20 @@ export function Sidebar() {
     [canAccess],
   );
 
-  // Filter sections and children based on permissions and component gates
+  // A nav item passes its capability gate when the active backend declares the
+  // required BAL capability (or the item has none). This hides entry points the
+  // backend cannot serve (e.g. cellxgene / work nodes on a SLURM/NFS stack),
+  // distinct from componentGate availability.
+  const passesCapability = useCallback(
+    (item: { capability?: string }): boolean => {
+      if (!item.capability) return true;
+      return hasCapability(item.capability as CapabilityFlag);
+    },
+    [hasCapability],
+  );
+
+  // Filter sections and children based on permissions, component gates, and
+  // backend capabilities
   const visibleSections = useMemo(() => {
     if (loading) return [];
     return navConfig
@@ -170,9 +185,13 @@ export function Sidebar() {
         if (section.adminOnly && roleName !== "admin") return false;
         if (!passesPermission(section)) return false;
         if (!passesComponentGate(section.componentGate)) return false;
+        if (!passesCapability(section)) return false;
         if (section.children) {
           return section.children.some(
-            (child) => passesPermission(child) && passesComponentGate(child.componentGate),
+            (child) =>
+              passesPermission(child) &&
+              passesComponentGate(child.componentGate) &&
+              passesCapability(child),
           );
         }
         return true;
@@ -180,11 +199,14 @@ export function Sidebar() {
       .map((section) => {
         if (!section.children) return section;
         const filteredChildren = section.children.filter(
-          (child) => passesPermission(child) && passesComponentGate(child.componentGate),
+          (child) =>
+            passesPermission(child) &&
+            passesComponentGate(child.componentGate) &&
+            passesCapability(child),
         );
         return { ...section, children: filteredChildren };
       });
-  }, [loading, roleName, passesPermission, passesComponentGate]);
+  }, [loading, roleName, passesPermission, passesComponentGate, passesCapability]);
 
   // Initialize expanded state: auto-expand the section containing active path.
   // Only one section can be expanded at a time.

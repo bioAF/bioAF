@@ -176,13 +176,20 @@ class PipelineRunService:
 
             run.status = "running"
             run.started_at = datetime.now(timezone.utc)
-            run.slurm_job_id = job_result.get("job_id", "")
-            run.k8s_job_name = job_result.get("job_id", "")
-            run.k8s_namespace = job_result.get("namespace", "")
+            run.slurm_job_id = job_result.job_id
+            run.k8s_job_name = job_result.job_id
+            run.k8s_namespace = job_result.provider_details.get("namespace", "")
+            # Backend-neutral handle + provider detail (BAL Phase 4); dual-written
+            # alongside k8s_* until the old columns are dropped.
+            run.compute_job_ref = job_result.job_id
+            run.provider_metadata = {
+                k: v
+                for k, v in {"job_name": job_result.job_id, **(job_result.provider_details or {})}.items()
+                if v is not None
+            }
 
-            estimated_cost = job_result.get("estimated_cost", {})
-            if estimated_cost:
-                run.cost_estimate = estimated_cost.get("estimated_cost_usd")
+            if job_result.estimated_cost:
+                run.cost_estimate = job_result.estimated_cost.estimated_cost_usd
 
             import asyncio
 
@@ -398,7 +405,7 @@ class PipelineRunService:
         old_status = run.status
 
         # Persist logs before killing the pod -- once deleted they're gone
-        job_id = run.k8s_job_name or run.slurm_job_id
+        job_id = run.compute_job_ref or run.slurm_job_id
         if job_id:
             try:
                 compute_adapter = get_compute_adapter()

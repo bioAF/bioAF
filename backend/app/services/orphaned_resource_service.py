@@ -194,13 +194,12 @@ class OrphanedResourceService:
         session: AsyncSession,
         resource: OrphanedResource,
     ) -> None:
-        """Delete a GCP service account using the SA credentials."""
-        from google.cloud import iam_admin_v1
+        """Delete a service account using the SA credentials."""
+        from app.adapters.iam import create_iam_provider
 
         credentials = await _get_gke_credentials(session)
-        client = iam_admin_v1.IAMClient(credentials=credentials) if credentials else iam_admin_v1.IAMClient()
-        sa_name = f"projects/{resource.gcp_project_id}/serviceAccounts/{resource.resource_name}@{resource.gcp_project_id}.iam.gserviceaccount.com"
-        client.delete_service_account(name=sa_name)
+        provider = create_iam_provider(credentials=credentials)
+        provider.delete_service_account(resource.gcp_project_id, resource.resource_name)
 
     @staticmethod
     async def dismiss_resource(
@@ -315,12 +314,12 @@ class OrphanedResourceService:
         # Scan IAM service accounts created by the compute module
         _COMPUTE_SA_IDS = {"bioaf-notebook-runner"}
         try:
-            from google.cloud import iam_admin_v1
+            from app.adapters.iam import create_iam_provider
 
-            iam_client = iam_admin_v1.IAMClient(credentials=credentials) if credentials else iam_admin_v1.IAMClient()
-            sa_list = iam_client.list_service_accounts(name=f"projects/{project_id}")
+            provider = create_iam_provider(credentials=credentials)
+            sa_list = provider.list_service_accounts(project_id)
             for sa in sa_list:
-                sa_id = sa.email.split("@")[0]
+                sa_id = sa.account_id
                 if sa_id not in _COMPUTE_SA_IDS:
                     continue
                 # Only orphaned if no compute stack is deployed

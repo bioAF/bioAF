@@ -60,6 +60,9 @@ async def initiate_upload(
     current_user: dict = require_permission("files", "upload"),
     session: AsyncSession = Depends(get_session),
 ):
+    from app.adapters.registry import require_capability
+
+    require_capability("signed_url_upload")
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
@@ -101,6 +104,9 @@ async def complete_upload(
 async def simple_upload(
     file: UploadFile = FastAPIFile(...),
     experiment_id: int | None = Query(None),
+    project_id: int | None = Query(None),
+    sample_ids: list[int] | None = Query(None),
+    is_global: bool = Query(False),
     current_user: dict = require_permission("files", "upload"),
     session: AsyncSession = Depends(get_session),
 ):
@@ -115,7 +121,10 @@ async def simple_upload(
             file.filename or "unknown",
             file.file,
             size_bytes=file.size,
+            project_id=project_id,
             experiment_id=experiment_id,
+            sample_ids=sample_ids,
+            is_global=is_global,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -365,16 +374,9 @@ async def download_file(
 
     # Generate signed download URL
     try:
-        from google.cloud import storage as gcs_storage
+        from app.adapters.registry import get_storage_adapter
 
-        from app.services.gcs_storage import GcsStorageService
-
-        credentials = await GcsStorageService.get_credentials(session)
-        client = gcs_storage.Client(credentials=credentials)
-        parts = file.gcs_uri.replace("gs://", "").split("/", 1)
-        bucket = client.bucket(parts[0])
-        blob = bucket.blob(parts[1])
-        url = blob.generate_signed_url(version="v4", expiration=3600, method="GET")
+        url = await get_storage_adapter().generate_signed_url(file.gcs_uri, method="GET", expiry_seconds=3600)
     except Exception:
         raise HTTPException(502, "Could not generate download URL")
 
@@ -421,16 +423,9 @@ async def file_content(
         raise HTTPException(410, "File storage has been deleted")
 
     try:
-        from google.cloud import storage as gcs_storage
+        from app.adapters.registry import get_storage_adapter
 
-        from app.services.gcs_storage import GcsStorageService
-
-        credentials = await GcsStorageService.get_credentials(session)
-        client = gcs_storage.Client(credentials=credentials)
-        parts = file.gcs_uri.replace("gs://", "").split("/", 1)
-        bucket = client.bucket(parts[0])
-        blob = bucket.blob(parts[1])
-        data = blob.download_as_bytes()
+        data = await get_storage_adapter().read_bytes(file.gcs_uri)
 
         content_type = "application/octet-stream"
         if file.filename.endswith(".png"):

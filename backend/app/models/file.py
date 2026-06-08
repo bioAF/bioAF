@@ -5,6 +5,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.models._storage_uri_sync import register_storage_uri_sync
 
 
 class File(Base):
@@ -12,7 +13,12 @@ class File(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False)
+    # Opaque object-store URI. Expand/contract rename (BAL Phase 4): storage_uri
+    # is the backend-neutral column being introduced to replace gcs_uri. Both are
+    # real columns and kept in sync (see _storage_uri_sync) until a later
+    # migration drops gcs_uri; gcs_uri stays NOT NULL during the transition.
     gcs_uri: Mapped[str] = mapped_column(String(1000), nullable=False)
+    storage_uri: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     filename: Mapped[str] = mapped_column(String(500), nullable=False)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     md5_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -49,3 +55,6 @@ class File(Base):
     sequencing_batch = relationship("SequencingBatch", back_populates="files")
     consumed_by_runs = relationship("PipelineRunInputFile", cascade="all, delete-orphan", passive_deletes=True)
     notebook_sessions = relationship("NotebookSessionFile", foreign_keys="NotebookSessionFile.file_id")
+
+
+register_storage_uri_sync(File)

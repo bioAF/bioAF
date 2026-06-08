@@ -91,7 +91,7 @@ class StorageService:
         has unconditioned roles/storage.admin), service_account.Credentials in
         legacy mode, or None on failure (caller falls back gracefully).
         """
-        from app.services import credential_injector
+        from app.platform import credential_injector
 
         rows = await session.execute(
             text(

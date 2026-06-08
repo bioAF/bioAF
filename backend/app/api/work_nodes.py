@@ -134,6 +134,9 @@ async def launch_work_node(
     current_user: dict = require_permission("work_nodes", "launch"),
     session: AsyncSession = Depends(get_session),
 ):
+    from app.adapters.registry import require_capability
+
+    require_capability("work_nodes")
     user_id = int(current_user["sub"])
     org_id = int(current_user["org_id"])
 

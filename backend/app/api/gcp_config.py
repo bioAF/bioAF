@@ -11,7 +11,7 @@ from app.database import get_session
 from app.schemas.gcp_config import GCPConfigResponse, GCPConfigUpdate, GCPValidationResult
 from app.services import audit_service
 from app.services.gcp_config import validate_gcp_credentials
-from app.services.platform_config_service import PlatformConfigService
+from app.platform.platform_config_service import PlatformConfigService
 
 router = APIRouter(prefix="/api/v1/settings/gcp", tags=["gcp_config"])
 

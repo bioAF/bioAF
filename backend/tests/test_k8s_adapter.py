@@ -60,19 +60,19 @@ async def test_k8s_adapter_get_cluster_status_with_mock():
     ):
         status = await provider.get_cluster_status()
 
-    assert status["controller_status"] == "running"
-    assert status["health"] == "healthy"
-    assert len(status["node_pools"]) == 2
+    assert status.controller_status == "running"
+    assert status.health == "healthy"
+    assert len(status.node_pools) == 2
 
-    pipeline = next(p for p in status["node_pools"] if p["name"] == "bioaf-pipelines")
-    assert pipeline["machine_type"] == "n2-highmem-8"
-    assert pipeline["max_nodes"] == 20
-    assert pipeline["spot"] is True
+    pipeline = next(p for p in status.node_pools if p.name == "bioaf-pipelines")
+    assert pipeline.machine_type == "n2-highmem-8"
+    assert pipeline.max_nodes == 20
+    assert pipeline.spot is True
 
-    interactive = next(p for p in status["node_pools"] if p["name"] == "bioaf-interactive")
-    assert interactive["machine_type"] == "n2-standard-4"
-    assert interactive["max_nodes"] == 5
-    assert interactive["spot"] is False
+    interactive = next(p for p in status.node_pools if p.name == "bioaf-interactive")
+    assert interactive.machine_type == "n2-standard-4"
+    assert interactive.max_nodes == 5
+    assert interactive.spot is False
 
 
 @pytest.mark.asyncio
@@ -107,7 +107,7 @@ async def test_k8s_adapter_get_cluster_metrics_with_mock():
     ):
         metrics = await provider.get_cluster_metrics()
 
-    assert "cpu_utilization_pct" in metrics
-    assert "memory_utilization_pct" in metrics
-    assert "cost_burn_rate_hourly" in metrics
-    assert "node_pools" in metrics
+    assert metrics.cpu_utilization_pct is not None
+    assert metrics.memory_utilization_pct is not None
+    assert metrics.cost_burn_rate_hourly is not None
+    assert metrics.node_pools is not None

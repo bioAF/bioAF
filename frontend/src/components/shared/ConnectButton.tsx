@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth";
+import { useCapabilities } from "@/hooks/useCapabilities";
 
 interface ConnectButtonProps {
   targetType: "pipeline_run" | "session";
@@ -22,12 +23,20 @@ interface ConnectionResponse {
 export function ConnectButton({ targetType, targetId, disabled = false }: ConnectButtonProps) {
   const user = getCurrentUser();
   const role = user?.role_name as string;
+  const { has } = useCapabilities();
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [connection, setConnection] = useState<ConnectionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
+
+  // Hide when the active compute backend cannot open an interactive shell
+  // (e.g. a SLURM partition with no exec). A backend without ssh_exec would
+  // 500 on /connect, so this prevents a dead button.
+  if (!has("ssh_exec")) {
+    return null;
+  }
 
   // Only render for comp_bio and admin roles
   if (role !== "admin" && role !== "comp_bio") {

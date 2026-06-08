@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy import select, text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.services import encryption_service
+from app.platform import encryption_service
 
 
 def _factory(engine):

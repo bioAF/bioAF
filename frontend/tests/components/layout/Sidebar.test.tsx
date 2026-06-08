@@ -34,6 +34,15 @@ jest.mock("@/hooks/useBackendReady", () => ({
   useBackendReady: () => ({ ready: true }),
 }));
 
+const mockHasCapability = jest.fn().mockReturnValue(true);
+jest.mock("@/hooks/useCapabilities", () => ({
+  useCapabilities: () => ({
+    has: (flag: string) => mockHasCapability(flag),
+    capabilities: {},
+    loading: false,
+  }),
+}));
+
 jest.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => ({
     canAccess: (...args: unknown[]) => mockCanAccess(...args),
@@ -54,6 +63,8 @@ describe("Sidebar", () => {
     });
     mockCanAccess.mockReturnValue(true);
     mockRoleName.mockReturnValue("admin");
+    mockHasCapability.mockReset();
+    mockHasCapability.mockReturnValue(true);
   });
 
   it("renders all 8 top-level items for admin user", () => {
@@ -217,6 +228,22 @@ describe("Sidebar", () => {
     expect(nav).toHaveTextContent("Results");
     fireEvent.click(screen.getByText("Results"));
     expect(screen.getByText("QC Dashboards")).toBeInTheDocument();
+  });
+
+  it("hides the Cellxgene entry when the backend lacks the cellxgene capability", () => {
+    mockHasCapability.mockImplementation((flag: string) => flag !== "cellxgene");
+    render(<Sidebar />);
+    fireEvent.click(screen.getByText("Results"));
+    expect(screen.getByText("QC Dashboards")).toBeInTheDocument();
+    expect(screen.queryByText("Cellxgene")).not.toBeInTheDocument();
+  });
+
+  it("hides Work Nodes entries when the backend lacks the work_nodes capability", () => {
+    mockHasCapability.mockImplementation((flag: string) => flag !== "work_nodes");
+    render(<Sidebar />);
+    fireEvent.click(screen.getByText("Workbench"));
+    expect(screen.getByText("Notebooks")).toBeInTheDocument();
+    expect(screen.queryByText("Work Nodes")).not.toBeInTheDocument();
   });
 
   it("hides Results from a role with neither experiments nor pipelines view", () => {

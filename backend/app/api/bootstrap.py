@@ -101,6 +101,18 @@ async def get_bootstrap_status(request: Request, session: AsyncSession = Depends
     # leaking deployment state to unauthenticated users (pentest #3).
     if getattr(request.state, "current_user", None) is not None:
         result["smtp_configured"] = org.smtp_configured if org else False
+        # The active backend's BAL capabilities, so the frontend useCapabilities()
+        # hook can gate UI on what this stack supports (Phase 4b). Same
+        # authenticated-only gating as smtp_configured (deployment detail). Fail
+        # safe to the minimal set if the registry is not yet initialized.
+        from app.adapters.capabilities import ProviderCapabilities
+        from app.adapters.registry import get_active_capabilities
+
+        try:
+            caps = get_active_capabilities()
+        except RuntimeError:
+            caps = ProviderCapabilities()
+        result["capabilities"] = caps.model_dump()
 
     return result
 

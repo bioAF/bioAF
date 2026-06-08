@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import csv
-import io
 import logging
 import re
 from datetime import datetime, timezone
@@ -16,7 +14,9 @@ from app.models.pipeline_run import PipelineRun
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import PIPELINE_COMPLETED, PIPELINE_FAILED, PIPELINE_OOM
+from app.adapters.models import ProcessInfo, StorageObjectNotFound, StoredObject
 from app.adapters.registry import get_compute_adapter, get_storage_adapter
+from app.pipeline import nextflow_trace
 
 if TYPE_CHECKING:
     from app.adapters.base import ComputeProvider
@@ -105,13 +105,13 @@ class PipelineMonitorService:
     async def _sync_single_run(session: AsyncSession, run: PipelineRun) -> None:
         """Sync a single run's status from the compute adapter.
 
-        For K8s jobs (k8s_job_name set), uses direct K8s Job status polling.
+        For backend-scheduled jobs (compute_job_ref set), uses direct status polling.
         For Nextflow runs, falls back to trace file parsing.
         """
-        job_id = run.k8s_job_name or run.slurm_job_id or str(run.id)
+        job_id = run.compute_job_ref or run.slurm_job_id or str(run.id)
 
         # K8s direct status polling
-        if run.k8s_job_name:
+        if run.compute_job_ref:
             await PipelineMonitorService._sync_k8s_run(session, run, job_id)
             return
 
@@ -191,12 +191,14 @@ class PipelineMonitorService:
             logger.warning("Failed to get K8s job status for run %d: %s", run.id, e)
             return
 
-        k8s_status = status_result.get("status", "")
-        pod_name = status_result.get("pod_name")
+        k8s_status = status_result.status
+        pod_name = status_result.provider_details.get("pod_name")
 
         # Update pod name if available
         if pod_name:
             run.k8s_pod_name = pod_name
+            # Mirror into the neutral provider_metadata (BAL Phase 4).
+            run.provider_metadata = {**(run.provider_metadata or {}), "pod_name": pod_name}
 
         is_custom = run.custom_pipeline_version_id is not None
 
@@ -269,8 +271,8 @@ class PipelineMonitorService:
         """
         PREEMPTION_EXIT_CODES = {143, 137, 247}
 
-        termination_reasons = status_result.get("termination_reasons", [])
-        oom_detected = any(r.get("reason") == "OOMKilled" for r in termination_reasons)
+        termination_reasons = status_result.termination_reasons
+        oom_detected = any(r.reason == "OOMKilled" for r in termination_reasons)
 
         if oom_detected:
             machine_type = await PipelineMonitorService._get_pipeline_machine_type(session)
@@ -366,7 +368,7 @@ class PipelineMonitorService:
             logger.warning("Failed to get job progress for run %d: %s", run.id, e)
             return
 
-        adapter_processes = progress.get("processes", [])
+        adapter_processes = progress.processes
         if not adapter_processes:
             return
 
@@ -381,9 +383,9 @@ class PipelineMonitorService:
         # `attempt` is the authoritative final status.
         # task_id may be missing on older adapter outputs; fall back to
         # name so we don't crash, but log it so it can be diagnosed.
-        attempts_by_task: dict[str, list[dict]] = {}
+        attempts_by_task: dict[str, list[ProcessInfo]] = {}
         for proc_data in adapter_processes:
-            key = proc_data.get("task_id") or proc_data.get("name", "")
+            key = proc_data.task_id or proc_data.name or ""
             attempts_by_task.setdefault(key, []).append(proc_data)
 
         completed = 0
@@ -393,9 +395,9 @@ class PipelineMonitorService:
         retries: list[dict] = []
 
         for key, attempts in attempts_by_task.items():
-            final = max(attempts, key=lambda a: a.get("attempt", 1))
-            final_status = final.get("status", "")
-            name = final.get("name", "") or key
+            final = max(attempts, key=lambda a: a.attempt or 1)
+            final_status = final.status or ""
+            name = final.name or key
 
             if final_status == "completed":
                 completed += 1
@@ -406,11 +408,11 @@ class PipelineMonitorService:
             elif final_status == "cached":
                 cached += 1
 
-            max_attempt = max((a.get("attempt", 1) for a in attempts), default=1)
+            max_attempt = max((a.attempt or 1 for a in attempts), default=1)
             if max_attempt > 1 or len(attempts) > 1:
                 retries.append({"name": name, "attempts": max(max_attempt, len(attempts))})
 
-            task_id = final.get("task_id") or ""
+            task_id = final.task_id or ""
             if task_id and task_id in existing_by_task:
                 proc = existing_by_task[task_id]
             elif not task_id and name in existing_by_name:
@@ -425,18 +427,14 @@ class PipelineMonitorService:
 
             # Persist the final attempt's status + metrics.
             proc.status = final_status
-            exit_val = final.get("exit_code")
-            if exit_val is not None:
-                proc.exit_code = exit_val
-            cpu_val = final.get("cpu")
-            if cpu_val is not None:
-                proc.cpu_usage = cpu_val
-            mem_val = final.get("memory_gb")
-            if mem_val is not None:
-                proc.memory_peak_gb = mem_val
-            dur_val = final.get("duration_s")
-            if dur_val is not None:
-                proc.duration_seconds = dur_val
+            if final.exit_code is not None:
+                proc.exit_code = final.exit_code
+            if final.cpu is not None:
+                proc.cpu_usage = final.cpu
+            if final.memory_gb is not None:
+                proc.memory_peak_gb = final.memory_gb
+            if final.duration_s is not None:
+                proc.duration_seconds = final.duration_s
 
         total = len(attempts_by_task)
         pct = round((completed + cached) / total * 100, 1) if total > 0 else 0.0
@@ -481,11 +479,11 @@ class PipelineMonitorService:
                     logger.warning("Could not advance experiment status: %s", e)
 
         # Persist pipeline logs to GCS while the pod is still alive
-        k8s_job_name = run.k8s_job_name
-        if k8s_job_name:
+        job_ref = run.compute_job_ref
+        if job_ref:
             try:
                 compute_adapter = get_compute_adapter()
-                await compute_adapter.persist_job_logs(k8s_job_name)
+                await compute_adapter.persist_job_logs(job_ref)
             except Exception as e:
                 logger.warning("Failed to persist logs for run %d: %s", run.id, e)
 
@@ -509,7 +507,7 @@ class PipelineMonitorService:
                 {"id": run.id, "experiment_id": run.experiment_id},
             )
             if collected:
-                output_meta: dict = {"files": [f["filename"] for f in collected]}
+                output_meta: dict = {"files": [f.filename for f in collected]}
 
                 if is_custom:
                     report_uri, report_format = _find_custom_report(collected)
@@ -528,22 +526,32 @@ class PipelineMonitorService:
                 try:
                     from app.services.pipeline_output_service import PipelineOutputService
 
-                    await PipelineOutputService.register_outputs(session, run, collected)
+                    await PipelineOutputService.register_outputs(
+                        session,
+                        run,
+                        [
+                            {
+                                "filename": f.filename,
+                                "gcs_uri": f.storage_uri,
+                                "size_bytes": f.size_bytes,
+                                "md5_hash": f.md5_hash,
+                            }
+                            for f in collected
+                        ],
+                    )
                     logger.info("Registered %d output files for run %d", len(collected), run.id)
                 except Exception as reg_err:
                     logger.warning("Failed to register output files for run %d: %s", run.id, reg_err)
         except Exception as e:
             logger.warning("Failed to collect output files for run %d: %s", run.id, e)
 
-        # Register Nextflow report and trace from the raw bucket (Nextflow only)
-        if run.k8s_job_name and not is_custom:
+        # Register Nextflow report and trace from the RAW store (Nextflow only).
+        # register_nextflow_metadata resolves the URIs via the storage adapter.
+        if run.compute_job_ref and not is_custom:
             try:
                 from app.services.pipeline_output_service import PipelineOutputService
 
-                compute_adapter = get_compute_adapter()
-                raw_bucket = compute_adapter.get_raw_bucket_name()
-                if raw_bucket:
-                    await PipelineOutputService.register_nextflow_metadata(session, run, raw_bucket)
+                await PipelineOutputService.register_nextflow_metadata(session, run)
             except Exception as e:
                 logger.warning("Failed to register NF metadata for run %d: %s", run.id, e)
 
@@ -611,22 +619,15 @@ class PipelineMonitorService:
 
     @staticmethod
     def parse_trace_tsv(content: str) -> list[dict]:
-        """Parse a Nextflow trace.tsv file into a list of dicts."""
-        reader = csv.DictReader(io.StringIO(content), delimiter="\t")
-        return [dict(row) for row in reader]
+        """Parse a Nextflow trace.tsv file into a list of raw row dicts.
+
+        Delegates to the shared ``app.pipeline.nextflow_trace`` parser.
+        """
+        return nextflow_trace.parse_trace_rows(content)
 
     @staticmethod
     def _map_nf_status(nf_status: str) -> str:
-        mapping = {
-            "COMPLETED": "completed",
-            "RUNNING": "running",
-            "FAILED": "failed",
-            "CACHED": "cached",
-            "SUBMITTED": "pending",
-            "PENDING": "pending",
-            "ABORTED": "failed",
-        }
-        return mapping.get(nf_status.upper(), nf_status.lower())
+        return nextflow_trace.map_nf_status(nf_status)
 
     @staticmethod
     async def get_run_logs(
@@ -639,14 +640,14 @@ class PipelineMonitorService:
         run_result = await session.execute(select(PipelineRun).where(PipelineRun.id == run_id))
         run = run_result.scalar_one_or_none()
 
-        if run is not None and run.k8s_job_name:
+        if run is not None and run.compute_job_ref:
             if run.custom_pipeline_version_id is not None:
                 return await PipelineMonitorService._get_custom_run_logs(run, force_pod_logs=force_pod_logs)
 
             stdout = ""
             try:
                 compute_adapter = get_compute_adapter()
-                stdout = await compute_adapter.get_job_logs(run.k8s_job_name)
+                stdout = await compute_adapter.get_job_logs(run.compute_job_ref)
             except Exception as e:
                 logger.warning("Failed to read K8s logs for run %d: %s", run_id, e)
             return {"stdout": stdout, "stderr": ""}
@@ -687,18 +688,18 @@ class PipelineMonitorService:
         log_file_path = version.log_file_path if version else None
 
         if not log_file_path:
-            return {"stdout": await _safe_pod_logs(run.k8s_job_name, run.id), "stderr": ""}
+            return {"stdout": await _safe_pod_logs(run.compute_job_ref, run.id), "stderr": ""}
 
         if force_pod_logs:
             return {
-                "stdout": await _safe_pod_logs(run.k8s_job_name, run.id),
+                "stdout": await _safe_pod_logs(run.compute_job_ref, run.id),
                 "stderr": "",
                 "log_source": "pod",
             }
 
         if run.status in ("running", "pending"):
             return {
-                "stdout": await _safe_pod_logs(run.k8s_job_name, run.id),
+                "stdout": await _safe_pod_logs(run.compute_job_ref, run.id),
                 "stderr": "",
                 "log_source": "pod",
                 "custom_log_pending": True,
@@ -716,7 +717,7 @@ class PipelineMonitorService:
                 }
 
         return {
-            "stdout": await _safe_pod_logs(run.k8s_job_name, run.id),
+            "stdout": await _safe_pod_logs(run.compute_job_ref, run.id),
             "stderr": "",
             "log_source": "pod",
             "custom_log_missing": True,
@@ -733,7 +734,7 @@ class PipelineMonitorService:
         run_result = await session.execute(select(PipelineRun).where(PipelineRun.id == run_id))
         run = run_result.scalar_one_or_none()
 
-        if run is None or not run.k8s_job_name:
+        if run is None or not run.compute_job_ref:
             return ""
 
         if run.custom_pipeline_version_id is not None:
@@ -745,14 +746,14 @@ class PipelineMonitorService:
 
         try:
             compute_adapter = get_compute_adapter()
-            report = await compute_adapter.get_job_report(run.k8s_job_name)
+            report = await compute_adapter.get_job_report(run.compute_job_ref)
             return _prepare_report_for_iframe(report)
         except Exception as e:
             logger.warning("Failed to read report for run %d: %s", run_id, e)
             return ""
 
 
-def _find_custom_report(collected: list[dict]) -> tuple[str | None, str | None]:
+def _find_custom_report(collected: list[StoredObject]) -> tuple[str | None, str | None]:
     """Detect a `report/report.html` or `report/report.md` artifact in collected outputs.
 
     HTML is preferred when both are present.
@@ -760,7 +761,7 @@ def _find_custom_report(collected: list[dict]) -> tuple[str | None, str | None]:
     html_uri: str | None = None
     md_uri: str | None = None
     for f in collected:
-        uri = f.get("gcs_uri") or ""
+        uri = f.storage_uri or ""
         if uri.endswith("/report/report.html"):
             html_uri = uri
         elif uri.endswith("/report/report.md"):
@@ -772,7 +773,7 @@ def _find_custom_report(collected: list[dict]) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _find_custom_log(collected: list[dict], log_file_path: str) -> str | None:
+def _find_custom_log(collected: list[StoredObject], log_file_path: str) -> str | None:
     """Find a custom log artifact whose GCS URI ends with the configured log path.
 
     `log_file_path` is the path inside the pod (e.g. `/outputs/analysis.log`);
@@ -786,105 +787,46 @@ def _find_custom_log(collected: list[dict], log_file_path: str) -> str | None:
         return None
     needle = "/" + relative
     for f in collected:
-        uri = f.get("gcs_uri") or ""
+        uri = f.storage_uri or ""
         if uri.endswith(needle):
             return uri
     return None
 
 
 async def _read_gcs_text(gcs_uri: str) -> str | None:
-    """Download a GCS object as text. Returns None if the object is missing or unreadable."""
+    """Download a storage object as text via the storage adapter.
+
+    Returns None if the object is missing or unreadable. Routing through the
+    adapter offloads the blocking SDK call to a worker thread (fixing the
+    event-loop stall the inline ``download_as_text`` previously caused).
+    """
     if not gcs_uri.startswith("gs://"):
         return None
     try:
-        from google.cloud import storage as gcs_storage
-    except ImportError:
+        return await get_storage_adapter().read_text(gcs_uri)
+    except StorageObjectNotFound:
         return None
-    try:
-        bucket_name, _, blob_path = gcs_uri[len("gs://") :].partition("/")
-        if not bucket_name or not blob_path:
-            return None
-        client = gcs_storage.Client()
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob(blob_path)
-        if not blob.exists():
-            return None
-        return blob.download_as_text()
     except Exception as e:
-        logger.warning("Failed to read GCS object %s: %s", gcs_uri, e)
+        logger.warning("Failed to read storage object %s: %s", gcs_uri, e)
         return None
 
 
-async def _safe_pod_logs(k8s_job_name: str | None, run_id: int) -> str:
-    """Fetch pod logs via the compute adapter, returning empty string on error."""
-    if not k8s_job_name:
+async def _safe_pod_logs(job_ref: str | None, run_id: int) -> str:
+    """Fetch job logs via the compute adapter, returning empty string on error."""
+    if not job_ref:
         return ""
     try:
         compute_adapter = get_compute_adapter()
-        return await compute_adapter.get_job_logs(k8s_job_name)
+        return await compute_adapter.get_job_logs(job_ref)
     except Exception as e:
         logger.warning("Failed to read K8s logs for run %d: %s", run_id, e)
         return ""
 
 
-def _safe_int(val) -> int | None:
-    if val is None or val == "" or val == "-":
-        return None
-    try:
-        return int(val)
-    except (ValueError, TypeError):
-        return None
-
-
-def _safe_float(val) -> float | None:
-    if val is None or val == "" or val == "-":
-        return None
-    try:
-        return float(str(val).replace("%", ""))
-    except (ValueError, TypeError):
-        return None
-
-
-def _parse_memory_gb(val) -> float | None:
-    """Parse memory values like '1.2 GB' or '500 MB'."""
-    if not val or val == "-":
-        return None
-    try:
-        val = str(val).strip()
-        if "GB" in val.upper():
-            return float(val.upper().replace("GB", "").strip())
-        if "MB" in val.upper():
-            return round(float(val.upper().replace("MB", "").strip()) / 1024, 2)
-        if "KB" in val.upper():
-            return round(float(val.upper().replace("KB", "").strip()) / (1024 * 1024), 4)
-        return float(val)
-    except (ValueError, TypeError):
-        return None
-
-
-def _parse_duration(val) -> int | None:
-    """Parse duration strings like '5m 30s' or '1h 2m 3s' into seconds."""
-    if not val or val == "-":
-        return None
-    try:
-        val = str(val).strip()
-        # Try direct milliseconds first (Nextflow trace uses ms)
-        if val.endswith("ms"):
-            return int(float(val[:-2]) / 1000)
-        if val.endswith("s") and "m" not in val and "h" not in val:
-            return int(float(val[:-1]))
-        # Parse h/m/s format
-        seconds = 0
-        if "h" in val:
-            parts = val.split("h")
-            seconds += int(parts[0].strip()) * 3600
-            val = parts[1].strip()
-        if "m" in val:
-            parts = val.split("m")
-            seconds += int(parts[0].strip()) * 60
-            val = parts[1].strip()
-        if val.endswith("s"):
-            seconds += int(float(val[:-1]))
-        return seconds if seconds > 0 else None
-    except (ValueError, TypeError):
-        return None
+# Trace-field normalizers. These are thin aliases of the shared
+# app.pipeline.nextflow_trace helpers (the single source of truth); kept as
+# module-level names because the monitor and its tests import them directly.
+_safe_int = nextflow_trace.safe_int
+_safe_float = nextflow_trace.safe_float
+_parse_memory_gb = nextflow_trace.parse_memory_gb
+_parse_duration = nextflow_trace.parse_duration_s

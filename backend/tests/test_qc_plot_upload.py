@@ -112,30 +112,22 @@ async def test_extract_metrics_reads_cached_json():
         "median_reads_per_cell": None,
     }
 
-    mock_blob = MagicMock()
-    mock_blob.exists.return_value = True
-    mock_blob.download_as_text.return_value = json.dumps(cached)
-
-    mock_bucket = MagicMock()
-    mock_bucket.blob.return_value = mock_blob
-
-    mock_client = MagicMock()
-    mock_client.bucket.return_value = mock_bucket
+    # The scrnaseq extractor reads the cache via the BAL storage adapter (Phase 3):
+    # an empty prefix listing then a successful read_text of qc_metrics.json.
+    adapter = AsyncMock()
+    adapter.list_objects.return_value = []
+    adapter.read_text.return_value = json.dumps(cached)
 
     mock_session = AsyncMock()
 
     run = _make_run(["filtered.h5ad"])
 
     with (
-        patch("google.cloud.storage.Client", return_value=mock_client),
+        patch("app.adapters.registry.get_storage_adapter", return_value=adapter),
         patch.object(
             QCDashboardService,
             "_get_results_bucket",
             return_value="my-results-bucket",
-        ),
-        patch(
-            "app.services.qc_dashboard_service.GcsStorageService.get_credentials",
-            return_value=None,
         ),
     ):
         metrics = await QCDashboardService._extract_metrics(mock_session, run)
@@ -151,16 +143,10 @@ async def test_extract_metrics_returns_empty_when_no_results_bucket():
     mock_session = AsyncMock()
     run = _make_run(["filtered.h5ad"])
 
-    with (
-        patch.object(
-            QCDashboardService,
-            "_get_results_bucket",
-            return_value=None,
-        ),
-        patch(
-            "app.services.qc_dashboard_service.GcsStorageService.get_credentials",
-            return_value=None,
-        ),
+    with patch.object(
+        QCDashboardService,
+        "_get_results_bucket",
+        return_value=None,
     ):
         metrics = await QCDashboardService._extract_metrics(mock_session, run)
 

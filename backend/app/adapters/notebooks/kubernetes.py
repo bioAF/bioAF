@@ -21,12 +21,58 @@ from datetime import datetime, timezone
 from kubernetes import client, config
 
 from app.adapters.base import NotebookProvider
-from app.services.session_persistence import (
+from app.adapters.capabilities import ProviderCapabilities
+from app.adapters.models import (
+    SessionInfo,
+    SessionStatus,
+    StoredObject,
+    TerminationResult,
+    to_service_state,
+)
+from app.adapters.notebooks.gcs_sync import (
     generate_sync_in_command,
     generate_sync_out_command,
+    parse_gsutil_ls_output,
 )
 
 logger = logging.getLogger("bioaf.adapters.notebooks.k8s")
+
+_SESSION_INFO_KEYS = {"session_id", "status", "access_url", "session_type", "created_at"}
+_SESSION_STATUS_KEYS = {"session_id", "status", "access_url", "session_type", "user_id"}
+
+
+def _session_info_from_dict(d: dict) -> SessionInfo:
+    return SessionInfo(
+        session_id=str(d.get("session_id", "")),
+        status=to_service_state(d.get("status")),
+        access_url=d.get("access_url"),
+        session_type=d.get("session_type"),
+        created_at=d.get("created_at"),
+        provider_details={k: v for k, v in d.items() if k not in _SESSION_INFO_KEYS},
+    )
+
+
+def _session_status_from_dict(d: dict) -> SessionStatus:
+    return SessionStatus(
+        session_id=str(d.get("session_id", "")),
+        status=to_service_state(d.get("status")),
+        access_url=d.get("access_url"),
+        session_type=d.get("session_type"),
+        user_id=d.get("user_id"),
+        provider_details={k: v for k, v in d.items() if k not in _SESSION_STATUS_KEYS},
+    )
+
+
+def _session_termination_from_dict(d: dict) -> TerminationResult:
+    return TerminationResult(
+        status=to_service_state(d.get("status")),
+        output_files=[
+            StoredObject(filename=o["filename"], storage_uri=o.get("gcs_uri", ""), size_bytes=o.get("size_bytes"))
+            for o in d.get("output_files", [])
+        ],
+        output_prefix=d.get("gcs_output_prefix", ""),
+        provider_details={"session_id": d.get("session_id"), "stopped_at": d.get("stopped_at")},
+    )
 
 
 def _get_gcp_token(gcp_config: dict) -> str:
@@ -38,7 +84,7 @@ def _get_gcp_token(gcp_config: dict) -> str:
     """
     import google.auth.transport.requests
 
-    from app.services import credential_injector
+    from app.platform import credential_injector
 
     credentials = credential_injector.load_gcp_credentials(gcp_config)
     credentials.refresh(google.auth.transport.requests.Request())
@@ -70,6 +116,10 @@ class KubernetesNotebookProvider(NotebookProvider):
         self._cluster_config: dict | None = None
         self._namespace_ready = False
 
+    def capabilities(self) -> ProviderCapabilities:
+        """Kubernetes notebook backend supports interactive notebook sessions."""
+        return ProviderCapabilities(notebooks=True)
+
     def _cluster_fingerprint(self) -> tuple[str, str]:
         """(endpoint, ca_cert) identity of the cluster in the current config."""
         cfg = self._cluster_config or {}
@@ -82,29 +132,63 @@ class KubernetesNotebookProvider(NotebookProvider):
     def is_local(self) -> bool:
         return self._mode == "local"
 
-    async def launch_session(self, session_spec: dict) -> dict:
-        if self.is_local:
-            return self._local_launch_session(session_spec)
-        return await self._k8s_launch_session(session_spec)
+    async def launch_session(self, session_spec: dict) -> SessionInfo:
+        d = self._local_launch_session(session_spec) if self.is_local else await self._k8s_launch_session(session_spec)
+        return _session_info_from_dict(d)
 
-    async def terminate_session(self, session_id: str, **kwargs) -> dict:
-        if self.is_local:
-            return self._local_terminate_session(session_id)
-        return await self._k8s_terminate_session(session_id=session_id, **kwargs)
+    async def terminate_session(self, session_id: str, **kwargs) -> TerminationResult:
+        d = (
+            self._local_terminate_session(session_id)
+            if self.is_local
+            else await self._k8s_terminate_session(session_id=session_id, **kwargs)
+        )
+        return _session_termination_from_dict(d)
 
-    async def get_session_status(self, session_id: str, **kwargs) -> dict:
-        if self.is_local:
-            return self._local_get_session_status(session_id)
-        return await self._k8s_get_session_status(session_id=session_id, **kwargs)
+    async def get_session_status(self, session_id: str, **kwargs) -> SessionStatus:
+        d = (
+            self._local_get_session_status(session_id)
+            if self.is_local
+            else await self._k8s_get_session_status(session_id=session_id, **kwargs)
+        )
+        return _session_status_from_dict(d)
 
-    async def list_sessions(self, filters: dict | None = None) -> list[dict]:
-        if self.is_local:
-            return self._local_list_sessions(filters)
-        return await self._k8s_list_sessions(filters)
+    async def list_sessions(self, filters: dict | None = None) -> list[SessionStatus]:
+        items = self._local_list_sessions(filters) if self.is_local else await self._k8s_list_sessions(filters)
+        return [_session_status_from_dict(d) for d in items]
 
     async def get_connection_command(self, session_id: str) -> str:
         namespace = DEFAULT_NOTEBOOK_NAMESPACE
         return f"kubectl exec -it -n {namespace} pod/bioaf-notebook-{session_id} -- /bin/bash"
+
+    async def sync_session_storage(  # type: ignore[override]
+        self,
+        session_id: str,
+        *,
+        pod_name: str,
+        namespace: str = DEFAULT_NOTEBOOK_NAMESPACE,
+        gcs_prefix: str,
+        local_dir: str = "/home/jovyan",
+        **kwargs,
+    ) -> None:
+        """Exec a gsutil rsync inside the running pod to persist its home dir to GCS."""
+        if self.is_local:
+            return
+        from kubernetes.stream import stream
+
+        core_client = self._get_k8s_core_client()
+        sync_cmd = generate_sync_out_command(local_dir, gcs_prefix)
+        logger.info("Syncing session data to GCS from pod %s", pod_name)
+        stream(
+            core_client.connect_get_namespaced_pod_exec,
+            name=pod_name,
+            namespace=namespace,
+            command=sync_cmd,
+            stderr=True,
+            stdin=False,
+            stdout=True,
+            tty=False,
+        )
+        logger.info("GCS sync complete for pod %s", pod_name)
 
     # -- K8s client helpers --
 
@@ -124,7 +208,7 @@ class KubernetesNotebookProvider(NotebookProvider):
             return self._cluster_config
 
         async with self._session_factory() as session:
-            from app.services.platform_config_service import PlatformConfigService
+            from app.platform.platform_config_service import PlatformConfigService
 
             self._cluster_config = await PlatformConfigService.get_many(
                 session,
@@ -898,43 +982,23 @@ class KubernetesNotebookProvider(NotebookProvider):
                 )
                 return
 
-            # Wait for LoadBalancer external IP (up to 3 minutes)
-            # Use raw httpx instead of python client (client returns stale
-            # ingress: None even when kubectl shows the IP).
-            import httpx
-
+            # Wait for LoadBalancer external IP (up to 3 minutes). The per-attempt
+            # lookup is shared with the status read path via _resolve_service_url
+            # (raw httpx, since the python client returns a stale ingress: None).
+            # Keep the auth pre-check here so a misconfigured client fails the
+            # background task loudly rather than silently spinning.
             api_client = self._get_api_client()
-            config = api_client.configuration
-            svc_url = f"{config.host}/api/v1/namespaces/{namespace}/services/{service_name}"
-            auth = api_client.default_headers.get("Authorization")
-            if not auth:
+            if not api_client.default_headers.get("Authorization"):
                 raise RuntimeError(
                     "K8s ApiClient has no Authorization header; _build_out_of_cluster_client did not set one."
                 )
-            headers = {"Authorization": auth}
 
             access_url = None
             for attempt in range(36):
-                try:
-                    resp = httpx.get(
-                        svc_url,
-                        headers=headers,
-                        verify=config.ssl_ca_cert or False,
-                        timeout=10,
-                    )
-                    if resp.status_code == 200:
-                        ingress_list = resp.json().get("status", {}).get("loadBalancer", {}).get("ingress") or []
-                        if ingress_list:
-                            ext_ip = ingress_list[0].get("ip") or ingress_list[0].get("hostname")
-                            access_url = f"http://{ext_ip}:{container_port}"
-                            logger.info(
-                                "External URL for session %s: %s",
-                                session_id,
-                                access_url,
-                            )
-                            break
-                except Exception:
-                    pass
+                access_url = self._resolve_service_url(service_name, namespace, container_port)
+                if access_url:
+                    logger.info("External URL for session %s: %s", session_id, access_url)
+                    break
                 await asyncio.sleep(5)
 
             if not access_url:
@@ -1204,8 +1268,6 @@ class KubernetesNotebookProvider(NotebookProvider):
                     _request_timeout=60,
                 )
                 if raw_output:
-                    from app.services.session_output_service import parse_gsutil_ls_output
-
                     output_files = parse_gsutil_ls_output(str(raw_output))
                     logger.info("Found %d output files for compute session", len(output_files))
             except Exception as e:
@@ -1239,8 +1301,14 @@ class KubernetesNotebookProvider(NotebookProvider):
         session_id: int | str = 0,
         pod_name: str = "",
         namespace: str = DEFAULT_NOTEBOOK_NAMESPACE,
+        session_type: str = "",
     ) -> dict:
-        """Query K8s API for pod status."""
+        """Query K8s API for pod status, resolving the LoadBalancer URL if live.
+
+        For a starting/running session this also resolves the service's external
+        URL so callers read access_url off the normalized SessionStatus rather
+        than reaching into the K8s client themselves.
+        """
         core_client = self._get_k8s_core_client()
 
         try:
@@ -1266,12 +1334,56 @@ class KubernetesNotebookProvider(NotebookProvider):
         else:
             status = "unknown"
 
-        return {
+        result = {
             "session_id": session_id,
             "status": status,
             "pod_name": pod_name,
             "namespace": namespace,
         }
+        if session_type:
+            result["session_type"] = session_type
+
+        # Resolve the LoadBalancer URL for live sessions so the API layer never
+        # builds K8s service URLs itself.
+        if status in ("running", "starting"):
+            container_port = 8888 if session_type == "jupyter" else 8787
+            url = self._resolve_service_url(f"bioaf-notebook-svc-{session_id}", namespace, container_port)
+            if url:
+                result["access_url"] = url
+
+        return result
+
+    def _resolve_service_url(self, service_name: str, namespace: str, container_port: int) -> str | None:
+        """Single-attempt LoadBalancer external-IP lookup -> http URL, or None.
+
+        Uses raw httpx instead of the python K8s client (which returns a stale
+        ``ingress: None`` even when kubectl shows the IP). Swallows every error
+        and returns None so read-path callers (status reconciliation) never
+        raise on a not-yet-ready or unreachable service.
+        """
+        import httpx
+
+        try:
+            api_client = self._get_api_client()
+            config = api_client.configuration
+            auth = api_client.default_headers.get("Authorization")
+            if not auth:
+                return None
+            svc_url = f"{config.host}/api/v1/namespaces/{namespace}/services/{service_name}"
+            resp = httpx.get(
+                svc_url,
+                headers={"Authorization": auth},
+                verify=config.ssl_ca_cert or False,
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                ingress_list = resp.json().get("status", {}).get("loadBalancer", {}).get("ingress") or []
+                if ingress_list:
+                    ext_ip = ingress_list[0].get("ip") or ingress_list[0].get("hostname")
+                    return f"http://{ext_ip}:{container_port}"
+        except Exception:
+            return None
+        return None
 
     async def _k8s_list_sessions(self, filters: dict | None = None) -> list[dict]:
         """List notebook pods in the namespace."""

@@ -14,7 +14,8 @@ A turnkey computational biology platform for small biotech companies (5-50 resea
 - **Pipeline Engine** - Nextflow integration, custom pipelines, pipeline catalog, run monitoring, parameter management
 - **Data Management** - File upload/download, dataset browser, GCS storage integration, GEO export, SuperSeries cross-experiment packaging
 - **Results & Visualization** - QC dashboards, cellxgene single-cell viewer, plot archive, search
-- **SSH Access** - One-click kubectl exec into running pipeline jobs and notebook sessions
+- **SSH Access** - One-click kubectl exec into running pipeline jobs and notebook sessions; standalone GCE work-node VMs ([ADR-043](decisions/ADR-043-work-nodes-gce-migration.md)) for interactive shell work outside the cluster
+- **Knowledge & Records** - Literature Library (paper ingest, search, AI review), Lab Knowledge (lab documents + glossary), Scientific Decision Records (SDRs), and configurable CRO Naming Profiles
 - **Notifications** - Event-driven alerts via in-app, email (SMTP), and Slack (OAuth integration)
 - **Cost Center** - GCP billing integration, budget alerts, component cost breakdown, projections
 - **Backup & Recovery** - 4-tier GCS backups (pg_dump, GCS versioning, platform config, terraform state), restore with review period
@@ -34,9 +35,9 @@ A turnkey computational biology platform for small biotech companies (5-50 resea
 
 ### How it works
 
-A computational biologist registers an experiment, links FASTQ files (uploaded or auto-ingested from a sequencer drop), selects a pipeline from the catalog (nf-core/scrnaseq, rnaseq, or custom), and launches a run. The **BioAF Adapter Layer** handles everything below that: staging inputs from GCS, submitting Kubernetes Jobs to GKE Autopilot, monitoring execution via Nextflow trace parsing, collecting outputs back to GCS, and transitioning the experiment through its status lifecycle (`registered` -> `library_prep` -> `sequencing` -> `fastq_uploaded` -> `processing` -> `pipeline_complete` -> [`reviewed` ->] `analysis` -> `complete`). Pipeline completion triggers event-driven notifications (in-app, email, Slack), and results are browsable through the plot archive, cellxgene viewer, and GEO export tools. Jupyter and RStudio sessions run as Kubernetes Pods with GCS-backed home directories and SSH access. RStudio sessions use per-user PAM authentication ([ADR-030](decisions/ADR-030-session-credentials-pam-auth.md)), and notebook container images are managed as versioned environments ([ADR-033](decisions/ADR-033-versioned-compute-environments.md)), built automatically via Cloud Build ([ADR-031](decisions/ADR-031-notebook-image-build-pipeline.md)).
+A computational biologist registers an experiment, links FASTQ files (uploaded or auto-ingested from a sequencer drop), selects a pipeline from the catalog (nf-core/scrnaseq, rnaseq, or custom), and launches a run. The **BioAF Adapter Layer** handles everything below that: staging inputs from GCS, submitting Kubernetes Jobs to GKE Autopilot, monitoring execution via Nextflow trace parsing, collecting outputs back to GCS, and transitioning the experiment through its status lifecycle (`registered` -> `library_prep` -> `sequencing` -> `fastq_uploaded` -> `processing` -> `pipeline_complete` -> [`reviewed` ->] `analysis` -> `complete`). Pipeline completion triggers event-driven notifications (in-app, email, Slack), and results are browsable through the plot archive, cellxgene viewer, and GEO export tools. Jupyter and RStudio sessions run as Kubernetes Pods with GCS-backed home directories, while SSH work nodes run as standalone GCE VMs ([ADR-043](decisions/ADR-043-work-nodes-gce-migration.md)) for interactive shell work outside the cluster. RStudio sessions use per-user PAM authentication ([ADR-030](decisions/ADR-030-session-credentials-pam-auth.md)), and notebook container images are managed as versioned environments ([ADR-033](decisions/ADR-033-versioned-compute-environments.md)), built automatically via Cloud Build ([ADR-031](decisions/ADR-031-notebook-image-build-pipeline.md)).
 
-The adapter layer ([ADR-020](decisions/ADR-020-bioaf-adapter-layer.md)) abstracts compute, storage, and notebook providers behind clean interfaces, so all application logic is decoupled from infrastructure specifics. Today that means GKE + GCS ([ADR-021](decisions/ADR-021-kubernetes-compute-backend.md), [ADR-022](decisions/ADR-022-gcs-storage-backend.md)).
+The adapter layer ([ADR-020](decisions/ADR-020-bioaf-adapter-layer.md), recontracted in [ADR-065](decisions/ADR-065-bal-normalized-contract.md)) abstracts five runtime provider categories (compute, storage, notebook, work-node, cellxgene) plus five platform-service categories (secrets, messaging, observability, IAM, billing) behind clean interfaces. Every method returns a typed, backend-neutral normalized model, and each backend declares a `ProviderCapabilities` set that gates optional UI and is enforced server-side. The category (the "what") is separated from the backend (the "how"): a committed import guardrail (`backend/tests/test_bal_layering.py`) fails the build if any module outside `adapters/` imports a cloud or Kubernetes SDK, or if an adapter imports back up into the service layer. Today every category is implemented for GKE + GCS + the surrounding GCP platform services ([ADR-021](decisions/ADR-021-kubernetes-compute-backend.md), [ADR-022](decisions/ADR-022-gcs-storage-backend.md)); a real NFS storage backend also exists, and the remaining backend slots (SLURM, AWS, on-premise) are seams without shipped implementations.
 
 Infrastructure is provisioned through UI-driven Terraform ([ADR-007](decisions/ADR-007-ui-driven-terraform.md)) -- researchers never touch HCL. All secrets live in Secret Manager ([ADR-008](decisions/ADR-008-secret-manager.md)), all actions are recorded in an immutable audit log ([ADR-009](decisions/ADR-009-immutable-audit-log.md)), and data portability is guaranteed ([ADR-012](decisions/ADR-012-data-portability.md)).
 
@@ -200,8 +201,14 @@ bioAF/
   terraform/         GCP infrastructure as code
   helm/              Kubernetes deployment chart
   decisions/         Architecture Decision Records
-  documentation/     Product and architecture specs
+  ai_guides/         Working model for humans and AI agents (process, domain language, TDD)
   docs/              User-facing documentation
+  cli/               bioaf in-session CLI (provenance + heartbeat)
+  sdk/               Python and R analysis SDKs
+  templates/         Example pipeline/workflow templates
+  installer/         Installer helper scripts and roles manifest
+  changes/           Unreleased change notes
+  assets/            Architecture diagram and static images
   scripts/           Utility scripts (seed data, update agent)
   tests/shell/       BATS tests for install.sh and bioaf scripts
   bioaf              Management script (entry point)

@@ -155,7 +155,7 @@ async def realign_storage_naming(session: AsyncSession) -> dict | None:
     Reads a known deployed bucket name (raw) from platform_config, falling back
     to live Terraform outputs. Returns the values it changed, or None when
     nothing needed changing or the name could not be parsed."""
-    from app.services.platform_config_service import PlatformConfigService
+    from app.platform.platform_config_service import PlatformConfigService
 
     name = await PlatformConfigService.get(session, "raw_bucket_name")
     if not name or name == "null":

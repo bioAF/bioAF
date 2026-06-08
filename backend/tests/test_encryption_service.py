@@ -23,7 +23,7 @@ def _service_with_keys(raw_keys: str):
     from app import config
 
     config.settings.encryption_keys = raw_keys
-    from app.services import encryption_service as svc
+    from app.platform import encryption_service as svc
 
     importlib.reload(svc)
     return svc
@@ -80,7 +80,7 @@ def test_init_fails_when_no_keys_configured(monkeypatch):
     from app import config
 
     config.settings.encryption_keys = ""
-    from app.services import encryption_service as svc
+    from app.platform import encryption_service as svc
 
     with pytest.raises(SystemExit):
         importlib.reload(svc)
@@ -91,7 +91,7 @@ def test_init_fails_on_invalid_key(monkeypatch):
 
     # Wrong length / not urlsafe-base64
     config.settings.encryption_keys = "not-a-valid-fernet-key"
-    from app.services import encryption_service as svc
+    from app.platform import encryption_service as svc
 
     with pytest.raises(SystemExit):
         importlib.reload(svc)

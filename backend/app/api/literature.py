@@ -556,23 +556,10 @@ async def upload_pdf_to_paper_endpoint(
 
 
 async def _download_pdf_bytes(session: AsyncSession, gcs_uri: str) -> bytes | None:
-    import asyncio
-
-    from app.services.gcs_storage import GcsStorageService
+    from app.adapters.registry import get_storage_adapter
 
     try:
-        credentials = await GcsStorageService.get_credentials(session)
-        from google.cloud import storage as gcs
-
-        loop = asyncio.get_running_loop()
-
-        def _download() -> bytes:
-            client = gcs.Client(credentials=credentials)
-            parts = gcs_uri.replace("gs://", "").split("/", 1)
-            bucket = client.bucket(parts[0])
-            return bucket.blob(parts[1]).download_as_bytes()
-
-        return await loop.run_in_executor(None, _download)
+        return await get_storage_adapter().read_bytes(gcs_uri)
     except Exception:
         return None
 
