@@ -10,7 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.base import CellxgeneProvider, ComputeProvider, NotebookProvider, StorageProvider, WorkNodeProvider
-from app.adapters.capabilities import ProviderCapabilities
+from app.adapters.capabilities import CapabilityNotSupported, ProviderCapabilities
 
 logger = logging.getLogger("bioaf.adapters.registry")
 
@@ -156,6 +156,20 @@ def get_active_capabilities() -> ProviderCapabilities:
         if adapter is not None:
             caps = caps.merge(adapter.capabilities())
     return caps
+
+
+def require_capability(flag: str) -> None:
+    """Raise CapabilityNotSupported if the active backend lacks ``flag``.
+
+    Server-side enforcement counterpart to the frontend useCapabilities() gating
+    (Phase 4b): a direct API caller that requests a capability-dependent action
+    the active backend cannot perform gets a clean 4xx (via the registered
+    exception handler) instead of a 500 from deeper in the stack. Looks the flag
+    up on the merged active capability surface.
+    """
+    caps = get_active_capabilities()
+    if not getattr(caps, flag, False):
+        raise CapabilityNotSupported(flag)
 
 
 def reset_registry() -> None:

@@ -895,11 +895,33 @@ def create_app() -> FastAPI:
 
     application.include_router(api_router)
 
+    # Map CapabilityNotSupported (raised by require_capability guards) to a clean
+    # 4xx envelope instead of a 500 (Phase 4b). Registered on both the main app
+    # and the mounted integration sub-app, since a mounted Starlette sub-app does
+    # not inherit the parent's exception handlers.
+    from app.adapters.capabilities import CapabilityNotSupported
+    from fastapi import Request
+    from fastapi.responses import JSONResponse
+
+    async def _capability_not_supported_handler(request: Request, exc: CapabilityNotSupported) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": str(exc),
+                "code": "capability_not_supported",
+                "capability": exc.capability,
+            },
+        )
+
+    application.add_exception_handler(CapabilityNotSupported, _capability_not_supported_handler)
+
     # Public integration API sub-app (ADR-048). Owns its own OpenAPI document;
     # docs are served in production regardless of the main app's gating.
     from app.api.v1.integrations import build_integrations_app
 
-    application.mount("/api/v1/integrations", build_integrations_app())
+    integrations_app = build_integrations_app()
+    integrations_app.add_exception_handler(CapabilityNotSupported, _capability_not_supported_handler)
+    application.mount("/api/v1/integrations", integrations_app)
     return application
 
 
