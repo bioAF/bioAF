@@ -21,7 +21,7 @@
 | [ADR-017](ADR-017-reference-data-management.md) | Managed Reference Data Layer | Accepted | 2026-03-06 |
 | [ADR-018](ADR-018-cross-experiment-projects.md) | Cross-Experiment Analysis Projects | Accepted | 2026-03-06 |
 | [ADR-019](ADR-019-pipeline-review-handoff.md) | Pipeline Run Review and Data Handoff Protocol | Accepted | 2026-03-06 |
-| [ADR-020](ADR-020-bioaf-adapter-layer.md) | BioAF Adapter Layer (BAL) | Accepted | 2026-03-10 |
+| [ADR-020](ADR-020-bioaf-adapter-layer.md) | BioAF Adapter Layer (BAL) | Superseded by ADR-065 | 2026-03-10 |
 | [ADR-021](ADR-021-kubernetes-compute-backend.md) | Kubernetes as Recommended Compute Backend | Accepted | 2026-03-10 |
 | [ADR-022](ADR-022-gcs-storage-backend.md) | GCS as Recommended Storage Backend | Accepted | 2026-03-10 |
 | [ADR-023](ADR-023-cro-naming-profiles.md) | Configurable CRO Naming Profiles | Superseded by ADR-058 | 2026-03-10 |
@@ -60,6 +60,7 @@
 | [ADR-062](ADR-062-glossary-ai-population-human-review.md) | AI-Assisted Glossary Population with Mandatory Human Review | Proposed | 2026-06-05 |
 | [ADR-063](ADR-063-sdr-status-machine.md) | Scientific Decision Records (SDR) Status Machine | Proposed | 2026-06-05 |
 | [ADR-064](ADR-064-sdr-reassessment-triggers.md) | Date-Based SDR Re-Assessment Triggers | Proposed | 2026-06-05 |
+| [ADR-065](ADR-065-bal-normalized-contract.md) | BAL Normalized Contract, Capabilities, and the Category/Backend Rule | Accepted | 2026-06-08 |
 
 ## How to Use This Directory
 
