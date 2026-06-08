@@ -243,6 +243,7 @@ class UploadService:
         project_id: int | None = None,
         experiment_id: int | None = None,
         sample_ids: list[int] | None = None,
+        is_global: bool = False,
     ) -> File:
         """Stream a file directly to storage without buffering the full content.
 
@@ -275,6 +276,7 @@ class UploadService:
             file_type=file_type,
             project_id=project_id,
             experiment_id=experiment_id,
+            is_global=is_global,
         )
 
         if sample_ids:

@@ -104,6 +104,9 @@ async def complete_upload(
 async def simple_upload(
     file: UploadFile = FastAPIFile(...),
     experiment_id: int | None = Query(None),
+    project_id: int | None = Query(None),
+    sample_ids: list[int] | None = Query(None),
+    is_global: bool = Query(False),
     current_user: dict = require_permission("files", "upload"),
     session: AsyncSession = Depends(get_session),
 ):
@@ -118,7 +121,10 @@ async def simple_upload(
             file.filename or "unknown",
             file.file,
             size_bytes=file.size,
+            project_id=project_id,
             experiment_id=experiment_id,
+            sample_ids=sample_ids,
+            is_global=is_global,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
