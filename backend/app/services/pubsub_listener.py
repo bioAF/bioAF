@@ -16,6 +16,8 @@ import logging
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapters.messaging import create_messaging_provider
+
 logger = logging.getLogger("bioaf.pubsub_listener")
 
 # Retry backoff base (seconds) - overridable in tests
@@ -70,7 +72,10 @@ class PubSubListener:
         from app.services.gcs_storage import GcsStorageService
 
         credentials = await GcsStorageService.get_credentials(session)
-        subscriber = self._create_subscriber(credentials=credentials)
+        # Event subscription is reached through the BAL MessagingProvider (Phase
+        # 9E); no Pub/Sub SDK lives in this service. The provider owns the client
+        # and the blocking-call offload and hands back normalized messages.
+        provider = create_messaging_provider(credentials=credentials)
         subscription_path = f"projects/{project_id}/subscriptions/{subscription_name}"
 
         self._running = True
@@ -81,34 +86,20 @@ class PubSubListener:
         try:
             while not self._stop_event.is_set():
                 try:
-                    response = await asyncio.to_thread(
-                        subscriber.pull,
-                        subscription=subscription_path,
-                        max_messages=10,
-                        timeout=30,
-                    )
+                    messages = await provider.pull(subscription_path, max_messages=10, timeout=30)
                     retry_delay = RETRY_BASE_SECONDS  # reset on success
 
-                    for received in response.received_messages:
+                    for received in messages:
                         try:
-                            msg_data = json.loads(received.message.data)
+                            msg_data = json.loads(received.data)
                             await self._handle_message(msg_data, session)
-                            await asyncio.to_thread(
-                                subscriber.acknowledge,
-                                subscription=subscription_path,
-                                ack_ids=[received.ack_id],
-                            )
+                            await provider.acknowledge(subscription_path, [received.ack_id])
                         except Exception:
                             logger.exception(
                                 "Failed to process message %s, nacking",
                                 received.ack_id,
                             )
-                            await asyncio.to_thread(
-                                subscriber.modify_ack_deadline,
-                                subscription=subscription_path,
-                                ack_ids=[received.ack_id],
-                                ack_deadline_seconds=0,
-                            )
+                            await provider.nack(subscription_path, [received.ack_id])
 
                 except (ConnectionError, OSError) as exc:
                     logger.error("Pub/Sub connection error: %s, retrying in %.0fs", exc, retry_delay)
@@ -182,14 +173,6 @@ class PubSubListener:
             credentials=credentials,
         )
         await session.commit()
-
-    def _create_subscriber(self, credentials=None):  # type: ignore[no-untyped-def]
-        """Create a Pub/Sub SubscriberClient. Overridden in tests."""
-        from google.cloud import pubsub_v1
-
-        if credentials:
-            return pubsub_v1.SubscriberClient(credentials=credentials)
-        return pubsub_v1.SubscriberClient()
 
     @staticmethod
     async def _read_config(session: AsyncSession) -> dict[str, str]:

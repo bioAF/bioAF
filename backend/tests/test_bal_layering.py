@@ -166,7 +166,6 @@ SDK_IMPORT_ALLOWLIST: set[tuple[str, str]] = {
     ("services/orphaned_resource_service.py", "google.cloud.iam_admin_v1"),
     ("services/stack_deployment.py", "google.cloud.container_v1"),
     ("services/billing_export_service.py", "google.cloud.bigquery"),
-    ("services/pubsub_listener.py", "google.cloud.pubsub_v1"),
 }
 
 
@@ -210,7 +209,7 @@ def test_sdk_allowlist_count_is_pinned():
 
     Decrement this as phases drain leaks; it must reach 0 by end of Phase 9.
     """
-    assert len(SDK_IMPORT_ALLOWLIST) == 13
+    assert len(SDK_IMPORT_ALLOWLIST) == 12
 
 
 # --- Tree scan: no adapter imports services (the layering inversion) ---------
