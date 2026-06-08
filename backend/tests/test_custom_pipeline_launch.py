@@ -9,6 +9,7 @@ from app.adapters.compute.kubernetes import _job_submit_result_from_dict
 import pytest_asyncio
 from sqlalchemy import select, text as sa_text
 
+from app.exceptions import StateError, ValidationError
 from app.models.audit_log import AuditLog
 from app.models.environment import Environment
 from app.models.environment_version import EnvironmentVersion
@@ -343,7 +344,7 @@ async def test_launch_github_repo_missing_ssh_key(
     adapter, _ = _mock_compute_adapter()
 
     with patch("app.services.custom_pipeline_service.get_compute_adapter", return_value=adapter):
-        with pytest.raises(ValueError, match="No SSH private key"):
+        with pytest.raises(ValidationError, match="No SSH private key"):
             await CustomPipelineService.launch_run(
                 session,
                 admin_user.organization_id,
@@ -496,7 +497,7 @@ async def test_required_variable_missing(session, admin_user, ready_env_version,
     adapter, _ = _mock_compute_adapter()
 
     with patch("app.services.custom_pipeline_service.get_compute_adapter", return_value=adapter):
-        with pytest.raises(ValueError, match="Required variable missing"):
+        with pytest.raises(ValidationError, match="Required variable missing"):
             await CustomPipelineService.launch_run(
                 session,
                 admin_user.organization_id,
@@ -515,7 +516,7 @@ async def test_unknown_variable_rejected(session, admin_user, ready_env_version,
     adapter, _ = _mock_compute_adapter()
 
     with patch("app.services.custom_pipeline_service.get_compute_adapter", return_value=adapter):
-        with pytest.raises(ValueError, match="Unknown variable"):
+        with pytest.raises(ValidationError, match="Unknown variable"):
             await CustomPipelineService.launch_run(
                 session,
                 admin_user.organization_id,
@@ -548,7 +549,7 @@ async def test_number_variable_type_check(session, admin_user, ready_env_version
     adapter, _ = _mock_compute_adapter()
 
     with patch("app.services.custom_pipeline_service.get_compute_adapter", return_value=adapter):
-        with pytest.raises(ValueError, match="must be a number"):
+        with pytest.raises(ValidationError, match="must be a number"):
             await CustomPipelineService.launch_run(
                 session,
                 admin_user.organization_id,
@@ -716,7 +717,7 @@ async def test_deprecated_version_rejected(session, admin_user, ready_env_versio
 
     adapter, _ = _mock_compute_adapter()
     with patch("app.services.custom_pipeline_service.get_compute_adapter", return_value=adapter):
-        with pytest.raises(ValueError, match="active"):
+        with pytest.raises(StateError, match="active"):
             await CustomPipelineService.launch_run(
                 session,
                 admin_user.organization_id,
@@ -735,7 +736,7 @@ async def test_other_org_version_rejected(session, admin_user, ready_env_version
     adapter, _ = _mock_compute_adapter()
 
     with patch("app.services.custom_pipeline_service.get_compute_adapter", return_value=adapter):
-        with pytest.raises(ValueError, match="organization"):
+        with pytest.raises(ValidationError, match="organization"):
             await CustomPipelineService.launch_run(
                 session,
                 admin_user.organization_id + 999,
@@ -751,7 +752,7 @@ async def test_other_org_version_rejected(session, admin_user, ready_env_version
 @pytest.mark.asyncio
 async def test_no_target_rejected(session, admin_user, ready_env_version):
     pipeline, version = await _create_pipeline_with_version(session, admin_user, ready_env_version.id)
-    with pytest.raises(ValueError, match="experiment_id or project_id"):
+    with pytest.raises(ValidationError, match="experiment_id or project_id"):
         await CustomPipelineService.launch_run(
             session,
             admin_user.organization_id,
