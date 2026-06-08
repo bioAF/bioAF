@@ -113,6 +113,11 @@ class NfsStorageProvider(StorageProvider):
         ``file://working/../../etc/passwd`` cannot read or write outside the mount.
         """
         store, key = self._parse_uri(uri)
+        # Reject traversal in the user-derived key first (the explicit '..'/abs
+        # check is a CodeQL-recognised path-injection barrier), then confirm the
+        # resolved real path stays under the mount root (the semantic guard).
+        if os.path.isabs(key) or ".." in key.split("/"):
+            raise ValueError(f"Storage URI escapes the mount root: {uri!r}")
         base = os.path.realpath(self._root)
         full = os.path.realpath(os.path.join(base, store, key))
         if full != base and not full.startswith(base + os.sep):

@@ -190,7 +190,17 @@ class GcsStorageProvider(StorageProvider):
 
     def _local_path(self, uri: str) -> str:
         bucket, key = self._parse_uri(uri)
-        return os.path.join(LOCAL_DATA_ROOT, _LOCAL_OBJECTS_DIR, bucket, key)
+        # The key can derive from user input, and local mode maps it onto a real
+        # filesystem path. Reject traversal in the key (the explicit '..'/abs
+        # check is a CodeQL-recognised path-injection barrier), then confirm the
+        # resolved real path stays under the local object root.
+        if os.path.isabs(key) or ".." in key.split("/"):
+            raise ValueError(f"Storage key escapes the local object root: {key!r}")
+        base = os.path.realpath(os.path.join(LOCAL_DATA_ROOT, _LOCAL_OBJECTS_DIR))
+        full = os.path.realpath(os.path.join(base, bucket, key))
+        if full != base and not full.startswith(base + os.sep):
+            raise ValueError(f"Storage path escapes the local object root: {uri!r}")
+        return full
 
     async def _get_credentials(self):
         """Resolve and cache GCS credentials via a short-lived session.
