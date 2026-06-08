@@ -133,9 +133,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         return self._mode == "local"
 
     async def launch_session(self, session_spec: dict) -> SessionInfo:
-        d = self._local_launch_session(session_spec) if self.is_local else await self._k8s_launch_session(
-            session_spec
-        )
+        d = self._local_launch_session(session_spec) if self.is_local else await self._k8s_launch_session(session_spec)
         return _session_info_from_dict(d)
 
     async def terminate_session(self, session_id: str, **kwargs) -> TerminationResult:
@@ -162,7 +160,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         namespace = DEFAULT_NOTEBOOK_NAMESPACE
         return f"kubectl exec -it -n {namespace} pod/bioaf-notebook-{session_id} -- /bin/bash"
 
-    async def sync_session_storage(
+    async def sync_session_storage(  # type: ignore[override]
         self,
         session_id: str,
         *,

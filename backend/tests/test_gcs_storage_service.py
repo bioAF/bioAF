@@ -88,6 +88,7 @@ async def test_get_bucket_metrics_requires_deployed(session):
     with pytest.raises(ValueError, match="not been deployed"):
         await GcsStorageService.get_bucket_metrics(session)
 
+
 # NOTE: move_file / read_object_text were removed from GcsStorageService in
 # Phase 3 of the BAL rework; object I/O now goes through the storage adapter.
 # The fail-safe copy-verify-delete move behavior is covered by

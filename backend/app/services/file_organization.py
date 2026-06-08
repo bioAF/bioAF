@@ -217,9 +217,9 @@ class FileOrganizationService:
 
         # Update DB
         await session.execute(
-            text("UPDATE files SET experiment_id = NULL, gcs_uri = :uri, storage_uri = :uri WHERE id = :fid").bindparams(
-                uri=new_uri, fid=file_id
-            )
+            text(
+                "UPDATE files SET experiment_id = NULL, gcs_uri = :uri, storage_uri = :uri WHERE id = :fid"
+            ).bindparams(uri=new_uri, fid=file_id)
         )
 
         await log_action(

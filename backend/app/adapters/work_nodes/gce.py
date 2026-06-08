@@ -342,14 +342,18 @@ class GCEWorkNodeProvider(WorkNodeProvider):
         return _vm_info_from_dict(d)
 
     async def terminate_vm(self, instance_name: str, zone: str, **kwargs) -> TerminationResult:
-        d = self._local_terminate_vm(instance_name) if self.is_local else await self._gce_terminate_vm(
-            instance_name, zone, **kwargs
+        d = (
+            self._local_terminate_vm(instance_name)
+            if self.is_local
+            else await self._gce_terminate_vm(instance_name, zone, **kwargs)
         )
         return _termination_result_from_dict(d)
 
     async def get_vm_status(self, instance_name: str, zone: str) -> VmStatus:
-        d = self._local_get_vm_status(instance_name) if self.is_local else await self._gce_get_vm_status(
-            instance_name, zone
+        d = (
+            self._local_get_vm_status(instance_name)
+            if self.is_local
+            else await self._gce_get_vm_status(instance_name, zone)
         )
         return _vm_status_from_dict(d)
 

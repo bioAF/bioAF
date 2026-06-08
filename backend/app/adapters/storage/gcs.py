@@ -156,9 +156,7 @@ class GcsStorageProvider(StorageProvider):
                 size_bytes=d.get("size_bytes"),
                 md5_hash=d.get("md5_hash"),
                 provider_details={
-                    k: v
-                    for k, v in d.items()
-                    if k not in {"filename", "gcs_uri", "size_bytes", "md5_hash"}
+                    k: v for k, v in d.items() if k not in {"filename", "gcs_uri", "size_bytes", "md5_hash"}
                 },
             )
             for d in items
@@ -256,9 +254,7 @@ class GcsStorageProvider(StorageProvider):
     async def write_text(self, uri: str, text: str, *, content_type: str = "text/plain") -> None:
         await self.write_bytes(uri, text.encode("utf-8"), content_type=content_type)
 
-    async def write_bytes(
-        self, uri: str, data: bytes, *, content_type: str = "application/octet-stream"
-    ) -> None:
+    async def write_bytes(self, uri: str, data: bytes, *, content_type: str = "application/octet-stream") -> None:
         if self.is_local:
             await asyncio.to_thread(_write_file_bytes, self._local_path(uri), data)
             return
@@ -372,9 +368,7 @@ class GcsStorageProvider(StorageProvider):
         content_type: str | None = None,
     ) -> str:
         creds = await self._get_credentials()
-        return await asyncio.to_thread(
-            self._gcs_generate_signed_url, uri, method, expiry_seconds, content_type, creds
-        )
+        return await asyncio.to_thread(self._gcs_generate_signed_url, uri, method, expiry_seconds, content_type, creds)
 
     async def create_resumable_upload_url(
         self,
@@ -559,9 +553,7 @@ class GcsStorageProvider(StorageProvider):
             updated=str(blob.updated) if blob.updated else None,
         )
 
-    def _gcs_generate_signed_url(
-        self, uri: str, method: str, expiry_seconds: int, content_type, creds
-    ) -> str:
+    def _gcs_generate_signed_url(self, uri: str, method: str, expiry_seconds: int, content_type, creds) -> str:
         bucket, key = self._parse_uri(uri)
         blob = self._get_gcs_client(creds).bucket(bucket).blob(key)
         kwargs: dict = {"version": "v4", "expiration": expiry_seconds, "method": method}

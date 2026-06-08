@@ -200,12 +200,14 @@ def _mock_compute_adapter():
 
     async def capture_submit(job_spec):
         captured["job_spec"] = job_spec
-        return _job_submit_result_from_dict({
-            "job_id": "bioaf-pipeline-test-123",
-            "namespace": "bioaf-pipelines",
-            "status": "queued",
-            "estimated_cost": {"estimated_cost_usd": 0.25},
-        })
+        return _job_submit_result_from_dict(
+            {
+                "job_id": "bioaf-pipeline-test-123",
+                "namespace": "bioaf-pipelines",
+                "status": "queued",
+                "estimated_cost": {"estimated_cost_usd": 0.25},
+            }
+        )
 
     adapter = MagicMock()
     adapter.submit_job = AsyncMock(side_effect=capture_submit)

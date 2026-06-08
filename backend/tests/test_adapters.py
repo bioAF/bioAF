@@ -247,28 +247,28 @@ class TestGetJobProgress:
         """ComputeProvider subclass missing get_job_progress cannot instantiate."""
 
         class IncompleteProvider(ComputeProvider):
-            async def submit_job(self, job_spec: dict) -> dict:
+            async def submit_job(self, job_spec: dict) -> dict:  # type: ignore[override]
                 return {}
 
-            async def cancel_job(self, job_id: str) -> dict:
+            async def cancel_job(self, job_id: str) -> dict:  # type: ignore[override]
                 return {}
 
-            async def get_job_status(self, job_id: str) -> dict:
+            async def get_job_status(self, job_id: str) -> dict:  # type: ignore[override]
                 return {}
 
-            async def list_jobs(self, filters: dict | None = None) -> list[dict]:
+            async def list_jobs(self, filters: dict | None = None) -> list[dict]:  # type: ignore[override]
                 return []
 
             async def get_job_logs(self, job_id: str) -> str:
                 return ""
 
-            async def get_cluster_status(self) -> dict:
+            async def get_cluster_status(self) -> dict:  # type: ignore[override]
                 return {}
 
-            async def get_cluster_metrics(self) -> dict:
+            async def get_cluster_metrics(self) -> dict:  # type: ignore[override]
                 return {}
 
-            async def get_cost_estimate(self, job_spec: dict) -> dict:
+            async def get_cost_estimate(self, job_spec: dict) -> dict:  # type: ignore[override]
                 return {}
 
             async def get_connection_command(self, job_id: str) -> str:

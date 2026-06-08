@@ -185,9 +185,7 @@ async def test_storage_metrics_reports_usage(nfs):
 @pytest.mark.asyncio
 async def test_nfs_integration_stage_and_collect(nfs, tmp_path):
     working = str(tmp_path / "work")
-    staged = await nfs.stage_inputs(
-        [{"filename": "reads.fastq", "local_path": None}], working
-    )
+    staged = await nfs.stage_inputs([{"filename": "reads.fastq", "local_path": None}], working)
     assert len(staged) == 1
     # Simulate a pipeline writing an output into the working dir.
     import os
@@ -225,9 +223,7 @@ async def test_storage_interface_parity_gcs_vs_nfs(tmp_path, monkeypatch):
         assert await adapter.read_text(uri) == "same code"
         assert await adapter.exists(uri) is True
 
-        listed = await adapter.list_objects(
-            await adapter.resolve_uri(StorageStore.WORKING, "dir/")
-        )
+        listed = await adapter.list_objects(await adapter.resolve_uri(StorageStore.WORKING, "dir/"))
         assert [o.filename for o in listed] == ["file.txt"]
 
         await adapter.delete(uri)

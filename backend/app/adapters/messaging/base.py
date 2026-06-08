@@ -24,9 +24,7 @@ class MessagingProvider(ABC):
     """Pull/ack/nack against a subscription on the active messaging backend."""
 
     @abstractmethod
-    async def pull(
-        self, subscription_path: str, *, max_messages: int = 10, timeout: int = 30
-    ) -> list[ReceivedMessage]:
+    async def pull(self, subscription_path: str, *, max_messages: int = 10, timeout: int = 30) -> list[ReceivedMessage]:
         """Pull up to ``max_messages`` messages, blocking up to ``timeout`` seconds."""
 
     @abstractmethod

@@ -119,7 +119,7 @@ def test_cluster_status_holds_node_pools():
         total_nodes=3,
         active_nodes=2,
         health="healthy",
-        node_pools=[{"name": "pipelines", "current_nodes": 2, "spot": True}],
+        node_pools=[{"name": "pipelines", "current_nodes": 2, "spot": True}],  # type: ignore[list-item]
     )
     assert cs.node_pools[0].name == "pipelines"
     assert cs.node_pools[0].spot is True
@@ -128,7 +128,7 @@ def test_cluster_status_holds_node_pools():
 def test_cluster_metrics_holds_pool_cost_rates():
     cm = ClusterMetrics(
         cost_burn_rate_hourly=0.42,
-        node_pools=[{"name": "pipelines", "cost_rate_hourly": 0.21}],
+        node_pools=[{"name": "pipelines", "cost_rate_hourly": 0.21}],  # type: ignore[list-item]
     )
     assert cm.node_pools[0].cost_rate_hourly == 0.21
 
@@ -140,7 +140,7 @@ def test_storage_metrics_holds_buckets():
     sm = StorageMetrics(
         total_size_gb=10.0,
         total_cost_monthly_usd=1.0,
-        buckets=[{"name": "raw", "size_gb": 5.0, "object_count": 3}],
+        buckets=[{"name": "raw", "size_gb": 5.0, "object_count": 3}],  # type: ignore[list-item]
     )
     assert sm.buckets[0].name == "raw"
     assert sm.total_cost_monthly_usd == 1.0

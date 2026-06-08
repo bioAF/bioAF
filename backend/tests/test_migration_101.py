@@ -66,9 +66,7 @@ async def test_backfill_sql_copies_k8s_values(session, admin_user):
     await session.commit()
 
     row = (
-        await session.execute(
-            text("SELECT compute_job_ref, provider_metadata FROM pipeline_runs WHERE id = 9101")
-        )
+        await session.execute(text("SELECT compute_job_ref, provider_metadata FROM pipeline_runs WHERE id = 9101"))
     ).fetchone()
     assert row is not None
     assert row[0] == "job-abc"

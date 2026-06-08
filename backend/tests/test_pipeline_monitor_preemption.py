@@ -63,7 +63,6 @@ async def k8s_failed_preemption_run(session, admin_user):
         status="running",
         k8s_job_name="bioaf-pipeline-preempt-1",
         compute_job_ref="bioaf-pipeline-preempt-1",
-
         k8s_namespace="bioaf-pipelines",
         started_at=datetime.now(timezone.utc),
     )
@@ -97,13 +96,15 @@ async def test_preemption_exhaustion_detected_from_trace(session, k8s_failed_pre
     # The monitor reads the trace from get_job_progress processes or parses trace.tsv.
     # For the preemption path, OOM is checked first (no OOMKilled), then trace is checked.
     # We simulate the trace being available via the progress adapter.
-    mock_compute.get_job_progress.return_value = _job_progress_from_dict({
-        "percent_complete": 0.0,
-        "processes": [
-            {"name": "STAR_GENOMEGENERATE", "status": "failed", "exit_code": 143},
-            {"name": "FASTQC", "status": "completed"},
-        ],
-    })
+    mock_compute.get_job_progress.return_value = _job_progress_from_dict(
+        {
+            "percent_complete": 0.0,
+            "processes": [
+                {"name": "STAR_GENOMEGENERATE", "status": "failed", "exit_code": 143},
+                {"name": "FASTQC", "status": "completed"},
+            ],
+        }
+    )
 
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = []
@@ -131,12 +132,14 @@ async def test_preemption_exit_137_detected(session, k8s_failed_preemption_run):
     mock_compute = _make_mock_compute(
         termination_reasons=[{"container": "pipeline", "exit_code": 137, "reason": "Error"}],
     )
-    mock_compute.get_job_progress.return_value = _job_progress_from_dict({
-        "percent_complete": 0.0,
-        "processes": [
-            {"name": "STAR_GENOMEGENERATE", "status": "failed", "exit_code": 137},
-        ],
-    })
+    mock_compute.get_job_progress.return_value = _job_progress_from_dict(
+        {
+            "percent_complete": 0.0,
+            "processes": [
+                {"name": "STAR_GENOMEGENERATE", "status": "failed", "exit_code": 137},
+            ],
+        }
+    )
 
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = []
@@ -162,12 +165,14 @@ async def test_normal_failure_sets_task_error(session, k8s_failed_preemption_run
     mock_compute = _make_mock_compute(
         termination_reasons=[{"container": "pipeline", "exit_code": 1, "reason": "Error"}],
     )
-    mock_compute.get_job_progress.return_value = _job_progress_from_dict({
-        "percent_complete": 0.0,
-        "processes": [
-            {"name": "STAR_GENOMEGENERATE", "status": "failed", "exit_code": 1},
-        ],
-    })
+    mock_compute.get_job_progress.return_value = _job_progress_from_dict(
+        {
+            "percent_complete": 0.0,
+            "processes": [
+                {"name": "STAR_GENOMEGENERATE", "status": "failed", "exit_code": 1},
+            ],
+        }
+    )
 
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = []

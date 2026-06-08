@@ -376,9 +376,7 @@ async def download_file(
     try:
         from app.adapters.registry import get_storage_adapter
 
-        url = await get_storage_adapter().generate_signed_url(
-            file.gcs_uri, method="GET", expiry_seconds=3600
-        )
+        url = await get_storage_adapter().generate_signed_url(file.gcs_uri, method="GET", expiry_seconds=3600)
     except Exception:
         raise HTTPException(502, "Could not generate download URL")
 

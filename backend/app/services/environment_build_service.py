@@ -453,9 +453,7 @@ class EnvironmentBuildService:
 
         # Upload Packer template
         packer_path = f"builds/{safe_name}/v{version.version_number}/work_node.pkr.hcl"
-        await adapter.write_text(
-            f"gs://{working_bucket}/{packer_path}", PACKER_VM_TEMPLATE, content_type="text/plain"
-        )
+        await adapter.write_text(f"gs://{working_bucket}/{packer_path}", PACKER_VM_TEMPLATE, content_type="text/plain")
 
         # Build image name and URI
         image_name = _get_vm_image_name(env.name, version.version_number, version.build_number)

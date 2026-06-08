@@ -46,9 +46,7 @@ OBJECT_STORE_METHODS = {
 def test_storage_provider_declares_object_store_methods():
     for name in OBJECT_STORE_METHODS:
         assert hasattr(StorageProvider, name), f"StorageProvider missing {name}"
-        assert inspect.iscoroutinefunction(getattr(StorageProvider, name)), (
-            f"{name} must be async"
-        )
+        assert inspect.iscoroutinefunction(getattr(StorageProvider, name)), f"{name} must be async"
 
 
 def test_storage_store_enum_has_logical_stores():

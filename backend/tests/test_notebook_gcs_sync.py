@@ -83,9 +83,7 @@ async def test_sync_session_storage_local_mode_is_noop():
     adapter._mode = "local"
     adapter._get_k8s_core_client = MagicMock(side_effect=AssertionError("should not touch K8s"))
 
-    await adapter.sync_session_storage(
-        session_id=1, pod_name="p", namespace="n", gcs_prefix="gs://x/"
-    )
+    await adapter.sync_session_storage(session_id=1, pod_name="p", namespace="n", gcs_prefix="gs://x/")
 
 
 @pytest.mark.asyncio
@@ -95,4 +93,4 @@ async def test_base_sync_session_storage_is_noop():
     from app.adapters.notebooks.slurm import SlurmNotebookProvider
 
     provider = SlurmNotebookProvider()
-    assert await provider.sync_session_storage("123", pod_name="p", gcs_prefix="gs://x/") is None
+    assert await provider.sync_session_storage("123", pod_name="p", gcs_prefix="gs://x/") is None  # type: ignore[func-returns-value]

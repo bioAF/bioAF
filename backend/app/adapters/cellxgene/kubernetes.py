@@ -112,7 +112,7 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
             else:
                 raise
 
-    async def deploy(self, publication_id: int, gcs_uri: str, dataset_name: str) -> dict:
+    async def deploy(self, publication_id: int, gcs_uri: str, dataset_name: str) -> dict:  # type: ignore[override]
         await self._get_api_client_async()
         image = await self._resolve_image()
 

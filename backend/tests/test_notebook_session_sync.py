@@ -40,9 +40,7 @@ async def test_running_transitions_status_and_sets_access_url():
     ns = _ns()
     session = MagicMock()
     session.flush = AsyncMock()
-    status = SessionStatus(
-        session_id="42", status=ServiceState.RUNNING, access_url="http://1.2.3.4:8888"
-    )
+    status = SessionStatus(session_id="42", status=ServiceState.RUNNING, access_url="http://1.2.3.4:8888")
     with patch("app.api.notebook_sessions.get_notebook_adapter", return_value=_adapter(status)):
         await _sync_session_from_k8s(ns, session)
 

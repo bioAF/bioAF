@@ -124,9 +124,7 @@ async def download_document(
     try:
         from app.adapters.registry import get_storage_adapter
 
-        url = await get_storage_adapter().generate_signed_url(
-            doc.file.gcs_uri, method="GET", expiry_seconds=3600
-        )
+        url = await get_storage_adapter().generate_signed_url(doc.file.gcs_uri, method="GET", expiry_seconds=3600)
         return {"download_url": url}
     except Exception:
         return {"download_url": doc.file.gcs_uri if doc.file else ""}

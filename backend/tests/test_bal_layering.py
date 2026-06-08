@@ -65,10 +65,7 @@ def _forbidden_sdk_imports_in_source(source: str) -> set[str]:
 
 
 def _is_forbidden(name: str) -> bool:
-    return any(
-        name == prefix or name.startswith(prefix + ".")
-        for prefix in FORBIDDEN_SDK_PREFIXES
-    )
+    return any(name == prefix or name.startswith(prefix + ".") for prefix in FORBIDDEN_SDK_PREFIXES)
 
 
 # --- Detector unit tests (no real files; prove the scanner works) -----------
@@ -80,9 +77,7 @@ def test_synthetic_new_leak_is_detected():
 
 
 def test_detects_plain_import_form():
-    assert _forbidden_sdk_imports_in_source("import google.cloud.storage") == {
-        "google.cloud.storage"
-    }
+    assert _forbidden_sdk_imports_in_source("import google.cloud.storage") == {"google.cloud.storage"}
 
 
 def test_detects_kubernetes_submodule_import():
@@ -100,11 +95,7 @@ def test_detects_deferred_import_inside_function():
 
 
 def test_detects_import_under_type_checking_block():
-    source = (
-        "from typing import TYPE_CHECKING\n"
-        "if TYPE_CHECKING:\n"
-        "    from google.cloud import compute_v1\n"
-    )
+    source = "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from google.cloud import compute_v1\n"
     assert _forbidden_sdk_imports_in_source(source) == {"google.cloud.compute_v1"}
 
 
@@ -179,8 +170,7 @@ def test_no_cloud_sdk_imports_outside_adapters():
     assert not new_leaks, (
         "New cloud/k8s SDK import(s) outside backend/app/adapters/. Route through "
         "an adapter, or (if intentional and pending a later phase) add to "
-        "SDK_IMPORT_ALLOWLIST:\n"
-        + "\n".join(f"  {rel}: imports {sdk}" for rel, sdk in new_leaks)
+        "SDK_IMPORT_ALLOWLIST:\n" + "\n".join(f"  {rel}: imports {sdk}" for rel, sdk in new_leaks)
     )
 
 
@@ -199,8 +189,7 @@ def test_sdk_allowlist_has_no_stale_entries():
     stale = sorted(SDK_IMPORT_ALLOWLIST - actual)
     assert not stale, (
         "Stale SDK_IMPORT_ALLOWLIST entr(ies): the leak is gone but the "
-        "allowlist still exempts it. Delete these entries:\n"
-        + "\n".join(f"  {rel}: {sdk}" for rel, sdk in stale)
+        "allowlist still exempts it. Delete these entries:\n" + "\n".join(f"  {rel}: {sdk}" for rel, sdk in stale)
     )
 
 
@@ -229,9 +218,7 @@ def _service_imports_in_source(source: str) -> set[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name == "app.services" or alias.name.startswith(
-                    "app.services."
-                ):
+                if alias.name == "app.services" or alias.name.startswith("app.services."):
                     found.add(alias.name)
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             module = node.module
@@ -287,8 +274,7 @@ def test_no_adapter_imports_services():
     assert not new_inversions, (
         "Adapter(s) import from app.services (layering inversion). Depend on "
         "app.platform instead, or (pending Phase 1) add to "
-        "ADAPTER_SERVICE_IMPORT_ALLOWLIST:\n"
-        + "\n".join(f"  {rel}: imports {svc}" for rel, svc in new_inversions)
+        "ADAPTER_SERVICE_IMPORT_ALLOWLIST:\n" + "\n".join(f"  {rel}: imports {svc}" for rel, svc in new_inversions)
     )
 
 

@@ -105,7 +105,6 @@ async def _make_custom_run(
         status="running",
         k8s_job_name=f"bioaf-custom-{pipeline.id}",
         compute_job_ref=f"bioaf-custom-{pipeline.id}",
-
         k8s_namespace="bioaf-pipelines",
         custom_pipeline_version_id=version.id,
         started_at=datetime.now(timezone.utc),
@@ -174,10 +173,12 @@ async def test_custom_completion_sets_simple_progress(session, admin_user, env_v
     run, _ = await _make_custom_run(session, admin_user, env_version)
 
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = _job_status_from_dict({
-        "status": "completed",
-        "pod_name": "pod-xyz",
-    })
+    mock_compute.get_job_status.return_value = _job_status_from_dict(
+        {
+            "status": "completed",
+            "pod_name": "pod-xyz",
+        }
+    )
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = []
 
@@ -208,11 +209,13 @@ async def test_custom_failure_sets_simple_progress(session, admin_user, env_vers
     run, _ = await _make_custom_run(session, admin_user, env_version)
 
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = _job_status_from_dict({
-        "status": "failed",
-        "pod_name": "pod-xyz",
-        "termination_reasons": [],
-    })
+    mock_compute.get_job_status.return_value = _job_status_from_dict(
+        {
+            "status": "failed",
+            "pod_name": "pod-xyz",
+            "termination_reasons": [],
+        }
+    )
     mock_compute.get_job_logs.return_value = "boom"
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = []
@@ -239,10 +242,12 @@ async def test_custom_completion_skips_nextflow_metadata(session, admin_user, en
     run, _ = await _make_custom_run(session, admin_user, env_version)
 
     mock_compute = AsyncMock()
-    mock_compute.get_job_status.return_value = _job_status_from_dict({
-        "status": "completed",
-        "pod_name": "pod-xyz",
-    })
+    mock_compute.get_job_status.return_value = _job_status_from_dict(
+        {
+            "status": "completed",
+            "pod_name": "pod-xyz",
+        }
+    )
     mock_storage = AsyncMock()
     mock_storage.collect_outputs.return_value = []
 

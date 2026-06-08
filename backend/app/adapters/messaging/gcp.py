@@ -30,9 +30,7 @@ class GcpMessagingProvider(MessagingProvider):
             )
         return self._subscriber
 
-    async def pull(
-        self, subscription_path: str, *, max_messages: int = 10, timeout: int = 30
-    ) -> list[ReceivedMessage]:
+    async def pull(self, subscription_path: str, *, max_messages: int = 10, timeout: int = 30) -> list[ReceivedMessage]:
         response = await asyncio.to_thread(
             self._client().pull,
             subscription=subscription_path,

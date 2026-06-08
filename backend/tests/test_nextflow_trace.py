@@ -122,9 +122,6 @@ def test_parse_trace_to_progress_empty():
 
 def test_parse_trace_to_progress_gains_kb_memory():
     """The converged (superset) parser now resolves KB memory the adapter dropped."""
-    trace = (
-        "task_id\tname\tstatus\t%cpu\tpeak_rss\trealtime\n"
-        "1\tP\tCOMPLETED\t10\t2097152 KB\t10s\n"
-    )
+    trace = "task_id\tname\tstatus\t%cpu\tpeak_rss\trealtime\n1\tP\tCOMPLETED\t10\t2097152 KB\t10s\n"
     result = nf.parse_trace_to_progress(trace)
     assert result["processes"][0]["memory_gb"] == pytest.approx(2.0, rel=0.01)

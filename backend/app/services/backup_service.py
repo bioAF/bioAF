@@ -915,9 +915,7 @@ class RestoreService:
             from app.adapters.registry import get_storage_adapter
 
             try:
-                await get_storage_adapter().download_to_filename(
-                    f"gs://{bucket_name}/postgres/{filename}", dump_path
-                )
+                await get_storage_adapter().download_to_filename(f"gs://{bucket_name}/postgres/{filename}", dump_path)
             except StorageObjectNotFound:
                 return {"status": "error", "message": f"Backup file not found: {filename}"}
             logger.info("Downloaded %s from storage (%d bytes)", filename, os.path.getsize(dump_path))

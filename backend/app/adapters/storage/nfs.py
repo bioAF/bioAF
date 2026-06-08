@@ -227,9 +227,7 @@ class NfsStorageProvider(StorageProvider):
     async def write_text(self, uri: str, text: str, *, content_type: str = "text/plain") -> None:
         await self.write_bytes(uri, text.encode("utf-8"), content_type=content_type)
 
-    async def write_bytes(
-        self, uri: str, data: bytes, *, content_type: str = "application/octet-stream"
-    ) -> None:
+    async def write_bytes(self, uri: str, data: bytes, *, content_type: str = "application/octet-stream") -> None:
         await asyncio.to_thread(_write_file_bytes, self._path(uri), data)
 
     async def upload_file(self, uri: str, file_obj: BinaryIO, *, content_type: str | None = None) -> None:

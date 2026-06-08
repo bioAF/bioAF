@@ -341,4 +341,3 @@ class UploadService:
         if lower.endswith(".csv"):
             return "csv"
         return "other"
-

@@ -115,9 +115,7 @@ class PipelineOutputService:
             report_uri = await adapter.resolve_uri(
                 StorageStore.RAW, f"nextflow-reports/{run.compute_job_ref}/report.html"
             )
-            trace_uri = await adapter.resolve_uri(
-                StorageStore.RAW, f"nextflow-traces/{run.compute_job_ref}/trace.tsv"
-            )
+            trace_uri = await adapter.resolve_uri(StorageStore.RAW, f"nextflow-traces/{run.compute_job_ref}/trace.tsv")
         except ValueError:
             # No RAW store configured for this install.
             return []

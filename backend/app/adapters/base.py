@@ -40,12 +40,13 @@ class ComputeProvider(ABC):
         """
         return ProviderCapabilities()
 
-    async def load_cluster_config(self) -> None:
+    async def load_cluster_config(self, force: bool = False) -> dict | None:
         """Optionally pre-load backend config at startup. No-op by default.
 
         The registry calls this once on every adapter at startup so adapters
         that need eager config (e.g. the K8s adapters reading GKE cluster
-        details) get it without the registry sniffing for the method.
+        details) get it without the registry sniffing for the method. Backends
+        that load config return it as a dict; ``force`` re-reads past any cache.
         """
         return None
 
@@ -164,9 +165,7 @@ class StorageProvider(ABC):
         """Upload text to an object, replacing any existing object."""
         raise NotImplementedError
 
-    async def write_bytes(
-        self, uri: str, data: bytes, *, content_type: str = "application/octet-stream"
-    ) -> None:
+    async def write_bytes(self, uri: str, data: bytes, *, content_type: str = "application/octet-stream") -> None:
         """Upload bytes to an object, replacing any existing object."""
         raise NotImplementedError
 
@@ -276,7 +275,7 @@ class NotebookProvider(ABC):
         """Declare what this backend can do. Default: nothing (see ComputeProvider)."""
         return ProviderCapabilities()
 
-    async def load_cluster_config(self) -> None:
+    async def load_cluster_config(self, force: bool = False) -> dict | None:
         """Optionally pre-load backend config at startup. No-op by default."""
         return None
 
@@ -289,8 +288,12 @@ class NotebookProvider(ABC):
         """Stop a running session. Returns a TerminationResult."""
 
     @abstractmethod
-    async def get_session_status(self, session_id: str) -> SessionStatus:
-        """Get session health and resource usage."""
+    async def get_session_status(self, session_id: str, **kwargs) -> SessionStatus:
+        """Get session health and resource usage.
+
+        ``**kwargs`` carries backend-specific lookup hints (e.g. the K8s pod
+        name / namespace) that some backends need to locate the session.
+        """
 
     @abstractmethod
     async def list_sessions(self, filters: dict | None = None) -> list[SessionStatus]:
@@ -352,7 +355,7 @@ class CellxgeneProvider(ABC):
         """Declare what this backend can do. Default: nothing (see ComputeProvider)."""
         return ProviderCapabilities()
 
-    async def load_cluster_config(self) -> None:
+    async def load_cluster_config(self, force: bool = False) -> dict | None:
         """Optionally pre-load backend config at startup. No-op by default."""
         return None
 
