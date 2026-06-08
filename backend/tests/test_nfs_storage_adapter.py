@@ -202,3 +202,33 @@ async def test_nfs_integration_stage_and_collect(nfs, tmp_path):
     for obj in outputs:
         if obj.filename == "result.txt":
             assert await nfs.read_text(obj.storage_uri) == "done"
+
+
+# -- parity: the same caller code works against GCS (local) and NFS -----------
+
+
+@pytest.mark.asyncio
+async def test_storage_interface_parity_gcs_vs_nfs(tmp_path, monkeypatch):
+    """Identical caller code (resolve_uri -> write -> read -> list -> delete)
+    produces the same observable behavior on both the GCS adapter (local mode)
+    and the NFS adapter: the abstraction holds across backends."""
+    from app.adapters.storage import gcs as gcs_mod
+
+    monkeypatch.setattr(gcs_mod, "LOCAL_DATA_ROOT", str(tmp_path / "gcs"))
+    gcs = gcs_mod.GcsStorageProvider()
+    assert gcs.is_local  # parity test exercises the GCS filesystem-emulation path
+    nfs = NfsStorageProvider(root=str(tmp_path / "nfs"))
+
+    for adapter in (gcs, nfs):
+        uri = await adapter.resolve_uri(StorageStore.WORKING, "dir/file.txt")
+        await adapter.write_text(uri, "same code")
+        assert await adapter.read_text(uri) == "same code"
+        assert await adapter.exists(uri) is True
+
+        listed = await adapter.list_objects(
+            await adapter.resolve_uri(StorageStore.WORKING, "dir/")
+        )
+        assert [o.filename for o in listed] == ["file.txt"]
+
+        await adapter.delete(uri)
+        assert await adapter.exists(uri) is False
