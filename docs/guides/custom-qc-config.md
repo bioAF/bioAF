@@ -1,6 +1,6 @@
 # Custom QC Report Configuration
 
-Custom pipelines can ship their own QC dashboard. The dashboard is driven by two pieces:
+Custom pipelines can ship their own QC Dashboard. The QC Dashboard is driven by two pieces:
 
 1. A **render config** (`qc_config_json`) attached to the pipeline version, describing which sections, metric labels, formats, and thresholds to display.
 2. A **`qc_metrics.json`** file that the pipeline writes to `/outputs/` at run time, supplying the actual metric values.
@@ -15,9 +15,9 @@ When a custom pipeline run completes, bioAF:
 
 1. Looks up the pipeline version's `qc_template` and `qc_config_json`.
 2. If `qc_template = custom`, reads `/outputs/qc_metrics.json` from the run's GCS prefix.
-3. Renders the dashboard generically: sections from the config, values from the metrics file, formats and threshold colors from the config.
+3. Renders the QC Dashboard generically: sections from the config, values from the metrics file, formats and threshold colors from the config.
 
-The render config travels with the pipeline version. Editing it produces a new version, so old runs always render the way they were generated even if you later evolve the layout. Inside `bioAF` the dashboard row also snapshots the resolved config at generation time, so this guarantee survives even if the pipeline is later deleted.
+The render config travels with the pipeline version. Editing it produces a new version, so old runs always render the way they were generated even if you later evolve the layout. Inside `bioAF` the QC Dashboard row also snapshots the resolved config at generation time, so this guarantee survives even if the pipeline is later deleted.
 
 ## Setting It Up
 
@@ -27,7 +27,7 @@ In the **New Version** form, expand the **QC dashboard config** panel.
 2. Paste a JSON object into the **QC config JSON** textarea. The editor validates it client-side -- it must be a JSON object (not an array or scalar).
 3. Save the version.
 
-If you skip this step, the dashboard will not be generated for runs of that version (the pipeline can still emit `qc_metrics.json`, but nothing renders it).
+If you skip this step, the QC Dashboard will not be generated for runs of that version (the pipeline can still emit `qc_metrics.json`, but nothing renders it).
 
 ## Config Schema
 
@@ -189,7 +189,7 @@ cat > "${QC_METRICS}" <<JSON
 JSON
 ```
 
-After the run completes, open **QC Dashboards** (or the run detail page's QC tab) to see the rendered dashboard.
+After the run completes, open **QC Dashboards** (or the run detail page's QC tab) to see the rendered QC Dashboard.
 
 ## Iterating on the Layout
 

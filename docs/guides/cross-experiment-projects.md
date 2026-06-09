@@ -82,7 +82,7 @@ When launching a project-level pipeline, some parameters require special attenti
 
 - **Batch variable:** Specify which metadata field identifies the batch (usually experiment ID or sequencing run). This is critical for batch correction.
 - **Sample grouping:** Define how samples should be grouped for comparison (e.g., treatment vs control).
-- **Reference version:** Ensure all experiments were processed against the same reference data version. If not, consider reprocessing with a consistent reference before integration.
+- **Reference version:** Ensure all experiments were processed against the same Reference Dataset version. If not, consider reprocessing with a consistent reference before integration.
 
 ## DAG Provenance
 
@@ -96,7 +96,7 @@ The project DAG connects:
 - **Samples** as children of their parent experiments.
 - **Input files** (FASTQs, count matrices) linked to their samples.
 - **Pipeline runs** as processing nodes, with edges from input files to output files.
-- **Analysis snapshots** linked to the pipeline outputs and notebook sessions that produced them.
+- **Analysis snapshots** linked to the pipeline outputs and Notebook Sessions that produced them.
 
 This graph lets you trace any result (a figure, a gene list, a cluster annotation) back through the exact processing steps to the original tissue samples.
 

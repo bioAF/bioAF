@@ -4,7 +4,7 @@ bioAF posts JSON events to subscriber URLs when entities change. Each
 delivery is signed; failed deliveries are retried with exponential
 backoff and eventually dead-lettered.
 
-Webhook subscriptions are managed in Settings > Users & Accounts >
+Webhook Subscriptions are managed in Settings > Users & Accounts >
 Webhooks. There is no public endpoint to create or modify subscriptions.
 
 ## Event catalog
@@ -97,6 +97,6 @@ attacks. Anchoring the timestamp inside the signed message blocks replay.
 
 ## Inspecting deliveries
 
-Settings > Users & Accounts > Webhooks shows the deliveries table for
+Settings > Users & Accounts > Webhooks shows the Webhook Deliveries table for
 each subscription with status, attempt count, last response status, and
 a Replay button per row.

@@ -131,4 +131,4 @@ The **Settings** section includes:
 - The **Dashboard** shows admin-specific metrics: cost summary, system health, experiment counts
 - Use **Activity Feed** to monitor team activity
 - Set up Slack integration early for real-time alerts
-- Review access logs periodically for security compliance
+- Review Access Logs periodically for security compliance

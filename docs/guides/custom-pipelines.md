@@ -47,7 +47,7 @@ The command runs from the working directory described above and inherits the con
 
 ### Environment + Resources
 
-- **Environment version** -- pick a built `ready` version of one of your Pipeline environments. The version is pinned: even if you later rebuild the environment, this pipeline version keeps running against the snapshot it was created with. (When you rebuild the environment, bioAF auto-creates a new minor version of pipelines that depend on it -- see *Version Cascade* below.)
+- **Environment Version** -- pick a built `ready` version of one of your Pipeline environments. The version is pinned: even if you later rebuild the environment, this pipeline version keeps running against the snapshot it was created with. (When you rebuild the environment, bioAF auto-creates a new minor version of pipelines that depend on it -- see *Version Cascade* below.)
 - **CPU / Memory** -- Kubernetes requests for the pod. Defaults are conservative; bump them when your script needs more headroom.
 - **Log file path** -- optional `/outputs/...` path that the run page tails after completion. Without this, the run page shows pod stdout/stderr.
 
@@ -116,7 +116,7 @@ Built-in roles have these wired up: `admin` and `comp_bio` get the full set; `be
 
 ## Troubleshooting
 
-- **Run fails immediately** -- check **Pipelines > Environments**: the pinned environment version must be `ready`, not `building` or `failed`.
+- **Run fails immediately** -- check **Pipelines > Environments**: the pinned Environment Version must be `ready`, not `building` or `failed`.
 - **Variables come through as `<unset>`** -- the variable name in the script's `PARAM_<NAME>` reference must match the declared variable name (uppercased). bioAF lowercases stored names, so `var1` becomes `PARAM_VAR1`.
 - **Output files aren't showing up** -- only files written under `/outputs/` are synced. Files written elsewhere (e.g. `/tmp` or `/data/results`) are discarded when the pod terminates.
 - **Run is OOM-killed** -- watch the run page for the OOM badge. Bump the **Memory** field on a new version.
