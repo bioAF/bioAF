@@ -35,12 +35,14 @@ FROM jupyter/scipy-notebook:latest
 USER root
 
 # System libraries. Several of these are the reason R/Python packages fail to
-# build if absent: libglpk (igraph), libgsl, libgeos (spatial), cairo/xt/
+# build or load if absent: libglpk (igraph), libopenblas (igraph.so links
+# libopenblas.so.0 at runtime; without it igraph fails to load and cascades to
+# Seurat/scran/batchelor/clusterProfiler), libgsl, libgeos (spatial), cairo/xt/
 # harfbuzz/fribidi (tidyverse graphics via ragg and textshaping), and HDF5 for
 # .h5 / .h5ad I/O. The base image is Ubuntu 22.04 (jammy).
 RUN apt-get update && apt-get install -y --no-install-recommends \\
     libhdf5-dev libcurl4-openssl-dev libssl-dev libxml2-dev \\
-    libglpk-dev libgsl-dev libgeos-dev libfftw3-dev cmake \\
+    libglpk-dev libopenblas-dev libgsl-dev libgeos-dev libfftw3-dev cmake \\
     libcairo2-dev libxt-dev libfontconfig1-dev \\
     libharfbuzz-dev libfribidi-dev \\
     libpng-dev libtiff5-dev libjpeg-dev \\

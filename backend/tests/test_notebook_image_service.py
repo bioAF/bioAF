@@ -57,6 +57,14 @@ def test_dockerfile_fails_build_on_missing_r_packages():
     assert "Missing R packages" in DOCKERFILE_CONTENT
 
 
+def test_dockerfile_installs_openblas_runtime():
+    """igraph's compiled .so links against libopenblas.so.0. Without the OpenBLAS
+    runtime it fails to load, which cascades to Seurat, scran, batchelor, ggraph,
+    clusterProfiler, fgsea, ComplexHeatmap (all igraph-dependent) and fails the build
+    at the R package verification step. The apt step must install OpenBLAS."""
+    assert "libopenblas" in DOCKERFILE_CONTENT
+
+
 @pytest_asyncio.fixture
 async def seed_build_config(session):
     """Seed platform_config with build-related keys."""
