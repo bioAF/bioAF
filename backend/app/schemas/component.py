@@ -3,17 +3,6 @@ from datetime import datetime
 from pydantic import BaseModel
 
 
-class ComponentDefinition(BaseModel):
-    key: str
-    name: str
-    description: str
-    category: str
-    dependencies: list[str]
-    estimated_monthly_cost: str
-    config_schema: list[dict]
-    provisioning_time_estimate: str
-
-
 class ComponentStateResponse(BaseModel):
     key: str
     name: str
@@ -25,10 +14,6 @@ class ComponentStateResponse(BaseModel):
     dependencies: list[str]
     estimated_monthly_cost: str
     updated_at: datetime | None = None
-
-
-class ComponentConfigUpdate(BaseModel):
-    config: dict
 
 
 class ComponentListResponse(BaseModel):

@@ -3,9 +3,7 @@ import asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.exceptions import NotFoundError
 from app.models.component import ComponentState
-from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import COMPONENT_HEALTH_DEGRADED, COMPONENT_HEALTH_DOWN
 
@@ -225,13 +223,6 @@ COMPONENT_CATALOG: dict[str, dict] = {
     },
 }
 
-# Dependency graph for cascade checks
-DEPENDENTS: dict[str, list[str]] = {}
-for key, comp in COMPONENT_CATALOG.items():
-    for dep in comp["dependencies"]:
-        DEPENDENTS.setdefault(dep, []).append(key)
-
-
 class ComponentService:
     @staticmethod
     def get_catalog() -> dict[str, dict]:
@@ -261,99 +252,6 @@ class ComponentService:
                 state = ComponentState(component_key=key, enabled=False, status="disabled", config_json={})
                 session.add(state)
         await session.flush()
-
-    @staticmethod
-    def check_dependencies(component_key: str, enabled_components: set[str]) -> list[str]:
-        """Check unmet dependencies. Returns list of missing dependency keys."""
-        catalog_entry = COMPONENT_CATALOG.get(component_key)
-        if not catalog_entry:
-            return []
-        return [dep for dep in catalog_entry["dependencies"] if dep not in enabled_components]
-
-    @staticmethod
-    def get_dependents(component_key: str) -> list[str]:
-        """Get components that depend on this one."""
-        return DEPENDENTS.get(component_key, [])
-
-    @staticmethod
-    async def enable_component(
-        session: AsyncSession,
-        component_key: str,
-        user_id: int,
-    ) -> ComponentState:
-        state = await ComponentService.get_state(session, component_key)
-        if not state:
-            state = ComponentState(component_key=component_key, enabled=False, status="disabled", config_json={})
-            session.add(state)
-            await session.flush()
-
-        old_status = state.status
-        state.enabled = True
-        state.status = "provisioning"
-        await session.flush()
-
-        await log_action(
-            session,
-            user_id=user_id,
-            entity_type="component",
-            entity_id=state.id,
-            action="enable",
-            details={"component_key": component_key},
-            previous_value={"status": old_status, "enabled": False},
-        )
-        return state
-
-    @staticmethod
-    async def disable_component(
-        session: AsyncSession,
-        component_key: str,
-        user_id: int,
-    ) -> ComponentState:
-        state = await ComponentService.get_state(session, component_key)
-        if not state:
-            raise NotFoundError(f"Component {component_key} not found")
-
-        old_status = state.status
-        state.enabled = False
-        state.status = "destroying"
-        await session.flush()
-
-        await log_action(
-            session,
-            user_id=user_id,
-            entity_type="component",
-            entity_id=state.id,
-            action="disable",
-            details={"component_key": component_key},
-            previous_value={"status": old_status, "enabled": True},
-        )
-        return state
-
-    @staticmethod
-    async def update_config(
-        session: AsyncSession,
-        component_key: str,
-        config: dict,
-        user_id: int,
-    ) -> ComponentState:
-        state = await ComponentService.get_state(session, component_key)
-        if not state:
-            raise NotFoundError(f"Component {component_key} not found")
-
-        old_config = dict(state.config_json)
-        state.config_json = config
-        await session.flush()
-
-        await log_action(
-            session,
-            user_id=user_id,
-            entity_type="component",
-            entity_id=state.id,
-            action="configure",
-            details={"config": config},
-            previous_value={"config": old_config},
-        )
-        return state
 
     @staticmethod
     async def report_health_issue(
