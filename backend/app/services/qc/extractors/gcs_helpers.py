@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.platform.platform_config_service import PlatformConfigService
 
 
 async def get_results_bucket(session: AsyncSession) -> str | None:
@@ -13,10 +14,7 @@ async def get_results_bucket(session: AsyncSession) -> str | None:
     raw_bucket_name (bioaf-raw-X -> bioaf-results-X) since the raw bucket
     is populated by Terraform before results_bucket_name.
     """
-    result = await session.execute(
-        text("SELECT key, value FROM platform_config WHERE key IN ('results_bucket_name', 'raw_bucket_name')")
-    )
-    config = {r[0]: r[1] for r in result.fetchall()}
+    config = await PlatformConfigService.get_many(session, ["results_bucket_name", "raw_bucket_name"])
 
     results = config.get("results_bucket_name")
     if results and results != "null":

@@ -67,6 +67,17 @@ class PlatformConfigService:
         return out
 
     @staticmethod
+    async def export_all(session: AsyncSession) -> dict[str, str]:
+        """Return every key/value pair exactly as stored, WITHOUT decryption.
+
+        Used by config backup so encrypted values (e.g. gcp_service_account_key)
+        round-trip faithfully on restore. Do NOT use this to read values for
+        application use; use get / get_many, which decrypt sensitive keys.
+        """
+        rows = (await session.execute(text("SELECT key, value FROM platform_config"))).fetchall()
+        return {row[0]: row[1] for row in rows}
+
+    @staticmethod
     async def set(session: AsyncSession, key: str, value: str | None) -> None:
         stored = PlatformConfigService._maybe_encrypt(key, value)
         if stored is None:

@@ -11,8 +11,9 @@ blocking the async event loop.
 import asyncio
 import logging
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.platform.platform_config_service import PlatformConfigService
 
 logger = logging.getLogger("bioaf.thumbnail_service")
 
@@ -97,8 +98,7 @@ class ThumbnailService:
     @staticmethod
     async def get_results_bucket(session: AsyncSession) -> str | None:
         """Read results_bucket_name from platform_config."""
-        result = await session.execute(text("SELECT value FROM platform_config WHERE key = 'results_bucket_name'"))
-        val = result.scalars().first()
+        val = await PlatformConfigService.get(session, "results_bucket_name")
         if not val or val == "null":
             return None
         return val

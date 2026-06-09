@@ -77,10 +77,12 @@ async def _get_gke_credentials(session: AsyncSession):
     """
     import json as _json
 
-    result = await session.execute(
-        text("SELECT key, value FROM platform_config WHERE key IN ('gcp_credential_source', 'gcp_service_account_key')")
+    from app.platform.platform_config_service import PlatformConfigService
+
+    config = await PlatformConfigService.get_many(
+        session,
+        ["gcp_credential_source", "gcp_service_account_key"],
     )
-    config = {r[0]: r[1] for r in result.fetchall()}
 
     if config.get("gcp_credential_source") != "service_account_key":
         return None
@@ -245,18 +247,17 @@ async def get_cluster_status(session: AsyncSession) -> StackStatus:
 
 async def _read_config(session: AsyncSession, key: str) -> str:
     """Read a single platform_config value, defaulting to 'null'."""
-    row = (await session.execute(text("SELECT value FROM platform_config WHERE key = :k").bindparams(k=key))).fetchone()
-    return row[0] if row else "null"
+    from app.platform.platform_config_service import PlatformConfigService
+
+    val = await PlatformConfigService.get(session, key)
+    return val if val is not None else "null"
 
 
 async def _set_config(session: AsyncSession, key: str, value: str) -> None:
     """Upsert a platform_config key."""
-    await session.execute(
-        text(
-            "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
-        ).bindparams(k=key, v=value)
-    )
+    from app.platform.platform_config_service import PlatformConfigService
+
+    await PlatformConfigService.set(session, key, value)
 
 
 async def _run_module(

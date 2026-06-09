@@ -11,12 +11,13 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import get_session
 from app.models.ingest_event import IngestEvent
+from app.platform.platform_config_service import PlatformConfigService
 from app.services.audit_service import log_action
 
 logger = logging.getLogger("bioaf.auto_ingest_api")
@@ -59,13 +60,11 @@ async def configure_auto_ingest(
     user_id = int(current_user["sub"])
 
     # Check if enabled state is actually changing (not just a config save)
-    prev_row = await session.execute(text("SELECT value FROM platform_config WHERE key = 'auto_ingest_enabled'"))
-    was_enabled = (prev_row.scalar() or "false") == "true"
+    was_enabled = (await PlatformConfigService.get(session, "auto_ingest_enabled") or "false") == "true"
 
     # Check storage is deployed
     if body.enabled:
-        row = await session.execute(text("SELECT value FROM platform_config WHERE key = 'storage_deployed'"))
-        storage = row.scalar()
+        storage = await PlatformConfigService.get(session, "storage_deployed")
         if not storage or storage != "true":
             raise HTTPException(
                 status_code=400,
@@ -101,12 +100,7 @@ async def configure_auto_ingest(
     if body.manifest_max_retries is not None:
         updates["manifest_max_retries"] = str(body.manifest_max_retries)
     for key, value in updates.items():
-        await session.execute(
-            text(
-                "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
-                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
-            ).bindparams(k=key, v=value)
-        )
+        await PlatformConfigService.set(session, key, value)
 
     action = "enable" if body.enabled else "disable"
     await log_action(
@@ -146,12 +140,7 @@ async def get_auto_ingest_status(
         "manifest_retry_interval_minutes",
         "manifest_max_retries",
     ]
-    rows = (
-        await session.execute(
-            text("SELECT key, value FROM platform_config WHERE key = ANY(:keys)").bindparams(keys=keys)
-        )
-    ).fetchall()
-    config = {r[0]: r[1] for r in rows}
+    config = await PlatformConfigService.get_many(session, keys)
 
     enabled = config.get("auto_ingest_enabled", "false") == "true"
     cleanup_policy = config.get("ingest_cleanup_policy", "delete_after_copy")

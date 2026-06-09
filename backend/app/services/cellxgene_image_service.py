@@ -19,6 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import ValidationError
+from app.platform.platform_config_service import PlatformConfigService
 from app.services.notebook_image_service import _get_credentials
 
 logger = logging.getLogger("bioaf.cellxgene_image")
@@ -68,17 +69,12 @@ def _authorized_request(credentials, method: str, url: str, body: dict | None = 
 
 
 async def _read_config(session: AsyncSession, key: str) -> str:
-    row = (await session.execute(text("SELECT value FROM platform_config WHERE key = :k").bindparams(k=key))).fetchone()
-    return row[0] if row else "null"
+    value = await PlatformConfigService.get(session, key)
+    return value if value is not None else "null"
 
 
 async def _set_config(session: AsyncSession, key: str, value: str) -> None:
-    await session.execute(
-        text(
-            "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
-        ).bindparams(k=key, v=value)
-    )
+    await PlatformConfigService.set(session, key, value)
 
 
 async def _upload_build_context(session: AsyncSession, project_id: str, working_bucket: str) -> str:

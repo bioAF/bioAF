@@ -21,7 +21,6 @@ from urllib.parse import urlparse
 
 from google.cloud import storage
 from pydantic import BaseModel
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import ValidationError
@@ -168,10 +167,7 @@ class GcsStorageService:
         partial list here is what previously hid the references and literature
         buckets from the Components view even after their names were persisted.
         """
+        from app.platform.platform_config_service import PlatformConfigService
+
         keys = ["storage_deployed", *_BUCKET_CONFIG_KEYS.keys()]
-        rows = (
-            await session.execute(
-                text("SELECT key, value FROM platform_config WHERE key = ANY(:keys)").bindparams(keys=keys)
-            )
-        ).fetchall()
-        return {r[0]: r[1] for r in rows}
+        return await PlatformConfigService.get_many(session, keys)

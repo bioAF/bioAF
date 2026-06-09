@@ -12,13 +12,14 @@ the retroactive path (manifest arrives after files) and the forward path
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.experiment import Experiment
 from app.models.file import File
 from app.models.manifest_entry import ManifestEntry
 from app.models.sequencing_batch import SequencingBatch
+from app.platform.platform_config_service import PlatformConfigService
 from app.services.auto_ingest_gate import check_gate
 from app.services.manifest_parser import parse_manifest
 from app.services.naming_profile_parser import match_filename, resolve_entities
@@ -395,10 +396,7 @@ async def read_manifest_config(db: AsyncSession) -> dict[str, str]:
         "manifest_retry_interval_minutes",
         "manifest_max_retries",
     ]
-    rows = (
-        await db.execute(text("SELECT key, value FROM platform_config WHERE key = ANY(:keys)").bindparams(keys=keys))
-    ).fetchall()
-    config = {r[0]: r[1] for r in rows}
+    config = await PlatformConfigService.get_many(db, keys)
     return {
         "manifest_filename": config.get("manifest_filename", "md5.txt"),
         "manifest_format": config.get("manifest_format", "md5sum"),

@@ -18,8 +18,9 @@ import secrets
 from google.auth import impersonated_credentials
 from google.oauth2 import service_account
 from googleapiclient import discovery as google_discovery
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.platform.platform_config_service import PlatformConfigService
 
 # Patchable aliases for tests
 discovery_build = google_discovery.build
@@ -42,26 +43,15 @@ _GCP_KEYS = [
 
 
 async def _upsert(session: AsyncSession, key: str, value: str) -> None:
-    await session.execute(
-        text(
-            "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, "
-            "updated_at = now()"
-        ).bindparams(k=key, v=value)
-    )
+    await PlatformConfigService.set(session, key, value)
 
 
 async def _delete_key(session: AsyncSession, key: str) -> None:
-    await session.execute(text("DELETE FROM platform_config WHERE key = :k").bindparams(k=key))
+    await PlatformConfigService.set(session, key, None)
 
 
 async def _read_keys(session: AsyncSession, keys: list[str]) -> dict[str, str]:
-    rows = (
-        await session.execute(
-            text("SELECT key, value FROM platform_config WHERE key = ANY(:keys)").bindparams(keys=keys)
-        )
-    ).fetchall()
-    return {r[0]: r[1] for r in rows}
+    return await PlatformConfigService.get_many(session, keys)
 
 
 def _load_primary_credentials(config: dict[str, str]) -> tuple[object, str]:

@@ -5,11 +5,11 @@ from uuid import uuid4
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import get_session
+from app.platform.platform_config_service import PlatformConfigService
 from app.schemas.networking import (
     CertificateStatusResponse,
     EnforceHttpsRequest,
@@ -49,24 +49,13 @@ _DEFAULTS: dict[str, str] = {
 
 
 async def _read_config(session: AsyncSession) -> dict[str, str]:
-    rows = (
-        await session.execute(
-            text("SELECT key, value FROM platform_config WHERE key = ANY(:keys)").bindparams(keys=_KEYS)
-        )
-    ).fetchall()
     config = dict(_DEFAULTS)
-    config.update({r[0]: r[1] for r in rows})
+    config.update(await PlatformConfigService.get_many(session, _KEYS))
     return config
 
 
 async def _upsert(session: AsyncSession, key: str, value: str) -> None:
-    await session.execute(
-        text(
-            "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, "
-            "updated_at = now()"
-        ).bindparams(k=key, v=value)
-    )
+    await PlatformConfigService.set(session, key, value)
 
 
 def _compute_fqdn(hostname: str, domain: str) -> str:
@@ -440,15 +429,10 @@ async def self_check(session: AsyncSession = Depends(get_session)) -> dict[str, 
     the configured public FQDN. If the response token matches the one this
     instance just wrote, we have proof that the FQDN routes here.
     """
-    rows = (
-        await session.execute(
-            text(
-                "SELECT key, value FROM platform_config "
-                "WHERE key IN ('networking_self_check_token', 'networking_self_check_expires_at')"
-            )
-        )
-    ).fetchall()
-    values = {r[0]: r[1] for r in rows}
+    values = await PlatformConfigService.get_many(
+        session,
+        ["networking_self_check_token", "networking_self_check_expires_at"],
+    )
     token = values.get("networking_self_check_token")
     expires_raw = values.get("networking_self_check_expires_at")
     if not token or not expires_raw:

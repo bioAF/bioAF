@@ -32,10 +32,10 @@ import logging
 import re
 from datetime import datetime, timezone
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import StateError
+from app.platform.platform_config_service import PlatformConfigService
 from app.services.terraform_executor import TerraformExecutor
 
 logger = logging.getLogger("bioaf.infra_update_service")
@@ -156,8 +156,6 @@ async def realign_storage_naming(session: AsyncSession) -> dict | None:
     Reads a known deployed bucket name (raw) from platform_config, falling back
     to live Terraform outputs. Returns the values it changed, or None when
     nothing needed changing or the name could not be parsed."""
-    from app.platform.platform_config_service import PlatformConfigService
-
     name = await PlatformConfigService.get(session, "raw_bucket_name")
     if not name or name == "null":
         try:
@@ -191,15 +189,10 @@ async def realign_storage_naming(session: AsyncSession) -> dict | None:
 
 
 async def _deployed_modules(session: AsyncSession) -> list[str]:
-    rows = (
-        await session.execute(
-            text(
-                "SELECT key, value FROM platform_config "
-                "WHERE key IN ('terraform_initialized', 'storage_deployed', 'compute_deployed')"
-            )
-        )
-    ).fetchall()
-    cfg = {r[0]: r[1] for r in rows}
+    cfg = await PlatformConfigService.get_many(
+        session,
+        ["terraform_initialized", "storage_deployed", "compute_deployed"],
+    )
     if cfg.get("terraform_initialized") != "true":
         raise StateError("Terraform has not been initialized")
     modules = [module for module, flag in _CANDIDATE_MODULES if cfg.get(flag) == "true"]

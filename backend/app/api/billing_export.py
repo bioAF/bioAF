@@ -15,11 +15,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from google.api_core.exceptions import Forbidden
 from pydantic import BaseModel
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import get_session
+from app.platform.platform_config_service import PlatformConfigService
 from app.services.billing_export_service import BillingExportService
 from app.platform.credential_injector import load_gcp_credentials
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
@@ -100,12 +100,7 @@ async def deploy_billing_export_module(session: AsyncSession, user_id: int) -> d
     if error_message is not None:
         return {"status": "failed", "message": error_message}
 
-    await session.execute(
-        text(
-            "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
-        ).bindparams(k="billing_export_dataset", v=dataset_id)
-    )
+    await PlatformConfigService.set(session, "billing_export_dataset", dataset_id)
     await session.commit()
     return {"status": "completed"}
 
@@ -231,12 +226,7 @@ async def billing_export_verify(
         ("billing_export_configured", "true"),
         ("billing_export_table", table_id),
     ]:
-        await session.execute(
-            text(
-                "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
-                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
-            ).bindparams(k=key, v=value)
-        )
+        await PlatformConfigService.set(session, key, value)
     await session.commit()
 
     return BillingExportVerifyResponse(
@@ -306,7 +296,7 @@ async def billing_export_teardown(
                     "billing_export_dataset",
                     "billing_export_table",
                 ):
-                    await session.execute(text("DELETE FROM platform_config WHERE key = :k").bindparams(k=key))
+                    await PlatformConfigService.set(session, key, None)
             await session.commit()
 
     return StreamingResponse(

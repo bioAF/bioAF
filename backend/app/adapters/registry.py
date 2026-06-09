@@ -7,12 +7,12 @@ the database and instantiates the correct adapter implementations.
 import asyncio
 import logging
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.base import CellxgeneProvider, ComputeProvider, NotebookProvider, StorageProvider, WorkNodeProvider
 from app.adapters.capabilities import CapabilityNotSupported, ProviderCapabilities
 from app.exceptions import ValidationError
+from app.platform.platform_config_service import PlatformConfigService
 
 logger = logging.getLogger("bioaf.adapters.registry")
 
@@ -100,13 +100,7 @@ async def initialize_adapters(session: AsyncSession, session_factory=None) -> No
     global _compute_adapter, _storage_adapter, _notebook_adapter, _cellxgene_adapter, _work_node_adapter, _initialized
 
     async with _init_lock:
-        result = await session.execute(
-            text(
-                "SELECT key, value FROM platform_config "
-                "WHERE key IN ('compute_stack', 'work_node_backend', 'cellxgene_backend')"
-            )
-        )
-        cfg = {row[0]: row[1] for row in result.fetchall()}
+        cfg = await PlatformConfigService.get_many(session, ["compute_stack", "work_node_backend", "cellxgene_backend"])
         compute_stack = cfg.get("compute_stack") or "kubernetes"
         work_node_backend = cfg.get("work_node_backend") or DEFAULT_WORK_NODE_BACKEND
         cellxgene_backend = cfg.get("cellxgene_backend") or DEFAULT_CELLXGENE_BACKEND

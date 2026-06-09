@@ -13,8 +13,9 @@ import logging
 import urllib.error
 import urllib.request
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.platform.platform_config_service import PlatformConfigService
 
 logger = logging.getLogger("bioaf.bootstrap_metadata")
 
@@ -47,9 +48,7 @@ async def persist_bootstrap_sa_from_metadata(session: AsyncSession) -> bool:
 
     Idempotent: leaves an existing row untouched.
     """
-    existing = (
-        await session.execute(text("SELECT value FROM platform_config WHERE key='gcp_bootstrap_sa_email'"))
-    ).scalar()
+    existing = await PlatformConfigService.get(session, "gcp_bootstrap_sa_email")
     if existing:
         return True
 
@@ -57,13 +56,7 @@ async def persist_bootstrap_sa_from_metadata(session: AsyncSession) -> bool:
     if not email:
         return False
 
-    await session.execute(
-        text(
-            "INSERT INTO platform_config (key, value) VALUES "
-            "('gcp_bootstrap_sa_email', :v) "
-            "ON CONFLICT (key) DO NOTHING"
-        ).bindparams(v=email)
-    )
+    await PlatformConfigService.set(session, "gcp_bootstrap_sa_email", email)
     await session.commit()
     logger.info("Persisted gcp_bootstrap_sa_email from VM metadata: %s", email)
     return True
@@ -84,9 +77,7 @@ async def persist_app_sa_from_metadata(session: AsyncSession) -> bool:
 
     Idempotent: leaves an existing row untouched.
     """
-    existing = (
-        await session.execute(text("SELECT value FROM platform_config WHERE key='bioaf_app_sa_email'"))
-    ).scalar()
+    existing = await PlatformConfigService.get(session, "bioaf_app_sa_email")
     if existing:
         return True
 
@@ -94,11 +85,7 @@ async def persist_app_sa_from_metadata(session: AsyncSession) -> bool:
     if not email:
         return False
 
-    await session.execute(
-        text(
-            "INSERT INTO platform_config (key, value) VALUES ('bioaf_app_sa_email', :v) ON CONFLICT (key) DO NOTHING"
-        ).bindparams(v=email)
-    )
+    await PlatformConfigService.set(session, "bioaf_app_sa_email", email)
     await session.commit()
     logger.info("Persisted bioaf_app_sa_email from VM metadata: %s", email)
     return True

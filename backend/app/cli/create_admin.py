@@ -14,11 +14,12 @@ import os
 import re
 import sys
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.models.organization import Organization
 from app.models.user import User
+from app.platform.platform_config_service import PlatformConfigService
 from app.services.auth_service import AuthService
 
 
@@ -93,13 +94,7 @@ async def create_admin_user(
     await seed_default_sdr_categories(session, org.id, user.id)
 
     # Set org_slug in platform_config
-    await session.execute(
-        text(
-            "INSERT INTO platform_config (key, value) VALUES ('org_slug', :slug) "
-            "ON CONFLICT (key) DO UPDATE SET value = :slug"
-        ),
-        {"slug": org_slug},
-    )
+    await PlatformConfigService.set(session, "org_slug", org_slug)
 
     await session.commit()
 

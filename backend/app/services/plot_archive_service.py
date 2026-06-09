@@ -1,13 +1,14 @@
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.experiment import Experiment
 from app.models.file import File
 from app.models.plot_archive_entry import PlotArchiveEntry
+from app.platform.platform_config_service import PlatformConfigService
 from app.services.audit_service import log_action
 from app.services.file_service import FileService
 from app.services.thumbnail_service import THUMBNAIL_PREFIX, ThumbnailService
@@ -153,10 +154,7 @@ class PlotArchiveService:
             orgs_result = await session.execute(select(Organization))
             orgs = list(orgs_result.scalars().all())
 
-            cfg_result = await session.execute(
-                text("SELECT value FROM platform_config WHERE key = 'results_bucket_name'")
-            )
-            results_bucket = cfg_result.scalars().first()
+            results_bucket = await PlatformConfigService.get(session, "results_bucket_name")
             if not results_bucket or results_bucket == "null":
                 logger.warning("results_bucket_name not configured in platform_config, skipping plot scan")
                 return 0

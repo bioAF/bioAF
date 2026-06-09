@@ -13,12 +13,13 @@ import asyncio
 import os
 import sys
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.adapters.registry import get_storage_adapter, initialize_adapters
 from app.models.file import File
 from app.models.pipeline_run import PipelineRun
+from app.platform.platform_config_service import PlatformConfigService
 from app.services.pipeline_output_service import PipelineOutputService
 
 
@@ -30,10 +31,9 @@ async def _resolve_outdir(session: AsyncSession, run: PipelineRun) -> str:
         return outdir
 
     # Fall back: build the GCS URI from results_bucket_name in platform_config
-    result = await session.execute(text("SELECT value FROM platform_config WHERE key = 'results_bucket_name'"))
-    row = result.first()
-    if row:
-        return f"gs://{row[0]}/experiments/{run.experiment_id}/pipeline-runs/{run.id}"
+    bucket = await PlatformConfigService.get(session, "results_bucket_name")
+    if bucket is not None:
+        return f"gs://{bucket}/experiments/{run.experiment_id}/pipeline-runs/{run.id}"
 
     # Last resort: local-style path (GCS adapter will use its default bucket)
     return f"/data/results/experiments/{run.experiment_id}/pipeline-runs/{run.id}"

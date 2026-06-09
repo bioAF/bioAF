@@ -91,9 +91,8 @@ async def lifespan(app: FastAPI):
         from app.platform.platform_config_service import PlatformConfigService
 
         async with cl_session_factory() as cl_session:
-            result = await cl_session.execute(text("SELECT value FROM platform_config WHERE key = 'gcp_project_id'"))
-            row = result.fetchone()
-            gcp_project_id = row[0] if row and row[0] and row[0] != "null" else ""
+            project_value = await PlatformConfigService.get(cl_session, "gcp_project_id")
+            gcp_project_id = project_value if project_value and project_value != "null" else ""
 
             if gcp_project_id:
                 cred_config = await PlatformConfigService.get_many(
@@ -807,23 +806,17 @@ async def _export_cleanup_loop():
     """Delete export ZIPs older than 24 hours from GCS every hour."""
     from datetime import datetime, timezone, timedelta
 
-    from sqlalchemy import text as sa_text
-
     from app.adapters.registry import get_storage_adapter
     from app.database import async_session_factory
+    from app.platform.platform_config_service import PlatformConfigService
 
     while True:
         try:
             await asyncio.sleep(3600)
             async with async_session_factory() as session:
-                result = await session.execute(
-                    sa_text("SELECT value FROM platform_config WHERE key = 'config_backups_bucket_name'")
-                )
-                row = result.fetchone()
-                if not row or not row[0] or row[0] == "null":
+                bucket_name = await PlatformConfigService.get(session, "config_backups_bucket_name")
+                if not bucket_name or bucket_name == "null":
                     continue
-
-                bucket_name = row[0]
                 adapter = get_storage_adapter()
                 cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
                 deleted = 0

@@ -150,20 +150,20 @@ class CostService:
         month_start = date(today.year, today.month, 1)
 
         # Check if BQ billing export is configured
-        from sqlalchemy import text as sa_text
+        from app.platform.platform_config_service import PlatformConfigService
 
-        bq_rows = (
-            await session.execute(
-                sa_text(
-                    "SELECT key, value FROM platform_config "
-                    "WHERE key IN ('billing_export_configured', 'billing_export_dataset', "
-                    "'billing_export_table', 'gcp_project_id', "
-                    "'gcp_credential_source', 'gcp_service_account_key', "
-                    "'gcp_service_account_email')"
-                )
-            )
-        ).fetchall()
-        bq_config = {r[0]: r[1] for r in bq_rows}
+        bq_config = await PlatformConfigService.get_many(
+            session,
+            [
+                "billing_export_configured",
+                "billing_export_dataset",
+                "billing_export_table",
+                "gcp_project_id",
+                "gcp_credential_source",
+                "gcp_service_account_key",
+                "gcp_service_account_email",
+            ],
+        )
 
         bq_configured = bq_config.get("billing_export_configured", "false") == "true"
 
