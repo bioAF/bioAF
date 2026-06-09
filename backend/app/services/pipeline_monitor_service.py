@@ -5,10 +5,11 @@ import re
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.platform.platform_config_service import PlatformConfigService
 from app.models.pipeline_process import PipelineProcess
 from app.models.pipeline_run import PipelineRun
 from app.services.audit_service import log_action
@@ -348,11 +349,8 @@ class PipelineMonitorService:
     @staticmethod
     async def _get_pipeline_machine_type(session: AsyncSession) -> str:
         """Read the pipeline machine type from platform_config."""
-        result = await session.execute(
-            text("SELECT value FROM platform_config WHERE key = 'k8s_pipeline_machine_type'")
-        )
-        row = result.first()
-        return row[0] if row else "unknown"
+        val = await PlatformConfigService.get(session, "k8s_pipeline_machine_type")
+        return val if val is not None else "unknown"
 
     @staticmethod
     async def _populate_progress(
@@ -495,11 +493,9 @@ class PipelineMonitorService:
             outdir = (run.parameters_json or {}).get("outdir", "")
             if not outdir:
                 # Fall back: read results_bucket_name from platform_config
-                bucket_row = (
-                    await session.execute(text("SELECT value FROM platform_config WHERE key = 'results_bucket_name'"))
-                ).first()
-                if bucket_row:
-                    outdir = f"gs://{bucket_row[0]}/experiments/{run.experiment_id}/pipeline-runs/{run.id}"
+                results_bucket = await PlatformConfigService.get(session, "results_bucket_name")
+                if results_bucket is not None:
+                    outdir = f"gs://{results_bucket}/experiments/{run.experiment_id}/pipeline-runs/{run.id}"
                 else:
                     outdir = f"/data/results/experiments/{run.experiment_id}/pipeline-runs/{run.id}"
             collected = await storage_adapter.collect_outputs(

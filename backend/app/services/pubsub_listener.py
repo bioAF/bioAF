@@ -13,10 +13,10 @@ import binascii
 import json
 import logging
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.messaging import create_messaging_provider
+from app.platform.platform_config_service import PlatformConfigService
 
 logger = logging.getLogger("bioaf.pubsub_listener")
 
@@ -134,9 +134,8 @@ class PubSubListener:
         md5_hash = _base64_md5_to_hex(raw_md5) if raw_md5 else None
 
         # Read org_id from platform_config (single-tenant assumption)
-        row = await session.execute(text("SELECT value FROM platform_config WHERE key = 'default_org_id'"))
-        org_id_row = row.fetchone()
-        org_id = int(org_id_row[0]) if org_id_row else 1
+        default_org_id = await PlatformConfigService.get(session, "default_org_id")
+        org_id = int(default_org_id) if default_org_id is not None else 1
 
         # Fetch stored GCP credentials for all downstream GCS operations
         credentials = await GcsStorageService.get_credentials(session)
@@ -184,12 +183,7 @@ class PubSubListener:
             "ingest_cleanup_policy",
             "gcp_project_id",
         ]
-        rows = (
-            await session.execute(
-                text("SELECT key, value FROM platform_config WHERE key = ANY(:keys)").bindparams(keys=keys)
-            )
-        ).fetchall()
-        return {r[0]: r[1] for r in rows}
+        return await PlatformConfigService.get_many(session, keys)
 
 
 # Module-level instance for the background task

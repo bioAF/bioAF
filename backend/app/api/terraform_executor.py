@@ -19,12 +19,13 @@ from typing import AsyncIterator
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import get_session
 from app.models.component import TerraformRun
+from app.platform.platform_config_service import PlatformConfigService
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
 
 logger = logging.getLogger("bioaf.terraform_api")
@@ -121,15 +122,7 @@ async def bootstrap_foundation(
     org_id = int(current_user["org_id"])
 
     # Eagerly check preconditions before opening the stream so we can return 409
-    config_rows = (
-        await session.execute(
-            text(
-                "SELECT key, value FROM platform_config "
-                "WHERE key IN ('gcp_credentials_configured', 'terraform_initialized')"
-            )
-        )
-    ).fetchall()
-    config = {r[0]: r[1] for r in config_rows}
+    config = await PlatformConfigService.get_many(session, ["gcp_credentials_configured", "terraform_initialized"])
 
     if config.get("gcp_credentials_configured", "false") != "true":
         raise HTTPException(status_code=409, detail="GCP credentials are not configured")
@@ -173,15 +166,7 @@ async def terraform_init(
     org_id = int(current_user["org_id"])
 
     # Pre-flight checks
-    config_rows = (
-        await session.execute(
-            text(
-                "SELECT key, value FROM platform_config "
-                "WHERE key IN ('gcp_credentials_configured', 'terraform_initialized')"
-            )
-        )
-    ).fetchall()
-    config = {r[0]: r[1] for r in config_rows}
+    config = await PlatformConfigService.get_many(session, ["gcp_credentials_configured", "terraform_initialized"])
 
     if config.get("gcp_credentials_configured", "false") != "true":
         raise HTTPException(status_code=400, detail="GCP credentials are not configured")
@@ -298,12 +283,7 @@ async def get_terraform_status(
         "terraform_state_bucket",
         "gcp_credentials_configured",
     ]
-    rows = (
-        await session.execute(
-            text("SELECT key, value FROM platform_config WHERE key = ANY(:keys)").bindparams(keys=keys)
-        )
-    ).fetchall()
-    config = {r[0]: r[1] for r in rows}
+    config = await PlatformConfigService.get_many(session, keys)
 
     # Check for active run (includes awaiting_confirmation since those hold GCS locks)
     active_result = await session.execute(

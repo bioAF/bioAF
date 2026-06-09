@@ -7,7 +7,7 @@ entities, and catalogs files in the database.
 
 import asyncio
 import logging
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.experiment import Experiment
@@ -16,6 +16,7 @@ from app.models.file_parse_result import FileParseResult
 from app.models.ingest_event import IngestEvent
 from app.models.project import Project
 from app.models.sample import Sample
+from app.platform.platform_config_service import PlatformConfigService
 from app.services.audit_service import log_action
 from app.services.auto_ingest_gate import check_gate
 from app.services.event_bus import event_bus
@@ -554,10 +555,7 @@ async def _read_ingest_config(db: AsyncSession) -> dict[str, str]:
         "ingest_cleanup_policy",
         "storage_deployed",
     ]
-    rows = (
-        await db.execute(text("SELECT key, value FROM platform_config WHERE key = ANY(:keys)").bindparams(keys=keys))
-    ).fetchall()
-    return {r[0]: r[1] for r in rows}
+    return await PlatformConfigService.get_many(db, keys)
 
 
 async def get_unclaimed_entities(org_id: int, db: AsyncSession) -> list[dict]:

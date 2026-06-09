@@ -3,7 +3,6 @@
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
@@ -41,24 +40,13 @@ _DEFAULTS: dict[str, str] = {
 
 
 async def _read_config(session: AsyncSession) -> dict[str, str]:
-    rows = (
-        await session.execute(
-            text("SELECT key, value FROM platform_config WHERE key = ANY(:keys)").bindparams(keys=_GCP_KEYS)
-        )
-    ).fetchall()
     config = dict(_DEFAULTS)
-    config.update({r[0]: r[1] for r in rows})
+    config.update(await PlatformConfigService.get_many(session, _GCP_KEYS))
     return config
 
 
 async def _upsert(session: AsyncSession, key: str, value: str) -> None:
-    await session.execute(
-        text(
-            "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, "
-            "updated_at = now()"
-        ).bindparams(k=key, v=value)
-    )
+    await PlatformConfigService.set(session, key, value)
 
 
 def _to_response(config: dict[str, str]) -> GCPConfigResponse:

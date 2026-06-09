@@ -10,6 +10,7 @@ from app.schemas.component import (
     ComponentSelectBatchResponse,
     ComponentStateResponse,
 )
+from app.platform.platform_config_service import PlatformConfigService
 from app.services.component_service import COMPONENT_CATALOG, ComponentService
 from app.services import role_service
 from app.services.terraform_service import TerraformService
@@ -61,8 +62,7 @@ async def select_batch(
 
     keys = list(dict.fromkeys(body.keys))  # de-dup while preserving order
 
-    row = (await session.execute(text("SELECT value FROM platform_config WHERE key = 'compute_stack'"))).first()
-    compute_stack = row[0] if row else "kubernetes"
+    compute_stack = await PlatformConfigService.get(session, "compute_stack") or "kubernetes"
 
     # Validate against the same canonical list that the post-install
     # Infrastructure > Components page renders; that is the contract the

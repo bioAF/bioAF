@@ -9,11 +9,12 @@ import logging
 import secrets
 from datetime import datetime, timezone
 
-from sqlalchemy import select, func, text
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.notebook_session import ComputeSession
+from app.platform.platform_config_service import PlatformConfigService
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import (
@@ -167,15 +168,17 @@ class WorkNodeService:
         await session.flush()
 
         # Look up working bucket and SA email for GCS mounts
-        config_rows = await session.execute(
-            text(
-                "SELECT key, value FROM platform_config "
-                "WHERE key IN ('working_bucket_name', 'notebook_runner_sa_email', "
-                "'gcp_project_id', 'gcp_zone', "
-                "'work_node_boot_disk_gb', 'work_node_boot_disk_type')"
-            )
+        config_map = await PlatformConfigService.get_many(
+            session,
+            [
+                "working_bucket_name",
+                "notebook_runner_sa_email",
+                "gcp_project_id",
+                "gcp_zone",
+                "work_node_boot_disk_gb",
+                "work_node_boot_disk_type",
+            ],
         )
-        config_map = {row[0]: row[1] for row in config_rows.all()}
 
         # Extract conda env name from definition
         conda_env_name = "bioaf"
@@ -336,13 +339,10 @@ class WorkNodeService:
         await session.commit()
 
         # Look up working bucket for output sync
-        working_bucket_row = await session.execute(
-            text("SELECT value FROM platform_config WHERE key = 'working_bucket_name'")
-        )
         working_bucket = ""
-        wb_row = working_bucket_row.first()
-        if wb_row:
-            val = (wb_row[0] or "").strip()
+        working_bucket_value = await PlatformConfigService.get(session, "working_bucket_name")
+        if working_bucket_value is not None:
+            val = (working_bucket_value or "").strip()
             if val and val != "null":
                 working_bucket = val
 
@@ -389,11 +389,8 @@ class WorkNodeService:
         # Move outputs from working to results bucket (ADR-040: two-phase)
         if working_bucket and output_files:
             try:
-                results_row = await session.execute(
-                    text("SELECT value FROM platform_config WHERE key = 'results_bucket_name'")
-                )
-                r_row = results_row.first()
-                results_bucket = (r_row[0] or "").strip() if r_row else ""
+                results_bucket_value = await PlatformConfigService.get(session, "results_bucket_name")
+                results_bucket = (results_bucket_value or "").strip() if results_bucket_value is not None else ""
                 if results_bucket and results_bucket != "null":
                     from app.services.session_output_service import SessionOutputService
 
@@ -603,24 +600,20 @@ class WorkNodeService:
 
     @staticmethod
     async def _get_max_nodes_per_user(session: AsyncSession) -> int:
-        result = await session.execute(text("SELECT value FROM platform_config WHERE key = 'work_node_max_per_user'"))
-        row = result.first()
-        if row:
+        value = await PlatformConfigService.get(session, "work_node_max_per_user")
+        if value is not None:
             try:
-                return int(row[0])
+                return int(value)
             except (ValueError, TypeError):
                 pass
         return DEFAULT_MAX_WORK_NODES_PER_USER
 
     @staticmethod
     async def _get_idle_timeout(session: AsyncSession) -> int:
-        result = await session.execute(
-            text("SELECT value FROM platform_config WHERE key = 'work_node_idle_timeout_hours'")
-        )
-        row = result.first()
-        if row:
+        value = await PlatformConfigService.get(session, "work_node_idle_timeout_hours")
+        if value is not None:
             try:
-                return int(row[0])
+                return int(value)
             except (ValueError, TypeError):
                 pass
         return DEFAULT_IDLE_TIMEOUT_HOURS

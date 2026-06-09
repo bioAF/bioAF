@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from app.workers.reference_importer import ImportResult
 
-from sqlalchemy import Select, func, select, text
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -23,6 +23,7 @@ from app.models.reference_dataset import (
     pipeline_run_references,
 )
 from app.models.reference_import_progress import ReferenceImportProgress
+from app.platform.platform_config_service import PlatformConfigService
 from app.schemas.reference_dataset import (
     ImpactPipelineRun,
     ImpactSummary,
@@ -443,8 +444,7 @@ class ReferenceDataService:
 
     @staticmethod
     async def _get_references_bucket(session: AsyncSession) -> str:
-        result = await session.execute(text("SELECT value FROM platform_config WHERE key = 'references_bucket_name'"))
-        name = result.scalar_one_or_none()
+        name = await PlatformConfigService.get(session, "references_bucket_name")
         if not name or name == "null":
             raise ValueError("References bucket not configured. Deploy storage infrastructure first.")
         return name

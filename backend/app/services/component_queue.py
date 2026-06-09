@@ -25,6 +25,7 @@ import logging
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.platform.platform_config_service import PlatformConfigService
 from app.services.cellxgene_image_service import build_cellxgene_image
 from app.services.notebook_image_service import build_notebook_image
 
@@ -48,10 +49,9 @@ class QueueProcessResult:
 
 
 async def _read_config(session: AsyncSession, key: str) -> str | None:
-    row = (await session.execute(text("SELECT value FROM platform_config WHERE key = :k").bindparams(k=key))).first()
-    if not row:
+    value = await PlatformConfigService.get(session, key)
+    if value is None:
         return None
-    value = row[0]
     if value == "null":
         return None
     return value

@@ -12,11 +12,11 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import get_session
+from app.platform.platform_config_service import PlatformConfigService
 from app.services.file_organization import FileOrganizationService
 from app.services.gcs_storage import BucketMetrics, GcsStorageService
 
@@ -48,12 +48,7 @@ async def _store_storage_outputs(session: AsyncSession) -> None:
     for config_key in _STORAGE_OUTPUT_KEYS:
         val = outputs.get(config_key, {}).get("value", "")
         if val:
-            await session.execute(
-                text(
-                    "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
-                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
-                ).bindparams(k=config_key, v=val)
-            )
+            await PlatformConfigService.set(session, config_key, val)
     await session.commit()
 
 
@@ -125,12 +120,7 @@ async def deploy_storage(
     user_id = int(current_user["sub"])
 
     # Read preconditions
-    rows = (
-        await session.execute(
-            text("SELECT key, value FROM platform_config WHERE key IN ('terraform_initialized', 'storage_deployed')")
-        )
-    ).fetchall()
-    config = {r[0]: r[1] for r in rows}
+    config = await PlatformConfigService.get_many(session, ["terraform_initialized", "storage_deployed"])
 
     if config.get("terraform_initialized", "false") != "true":
         raise HTTPException(
@@ -162,12 +152,7 @@ async def update_storage(
     """
     user_id = int(current_user["sub"])
 
-    rows = (
-        await session.execute(
-            text("SELECT key, value FROM platform_config WHERE key IN ('terraform_initialized', 'storage_deployed')")
-        )
-    ).fetchall()
-    config = {r[0]: r[1] for r in rows}
+    config = await PlatformConfigService.get_many(session, ["terraform_initialized", "storage_deployed"])
 
     if config.get("terraform_initialized", "false") != "true":
         raise HTTPException(
@@ -204,9 +189,9 @@ async def get_storage_buckets(
 ) -> BucketMetricsResponse:
     """Return live bucket metrics from the GCS API."""
     # Check deployment status
-    row = (await session.execute(text("SELECT value FROM platform_config WHERE key = 'storage_deployed'"))).fetchone()
+    storage_deployed = await PlatformConfigService.get(session, "storage_deployed")
 
-    if not row or row[0] != "true":
+    if storage_deployed != "true":
         raise HTTPException(
             status_code=400,
             detail="Storage infrastructure has not been deployed yet.",

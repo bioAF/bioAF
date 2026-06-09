@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import NotFoundError, StateError, ValidationError
 from app.models.orphaned_resource import OrphanedResource
+from app.platform.platform_config_service import PlatformConfigService
 
 logger = logging.getLogger(__name__)
 
@@ -255,12 +256,7 @@ class OrphanedResourceService:
         platform_config and existing orphan records. Returns the number
         of newly detected orphans.
         """
-        config_result = await session.execute(
-            text(
-                "SELECT key, value FROM platform_config WHERE key IN ('gcp_project_id', 'gcp_zone', 'gke_cluster_name')"
-            )
-        )
-        config = {r[0]: r[1] for r in config_result.fetchall()}
+        config = await PlatformConfigService.get_many(session, ["gcp_project_id", "gcp_zone", "gke_cluster_name"])
 
         project_id = config.get("gcp_project_id", "")
         zone = config.get("gcp_zone", "")

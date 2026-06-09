@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select, func, text
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 from app.exceptions import ConflictError, DomainError, NotFoundError, ValidationError
 from app.models.notebook_session import NotebookSession
+from app.platform.platform_config_service import PlatformConfigService
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import SESSION_IDLE
@@ -64,15 +65,11 @@ class NotebookService:
         (Infrastructure > Components); the full ladder is always returned so the
         UI can show larger tiers as unavailable rather than hiding them.
         """
-        row = (
-            await session.execute(
-                text("SELECT value FROM platform_config WHERE key = :key").bindparams(
-                    key=INTERACTIVE_POOL_MACHINE_TYPE_KEY
-                )
-            )
-        ).first()
+        machine_type_value = await PlatformConfigService.get(session, INTERACTIVE_POOL_MACHINE_TYPE_KEY)
         pool_machine_type = (
-            row[0].strip() if row and row[0] and row[0].strip() else DEFAULT_INTERACTIVE_POOL_MACHINE_TYPE
+            machine_type_value.strip()
+            if machine_type_value and machine_type_value.strip()
+            else DEFAULT_INTERACTIVE_POOL_MACHINE_TYPE
         )
         capacity = machine_type_capacity(pool_machine_type) or machine_type_capacity(
             DEFAULT_INTERACTIVE_POOL_MACHINE_TYPE
@@ -150,15 +147,9 @@ class NotebookService:
                 spec["image"] = image
 
             # Pass working bucket name so the adapter uses the correct GCS path
-            from sqlalchemy import text as sa_text
-
-            config_rows = await session.execute(
-                sa_text(
-                    "SELECT key, value FROM platform_config "
-                    "WHERE key IN ('working_bucket_name', 'notebook_runner_sa_email')"
-                )
+            config_map = await PlatformConfigService.get_many(
+                session, ["working_bucket_name", "notebook_runner_sa_email"]
             )
-            config_map = {row[0]: row[1] for row in config_rows.all()}
 
             bucket_name = (config_map.get("working_bucket_name") or "").strip()
             if bucket_name and bucket_name != "null":
@@ -298,15 +289,10 @@ class NotebookService:
         old_status = notebook_session.status
 
         # Look up working bucket for output sync
-        from sqlalchemy import text as sa_text
-
-        bucket_row = await session.execute(
-            sa_text("SELECT value FROM platform_config WHERE key = 'working_bucket_name'")
-        )
         working_bucket = ""
-        row = bucket_row.first()
-        if row:
-            val = (row[0] or "").strip()
+        working_bucket_value = await PlatformConfigService.get(session, "working_bucket_name")
+        if working_bucket_value is not None:
+            val = (working_bucket_value or "").strip()
             if val and val != "null":
                 working_bucket = val
 
@@ -354,11 +340,8 @@ class NotebookService:
         # Move outputs from working to results bucket (ADR-040: two-phase)
         if working_bucket and output_files:
             try:
-                results_row = await session.execute(
-                    sa_text("SELECT value FROM platform_config WHERE key = 'results_bucket_name'")
-                )
-                r_row = results_row.first()
-                results_bucket = (r_row[0] or "").strip() if r_row else ""
+                results_bucket_value = await PlatformConfigService.get(session, "results_bucket_name")
+                results_bucket = (results_bucket_value or "").strip() if results_bucket_value is not None else ""
                 if results_bucket and results_bucket != "null":
                     from app.services.session_output_service import SessionOutputService
 

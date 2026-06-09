@@ -392,26 +392,31 @@ class KubernetesComputeProvider(ComputeProvider):
             if endpoint and endpoint != "null":
                 return self._cluster_config
 
-        from sqlalchemy import text as sa_text
+        from app.platform.platform_config_service import PlatformConfigService
 
         if not self._session_factory:
             self._cluster_config = {}
             return self._cluster_config
 
         async with self._session_factory() as session:
-            result = await session.execute(
-                sa_text(
-                    "SELECT key, value FROM platform_config "
-                    "WHERE key IN ("
-                    "  'gke_cluster_endpoint', 'gke_cluster_ca_cert',"
-                    "  'gcp_credential_source', 'gcp_service_account_key',"
-                    "  'gcp_service_account_email', 'gcp_bootstrap_sa_email',"
-                    "  'gke_cluster_name', 'gcp_project_id', 'gcp_region',"
-                    "  'raw_bucket_name', 'k8s_pipeline_machine_type'"
-                    ")"
-                )
+            # get_many decrypts gcp_service_account_key; the credential consumers
+            # (credential_injector / kube client) expect the plaintext JSON.
+            self._cluster_config = await PlatformConfigService.get_many(
+                session,
+                [
+                    "gke_cluster_endpoint",
+                    "gke_cluster_ca_cert",
+                    "gcp_credential_source",
+                    "gcp_service_account_key",
+                    "gcp_service_account_email",
+                    "gcp_bootstrap_sa_email",
+                    "gke_cluster_name",
+                    "gcp_project_id",
+                    "gcp_region",
+                    "raw_bucket_name",
+                    "k8s_pipeline_machine_type",
+                ],
             )
-            self._cluster_config = {r[0]: r[1] for r in result.fetchall()}
 
         # Invalidate cached API client so it rebuilds with fresh config
         if force:

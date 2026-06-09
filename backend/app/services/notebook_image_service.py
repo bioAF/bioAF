@@ -157,18 +157,17 @@ def _authorized_request(credentials, method: str, url: str, body: dict | None = 
 
 async def _read_config(session: AsyncSession, key: str) -> str:
     """Read a single platform_config value."""
-    row = (await session.execute(text("SELECT value FROM platform_config WHERE key = :k").bindparams(k=key))).fetchone()
-    return row[0] if row else "null"
+    from app.platform.platform_config_service import PlatformConfigService
+
+    val = await PlatformConfigService.get(session, key)
+    return val if val is not None else "null"
 
 
 async def _set_config(session: AsyncSession, key: str, value: str) -> None:
     """Upsert a platform_config key."""
-    await session.execute(
-        text(
-            "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
-        ).bindparams(k=key, v=value)
-    )
+    from app.platform.platform_config_service import PlatformConfigService
+
+    await PlatformConfigService.set(session, key, value)
 
 
 async def ensure_artifact_registry(session: AsyncSession, project_id: str, region: str) -> str:

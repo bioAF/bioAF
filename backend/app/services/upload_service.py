@@ -3,7 +3,6 @@ import logging
 import re
 import uuid
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import ValidationError
@@ -56,17 +55,17 @@ class UploadService:
         credentials work for blob.generate_signed_url(version="v4").
         """
         from app.platform import credential_injector
+        from app.platform.platform_config_service import PlatformConfigService
 
-        result = await session.execute(
-            text(
-                "SELECT key, value FROM platform_config "
-                "WHERE key IN ("
-                "  'gcp_credential_source', 'gcp_service_account_key',"
-                "  'gcp_service_account_email', 'gcp_bootstrap_sa_email'"
-                ")"
-            )
+        config = await PlatformConfigService.get_many(
+            session,
+            [
+                "gcp_credential_source",
+                "gcp_service_account_key",
+                "gcp_service_account_email",
+                "gcp_bootstrap_sa_email",
+            ],
         )
-        config = {r[0]: r[1] for r in result.fetchall()}
 
         try:
             return credential_injector.load_gcp_credentials(config)
@@ -77,8 +76,9 @@ class UploadService:
     @staticmethod
     async def _get_ingest_bucket(session: AsyncSession) -> str:
         """Read ingest bucket name from platform_config."""
-        result = await session.execute(text("SELECT value FROM platform_config WHERE key = 'ingest_bucket_name'"))
-        name = result.scalar_one_or_none()
+        from app.platform.platform_config_service import PlatformConfigService
+
+        name = await PlatformConfigService.get(session, "ingest_bucket_name")
         if not name or name == "null":
             raise ValidationError("Ingest bucket not configured. Deploy storage infrastructure first.")
         return name

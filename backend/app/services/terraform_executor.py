@@ -558,17 +558,14 @@ class TerraformExecutor:
                     pass
 
             # Update platform_config
+            from app.platform.platform_config_service import PlatformConfigService
+
             for key, value in [
                 ("terraform_initialized", "true"),
                 ("terraform_state_bucket", bucket_name),
                 ("backups_bucket_name", backups_bucket),
             ]:
-                await session.execute(
-                    text(
-                        "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
-                        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
-                    ).bindparams(k=key, v=value)
-                )
+                await PlatformConfigService.set(session, key, value)
 
             run.status = "completed"
             run.terraform_state_url = f"gs://{bucket_name}" if bucket_name else ""

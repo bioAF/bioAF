@@ -22,10 +22,11 @@ import uuid
 from datetime import UTC, datetime
 from urllib.parse import unquote, urljoin, urlparse
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import ValidationError
+from app.platform.platform_config_service import PlatformConfigService
 
 logger = logging.getLogger("bioaf.lab_document_upload")
 
@@ -95,8 +96,7 @@ def _filename_from_response(parsed_url, content_disposition: str | None) -> str:
 class LabDocumentUploadService:
     @staticmethod
     async def _get_working_bucket(session: AsyncSession) -> str:
-        result = await session.execute(text("SELECT value FROM platform_config WHERE key = 'working_bucket_name'"))
-        name = result.scalar_one_or_none()
+        name = await PlatformConfigService.get(session, "working_bucket_name")
         if not name or name == "null":
             raise ValidationError("Working bucket not configured. Deploy storage infrastructure first.")
         return name
