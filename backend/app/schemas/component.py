@@ -26,22 +26,3 @@ class ComponentSelectBatchRequest(BaseModel):
 
 class ComponentSelectBatchResponse(BaseModel):
     queued: list[str]
-
-
-class TerraformRunResponse(BaseModel):
-    id: int
-    triggered_by_user_id: int
-    action: str
-    component_key: str | None
-    plan_summary: dict | None
-    status: str
-    started_at: datetime
-    completed_at: datetime | None
-    error_message: str | None
-
-    model_config = {"from_attributes": True}
-
-
-class TerraformRunListResponse(BaseModel):
-    runs: list[TerraformRunResponse]
-    total: int
