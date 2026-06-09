@@ -41,6 +41,28 @@ class PipelineRunService:
             return True
         return (getattr(pipeline, "source_type", "") or "").lower() == "nf-core"
 
+    # File source types that are pipeline/notebook DERIVATIVES, not raw inputs.
+    # By default these are excluded from a run's inputs so a previous run's
+    # outputs are never fed back in as inputs (which compounds every run).
+    DERIVED_SOURCE_TYPES: frozenset[str] = frozenset({"pipeline_output", "notebook_output"})
+
+    @staticmethod
+    def _input_eligible_files(files: list, include_derived: bool) -> list:
+        """Filter a sample's files to those eligible as pipeline inputs.
+
+        Raw uploads are always eligible. Derived files (a prior pipeline or
+        notebook run's outputs) are excluded unless the caller opts in via
+        ``include_derived_inputs`` on the launch request.
+        """
+        files = files or []
+        if include_derived:
+            return list(files)
+        return [
+            f
+            for f in files
+            if (getattr(f, "source_type", "") or "upload") not in PipelineRunService.DERIVED_SOURCE_TYPES
+        ]
+
     @staticmethod
     async def launch_run(
         session: AsyncSession,
@@ -84,12 +106,20 @@ class PipelineRunService:
             )
             samples = list(sample_result.scalars().all())
 
+        # 3a. Resolve each sample's INPUT-eligible files. Prior pipeline/notebook
+        # outputs are excluded by default so they are never fed back in as inputs
+        # (which compounded the dataset every run); include_derived_inputs opts in.
+        # Stored on a transient attribute the sample-sheet builder reads; it is
+        # not a mapped column, so it never touches the ORM/DB.
+        for s in samples:
+            s._input_files = PipelineRunService._input_eligible_files(s.files, data.include_derived_inputs)
+
         # 3b. A FASTQ-consuming pipeline needs every selected sample to have its
-        # own linked files. Reject (or, if asked, drop) samples with none. The
-        # old behaviour back-filled file-less samples with the WHOLE experiment's
+        # own input files. Reject (or, if asked, drop) samples with none. The old
+        # behaviour back-filled file-less samples with the WHOLE experiment's
         # files, which cross-contaminated one sample's run with another's reads.
         if PipelineRunService._requires_per_sample_fastq(pipeline):
-            missing = [s for s in samples if not s.files]
+            missing = [s for s in samples if not s._input_files]
             if missing:
                 if not data.drop_samples_without_files:
                     raise SamplesMissingFilesError(
@@ -98,7 +128,7 @@ class PipelineRunService:
                             "samples_without_files": [{"id": s.id, "external_id": s.external_id} for s in missing]
                         },
                     )
-                samples = [s for s in samples if s.files]
+                samples = [s for s in samples if s._input_files]
                 if not samples:
                     raise ValidationError("All selected samples lack input files; nothing to run")
 
@@ -148,10 +178,12 @@ class PipelineRunService:
             session.add(link)
         await session.flush()
 
-        # 7b. Record input files in junction table (ADR-038)
+        # 7b. Record input files in junction table (ADR-038). Use the
+        # input-eligible set so the recorded provenance matches what actually
+        # fed the run (raw inputs, not re-ingested prior outputs).
         seen_file_ids: set[int] = set()
         for sample in samples:
-            for f in sample.files or []:
+            for f in sample._input_files or []:
                 if f.id not in seen_file_ids:
                     session.add(PipelineRunInputFile(pipeline_run_id=run.id, file_id=f.id))
                     seen_file_ids.add(f.id)

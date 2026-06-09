@@ -78,13 +78,14 @@ async def _make_sample(session, exp, external_id):
     return s
 
 
-async def _link_file(session, org, exp, sample, filename):
+async def _link_file(session, org, exp, sample, filename, source_type="upload"):
     f = File(
         organization_id=org.id,
         experiment_id=exp.id,
         gcs_uri=f"gs://bucket/{filename}",
         filename=filename,
         file_type="fastq",
+        source_type=source_type,
     )
     session.add(f)
     await session.flush()
@@ -158,6 +159,56 @@ class TestLaunchRequiresSampleFiles:
         )
         with pytest.raises(ValidationError):
             await PipelineRunService.launch_run(session, org.id, user.id, req)
+
+    @pytest.mark.asyncio
+    async def test_prior_pipeline_outputs_are_not_used_as_inputs_by_default(self, session, base):
+        """A sample whose only files are prior pipeline outputs counts as having
+        no inputs (outputs must not be fed back in), so the launch is rejected."""
+        org, user, exp = base["org"], base["user"], base["exp"]
+        s = await _make_sample(session, exp, "SAMPLE-101")
+        await _link_file(session, org, exp, s, "SAMPLE-101_trimmed.fastq.gz", source_type="pipeline_output")
+        await session.commit()
+
+        req = PipelineRunLaunchRequest(
+            pipeline_key="nf-core/demo",
+            experiment_id=exp.id,
+            sample_ids=[s.id],
+        )
+        with pytest.raises(SamplesMissingFilesError):
+            await PipelineRunService.launch_run(session, org.id, user.id, req)
+
+    @pytest.mark.asyncio
+    async def test_raw_inputs_used_outputs_excluded(self, session, base):
+        """With both a raw upload and a prior output linked, only the raw upload
+        is recorded as a run input by default."""
+        org, user, exp = base["org"], base["user"], base["exp"]
+        s = await _make_sample(session, exp, "SAMPLE-101")
+        raw = await _link_file(session, org, exp, s, "SAMPLE-101_R1_001.fastq.gz", source_type="upload")
+        await _link_file(session, org, exp, s, "SAMPLE-101_trimmed.fastq.gz", source_type="pipeline_output")
+        await session.commit()
+
+        req = PipelineRunLaunchRequest(pipeline_key="nf-core/demo", experiment_id=exp.id, sample_ids=[s.id])
+        run = await PipelineRunService.launch_run(session, org.id, user.id, req)
+        await session.commit()
+        assert run.input_files_json == [raw.id], "only the raw upload should be a run input"
+
+    @pytest.mark.asyncio
+    async def test_include_derived_inputs_opts_in(self, session, base):
+        """include_derived_inputs=True lets prior outputs be used as inputs."""
+        org, user, exp = base["org"], base["user"], base["exp"]
+        s = await _make_sample(session, exp, "SAMPLE-101")
+        out = await _link_file(session, org, exp, s, "SAMPLE-101_trimmed.fastq.gz", source_type="pipeline_output")
+        await session.commit()
+
+        req = PipelineRunLaunchRequest(
+            pipeline_key="nf-core/demo",
+            experiment_id=exp.id,
+            sample_ids=[s.id],
+            include_derived_inputs=True,
+        )
+        run = await PipelineRunService.launch_run(session, org.id, user.id, req)
+        await session.commit()
+        assert run.input_files_json == [out.id]
 
     @pytest.mark.asyncio
     async def test_builtin_no_input_pipeline_is_exempt(self, session, base):

@@ -145,6 +145,38 @@ async def test_register_outputs_links_files_to_samples(session, pipeline_run, ex
 
 
 @pytest.mark.asyncio
+async def test_register_outputs_links_each_output_to_its_own_sample(session, pipeline_run, experiment, samples):
+    """Per-sample outputs link only to the sample whose external_id they carry;
+    aggregate outputs (matching no sample) fall back to all run samples."""
+    s1, s2 = samples  # external_ids Sample-001, Sample-002
+    base = f"gs://bioaf-results-testorg/experiments/{experiment.id}/pipeline-runs/{pipeline_run.id}"
+    collected = [
+        # belongs to Sample-001 (path segment)
+        {"filename": "Sample-001.bam", "gcs_uri": f"{base}/star/Sample-001/Sample-001.bam", "md5_hash": "a"},
+        # belongs to Sample-002 (filename prefix)
+        {
+            "filename": "Sample-002_trimmed.fastq.gz",
+            "gcs_uri": f"{base}/fq/Sample-002_trimmed.fastq.gz",
+            "md5_hash": "b",
+        },
+        # aggregate report -> no sample match -> all samples
+        {"filename": "multiqc_report.html", "gcs_uri": f"{base}/multiqc/multiqc_report.html", "md5_hash": "c"},
+    ]
+
+    files = await PipelineOutputService.register_outputs(session, pipeline_run, collected)
+    await session.commit()
+
+    async def _linked(fid):
+        rows = await session.execute(text("SELECT sample_id FROM sample_files WHERE file_id = :fid"), {"fid": fid})
+        return {row[0] for row in rows.all()}
+
+    by_name = {f.filename: f for f in files}
+    assert await _linked(by_name["Sample-001.bam"].id) == {s1.id}
+    assert await _linked(by_name["Sample-002_trimmed.fastq.gz"].id) == {s2.id}
+    assert await _linked(by_name["multiqc_report.html"].id) == {s1.id, s2.id}
+
+
+@pytest.mark.asyncio
 async def test_register_outputs_skips_duplicates(session, pipeline_run, experiment, admin_user):
     """Files with an already-existing gcs_uri are not duplicated."""
     collected = _make_collected(pipeline_run.id, experiment.id)

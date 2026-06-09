@@ -63,6 +63,10 @@ class PipelineRunLaunchRequest(BaseModel):
     # files, the launch is rejected with SamplesMissingFilesError. Set this to
     # drop those samples and run with the rest instead.
     drop_samples_without_files: bool = False
+    # By default a previous pipeline/notebook run's output files are NOT fed back
+    # in as inputs (they would compound the dataset every run). Set this to opt
+    # in to using derived files as inputs.
+    include_derived_inputs: bool = False
 
 
 class PipelineRunResponse(BaseModel):
