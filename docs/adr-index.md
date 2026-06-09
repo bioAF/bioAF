@@ -35,9 +35,36 @@
 | [ADR-031](../decisions/ADR-031-notebook-image-build-pipeline.md) | Notebook Image Build Pipeline | Cloud Build pipeline for notebook container images |
 | [ADR-032](../decisions/ADR-032-custom-rbac.md) | Custom RBAC | Permission-based access control with custom roles |
 | [ADR-033](../decisions/ADR-033-versioned-compute-environments.md) | Versioned Compute Environments | Immutable, versioned notebook and compute environments |
-| [ADR-034](../decisions/ADR-034-custom-work-nodes.md) | Custom Work Nodes | Ephemeral Kubernetes pods for Work Nodes |
+| [ADR-034](../decisions/ADR-034-custom-work-nodes.md) | Custom Work Nodes | Custom ephemeral Work Nodes (originally Kubernetes pods; moved to GCE VMs by [ADR-043](../decisions/ADR-043-work-nodes-gce-migration.md)) |
 | [ADR-035](../decisions/ADR-035-bioaf-cli.md) | bioaf CLI | In-session CLI for provenance capture and heartbeat |
 | [ADR-036](../decisions/ADR-036-data-export-download.md) | Data Export and Download | Bulk export and download system for experiment data |
 | [ADR-037](../decisions/ADR-037-provenance-reporting.md) | Provenance Reporting | Full lineage reports for files and analysis outputs |
 | [ADR-038](../decisions/ADR-038-pipeline-io-lineage-junction.md) | Pipeline I/O Lineage | Junction table tracking pipeline input file lineage |
 | [ADR-039](../decisions/ADR-039-notebook-output-provenance.md) | Notebook Output Provenance | Provenance tracking for notebook-generated outputs |
+| [ADR-040](../decisions/ADR-040-notebook-file-lifecycle.md) | Notebook Session File Lifecycle | Lifecycle and persistence rules for files created in notebook sessions |
+| [ADR-041](../decisions/ADR-041-environment-build-versioning.md) | Environment Build Versioning | Versioned, immutable builds for compute environments |
+| [ADR-042](../decisions/ADR-042-spot-preemption-retry-strategy.md) | Spot Preemption Retry Strategy | Retry pipeline tasks on spot-VM preemption without re-requesting extra capacity |
+| [ADR-043](../decisions/ADR-043-work-nodes-gce-migration.md) | Work Nodes GCE Migration | Work Nodes run on dedicated GCE VMs instead of GKE pods (supersedes the ADR-034 pod model) |
+| [ADR-044](../decisions/ADR-044-custom-pipelines.md) | Custom Pipelines | User-defined custom pipelines alongside the nf-core registry |
+| [ADR-045](../decisions/ADR-045-pipeline-environments.md) | Pipeline Environments | Named, versioned environments for pipeline execution |
+| [ADR-046](../decisions/ADR-046-pipeline-version-cascade.md) | Pipeline Version Cascade | Propagate pipeline version changes downstream via the event bus |
+| [ADR-047](../decisions/ADR-047-data-at-rest-encryption.md) | Data-at-Rest Encryption | App-level Fernet encryption for sensitive stored fields |
+| [ADR-048](../decisions/ADR-048-public-integration-api-surface.md) | Public Integration API Surface | Stable public `/v1/integrations` LIMS API surface |
+| [ADR-049](../decisions/ADR-049-service-accounts-and-api-keys.md) | Service Accounts and API Keys | Service-account + API-key authentication for programmatic access |
+| [ADR-050](../decisions/ADR-050-external-ids-and-idempotent-writes.md) | External IDs and Idempotent Writes | External-id-keyed idempotent writes on the integration API |
+| [ADR-051](../decisions/ADR-051-outbound-webhook-delivery.md) | Outbound Webhook Delivery | Deliver event notifications to external systems via outbound webhooks |
+| [ADR-052](../decisions/ADR-052-llm-integration-trust-boundary.md) | LLM Integration Trust Boundary | LLM output is advisory; defined trust boundary around model inputs/outputs |
+| [ADR-053](../decisions/ADR-053-llm-provider-abstraction.md) | LLM Provider Abstraction | Single-active LLM provider behind a provider abstraction |
+| [ADR-054](../decisions/ADR-054-gemma-per-request-inference.md) | Gemma Per-Request Inference | Self-hosted Gemma served as a per-request GCE inference pipeline |
+| [ADR-055](../decisions/ADR-055-agent-review-advisory-entity.md) | Agent Review Advisory Entity | Agent Review is an advisory entity, not a gating control |
+| [ADR-056](../decisions/ADR-056-literature-library-domain-model.md) | Literature Library Domain Model | Domain model for the literature library (papers, authors, associations) |
+| [ADR-057](../decisions/ADR-057-literature-as-input-to-agent-review.md) | Literature as Agent Review Input | Feed library literature into Agent Review prompts |
+| [ADR-058](../decisions/ADR-058-naming-profile-parse-only.md) | Naming Profiles Parse-Only | Naming profiles parse filenames only, with template-driven vocabulary |
+| [ADR-059](../decisions/ADR-059-lab-knowledge-institutional-memory.md) | Lab Knowledge Institutional Memory | Lab knowledge as a persistent institutional-memory layer |
+| [ADR-060](../decisions/ADR-060-lab-document-tag-organization.md) | Lab Document Tag Organization | Tag-based organization for lab documents |
+| [ADR-061](../decisions/ADR-061-lab-document-versioning.md) | Lab Document Versioning | Upload-new-version model for lab document versioning |
+| [ADR-062](../decisions/ADR-062-glossary-ai-population-human-review.md) | Glossary AI Population + Human Review | AI proposes glossary terms; mandatory human review before adoption |
+| [ADR-063](../decisions/ADR-063-sdr-status-machine.md) | SDR Status Machine | Status machine for Scientific Decision Records (SDR) |
+| [ADR-064](../decisions/ADR-064-sdr-reassessment-triggers.md) | SDR Re-Assessment Triggers | Date-based triggers for re-assessing Scientific Decision Records |
+| [ADR-065](../decisions/ADR-065-bal-normalized-contract.md) | BAL Normalized Contract | Normalized BAL model, capabilities, and the category/backend rule (supersedes ADR-020) |
+| [ADR-066](../decisions/ADR-066-terraform-single-execution-owner.md) | Terraform Single Execution Owner | Per-module TerraformExecutor is the sole terraform engine (supersedes the ADR-007 implementation) |
