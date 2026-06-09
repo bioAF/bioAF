@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import require_permission
 from app.database import async_session_factory, get_session
 from app.exceptions import DomainError
+from app.platform.platform_config_service import PlatformConfigService
 from app.services.audit_service import log_action
 from app.services.notebook_image_service import build_notebook_image, cancel_build
 from app.services import infra_update_service
@@ -285,29 +286,18 @@ async def stack_deploy_background_endpoint(
     compute_zone = body.compute_zone if body else None
 
     # Validate preconditions synchronously so we can return a clear error.
-    gcp_configured = await session.execute(
-        text("SELECT value FROM platform_config WHERE key = 'gcp_credentials_configured'")
-    )
-    gcp_val = gcp_configured.scalar_one_or_none()
+    gcp_val = await PlatformConfigService.get(session, "gcp_credentials_configured")
     if gcp_val != "true":
         raise HTTPException(status_code=400, detail="GCP credentials are not configured")
 
-    tf_initialized = await session.execute(
-        text("SELECT value FROM platform_config WHERE key = 'terraform_initialized'")
-    )
-    tf_val = tf_initialized.scalar_one_or_none()
+    tf_val = await PlatformConfigService.get(session, "terraform_initialized")
     if tf_val != "true":
         raise HTTPException(status_code=400, detail="Terraform has not been initialized")
 
     # Record the chosen compute_stack now so downstream views (the wizard's
     # Select Components step, the post-install components page) can resolve
     # the right component list before the compute module finishes applying.
-    await session.execute(
-        text(
-            "INSERT INTO platform_config (key, value) VALUES ('compute_stack', :v) "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
-        ).bindparams(v=stack_type)
-    )
+    await PlatformConfigService.set(session, "compute_stack", stack_type)
     await session.commit()
 
     async def _run_deploy():
@@ -347,8 +337,8 @@ async def stack_teardown_background_endpoint(
     org_id = int(current_user["org_id"]) if current_user.get("org_id") else None
 
     # Validate compute is deployed
-    compute_deployed = await session.execute(text("SELECT value FROM platform_config WHERE key = 'compute_deployed'"))
-    if compute_deployed.scalar_one_or_none() != "true":
+    compute_deployed = await PlatformConfigService.get(session, "compute_deployed")
+    if compute_deployed != "true":
         raise HTTPException(status_code=400, detail="Compute stack is not deployed")
 
     async def _run_teardown():
@@ -380,12 +370,12 @@ async def stack_destroy_storage_background_endpoint(
     org_id = int(current_user["org_id"]) if current_user.get("org_id") else None
 
     # Validate storage is deployed and compute is not
-    compute_deployed = await session.execute(text("SELECT value FROM platform_config WHERE key = 'compute_deployed'"))
-    if compute_deployed.scalar_one_or_none() == "true":
+    compute_deployed = await PlatformConfigService.get(session, "compute_deployed")
+    if compute_deployed == "true":
         raise HTTPException(status_code=400, detail="Teardown compute stack before destroying storage")
 
-    storage_deployed = await session.execute(text("SELECT value FROM platform_config WHERE key = 'storage_deployed'"))
-    if storage_deployed.scalar_one_or_none() != "true":
+    storage_deployed = await PlatformConfigService.get(session, "storage_deployed")
+    if storage_deployed != "true":
         raise HTTPException(status_code=400, detail="Storage is not deployed")
 
     async def _run_destroy_storage():
@@ -765,15 +755,7 @@ async def stack_components_list(
     session: AsyncSession = Depends(get_session),
 ) -> ComponentListResponse:
     """Return component list based on active compute stack."""
-    rows = (
-        await session.execute(
-            text(
-                "SELECT key, value FROM platform_config "
-                "WHERE key IN ('compute_stack', 'compute_deployed', 'storage_deployed')"
-            )
-        )
-    ).fetchall()
-    config = {r[0]: r[1] for r in rows}
+    config = await PlatformConfigService.get_many(session, ["compute_stack", "compute_deployed", "storage_deployed"])
 
     compute_stack = config.get("compute_stack", "null")
     if compute_stack == "null":
@@ -892,14 +874,8 @@ async def stack_component_toggle(
 
         # Notebook components need the bioaf-scrna image
         if component_key in _NOTEBOOK_COMPONENTS:
-            scrna_image = (
-                await session.execute(text("SELECT value FROM platform_config WHERE key = 'bioaf_scrna_image'"))
-            ).scalar_one_or_none()
-            build_status = (
-                await session.execute(
-                    text("SELECT value FROM platform_config WHERE key = 'notebook_image_build_status'")
-                )
-            ).scalar_one_or_none()
+            scrna_image = await PlatformConfigService.get(session, "bioaf_scrna_image")
+            build_status = await PlatformConfigService.get(session, "notebook_image_build_status")
 
             needs_build = force_rebuild or not scrna_image or scrna_image == "null" or build_status not in ("SUCCESS",)
             if needs_build:
@@ -914,14 +890,8 @@ async def stack_component_toggle(
         if component_key in _CELLXGENE_COMPONENTS:
             from app.services.cellxgene_image_service import build_cellxgene_image
 
-            cxg_image = (
-                await session.execute(text("SELECT value FROM platform_config WHERE key = 'cellxgene_image'"))
-            ).scalar_one_or_none()
-            cxg_build_status = (
-                await session.execute(
-                    text("SELECT value FROM platform_config WHERE key = 'cellxgene_image_build_status'")
-                )
-            ).scalar_one_or_none()
+            cxg_image = await PlatformConfigService.get(session, "cellxgene_image")
+            cxg_build_status = await PlatformConfigService.get(session, "cellxgene_image_build_status")
 
             needs_build = force_rebuild or not cxg_image or cxg_image == "null" or cxg_build_status not in ("SUCCESS",)
             if needs_build:
@@ -983,15 +953,9 @@ async def notebook_image_build_status(
     session: AsyncSession = Depends(get_session),
 ) -> NotebookImageBuildStatus:
     """Return current notebook image build status."""
-    rows = (
-        await session.execute(
-            text(
-                "SELECT key, value FROM platform_config "
-                "WHERE key IN ('notebook_image_build_id', 'notebook_image_build_status', 'bioaf_scrna_image')"
-            )
-        )
-    ).fetchall()
-    config = {r[0]: r[1] for r in rows}
+    config = await PlatformConfigService.get_many(
+        session, ["notebook_image_build_id", "notebook_image_build_status", "bioaf_scrna_image"]
+    )
 
     def _non_null(val: str | None) -> str | None:
         return val if val and val != "null" else None
@@ -1009,15 +973,9 @@ async def cellxgene_image_build_status(
     session: AsyncSession = Depends(get_session),
 ) -> NotebookImageBuildStatus:
     """Return current cellxgene image build status."""
-    rows = (
-        await session.execute(
-            text(
-                "SELECT key, value FROM platform_config "
-                "WHERE key IN ('cellxgene_image_build_id', 'cellxgene_image_build_status', 'cellxgene_image')"
-            )
-        )
-    ).fetchall()
-    config = {r[0]: r[1] for r in rows}
+    config = await PlatformConfigService.get_many(
+        session, ["cellxgene_image_build_id", "cellxgene_image_build_status", "cellxgene_image"]
+    )
 
     def _non_null(val: str | None) -> str | None:
         return val if val and val != "null" else None
@@ -1058,12 +1016,7 @@ async def get_cluster_config(
         "k8s_interactive_machine_type",
         "k8s_interactive_max_nodes",
     ]
-    rows = (
-        await session.execute(
-            text("SELECT key, value FROM platform_config WHERE key = ANY(:keys)").bindparams(keys=keys)
-        )
-    ).fetchall()
-    config = {r[0]: r[1] for r in rows}
+    config = await PlatformConfigService.get_many(session, keys)
 
     return ClusterConfigResponse(
         k8s_pipeline_machine_type=config.get("k8s_pipeline_machine_type", "n2-highmem-16"),
@@ -1085,20 +1038,14 @@ async def update_cluster_config(
 
     require_capability("autoscaling")
     # Verify compute is deployed
-    deployed = (
-        await session.execute(text("SELECT value FROM platform_config WHERE key = 'compute_deployed'"))
-    ).fetchone()
-    if not deployed or deployed[0] != "true":
+    deployed = await PlatformConfigService.get(session, "compute_deployed")
+    if deployed != "true":
         raise HTTPException(status_code=400, detail="Compute stack is not deployed")
 
     # Update config values
     updates = body.model_dump(exclude_none=True)
     for key, value in updates.items():
-        await session.execute(
-            text("UPDATE platform_config SET value = :v, updated_at = now() WHERE key = :k").bindparams(
-                k=key, v=str(value).lower() if isinstance(value, bool) else str(value)
-            )
-        )
+        await PlatformConfigService.set(session, key, str(value).lower() if isinstance(value, bool) else str(value))
     await session.flush()
 
     # Generate terraform plan

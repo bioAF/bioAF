@@ -8,11 +8,11 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.api.dependencies import require_permission
+from app.platform.platform_config_service import PlatformConfigService
 from app.services import role_service
 from app.schemas.notebook_session import (
     SessionResponse,
@@ -106,12 +106,7 @@ def _session_response(ns) -> SessionResponse:
 
 
 async def _get_config_value(session: AsyncSession, key: str) -> str | None:
-    result = await session.execute(
-        text("SELECT value FROM platform_config WHERE key = :k"),
-        {"k": key},
-    )
-    row = result.first()
-    return row[0] if row else None
+    return await PlatformConfigService.get(session, key)
 
 
 async def _sync_session_from_k8s(ns, session: AsyncSession) -> None:
@@ -542,9 +537,9 @@ async def get_notebook_settings(
     session: AsyncSession = Depends(get_session),
 ):
     defaults = {
-        "idle_timeout_hours": 4,
-        "idle_warning_minutes": 15,
-        "max_sessions_per_user": 2,
+        "idle_timeout_hours": "4",
+        "idle_warning_minutes": "15",
+        "max_sessions_per_user": "2",
         "bioaf_scrna_image": "",
     }
     db_keys = [
@@ -553,11 +548,7 @@ async def get_notebook_settings(
         "notebook_max_sessions_per_user",
         "bioaf_scrna_image",
     ]
-    result = await session.execute(
-        text("SELECT key, value FROM platform_config WHERE key = ANY(:keys)"),
-        {"keys": db_keys},
-    )
-    rows = {r[0]: r[1] for r in result.fetchall()}
+    rows = await PlatformConfigService.get_many(session, db_keys)
 
     return {
         "idle_timeout_hours": int(rows.get("notebook_idle_timeout_hours", defaults["idle_timeout_hours"])),
@@ -578,13 +569,7 @@ async def update_notebook_settings(
         ("notebook_idle_warning_minutes", str(body.idle_warning_minutes)),
         ("notebook_max_sessions_per_user", str(body.max_sessions_per_user)),
     ]:
-        await session.execute(
-            text("""
-                INSERT INTO platform_config (key, value) VALUES (:k, :v)
-                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-            """),
-            {"k": key, "v": value},
-        )
+        await PlatformConfigService.set(session, key, value)
     await session.commit()
     return {"status": "ok"}
 
@@ -595,12 +580,6 @@ async def update_container_registry(
     current_user: dict = require_permission("notebooks", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
-    await session.execute(
-        text("""
-            INSERT INTO platform_config (key, value) VALUES (:k, :v)
-            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-        """),
-        {"k": "bioaf_scrna_image", "v": body.bioaf_scrna_image},
-    )
+    await PlatformConfigService.set(session, "bioaf_scrna_image", body.bioaf_scrna_image)
     await session.commit()
     return {"status": "ok"}

@@ -153,12 +153,9 @@ async def reconcile_stuck_files(
     user_id = int(current_user["sub"])
 
     # Read bucket names
-    config_rows = (
-        await session.execute(
-            text("SELECT key, value FROM platform_config WHERE key IN ('ingest_bucket_name', 'raw_bucket_name')")
-        )
-    ).fetchall()
-    config = {r[0]: r[1] for r in config_rows}
+    from app.platform.platform_config_service import PlatformConfigService
+
+    config = await PlatformConfigService.get_many(session, ["ingest_bucket_name", "raw_bucket_name"])
     ingest_bucket = config.get("ingest_bucket_name", "")
     raw_bucket = config.get("raw_bucket_name", "")
 

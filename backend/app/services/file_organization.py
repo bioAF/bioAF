@@ -13,6 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import NotFoundError
+from app.platform.platform_config_service import PlatformConfigService
 from app.services.audit_service import log_action
 from app.services.gcs_storage import GcsStorageService
 
@@ -25,8 +26,7 @@ class FileOrganizationService:
     @staticmethod
     async def _get_raw_bucket(session: AsyncSession) -> str | None:
         """Read raw_bucket_name from platform_config."""
-        result = await session.execute(text("SELECT value FROM platform_config WHERE key = 'raw_bucket_name'"))
-        val = result.scalar_one_or_none()
+        val = await PlatformConfigService.get(session, "raw_bucket_name")
         if val and val != "null":
             return val
         return None

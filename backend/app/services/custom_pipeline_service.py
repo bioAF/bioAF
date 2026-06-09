@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import and_, func, select
-from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -23,6 +22,7 @@ from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.models.pipeline_run import PipelineRun
 from app.models.pipeline_run_input_file import PipelineRunInputFile
 from app.models.project import Project
+from app.platform.platform_config_service import PlatformConfigService
 from app.schemas.custom_pipeline import (
     CustomPipelineCreateRequest,
     CustomPipelineLaunchRequest,
@@ -1013,14 +1013,8 @@ class CustomPipelineService:
 
     @staticmethod
     async def _read_platform_config(session: AsyncSession, key: str) -> str:
-        result = await session.execute(
-            sa_text("SELECT value FROM platform_config WHERE key = :k"),
-            {"k": key},
-        )
-        row = result.first()
-        if not row:
-            return ""
-        val = (row[0] or "").strip()
+        raw = await PlatformConfigService.get(session, key)
+        val = (raw or "").strip()
         if val and val != "null":
             return val
         return ""

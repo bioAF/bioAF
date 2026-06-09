@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.api.dependencies import require_permission
 from app.adapters.registry import get_storage_adapter
+from app.platform.platform_config_service import PlatformConfigService
 from app.schemas.infrastructure import (
     InfraStorageMetricsResponse,
     ComputeStackResponse,
@@ -50,9 +50,8 @@ async def get_compute_stack(
     session: AsyncSession = Depends(get_session),
 ):
     """Returns the current compute stack selection."""
-    result = await session.execute(text("SELECT value FROM platform_config WHERE key = 'compute_stack'"))
-    row = result.first()
-    return ComputeStackResponse(compute_stack=row[0] if row else "kubernetes")
+    compute_stack = await PlatformConfigService.get(session, "compute_stack") or "kubernetes"
+    return ComputeStackResponse(compute_stack=compute_stack)
 
 
 @router.get("/components", response_model=ComponentsListResponse)
@@ -63,9 +62,7 @@ async def get_components(
     """Returns component catalog filtered by active compute stack."""
     from app.services.component_service import COMPONENT_CATALOG
 
-    result = await session.execute(text("SELECT value FROM platform_config WHERE key = 'compute_stack'"))
-    row = result.first()
-    compute_stack = row[0] if row else "kubernetes"
+    compute_stack = await PlatformConfigService.get(session, "compute_stack") or "kubernetes"
 
     # Components with no backend implementation yet, regardless of compute stack
     unimplemented = {"snakemake_k8s", "snakemake"}

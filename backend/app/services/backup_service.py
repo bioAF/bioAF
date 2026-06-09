@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.platform.platform_config_service import PlatformConfigService
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import BACKUP_FAILURE
@@ -65,12 +66,7 @@ async def _get_backups_bucket(session: AsyncSession) -> str:
     then falls back to config_backups_bucket_name (existing bucket from storage
     deployment). Returns empty string if neither is configured.
     """
-    result = await session.execute(
-        text(
-            "SELECT key, value FROM platform_config WHERE key IN ('backups_bucket_name', 'config_backups_bucket_name')"
-        )
-    )
-    config = {r[0]: r[1] for r in result.fetchall()}
+    config = await PlatformConfigService.get_many(session, ["backups_bucket_name", "config_backups_bucket_name"])
 
     # Prefer the persistent backups bucket from foundation module
     bucket = config.get("backups_bucket_name", "")
@@ -492,9 +488,7 @@ class BackupService:
     @staticmethod
     async def list_tfstate_files(session: AsyncSession) -> list[dict]:
         """List terraform state files in the tfstate bucket."""
-        result = await session.execute(text("SELECT value FROM platform_config WHERE key = 'terraform_state_bucket'"))
-        row = result.fetchone()
-        bucket_name = row[0] if row else ""
+        bucket_name = await PlatformConfigService.get(session, "terraform_state_bucket") or ""
         if not bucket_name or bucket_name == "null":
             return []
 
@@ -523,9 +517,7 @@ class BackupService:
     @staticmethod
     async def download_tfstate(session: AsyncSession, filename: str) -> bytes | None:
         """Download a terraform state file from the tfstate bucket."""
-        result = await session.execute(text("SELECT value FROM platform_config WHERE key = 'terraform_state_bucket'"))
-        row = result.fetchone()
-        bucket_name = row[0] if row else ""
+        bucket_name = await PlatformConfigService.get(session, "terraform_state_bucket") or ""
         if not bucket_name or bucket_name == "null":
             return None
 
@@ -620,10 +612,7 @@ class BackupService:
             "backup_config_schedule_enabled",
             "backup_config_next_run",
         ]
-        result = await session.execute(
-            text("SELECT key, value FROM platform_config WHERE key = ANY(:keys)").bindparams(keys=keys)
-        )
-        stored = {r[0]: r[1] for r in result.fetchall()}
+        stored = await PlatformConfigService.get_many(session, keys)
 
         pg_next_raw = stored.get("backup_postgres_next_run", "")
         cfg_next_raw = stored.get("backup_config_next_run", "")
@@ -662,12 +651,7 @@ class BackupService:
         }
         for field, config_key in key_map.items():
             if field in updates and updates[field] is not None:
-                await session.execute(
-                    text(
-                        "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
-                        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
-                    ).bindparams(k=config_key, v=str(updates[field]))
-                )
+                await PlatformConfigService.set(session, config_key, str(updates[field]))
 
         # Handle postgres schedule enable/disable
         await BackupService._apply_schedule_toggle(
@@ -703,21 +687,11 @@ class BackupService:
 
         if enabled_field in updates and updates[enabled_field] is not None:
             enabled = updates[enabled_field]
-            await session.execute(
-                text(
-                    "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
-                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
-                ).bindparams(k=enabled_key, v="true" if enabled else "false")
-            )
+            await PlatformConfigService.set(session, enabled_key, "true" if enabled else "false")
 
             if not enabled:
                 # Disable: clear next_run
-                await session.execute(
-                    text(
-                        "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
-                        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
-                    ).bindparams(k=next_run_key, v="")
-                )
+                await PlatformConfigService.set(session, next_run_key, "")
                 return
 
         # Handle first_run -> next_run (only when enabling or updating)
@@ -730,12 +704,7 @@ class BackupService:
                 if next_run.tzinfo is None:
                     next_run = next_run.replace(tzinfo=timezone.utc)
 
-            await session.execute(
-                text(
-                    "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
-                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
-                ).bindparams(k=next_run_key, v=next_run.isoformat())
-            )
+            await PlatformConfigService.set(session, next_run_key, next_run.isoformat())
 
     @staticmethod
     async def advance_next_run(session: AsyncSession, tier: str) -> None:
@@ -762,12 +731,7 @@ class BackupService:
             base = base.replace(tzinfo=timezone.utc)
         new_next = base + timedelta(hours=hours)
 
-        await session.execute(
-            text(
-                "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
-                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
-            ).bindparams(k=key, v=new_next.isoformat())
-        )
+        await PlatformConfigService.set(session, key, new_next.isoformat())
 
     @staticmethod
     async def is_backup_due(session: AsyncSession, tier: str) -> bool:

@@ -5,11 +5,11 @@ under /api/v1/work-nodes/.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.api.dependencies import require_permission
+from app.platform.platform_config_service import PlatformConfigService
 from app.services import role_service
 from app.services.work_node_service import WorkNodeService
 from app.services.machine_types import MACHINE_TYPES
@@ -71,12 +71,7 @@ def _work_node_response(cs) -> WorkNodeResponse:
 
 
 async def _get_config_value(session: AsyncSession, key: str) -> str | None:
-    result = await session.execute(
-        text("SELECT value FROM platform_config WHERE key = :k"),
-        {"k": key},
-    )
-    row = result.first()
-    return row[0] if row else None
+    return await PlatformConfigService.get(session, key)
 
 
 # -- Machine types --
@@ -295,11 +290,7 @@ async def get_work_node_settings(
     session: AsyncSession = Depends(get_session),
 ):
     db_keys = list(_SETTINGS_KEYS.values())
-    result = await session.execute(
-        text("SELECT key, value FROM platform_config WHERE key = ANY(:keys)"),
-        {"keys": db_keys},
-    )
-    rows = {r[0]: r[1] for r in result.fetchall()}
+    rows = await PlatformConfigService.get_many(session, db_keys)
 
     return {
         field: _SETTINGS_CASTS[field](rows.get(db_key, _SETTINGS_DEFAULTS[field]))
@@ -322,13 +313,7 @@ async def update_work_node_settings(
     }
 
     for key, value in updates.items():
-        await session.execute(
-            text(
-                "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
-                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
-            ),
-            {"k": key, "v": value},
-        )
+        await PlatformConfigService.set(session, key, value)
 
     await log_action(
         session,
