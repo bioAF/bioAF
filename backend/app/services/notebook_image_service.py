@@ -91,7 +91,13 @@ RUN echo "options(repos = c(P3M = 'https://packagemanager.posit.co/cran/__linux_
 RUN echo 'options(HTTPUserAgent = sprintf("R/%s R (%s)", getRversion(), paste(getRversion(), R.version$platform, R.version$arch, R.version$os)))' >> /opt/R/${R_VERSION}/lib/R/etc/Rprofile.site
 
 # R / CRAN: Seurat stack, single-cell helpers, plotting, dev tooling
-RUN R -e "install.packages(c('Seurat','SeuratObject','hdf5r','Matrix','harmony','future','tidyverse','data.table','patchwork','cowplot','ggplot2','pheatmap','RColorBrewer','viridis','devtools','remotes','R.utils','BiocManager'))"
+RUN R -e "install.packages(c('Seurat','SeuratObject','Matrix','harmony','future','tidyverse','data.table','patchwork','cowplot','ggplot2','pheatmap','RColorBrewer','viridis','devtools','remotes','R.utils','BiocManager'))"
+
+# hdf5r built from source links whatever HDF5 its configure finds first, which in
+# this base image is conda's (libhdf5_hl.so.310) -- not on the runtime linker path,
+# so the package fails to load. Force it against the system HDF5 from libhdf5-dev
+# (libhdf5_hl.so.*, on the standard path) via the system h5cc wrapper.
+RUN R -e "install.packages('hdf5r', configure.args='--with-hdf5=/usr/bin/h5cc')"
 
 # presto (fast Wilcoxon for Seurat FindMarkers) ships only from GitHub; pinned to a commit
 RUN R -e "remotes::install_github('immunogenomics/presto', ref='${PRESTO_REF}', upgrade='never')"

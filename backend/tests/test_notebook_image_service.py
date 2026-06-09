@@ -102,6 +102,14 @@ def test_dockerfile_pins_python_package_versions():
     assert "scvi-tools==" in DOCKERFILE_CONTENT
 
 
+def test_dockerfile_builds_hdf5r_against_system_hdf5():
+    """hdf5r must link the system HDF5 (libhdf5-dev, on the runtime linker path),
+    not the base image's conda HDF5 (libhdf5_hl.so.310, which is not). Building it
+    with --with-hdf5 pointed at the system h5cc avoids the load failure."""
+    assert "install.packages('hdf5r'" in DOCKERFILE_CONTENT
+    assert "--with-hdf5=/usr/bin/h5cc" in DOCKERFILE_CONTENT
+
+
 @pytest_asyncio.fixture
 async def seed_build_config(session):
     """Seed platform_config with build-related keys."""
