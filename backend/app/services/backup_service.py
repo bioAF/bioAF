@@ -13,7 +13,6 @@ import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -547,9 +546,9 @@ class BackupService:
         try:
             import json
 
-            # Export platform_config table
-            result = await session.execute(text("SELECT key, value FROM platform_config"))
-            config_data = {r[0]: r[1] for r in result.fetchall()}
+            # Export platform_config table as stored (no decryption) so encrypted
+            # values round-trip faithfully on restore.
+            config_data: dict = dict(await PlatformConfigService.export_all(session))
             config_data["_exported_at"] = now.isoformat()
 
             with open(output_path, "w") as f:

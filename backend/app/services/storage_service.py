@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.storage_stats import StorageStatsCache
@@ -92,17 +92,17 @@ class StorageService:
         legacy mode, or None on failure (caller falls back gracefully).
         """
         from app.platform import credential_injector
+        from app.platform.platform_config_service import PlatformConfigService
 
-        rows = await session.execute(
-            text(
-                "SELECT key, value FROM platform_config "
-                "WHERE key IN ("
-                "  'gcp_credential_source', 'gcp_service_account_key',"
-                "  'gcp_service_account_email', 'gcp_bootstrap_sa_email'"
-                ")"
-            )
+        config = await PlatformConfigService.get_many(
+            session,
+            [
+                "gcp_credential_source",
+                "gcp_service_account_key",
+                "gcp_service_account_email",
+                "gcp_bootstrap_sa_email",
+            ],
         )
-        config = {r[0]: r[1] for r in rows.fetchall()}
         try:
             return credential_injector.load_gcp_credentials(config)
         except Exception as exc:
