@@ -10,8 +10,6 @@ from app.schemas.infrastructure import (
     InfraStorageMetricsResponse,
     ComputeStackResponse,
     BucketMetrics,
-    ComponentDefinitionResponse,
-    ComponentsListResponse,
 )
 
 router = APIRouter(prefix="/api/v1/infrastructure", tags=["infrastructure"])
@@ -54,51 +52,7 @@ async def get_compute_stack(
     return ComputeStackResponse(compute_stack=compute_stack)
 
 
-@router.get("/components", response_model=ComponentsListResponse)
-async def get_components(
-    current_user: dict = require_permission("infrastructure", "view"),
-    session: AsyncSession = Depends(get_session),
-):
-    """Returns component catalog filtered by active compute stack."""
-    from app.services.component_service import COMPONENT_CATALOG
-
-    compute_stack = await PlatformConfigService.get(session, "compute_stack") or "kubernetes"
-
-    # Components with no backend implementation yet, regardless of compute stack
-    unimplemented = {"snakemake_k8s", "snakemake"}
-
-    components = []
-    for key, defn in COMPONENT_CATALOG.items():
-        comp_stack = defn.get("compute_stack")
-        if key in unimplemented:
-            status = "coming_soon"
-        elif compute_stack == "kubernetes":
-            if comp_stack == "slurm":
-                status = "coming_soon"
-            else:
-                status = "available"
-        else:
-            # slurm stack -- all adapters are stubbed so mark k8s as coming_soon
-            if comp_stack == "kubernetes":
-                status = "coming_soon"
-            else:
-                status = "coming_soon"
-
-        components.append(
-            ComponentDefinitionResponse(
-                key=key,
-                name=defn["name"],
-                category=defn["category"],
-                description=defn["description"],
-                cost_estimate=defn.get("estimated_monthly_cost", ""),
-                dependencies=defn.get("dependencies", []),
-                configurable_fields=defn.get("config_schema", []),
-                status=status,
-            )
-        )
-
-    return ComponentsListResponse(compute_stack=compute_stack, components=components)
-
-
 # NOTE: The /storage/buckets endpoint was moved to app/api/storage_deploy.py
 # in Phase 18 to support live GCS bucket metrics.
+# NOTE: The component-catalog endpoint (GET /components) was removed; the live
+# component list is served by /api/v1/infrastructure/stack/components.
