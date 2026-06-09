@@ -95,16 +95,12 @@ class PipelineRunService:
                     raise SamplesMissingFilesError(
                         "Some selected samples have no linked input files",
                         details={
-                            "samples_without_files": [
-                                {"id": s.id, "external_id": s.external_id} for s in missing
-                            ]
+                            "samples_without_files": [{"id": s.id, "external_id": s.external_id} for s in missing]
                         },
                     )
                 samples = [s for s in samples if s.files]
                 if not samples:
-                    raise ValidationError(
-                        "All selected samples lack input files; nothing to run"
-                    )
+                    raise ValidationError("All selected samples lack input files; nothing to run")
 
         # 4. Check quota
         allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=2.0)
@@ -604,33 +600,40 @@ class PipelineRunService:
         experiment, sample, and filename. Prefers the pipeline_run_input_files
         junction (ADR-038); falls back to the legacy input_files_json id list.
         """
-        file_ids = [row[0] for row in (
-            await session.execute(
-                text("SELECT file_id FROM pipeline_run_input_files WHERE pipeline_run_id = :rid"),
-                {"rid": run.id},
-            )
-        ).fetchall()]
+        file_ids = [
+            row[0]
+            for row in (
+                await session.execute(
+                    text("SELECT file_id FROM pipeline_run_input_files WHERE pipeline_run_id = :rid"),
+                    {"rid": run.id},
+                )
+            ).fetchall()
+        ]
         if not file_ids:
             file_ids = list(run.input_files_json or [])
         if not file_ids:
             return []
 
         rows = (
-            await session.execute(
-                text(
-                    "SELECT f.id AS file_id, f.filename, "
-                    "       e.id AS experiment_id, e.name AS experiment_name, "
-                    "       p.id AS project_id, p.name AS project_name, "
-                    "       s.id AS sample_id, s.external_id AS sample_external_id "
-                    "FROM files f "
-                    "LEFT JOIN experiments e ON e.id = f.experiment_id "
-                    "LEFT JOIN projects p ON p.id = COALESCE(f.project_id, e.project_id) "
-                    "LEFT JOIN sample_files sf ON sf.file_id = f.id "
-                    "LEFT JOIN samples s ON s.id = sf.sample_id "
-                    "WHERE f.id = ANY(:ids)"
-                ).bindparams(ids=file_ids)
+            (
+                await session.execute(
+                    text(
+                        "SELECT f.id AS file_id, f.filename, "
+                        "       e.id AS experiment_id, e.name AS experiment_name, "
+                        "       p.id AS project_id, p.name AS project_name, "
+                        "       s.id AS sample_id, s.external_id AS sample_external_id "
+                        "FROM files f "
+                        "LEFT JOIN experiments e ON e.id = f.experiment_id "
+                        "LEFT JOIN projects p ON p.id = COALESCE(f.project_id, e.project_id) "
+                        "LEFT JOIN sample_files sf ON sf.file_id = f.id "
+                        "LEFT JOIN samples s ON s.id = sf.sample_id "
+                        "WHERE f.id = ANY(:ids)"
+                    ).bindparams(ids=file_ids)
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
 
         # One record per file; a file may link to several samples.
         by_file: dict[int, dict] = {}
@@ -640,9 +643,7 @@ class PipelineRunService:
                 rec = {
                     "file_id": r["file_id"],
                     "filename": r["filename"],
-                    "project": {"id": r["project_id"], "name": r["project_name"]}
-                    if r["project_id"]
-                    else None,
+                    "project": {"id": r["project_id"], "name": r["project_name"]} if r["project_id"] else None,
                     "experiment": {"id": r["experiment_id"], "name": r["experiment_name"]}
                     if r["experiment_id"]
                     else None,

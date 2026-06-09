@@ -200,9 +200,7 @@ async def activate_provider(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    row = await llm_provider_config_service.set_active(
-        session, org_id=org_id, provider=provider, actor_user_id=user_id
-    )
+    row = await llm_provider_config_service.set_active(session, org_id=org_id, provider=provider, actor_user_id=user_id)
     await session.commit()
 
     return ProviderConfigSummary(

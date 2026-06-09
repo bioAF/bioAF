@@ -39,9 +39,7 @@ async def base(session):
     )
     session.add(user)
     await session.flush()
-    exp = Experiment(
-        name="MF Experiment", organization_id=org.id, status="fastq_uploaded", owner_user_id=user.id
-    )
+    exp = Experiment(name="MF Experiment", organization_id=org.id, status="fastq_uploaded", owner_user_id=user.id)
     session.add(exp)
     await session.flush()
     # nf-core pipeline => consumes per-sample FASTQ input
