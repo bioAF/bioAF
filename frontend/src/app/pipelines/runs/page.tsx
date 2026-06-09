@@ -9,15 +9,8 @@ import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { ReviewBadge } from "@/components/experiments/ReviewBadge";
-import type { PipelineRun, PipelineRunListResponse, PipelineRunStatus } from "@/lib/types";
-
-const STATUS_COLORS: Record<PipelineRunStatus, string> = {
-  pending: "bg-gray-100 text-gray-700",
-  running: "bg-blue-100 text-blue-700",
-  completed: "bg-green-100 text-green-700",
-  failed: "bg-red-100 text-red-700",
-  cancelled: "bg-orange-100 text-orange-700",
-};
+import { statusBadgeClass } from "@/lib/statusStyles";
+import type { PipelineRun, PipelineRunListResponse } from "@/lib/types";
 
 export default function PipelineRunsPage() {
   const router = useRouter();
@@ -129,7 +122,7 @@ export default function PipelineRunsPage() {
                     <td className="px-4 py-3 text-sm">{r.pipeline_name}</td>
                     <td className="px-4 py-3 text-sm">{r.experiment?.name || "—"}</td>
                     <td className="px-4 py-3">
-                      <span className={`px-2 py-0.5 text-xs rounded-full ${STATUS_COLORS[r.status]}`}>{r.status}</span>
+                      <span className={`px-2 py-0.5 text-xs rounded-full ${statusBadgeClass("pipelineRun", r.status)}`}>{r.status}</span>
                       {r.status === "failed" && r.failure_reason === "oom" && (
                         <span className="ml-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-orange-100 text-orange-700">OOM</span>
                       )}

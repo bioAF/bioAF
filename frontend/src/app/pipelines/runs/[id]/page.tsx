@@ -16,22 +16,12 @@ import { isAuthenticated } from "@/lib/auth";
 import { getToken } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
+import { statusBadgeClass } from "@/lib/statusStyles";
 import type {
   CustomPipelineRunOverview,
   PipelineRunDetail,
-  PipelineRunStatus,
-  PipelineProcessStatus,
   ReferenceDataset,
 } from "@/lib/types";
-
-const STATUS_COLORS: Record<PipelineRunStatus | PipelineProcessStatus, string> = {
-  pending: "bg-gray-100 text-gray-700",
-  running: "bg-blue-100 text-blue-700",
-  completed: "bg-green-100 text-green-700",
-  failed: "bg-red-100 text-red-700",
-  cancelled: "bg-orange-100 text-orange-700",
-  cached: "bg-purple-100 text-purple-700",
-};
 
 type Tab = "logs" | "report" | "parameters" | "provenance" | "results" | "review" | "agent_review";
 
@@ -392,7 +382,7 @@ export default function PipelineRunDetailPage() {
           <div className="flex items-center gap-4 mb-6">
             <button onClick={() => router.push("/pipelines/runs")} className="text-gray-500 hover:text-gray-700">← Back</button>
             <h1 className="text-2xl font-bold">Run #{run.id} — {run.pipeline_name}</h1>
-            <span className={`px-2 py-0.5 text-xs rounded-full ${STATUS_COLORS[run.status]}`}>{run.status}</span>
+            <span className={`px-2 py-0.5 text-xs rounded-full ${statusBadgeClass("pipelineRun", run.status)}`}>{run.status}</span>
             {isActive && (
               <button onClick={handleCancel} className="ml-auto bg-red-600 text-white px-4 py-1.5 rounded text-sm hover:bg-red-700">Cancel</button>
             )}

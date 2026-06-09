@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
+import { STATUS_STYLES, statusBadgeClass, statusLabel } from "@/lib/statusStyles";
 
 interface UserSummary {
   id: number;
@@ -63,21 +64,11 @@ interface SdrListResponse {
 
 const API_BASE = "/api/lab-knowledge";
 
-export const STATUS_LABELS: Record<string, string> = {
-  draft: "Draft",
-  active: "Active",
-  flagged_for_review: "Flagged for Review",
-  superseded: "Superseded",
-  repealed: "Repealed",
-};
-
-const STATUS_BADGE: Record<string, string> = {
-  draft: "bg-gray-100 text-gray-700",
-  active: "bg-green-100 text-green-800",
-  flagged_for_review: "bg-amber-100 text-amber-800",
-  superseded: "bg-gray-100 text-gray-400 line-through",
-  repealed: "bg-gray-100 text-gray-400 line-through",
-};
+// SDR status labels, sourced from the shared status registry so the dropdown
+// and transition views stay in sync with the badge styling.
+export const STATUS_LABELS: Record<string, string> = Object.fromEntries(
+  Object.entries(STATUS_STYLES.sdr).map(([value, style]) => [value, style.label ?? value]),
+);
 
 export function sdrCode(n: number): string {
   return `SDR-${String(n).padStart(3, "0")}`;
@@ -85,8 +76,8 @@ export function sdrCode(n: number): string {
 
 function StatusBadge({ status }: { status: string }) {
   return (
-    <span className={`text-xs px-2 py-0.5 rounded ${STATUS_BADGE[status] ?? "bg-gray-100"}`}>
-      {STATUS_LABELS[status] ?? status}
+    <span className={`text-xs px-2 py-0.5 rounded ${statusBadgeClass("sdr", status)}`}>
+      {statusLabel("sdr", status)}
     </span>
   );
 }

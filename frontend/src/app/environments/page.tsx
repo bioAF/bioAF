@@ -8,6 +8,7 @@ import { ContentLoading } from "@/components/shared/ContentLoading";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { statusDotClass, statusLabel } from "@/lib/statusStyles";
 import type {
   EnvironmentResponse,
   EnvironmentListResponse,
@@ -257,20 +258,6 @@ export default function EnvironmentsPage() {
     }
   }
 
-  const statusColor: Record<string, string> = {
-    draft: "bg-gray-400",
-    building: "bg-yellow-500",
-    ready: "bg-green-500",
-    failed: "bg-red-500",
-  };
-
-  const statusLabel: Record<string, string> = {
-    draft: "Draft",
-    building: "Building",
-    ready: "Ready",
-    failed: "Failed",
-  };
-
   return (
     <div className="flex h-screen">
       <Sidebar />
@@ -334,9 +321,9 @@ export default function EnvironmentsPage() {
                     </span>
                     {env.latest_version && (
                       <div className="flex items-center gap-1">
-                        <span className={`w-2 h-2 rounded-full ${statusColor[env.latest_version.status] || "bg-gray-400"}`}></span>
+                        <span className={`w-2 h-2 rounded-full ${statusDotClass("environmentVersion", env.latest_version.status)}`}></span>
                         <span className="text-xs text-gray-500">
-                          v{env.latest_version.version_number} {statusLabel[env.latest_version.status] || env.latest_version.status}
+                          v{env.latest_version.version_number} {statusLabel("environmentVersion", env.latest_version.status)}
                         </span>
                       </div>
                     )}
@@ -367,9 +354,9 @@ export default function EnvironmentsPage() {
                         {selectedEnv.name} v{selectedVersion.version_number}
                       </h2>
                       <div className="flex items-center gap-2 mt-1">
-                        <span className={`w-2 h-2 rounded-full ${statusColor[selectedVersion.status]}`}></span>
+                        <span className={`w-2 h-2 rounded-full ${statusDotClass("environmentVersion", selectedVersion.status)}`}></span>
                         <span className="text-sm text-gray-500">
-                          {statusLabel[selectedVersion.status]} - {selectedVersion.definition_format}
+                          {statusLabel("environmentVersion", selectedVersion.status)} - {selectedVersion.definition_format}
                         </span>
                         {selectedVersion.image_uri && (
                           <span className="text-xs text-gray-400 font-mono ml-2">{selectedVersion.image_uri}</span>
@@ -485,7 +472,7 @@ export default function EnvironmentsPage() {
                               v.status === "failed" ? "bg-red-100 text-red-700" :
                               "bg-gray-100 text-gray-700"
                             }`}>
-                              {statusLabel[v.status] || v.status}
+                              {statusLabel("environmentVersion", v.status)}
                             </span>
                             <span className="text-xs text-gray-400">{v.definition_format}</span>
                           </div>

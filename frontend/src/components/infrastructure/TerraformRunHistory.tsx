@@ -1,5 +1,7 @@
 "use client";
 
+import { statusBadgeClass } from "@/lib/statusStyles";
+
 interface TerraformRun {
   id: number;
   action: string;
@@ -18,15 +20,6 @@ interface TerraformRun {
 interface TerraformRunHistoryProps {
   runs: TerraformRun[];
 }
-
-const STATUS_COLORS: Record<string, string> = {
-  completed: "text-green-700 bg-green-50",
-  failed: "text-red-700 bg-red-50",
-  planning: "text-blue-700 bg-blue-50",
-  applying: "text-blue-700 bg-blue-50",
-  awaiting_confirmation: "text-amber-700 bg-amber-50",
-  cancelled: "text-gray-700 bg-gray-50",
-};
 
 function formatDate(iso: string): string {
   try {
@@ -91,7 +84,7 @@ export function TerraformRunHistory({ runs }: TerraformRunHistoryProps) {
             <td className="py-2 pr-4">
               <span
                 title={status.title}
-                className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[run.status] ?? "text-gray-700 bg-gray-50"}`}
+                className={`px-2 py-0.5 rounded text-xs font-medium ${statusBadgeClass("terraformRun", run.status)}`}
               >
                 {status.label}
               </span>

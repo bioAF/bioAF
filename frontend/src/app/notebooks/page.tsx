@@ -33,16 +33,7 @@ import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
 import { SessionBucketFilter, type SessionBucket } from "@/components/shared/SessionBucketFilter";
 import { formatSessionStatusLabel, formatLinkedTo } from "@/lib/sessionStatus";
 import { prefillFromNotebookSession } from "@/lib/sessionRecreate";
-
-const SESSION_STATUS_COLORS: Record<string, string> = {
-  pending: "bg-gray-100 text-gray-800",
-  starting: "bg-blue-100 text-blue-800",
-  running: "bg-green-100 text-green-800",
-  idle: "bg-yellow-100 text-yellow-800",
-  stopping: "bg-orange-100 text-orange-800",
-  stopped: "bg-gray-100 text-gray-600",
-  failed: "bg-red-100 text-red-800",
-};
+import { statusBadgeClass } from "@/lib/statusStyles";
 
 const PROFILE_ORDER: ResourceProfile[] = ["small", "medium", "large", "xlarge", "2xlarge"];
 
@@ -462,7 +453,7 @@ export default function NotebooksPage() {
                             Starting... this may take a few minutes
                           </span>
                         ) : (
-                          <span className={`text-xs px-2 py-1 rounded ${SESSION_STATUS_COLORS[s.status] || "bg-gray-100"}`}>
+                          <span className={`text-xs px-2 py-1 rounded ${statusBadgeClass("computeSession", s.status)}`}>
                             {formatSessionStatusLabel({ status: s.status, failure_reason: s.failure_reason })}
                           </span>
                         )}

@@ -8,22 +8,14 @@ import { ContentLoading } from "@/components/shared/ContentLoading";
 import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
+import { statusBadgeClass } from "@/lib/statusStyles";
 import type {
   CustomPipeline,
   CustomPipelineCreateRequest,
   PipelineCatalogListResponse,
   PipelineRun,
   PipelineRunListResponse,
-  PipelineRunStatus,
 } from "@/lib/types";
-
-const STATUS_BADGE: Record<PipelineRunStatus, string> = {
-  pending: "bg-gray-100 text-gray-700",
-  running: "bg-blue-100 text-blue-700",
-  completed: "bg-green-100 text-green-700",
-  failed: "bg-red-100 text-red-700",
-  cancelled: "bg-orange-100 text-orange-700",
-};
 
 interface PipelineRow {
   id: number;
@@ -210,10 +202,10 @@ export default function CustomPipelineListPage() {
                         <td className="px-4 py-3">
                           {row.last_run ? (
                             <span
-                              className={`inline-flex items-center px-2 py-0.5 text-xs rounded-full ${
-                                STATUS_BADGE[row.last_run.status] ||
-                                "bg-gray-100 text-gray-700"
-                              }`}
+                              className={`inline-flex items-center px-2 py-0.5 text-xs rounded-full ${statusBadgeClass(
+                                "pipelineRun",
+                                row.last_run.status,
+                              )}`}
                             >
                               {row.last_run.status}
                             </span>

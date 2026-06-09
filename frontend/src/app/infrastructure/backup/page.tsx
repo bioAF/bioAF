@@ -8,6 +8,7 @@ import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { statusBadgeClass } from "@/lib/statusStyles";
 
 interface BackupTier {
   tier: string;
@@ -57,13 +58,6 @@ interface RestoreStatus {
   expires_at?: string;
   seconds_remaining?: number;
 }
-
-const statusColors: Record<string, string> = {
-  healthy: "bg-green-100 text-green-700",
-  warning: "bg-yellow-100 text-yellow-700",
-  error: "bg-red-100 text-red-700",
-  unknown: "bg-gray-100 text-gray-600",
-};
 
 function formatBytes(bytes: number | null): string {
   if (!bytes) return "N/A";
@@ -364,7 +358,7 @@ export default function InfraBackupPage() {
             <>
               <div className="mb-4 flex items-center gap-2">
                 <span className="text-sm text-gray-600">Overall Status:</span>
-                <span className={`text-xs px-2 py-1 rounded font-medium ${statusColors[overallStatus] || statusColors.unknown}`}>
+                <span className={`text-xs px-2 py-1 rounded font-medium ${statusBadgeClass("backupTier", overallStatus)}`}>
                   {overallStatus}
                 </span>
               </div>
@@ -374,7 +368,7 @@ export default function InfraBackupPage() {
                   <div key={tier.tier} className="bg-white rounded-lg border border-gray-200 p-4">
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="font-semibold text-gray-900">{tier.name}</h3>
-                      <span className={`text-xs px-2 py-0.5 rounded ${statusColors[tier.status] || statusColors.unknown}`}>
+                      <span className={`text-xs px-2 py-0.5 rounded ${statusBadgeClass("backupTier", tier.status)}`}>
                         {tier.status}
                       </span>
                     </div>
