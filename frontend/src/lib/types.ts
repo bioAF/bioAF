@@ -758,6 +758,7 @@ export interface PipelineRunLaunchRequest {
   resume_from_run_id?: number | null;
   reference_genome?: string | null;
   alignment_algorithm?: string | null;
+  drop_samples_without_files?: boolean;
 }
 
 export interface PipelineRunCompareResponse {

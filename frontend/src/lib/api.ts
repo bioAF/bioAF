@@ -4,10 +4,15 @@ import { clearCapabilitiesCache } from "@/hooks/capabilitiesCache";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-class ApiError extends Error {
+export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    // Machine-readable error code and structured payload from the domain-error
+    // envelope ({detail, code, details}), so callers can react programmatically
+    // (e.g. offer to drop samples that blocked a pipeline launch).
+    public code?: string,
+    public details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = "ApiError";
@@ -76,7 +81,12 @@ async function fetchApi<T>(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Unknown error" }));
-    throw new ApiError(response.status, extractErrorMessage(error));
+    throw new ApiError(
+      response.status,
+      extractErrorMessage(error),
+      (error as { code?: string }).code,
+      (error as { details?: Record<string, unknown> }).details,
+    );
   }
 
   if (response.status === 204) {
@@ -119,7 +129,12 @@ async function uploadFile<T>(path: string, file: File, extraFields?: Record<stri
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Unknown error" }));
-    throw new ApiError(response.status, extractErrorMessage(error));
+    throw new ApiError(
+      response.status,
+      extractErrorMessage(error),
+      (error as { code?: string }).code,
+      (error as { details?: Record<string, unknown> }).details,
+    );
   }
 
   return response.json();
@@ -312,7 +327,12 @@ async function downloadFile(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Download failed" }));
-    throw new ApiError(response.status, extractErrorMessage(error));
+    throw new ApiError(
+      response.status,
+      extractErrorMessage(error),
+      (error as { code?: string }).code,
+      (error as { details?: Record<string, unknown> }).details,
+    );
   }
 
   const blob = await response.blob();
@@ -413,5 +433,3 @@ export async function plotThumbnailContentUrl(
     return base;
   }
 }
-
-export { ApiError };

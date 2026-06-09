@@ -12,12 +12,23 @@ jest.mock("@/lib/auth", () => ({
   getToken: () => "fake-token",
 }));
 
-jest.mock("@/lib/api", () => ({
-  api: {
-    get: jest.fn(),
-    post: jest.fn(),
-  },
-}));
+jest.mock("@/lib/api", () => {
+  class ApiError extends Error {
+    constructor(
+      public status: number,
+      message: string,
+      public code?: string,
+      public details?: Record<string, unknown>,
+    ) {
+      super(message);
+      this.name = "ApiError";
+    }
+  }
+  return {
+    api: { get: jest.fn(), post: jest.fn() },
+    ApiError,
+  };
+});
 
 jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => null }));
 jest.mock("@/components/layout/Header", () => ({ Header: () => null }));
@@ -41,9 +52,10 @@ jest.mock("@/hooks/usePermissions", () => ({
 }));
 
 import PipelineRunDetailPage from "./page";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 
 const mockGet = api.get as jest.Mock;
+const mockPost = api.post as jest.Mock;
 
 function mockApiResponses(runStatus: string, extraRunFields: Record<string, unknown> = {}) {
   mockGet.mockImplementation((url: string) => {
@@ -71,6 +83,8 @@ function mockApiResponses(runStatus: string, extraRunFields: Record<string, unkn
 
 beforeEach(() => {
   mockGet.mockReset();
+  mockPost.mockReset();
+  mockRouter.push.mockReset();
 });
 
 function logsCalls(): number {
@@ -399,5 +413,96 @@ describe("PipelineRunDetailPage provider details (BAL Phase 4)", () => {
     await waitFor(() => expect(mockGet).toHaveBeenCalledWith("/api/pipeline-runs/1"));
     await waitFor(() => expect(screen.queryByText(/scrnaseq/i)).toBeTruthy());
     expect(screen.queryByTestId("provider-details")).toBeNull();
+  });
+});
+
+describe("PipelineRunDetailPage provenance input files", () => {
+  test("renders project / experiment / sample / filename, not bare ids", async () => {
+    mockGet.mockImplementation((url: string) => {
+      if (url === "/api/pipeline-runs/1") {
+        return Promise.resolve({
+          id: 1,
+          status: "completed",
+          pipeline_name: "nf-core/demo",
+          processes: [],
+        });
+      }
+      if (url === "/api/pipeline-runs/1/references") return Promise.resolve([]);
+      if (url === "/api/pipeline-runs/1/provenance") {
+        return Promise.resolve({
+          run_id: 1,
+          input_files: [
+            {
+              file_id: 42,
+              filename: "SAMPLE-101_R1_001.fastq.gz",
+              project: { id: 3, name: "PBMC Project" },
+              experiment: { id: 7, name: "Demo Experiment" },
+              samples: [{ id: 9, external_id: "SAMPLE-101" }],
+            },
+          ],
+        });
+      }
+      return Promise.resolve({});
+    });
+
+    render(<PipelineRunDetailPage />);
+    await waitFor(() => expect(screen.queryByText(/nf-core\/demo/i)).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Provenance" }));
+
+    await waitFor(() => expect(screen.getByText("SAMPLE-101_R1_001.fastq.gz")).toBeTruthy());
+    expect(screen.getByText("PBMC Project")).toBeTruthy();
+    expect(screen.getByText("Demo Experiment")).toBeTruthy();
+    expect(screen.getByText("SAMPLE-101")).toBeTruthy();
+  });
+});
+
+describe("PipelineRunDetailPage reproduce with file-less samples", () => {
+  test("on samples_missing_files, confirms then retries with the drop flag", async () => {
+    mockApiResponses("completed");
+    mockPost
+      .mockRejectedValueOnce(
+        new ApiError(400, "Some selected samples have no linked input files", "samples_missing_files", {
+          samples_without_files: [{ id: 9, external_id: "SAMPLE-102" }],
+        }),
+      )
+      .mockResolvedValueOnce({ id: 55 });
+    const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<PipelineRunDetailPage />);
+    await waitFor(() => expect(screen.queryByText(/scrnaseq/i)).toBeTruthy());
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Reproduce" }));
+    });
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(2));
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(confirmSpy.mock.calls[0][0]).toContain("SAMPLE-102");
+    expect(mockPost.mock.calls[0][0]).toContain("drop_samples_without_files=false");
+    expect(mockPost.mock.calls[1][0]).toContain("drop_samples_without_files=true");
+    await waitFor(() => expect(mockRouter.push).toHaveBeenCalledWith("/pipelines/runs/55"));
+    confirmSpy.mockRestore();
+  });
+
+  test("does not retry when the user cancels the confirm", async () => {
+    mockApiResponses("completed");
+    mockPost.mockRejectedValueOnce(
+      new ApiError(400, "Some selected samples have no linked input files", "samples_missing_files", {
+        samples_without_files: [{ id: 9, external_id: "SAMPLE-102" }],
+      }),
+    );
+    const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(<PipelineRunDetailPage />);
+    await waitFor(() => expect(screen.queryByText(/scrnaseq/i)).toBeTruthy());
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Reproduce" }));
+    });
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(1));
+    expect(mockRouter.push).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 });

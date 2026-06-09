@@ -14,7 +14,7 @@ import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBad
 import { usePermissions } from "@/hooks/usePermissions";
 import { isAuthenticated } from "@/lib/auth";
 import { getToken } from "@/lib/auth";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { statusBadgeClass } from "@/lib/statusStyles";
 import type {
@@ -219,11 +219,35 @@ export default function PipelineRunDetailPage() {
     }
   }
 
-  async function handleReproduce() {
+  async function handleReproduce(dropSamplesWithoutFiles = false) {
     try {
-      const newRun = await api.post<{ id: number }>(`/api/pipeline-runs/${runId}/reproduce`);
+      const newRun = await api.post<{ id: number }>(
+        `/api/pipeline-runs/${runId}/reproduce?drop_samples_without_files=${dropSamplesWithoutFiles}`,
+      );
       router.push(`/pipelines/runs/${newRun.id}`);
     } catch (err) {
+      // Same recovery as launch: a sample that has since lost its files blocks
+      // the reproduce. Offer to drop it and rerun with the rest.
+      if (
+        err instanceof ApiError &&
+        err.code === "samples_missing_files" &&
+        !dropSamplesWithoutFiles
+      ) {
+        const offending =
+          (err.details?.samples_without_files as
+            | { id: number; external_id: string | null }[]
+            | undefined) ?? [];
+        const names = offending.map((s) => s.external_id || `sample ${s.id}`).join(", ");
+        if (
+          window.confirm(
+            `These samples have no linked input files and cannot run: ${names}.\n\n` +
+              `Drop them and reproduce with the remaining samples?`,
+          )
+        ) {
+          await handleReproduce(true);
+        }
+        return;
+      }
       alert(err instanceof Error ? err.message : "Reproduce failed");
     }
   }
@@ -387,7 +411,7 @@ export default function PipelineRunDetailPage() {
               <button onClick={handleCancel} className="ml-auto bg-red-600 text-white px-4 py-1.5 rounded text-sm hover:bg-red-700">Cancel</button>
             )}
             {!isActive && (
-              <button onClick={handleReproduce} className="ml-auto bg-bioaf-600 text-white px-4 py-1.5 rounded text-sm hover:bg-bioaf-700">Reproduce</button>
+              <button onClick={() => handleReproduce()} className="ml-auto bg-bioaf-600 text-white px-4 py-1.5 rounded text-sm hover:bg-bioaf-700">Reproduce</button>
             )}
           </div>
 
@@ -451,7 +475,7 @@ export default function PipelineRunDetailPage() {
                   <p className="text-sm text-blue-700 mt-1">This is unusual and typically resolves on its own.</p>
                   <div className="flex gap-2 mt-2">
                     <button
-                      onClick={handleReproduce}
+                      onClick={() => handleReproduce()}
                       className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
                     >
                       Re-run pipeline
@@ -606,6 +630,58 @@ export default function PipelineRunDetailPage() {
                   <h2 className="text-lg font-semibold">Provenance</h2>
                   <ProvenanceExportMenu entityType="pipeline-runs" entityId={Number(runId)} />
                 </div>
+
+                {/* Input files as readable records (project / experiment / sample
+                    / filename) instead of bare file IDs. */}
+                {(() => {
+                  const inputFiles =
+                    (provenance?.input_files as
+                      | {
+                          file_id: number;
+                          filename: string;
+                          project?: { id: number; name: string } | null;
+                          experiment?: { id: number; name: string } | null;
+                          samples?: { id: number; external_id: string | null }[];
+                        }[]
+                      | undefined) ?? [];
+                  if (inputFiles.length === 0) return null;
+                  return (
+                    <div className="mb-6">
+                      <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                        Input Files ({inputFiles.length})
+                      </h3>
+                      <div className="overflow-x-auto border rounded">
+                        <table className="min-w-full text-sm">
+                          <thead className="bg-gray-50 text-gray-600">
+                            <tr>
+                              <th className="text-left px-3 py-2 font-medium">Project</th>
+                              <th className="text-left px-3 py-2 font-medium">Experiment</th>
+                              <th className="text-left px-3 py-2 font-medium">Sample</th>
+                              <th className="text-left px-3 py-2 font-medium">File</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {inputFiles.map((f) => (
+                              <tr key={f.file_id}>
+                                <td className="px-3 py-2">{f.project?.name ?? "-"}</td>
+                                <td className="px-3 py-2">{f.experiment?.name ?? "-"}</td>
+                                <td className="px-3 py-2">
+                                  {f.samples && f.samples.length > 0
+                                    ? f.samples
+                                        .map((s) => s.external_id || `sample ${s.id}`)
+                                        .join(", ")
+                                    : "-"}
+                                </td>
+                                <td className="px-3 py-2 font-mono text-xs">{f.filename}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {provenance ? (
                   <pre className="text-sm bg-gray-50 p-4 rounded overflow-auto max-h-96">
                     {JSON.stringify(

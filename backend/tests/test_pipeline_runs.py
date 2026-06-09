@@ -361,6 +361,15 @@ async def test_provenance_export(client, admin_token, pipeline_run):
     assert "samples" in data
     assert "experiment" in data
 
+    # Input files must be human-readable records, not bare ids (issue #3).
+    input_files = data["input_files"]
+    assert input_files, "run should have resolved input files"
+    first = input_files[0]
+    assert isinstance(first, dict), "input files must be enriched objects, not ids"
+    assert first["filename"].endswith(".fastq.gz")
+    assert first["experiment"]["name"] == "Test Experiment"
+    assert first["samples"] and first["samples"][0]["external_id"].startswith("SAMPLE_")
+
 
 @pytest.mark.asyncio
 async def test_compare_runs(client, admin_token, experiment, samples, initialized_catalog):
