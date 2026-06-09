@@ -30,9 +30,19 @@ IMAGE_TAG = "latest"
 # Dockerfile is embedded so it can be built from the running backend
 # container without needing the source repo on disk.
 DOCKERFILE_CONTENT = """\
-FROM jupyter/scipy-notebook:latest
+# Pinned for reproducibility (postmortem of build 28b547ac: floating :latest left
+# R 4.1.2 too old for current packages). Bump these ARGs deliberately; never float
+# to :latest. After changing a pin, validate with a Cloud Build, then lock results.
+FROM jupyter/scipy-notebook@sha256:fca4bcc9cbd49d9a15e0e4df6c666adf17776c950da9fa94a4f0a045d5c4ad33
 
 USER root
+
+# ---- Version pins (single source of truth) ----
+ARG R_VERSION=4.4.3
+ARG BIOC_VERSION=3.20
+ARG CRAN_SNAPSHOT=2024-12-02
+ARG PRESTO_REF=a24772a135c7895a8183b007376050556c60a05b
+ARG RSTUDIO_DEB=rstudio-server-2024.04.2-764-amd64.deb
 
 # System libraries. Several of these are the reason R/Python packages fail to
 # build or load if absent: libglpk (igraph), libopenblas (igraph.so links
@@ -46,35 +56,48 @@ RUN apt-get update && apt-get install -y --no-install-recommends \\
     libcairo2-dev libxt-dev libfontconfig1-dev \\
     libharfbuzz-dev libfribidi-dev \\
     libpng-dev libtiff5-dev libjpeg-dev \\
-    r-base r-base-dev \\
+    build-essential gfortran \\
+    gdebi-core wget \\
     git openssh-client \\
     && rm -rf /var/lib/apt/lists/*
 
+# Pinned R from Posit r-builds (exact, reproducible) instead of Ubuntu's stale
+# r-base: jammy ships R 4.1.2 (2021), too old for current CRAN/Bioconductor
+# packages (yulab.utils/ggfun/Matrix are 'not available' for it). r-builds keeps
+# every version on its CDN, so R_VERSION is durably pinnable.
+RUN wget -q https://cdn.posit.co/r/ubuntu-2204/pkgs/r-${R_VERSION}_1_amd64.deb \\
+    && apt-get update \\
+    && gdebi -n r-${R_VERSION}_1_amd64.deb \\
+    && rm r-${R_VERSION}_1_amd64.deb \\
+    && rm -rf /var/lib/apt/lists/* \\
+    && ln -sf /opt/R/${R_VERSION}/bin/R /usr/local/bin/R \\
+    && ln -sf /opt/R/${R_VERSION}/bin/Rscript /usr/local/bin/Rscript
+
 # Python: single-cell, bulk RNA-seq, and general bioinformatics
 RUN pip install --no-cache-dir \\
-    scanpy anndata muon scvi-tools \\
-    leidenalg python-igraph harmonypy scanorama bbknn \\
-    scrublet doubletdetection celltypist decoupler gseapy \\
-    scikit-misc statsmodels scvelo \\
-    pandas numpy scipy matplotlib seaborn plotly \\
-    umap-learn pybiomart biopython pysam anndata2ri \\
-    google-cloud-storage gsutil
+    scanpy==1.11.5 anndata==0.12.16 muon==0.1.7 scvi-tools==1.4.2 \\
+    leidenalg==0.12.0 python-igraph==1.0.0 harmonypy==2.0.0 scanorama==1.7.4 bbknn==1.6.0 \\
+    scrublet==0.2.3 doubletdetection==4.3.0.post1 celltypist==1.7.1 decoupler==2.1.6 gseapy==1.2.1 \\
+    scikit-misc==0.5.2 statsmodels==0.14.6 scvelo==0.3.4 \\
+    pandas==2.3.3 numpy==1.26.4 scipy==1.17.1 seaborn==0.13.2 plotly==6.8.0 \\
+    umap-learn==0.5.12 pybiomart==0.2.0 biopython==1.87 pysam==0.24.0 anndata2ri==2.0 \\
+    google-cloud-storage==3.11.0 gsutil==5.37
 
-# Install R packages as precompiled binaries from the Posit Public Package
-# Manager (P3M) rather than compiling from source. This turns a ~1h fragile
-# build into a fast one; CRAN is kept as a source fallback. Combined with the
-# verification step below, it makes silent package failures impossible.
-RUN echo 'options(repos = c(P3M = "https://packagemanager.posit.co/cran/__linux__/jammy/latest", CRAN = "https://cloud.r-project.org"))' >> /usr/lib/R/etc/Rprofile.site
-RUN echo 'options(HTTPUserAgent = sprintf("R/%s R (%s)", getRversion(), paste(getRversion(), R.version$platform, R.version$arch, R.version$os)))' >> /usr/lib/R/etc/Rprofile.site
+# Install R packages as precompiled binaries from a DATED Posit P3M snapshot, so
+# every CRAN version is frozen to that date (reproducible) and builds are fast
+# (no source compilation, which is also what avoided the igraph/openblas link).
+# Combined with the verification step below, silent package failures are caught.
+RUN echo "options(repos = c(P3M = 'https://packagemanager.posit.co/cran/__linux__/jammy/${CRAN_SNAPSHOT}'))" >> /opt/R/${R_VERSION}/lib/R/etc/Rprofile.site
+RUN echo 'options(HTTPUserAgent = sprintf("R/%s R (%s)", getRversion(), paste(getRversion(), R.version$platform, R.version$arch, R.version$os)))' >> /opt/R/${R_VERSION}/lib/R/etc/Rprofile.site
 
 # R / CRAN: Seurat stack, single-cell helpers, plotting, dev tooling
 RUN R -e "install.packages(c('Seurat','SeuratObject','hdf5r','Matrix','harmony','future','tidyverse','data.table','patchwork','cowplot','ggplot2','pheatmap','RColorBrewer','viridis','devtools','remotes','R.utils','BiocManager'))"
 
-# presto (fast Wilcoxon for Seurat FindMarkers) ships only from GitHub
-RUN R -e "remotes::install_github('immunogenomics/presto', upgrade='never')"
+# presto (fast Wilcoxon for Seurat FindMarkers) ships only from GitHub; pinned to a commit
+RUN R -e "remotes::install_github('immunogenomics/presto', ref='${PRESTO_REF}', upgrade='never')"
 
-# R / Bioconductor: single-cell, bulk DE, enrichment, annotation
-RUN R -e "BiocManager::install(c('SingleCellExperiment','scater','scran','scuttle','glmGamPoi','batchelor','DropletUtils','SingleR','celldex','zellkonverter','DESeq2','edgeR','limma','clusterProfiler','fgsea','ComplexHeatmap','EnhancedVolcano','org.Hs.eg.db','org.Mm.eg.db','AnnotationDbi'), update=FALSE, ask=FALSE)"
+# R / Bioconductor: pinned release, single-cell, bulk DE, enrichment, annotation
+RUN R -e "BiocManager::install(version='${BIOC_VERSION}', update=FALSE, ask=FALSE); BiocManager::install(c('SingleCellExperiment','scater','scran','scuttle','glmGamPoi','batchelor','DropletUtils','SingleR','celldex','zellkonverter','DESeq2','edgeR','limma','clusterProfiler','fgsea','ComplexHeatmap','EnhancedVolcano','org.Hs.eg.db','org.Mm.eg.db','AnnotationDbi'), update=FALSE, ask=FALSE)"
 
 # Fail the build if any expected package is missing. install.packages() and
 # BiocManager::install() exit 0 even when a package fails to install, which is
@@ -84,10 +107,10 @@ RUN R -e "req <- c('Seurat','SeuratObject','hdf5r','harmony','presto','SingleCel
 # Verify the key Python imports resolve too
 RUN python -c "import scanpy, anndata, scvi, muon, harmonypy, scanorama, scrublet, celltypist, decoupler, gseapy, scvelo; print('Python deps ok')"
 
-# RStudio Server (jammy build, matching the base image)
+# RStudio Server (pinned jammy build)
 RUN apt-get update && apt-get install -y --no-install-recommends gdebi-core wget \\
-    && wget -q https://download2.rstudio.org/server/jammy/amd64/rstudio-server-2024.04.2-764-amd64.deb \\
-    && gdebi -n rstudio-server-2024.04.2-764-amd64.deb \\
+    && wget -q https://download2.rstudio.org/server/jammy/amd64/${RSTUDIO_DEB} \\
+    && gdebi -n ${RSTUDIO_DEB} \\
     && rm rstudio-server-*.deb \\
     && rm -rf /var/lib/apt/lists/*
 
