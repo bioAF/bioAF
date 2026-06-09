@@ -29,18 +29,16 @@ class TestComponentsEndpoint:
         )
         assert response.status_code == 404
 
-    def test_interactive_pool_exposes_no_vestigial_config_fields(self):
-        """The interactive pool's size is set via the k8s_interactive_machine_type
-        cluster config, not per-component fields. The component must not surface
-        disconnected `interactive_pool_*` config keys that look editable but do
-        nothing.
+    def test_components_have_no_per_component_config(self):
+        """Components are enable/disable only; they carry no per-component config.
+        Per-component config_schema was vestigial (only the removed
+        /api/v1/infrastructure/components endpoint ever surfaced it). Infra config
+        (compute/storage) lives on the cluster-config endpoint, not on components.
         """
         from app.services.component_service import ComponentService
 
-        schema = ComponentService.get_catalog()["k8s_interactive_pool"]["config_schema"]
-        exposed = {field["key"] for field in schema}
-        assert "interactive_pool_machine_type" not in exposed
-        assert "interactive_pool_max_nodes" not in exposed
+        offenders = [key for key, defn in ComponentService.get_catalog().items() if "config_schema" in defn]
+        assert not offenders, f"components still carry a vestigial config_schema: {offenders}"
 
 
 class TestStorageBucketsEndpoint:
