@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 from app.adapters.secrets import create_secrets_provider
 from app.adapters.secrets.base import SecretsProvider
 from app.adapters.secrets.gcp import GcpSecretsProvider
+from app.exceptions import ValidationError
 
 
 def test_factory_returns_gcp_provider_by_default():
@@ -23,7 +24,7 @@ def test_factory_returns_gcp_provider_by_default():
 def test_unknown_secrets_backend_raises():
     import pytest
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError):
         create_secrets_provider("my-proj", backend="vault")
 
 

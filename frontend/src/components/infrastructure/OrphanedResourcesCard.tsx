@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
+import { statusBadgeClass } from "@/lib/statusStyles";
 
 interface OrphanedResource {
   id: number;
@@ -20,14 +21,6 @@ interface OrphanedResourceListResponse {
   items: OrphanedResource[];
   total: number;
 }
-
-const STATUS_BADGE: Record<string, string> = {
-  detected: "text-amber-700 bg-amber-50",
-  cleaning: "text-blue-700 bg-blue-50",
-  cleaned: "text-green-700 bg-green-50",
-  dismissed: "text-gray-700 bg-gray-50",
-  failed: "text-red-700 bg-red-50",
-};
 
 const RESOURCE_LABELS: Record<string, string> = {
   gke_cluster: "GKE Cluster",
@@ -106,7 +99,7 @@ export function OrphanedResourcesCard() {
                   {RESOURCE_LABELS[r.resource_type] ?? r.resource_type}
                 </span>
                 <span
-                  className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${STATUS_BADGE[r.status] ?? "text-gray-700 bg-gray-50"}`}
+                  className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${statusBadgeClass("orphanedResource", r.status)}`}
                 >
                   {r.status}
                 </span>

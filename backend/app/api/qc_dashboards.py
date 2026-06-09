@@ -253,14 +253,11 @@ async def generate_dashboard(
     if not await ComponentService.is_enabled(session, "qc_dashboard"):
         raise HTTPException(400, "QC Dashboard component is not enabled")
 
-    try:
-        d = await QCDashboardService.generate_qc_dashboard(session, org_id, pipeline_run_id)
-        await session.commit()
-        cfg = await _resolve_dashboard_config(session, d)
-        ctx = await _dashboard_context(session, org_id, d)
-        return _dashboard_response(d, cfg, ctx)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    d = await QCDashboardService.generate_qc_dashboard(session, org_id, pipeline_run_id)
+    await session.commit()
+    cfg = await _resolve_dashboard_config(session, d)
+    ctx = await _dashboard_context(session, org_id, d)
+    return _dashboard_response(d, cfg, ctx)
 
 
 @router.post("/regenerate/{pipeline_run_id}", response_model=QCDashboardResponse)
@@ -289,11 +286,8 @@ async def regenerate_dashboard(
         await session.delete(existing)
         await session.flush()
 
-    try:
-        d = await QCDashboardService.generate_qc_dashboard(session, org_id, pipeline_run_id, skip_cache=True)
-        await session.commit()
-        cfg = await _resolve_dashboard_config(session, d)
-        ctx = await _dashboard_context(session, org_id, d)
-        return _dashboard_response(d, cfg, ctx)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    d = await QCDashboardService.generate_qc_dashboard(session, org_id, pipeline_run_id, skip_cache=True)
+    await session.commit()
+    cfg = await _resolve_dashboard_config(session, d)
+    ctx = await _dashboard_context(session, org_id, d)
+    return _dashboard_response(d, cfg, ctx)

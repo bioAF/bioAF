@@ -8,6 +8,11 @@ import { ContentLoading } from "@/components/shared/ContentLoading";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
+import {
+  statusBadgeClass as badgeClass,
+  statusDotClass as dotClass,
+  statusLabel as labelFor,
+} from "@/lib/statusStyles";
 import type {
   EnvironmentResponse,
   EnvironmentListResponse,
@@ -35,27 +40,6 @@ dependencies:
 const POLL_INTERVAL_MS = 5000;
 
 type Tab = "versions" | "new-version";
-
-const statusBadgeClass: Record<string, string> = {
-  draft: "bg-gray-100 text-gray-700",
-  building: "bg-yellow-100 text-yellow-700",
-  ready: "bg-green-100 text-green-700",
-  failed: "bg-red-100 text-red-700",
-};
-
-const statusDotClass: Record<string, string> = {
-  draft: "bg-gray-400",
-  building: "bg-yellow-500",
-  ready: "bg-green-500",
-  failed: "bg-red-500",
-};
-
-const statusLabel: Record<string, string> = {
-  draft: "Draft",
-  building: "Building",
-  ready: "Ready",
-  failed: "Failed",
-};
 
 export default function PipelineEnvironmentsPage() {
   const router = useRouter();
@@ -364,17 +348,18 @@ export default function PipelineEnvironmentsPage() {
                           <td className="px-4 py-3">
                             {env.latest_version ? (
                               <span
-                                className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-xs rounded-full ${
-                                  statusBadgeClass[env.latest_version.status] ||
-                                  "bg-gray-100 text-gray-700"
-                                }`}
+                                className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-xs rounded-full ${badgeClass(
+                                  "environmentVersion",
+                                  env.latest_version.status,
+                                )}`}
                               >
                                 <span
-                                  className={`w-1.5 h-1.5 rounded-full ${
-                                    statusDotClass[env.latest_version.status] || "bg-gray-400"
-                                  }`}
+                                  className={`w-1.5 h-1.5 rounded-full ${dotClass(
+                                    "environmentVersion",
+                                    env.latest_version.status,
+                                  )}`}
                                 />
-                                {statusLabel[env.latest_version.status] || env.latest_version.status}
+                                {labelFor("environmentVersion", env.latest_version.status)}
                               </span>
                             ) : (
                               <span className="text-xs text-gray-400">No versions</span>
@@ -418,12 +403,13 @@ export default function PipelineEnvironmentsPage() {
                           </h2>
                           <div className="flex items-center gap-2 mt-1">
                             <span
-                              className={`w-2 h-2 rounded-full ${
-                                statusDotClass[selectedVersion.status] || "bg-gray-400"
-                              }`}
+                              className={`w-2 h-2 rounded-full ${dotClass(
+                                "environmentVersion",
+                                selectedVersion.status,
+                              )}`}
                             />
                             <span className="text-sm text-gray-500">
-                              {statusLabel[selectedVersion.status] || selectedVersion.status} -{" "}
+                              {labelFor("environmentVersion", selectedVersion.status)} -{" "}
                               {selectedVersion.definition_format}
                             </span>
                             {selectedVersion.image_uri && (
@@ -551,11 +537,12 @@ export default function PipelineEnvironmentsPage() {
                                   build #{v.build_number}
                                 </span>
                                 <span
-                                  className={`px-2 py-0.5 text-xs rounded-full ${
-                                    statusBadgeClass[v.status] || "bg-gray-100 text-gray-700"
-                                  }`}
+                                  className={`px-2 py-0.5 text-xs rounded-full ${badgeClass(
+                                    "environmentVersion",
+                                    v.status,
+                                  )}`}
                                 >
-                                  {statusLabel[v.status] || v.status}
+                                  {labelFor("environmentVersion", v.status)}
                                 </span>
                               </div>
                               <div className="flex items-center gap-3">

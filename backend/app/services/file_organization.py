@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import NotFoundError
 from app.services.audit_service import log_action
 from app.services.gcs_storage import GcsStorageService
 
@@ -49,7 +50,7 @@ class FileOrganizationService:
         ).fetchone()
 
         if not row:
-            raise ValueError(f"File {file_id} not found")
+            raise NotFoundError(f"File {file_id} not found")
 
         old_uri, current_exp_id, filename = row[0], row[1], row[2]
 
@@ -126,7 +127,7 @@ class FileOrganizationService:
         ).fetchone()
 
         if not row:
-            raise ValueError(f"File {file_id} not found")
+            raise NotFoundError(f"File {file_id} not found")
 
         old_uri, old_exp_id, filename = row[0], row[1], row[2]
 
@@ -198,7 +199,7 @@ class FileOrganizationService:
         ).fetchone()
 
         if not row:
-            raise ValueError(f"File {file_id} not found")
+            raise NotFoundError(f"File {file_id} not found")
 
         old_uri, old_exp_id, filename = row[0], row[1], row[2]
 

@@ -10,6 +10,8 @@ Tests:
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from app.exceptions import ValidationError
 from sqlalchemy import text
 
 
@@ -85,7 +87,7 @@ async def test_get_bucket_metrics_requires_deployed(session):
 
     from app.services.gcs_storage import GcsStorageService
 
-    with pytest.raises(ValueError, match="not been deployed"):
+    with pytest.raises(ValidationError, match="not been deployed"):
         await GcsStorageService.get_bucket_metrics(session)
 
 

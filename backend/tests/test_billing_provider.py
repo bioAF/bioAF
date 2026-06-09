@@ -14,6 +14,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.exceptions import ValidationError
+
 from app.adapters.billing import (
     DEFAULT_BILLING_BACKEND,
     VALID_BILLING_BACKENDS,
@@ -30,7 +32,7 @@ def test_factory_returns_gcp_provider_by_default():
 
 
 def test_factory_rejects_unknown_backend():
-    with pytest.raises(ValueError, match="Unknown billing backend"):
+    with pytest.raises(ValidationError, match="Unknown billing backend"):
         create_billing_provider(backend="aws")
 
 

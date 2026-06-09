@@ -1,15 +1,15 @@
 # SSH Access to Running Containers
 
-bioAF provides SSH and exec access to running compute containers, allowing bioinformaticians to inspect state, debug failing pipelines, test commands interactively, and develop new pipeline steps. All SSH sessions are authenticated, authorized, and audit-logged.
+bioAF provides SSH and exec access to running Work Nodes, allowing bioinformaticians to inspect state, debug failing pipelines, test commands interactively, and develop new pipeline steps. All SSH sessions are authenticated, authorized, and audit-logged.
 
 ## Prerequisites
 
 Before using SSH access, ensure the following:
 
-- **Role requirement:** You must have the `admin` or `comp_bio` role. Bench scientists and viewers cannot access compute containers directly.
+- **Role requirement:** You must have the `admin` or `comp_bio` role. Bench scientists and viewers cannot access Work Nodes directly.
 - **SSH key registered:** Your SSH public key must be uploaded to your bioAF profile. Navigate to **Profile > SSH Keys** and add your public key (typically `~/.ssh/id_ed25519.pub` or `~/.ssh/id_rsa.pub`).
 - **Compute backend running:** The Kubernetes or SLURM compute backend must be provisioned and healthy. Check **Compute > Status** for a green health indicator.
-- **Target container running:** You can only connect to containers that are currently executing a pipeline run or interactive session. Completed or failed containers are no longer accessible.
+- **Target container running:** You can only connect to containers that are currently executing a pipeline run, Work Node, or Notebook. Completed or failed containers are no longer accessible.
 
 ## First-Time Setup
 
@@ -109,7 +109,7 @@ You cannot:
 
 ## Audit Trail
 
-Every SSH session is recorded in the bioAF audit log. The following events are captured:
+Every SSH session is recorded in the bioAF Audit Log. The following events are captured:
 
 - **Session start:** Timestamp, user, source IP, target container/pod, pipeline run ID.
 - **Session end:** Timestamp, duration.
@@ -123,7 +123,7 @@ Command logging is optional and disabled by default for privacy reasons. To enab
 2. Toggle "Log SSH Commands" to enabled.
 3. Set the retention period for command logs (default: 90 days).
 
-When enabled, all commands typed during SSH sessions are recorded and visible in the audit log at **Settings > Audit Log**. Users are informed at login with a banner message that command logging is active.
+When enabled, all commands typed during SSH sessions are recorded and visible in the Audit Log at **Settings > Audit Log**. Users are informed at login with a banner message that command logging is active.
 
 ### Viewing Session History
 
@@ -133,7 +133,7 @@ To review SSH sessions for a specific pipeline run:
 2. Click the "Sessions" tab.
 3. Each session shows the connecting user, start/end times, and (if command logging is enabled) a transcript of commands.
 
-Alternatively, query the audit log directly at **Settings > Audit Log** with the filter `event_type = ssh.session_start`.
+Alternatively, query the Audit Log directly at **Settings > Audit Log** with the filter `event_type = ssh.session_start`.
 
 ## Security Considerations
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.adapters.messaging.base import MessagingProvider, ReceivedMessage
+from app.exceptions import ValidationError
 
 __all__ = ["MessagingProvider", "ReceivedMessage", "create_messaging_provider"]
 
@@ -19,7 +20,7 @@ DEFAULT_MESSAGING_BACKEND = "gcp"
 def create_messaging_provider(credentials: Any = None, backend: str = DEFAULT_MESSAGING_BACKEND) -> MessagingProvider:
     """Instantiate the messaging provider for ``backend`` (default GCP)."""
     if backend not in VALID_MESSAGING_BACKENDS:
-        raise ValueError(f"Unknown messaging backend '{backend}'. Valid options: {VALID_MESSAGING_BACKENDS}")
+        raise ValidationError(f"Unknown messaging backend '{backend}'. Valid options: {VALID_MESSAGING_BACKENDS}")
     from app.adapters.messaging.gcp import GcpMessagingProvider
 
     return GcpMessagingProvider(credentials)

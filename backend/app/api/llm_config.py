@@ -170,18 +170,15 @@ async def upsert_provider(
     else:
         api_key = body.api_key
 
-    try:
-        row = await llm_provider_config_service.upsert(
-            session,
-            org_id=org_id,
-            provider=provider,
-            api_key=api_key,
-            model=body.model,
-            actor_user_id=user_id,
-        )
-        await session.commit()
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
+    row = await llm_provider_config_service.upsert(
+        session,
+        org_id=org_id,
+        provider=provider,
+        api_key=api_key,
+        model=body.model,
+        actor_user_id=user_id,
+    )
+    await session.commit()
 
     return ProviderConfigSummary(
         provider=row.provider,
@@ -203,13 +200,8 @@ async def activate_provider(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    try:
-        row = await llm_provider_config_service.set_active(
-            session, org_id=org_id, provider=provider, actor_user_id=user_id
-        )
-        await session.commit()
-    except ValueError as exc:
-        raise HTTPException(404, str(exc))
+    row = await llm_provider_config_service.set_active(session, org_id=org_id, provider=provider, actor_user_id=user_id)
+    await session.commit()
 
     return ProviderConfigSummary(
         provider=row.provider,

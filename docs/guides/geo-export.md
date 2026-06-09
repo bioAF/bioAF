@@ -67,9 +67,9 @@ You can edit the spreadsheet manually if needed. bioAF preserves your edits if y
 
 A SuperSeries groups multiple related experiments (SubSeries) under a single GEO accession. This is common for publications that span multiple experimental conditions or timepoints.
 
-### Step 1: Create a Cross-Experiment Project
+### Step 1: Create a Project
 
-If you have not already, create a cross-experiment project containing all the experiments you want to include. Navigate to **Projects > Create** and add the relevant experiments.
+If you have not already, create a Project containing all the experiments you want to include. Navigate to **Projects > Create** and add the relevant experiments.
 
 ### Step 2: Initiate SuperSeries Export
 
@@ -149,4 +149,4 @@ After upload completes, bioAF generates a notification email to GEO curators wit
 - Use the hold date feature to keep your data private until publication. You can extend the hold date through GEO's interface if your publication timeline changes.
 - For large submissions, start the FTP upload at the end of the workday and let it run overnight. bioAF sends a notification when the upload completes.
 - Save validation reports as PDF (available from the validation view) for your records. Some journals require evidence of data repository submission.
-- If GEO curators request revisions to your metadata, make the changes in bioAF's experiment metadata, regenerate the package, and re-upload. This preserves the audit trail of what was submitted.
+- If GEO curators request revisions to your metadata, make the changes in bioAF's experiment metadata, regenerate the package, and re-upload. This preserves the Audit Log of what was submitted.

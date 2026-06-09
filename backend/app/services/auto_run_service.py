@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import ValidationError
 from app.models.experiment import Experiment
 from app.models.experiment_auto_run import ExperimentAutoRun
 from app.models.pending_auto_run import PendingAutoRun
@@ -45,7 +46,7 @@ class AutoRunService:
             )
         )
         if not result.scalar_one_or_none():
-            raise ValueError(f"Pipeline '{pipeline_key}' not found in catalog")
+            raise ValidationError(f"Pipeline '{pipeline_key}' not found in catalog")
 
         # Validate experiment exists
         exp_result = await session.execute(
@@ -55,7 +56,7 @@ class AutoRunService:
             )
         )
         if not exp_result.scalar_one_or_none():
-            raise ValueError(f"Experiment {experiment_id} not found")
+            raise ValidationError(f"Experiment {experiment_id} not found")
 
         # Validate CV fields
         await VocabularyValidator.validate_pipeline_run_fields(

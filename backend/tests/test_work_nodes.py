@@ -466,7 +466,7 @@ async def test_launch_enforces_quota(
         },
         headers={"Authorization": f"Bearer {comp_bio_token}"},
     )
-    assert response.status_code == 400
+    assert response.status_code == 409
     assert "limit" in response.json()["detail"].lower()
 
 

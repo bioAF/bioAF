@@ -125,7 +125,7 @@ async def test_confirm_nonexistent_upgrade(client: AsyncClient, admin_token: str
         "/api/upgrades/99999/confirm",
         headers={"Authorization": f"Bearer {admin_token}"},
     )
-    assert response.status_code == 400
+    assert response.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -403,7 +403,8 @@ async def test_execute_upgrade_rejects_same_version(client: AsyncClient, admin_t
         json={"target_version": settings.app_version},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
-    assert response.status_code == 400
+    # Upgrading to the version already running is a state conflict (409).
+    assert response.status_code == 409
 
 
 @pytest.mark.asyncio

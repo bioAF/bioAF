@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.base import CellxgeneProvider, ComputeProvider, NotebookProvider, StorageProvider, WorkNodeProvider
 from app.adapters.capabilities import CapabilityNotSupported, ProviderCapabilities
+from app.exceptions import ValidationError
 
 logger = logging.getLogger("bioaf.adapters.registry")
 
@@ -48,7 +49,7 @@ def _create_adapters(
     to compute_stack); see ``_create_work_node_adapter`` / ``_create_cellxgene_adapter``.
     """
     if compute_stack not in VALID_COMPUTE_STACKS:
-        raise ValueError(f"Unknown compute_stack '{compute_stack}'. Valid options: {VALID_COMPUTE_STACKS}")
+        raise ValidationError(f"Unknown compute_stack '{compute_stack}'. Valid options: {VALID_COMPUTE_STACKS}")
 
     if compute_stack == "kubernetes":
         from app.adapters.compute.kubernetes import KubernetesComputeProvider
@@ -75,7 +76,7 @@ def _create_adapters(
 def _create_work_node_adapter(backend: str, session_factory=None) -> WorkNodeProvider:
     """Instantiate the work-node adapter for ``backend`` (default GCE)."""
     if backend not in VALID_WORK_NODE_BACKENDS:
-        raise ValueError(f"Unknown work_node_backend '{backend}'. Valid options: {VALID_WORK_NODE_BACKENDS}")
+        raise ValidationError(f"Unknown work_node_backend '{backend}'. Valid options: {VALID_WORK_NODE_BACKENDS}")
     from app.adapters.work_nodes.gce import GCEWorkNodeProvider
 
     return GCEWorkNodeProvider(session_factory=session_factory)
@@ -84,7 +85,7 @@ def _create_work_node_adapter(backend: str, session_factory=None) -> WorkNodePro
 def _create_cellxgene_adapter(backend: str, session_factory=None) -> CellxgeneProvider:
     """Instantiate the cellxgene adapter for ``backend`` (default Kubernetes)."""
     if backend not in VALID_CELLXGENE_BACKENDS:
-        raise ValueError(f"Unknown cellxgene_backend '{backend}'. Valid options: {VALID_CELLXGENE_BACKENDS}")
+        raise ValidationError(f"Unknown cellxgene_backend '{backend}'. Valid options: {VALID_CELLXGENE_BACKENDS}")
     from app.adapters.cellxgene.kubernetes import KubernetesCellxgeneProvider
 
     return KubernetesCellxgeneProvider(session_factory=session_factory)

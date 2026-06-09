@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 if TYPE_CHECKING:
     from app.models.file import File
 
+from app.exceptions import ConflictError, DomainError, NotFoundError, ValidationError
 from app.models.notebook_session import NotebookSession
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
@@ -49,7 +50,7 @@ class NotebookService:
     @staticmethod
     def get_resource_profile(profile_name: str) -> tuple[int, int]:
         if profile_name not in RESOURCE_PROFILES:
-            raise ValueError(f"Invalid resource profile: {profile_name}")
+            raise ValidationError(f"Invalid resource profile: {profile_name}")
         return RESOURCE_PROFILES[profile_name]
 
     @staticmethod
@@ -107,7 +108,7 @@ class NotebookService:
         # Check quota
         allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=1.0)
         if not allowed:
-            raise ValueError(f"Quota exceeded: {message}")
+            raise ConflictError(f"Quota exceeded: {message}")
 
         cpu_cores, memory_gb = NotebookService.get_resource_profile(resource_profile)
 
@@ -173,7 +174,7 @@ class NotebookService:
 
                 cred = await SessionCredentialService.get_by_user_id(session, user_id)
                 if not cred:
-                    raise ValueError(
+                    raise ValidationError(
                         "Session credentials are required for RStudio sessions. "
                         "Please set up your session credentials in your profile settings."
                     )
@@ -200,7 +201,7 @@ class NotebookService:
                 for fid in input_file_ids:
                     f = found_files.get(fid)
                     if not f or f.organization_id != org_id:
-                        raise ValueError(f"File {fid} not found or not accessible")
+                        raise ValidationError(f"File {fid} not found or not accessible")
                     rel_path = _build_relative_path(f, name_cache)
                     input_files_spec.append(
                         {
@@ -251,7 +252,7 @@ class NotebookService:
                         )
                     )
 
-        except ValueError as e:
+        except DomainError as e:
             from app.adapters.failure_classification import classify_gce_vm_failure
 
             notebook_session.status = "failed"
@@ -292,7 +293,7 @@ class NotebookService:
     async def stop_session(session: AsyncSession, session_id: int, user_id: int) -> NotebookSession:
         notebook_session = await NotebookService.get_session(session, session_id)
         if not notebook_session:
-            raise ValueError("Session not found")
+            raise NotFoundError("Session not found")
 
         old_status = notebook_session.status
 

@@ -12,6 +12,8 @@ hardcoded model list (fetch) or surface the error to the user (submit).
 
 from __future__ import annotations
 
+from app.exceptions import ValidationError
+
 
 class ProviderError(Exception):
     """Raised by provider clients on any non-2xx or transport failure.
@@ -43,5 +45,5 @@ CLIENTS = {
 
 def get_client(provider: str):
     if provider not in CLIENTS:
-        raise ValueError(f"unknown provider: {provider}")
+        raise ValidationError(f"unknown provider: {provider}")
     return CLIENTS[provider]

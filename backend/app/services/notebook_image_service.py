@@ -18,6 +18,7 @@ import google.auth.transport.requests
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import StateError, ValidationError
 from app.platform.credential_injector import load_gcp_credentials
 
 logger = logging.getLogger("bioaf.notebook_image")
@@ -237,7 +238,7 @@ async def submit_image_build(session: AsyncSession, project_id: str, region: str
     """
     working_bucket = await _read_config(session, "working_bucket_name")
     if not working_bucket or working_bucket == "null":
-        raise ValueError("Working bucket not configured. Deploy storage first.")
+        raise ValidationError("Working bucket not configured. Deploy storage first.")
 
     # Upload Dockerfile as build context
     object_path = await _upload_build_context(session, project_id, working_bucket)
@@ -308,19 +309,19 @@ async def cancel_build(session: AsyncSession) -> str:
     """Cancel the active Cloud Build job.
 
     Returns the build ID that was cancelled.
-    Raises ValueError if there is no active build to cancel.
+    Raises a DomainError if there is no active build to cancel.
     """
     build_id = await _read_config(session, "notebook_image_build_id")
     if not build_id or build_id == "null":
-        raise ValueError("No active build to cancel.")
+        raise ValidationError("No active build to cancel.")
 
     current_status = await _read_config(session, "notebook_image_build_status")
     if current_status in ("SUCCESS", "FAILURE", "CANCELLED", "TIMEOUT"):
-        raise ValueError(f"Build already finished with status {current_status}.")
+        raise StateError(f"Build already finished with status {current_status}.")
 
     project_id = await _read_config(session, "gcp_project_id")
     if not project_id or project_id == "null":
-        raise ValueError("GCP project not configured.")
+        raise ValidationError("GCP project not configured.")
 
     credentials = await _get_credentials(session)
     url = f"https://cloudbuild.googleapis.com/v1/projects/{project_id}/builds/{build_id}:cancel"
@@ -354,9 +355,9 @@ async def build_notebook_image(session: AsyncSession) -> str:
     region = await _read_config(session, "gcp_region")
 
     if not project_id or project_id == "null":
-        raise ValueError("GCP project not configured")
+        raise ValidationError("GCP project not configured")
     if not region or region == "null":
-        raise ValueError("GCP region not configured")
+        raise ValidationError("GCP region not configured")
 
     # Clear any stale image URI from a previous failed build attempt
     await _set_config(session, "bioaf_scrna_image", "null")

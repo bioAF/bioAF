@@ -16,6 +16,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import ValidationError
 from app.models.agent_review import AgentReview
 from app.models.agent_review_job import AgentReviewJob
 from app.models.llm_provider_config import LlmProviderConfig
@@ -115,7 +116,7 @@ async def create(
     them explicitly).
     """
     if entity_type not in VALID_ENTITY_TYPES:
-        raise ValueError(f"invalid entity_type: {entity_type}")
+        raise ValidationError(f"invalid entity_type: {entity_type}")
 
     experiment_scope = entity_type == "experiment"
     builder_template = template_name_for_scope(experiment_scope)
@@ -131,13 +132,13 @@ async def create(
 
         saved = await agent_review_prompt_service.get_for_org(session, org_id, custom_prompt_id)
         if saved is None:
-            raise ValueError(f"saved prompt {custom_prompt_id} not found in this org")
+            raise ValidationError(f"saved prompt {custom_prompt_id} not found in this org")
         prompt_source = "custom_saved"
         prompt_text = saved.body
         prompt_custom_id = saved.id
     elif custom_prompt_body is not None:
         if not custom_prompt_body.strip():
-            raise ValueError("custom_prompt_body must not be empty")
+            raise ValidationError("custom_prompt_body must not be empty")
         prompt_source = "custom_one_off"
         prompt_text = custom_prompt_body
     else:
@@ -154,7 +155,7 @@ async def create(
     # The legacy v1 templates remain valid review_type values, but anything
     # else must match the builder template name.
     if resolved_review_type not in VALID_REVIEW_TYPES and resolved_review_type != builder_template:
-        raise ValueError(f"invalid review_type: {resolved_review_type}")
+        raise ValidationError(f"invalid review_type: {resolved_review_type}")
 
     active = await llm_provider_config_service.get_active(session, org_id)
     if active is None:

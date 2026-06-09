@@ -109,7 +109,7 @@ async def test_create_environment_duplicate_name(client, admin_token):
         json={"name": "my-env"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
-    assert response.status_code == 400
+    assert response.status_code == 409
     assert "already exists" in response.json()["detail"]
 
 

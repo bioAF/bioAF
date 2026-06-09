@@ -8,13 +8,14 @@ Verifies:
   selected sub-items, drops experiment-only sub-items in Button A scope, and
   includes the response-format schema + template version footer.
 - Empty selection raises EmptySectionSelection (prompt body would be empty).
-- Unknown sub-item ids raise ValueError.
+- Unknown sub-item ids raise ValidationError.
 """
 
 from __future__ import annotations
 
 import pytest
 
+from app.exceptions import ValidationError
 from app.services.agent_review_prompt_builder import (
     EXPERIMENT_RUN_COMPARISON_V2_BUILDER_NAME,
     PIPELINE_RUN_REVIEW_V2_BUILDER_NAME,
@@ -119,7 +120,7 @@ def test_assemble_prompt_empty_selection_raises():
 
 
 def test_assemble_prompt_unknown_subitem_raises():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError):
         assemble_prompt(
             experiment_scope=False,
             selected_sub_item_ids=["does.not.exist"],

@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import ValidationError
 from app.models.literature import LiteraturePaperComment
 from app.services import audit_service
 
@@ -30,11 +31,11 @@ async def create(
     api_key_id: int | None = None,
 ) -> LiteraturePaperComment:
     if not body or not body.strip():
-        raise ValueError("comment body must be non-empty")
+        raise ValidationError("comment body must be non-empty")
     if parent_id is not None:
         parent = await get(session, parent_id)
         if parent.paper_id != paper_id:
-            raise ValueError("parent comment belongs to a different paper")
+            raise ValidationError("parent comment belongs to a different paper")
     comment = LiteraturePaperComment(paper_id=paper_id, user_id=user_id, body=body.strip(), parent_id=parent_id)
     session.add(comment)
     await session.flush()
@@ -89,9 +90,9 @@ async def update(
     if comment.user_id != user_id and not can_edit_any:
         raise CommentPermissionDenied(f"cannot edit comment {comment_id}")
     if comment.deleted_at is not None:
-        raise ValueError("cannot edit a deleted comment")
+        raise ValidationError("cannot edit a deleted comment")
     if not body or not body.strip():
-        raise ValueError("comment body must be non-empty")
+        raise ValidationError("comment body must be non-empty")
     previous_body = comment.body
     comment.body = body.strip()
     await session.flush()

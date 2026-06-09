@@ -75,18 +75,14 @@ async def export_experiment(
     user_id = int(current_user["sub"])
     user_email = current_user.get("email", "")
 
-    try:
-        zip_bytes = await export_service.export_experiment(
-            session=session,
-            experiment_id=experiment_id,
-            org_id=org_id,
-            include_fastq=body.include_fastq,
-            include_provenance=body.include_provenance,
-            user_email=user_email,
-        )
-    except ValueError as exc:
-        logger.warning("Experiment export failed for %d: %s", experiment_id, exc)
-        raise HTTPException(status_code=404, detail="Experiment not found")
+    zip_bytes = await export_service.export_experiment(
+        session=session,
+        experiment_id=experiment_id,
+        org_id=org_id,
+        include_fastq=body.include_fastq,
+        include_provenance=body.include_provenance,
+        user_email=user_email,
+    )
 
     await log_action(
         session=session,
@@ -134,18 +130,14 @@ async def export_project(
     user_id = int(current_user["sub"])
     user_email = current_user.get("email", "")
 
-    try:
-        zip_bytes, filename = await export_service.export_project(
-            session=session,
-            project_id=project_id,
-            org_id=org_id,
-            include_fastq=body.include_fastq,
-            include_provenance=body.include_provenance,
-            user_email=user_email,
-        )
-    except ValueError as exc:
-        logger.warning("Project export failed for %d: %s", project_id, exc)
-        raise HTTPException(status_code=404, detail="Project not found")
+    zip_bytes, filename = await export_service.export_project(
+        session=session,
+        project_id=project_id,
+        org_id=org_id,
+        include_fastq=body.include_fastq,
+        include_provenance=body.include_provenance,
+        user_email=user_email,
+    )
 
     await log_action(
         session=session,

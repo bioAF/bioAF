@@ -7,6 +7,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.exceptions import NotFoundError
 from app.models.slurm_job import SlurmJob
 from app.services.audit_service import log_action
 from app.services.compute_cost_service import ComputeCostService
@@ -219,7 +220,7 @@ class SlurmService:
     async def cancel_job(session: AsyncSession, job_id: int, user_id: int) -> SlurmJob:
         job = await SlurmService.get_job(session, job_id)
         if not job:
-            raise ValueError("Job not found")
+            raise NotFoundError("Job not found")
 
         await SlurmService._run_ssh_command(f"scancel {job.slurm_job_id}")
 
@@ -243,7 +244,7 @@ class SlurmService:
     async def resubmit_job(session: AsyncSession, job_id: int, user_id: int, org_id: int) -> SlurmJob:
         original = await SlurmService.get_job(session, job_id)
         if not original:
-            raise ValueError("Job not found")
+            raise NotFoundError("Job not found")
 
         new_job = await SlurmService.submit_job(
             session,

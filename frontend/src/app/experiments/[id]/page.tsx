@@ -30,6 +30,7 @@ import { QCReportModal } from "@/components/qc/QCReportModal";
 import { QCDashboardListItem } from "@/components/qc/QCDashboardListItem";
 import { PlotThumbnail, StorageDeletedPlaceholder } from "@/components/plots/PlotThumbnail";
 import { ExperimentTabKey, resolveExperimentTab } from "@/lib/experimentTabs";
+import { statusBadgeClass } from "@/lib/statusStyles";
 import type {
   ExperimentDetail,
   ExperimentUpdateRequest,
@@ -1136,13 +1137,6 @@ function ExperimentDetailPageInner() {
                 <h3 className="text-lg font-semibold mb-4">Sequencing Batches</h3>
                 <div className="grid gap-3">
                   {seqBatches.map((sb) => {
-                    const statusColors: Record<string, string> = {
-                      pending: "bg-gray-100 text-gray-700",
-                      ingesting: "bg-blue-100 text-blue-700",
-                      complete: "bg-green-100 text-green-700",
-                      partial_complete: "bg-yellow-100 text-yellow-700",
-                      failed: "bg-red-100 text-red-700",
-                    };
                     const progress = sb.expected_file_count ? Math.round((sb.ingested_file_count / sb.expected_file_count) * 100) : 0;
 
                     return (
@@ -1152,7 +1146,7 @@ function ExperimentDetailPageInner() {
                             <h4 className="font-semibold">{sb.code}</h4>
                             {sb.instrument_model && <p className="text-sm text-gray-500">{sb.instrument_model}</p>}
                           </div>
-                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusColors[sb.status] || "bg-gray-100"}`}>
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusBadgeClass("sampleBatch", sb.status)}`}>
                             {sb.status.replace("_", " ")}
                           </span>
                         </div>
@@ -1282,15 +1276,10 @@ function ExperimentDetailPageInner() {
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {pipelineRuns.map((r) => {
-                        const statusColors: Record<string, string> = {
-                          pending: "bg-gray-100 text-gray-700", running: "bg-blue-100 text-blue-700",
-                          completed: "bg-green-100 text-green-700", failed: "bg-red-100 text-red-700",
-                          cancelled: "bg-orange-100 text-orange-700",
-                        };
                         return (
                           <tr key={r.id} className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm">{r.pipeline_name} {r.pipeline_version ? `v${r.pipeline_version}` : ""}</td>
-                            <td className="px-4 py-3"><span className={`px-2 py-0.5 text-xs rounded-full ${statusColors[r.status] || ""}`}>{r.status}</span></td>
+                            <td className="px-4 py-3"><span className={`px-2 py-0.5 text-xs rounded-full ${statusBadgeClass("pipelineRun", r.status)}`}>{r.status}</span></td>
                             <td className="px-4 py-3">
                               {r.progress ? (
                                 <div className="flex items-center gap-2">

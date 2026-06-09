@@ -22,6 +22,7 @@ from sqlalchemy import text
 from app.models.reference_dataset import ReferenceDataset
 from app.models.reference_import_progress import ReferenceImportProgress
 from app.schemas.reference_dataset import ReferenceImportRequest
+from app.exceptions import ConflictError, NotFoundError, StateError, ValidationError
 from app.services.auth_service import AuthService
 from app.services.reference_data_service import ReferenceDataService
 
@@ -123,7 +124,7 @@ async def test_start_import_rejects_duplicate(session, comp_bio_user, configured
         )
         await session.commit()
 
-        with pytest.raises(ValueError, match="already exists"):
+        with pytest.raises(ConflictError, match="already exists"):
             await ReferenceDataService.start_import(
                 session,
                 org_id=comp_bio_user.organization_id,
@@ -167,7 +168,7 @@ async def test_get_import_status_returns_progress_row(session, comp_bio_user, co
 
 @pytest.mark.asyncio
 async def test_get_import_status_404_when_not_found(session, comp_bio_user):
-    with pytest.raises(ValueError, match="not found"):
+    with pytest.raises(NotFoundError, match="not found"):
         await ReferenceDataService.get_import_status(
             session, reference_id=999_999, org_id=comp_bio_user.organization_id
         )
@@ -425,7 +426,7 @@ async def test_recover_finalize_rejects_already_finalized_dataset(session, comp_
     dataset.status = "active"
     await session.commit()
 
-    with pytest.raises(ValueError, match="not in 'uploading'"):
+    with pytest.raises(StateError, match="not in 'uploading'"):
         await ReferenceDataService.recover_finalize(
             session, reference_id=dataset.id, org_id=comp_bio_user.organization_id
         )
@@ -452,7 +453,7 @@ async def test_recover_finalize_raises_when_no_blobs_exist(session, comp_bio_use
         await session.commit()
 
     with patch.object(ReferenceDataService, "_list_uploaded_blobs", return_value=[]):
-        with pytest.raises(ValueError, match="no files"):
+        with pytest.raises(ValidationError, match="no files"):
             await ReferenceDataService.recover_finalize(
                 session, reference_id=dataset.id, org_id=comp_bio_user.organization_id
             )

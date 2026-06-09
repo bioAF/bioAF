@@ -23,6 +23,7 @@ from typing import AsyncIterator
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import ConflictError, NotFoundError, StateError, ValidationError
 from app.models.component import TerraformRun
 from app.services.activity_feed_service import ActivityFeedService
 from app.services.audit_service import log_action
@@ -164,9 +165,9 @@ class TerraformExecutor:
         result = await session.execute(select(TerraformRun).where(TerraformRun.id == run_id))
         run = result.scalar_one_or_none()
         if not run:
-            raise ValueError(f"Run {run_id} not found")
+            raise NotFoundError(f"Run {run_id} not found")
         if run.status not in ("awaiting_confirmation", "applying"):
-            raise ValueError(f"Run {run_id} is not awaiting confirmation (status: {run.status})")
+            raise StateError(f"Run {run_id} is not awaiting confirmation (status: {run.status})")
 
         run.action = "apply"
         run.status = "applying"
@@ -408,10 +409,10 @@ class TerraformExecutor:
         config = await TerraformExecutor._read_gcp_config(session)
 
         if config.get("gcp_credentials_configured", "false") != "true":
-            raise ValueError("GCP credentials are not configured. Configure GCP settings before bootstrapping.")
+            raise ValidationError("GCP credentials are not configured. Configure GCP settings before bootstrapping.")
 
         if config.get("terraform_initialized", "false") == "true":
-            raise ValueError("Infrastructure is already initialized. terraform_initialized = true.")
+            raise ConflictError("Infrastructure is already initialized. terraform_initialized = true.")
 
         yield TerraformProgressEvent(
             event_type="progress",
@@ -1184,11 +1185,11 @@ class TerraformExecutor:
         result = await session.execute(select(TerraformRun).where(TerraformRun.id == run_id))
         run = result.scalar_one_or_none()
         if not run:
-            raise ValueError(f"Run {run_id} not found")
+            raise NotFoundError(f"Run {run_id} not found")
 
         abandonable = {"planning", "applying", "awaiting_confirmation"}
         if run.status not in abandonable:
-            raise ValueError(f"Run {run_id} in status '{run.status}' cannot be abandoned")
+            raise StateError(f"Run {run_id} in status '{run.status}' cannot be abandoned")
 
         config = await TerraformExecutor._read_gcp_config(session)
         state_bucket = config.get("terraform_state_bucket", "")
@@ -1242,8 +1243,8 @@ class TerraformExecutor:
 
     @staticmethod
     async def _check_no_active_run(session: AsyncSession) -> None:
-        """Raise ValueError if any run is currently in progress."""
+        """Raise ConflictError if any run is currently in progress."""
         result = await session.execute(select(TerraformRun).where(TerraformRun.status.in_(["planning", "applying"])))
         active = result.scalar_one_or_none()
         if active:
-            raise ValueError(f"Another Terraform operation is in progress (run {active.id})")
+            raise ConflictError(f"Another Terraform operation is in progress (run {active.id})")

@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.database import get_session
+from app.exceptions import ValidationError
 from app.services.file_service import FileService
 from app.services.plot_archive_service import PlotArchiveService
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,15 +60,15 @@ def create_content_token(resource_type: str, resource_id: int, org_id: int) -> s
 def validate_content_token(token: str) -> dict:
     """Decode a content token and verify its purpose claim.
 
-    Returns the payload dict or raises ValueError.
+    Returns the payload dict or raises ValidationError.
     """
     try:
         payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
     except jwt.PyJWTError as e:
-        raise ValueError(f"Invalid content token: {e}") from e
+        raise ValidationError(f"Invalid content token: {e}") from e
 
     if payload.get("purpose") != CONTENT_TOKEN_PURPOSE:
-        raise ValueError("Not a content token")
+        raise ValidationError("Not a content token")
 
     return payload
 

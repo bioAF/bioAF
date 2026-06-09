@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy import text
 
+from app.exceptions import ConflictError, NotFoundError, StateError, ValidationError
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
 from app.services.bootstrap_roles import seed_builtin_roles
 
@@ -435,7 +436,7 @@ async def test_concurrent_run_prevention(session):
     _active_processes[run_id] = mock_process
 
     try:
-        with pytest.raises(ValueError, match="in progress"):
+        with pytest.raises(ConflictError, match="in progress"):
             await TerraformExecutor.run_plan(session=session, user_id=user_id, module_name="foundation")
     finally:
         _active_processes.pop(run_id, None)
@@ -484,11 +485,11 @@ async def test_stale_lock_recovery(session):
 
 @pytest.mark.asyncio
 async def test_bootstrap_requires_gcp_configured(session):
-    """bootstrap_foundation raises ValueError when GCP is not configured."""
+    """bootstrap_foundation raises ValidationError when GCP is not configured."""
     user_id = await _seed_user(session)
     await _seed_gcp_config(session, configured=False, initialized=False)
 
-    with pytest.raises(ValueError, match="GCP"):
+    with pytest.raises(ValidationError, match="GCP"):
         async for _ in TerraformExecutor.bootstrap_foundation(session=session, user_id=user_id):
             pass
 
@@ -500,11 +501,11 @@ async def test_bootstrap_requires_gcp_configured(session):
 
 @pytest.mark.asyncio
 async def test_bootstrap_requires_not_initialized(session):
-    """bootstrap_foundation raises ValueError when already initialized."""
+    """bootstrap_foundation raises ConflictError when already initialized."""
     user_id = await _seed_user(session)
     await _seed_gcp_config(session, configured=True, initialized=True)
 
-    with pytest.raises(ValueError, match="already"):
+    with pytest.raises(ConflictError, match="already"):
         async for _ in TerraformExecutor.bootstrap_foundation(session=session, user_id=user_id):
             pass
 
@@ -1248,17 +1249,17 @@ async def test_abandon_run_rejects_completed_run(session):
     run_row = (await session.execute(text("SELECT id FROM terraform_runs LIMIT 1"))).fetchone()
     run_id = run_row[0]
 
-    with pytest.raises(ValueError, match="cannot be abandoned"):
+    with pytest.raises(StateError, match="cannot be abandoned"):
         await TerraformExecutor.abandon_run(session, run_id, user_id)
 
 
 @pytest.mark.asyncio
 async def test_abandon_run_rejects_nonexistent_run(session):
-    """abandon_run() raises ValueError for a run that does not exist."""
+    """abandon_run() raises NotFoundError for a run that does not exist."""
     user_id = await _seed_user(session)
     await _seed_gcp_config(session, configured=True, initialized=True)
 
-    with pytest.raises(ValueError, match="not found"):
+    with pytest.raises(NotFoundError, match="not found"):
         await TerraformExecutor.abandon_run(session, 99999, user_id)
 
 

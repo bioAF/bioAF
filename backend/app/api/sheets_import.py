@@ -21,6 +21,7 @@ from app.schemas.sheets_import import (
 )
 from app.services import sheets_reader_sa_service
 from app.services.csv_service import COLUMN_MAP, SAMPLE_FIELDS, _normalize_header, parse_sample_csv, preview_sample_csv
+from app.exceptions import ValidationError
 from app.services.google_sheets_service import parse_sheet_url, read_all_rows_as_csv, read_header_row
 
 router = APIRouter(prefix="/api/v1/sheets", tags=["sheets_import"])
@@ -103,13 +104,13 @@ async def preview_sheet_headers(
     # Parse the sheet URL
     try:
         spreadsheet_id, gid = parse_sheet_url(body.sheet_url)
-    except ValueError as exc:
+    except ValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Read headers from the sheet
     try:
         headers, sheet_name = read_header_row(creds, spreadsheet_id, gid)
-    except ValueError as exc:
+    except ValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         msg = str(exc)
@@ -180,12 +181,12 @@ async def _read_sheet_as_csv(
 
     try:
         spreadsheet_id, gid = parse_sheet_url(body.sheet_url)
-    except ValueError as exc:
+    except ValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
         csv_bytes, sheet_name = read_all_rows_as_csv(creds, spreadsheet_id, gid)
-    except ValueError as exc:
+    except ValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         msg = str(exc)

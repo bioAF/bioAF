@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.exceptions import ConflictError, NotFoundError, StateError, ValidationError
 from app.models.gitops_repo import GitOpsRepo
 from app.services.audit_service import log_action
 
@@ -28,14 +29,14 @@ class GitOpsService:
             secrets = svc.fetch_all()
             pat = secrets.get("bioaf-github-pat")
             if not pat:
-                raise ValueError("GitHub PAT not found in Secret Manager")
+                raise ValidationError("GitHub PAT not found in Secret Manager")
             return pat
         # For dev/test, fall back to env var
         import os
 
         pat = os.environ.get("BIOAF_GITHUB_PAT", "")
         if not pat:
-            raise ValueError("GitHub PAT not configured")
+            raise ValidationError("GitHub PAT not configured")
         return pat
 
     @staticmethod
@@ -83,7 +84,7 @@ class GitOpsService:
         """Create the GitOps repo on GitHub and populate with initial content."""
         existing = await GitOpsService.get_repo(session, org_id)
         if existing:
-            raise ValueError("GitOps repository already initialized")
+            raise ConflictError("GitOps repository already initialized")
 
         pat = github_pat or await GitOpsService._get_github_pat()
         headers = GitOpsService._github_headers(pat)
@@ -222,7 +223,7 @@ class GitOpsService:
         """Commit one or more file changes to the GitOps repo. Returns commit SHA."""
         repo = await GitOpsService.get_repo(session, org_id)
         if not repo:
-            raise ValueError("GitOps repository not initialized")
+            raise StateError("GitOps repository not initialized")
 
         pat = await GitOpsService._get_github_pat()
         headers = GitOpsService._github_headers(pat)
@@ -270,7 +271,7 @@ class GitOpsService:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(url, headers=headers, params=params)
             if resp.status_code != 200:
-                raise ValueError(f"File not found: {path} (status {resp.status_code})")
+                raise NotFoundError(f"File not found: {path} (status {resp.status_code})")
             data = resp.json()
             return base64.b64decode(data["content"]).decode()
 
@@ -321,7 +322,7 @@ class GitOpsService:
                 headers=headers,
             )
             if resp.status_code != 200:
-                raise ValueError(f"Commit not found: {sha}")
+                raise NotFoundError(f"Commit not found: {sha}")
             data = resp.json()
             files = [f["filename"] for f in data.get("files", [])]
             diff = "\n".join(f.get("patch", "") for f in data.get("files", []))
@@ -346,7 +347,7 @@ class GitOpsService:
                 headers=headers,
             )
             if resp.status_code != 200:
-                raise ValueError(f"Could not compare commits {sha1}...{sha2}")
+                raise NotFoundError(f"Could not compare commits {sha1}...{sha2}")
             data = resp.json()
             return "\n".join(f.get("patch", "") for f in data.get("files", []))
 

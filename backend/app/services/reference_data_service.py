@@ -13,6 +13,7 @@ from sqlalchemy import Select, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.exceptions import ConflictError, NotFoundError, StateError, ValidationError
 from app.models.experiment import Experiment
 from app.models.pipeline_run import PipelineRun
 from app.models.pipeline_run_review import PipelineRunReview
@@ -199,14 +200,14 @@ class ReferenceDataService:
         """Deprecate a reference dataset. Public scope requires admin approval."""
         dataset = await ReferenceDataService.get_reference(session, reference_id, org_id)
         if not dataset:
-            raise ValueError("Reference dataset not found")
+            raise NotFoundError("Reference dataset not found")
         if dataset.status != "active":
-            raise ValueError(f"Cannot deprecate a dataset with status '{dataset.status}'")
+            raise StateError(f"Cannot deprecate a dataset with status '{dataset.status}'")
 
         if request.superseded_by_id:
             successor = await ReferenceDataService.get_reference(session, request.superseded_by_id, org_id)
             if not successor:
-                raise ValueError("Superseding reference dataset not found")
+                raise ValidationError("Superseding reference dataset not found")
 
         previous = {"status": dataset.status}
 
@@ -283,9 +284,9 @@ class ReferenceDataService:
         """Admin approves a pending public deprecation."""
         dataset = await ReferenceDataService.get_reference(session, reference_id, org_id)
         if not dataset:
-            raise ValueError("Reference dataset not found")
+            raise NotFoundError("Reference dataset not found")
         if dataset.status != "pending_approval":
-            raise ValueError(f"Cannot approve deprecation: status is '{dataset.status}', expected 'pending_approval'")
+            raise StateError(f"Cannot approve deprecation: status is '{dataset.status}', expected 'pending_approval'")
 
         previous = {"status": dataset.status}
         dataset.status = "deprecated"
@@ -343,7 +344,7 @@ class ReferenceDataService:
             )
         )
         if not ref_exists.scalar_one_or_none():
-            raise ValueError("Reference dataset not found")
+            raise NotFoundError("Reference dataset not found")
 
         # Single query joining pipeline_run_references -> pipeline_runs -> experiments + reviews
         active_review_subq = (
@@ -489,7 +490,7 @@ class ReferenceDataService:
         See spec §2 for the state machine.
         """
         if not request.files:
-            raise ValueError("init_upload requires at least one file in `files`")
+            raise ValidationError("init_upload requires at least one file in `files`")
 
         # Up-front uniqueness check so we don't create a GCS session before failing
         existing = await session.execute(
@@ -500,7 +501,7 @@ class ReferenceDataService:
             )
         )
         if existing.scalar_one_or_none() is not None:
-            raise ValueError(f"Reference '{request.name}' version '{request.version}' already exists")
+            raise ConflictError(f"Reference '{request.name}' version '{request.version}' already exists")
 
         bucket_name = await ReferenceDataService._get_references_bucket(session)
 
@@ -616,9 +617,9 @@ class ReferenceDataService:
         """
         dataset = await ReferenceDataService.get_reference(session, reference_id, org_id)
         if not dataset:
-            raise ValueError("Reference dataset not found")
+            raise NotFoundError("Reference dataset not found")
         if dataset.status != "uploading":
-            raise ValueError(f"Cannot finalize: status is '{dataset.status}', expected 'uploading'")
+            raise StateError(f"Cannot finalize: status is '{dataset.status}', expected 'uploading'")
 
         bucket_name = await ReferenceDataService._get_references_bucket(session)
         from app.services.upload_service import UploadService
@@ -635,7 +636,7 @@ class ReferenceDataService:
         expected = list(dataset.files)
         missing = [f.filename for f in expected if f.filename not in blob_by_name]
         if missing:
-            raise ValueError(f"Upload incomplete: missing files in GCS: {', '.join(missing)}")
+            raise ValidationError(f"Upload incomplete: missing files in GCS: {', '.join(missing)}")
 
         # MD5 verification: compare client-supplied md5 (if any) to GCS metadata
         manifest: dict[str, str] = {}
@@ -663,7 +664,7 @@ class ReferenceDataService:
                     action="upload_failed",
                     details={"reason": "md5_mismatch", "filename": file_row.filename},
                 )
-                raise ValueError(dataset.deprecation_note)
+                raise ValidationError(dataset.deprecation_note)
             file_row.md5_checksum = gcs_md5
             file_row.size_bytes = gcs_size
             if gcs_md5:
@@ -886,7 +887,7 @@ class ReferenceDataService:
                     error_message=error_message,
                 )
                 await session.commit()
-            except ValueError:
+            except NotFoundError:
                 # The progress row is gone (cancel raced); nothing to do.
                 logger.info("Reference import %s: progress row gone, skipping update", reference_id)
 
@@ -907,7 +908,7 @@ class ReferenceDataService:
             )
         )
         if existing.scalar_one_or_none() is not None:
-            raise ValueError(f"Reference '{request.name}' version '{request.version}' already exists")
+            raise ConflictError(f"Reference '{request.name}' version '{request.version}' already exists")
 
         bucket_name = await ReferenceDataService._get_references_bucket(session)
         gcs_prefix = f"{request.category}/{_slugify(request.name)}/{_slugify(request.version)}/"
@@ -976,7 +977,7 @@ class ReferenceDataService:
             )
         )
         if dataset.scalar_one_or_none() is None:
-            raise ValueError("Reference dataset not found")
+            raise NotFoundError("Reference dataset not found")
 
         result = await session.execute(
             select(
@@ -992,7 +993,7 @@ class ReferenceDataService:
         )
         row = result.one_or_none()
         if row is None:
-            raise ValueError("No import progress record for this reference")
+            raise NotFoundError("No import progress record for this reference")
 
         return ReferenceImportStatusResponse(
             reference_id=row.reference_id,
@@ -1036,7 +1037,7 @@ class ReferenceDataService:
         """Update the progress row. Called by the importer container's callback."""
         progress = await session.get(ReferenceImportProgress, reference_id)
         if not progress:
-            raise ValueError("No import progress record for this reference")
+            raise NotFoundError("No import progress record for this reference")
 
         progress.status = status
         if progress_pct is not None:
@@ -1086,9 +1087,9 @@ class ReferenceDataService:
         )
         ds = dataset.scalar_one_or_none()
         if ds is None:
-            raise ValueError("Reference dataset not found")
+            raise NotFoundError("Reference dataset not found")
         if ds.status != "uploading":
-            raise ValueError(
+            raise StateError(
                 f"Reference dataset {reference_id} is not in 'uploading' status (currently '{ds.status}'); nothing to recover."
             )
 
@@ -1099,7 +1100,7 @@ class ReferenceDataService:
         credentials = await UploadService._get_gcs_credentials(session)
         blobs = ReferenceDataService._list_uploaded_blobs(bucket_name, ds.gcs_prefix, credentials=credentials)
         if not blobs:
-            raise ValueError(
+            raise ValidationError(
                 f"Reference dataset {reference_id} has no files under gs://{bucket_name}/{ds.gcs_prefix}; cancel and re-import."
             )
 

@@ -3,7 +3,7 @@
 CRUD for user-scoped GitHub repos used by work nodes.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
@@ -40,10 +40,7 @@ async def create_github_repo(
 ):
     user_id = int(current_user["sub"])
     org_id = int(current_user["org_id"])
-    try:
-        repo = await GitHubRepoService.create_repo(session, user_id, org_id, body.git_ssh_url, body.display_name)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    repo = await GitHubRepoService.create_repo(session, user_id, org_id, body.git_ssh_url, body.display_name)
     await session.commit()
     return GitHubRepoResponse.model_validate(repo)
 
@@ -55,9 +52,6 @@ async def delete_github_repo(
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
-    try:
-        await GitHubRepoService.delete_repo(session, repo_id, user_id)
-    except ValueError as e:
-        raise HTTPException(404, str(e))
+    await GitHubRepoService.delete_repo(session, repo_id, user_id)
     await session.commit()
     return {"status": "ok"}

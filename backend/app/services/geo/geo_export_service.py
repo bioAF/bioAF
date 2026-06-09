@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.exceptions import NotFoundError
 from app.models.experiment import Experiment
 from app.models.file import File
 from app.models.pipeline_run import PipelineRun
@@ -112,7 +113,7 @@ class GeoExportService:
         )
         experiment = exp_result.scalar_one_or_none()
         if not experiment:
-            raise ValueError("Experiment not found")
+            raise NotFoundError("Experiment not found")
 
         # 2. Samples with batches
         sample_query = (

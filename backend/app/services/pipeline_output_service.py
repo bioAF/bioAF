@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.file import File
 from app.models.pipeline_run import PipelineRun, PipelineRunSample
+from app.models.sample import Sample
 from app.services.file_service import FileService
 from app.services.file_type_utils import classify_artifact_type, detect_file_type
 
@@ -14,6 +15,28 @@ logger = logging.getLogger("bioaf.pipeline_output_service")
 
 
 class PipelineOutputService:
+    @staticmethod
+    def _match_samples(filename: str, gcs_uri: str, sample_extids: list[tuple[str, int]]) -> list[int]:
+        """Return ids of samples this output file belongs to, matched by external_id.
+
+        Matches when the external_id is a full path segment of the GCS URI (e.g.
+        ``.../star/SAMPLE-101/...``) or the filename starts with ``<extid>_``/
+        ``<extid>.``. Returns [] for aggregate outputs (e.g. multiqc) that match
+        no single sample, so the caller can fall back to all run samples.
+        """
+        segments = set((gcs_uri or "").split("/"))
+        matched: list[int] = []
+        for extid, sid in sample_extids:
+            if (
+                extid in segments
+                or filename == extid
+                or filename.startswith(f"{extid}_")
+                or filename.startswith(f"{extid}.")
+            ):
+                if sid not in matched:
+                    matched.append(sid)
+        return matched
+
     @staticmethod
     async def register_outputs(
         session: AsyncSession,
@@ -39,12 +62,24 @@ class PipelineOutputService:
         # files to all samples in the run.
         is_project_scoped = run.experiment_id is None and run.project_id is not None
 
+        # Map each run sample's external_id -> id so each output can be linked to
+        # the sample it actually belongs to (nf-core writes per-sample outputs
+        # under paths/filenames carrying the sample's external_id). Aggregate
+        # outputs that match no single sample fall back to all run samples.
         sample_ids: list[int] = []
+        sample_extids: list[tuple[str, int]] = []
         if not is_project_scoped:
             result = await session.execute(
-                select(PipelineRunSample.sample_id).where(PipelineRunSample.pipeline_run_id == run.id)
+                select(Sample.id, Sample.external_id)
+                .join(PipelineRunSample, PipelineRunSample.sample_id == Sample.id)
+                .where(PipelineRunSample.pipeline_run_id == run.id)
             )
-            sample_ids = [row[0] for row in result.all()]
+            for sid, extid in result.all():
+                sample_ids.append(sid)
+                if extid:
+                    sample_extids.append((extid, sid))
+            # Longest external_id first so e.g. "SAMPLE-10" can't shadow "SAMPLE-101".
+            sample_extids.sort(key=lambda t: len(t[0]), reverse=True)
 
         # Collect existing gcs_uris to skip duplicates
         uris = [f["gcs_uri"] for f in collected_files]
@@ -79,7 +114,12 @@ class PipelineOutputService:
                 artifact_type=artifact_type,
             )
 
-            for sample_id in sample_ids:
+            # Associate the output with the sample(s) it belongs to. Match the
+            # sample external_id as a path segment or filename prefix; only fall
+            # back to all run samples for aggregate outputs that match none.
+            matched = PipelineOutputService._match_samples(filename, gcs_uri, sample_extids)
+            targets = matched if matched else sample_ids
+            for sample_id in targets:
                 await FileService.link_file_to_sample(session, file_record.id, sample_id)
 
             created.append(file_record)

@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.exceptions import NotFoundError, StateError, ValidationError
 from app.models.upgrade_history import UpgradeHistory
 from app.services.event_bus import event_bus
 from app.services.event_types import PLATFORM_UPDATE_AVAILABLE
@@ -163,10 +164,10 @@ class UpgradeService:
         )
         upgrade = result.scalar_one_or_none()
         if not upgrade:
-            raise ValueError("Upgrade not found")
+            raise NotFoundError("Upgrade not found")
 
         if upgrade.status != "started":
-            raise ValueError(f"Upgrade is in '{upgrade.status}' state, cannot confirm")
+            raise StateError(f"Upgrade is in '{upgrade.status}' state, cannot confirm")
 
         # In production: rolling update GKE pods, run migrations, apply terraform
         upgrade.status = "completed"
@@ -190,10 +191,10 @@ class UpgradeService:
         )
         upgrade = result.scalar_one_or_none()
         if not upgrade:
-            raise ValueError("Upgrade not found")
+            raise NotFoundError("Upgrade not found")
 
         if upgrade.status != "completed":
-            raise ValueError(f"Upgrade is in '{upgrade.status}' state, cannot rollback")
+            raise StateError(f"Upgrade is in '{upgrade.status}' state, cannot rollback")
 
         # In production: revert container image, optionally revert terraform
         upgrade.status = "rolled_back"
@@ -214,10 +215,10 @@ class UpgradeService:
 
         # Validate version format
         if not re.match(r"^\d+\.\d+\.\d+$", target_version):
-            raise ValueError(f"Invalid version format: {target_version}")
+            raise ValidationError(f"Invalid version format: {target_version}")
 
         if target_version == current:
-            raise ValueError(f"Already running version {current}")
+            raise StateError(f"Already running version {current}")
 
         # Create upgrade history record
         upgrade = UpgradeHistory(

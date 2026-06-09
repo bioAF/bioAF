@@ -4,6 +4,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
+from app.exceptions import NotFoundError, StateError, ValidationError
 from app.models.audit_log import AuditLog
 from app.models.custom_pipeline import CustomPipeline
 from app.models.custom_pipeline_variable import CustomPipelineVariable
@@ -295,7 +296,7 @@ async def test_update_pipeline(session, admin_user):
 
 @pytest.mark.asyncio
 async def test_update_pipeline_not_found(session, admin_user):
-    with pytest.raises(ValueError, match="not found"):
+    with pytest.raises(NotFoundError, match="not found"):
         await CustomPipelineService.update_pipeline(
             session,
             admin_user.organization_id,
@@ -436,7 +437,7 @@ async def test_create_version_github_repo_missing_id(session, admin_user, ready_
         admin_user.id,
         CustomPipelineCreateRequest(name="Bad Pipeline"),
     )
-    with pytest.raises(ValueError, match="github_repo_id is required"):
+    with pytest.raises(ValidationError, match="github_repo_id is required"):
         await CustomPipelineService.create_version(
             session,
             admin_user.organization_id,
@@ -458,7 +459,7 @@ async def test_create_version_code_blob_missing_content(session, admin_user, rea
         admin_user.id,
         CustomPipelineCreateRequest(name="Bad Pipeline"),
     )
-    with pytest.raises(ValueError, match="code_content is required"):
+    with pytest.raises(ValidationError, match="code_content is required"):
         await CustomPipelineService.create_version(
             session,
             admin_user.organization_id,
@@ -480,7 +481,7 @@ async def test_create_version_environment_not_ready(session, admin_user, buildin
         admin_user.id,
         CustomPipelineCreateRequest(name="Env Pipeline"),
     )
-    with pytest.raises(ValueError, match="status 'ready'"):
+    with pytest.raises(StateError, match="status 'ready'"):
         await CustomPipelineService.create_version(
             session,
             admin_user.organization_id,
@@ -503,7 +504,7 @@ async def test_create_version_invalid_environment_id(session, admin_user):
         admin_user.id,
         CustomPipelineCreateRequest(name="Env Pipeline"),
     )
-    with pytest.raises(ValueError, match="environment_version_id is not valid"):
+    with pytest.raises(ValidationError, match="environment_version_id is not valid"):
         await CustomPipelineService.create_version(
             session,
             admin_user.organization_id,
@@ -526,7 +527,7 @@ async def test_create_version_invalid_log_path(session, admin_user, ready_env_ve
         admin_user.id,
         CustomPipelineCreateRequest(name="Log Pipeline"),
     )
-    with pytest.raises(ValueError, match="/outputs/"):
+    with pytest.raises(ValidationError, match="/outputs/"):
         await CustomPipelineService.create_version(
             session,
             admin_user.organization_id,

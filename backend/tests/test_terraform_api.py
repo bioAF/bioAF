@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy import text
 
+from app.exceptions import ConflictError, StateError
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
 
 
@@ -114,7 +115,7 @@ async def test_terraform_plan_409_when_gcp_not_configured(client, session):
     _, admin_token = await _seed_user_and_token(client, session)
     await _seed_gcp_config(session, configured=False)
 
-    with patch.object(TerraformExecutor, "run_plan", new=AsyncMock(side_effect=ValueError("GCP not configured"))):
+    with patch.object(TerraformExecutor, "run_plan", new=AsyncMock(side_effect=ConflictError("GCP not configured"))):
         resp = await client.post(
             "/api/v1/infrastructure/terraform/plan",
             json={"module_name": "foundation"},
@@ -397,7 +398,7 @@ async def test_terraform_plan_409_when_run_in_progress(client, session):
     _, admin_token = await _seed_user_and_token(client, session)
     await _seed_gcp_config(session, configured=True, initialized=True)
 
-    with patch.object(TerraformExecutor, "run_plan", new=AsyncMock(side_effect=ValueError("in progress"))):
+    with patch.object(TerraformExecutor, "run_plan", new=AsyncMock(side_effect=ConflictError("in progress"))):
         resp = await client.post(
             "/api/v1/infrastructure/terraform/plan",
             json={"module_name": "foundation"},
@@ -475,7 +476,7 @@ async def test_abandon_run_409_on_completed(client, session):
     with patch.object(
         TerraformExecutor,
         "abandon_run",
-        new=AsyncMock(side_effect=ValueError("cannot be abandoned")),
+        new=AsyncMock(side_effect=StateError("cannot be abandoned")),
     ):
         resp = await client.post(
             "/api/v1/infrastructure/terraform/abandon/1",

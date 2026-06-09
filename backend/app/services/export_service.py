@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import NotFoundError
 from app.models.experiment import Experiment
 from app.models.file import File
 from app.models.project import Project
@@ -121,7 +122,7 @@ async def export_experiment(
     """
     experiment = await _get_experiment(session, experiment_id, org_id)
     if experiment is None:
-        raise ValueError(f"Experiment {experiment_id} not found")
+        raise NotFoundError(f"Experiment {experiment_id} not found")
 
     safe_name = _safe_name(experiment.name)
     prefix = f"{folder_prefix}/{safe_name}/" if folder_prefix else f"{safe_name}/"
@@ -191,7 +192,7 @@ async def export_project(
     """Build and return (zip_bytes, filename) for a project export."""
     project = await _get_project(session, project_id, org_id)
     if project is None:
-        raise ValueError(f"Project {project_id} not found")
+        raise NotFoundError(f"Project {project_id} not found")
 
     safe_name = _safe_name(project.name)
     folder_prefix = safe_name

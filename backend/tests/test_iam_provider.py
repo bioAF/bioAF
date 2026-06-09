@@ -12,6 +12,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.exceptions import ValidationError
+
 from app.adapters.iam import (
     DEFAULT_IAM_BACKEND,
     VALID_IAM_BACKENDS,
@@ -28,7 +30,7 @@ def test_factory_returns_gcp_provider_by_default():
 
 
 def test_factory_rejects_unknown_backend():
-    with pytest.raises(ValueError, match="Unknown IAM backend"):
+    with pytest.raises(ValidationError, match="Unknown IAM backend"):
         create_iam_provider(backend="azure")
 
 

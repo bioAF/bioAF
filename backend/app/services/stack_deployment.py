@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import ConflictError, StateError, ValidationError
 from app.services.activity_feed_service import ActivityFeedService
 from app.services.audit_service import log_action
 from app.services.component_queue import process_queued_components
@@ -323,18 +324,18 @@ async def deploy_stack(
     # Validate pre-conditions
     gcp_configured = await _read_config(session, "gcp_credentials_configured")
     if gcp_configured != "true":
-        raise ValueError("GCP credentials are not configured")
+        raise ValidationError("GCP credentials are not configured")
 
     tf_initialized = await _read_config(session, "terraform_initialized")
     if tf_initialized != "true":
-        raise ValueError("Terraform has not been initialized")
+        raise ValidationError("Terraform has not been initialized")
 
     compute_deployed = await _read_config(session, "compute_deployed")
     if compute_deployed == "true":
-        raise ValueError("Compute stack is already deployed. Teardown first.")
+        raise ConflictError("Compute stack is already deployed. Teardown first.")
 
     if stack_type != "kubernetes":
-        raise ValueError(f"Unsupported stack type: {stack_type}")
+        raise ValidationError(f"Unsupported stack type: {stack_type}")
 
     storage_deployed = await _read_config(session, "storage_deployed")
     storage_failed = False
@@ -638,7 +639,7 @@ async def teardown_stack(
     """
     compute_deployed = await _read_config(session, "compute_deployed")
     if compute_deployed != "true":
-        raise ValueError("Compute stack is not deployed")
+        raise StateError("Compute stack is not deployed")
 
     yield TerraformProgressEvent(
         event_type="progress",
@@ -770,11 +771,11 @@ async def destroy_storage(
     """
     compute_deployed = await _read_config(session, "compute_deployed")
     if compute_deployed == "true":
-        raise ValueError("Cannot destroy storage while compute stack is deployed. Teardown compute first.")
+        raise StateError("Cannot destroy storage while compute stack is deployed. Teardown compute first.")
 
     storage_deployed = await _read_config(session, "storage_deployed")
     if storage_deployed != "true":
-        raise ValueError("Storage is not deployed.")
+        raise StateError("Storage is not deployed.")
 
     # Step 1: Empty all GCS buckets so terraform destroy can remove them
     # (buckets have force_destroy=false and cannot be deleted while non-empty)

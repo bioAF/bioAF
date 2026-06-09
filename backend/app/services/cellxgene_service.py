@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.adapters.registry import get_cellxgene_adapter
+from app.exceptions import NotFoundError, ValidationError
 from app.models.cellxgene_publication import CellxgenePublication
 from app.models.file import File
 from app.services.audit_service import log_action
@@ -28,9 +29,9 @@ class CellxgeneService:
         result = await session.execute(select(File).where(File.id == file_id, File.organization_id == org_id))
         file = result.scalar_one_or_none()
         if not file:
-            raise ValueError("File not found")
+            raise NotFoundError("File not found")
         if file.file_type != "h5ad":
-            raise ValueError("Only h5ad files can be published to cellxgene")
+            raise ValidationError("Only h5ad files can be published to cellxgene")
 
         pub = CellxgenePublication(
             organization_id=org_id,

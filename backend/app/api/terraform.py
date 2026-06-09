@@ -116,12 +116,10 @@ async def confirm_run(run_id: int, request: Request, session: AsyncSession = Dep
         await session.commit()
         asyncio.create_task(_run_apply_background(run_id, user_id))
     else:
-        # Legacy run: use TerraformService (synchronous)
-        try:
-            run = await TerraformService.apply_plan(session, run_id, user_id)
-        except ValueError as e:
-            logger.warning("Terraform apply failed for run %d: %s", run_id, e)
-            raise HTTPException(status_code=400, detail="Failed to apply plan")
+        # Legacy run: use TerraformService (synchronous). The route already
+        # validated existence and status above, so any DomainError from
+        # apply_plan reaches the central handler.
+        run = await TerraformService.apply_plan(session, run_id, user_id)
         await session.commit()
 
     return TerraformRunResponse(
@@ -142,11 +140,7 @@ async def cancel_run(run_id: int, request: Request, session: AsyncSession = Depe
     current_user = await _require_admin(request, session)
     user_id = int(current_user["sub"])
 
-    try:
-        run = await TerraformService.cancel_run(session, run_id, user_id)
-    except ValueError as e:
-        logger.warning("Terraform cancel failed for run %d: %s", run_id, e)
-        raise HTTPException(status_code=400, detail="Failed to cancel run")
+    run = await TerraformService.cancel_run(session, run_id, user_id)
 
     await session.commit()
     return TerraformRunResponse(

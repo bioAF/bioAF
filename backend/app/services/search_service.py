@@ -5,6 +5,7 @@ from urllib.parse import quote
 from sqlalchemy import Text, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import ValidationError
 from app.models.document import Document
 from app.models.experiment import Experiment
 from app.models.file import File
@@ -361,7 +362,7 @@ class SearchService:
                     ),
                 ),
             )
-        raise ValueError(f"unknown search type: {t}")
+        raise ValidationError(f"unknown search type: {t}")
 
     @staticmethod
     async def _count(session: AsyncSession, model, where) -> int:

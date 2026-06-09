@@ -12,6 +12,7 @@ import pytest
 import respx
 from httpx import Response
 
+from app.exceptions import ValidationError
 from app.services.llm_models_fetch_service import list_models_with_fallback
 from app.services.llm_provider_models import FALLBACK_MODELS
 
@@ -93,5 +94,5 @@ async def test_gemma_returns_static_list_with_no_egress():
 
 @pytest.mark.asyncio
 async def test_unknown_provider_raises():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError):
         await list_models_with_fallback("unknown", "key")

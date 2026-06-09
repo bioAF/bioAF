@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.api.dependencies import require_permission
+from app.exceptions import DomainError
 from app.schemas.gitops import (
     GitCommitDetail,
     GitCommitListResponse,
@@ -51,8 +52,10 @@ async def initialize_gitops(
             github_pat=data.github_pat,
         )
         await session.commit()
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    except DomainError:
+        # Typed domain failures (e.g. already-initialized, PAT not configured)
+        # are mapped to their HTTP status by the central handler.
+        raise
     except Exception as e:
         raise HTTPException(500, f"Failed to initialize GitOps: {e}")
 
@@ -99,10 +102,7 @@ async def get_commit(
     if not repo:
         raise HTTPException(400, "GitOps repository not initialized")
 
-    try:
-        detail = await GitOpsService.get_commit(org_id, repo.github_repo_name, sha)
-    except ValueError as e:
-        raise HTTPException(404, str(e))
+    detail = await GitOpsService.get_commit(org_id, repo.github_repo_name, sha)
     return GitCommitDetail(**detail)
 
 
@@ -118,8 +118,5 @@ async def get_file(
     if not repo:
         raise HTTPException(400, "GitOps repository not initialized")
 
-    try:
-        content = await GitOpsService.get_file(org_id, repo.github_repo_name, path, ref=ref)
-    except ValueError as e:
-        raise HTTPException(404, str(e))
+    content = await GitOpsService.get_file(org_id, repo.github_repo_name, path, ref=ref)
     return {"path": path, "content": content}

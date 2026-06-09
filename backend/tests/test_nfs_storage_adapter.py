@@ -11,6 +11,8 @@ import io
 
 import pytest
 
+from app.exceptions import ValidationError
+
 from app.adapters.capabilities import CapabilityNotSupported
 from app.adapters.models import StorageObjectNotFound, StorageStore
 from app.adapters.storage.nfs import NfsStorageProvider
@@ -163,7 +165,7 @@ async def test_nfs_path_traversal_blocked(nfs):
     # A crafted key trying to escape the store/root must be rejected, not write
     # outside the mount.
     evil = "file://working/../../../../etc/passwd"
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError):
         await nfs.write_text(evil, "pwned")
 
 

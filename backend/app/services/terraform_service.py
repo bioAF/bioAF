@@ -8,6 +8,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import ConflictError, NotFoundError, StateError
 from app.models.component import ComponentState, TerraformRun
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
@@ -52,7 +53,7 @@ class TerraformService:
         # Check for active runs
         active = await TerraformService.get_active_run(session)
         if active:
-            raise ValueError(f"Another Terraform operation is in progress (run {active.id})")
+            raise ConflictError(f"Another Terraform operation is in progress (run {active.id})")
 
         # Create run record
         run = TerraformRun(
@@ -100,9 +101,9 @@ class TerraformService:
     ) -> TerraformRun:
         run = await TerraformService.get_run(session, run_id)
         if not run:
-            raise ValueError(f"Run {run_id} not found")
+            raise NotFoundError(f"Run {run_id} not found")
         if run.status != "awaiting_confirmation":
-            raise ValueError(f"Run {run_id} is not awaiting confirmation (status: {run.status})")
+            raise StateError(f"Run {run_id} is not awaiting confirmation (status: {run.status})")
 
         run.status = "applying"
         await session.flush()
@@ -199,9 +200,9 @@ class TerraformService:
     ) -> TerraformRun:
         run = await TerraformService.get_run(session, run_id)
         if not run:
-            raise ValueError(f"Run {run_id} not found")
+            raise NotFoundError(f"Run {run_id} not found")
         if run.status != "awaiting_confirmation":
-            raise ValueError(f"Run {run_id} cannot be cancelled (status: {run.status})")
+            raise StateError(f"Run {run_id} cannot be cancelled (status: {run.status})")
 
         run.status = "cancelled"
         run.completed_at = datetime.now(timezone.utc)

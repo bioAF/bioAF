@@ -4,11 +4,11 @@ bioAF supports fully automated pipeline execution so that data flows from CRO de
 
 ## Trigger Modes
 
-bioAF offers three trigger modes for automated pipelines. Each mode is configured per pipeline definition.
+bioAF offers three trigger modes for automated pipelines. Each mode is configured per Pipeline Catalog Entry.
 
 ### Event-Driven Triggers
 
-Event-driven triggers launch a pipeline run immediately when a qualifying event occurs. The most common event is file arrival via auto-ingest.
+Event-driven triggers launch a pipeline run immediately when a qualifying event occurs. The most common event is file arrival via Auto-ingest.
 
 To configure an event-driven trigger:
 
@@ -41,7 +41,7 @@ To configure a batch trigger:
 
 ### Scheduled Triggers
 
-Scheduled triggers launch pipeline runs on a cron schedule regardless of whether new data has arrived. These are useful for periodic reprocessing, report generation, or reference data updates.
+Scheduled triggers launch pipeline runs on a cron schedule regardless of whether new data has arrived. These are useful for periodic reprocessing, report generation, or Reference Dataset updates.
 
 1. Add a trigger and choose "Scheduled" as the trigger type.
 2. Enter a cron expression (e.g., `0 2 * * 1` for every Monday at 2 AM).
@@ -70,7 +70,7 @@ bioAF estimates run costs based on:
 - The number and size of input files.
 - Current GCP pricing for the selected machine types.
 
-For pipelines with no history, bioAF uses the resource requests from the pipeline definition as a conservative estimate.
+For pipelines with no history, bioAF uses the resource requests from the Pipeline Catalog Entry as a conservative estimate.
 
 ### When Pre-Flight Fails
 

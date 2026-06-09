@@ -148,19 +148,16 @@ async def launch_work_node(
             "Compute infrastructure is not deployed. Deploy it from Infrastructure > Components first.",
         )
 
-    try:
-        compute_session = await WorkNodeService.launch_work_node(
-            session,
-            user_id=user_id,
-            org_id=org_id,
-            project_id=body.project_id,
-            environment_version_id=body.environment_version_id,
-            machine_type=body.machine_type,
-            input_file_ids=body.input_file_ids,
-            github_repo_ids=body.github_repo_ids,
-        )
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    compute_session = await WorkNodeService.launch_work_node(
+        session,
+        user_id=user_id,
+        org_id=org_id,
+        project_id=body.project_id,
+        environment_version_id=body.environment_version_id,
+        machine_type=body.machine_type,
+        input_file_ids=body.input_file_ids,
+        github_repo_ids=body.github_repo_ids,
+    )
 
     await session.commit()
 
@@ -196,10 +193,7 @@ async def stop_work_node(
     if not can_manage_all and compute_session.user_id != user_id:
         raise HTTPException(403, "Can only stop your own work nodes")
 
-    try:
-        compute_session = await WorkNodeService.stop_work_node(session, session_id, user_id)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    compute_session = await WorkNodeService.stop_work_node(session, session_id, user_id)
 
     await session.commit()
     compute_session = await WorkNodeService.get_work_node(session, compute_session.id)

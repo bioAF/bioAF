@@ -1,6 +1,6 @@
 # Reference Data Management
 
-bioAF provides a managed reference data layer for genome sequences, gene annotations, genome indices, reference cell atlases, marker gene lists, and gene ontology databases. This guide covers uploading reference data, managing versions, deprecating outdated references, and assessing the impact of changes.
+bioAF provides a managed Reference Dataset layer for genome sequences, gene annotations, genome indices, reference cell atlases, marker gene lists, and gene ontology databases. This guide covers uploading reference data, managing versions, deprecating outdated references, and assessing the impact of changes.
 
 ## Why Managed Reference Data Matters
 
@@ -9,7 +9,7 @@ Every computational biology analysis depends on external reference data. Without
 - Someone updates a reference file and silently breaks reproducibility for every pipeline that used the old version.
 - Different users maintain their own copies, leading to inconsistent results and wasted storage.
 
-bioAF's reference data layer solves both problems by versioning all reference files and tracking which pipeline runs and analyses used each version.
+bioAF's Reference Dataset layer solves both problems by versioning all reference files and tracking which pipeline runs and analyses used each version.
 
 ## Uploading Reference Data
 
@@ -111,7 +111,7 @@ For any reference version, the "Usage" tab shows:
 
 - **Pipeline definitions** pinned to this version, with links to each pipeline.
 - **Pipeline runs** that used this version, with their status and results.
-- **Notebook sessions** that loaded this reference, if the Analysis Snapshot SDK recorded it.
+- **Notebook Sessions** that loaded this reference, if the Analysis Snapshot SDK recorded it.
 
 ### Comparing Versions
 
@@ -138,13 +138,13 @@ When upgrading a reference version, use **Pipelines > Impact Assessment** to est
 
 ## Storage and Access
 
-Reference data is stored in a dedicated GCS bucket (`gs://<instance>-reference-data/`) separate from experiment data. This bucket is:
+Reference Datasets are stored in a dedicated GCS bucket (`gs://<instance>-reference-data/`) separate from experiment data. This bucket is:
 
-- Read-accessible by all compute containers (pipeline pods and notebook servers).
+- Read-accessible by all Work Nodes, Notebooks, and Pipelines (pipeline pods and notebook servers).
 - Write-accessible only by users with the `admin` or `comp_bio` role.
 - Versioned at the GCS object level for additional protection against accidental overwrites.
 
-Reference files are mounted read-only in compute containers at `/ref/` by default. Pipelines access them via this mount path or via the bioAF API.
+Reference files are mounted read-only in Work Nodes, Notebooks, and Pipelines at `/ref/` by default. Pipelines access them via this mount path or via the bioAF API.
 
 ## Tips
 

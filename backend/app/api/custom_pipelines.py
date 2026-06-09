@@ -86,11 +86,8 @@ async def create_custom_pipeline(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    try:
-        pipeline = await CustomPipelineService.create_pipeline(session, org_id, user_id, data)
-        await session.commit()
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    pipeline = await CustomPipelineService.create_pipeline(session, org_id, user_id, data)
+    await session.commit()
 
     await session.refresh(pipeline)
     return _pipeline_response(pipeline)
@@ -119,14 +116,8 @@ async def update_custom_pipeline(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    try:
-        pipeline = await CustomPipelineService.update_pipeline(session, org_id, user_id, pipeline_id, data)
-        await session.commit()
-    except ValueError as e:
-        message = str(e)
-        if "not found" in message.lower():
-            raise HTTPException(404, message)
-        raise HTTPException(400, message)
+    pipeline = await CustomPipelineService.update_pipeline(session, org_id, user_id, pipeline_id, data)
+    await session.commit()
 
     await session.refresh(pipeline)
     return _pipeline_response(pipeline)
@@ -141,14 +132,8 @@ async def delete_custom_pipeline(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    try:
-        await CustomPipelineService.delete_pipeline(session, org_id, user_id, pipeline_id)
-        await session.commit()
-    except ValueError as e:
-        message = str(e)
-        if "not found" in message.lower():
-            raise HTTPException(404, message)
-        raise HTTPException(400, message)
+    await CustomPipelineService.delete_pipeline(session, org_id, user_id, pipeline_id)
+    await session.commit()
 
     return {"status": "deleted"}
 
@@ -163,14 +148,8 @@ async def create_custom_pipeline_version(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    try:
-        version = await CustomPipelineService.create_version(session, org_id, user_id, pipeline_id, data)
-        await session.commit()
-    except ValueError as e:
-        message = str(e)
-        if "pipeline not found" in message.lower():
-            raise HTTPException(404, message)
-        raise HTTPException(400, message)
+    version = await CustomPipelineService.create_version(session, org_id, user_id, pipeline_id, data)
+    await session.commit()
 
     return _version_response(version)
 
@@ -215,14 +194,8 @@ async def deprecate_custom_pipeline_version(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    try:
-        await CustomPipelineService.deprecate_version(session, org_id, user_id, pipeline_id, version_id)
-        await session.commit()
-    except ValueError as e:
-        message = str(e)
-        if "not found" in message.lower():
-            raise HTTPException(404, message)
-        raise HTTPException(400, message)
+    await CustomPipelineService.deprecate_version(session, org_id, user_id, pipeline_id, version_id)
+    await session.commit()
 
     return {"status": "deprecated"}
 
@@ -309,11 +282,8 @@ async def launch_custom_pipeline(
     if pipeline is None:
         raise HTTPException(404, "Custom pipeline not found")
 
-    try:
-        run = await CustomPipelineService.launch_run(session, org_id, user_id, data)
-        await session.commit()
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    run = await CustomPipelineService.launch_run(session, org_id, user_id, data)
+    await session.commit()
 
     result = await session.execute(
         select(PipelineRun)

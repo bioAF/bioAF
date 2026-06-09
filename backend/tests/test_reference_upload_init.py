@@ -21,6 +21,7 @@ from app.schemas.reference_dataset import (
     ReferenceUploadFileSpec,
     ReferenceUploadInitRequest,
 )
+from app.exceptions import ConflictError, ValidationError
 from app.services.auth_service import AuthService
 from app.services.reference_data_service import ReferenceDataService
 
@@ -122,7 +123,7 @@ async def test_init_upload_rejects_duplicate_name_version(session, comp_bio_user
         )
         await session.commit()
 
-        with pytest.raises(ValueError, match="already exists"):
+        with pytest.raises(ConflictError, match="already exists"):
             await ReferenceDataService.init_upload(
                 session, org_id=comp_bio_user.organization_id, user_id=comp_bio_user.id, request=payload
             )
@@ -188,7 +189,7 @@ async def test_init_upload_requires_at_least_one_file(session, comp_bio_user, co
         files=[],
     )
 
-    with pytest.raises(ValueError, match="at least one file"):
+    with pytest.raises(ValidationError, match="at least one file"):
         await ReferenceDataService.init_upload(
             session, org_id=comp_bio_user.organization_id, user_id=comp_bio_user.id, request=payload
         )

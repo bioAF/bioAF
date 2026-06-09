@@ -5,6 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.exceptions import ValidationError
+
 from app.adapters.observability import create_log_sink_provider
 from app.adapters.observability.base import LogSinkProvider
 from app.adapters.observability.gcp import GcpLogSinkProvider
@@ -17,7 +19,7 @@ def test_factory_returns_gcp_provider_by_default():
 
 
 def test_unknown_log_sink_backend_raises():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError):
         create_log_sink_provider("proj", backend="loki")
 
 

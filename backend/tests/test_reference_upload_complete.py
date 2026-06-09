@@ -24,6 +24,7 @@ from app.schemas.reference_dataset import (
     ReferenceUploadFileSpec,
     ReferenceUploadInitRequest,
 )
+from app.exceptions import StateError, ValidationError
 from app.services.auth_service import AuthService
 from app.services.reference_data_service import ReferenceDataService
 
@@ -167,7 +168,7 @@ async def test_upload_complete_missing_file_keeps_status_uploading(session, comp
         _StubBlob(name=f"{dataset.gcs_prefix}markers.csv", size=4096, md5="aa" * 16),
     ]
     with patch.object(ReferenceDataService, "_list_uploaded_blobs", return_value=blobs):
-        with pytest.raises(ValueError, match="metadata.json"):
+        with pytest.raises(ValidationError, match="metadata.json"):
             await ReferenceDataService.upload_complete(
                 session, reference_id=dataset.id, org_id=comp_bio_user.organization_id, user_id=comp_bio_user.id
             )
@@ -201,7 +202,7 @@ async def test_upload_complete_client_md5_mismatch_marks_failed(session, comp_bi
         patch.object(ReferenceDataService, "_list_uploaded_blobs", return_value=blobs),
         patch.object(ReferenceDataService, "_delete_blobs", return_value=None),
     ):
-        with pytest.raises(ValueError, match="md5 mismatch"):
+        with pytest.raises(ValidationError, match="md5 mismatch"):
             await ReferenceDataService.upload_complete(
                 session, reference_id=dataset.id, org_id=comp_bio_user.organization_id, user_id=comp_bio_user.id
             )
@@ -225,7 +226,7 @@ async def test_upload_complete_only_works_in_uploading_status(session, comp_bio_
         )
         await session.commit()
 
-        with pytest.raises(ValueError, match="already finalized|cannot finalize|status"):
+        with pytest.raises(StateError, match="already finalized|cannot finalize|status"):
             await ReferenceDataService.upload_complete(
                 session, reference_id=dataset.id, org_id=comp_bio_user.organization_id, user_id=comp_bio_user.id
             )

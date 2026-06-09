@@ -1,8 +1,6 @@
 """API endpoints for orphaned resource tracking and cleanup."""
 
-import logging
-
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,8 +11,6 @@ from app.schemas.orphaned_resource import (
     OrphanedResourceResponse,
 )
 from app.services.orphaned_resource_service import OrphanedResourceService
-
-logger = logging.getLogger("bioaf.orphaned_resources.api")
 
 router = APIRouter(tags=["orphaned_resources"])
 
@@ -112,15 +108,8 @@ async def cleanup_orphaned_resource(
 ) -> OrphanedResourceResponse:
     """Trigger cleanup of an orphaned resource (deletes from GCP)."""
     user_id = int(current_user["sub"])
-    try:
-        resource = await OrphanedResourceService.cleanup_resource(session, resource_id, user_id)
-        await session.commit()
-    except ValueError as exc:
-        msg = str(exc)
-        logger.warning("Orphaned resource cleanup failed for %d: %s", resource_id, msg)
-        if "not found" in msg:
-            raise HTTPException(status_code=404, detail=msg)
-        raise HTTPException(status_code=400, detail=msg)
+    resource = await OrphanedResourceService.cleanup_resource(session, resource_id, user_id)
+    await session.commit()
     return OrphanedResourceResponse.model_validate(resource)
 
 
@@ -135,12 +124,8 @@ async def dismiss_orphaned_resource(
 ) -> OrphanedResourceResponse:
     """Mark an orphaned resource as manually resolved."""
     user_id = int(current_user["sub"])
-    try:
-        resource = await OrphanedResourceService.dismiss_resource(session, resource_id, user_id)
-        await session.commit()
-    except ValueError as exc:
-        logger.warning("Orphaned resource dismiss failed for %d: %s", resource_id, exc)
-        raise HTTPException(status_code=404, detail="Resource not found")
+    resource = await OrphanedResourceService.dismiss_resource(session, resource_id, user_id)
+    await session.commit()
     return OrphanedResourceResponse.model_validate(resource)
 
 
@@ -159,14 +144,6 @@ async def adopt_orphaned_resource(
     as adopted. Returns 409 if the cluster is not in a running state.
     """
     user_id = int(current_user["sub"])
-    try:
-        resource = await OrphanedResourceService.adopt_resource(session, resource_id, user_id)
-        await session.commit()
-    except ValueError as exc:
-        msg = str(exc)
-        if "not found" in msg:
-            raise HTTPException(status_code=404, detail="Resource not found")
-        if "not in a running state" in msg:
-            raise HTTPException(status_code=409, detail=msg)
-        raise HTTPException(status_code=400, detail=msg)
+    resource = await OrphanedResourceService.adopt_resource(session, resource_id, user_id)
+    await session.commit()
     return OrphanedResourceResponse.model_validate(resource)

@@ -5,6 +5,8 @@ import pytest_asyncio
 from unittest.mock import patch
 from sqlalchemy import text
 
+from app.exceptions import ValidationError
+
 
 @pytest_asyncio.fixture
 async def experiment_with_files(session, admin_user):
@@ -157,7 +159,7 @@ class TestInputFileMounting:
         other_file_id = other_file.id
         await session.commit()
 
-        with pytest.raises(ValueError, match="not found or not accessible"):
+        with pytest.raises(ValidationError, match="not found or not accessible"):
             await NotebookService.launch_session(
                 session,
                 user_id=admin_user.id,

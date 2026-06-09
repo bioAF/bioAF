@@ -35,6 +35,7 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import StateError
 from app.services.terraform_executor import TerraformExecutor
 
 logger = logging.getLogger("bioaf.infra_update_service")
@@ -200,10 +201,10 @@ async def _deployed_modules(session: AsyncSession) -> list[str]:
     ).fetchall()
     cfg = {r[0]: r[1] for r in rows}
     if cfg.get("terraform_initialized") != "true":
-        raise ValueError("Terraform has not been initialized")
+        raise StateError("Terraform has not been initialized")
     modules = [module for module, flag in _CANDIDATE_MODULES if cfg.get(flag) == "true"]
     if not modules:
-        raise ValueError("No infrastructure is deployed")
+        raise StateError("No infrastructure is deployed")
     return modules
 
 
@@ -234,7 +235,7 @@ async def check_for_updates(session: AsyncSession, user_id: int) -> dict:
     for module in modules:
         run = await TerraformExecutor.run_plan(session, user_id, module_name=module)
         if run.status == "failed":
-            raise ValueError(f"Plan failed for {module}: {run.error_message or 'unknown error'}")
+            raise StateError(f"Plan failed for {module}: {run.error_message or 'unknown error'}")
 
         plan = run.plan_json or {}
         total = plan.get("total", 0)

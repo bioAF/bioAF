@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.adapters.registry import get_compute_adapter
+from app.exceptions import ConflictError, NotFoundError, StateError, ValidationError
 from app.models.custom_pipeline import CustomPipeline
 from app.models.custom_pipeline_variable import CustomPipelineVariable
 from app.models.custom_pipeline_version import CustomPipelineVersion
@@ -53,9 +54,9 @@ def _slugify(name: str) -> str:
 
 def _validate_resource_strings(cpu_request: str, memory_request: str) -> None:
     if not CPU_PATTERN.match(cpu_request):
-        raise ValueError(f"Invalid cpu_request: {cpu_request}")
+        raise ValidationError(f"Invalid cpu_request: {cpu_request}")
     if not MEMORY_PATTERN.match(memory_request):
-        raise ValueError(f"Invalid memory_request: {memory_request}")
+        raise ValidationError(f"Invalid memory_request: {memory_request}")
 
 
 class CustomPipelineService:
@@ -174,7 +175,7 @@ class CustomPipelineService:
     ) -> CustomPipeline:
         pipeline = await CustomPipelineService._get_pipeline_unscoped(session, org_id, pipeline_id)
         if pipeline is None:
-            raise ValueError("Custom pipeline not found")
+            raise NotFoundError("Custom pipeline not found")
 
         previous = {"name": pipeline.name, "description": pipeline.description}
         updates: dict = {}
@@ -217,7 +218,7 @@ class CustomPipelineService:
     async def delete_pipeline(session: AsyncSession, org_id: int, user_id: int, pipeline_id: int) -> None:
         pipeline = await CustomPipelineService._get_pipeline_unscoped(session, org_id, pipeline_id)
         if pipeline is None:
-            raise ValueError("Custom pipeline not found")
+            raise NotFoundError("Custom pipeline not found")
 
         catalog_result = await session.execute(
             select(PipelineCatalogEntry).where(
@@ -249,22 +250,22 @@ class CustomPipelineService:
     ) -> CustomPipelineVersion:
         pipeline = await CustomPipelineService._get_pipeline_unscoped(session, org_id, pipeline_id)
         if pipeline is None:
-            raise ValueError("Custom pipeline not found")
+            raise NotFoundError("Custom pipeline not found")
 
         if data.code_source_type not in VALID_CODE_SOURCE_TYPES:
-            raise ValueError(f"Invalid code_source_type: {data.code_source_type}")
+            raise ValidationError(f"Invalid code_source_type: {data.code_source_type}")
 
         if not data.entrypoint_command or not data.entrypoint_command.strip():
-            raise ValueError("entrypoint_command must not be empty")
+            raise ValidationError("entrypoint_command must not be empty")
 
         _validate_resource_strings(data.cpu_request, data.memory_request)
 
         if data.log_file_path is not None and not data.log_file_path.startswith("/outputs/"):
-            raise ValueError("log_file_path must start with /outputs/")
+            raise ValidationError("log_file_path must start with /outputs/")
 
         if data.code_source_type == "github_repo":
             if data.github_repo_id is None:
-                raise ValueError("github_repo_id is required when code_source_type is 'github_repo'")
+                raise ValidationError("github_repo_id is required when code_source_type is 'github_repo'")
             repo_result = await session.execute(
                 select(GitHubRepo).where(
                     GitHubRepo.id == data.github_repo_id,
@@ -272,19 +273,19 @@ class CustomPipelineService:
                 )
             )
             if repo_result.scalar_one_or_none() is None:
-                raise ValueError("github_repo_id is not valid for this organization")
+                raise ValidationError("github_repo_id is not valid for this organization")
         else:
             if not data.code_content:
-                raise ValueError(f"code_content is required when code_source_type is '{data.code_source_type}'")
+                raise ValidationError(f"code_content is required when code_source_type is '{data.code_source_type}'")
 
         env_version_result = await session.execute(
             select(EnvironmentVersion).where(EnvironmentVersion.id == data.environment_version_id)
         )
         env_version = env_version_result.scalar_one_or_none()
         if env_version is None:
-            raise ValueError("environment_version_id is not valid")
+            raise ValidationError("environment_version_id is not valid")
         if env_version.status != "ready":
-            raise ValueError(f"Environment version must have status 'ready', got '{env_version.status}'")
+            raise StateError(f"Environment version must have status 'ready', got '{env_version.status}'")
 
         max_result = await session.execute(
             select(func.coalesce(func.max(CustomPipelineVersion.version_number), 0)).where(
@@ -352,7 +353,7 @@ class CustomPipelineService:
     async def list_versions(session: AsyncSession, org_id: int, pipeline_id: int) -> list[CustomPipelineVersion]:
         pipeline = await CustomPipelineService._get_pipeline_unscoped(session, org_id, pipeline_id)
         if pipeline is None:
-            raise ValueError("Custom pipeline not found")
+            raise NotFoundError("Custom pipeline not found")
 
         result = await session.execute(
             select(CustomPipelineVersion)
@@ -508,7 +509,7 @@ class CustomPipelineService:
     ) -> CustomPipelineVersion:
         pipeline = await CustomPipelineService._get_pipeline_unscoped(session, org_id, pipeline_id)
         if pipeline is None:
-            raise ValueError("Custom pipeline not found")
+            raise NotFoundError("Custom pipeline not found")
 
         result = await session.execute(
             select(CustomPipelineVersion).where(
@@ -518,7 +519,7 @@ class CustomPipelineService:
         )
         version = result.scalar_one_or_none()
         if version is None:
-            raise ValueError("Custom pipeline version not found")
+            raise NotFoundError("Custom pipeline version not found")
 
         previous_status = version.status
         version.status = "deprecated"
@@ -546,7 +547,7 @@ class CustomPipelineService:
     ) -> PipelineRun:
         """Launch a custom pipeline run. Implements spec-launch-orchestration.md."""
         if data.experiment_id is None and data.project_id is None:
-            raise ValueError("Either experiment_id or project_id must be provided")
+            raise ValidationError("Either experiment_id or project_id must be provided")
 
         # 1. Validate pipeline version
         version_result = await session.execute(
@@ -561,23 +562,23 @@ class CustomPipelineService:
         )
         version = version_result.scalar_one_or_none()
         if version is None:
-            raise ValueError(f"Pipeline version {data.version_id} not found")
+            raise ValidationError(f"Pipeline version {data.version_id} not found")
 
         pipeline = version.custom_pipeline
         if pipeline is None or pipeline.organization_id != org_id:
-            raise ValueError("Pipeline version does not belong to this organization")
+            raise ValidationError("Pipeline version does not belong to this organization")
 
         if version.status != "active":
-            raise ValueError(
+            raise StateError(
                 f"Pipeline version {version.version_number} has status '{version.status}', expected 'active'"
             )
 
         # 2. Validate environment
         env_version = version.environment_version
         if env_version is None:
-            raise ValueError("Environment version not found")
+            raise ValidationError("Environment version not found")
         if env_version.status != "ready":
-            raise ValueError(f"Environment version has status '{env_version.status}', expected 'ready'")
+            raise StateError(f"Environment version has status '{env_version.status}', expected 'ready'")
         image_uri = env_version.image_uri or ""
 
         # 3. Validate experiment / project / inputs
@@ -591,7 +592,7 @@ class CustomPipelineService:
             )
             experiment = exp_result.scalar_one_or_none()
             if experiment is None:
-                raise ValueError(f"Experiment {data.experiment_id} not found")
+                raise ValidationError(f"Experiment {data.experiment_id} not found")
 
         project: Project | None = None
         if data.project_id is not None:
@@ -603,7 +604,7 @@ class CustomPipelineService:
             )
             project = proj_result.scalar_one_or_none()
             if project is None:
-                raise ValueError(f"Project {data.project_id} not found")
+                raise ValidationError(f"Project {data.project_id} not found")
 
         input_files: list[File] = []
         if data.input_file_ids:
@@ -612,7 +613,7 @@ class CustomPipelineService:
             for fid in data.input_file_ids:
                 f = found.get(fid)
                 if not f or f.organization_id != org_id:
-                    raise ValueError(f"File {fid} not found or not accessible")
+                    raise ValidationError(f"File {fid} not found or not accessible")
                 input_files.append(f)
 
         # 4. Validate and resolve variables
@@ -686,7 +687,7 @@ class CustomPipelineService:
         if version.code_source_type == "github_repo":
             repo = version.github_repo
             if repo is None:
-                raise ValueError("github_repo not found for version")
+                raise ValidationError("github_repo not found for version")
             ssh_private_key = await CustomPipelineService._fetch_ssh_private_key(session, user_id)
             code_init_containers.append(CustomPipelineService._build_git_clone_init(repo))
             working_dir = f"/code/{repo.display_name}"
@@ -698,7 +699,7 @@ class CustomPipelineService:
             has_code_dir = False
             working_dir = "/data"
         else:
-            raise ValueError(f"Unknown code_source_type: {version.code_source_type}")
+            raise ValidationError(f"Unknown code_source_type: {version.code_source_type}")
 
         # 10. Output prefix and entrypoint wrapper (run_id substituted after creation)
         results_bucket = await CustomPipelineService._read_platform_config(session, "results_bucket_name")
@@ -716,7 +717,7 @@ class CustomPipelineService:
         # 12. Check quota
         allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=1.0)
         if not allowed:
-            raise ValueError(f"Quota exceeded: {message}")
+            raise ConflictError(f"Quota exceeded: {message}")
 
         # 13. Create PipelineRun
         run = PipelineRun(
@@ -861,7 +862,7 @@ class CustomPipelineService:
         provided_by_name: dict[str, str] = {}
         for entry in provided:
             if entry.variable_name not in defined_by_name:
-                raise ValueError(f"Unknown variable: {entry.variable_name}")
+                raise ValidationError(f"Unknown variable: {entry.variable_name}")
             provided_by_name[entry.variable_name] = entry.variable_value
 
         resolved: dict[str, str] = {}
@@ -871,7 +872,7 @@ class CustomPipelineService:
             elif var.default_value is not None:
                 value = var.default_value
             elif var.is_required:
-                raise ValueError(f"Required variable missing: {name}")
+                raise ValidationError(f"Required variable missing: {name}")
             else:
                 continue
 
@@ -885,10 +886,10 @@ class CustomPipelineService:
             try:
                 float(value)
             except ValueError:
-                raise ValueError(f"Variable '{name}' must be a number, got '{value}'")
+                raise ValidationError(f"Variable '{name}' must be a number, got '{value}'")
         elif variable_type == "boolean":
             if value.lower() not in ("true", "false"):
-                raise ValueError(f"Variable '{name}' must be 'true' or 'false', got '{value}'")
+                raise ValidationError(f"Variable '{name}' must be 'true' or 'false', got '{value}'")
         # "string" accepts any value
 
     @staticmethod
@@ -1004,7 +1005,7 @@ class CustomPipelineService:
 
         cred = await SessionCredentialService.get_by_user_id(session, user_id)
         if cred is None or not cred.ssh_private_key:
-            raise ValueError(
+            raise ValidationError(
                 "No SSH private key found for user. Configure session credentials with an SSH key before "
                 "launching a github_repo pipeline."
             )

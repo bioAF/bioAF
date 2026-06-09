@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { statusDotClass } from "@/lib/statusStyles";
 
 interface ServiceHealth {
   name: string;
@@ -45,13 +46,6 @@ export function InfrastructureHealthWidget() {
     return () => clearInterval(interval);
   }, []);
 
-  const statusColor: Record<string, string> = {
-    healthy: "bg-green-400",
-    degraded: "bg-yellow-400",
-    unhealthy: "bg-red-400",
-    unknown: "bg-gray-400",
-  };
-
   return (
     <div className="bg-white rounded-lg shadow p-5" data-testid="widget-infrastructure-health">
       <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
@@ -82,7 +76,7 @@ export function InfrastructureHealthWidget() {
         <div className="grid grid-cols-2 gap-2">
           {services.map((s) => (
             <div key={s.name} className="flex items-center gap-2 px-2 py-1.5 rounded bg-gray-50">
-              <span className={`w-2 h-2 rounded-full ${statusColor[s.status] || statusColor.unknown}`} />
+              <span className={`w-2 h-2 rounded-full ${statusDotClass("serviceHealth", s.status)}`} />
               <span className="text-sm text-gray-700 truncate">{SERVICE_LABELS[s.name] || s.name}</span>
             </div>
           ))}

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import NotFoundError
 from app.models.file import File
 from app.models.pipeline_run import PipelineRun
 from app.models.qc_dashboard import QCDashboard
@@ -37,7 +38,7 @@ class QCDashboardService:
         )
         run = result.scalar_one_or_none()
         if not run:
-            raise ValueError(f"Pipeline run {pipeline_run_id} not found")
+            raise NotFoundError(f"Pipeline run {pipeline_run_id} not found")
 
         dashboard = QCDashboard(
             organization_id=org_id,

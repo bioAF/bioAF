@@ -25,6 +25,8 @@ from urllib.parse import unquote, urljoin, urlparse
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import ValidationError
+
 logger = logging.getLogger("bioaf.lab_document_upload")
 
 PREFIX = "lab-knowledge/documents"
@@ -43,21 +45,21 @@ def _assert_public_url(url: str) -> None:
     Rejects anything that is not http(s) or whose host resolves to a non-public
     address: loopback, private ranges, link-local (which includes the cloud
     instance metadata endpoint 169.254.169.254 / fd00:ec2::254), reserved,
-    multicast, or unspecified. Raises ValueError on any violation. Called for the
-    initial URL and again for every redirect target so an external host cannot
+    multicast, or unspecified. Raises ValidationError on any violation. Called for
+    the initial URL and again for every redirect target so an external host cannot
     bounce the fetch onto an internal address.
     """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
-        raise ValueError("URL must start with http:// or https://")
+        raise ValidationError("URL must start with http:// or https://")
     host = parsed.hostname
     if not host:
-        raise ValueError("URL has no host")
+        raise ValidationError("URL has no host")
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     try:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
     except socket.gaierror:
-        raise ValueError("Could not resolve URL host")
+        raise ValidationError("Could not resolve URL host")
     for info in infos:
         ip = ipaddress.ip_address(info[4][0])
         if (
@@ -68,7 +70,7 @@ def _assert_public_url(url: str) -> None:
             or ip.is_multicast
             or ip.is_unspecified
         ):
-            raise ValueError("URL host is not allowed (resolves to a non-public address)")
+            raise ValidationError("URL host is not allowed (resolves to a non-public address)")
 
 
 # token -> pending upload metadata. In-memory, consistent with UploadService;
@@ -96,7 +98,7 @@ class LabDocumentUploadService:
         result = await session.execute(text("SELECT value FROM platform_config WHERE key = 'working_bucket_name'"))
         name = result.scalar_one_or_none()
         if not name or name == "null":
-            raise ValueError("Working bucket not configured. Deploy storage infrastructure first.")
+            raise ValidationError("Working bucket not configured. Deploy storage infrastructure first.")
         return name
 
     @staticmethod
@@ -161,7 +163,7 @@ class LabDocumentUploadService:
     async def _fetch_url(url: str) -> tuple[bytes, str, str | None]:
         """Download a document from a public http(s) URL.
 
-        Returns ``(content, file_name, mime_type)``. Raises ValueError for a
+        Returns ``(content, file_name, mime_type)``. Raises ValidationError for a
         non-http(s) scheme, a host that resolves to a non-public address (SSRF
         guard), a too-large body, or any transport/HTTP error. Redirects are
         followed manually so every hop is re-validated. The file name is derived
@@ -181,19 +183,19 @@ class LabDocumentUploadService:
                         if response.is_redirect:
                             location = response.headers.get("location")
                             if not location:
-                                raise ValueError("Redirect without a location")
+                                raise ValidationError("Redirect without a location")
                             current = urljoin(current, location)
                             continue
                         response.raise_for_status()
                         declared = response.headers.get("content-length")
                         if declared is not None and int(declared) > MAX_URL_DOWNLOAD_BYTES:
-                            raise ValueError("File at URL exceeds the 100 MB import limit")
+                            raise ValidationError("File at URL exceeds the 100 MB import limit")
                         chunks: list[bytes] = []
                         total = 0
                         async for chunk in response.aiter_bytes():
                             total += len(chunk)
                             if total > MAX_URL_DOWNLOAD_BYTES:
-                                raise ValueError("File at URL exceeds the 100 MB import limit")
+                                raise ValidationError("File at URL exceeds the 100 MB import limit")
                             chunks.append(chunk)
                         content = b"".join(chunks)
                         mime_type = (response.headers.get("content-type") or "").split(";")[0].strip() or None
@@ -201,15 +203,15 @@ class LabDocumentUploadService:
                             urlparse(current), response.headers.get("content-disposition")
                         )
                         if not content:
-                            raise ValueError("The URL returned an empty file")
+                            raise ValidationError("The URL returned an empty file")
                         return content, file_name, mime_type
-                raise ValueError("Too many redirects")
-        except ValueError:
+                raise ValidationError("Too many redirects")
+        except ValidationError:
             raise
         except httpx.HTTPStatusError as exc:
-            raise ValueError(f"Could not fetch URL (HTTP {exc.response.status_code})")
+            raise ValidationError(f"Could not fetch URL (HTTP {exc.response.status_code})")
         except httpx.HTTPError as exc:
-            raise ValueError(f"Could not fetch URL: {exc}")
+            raise ValidationError(f"Could not fetch URL: {exc}")
 
     @staticmethod
     async def _upload_bytes(bucket_name: str, gcs_path: str, content: bytes, content_type: str | None) -> None:
@@ -396,7 +398,7 @@ class LabDocumentUploadService:
     def _peek(token: str, org_id: int) -> dict:
         pending = _pending.get(token)
         if not pending or pending["org_id"] != org_id:
-            raise ValueError("Invalid or expired upload_token")
+            raise ValidationError("Invalid or expired upload_token")
         return pending
 
     @staticmethod
@@ -410,7 +412,7 @@ class LabDocumentUploadService:
         try:
             metadata = await get_storage_adapter().get_object_metadata(pending["gcs_uri"])
         except StorageObjectNotFound:
-            raise ValueError("Uploaded object not found in storage")
+            raise ValidationError("Uploaded object not found in storage")
         return {
             "file_name": pending["file_name"],
             "mime_type": pending["mime_type"],

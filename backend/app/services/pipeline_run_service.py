@@ -1,12 +1,12 @@
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.exceptions import ConflictError, NotFoundError, SamplesMissingFilesError, ValidationError
 from app.models.experiment import Experiment
-from app.models.file import File
 from app.models.pipeline_run import PipelineRun, PipelineRunSample
 from app.models.pipeline_run_input_file import PipelineRunInputFile
 from app.models.sample import Sample
@@ -25,21 +25,43 @@ logger = logging.getLogger("bioaf.pipeline_runs")
 
 class PipelineRunService:
     @staticmethod
-    def _attach_experiment_files(samples: list, experiment_files: list) -> None:
-        """Attach experiment-level FASTQ files to samples with no linked files.
+    def _requires_per_sample_fastq(pipeline) -> bool:
+        """Whether this pipeline consumes per-sample FASTQ input.
 
-        When the sample_files junction table is empty, fall back to
-        experiment-level files so the sample sheet has FASTQ paths.
-        Only attaches files with file_type 'fastq' or .fastq.gz extension.
+        nf-core sequencing pipelines (demo/rnaseq/scrnaseq/...) read each
+        sample's reads from the sample sheet, so every selected sample must have
+        linked files. Builtin no-input pipelines (e.g. bioaf-system-test) and
+        custom uploads do not, and fetch-style pipelines (fetchngs) pull their
+        own data from accessions rather than per-sample files.
         """
-        fastq_files = [
+        key = (getattr(pipeline, "pipeline_key", "") or "").lower()
+        if "fetchngs" in key:
+            return False
+        if "rnaseq" in key or "scrnaseq" in key:
+            return True
+        return (getattr(pipeline, "source_type", "") or "").lower() == "nf-core"
+
+    # File source types that are pipeline/notebook DERIVATIVES, not raw inputs.
+    # By default these are excluded from a run's inputs so a previous run's
+    # outputs are never fed back in as inputs (which compounds every run).
+    DERIVED_SOURCE_TYPES: frozenset[str] = frozenset({"pipeline_output", "notebook_output"})
+
+    @staticmethod
+    def _input_eligible_files(files: list, include_derived: bool) -> list:
+        """Filter a sample's files to those eligible as pipeline inputs.
+
+        Raw uploads are always eligible. Derived files (a prior pipeline or
+        notebook run's outputs) are excluded unless the caller opts in via
+        ``include_derived_inputs`` on the launch request.
+        """
+        files = files or []
+        if include_derived:
+            return list(files)
+        return [
             f
-            for f in experiment_files
-            if getattr(f, "file_type", "") == "fastq" or (getattr(f, "filename", "") or "").endswith(".fastq.gz")
+            for f in files
+            if (getattr(f, "source_type", "") or "upload") not in PipelineRunService.DERIVED_SOURCE_TYPES
         ]
-        for sample in samples:
-            if not sample.files:
-                sample.files = list(fastq_files)
 
     @staticmethod
     async def launch_run(
@@ -52,7 +74,7 @@ class PipelineRunService:
         # 1. Load pipeline from catalog
         pipeline = await PipelineCatalogService.get_pipeline(session, org_id, data.pipeline_key)
         if not pipeline:
-            raise ValueError(f"Pipeline '{data.pipeline_key}' not found or not enabled")
+            raise ValidationError(f"Pipeline '{data.pipeline_key}' not found or not enabled")
 
         # 2. Load experiment
         exp_result = await session.execute(
@@ -63,7 +85,7 @@ class PipelineRunService:
         )
         experiment = exp_result.scalar_one_or_none()
         if not experiment:
-            raise ValueError(f"Experiment {data.experiment_id} not found")
+            raise ValidationError(f"Experiment {data.experiment_id} not found")
 
         # 3. Resolve sample_ids
         if data.sample_ids:
@@ -77,25 +99,43 @@ class PipelineRunService:
             )
             samples = list(sample_result.scalars().all())
             if len(samples) != len(data.sample_ids):
-                raise ValueError("Some sample IDs do not belong to this experiment")
+                raise ValidationError("Some sample IDs do not belong to this experiment")
         else:
             sample_result = await session.execute(
                 select(Sample).where(Sample.experiment_id == data.experiment_id).options(selectinload(Sample.files))
             )
             samples = list(sample_result.scalars().all())
 
-        # 3b. Fall back to experiment-level files when sample_files is empty
-        any_sample_missing_files = any(not s.files for s in samples)
-        if any_sample_missing_files:
-            exp_files_result = await session.execute(select(File).where(File.experiment_id == data.experiment_id))
-            exp_files = list(exp_files_result.scalars().all())
-            if exp_files:
-                PipelineRunService._attach_experiment_files(samples, exp_files)
+        # 3a. Resolve each sample's INPUT-eligible files. Prior pipeline/notebook
+        # outputs are excluded by default so they are never fed back in as inputs
+        # (which compounded the dataset every run); include_derived_inputs opts in.
+        # Stored on a transient attribute the sample-sheet builder reads; it is
+        # not a mapped column, so it never touches the ORM/DB.
+        for s in samples:
+            s._input_files = PipelineRunService._input_eligible_files(s.files, data.include_derived_inputs)
+
+        # 3b. A FASTQ-consuming pipeline needs every selected sample to have its
+        # own input files. Reject (or, if asked, drop) samples with none. The old
+        # behaviour back-filled file-less samples with the WHOLE experiment's
+        # files, which cross-contaminated one sample's run with another's reads.
+        if PipelineRunService._requires_per_sample_fastq(pipeline):
+            missing = [s for s in samples if not s._input_files]
+            if missing:
+                if not data.drop_samples_without_files:
+                    raise SamplesMissingFilesError(
+                        "Some selected samples have no linked input files",
+                        details={
+                            "samples_without_files": [{"id": s.id, "external_id": s.external_id} for s in missing]
+                        },
+                    )
+                samples = [s for s in samples if s._input_files]
+                if not samples:
+                    raise ValidationError("All selected samples lack input files; nothing to run")
 
         # 4. Check quota
         allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=2.0)
         if not allowed:
-            raise ValueError(f"Quota exceeded: {message}")
+            raise ConflictError(f"Quota exceeded: {message}")
 
         # 5. Validate controlled vocabulary fields
         await VocabularyValidator.validate_pipeline_run_fields(
@@ -138,10 +178,12 @@ class PipelineRunService:
             session.add(link)
         await session.flush()
 
-        # 7b. Record input files in junction table (ADR-038)
+        # 7b. Record input files in junction table (ADR-038). Use the
+        # input-eligible set so the recorded provenance matches what actually
+        # fed the run (raw inputs, not re-ingested prior outputs).
         seen_file_ids: set[int] = set()
         for sample in samples:
-            for f in sample.files or []:
+            for f in sample._input_files or []:
                 if f.id not in seen_file_ids:
                     session.add(PipelineRunInputFile(pipeline_run_id=run.id, file_id=f.id))
                     seen_file_ids.add(f.id)
@@ -400,7 +442,7 @@ class PipelineRunService:
     async def cancel_run(session: AsyncSession, run_id: int, user_id: int) -> PipelineRun:
         run = await PipelineRunService.get_run_model(session, run_id)
         if not run:
-            raise ValueError("Run not found")
+            raise NotFoundError("Run not found")
 
         old_status = run.status
 
@@ -531,11 +573,22 @@ class PipelineRunService:
         return {"runs": runs, "parameter_diffs": diffs}
 
     @staticmethod
-    async def reproduce_run(session: AsyncSession, original_run_id: int, user_id: int) -> PipelineRun:
-        """Re-launch with identical parameters."""
+    async def reproduce_run(
+        session: AsyncSession,
+        original_run_id: int,
+        user_id: int,
+        drop_samples_without_files: bool = False,
+    ) -> PipelineRun:
+        """Re-launch with identical parameters.
+
+        Reproduce replays the original's samples through ``launch_run``, so it is
+        subject to the same per-sample file requirement: a sample that has since
+        lost its files raises SamplesMissingFilesError unless the caller opts to
+        drop the offending samples.
+        """
         original = await PipelineRunService.get_run_model(session, original_run_id)
         if not original:
-            raise ValueError("Original run not found")
+            raise NotFoundError("Original run not found")
 
         # Reconstruct launch request from original
         sample_ids = [s.id for s in original.samples] if original.samples else None
@@ -549,6 +602,7 @@ class PipelineRunService:
             sample_ids=sample_ids,
             parameters=original.parameters_json or {},
             resume_from_run_id=original_run_id,
+            drop_samples_without_files=drop_samples_without_files,
         )
 
         new_run = await PipelineRunService.launch_run(
@@ -570,18 +624,84 @@ class PipelineRunService:
         return new_run
 
     @staticmethod
+    async def _resolve_input_files(session: AsyncSession, run) -> list[dict]:
+        """Resolve a run's input files to human-readable provenance records.
+
+        The provenance tab previously showed bare file IDs, which are
+        meaningless to a user. Resolve each input file to its project,
+        experiment, sample, and filename. Prefers the pipeline_run_input_files
+        junction (ADR-038); falls back to the legacy input_files_json id list.
+        """
+        file_ids = [
+            row[0]
+            for row in (
+                await session.execute(
+                    text("SELECT file_id FROM pipeline_run_input_files WHERE pipeline_run_id = :rid"),
+                    {"rid": run.id},
+                )
+            ).fetchall()
+        ]
+        if not file_ids:
+            file_ids = list(run.input_files_json or [])
+        if not file_ids:
+            return []
+
+        rows = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT f.id AS file_id, f.filename, "
+                        "       e.id AS experiment_id, e.name AS experiment_name, "
+                        "       p.id AS project_id, p.name AS project_name, "
+                        "       s.id AS sample_id, s.external_id AS sample_external_id "
+                        "FROM files f "
+                        "LEFT JOIN experiments e ON e.id = f.experiment_id "
+                        "LEFT JOIN projects p ON p.id = COALESCE(f.project_id, e.project_id) "
+                        "LEFT JOIN sample_files sf ON sf.file_id = f.id "
+                        "LEFT JOIN samples s ON s.id = sf.sample_id "
+                        "WHERE f.id = ANY(:ids)"
+                    ).bindparams(ids=file_ids)
+                )
+            )
+            .mappings()
+            .all()
+        )
+
+        # One record per file; a file may link to several samples.
+        by_file: dict[int, dict] = {}
+        for r in rows:
+            rec = by_file.get(r["file_id"])
+            if rec is None:
+                rec = {
+                    "file_id": r["file_id"],
+                    "filename": r["filename"],
+                    "project": {"id": r["project_id"], "name": r["project_name"]} if r["project_id"] else None,
+                    "experiment": {"id": r["experiment_id"], "name": r["experiment_name"]}
+                    if r["experiment_id"]
+                    else None,
+                    "samples": [],
+                }
+                by_file[r["file_id"]] = rec
+            if r["sample_id"] and not any(s["id"] == r["sample_id"] for s in rec["samples"]):
+                rec["samples"].append({"id": r["sample_id"], "external_id": r["sample_external_id"]})
+
+        # Preserve the input id ordering; include any ids that resolved to no row.
+        ordered = [by_file[fid] for fid in file_ids if fid in by_file]
+        return ordered
+
+    @staticmethod
     async def export_provenance(session: AsyncSession, run_id: int) -> dict:
         """Export complete provenance for a run."""
         run = await PipelineRunService.get_run_model(session, run_id)
         if not run:
-            raise ValueError("Run not found")
+            raise NotFoundError("Run not found")
 
         return {
             "run_id": run.id,
             "pipeline_name": run.pipeline_name,
             "pipeline_version": run.pipeline_version,
             "parameters": run.parameters_json,
-            "input_files": run.input_files_json,
+            "input_files": await PipelineRunService._resolve_input_files(session, run),
             "output_files": run.output_files_json,
             "container_versions": run.container_versions_json,
             "experiment": {

@@ -9,6 +9,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.exceptions import ValidationError
 from app.models.notification import SlackChannelMapping, SlackInstallation
 from app.models.organization import Organization
 from app.models.user import User
@@ -47,7 +48,7 @@ class SlackOAuthService:
                 algorithms=[settings.jwt_algorithm],
             )
         except jwt.PyJWTError as e:
-            raise ValueError(f"Invalid state token: {e}") from e
+            raise ValidationError(f"Invalid state token: {e}") from e
 
     @staticmethod
     async def exchange_code(
@@ -69,7 +70,7 @@ class SlackOAuthService:
         if not data.get("ok"):
             error = data.get("error", "unknown_error")
             logger.error("Slack token exchange failed: %s", error)
-            raise ValueError(f"Slack OAuth error: {error}")
+            raise ValidationError(f"Slack OAuth error: {error}")
         return data
 
     @staticmethod

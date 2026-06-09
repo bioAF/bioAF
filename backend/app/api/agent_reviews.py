@@ -34,11 +34,7 @@ from app.services.agent_review_job_service import (
     JobAlreadyRunning,
     NoActiveProvider,
 )
-from app.services.agent_review_prompt_builder import (
-    EmptySectionSelection,
-    assemble_prompt,
-)
-from app.services.agent_review_prompt_service import DuplicatePromptName
+from app.services.agent_review_prompt_builder import assemble_prompt
 from app.services.agent_review_section_catalog import (
     SECTIONS,
     default_sub_item_ids,
@@ -214,10 +210,6 @@ async def run_review(
                 "existing_agent_review_id": exc.existing_agent_review_id,
             },
         )
-    except EmptySectionSelection as exc:
-        raise HTTPException(400, str(exc))
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
 
     if job.provider == "gemma":
         # Gemma path is dispatched through the pipeline orchestrator.
@@ -270,15 +262,10 @@ async def assemble_prompt_preview(
 ):
     """Render the prompt the section selection would produce, for the
     Display prompt modal. Does not start a job and writes no audit row."""
-    try:
-        text = assemble_prompt(
-            experiment_scope=body.entity_type == "experiment",
-            selected_sub_item_ids=body.selected_sub_item_ids,
-        )
-    except EmptySectionSelection as exc:
-        raise HTTPException(400, str(exc))
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
+    text = assemble_prompt(
+        experiment_scope=body.entity_type == "experiment",
+        selected_sub_item_ids=body.selected_sub_item_ids,
+    )
     return AssemblePromptResponse(body=text)
 
 
@@ -314,19 +301,14 @@ async def create_saved_prompt(
 ):
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
-    try:
-        row = await agent_review_prompt_service.create(
-            session,
-            org_id=org_id,
-            name=body.name,
-            body=body.body,
-            created_by_user_id=user_id,
-        )
-        await session.commit()
-    except DuplicatePromptName as exc:
-        raise HTTPException(409, str(exc))
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
+    row = await agent_review_prompt_service.create(
+        session,
+        org_id=org_id,
+        name=body.name,
+        body=body.body,
+        created_by_user_id=user_id,
+    )
+    await session.commit()
     return await _saved_prompt_payload(session, row)
 
 

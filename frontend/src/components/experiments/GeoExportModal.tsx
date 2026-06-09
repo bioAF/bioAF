@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { statusBadgeClass, statusLabel } from "@/lib/statusStyles";
 import type {
   GeoValidationReport,
   GeoValidationSummary,
@@ -22,20 +23,6 @@ interface GeoExportModalProps {
   userRole: string;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  complete: "bg-green-500",
-  populated_unvalidated: "bg-yellow-500",
-  missing_required: "bg-red-500",
-  missing_recommended: "bg-gray-400",
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  complete: "Complete",
-  populated_unvalidated: "Unvalidated",
-  missing_required: "Missing (Required)",
-  missing_recommended: "Missing (Recommended)",
-};
-
 function ValidationBar({ summary }: { summary: GeoValidationSummary }) {
   const total = summary.total_fields || 1;
   const segments = [
@@ -52,9 +39,9 @@ function ValidationBar({ summary }: { summary: GeoValidationSummary }) {
           seg.count > 0 ? (
             <div
               key={seg.key}
-              className={`${STATUS_COLORS[seg.key]}`}
+              className={`${statusBadgeClass("geoValidation", seg.key)}`}
               style={{ width: `${(seg.count / total) * 100}%` }}
-              title={`${STATUS_LABELS[seg.key]}: ${seg.count}`}
+              title={`${statusLabel("geoValidation", seg.key)}: ${seg.count}`}
             />
           ) : null,
         )}
@@ -62,8 +49,8 @@ function ValidationBar({ summary }: { summary: GeoValidationSummary }) {
       <div className="flex flex-wrap gap-3 text-xs">
         {segments.map((seg) => (
           <div key={seg.key} className="flex items-center gap-1">
-            <span className={`inline-block w-3 h-3 rounded ${STATUS_COLORS[seg.key]}`} />
-            <span>{STATUS_LABELS[seg.key]}: {seg.count}</span>
+            <span className={`inline-block w-3 h-3 rounded ${statusBadgeClass("geoValidation", seg.key)}`} />
+            <span>{statusLabel("geoValidation", seg.key)}: {seg.count}</span>
           </div>
         ))}
       </div>

@@ -176,10 +176,7 @@ async def oauth_callback(
 
     client_id, client_secret = await _get_slack_credentials(session, org_id)
 
-    try:
-        token_data = await SlackOAuthService.exchange_code(code, client_id, client_secret)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    token_data = await SlackOAuthService.exchange_code(code, client_id, client_secret)
 
     await SlackOAuthService.save_installation(session, org_id, user_id, token_data)
     await session.commit()

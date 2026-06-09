@@ -6,7 +6,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { isAuthenticated } from "@/lib/auth";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import type {
   PipelineCatalog,
   Experiment,
@@ -107,7 +107,7 @@ export default function PipelineLauncherPage() {
     } catch {}
   }
 
-  async function handleLaunch() {
+  async function handleLaunch(dropSamplesWithoutFiles = false) {
     if (!selectedExperimentId || !pipeline) return;
     setLaunching(true);
     try {
@@ -116,10 +116,36 @@ export default function PipelineLauncherPage() {
         experiment_id: selectedExperimentId,
         sample_ids: selectedSampleIds.length > 0 ? selectedSampleIds : null,
         parameters: userParams,
+        drop_samples_without_files: dropSamplesWithoutFiles,
       };
       const run = await api.post<PipelineRun>("/api/pipeline-runs", request);
       router.push(`/pipelines/runs/${run.id}`);
     } catch (err) {
+      // The pipeline needs per-sample input files; some selected samples have
+      // none. Offer to drop them and run with the rest instead of failing.
+      if (
+        err instanceof ApiError &&
+        err.code === "samples_missing_files" &&
+        !dropSamplesWithoutFiles
+      ) {
+        const offending =
+          (err.details?.samples_without_files as
+            | { id: number; external_id: string | null }[]
+            | undefined) ?? [];
+        const names = offending
+          .map((s) => s.external_id || `sample ${s.id}`)
+          .join(", ");
+        setLaunching(false);
+        if (
+          window.confirm(
+            `These samples have no linked input files and cannot run: ${names}.\n\n` +
+              `Drop them and launch with the remaining samples?`,
+          )
+        ) {
+          await handleLaunch(true);
+        }
+        return;
+      }
       alert(err instanceof Error ? err.message : "Launch failed");
       setLaunching(false);
     }
@@ -303,7 +329,7 @@ export default function PipelineLauncherPage() {
               </dl>
               <div className="flex justify-between">
                 <button onClick={() => setStep(3)} className="border px-6 py-2 rounded-md text-sm">Back</button>
-                <button onClick={handleLaunch} disabled={launching} className="bg-green-600 text-white px-8 py-2 rounded-md text-sm hover:bg-green-700 disabled:opacity-50">
+                <button onClick={() => handleLaunch()} disabled={launching} className="bg-green-600 text-white px-8 py-2 rounded-md text-sm hover:bg-green-700 disabled:opacity-50">
                   {launching ? "Launching..." : "Launch Pipeline"}
                 </button>
               </div>

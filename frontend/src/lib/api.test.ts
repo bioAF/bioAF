@@ -1,4 +1,4 @@
-import { extractErrorMessage } from "./api";
+import { extractErrorMessage, api, ApiError } from "./api";
 
 describe("extractErrorMessage", () => {
   test("returns a plain string detail unchanged", () => {
@@ -37,5 +37,34 @@ describe("extractErrorMessage", () => {
 
   test("falls back to a generic message for an opaque object", () => {
     expect(extractErrorMessage({ detail: { foo: 1 } })).toBe("Request failed");
+  });
+});
+
+describe("ApiError carries the structured domain-error envelope", () => {
+  const realFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = realFetch;
+  });
+
+  test("a domain error surfaces code and details to the caller", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        detail: "Some selected samples have no linked input files",
+        code: "samples_missing_files",
+        details: { samples_without_files: [{ id: 9, external_id: "SAMPLE-102" }] },
+      }),
+    }) as unknown as typeof fetch;
+
+    expect.assertions(3);
+    try {
+      await api.post("/api/pipeline-runs", {});
+    } catch (err) {
+      const e = err as ApiError;
+      expect(e).toBeInstanceOf(ApiError);
+      expect(e.code).toBe("samples_missing_files");
+      expect(e.details?.samples_without_files).toEqual([{ id: 9, external_id: "SAMPLE-102" }]);
+    }
   });
 });

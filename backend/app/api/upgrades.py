@@ -1,6 +1,4 @@
-import logging
-
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
@@ -19,8 +17,6 @@ from app.schemas.upgrade import (
     UpdateStatusResponse,
 )
 from app.services.upgrade_service import UpgradeService
-
-logger = logging.getLogger("bioaf.upgrades.api")
 
 router = APIRouter(prefix="/api/upgrades", tags=["upgrades"])
 
@@ -84,17 +80,14 @@ async def execute_upgrade(
     """Trigger an update to a specific version via the host update agent."""
     org_id = current_user["org_id"]
     user_id = int(current_user["sub"])
-    try:
-        upgrade = await UpgradeService.execute_upgrade(session, org_id, body.target_version, user_id)
-        await session.commit()
-        return ExecuteUpgradeResponse(
-            upgrade_id=upgrade.id,
-            status=upgrade.status,
-            from_version=upgrade.from_version,
-            to_version=upgrade.to_version,
-        )
-    except ValueError as e:
-        raise HTTPException(400, detail=str(e))
+    upgrade = await UpgradeService.execute_upgrade(session, org_id, body.target_version, user_id)
+    await session.commit()
+    return ExecuteUpgradeResponse(
+        upgrade_id=upgrade.id,
+        status=upgrade.status,
+        from_version=upgrade.from_version,
+        to_version=upgrade.to_version,
+    )
 
 
 @router.get("/status", response_model=UpdateStatusResponse)
@@ -112,17 +105,13 @@ async def confirm_upgrade(
     session: AsyncSession = Depends(get_session),
 ):
     org_id = current_user["org_id"]
-    try:
-        upgrade = await UpgradeService.confirm_upgrade(session, org_id, upgrade_id)
-        await session.commit()
-        return ConfirmUpgradeResponse(
-            upgrade_id=upgrade.id,
-            status=upgrade.status,
-            message=f"Upgrade to {upgrade.to_version} completed",
-        )
-    except ValueError as e:
-        logger.warning("Upgrade confirm failed for %d: %s", upgrade_id, e)
-        raise HTTPException(400, detail="Failed to confirm upgrade")
+    upgrade = await UpgradeService.confirm_upgrade(session, org_id, upgrade_id)
+    await session.commit()
+    return ConfirmUpgradeResponse(
+        upgrade_id=upgrade.id,
+        status=upgrade.status,
+        message=f"Upgrade to {upgrade.to_version} completed",
+    )
 
 
 @router.post("/{upgrade_id}/rollback", response_model=RollbackResponse)
@@ -133,14 +122,10 @@ async def rollback_upgrade(
 ):
     org_id = current_user["org_id"]
     user_id = int(current_user["sub"])
-    try:
-        upgrade = await UpgradeService.rollback(session, org_id, upgrade_id, user_id)
-        await session.commit()
-        return RollbackResponse(
-            upgrade_id=upgrade.id,
-            status=upgrade.status,
-            message=f"Upgrade to {upgrade.to_version} rolled back",
-        )
-    except ValueError as e:
-        logger.warning("Upgrade rollback failed for %d: %s", upgrade_id, e)
-        raise HTTPException(400, detail="Failed to rollback upgrade")
+    upgrade = await UpgradeService.rollback(session, org_id, upgrade_id, user_id)
+    await session.commit()
+    return RollbackResponse(
+        upgrade_id=upgrade.id,
+        status=upgrade.status,
+        message=f"Upgrade to {upgrade.to_version} rolled back",
+    )

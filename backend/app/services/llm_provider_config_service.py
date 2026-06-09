@@ -15,6 +15,7 @@ from collections.abc import Sequence
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import NotFoundError, ValidationError
 from app.models.llm_provider_config import LlmProviderConfig
 from app.services import audit_service
 
@@ -66,9 +67,9 @@ async def upsert(
     actor_user_id: int,
 ) -> LlmProviderConfig:
     if provider not in SUPPORTED_PROVIDERS:
-        raise ValueError(f"unsupported provider: {provider}")
+        raise ValidationError(f"unsupported provider: {provider}")
     if provider in HOSTED_PROVIDERS and not api_key:
-        raise ValueError(f"provider {provider} requires an api_key")
+        raise ValidationError(f"provider {provider} requires an api_key")
 
     existing = await get_for_provider(session, org_id, provider)
     is_first_save = existing is None
@@ -115,7 +116,7 @@ async def upsert(
 async def set_active(session: AsyncSession, org_id: int, provider: str, actor_user_id: int) -> LlmProviderConfig:
     target = await get_for_provider(session, org_id, provider)
     if target is None:
-        raise ValueError(f"no config row for provider {provider} in org {org_id}")
+        raise NotFoundError(f"no config row for provider {provider} in org {org_id}")
     # Deactivate all rows first to avoid hitting the partial unique index in
     # the same transaction; then activate the chosen row.
     await session.execute(

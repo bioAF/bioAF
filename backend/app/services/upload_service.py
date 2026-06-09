@@ -6,6 +6,7 @@ import uuid
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import ValidationError
 from app.models.file import File
 from app.services.event_bus import event_bus
 from app.services.event_types import DATA_UPLOADED
@@ -79,7 +80,7 @@ class UploadService:
         result = await session.execute(text("SELECT value FROM platform_config WHERE key = 'ingest_bucket_name'"))
         name = result.scalar_one_or_none()
         if not name or name == "null":
-            raise ValueError("Ingest bucket not configured. Deploy storage infrastructure first.")
+            raise ValidationError("Ingest bucket not configured. Deploy storage infrastructure first.")
         return name
 
     @staticmethod
@@ -166,11 +167,11 @@ class UploadService:
         """Complete an upload: verify MD5, create file record, link to experiment/samples."""
         pending = _pending_uploads.pop(upload_id, None)
         if not pending or pending["org_id"] != org_id:
-            raise ValueError("Invalid or expired upload_id")
+            raise ValidationError("Invalid or expired upload_id")
 
         # Verify MD5 if expected
         if pending["expected_md5"] and pending["expected_md5"] != actual_md5:
-            raise ValueError(f"MD5 mismatch: expected {pending['expected_md5']}, got {actual_md5}")
+            raise ValidationError(f"MD5 mismatch: expected {pending['expected_md5']}, got {actual_md5}")
 
         # Determine file type from extension
         filename = pending["filename"]

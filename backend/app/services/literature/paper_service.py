@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy import and_, exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import ValidationError
 from app.models.experiment import Experiment
 from app.models.literature import (
     ALL_PROVENANCES,
@@ -127,7 +128,7 @@ async def create_paper(
     user explicitly adds it.
     """
     if provenance not in ALL_PROVENANCES:
-        raise ValueError(f"invalid provenance: {provenance}")
+        raise ValidationError(f"invalid provenance: {provenance}")
 
     existing = await find_duplicate(session, org_id=org_id, doi=doi, title=title, authors=authors)
     if existing is not None:
@@ -242,7 +243,7 @@ async def update_paper_metadata(
 
     extra = set(fields) - allowed
     if extra:
-        raise ValueError(f"unknown fields: {sorted(extra)}")
+        raise ValidationError(f"unknown fields: {sorted(extra)}")
 
     if not changed_keys:
         return paper

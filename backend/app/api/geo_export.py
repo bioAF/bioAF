@@ -1,6 +1,6 @@
 """GEO export API endpoint."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,52 +30,48 @@ async def export_geo(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    try:
-        if validate_only:
-            report = await GeoExportService.validate(session, experiment_id, org_id, pipeline_run_id, qc_status_filter)
-
-            await log_action(
-                session,
-                user_id=user_id,
-                entity_type="geo_export",
-                entity_id=experiment_id,
-                action="validated",
-                details={
-                    "pipeline_run_id": pipeline_run_id,
-                    "qc_status_filter": qc_status_filter,
-                    "missing_required": report.summary.missing_required,
-                },
-            )
-            await session.commit()
-
-            return report.model_dump()
-
-        zip_bytes, filename = await GeoExportService.export(
-            session, experiment_id, org_id, pipeline_run_id, qc_status_filter
-        )
+    if validate_only:
+        report = await GeoExportService.validate(session, experiment_id, org_id, pipeline_run_id, qc_status_filter)
 
         await log_action(
             session,
             user_id=user_id,
             entity_type="geo_export",
             entity_id=experiment_id,
-            action="exported",
+            action="validated",
             details={
                 "pipeline_run_id": pipeline_run_id,
                 "qc_status_filter": qc_status_filter,
-                "filename": filename,
+                "missing_required": report.summary.missing_required,
             },
         )
         await session.commit()
 
-        return Response(
-            content=zip_bytes,
-            media_type="application/zip",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        )
+        return report.model_dump()
 
-    except ValueError as e:
-        raise HTTPException(404, str(e))
+    zip_bytes, filename = await GeoExportService.export(
+        session, experiment_id, org_id, pipeline_run_id, qc_status_filter
+    )
+
+    await log_action(
+        session,
+        user_id=user_id,
+        entity_type="geo_export",
+        entity_id=experiment_id,
+        action="exported",
+        details={
+            "pipeline_run_id": pipeline_run_id,
+            "qc_status_filter": qc_status_filter,
+            "filename": filename,
+        },
+    )
+    await session.commit()
+
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/api/projects/{project_id}/export/geo")
@@ -96,41 +92,37 @@ async def export_project_geo(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    try:
-        if validate_only:
-            validation = await SuperSeriesExportService.validate_cross_experiment(
-                session, project_id, org_id, exclude_unclaimed=exclude_unclaimed
-            )
-            return validation.to_dict()
-
-        zip_bytes, filename = await SuperSeriesExportService.export(
-            session,
-            project_id,
-            org_id,
-            pipeline_run_ids=pipeline_run_ids,
-            qc_status_filter=qc_status_filter,
-            exclude_unclaimed=exclude_unclaimed,
+    if validate_only:
+        validation = await SuperSeriesExportService.validate_cross_experiment(
+            session, project_id, org_id, exclude_unclaimed=exclude_unclaimed
         )
+        return validation.to_dict()
 
-        await log_action(
-            session,
-            user_id=user_id,
-            entity_type="geo_superseries_export",
-            entity_id=project_id,
-            action="exported",
-            details={
-                "qc_status_filter": qc_status_filter,
-                "exclude_unclaimed": exclude_unclaimed,
-                "filename": filename,
-            },
-        )
-        await session.commit()
+    zip_bytes, filename = await SuperSeriesExportService.export(
+        session,
+        project_id,
+        org_id,
+        pipeline_run_ids=pipeline_run_ids,
+        qc_status_filter=qc_status_filter,
+        exclude_unclaimed=exclude_unclaimed,
+    )
 
-        return Response(
-            content=zip_bytes,
-            media_type="application/zip",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        )
+    await log_action(
+        session,
+        user_id=user_id,
+        entity_type="geo_superseries_export",
+        entity_id=project_id,
+        action="exported",
+        details={
+            "qc_status_filter": qc_status_filter,
+            "exclude_unclaimed": exclude_unclaimed,
+            "filename": filename,
+        },
+    )
+    await session.commit()
 
-    except ValueError as e:
-        raise HTTPException(404, str(e))
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
