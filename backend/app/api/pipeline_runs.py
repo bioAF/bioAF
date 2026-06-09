@@ -194,13 +194,16 @@ async def cancel_run(
 @router.post("/{run_id}/reproduce", response_model=PipelineRunResponse)
 async def reproduce_run(
     run_id: int,
+    drop_samples_without_files: bool = False,
     current_user: dict = require_permission("pipelines", "launch"),
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
     org_id = int(current_user["org_id"])
 
-    new_run = await PipelineRunService.reproduce_run(session, run_id, user_id)
+    new_run = await PipelineRunService.reproduce_run(
+        session, run_id, user_id, drop_samples_without_files=drop_samples_without_files
+    )
     await session.commit()
     new_run = await PipelineRunService.get_run(session, new_run.id, org_id)
     return _run_response(new_run)

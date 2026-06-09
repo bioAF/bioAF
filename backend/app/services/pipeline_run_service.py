@@ -5,9 +5,8 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.exceptions import ConflictError, NotFoundError, ValidationError
+from app.exceptions import ConflictError, NotFoundError, SamplesMissingFilesError, ValidationError
 from app.models.experiment import Experiment
-from app.models.file import File
 from app.models.pipeline_run import PipelineRun, PipelineRunSample
 from app.models.pipeline_run_input_file import PipelineRunInputFile
 from app.models.sample import Sample
@@ -26,21 +25,21 @@ logger = logging.getLogger("bioaf.pipeline_runs")
 
 class PipelineRunService:
     @staticmethod
-    def _attach_experiment_files(samples: list, experiment_files: list) -> None:
-        """Attach experiment-level FASTQ files to samples with no linked files.
+    def _requires_per_sample_fastq(pipeline) -> bool:
+        """Whether this pipeline consumes per-sample FASTQ input.
 
-        When the sample_files junction table is empty, fall back to
-        experiment-level files so the sample sheet has FASTQ paths.
-        Only attaches files with file_type 'fastq' or .fastq.gz extension.
+        nf-core sequencing pipelines (demo/rnaseq/scrnaseq/...) read each
+        sample's reads from the sample sheet, so every selected sample must have
+        linked files. Builtin no-input pipelines (e.g. bioaf-system-test) and
+        custom uploads do not, and fetch-style pipelines (fetchngs) pull their
+        own data from accessions rather than per-sample files.
         """
-        fastq_files = [
-            f
-            for f in experiment_files
-            if getattr(f, "file_type", "") == "fastq" or (getattr(f, "filename", "") or "").endswith(".fastq.gz")
-        ]
-        for sample in samples:
-            if not sample.files:
-                sample.files = list(fastq_files)
+        key = (getattr(pipeline, "pipeline_key", "") or "").lower()
+        if "fetchngs" in key:
+            return False
+        if "rnaseq" in key or "scrnaseq" in key:
+            return True
+        return (getattr(pipeline, "source_type", "") or "").lower() == "nf-core"
 
     @staticmethod
     async def launch_run(
@@ -85,13 +84,27 @@ class PipelineRunService:
             )
             samples = list(sample_result.scalars().all())
 
-        # 3b. Fall back to experiment-level files when sample_files is empty
-        any_sample_missing_files = any(not s.files for s in samples)
-        if any_sample_missing_files:
-            exp_files_result = await session.execute(select(File).where(File.experiment_id == data.experiment_id))
-            exp_files = list(exp_files_result.scalars().all())
-            if exp_files:
-                PipelineRunService._attach_experiment_files(samples, exp_files)
+        # 3b. A FASTQ-consuming pipeline needs every selected sample to have its
+        # own linked files. Reject (or, if asked, drop) samples with none. The
+        # old behaviour back-filled file-less samples with the WHOLE experiment's
+        # files, which cross-contaminated one sample's run with another's reads.
+        if PipelineRunService._requires_per_sample_fastq(pipeline):
+            missing = [s for s in samples if not s.files]
+            if missing:
+                if not data.drop_samples_without_files:
+                    raise SamplesMissingFilesError(
+                        "Some selected samples have no linked input files",
+                        details={
+                            "samples_without_files": [
+                                {"id": s.id, "external_id": s.external_id} for s in missing
+                            ]
+                        },
+                    )
+                samples = [s for s in samples if s.files]
+                if not samples:
+                    raise ValidationError(
+                        "All selected samples lack input files; nothing to run"
+                    )
 
         # 4. Check quota
         allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=2.0)
@@ -532,8 +545,19 @@ class PipelineRunService:
         return {"runs": runs, "parameter_diffs": diffs}
 
     @staticmethod
-    async def reproduce_run(session: AsyncSession, original_run_id: int, user_id: int) -> PipelineRun:
-        """Re-launch with identical parameters."""
+    async def reproduce_run(
+        session: AsyncSession,
+        original_run_id: int,
+        user_id: int,
+        drop_samples_without_files: bool = False,
+    ) -> PipelineRun:
+        """Re-launch with identical parameters.
+
+        Reproduce replays the original's samples through ``launch_run``, so it is
+        subject to the same per-sample file requirement: a sample that has since
+        lost its files raises SamplesMissingFilesError unless the caller opts to
+        drop the offending samples.
+        """
         original = await PipelineRunService.get_run_model(session, original_run_id)
         if not original:
             raise NotFoundError("Original run not found")
@@ -550,6 +574,7 @@ class PipelineRunService:
             sample_ids=sample_ids,
             parameters=original.parameters_json or {},
             resume_from_run_id=original_run_id,
+            drop_samples_without_files=drop_samples_without_files,
         )
 
         new_run = await PipelineRunService.launch_run(

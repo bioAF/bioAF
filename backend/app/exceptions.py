@@ -27,10 +27,19 @@ class DomainError(Exception):
 
     The central handler reads ``status_code`` and ``code`` off the instance
     (which default to the class attributes) to build the HTTP response.
+
+    ``details`` is an optional structured payload merged into the JSON envelope
+    so a client can act on the error programmatically (e.g. the list of samples
+    that blocked a pipeline launch). It defaults to empty for the common case of
+    ``raise SomeError("message")``.
     """
 
     status_code: int = 400
     code: str = "domain_error"
+
+    def __init__(self, message: str = "", *, details: dict | None = None) -> None:
+        super().__init__(message)
+        self.details: dict = details or {}
 
 
 class ValidationError(DomainError):
@@ -38,6 +47,17 @@ class ValidationError(DomainError):
 
     status_code = 400
     code = "validation_error"
+
+
+class SamplesMissingFilesError(ValidationError):
+    """A FASTQ-consuming pipeline was launched with sample(s) that have no
+    linked input files.
+
+    Carries ``details["samples_without_files"]`` so the caller can offer to drop
+    the offending samples and retry with ``drop_samples_without_files=True``.
+    """
+
+    code = "samples_missing_files"
 
 
 class NotFoundError(DomainError):

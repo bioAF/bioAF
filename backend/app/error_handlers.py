@@ -15,10 +15,11 @@ from app.exceptions import DomainError
 
 async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     """Map any :class:`DomainError` to its declared status code and envelope."""
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": str(exc), "code": exc.code},
-    )
+    content: dict = {"detail": str(exc), "code": exc.code}
+    details = getattr(exc, "details", None)
+    if details:
+        content["details"] = details
+    return JSONResponse(status_code=exc.status_code, content=content)
 
 
 def register_error_handlers(app: FastAPI) -> None:

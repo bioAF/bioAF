@@ -52,7 +52,8 @@ async def experiment(session, admin_user):
 
 @pytest_asyncio.fixture
 async def samples(session, experiment):
-    from app.models.sample import Sample
+    from app.models.file import File
+    from app.models.sample import Sample, sample_files
 
     sample_list = []
     for i in range(3):
@@ -63,6 +64,20 @@ async def samples(session, experiment):
             tissue_type="PBMC",
         )
         session.add(s)
+        await session.flush()
+        # nf-core/scrnaseq consumes per-sample FASTQ; give each sample its own
+        # linked reads so the launch passes the file requirement.
+        for read in ("R1", "R2"):
+            f = File(
+                organization_id=experiment.organization_id,
+                experiment_id=experiment.id,
+                gcs_uri=f"gs://bucket/SAMPLE_{i + 1}_{read}_001.fastq.gz",
+                filename=f"SAMPLE_{i + 1}_{read}_001.fastq.gz",
+                file_type="fastq",
+            )
+            session.add(f)
+            await session.flush()
+            await session.execute(sample_files.insert().values(sample_id=s.id, file_id=f.id))
         sample_list.append(s)
     await session.flush()
     await session.commit()

@@ -13,6 +13,7 @@ from app.exceptions import (
     ConflictError,
     NotFoundError,
     PermissionDeniedError,
+    SamplesMissingFilesError,
     StateError,
     ValidationError,
 )
@@ -41,6 +42,13 @@ def _client() -> TestClient:
     @app.get("/forbidden")
     def _forbidden():
         raise PermissionDeniedError("nope")
+
+    @app.get("/missingfiles")
+    def _missingfiles():
+        raise SamplesMissingFilesError(
+            "Some selected samples have no linked input files",
+            details={"samples_without_files": [{"id": 2, "external_id": "SAMPLE-102"}]},
+        )
 
     return TestClient(app, raise_server_exceptions=False)
 
@@ -76,3 +84,19 @@ def test_permission_denied_maps_to_403():
     r = _client().get("/forbidden")
     assert r.status_code == 403
     assert r.json()["code"] == "permission_denied"
+
+
+def test_samples_missing_files_carries_structured_details():
+    r = _client().get("/missingfiles")
+    assert r.status_code == 400
+    body = r.json()
+    assert body["code"] == "samples_missing_files"
+    # the structured payload the frontend reads to offer "drop and proceed"
+    offending = body["details"]["samples_without_files"]
+    assert offending == [{"id": 2, "external_id": "SAMPLE-102"}]
+
+
+def test_plain_domain_error_omits_details_key():
+    """Errors raised without details must not grow an empty details key."""
+    r = _client().get("/validation")
+    assert "details" not in r.json()

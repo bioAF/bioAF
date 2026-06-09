@@ -59,6 +59,10 @@ class PipelineRunLaunchRequest(BaseModel):
     resume_from_run_id: int | None = None
     reference_genome: str | None = None
     alignment_algorithm: str | None = None
+    # When a FASTQ-consuming pipeline has selected samples that lack linked input
+    # files, the launch is rejected with SamplesMissingFilesError. Set this to
+    # drop those samples and run with the rest instead.
+    drop_samples_without_files: bool = False
 
 
 class PipelineRunResponse(BaseModel):
