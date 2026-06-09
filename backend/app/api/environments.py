@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.api.dependencies import require_permission
+from app.exceptions import DomainError
 from app.schemas.environment import (
     BuildLogsResponse,
     EnvironmentCreateRequest,
@@ -105,21 +106,18 @@ async def create_environment(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    try:
-        env = await EnvironmentService.create_environment(
-            session,
-            org_id,
-            user_id,
-            name=data.name,
-            description=data.description,
-            visibility=data.visibility,
-            environment_type=data.environment_type,
-        )
-        await session.commit()
-        # Re-fetch to load relationships
-        env = await EnvironmentService.get_environment(session, org_id, env.id)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    env = await EnvironmentService.create_environment(
+        session,
+        org_id,
+        user_id,
+        name=data.name,
+        description=data.description,
+        visibility=data.visibility,
+        environment_type=data.environment_type,
+    )
+    await session.commit()
+    # Re-fetch to load relationships
+    env = await EnvironmentService.get_environment(session, org_id, env.id)
 
     return _env_response(env)
 
@@ -176,19 +174,16 @@ async def update_environment(
 ):
     org_id = int(current_user["org_id"])
 
-    try:
-        env = await EnvironmentService.update_environment(
-            session,
-            org_id,
-            environment_id,
-            name=data.name,
-            description=data.description,
-            visibility=data.visibility,
-        )
-        await session.commit()
-        env = await EnvironmentService.get_environment(session, org_id, env.id)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    env = await EnvironmentService.update_environment(
+        session,
+        org_id,
+        environment_id,
+        name=data.name,
+        description=data.description,
+        visibility=data.visibility,
+    )
+    await session.commit()
+    env = await EnvironmentService.get_environment(session, org_id, env.id)
 
     return _env_response(env)
 
@@ -202,11 +197,8 @@ async def delete_environment(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    try:
-        await EnvironmentService.delete_environment(session, org_id, user_id, environment_id)
-        await session.commit()
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    await EnvironmentService.delete_environment(session, org_id, user_id, environment_id)
+    await session.commit()
 
 
 # --- Version endpoints ---
@@ -222,18 +214,15 @@ async def create_version(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    try:
-        version = await EnvironmentService.create_version(
-            session,
-            org_id,
-            user_id,
-            environment_id,
-            definition_format=data.definition_format,
-            definition_content=data.definition_content,
-        )
-        await session.commit()
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    version = await EnvironmentService.create_version(
+        session,
+        org_id,
+        user_id,
+        environment_id,
+        definition_format=data.definition_format,
+        definition_content=data.definition_content,
+    )
+    await session.commit()
 
     # Re-fetch to load relationships
     version = await EnvironmentService.get_version(session, org_id, environment_id, version.id)
@@ -255,8 +244,10 @@ async def trigger_build(
     try:
         await EnvironmentBuildService.build_version(session, org_id, user_id, environment_id, version_id)
         await session.commit()
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    except DomainError:
+        # Let the central handler map domain errors (e.g. 404/409/400)
+        # instead of swallowing them into the generic 500 below.
+        raise
     except HTTPException:
         raise
     except Exception as e:
@@ -324,11 +315,8 @@ async def rebuild_version(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    try:
-        rebuild = await EnvironmentService.rebuild_version(session, org_id, user_id, environment_id, version_id)
-        await session.commit()
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    rebuild = await EnvironmentService.rebuild_version(session, org_id, user_id, environment_id, version_id)
+    await session.commit()
 
     rebuild = await EnvironmentService.get_version(session, org_id, environment_id, rebuild.id)
     return _version_response(rebuild)

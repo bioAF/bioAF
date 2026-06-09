@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select, text
 
+from app.exceptions import StateError
 from app.models.component import TerraformRun
 from app.services import infra_update_service
 from app.platform.platform_config_service import PlatformConfigService
@@ -364,12 +365,12 @@ async def test_apply_noop_when_no_additive_targets(session, admin_user, monkeypa
 
 @pytest.mark.asyncio
 async def test_check_requires_terraform_initialized(session, admin_user):
-    with pytest.raises(ValueError):
+    with pytest.raises(StateError):
         await infra_update_service.check_for_updates(session, admin_user.id)
 
 
 @pytest.mark.asyncio
 async def test_check_requires_something_deployed(session, admin_user):
     await _seed(session, terraform_initialized="true")
-    with pytest.raises(ValueError):
+    with pytest.raises(StateError):
         await infra_update_service.check_for_updates(session, admin_user.id)

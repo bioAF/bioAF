@@ -11,6 +11,8 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.exceptions import ValidationError
+
 from app.models.experiment import Experiment
 from app.models.file import File
 from app.models.lab_document import LabDocument, LabDocumentVersion
@@ -107,14 +109,14 @@ async def test_create_scan_job_accepts_experiment(session, admin_user):
 async def test_create_scan_job_rejects_topic(session, admin_user):
     # AC-D01: topic is no longer a valid NEW scan source.
     org_id, uid = admin_user.organization_id, admin_user.id
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError):
         await scan_svc.create_scan_job(session, org_id=org_id, user_id=uid, scan_type="topic", scan_input="x")
 
 
 @pytest.mark.asyncio
 async def test_create_scan_job_rejects_non_numeric_experiment(session, admin_user):
     org_id, uid = admin_user.organization_id, admin_user.id
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError):
         await scan_svc.create_scan_job(session, org_id=org_id, user_id=uid, scan_type="experiment", scan_input="abc")
 
 
@@ -126,7 +128,7 @@ async def test_create_scan_job_validates_document_input(session, admin_user):
         job = await scan_svc.create_scan_job(session, org_id=org_id, user_id=uid, scan_type="document", scan_input=good)
         assert job.scan_type == "document"
     for bad in ("bogus:7", "file:abc", "file:", "", None):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValidationError):
             await scan_svc.create_scan_job(session, org_id=org_id, user_id=uid, scan_type="document", scan_input=bad)
 
 

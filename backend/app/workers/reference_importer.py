@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from typing import IO, Callable, Iterable, Literal, Protocol, cast
 from urllib.parse import urlparse
 
+from app.exceptions import ValidationError
+
 logger = logging.getLogger("bioaf.reference_importer")
 
 # Retry policy for transient mid-stream network failures (e.g., a public CDN
@@ -203,7 +205,7 @@ def _parse_md5_file(body: bytes) -> str:
         if m:
             return m.group(1).lower()
         break
-    raise ValueError("Could not parse md5 file")
+    raise ValidationError("Could not parse md5 file")
 
 
 class Md5MismatchError(Exception):
@@ -482,7 +484,7 @@ class ReferenceImporter:
                         blob.upload_from_file(src, content_type="application/octet-stream", size=member.size)
                         files_written.append((member.name, blob, member.size))
         else:
-            raise ValueError(f"Unsupported extract_mode: {cfg.extract_mode!r}")
+            raise ValidationError(f"Unsupported extract_mode: {cfg.extract_mode!r}")
 
         return files_written
 

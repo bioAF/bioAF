@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import async_session_factory, get_session
+from app.exceptions import DomainError
 from app.services.audit_service import log_action
 from app.services.notebook_image_service import build_notebook_image, cancel_build
 from app.services import infra_update_service
@@ -705,7 +706,11 @@ async def check_infra_updates_endpoint(
     user_id = int(current_user["sub"])
     try:
         result = await infra_update_service.check_for_updates(session, user_id)
-    except ValueError as exc:
+    except (DomainError, ValueError) as exc:
+        # DomainError comes from infra_update_service (e.g. not-initialized,
+        # nothing-deployed, plan-failed); the bare ValueError still guards the
+        # "Another Terraform operation is in progress" raised deeper in
+        # TerraformExecutor, which is not part of this migration.
         msg = str(exc)
         if msg in ("Terraform has not been initialized", "No infrastructure is deployed"):
             await session.rollback()

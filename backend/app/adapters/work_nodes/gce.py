@@ -19,6 +19,7 @@ from app.adapters.models import (
     VmStatus,
     to_service_state,
 )
+from app.exceptions import ValidationError
 from app.platform.credential_injector import load_gcp_credentials
 
 logger = logging.getLogger("bioaf.adapters.work_nodes.gce")
@@ -409,7 +410,7 @@ class GCEWorkNodeProvider(WorkNodeProvider):
         image_uri = vm_spec.get("image_uri", "")
 
         if not image_uri:
-            raise ValueError("No image_uri provided for work node")
+            raise ValidationError("No image_uri provided for work node")
 
         instance_name = f"bioaf-worknode-{session_id}"
 
@@ -438,7 +439,7 @@ class GCEWorkNodeProvider(WorkNodeProvider):
         # consulted here.
         sa_email = vm_spec.get("service_account_email") or cfg.get("notebook_runner_sa_email", "")
         if not sa_email:
-            raise ValueError(
+            raise ValidationError(
                 "No service account configured for work node -- set notebook_runner_sa_email in admin settings"
             )
 
@@ -525,7 +526,7 @@ class GCEWorkNodeProvider(WorkNodeProvider):
                 raise
         else:
             # All zones exhausted -- for loop completed without break
-            raise ValueError(
+            raise ValidationError(
                 f"GCP resources unavailable: no {machine_type} capacity in any {region} zone. "
                 "Try again later or choose a different machine type."
             )

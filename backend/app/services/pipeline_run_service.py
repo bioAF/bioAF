@@ -5,6 +5,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models.experiment import Experiment
 from app.models.file import File
 from app.models.pipeline_run import PipelineRun, PipelineRunSample
@@ -52,7 +53,7 @@ class PipelineRunService:
         # 1. Load pipeline from catalog
         pipeline = await PipelineCatalogService.get_pipeline(session, org_id, data.pipeline_key)
         if not pipeline:
-            raise ValueError(f"Pipeline '{data.pipeline_key}' not found or not enabled")
+            raise ValidationError(f"Pipeline '{data.pipeline_key}' not found or not enabled")
 
         # 2. Load experiment
         exp_result = await session.execute(
@@ -63,7 +64,7 @@ class PipelineRunService:
         )
         experiment = exp_result.scalar_one_or_none()
         if not experiment:
-            raise ValueError(f"Experiment {data.experiment_id} not found")
+            raise ValidationError(f"Experiment {data.experiment_id} not found")
 
         # 3. Resolve sample_ids
         if data.sample_ids:
@@ -77,7 +78,7 @@ class PipelineRunService:
             )
             samples = list(sample_result.scalars().all())
             if len(samples) != len(data.sample_ids):
-                raise ValueError("Some sample IDs do not belong to this experiment")
+                raise ValidationError("Some sample IDs do not belong to this experiment")
         else:
             sample_result = await session.execute(
                 select(Sample).where(Sample.experiment_id == data.experiment_id).options(selectinload(Sample.files))
@@ -95,7 +96,7 @@ class PipelineRunService:
         # 4. Check quota
         allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=2.0)
         if not allowed:
-            raise ValueError(f"Quota exceeded: {message}")
+            raise ConflictError(f"Quota exceeded: {message}")
 
         # 5. Validate controlled vocabulary fields
         await VocabularyValidator.validate_pipeline_run_fields(
@@ -400,7 +401,7 @@ class PipelineRunService:
     async def cancel_run(session: AsyncSession, run_id: int, user_id: int) -> PipelineRun:
         run = await PipelineRunService.get_run_model(session, run_id)
         if not run:
-            raise ValueError("Run not found")
+            raise NotFoundError("Run not found")
 
         old_status = run.status
 
@@ -535,7 +536,7 @@ class PipelineRunService:
         """Re-launch with identical parameters."""
         original = await PipelineRunService.get_run_model(session, original_run_id)
         if not original:
-            raise ValueError("Original run not found")
+            raise NotFoundError("Original run not found")
 
         # Reconstruct launch request from original
         sample_ids = [s.id for s in original.samples] if original.samples else None
@@ -574,7 +575,7 @@ class PipelineRunService:
         """Export complete provenance for a run."""
         run = await PipelineRunService.get_run_model(session, run_id)
         if not run:
-            raise ValueError("Run not found")
+            raise NotFoundError("Run not found")
 
         return {
             "run_id": run.id,

@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 
 from datetime import UTC, datetime
 
+from app.exceptions import ValidationError
 from app.models.lab_document import (
     LabDocument,
     LabDocumentNote,
@@ -321,7 +322,7 @@ class LabDocumentNoteService:
     ) -> LabDocumentNote:
         body = (body or "").strip()
         if not body:
-            raise ValueError("Note body is required")
+            raise ValidationError("Note body is required")
         doc = await LabDocumentService.get_document(session, document_id=document_id, org_id=org_id)
         if doc is None:
             raise NoteNotFoundError("Document not found")

@@ -6,6 +6,8 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
 
+from app.exceptions import NotFoundError, StateError
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -314,7 +316,7 @@ async def test_adopt_provisioning_cluster_rejected(session, admin_user):
             return_value=MagicMock(),
         ),
     ):
-        with pytest.raises(ValueError, match="not in a running state"):
+        with pytest.raises(StateError, match="not in a running state"):
             await OrphanedResourceService.adopt_resource(session, resource.id, admin_user.id)
 
 
@@ -323,7 +325,7 @@ async def test_adopt_nonexistent_resource_rejected(session, admin_user):
     """Adopting a non-existent resource should raise."""
     from app.services.orphaned_resource_service import OrphanedResourceService
 
-    with pytest.raises(ValueError, match="not found"):
+    with pytest.raises(NotFoundError, match="not found"):
         await OrphanedResourceService.adopt_resource(session, 9999, admin_user.id)
 
 

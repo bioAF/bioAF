@@ -115,17 +115,14 @@ async def create_upload_url(
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
-    try:
-        result = await LabDocumentUploadService.initiate(
-            session,
-            org_id,
-            file_name=body.file_name,
-            mime_type=body.mime_type,
-            size_bytes=body.size_bytes,
-            origin=request.headers.get("origin"),
-        )
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    result = await LabDocumentUploadService.initiate(
+        session,
+        org_id,
+        file_name=body.file_name,
+        mime_type=body.mime_type,
+        size_bytes=body.size_bytes,
+        origin=request.headers.get("origin"),
+    )
     return LabDocumentUploadUrlResponse(**result)
 
 
@@ -177,18 +174,15 @@ async def create_document(
 ):
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
-    try:
-        doc_id = await _finalize_document_from_token(
-            session,
-            org_id=org_id,
-            user_id=user_id,
-            upload_token=body.upload_token,
-            title=body.title,
-            description=body.description,
-            tag_ids=body.tag_ids,
-        )
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    doc_id = await _finalize_document_from_token(
+        session,
+        org_id=org_id,
+        user_id=user_id,
+        upload_token=body.upload_token,
+        title=body.title,
+        description=body.description,
+        tag_ids=body.tag_ids,
+    )
     doc = await LabDocumentService.get_document(session, document_id=doc_id, org_id=org_id)
     return _doc_response(doc)
 
@@ -216,10 +210,7 @@ async def import_document_from_url(
 
     # Validate up front (scheme + that the host is not an internal/metadata address)
     # so the caller gets immediate feedback. This performs no outbound request.
-    try:
-        _assert_public_url(body.url)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    _assert_public_url(body.url)
 
     row = await LabDocumentUploadService.create_url_import(
         session,
@@ -324,29 +315,26 @@ async def upload_version(
         raise HTTPException(404, "Document not found")
     if doc.is_archived:
         raise HTTPException(400, "Cannot upload a new version of an archived document")
-    try:
-        meta = await LabDocumentUploadService.read_metadata(session, upload_token=body.upload_token, org_id=org_id)
-        dest_uri = await LabDocumentUploadService.place(
-            session,
-            upload_token=body.upload_token,
-            org_id=org_id,
-            document_id=doc.id,
-            version=doc.current_version + 1,
-        )
-        await LabDocumentService.add_version(
-            session,
-            org_id=org_id,
-            user_id=user_id,
-            document_id=doc.id,
-            gcs_uri=dest_uri,
-            file_name=meta["file_name"],
-            file_size_bytes=meta["size_bytes"],
-            md5_checksum=meta["md5"],
-            change_note=body.change_note,
-        )
-        await session.commit()
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    meta = await LabDocumentUploadService.read_metadata(session, upload_token=body.upload_token, org_id=org_id)
+    dest_uri = await LabDocumentUploadService.place(
+        session,
+        upload_token=body.upload_token,
+        org_id=org_id,
+        document_id=doc.id,
+        version=doc.current_version + 1,
+    )
+    await LabDocumentService.add_version(
+        session,
+        org_id=org_id,
+        user_id=user_id,
+        document_id=doc.id,
+        gcs_uri=dest_uri,
+        file_name=meta["file_name"],
+        file_size_bytes=meta["size_bytes"],
+        md5_checksum=meta["md5"],
+        change_note=body.change_note,
+    )
+    await session.commit()
     doc = await LabDocumentService.get_document(session, document_id=doc.id, org_id=org_id)
     return _doc_response(doc)
 
@@ -474,8 +462,6 @@ async def add_note(
         )
     except NoteNotFoundError:
         raise HTTPException(404, "Document not found")
-    except ValueError as e:
-        raise HTTPException(400, str(e))
     await session.commit()
     return _note_response(note)
 

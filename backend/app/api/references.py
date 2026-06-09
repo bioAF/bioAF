@@ -176,10 +176,7 @@ async def get_import_status(
 ):
     """Read the in-flight import progress row."""
     org_id = int(current_user["org_id"])
-    try:
-        return await ReferenceDataService.get_import_status(session, reference_id, org_id)
-    except ValueError as e:
-        raise HTTPException(404, str(e))
+    return await ReferenceDataService.get_import_status(session, reference_id, org_id)
 
 
 @router.post("/{reference_id}/import-cancel", status_code=204)
@@ -318,11 +315,8 @@ async def deprecate_reference(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    try:
-        dataset = await ReferenceDataService.deprecate_reference(session, reference_id, org_id, user_id, data)
-        await session.commit()
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    dataset = await ReferenceDataService.deprecate_reference(session, reference_id, org_id, user_id, data)
+    await session.commit()
 
     return _response(dataset)
 
@@ -337,11 +331,8 @@ async def approve_deprecation(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    try:
-        dataset = await ReferenceDataService.approve_deprecation(session, reference_id, org_id, user_id)
-        await session.commit()
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    dataset = await ReferenceDataService.approve_deprecation(session, reference_id, org_id, user_id)
+    await session.commit()
 
     return _response(dataset)
 
@@ -355,7 +346,4 @@ async def get_impact(
     """Get impact assessment: which pipeline runs and experiments used this reference."""
     org_id = int(current_user["org_id"])
 
-    try:
-        return await ReferenceDataService.get_impact(session, reference_id, org_id)
-    except ValueError as e:
-        raise HTTPException(404, str(e))
+    return await ReferenceDataService.get_impact(session, reference_id, org_id)

@@ -29,6 +29,8 @@ import logging
 import uuid
 from typing import Any
 
+from app.exceptions import ValidationError
+
 logger = logging.getLogger("bioaf.adapters.work_nodes.gce_capacity")
 
 # Compute Engine error codes that indicate "no capacity in this zone for
@@ -178,10 +180,10 @@ def probe_zones(
         RuntimeError: a zone returned a non-stockout error (quota,
             permission, etc.). The caller almost certainly wants to see
             this rather than treat it as "out of capacity."
-        ValueError: ``zones`` was empty.
+        ValidationError: ``zones`` was empty.
     """
     if not zones:
-        raise ValueError("probe_zones requires at least one candidate zone")
+        raise ValidationError("probe_zones requires at least one candidate zone")
 
     client = _build_instances_client(credentials)
     exhausted: list[str] = []

@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import NotFoundError, ValidationError
 from app.models.lab_glossary import (
     LabGlossaryRejectedProposal,
     LabGlossaryScanJob,
@@ -65,19 +66,19 @@ def _parse_document_input(scan_input: str | None) -> tuple[str, int]:
     """Resolve a ``document`` scan_input to ``(source, id)``.
 
     Accepts ``lab_document:<id>``, ``file:<id>``, or a bare ``<int>`` (treated as
-    a Lab Knowledge document for back-compat). Raises ``ValueError`` on an unknown
-    prefix or non-numeric id so the API can reject it up front (AC-D06)."""
+    a Lab Knowledge document for back-compat). Raises ``ValidationError`` on an
+    unknown prefix or non-numeric id so the API can reject it up front (AC-D06)."""
     raw = (scan_input or "").strip()
     if not raw:
-        raise ValueError("document scan requires a scan_input")
+        raise ValidationError("document scan requires a scan_input")
     if ":" in raw:
         source, _, ident = raw.partition(":")
         if source not in DOCUMENT_SOURCES:
-            raise ValueError(f"unknown document source prefix: {source}")
+            raise ValidationError(f"unknown document source prefix: {source}")
     else:
         source, ident = "lab_document", raw
     if not ident.isdigit():
-        raise ValueError(f"document scan_input must reference a numeric id: {scan_input!r}")
+        raise ValidationError(f"document scan_input must reference a numeric id: {scan_input!r}")
     return source, int(ident)
 
 
@@ -97,12 +98,12 @@ async def create_scan_job(
     ``scan_input`` is validated up front by type so a bad reference fails at
     creation rather than inside the background task (AC-D06)."""
     if scan_type not in VALID_SCAN_TYPES:
-        raise ValueError(f"invalid scan_type for LLM scan: {scan_type}")
+        raise ValidationError(f"invalid scan_type for LLM scan: {scan_type}")
     if scan_type == "experiment":
         if not (scan_input or "").strip().isdigit():
-            raise ValueError("experiment scan requires a numeric experiment id")
+            raise ValidationError("experiment scan requires a numeric experiment id")
     elif scan_type == "document":
-        _parse_document_input(scan_input)  # raises ValueError on bad input
+        _parse_document_input(scan_input)  # raises ValidationError on bad input
     job = LabGlossaryScanJob(
         organization_id=org_id,
         scan_type=scan_type,
@@ -449,7 +450,7 @@ async def _collect_experiment_content(session: AsyncSession, job: LabGlossarySca
     run samples, and QC dashboard. It does NOT read the experiment's associated
     files; that matches Experiment Review and keeps the never-ship contract intact.
 
-    Raises ``ValueError`` if the experiment is missing or in another org so the
+    Raises ``NotFoundError`` if the experiment is missing or in another org so the
     job fails cleanly with a clear error (AC-D04)."""
     from app.models.experiment import Experiment
     from app.models.pipeline_run import PipelineRun
@@ -466,7 +467,7 @@ async def _collect_experiment_content(session: AsyncSession, job: LabGlossarySca
         )
     ).scalar_one_or_none()
     if exp is None:
-        raise ValueError(f"experiment {experiment_id} not found in this organization")
+        raise NotFoundError(f"experiment {experiment_id} not found in this organization")
 
     # All pipeline runs on the experiment feed the scan (LK-SPEC-D, OQ-2: all runs).
     run_ids = list(
@@ -618,7 +619,7 @@ async def review_proposals(
         )
     ).scalar_one_or_none()
     if job is None:
-        raise ValueError("scan job not found")
+        raise NotFoundError("scan job not found")
 
     proposals = (
         (
@@ -646,7 +647,7 @@ async def review_proposals(
             else:
                 continue
         if decision not in ("accepted", "rejected", "kept_existing"):
-            raise ValueError(f"invalid decision for proposal {prop.id}: {decision}")
+            raise ValidationError(f"invalid decision for proposal {prop.id}: {decision}")
 
         if decision == "accepted":
             await _commit_accepted(session, org_id=org_id, user_id=user_id, prop=prop, term_source=term_source)

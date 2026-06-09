@@ -147,15 +147,12 @@ async def launch_run(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    try:
-        run = await PipelineRunService.launch_run(session, org_id, user_id, data)
-        await session.commit()
+    run = await PipelineRunService.launch_run(session, org_id, user_id, data)
+    await session.commit()
 
-        # Reload with relationships
-        run = await PipelineRunService.get_run(session, run.id, org_id)
-        return _run_response(run)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    # Reload with relationships
+    run = await PipelineRunService.get_run(session, run.id, org_id)
+    return _run_response(run)
 
 
 @router.get("/{run_id}", response_model=PipelineRunDetailResponse)
@@ -203,13 +200,10 @@ async def reproduce_run(
     user_id = int(current_user["sub"])
     org_id = int(current_user["org_id"])
 
-    try:
-        new_run = await PipelineRunService.reproduce_run(session, run_id, user_id)
-        await session.commit()
-        new_run = await PipelineRunService.get_run(session, new_run.id, org_id)
-        return _run_response(new_run)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    new_run = await PipelineRunService.reproduce_run(session, run_id, user_id)
+    await session.commit()
+    new_run = await PipelineRunService.get_run(session, new_run.id, org_id)
+    return _run_response(new_run)
 
 
 @router.get("/{run_id}/provenance")
@@ -219,10 +213,7 @@ async def get_provenance(
     current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
-    try:
-        provenance = await PipelineRunService.export_provenance(session, run_id)
-    except ValueError as e:
-        raise HTTPException(404, str(e))
+    provenance = await PipelineRunService.export_provenance(session, run_id)
 
     if format == "yaml":
         return PlainTextResponse(

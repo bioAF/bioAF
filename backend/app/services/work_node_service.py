@@ -25,6 +25,7 @@ from app.services.machine_types import MACHINE_TYPES, get_machine_type
 from app.services.session_bucket import _bucket_filter
 from app.adapters.models import TerminationResult
 from app.adapters.registry import get_work_node_adapter
+from app.exceptions import ConflictError, NotFoundError, ValidationError
 
 logger = logging.getLogger("bioaf.work_nodes")
 
@@ -50,7 +51,7 @@ class WorkNodeService:
         mt = get_machine_type(machine_type)
         if not mt:
             valid_names = sorted(m["name"] for m in MACHINE_TYPES)
-            raise ValueError(f"Invalid machine type: {machine_type}. Valid types: {', '.join(valid_names)}")
+            raise ValidationError(f"Invalid machine type: {machine_type}. Valid types: {', '.join(valid_names)}")
 
         # Validate environment version is ready and is a work_node environment
         from app.models.environment_version import EnvironmentVersion
@@ -62,14 +63,14 @@ class WorkNodeService:
         )
         env_version = ev_result.scalar_one_or_none()
         if not env_version:
-            raise ValueError("Environment version not found")
+            raise ValidationError("Environment version not found")
         if env_version.status != "ready":
-            raise ValueError(
+            raise ValidationError(
                 f"Environment version must be in ready status (current: {env_version.status}). "
                 "Build the environment first."
             )
         if env_version.environment.environment_type != "work_node":
-            raise ValueError(
+            raise ValidationError(
                 "Only work node environments can be used for work nodes. This environment is configured for notebooks."
             )
 
@@ -78,7 +79,7 @@ class WorkNodeService:
 
         cred = await SessionCredentialService.get_by_user_id(session, user_id)
         if not cred:
-            raise ValueError(
+            raise ValidationError(
                 "Session credentials are required for work nodes. "
                 "Please set up your session credentials in your profile settings."
             )
@@ -98,7 +99,7 @@ class WorkNodeService:
             found_ids = {r.id for r in repos}
             missing = set(github_repo_ids) - found_ids
             if missing:
-                raise ValueError(f"GitHub repos not found: {missing}")
+                raise ValidationError(f"GitHub repos not found: {missing}")
             github_repos_data = [{"git_ssh_url": r.git_ssh_url, "display_name": r.display_name} for r in repos]
 
         # Check concurrent work node quota
@@ -112,7 +113,7 @@ class WorkNodeService:
         )
         running_count = running_count_result.scalar() or 0
         if running_count >= max_nodes:
-            raise ValueError(
+            raise ConflictError(
                 f"Concurrent work node limit reached ({max_nodes}). "
                 "Stop an existing work node before launching a new one."
             )
@@ -134,7 +135,7 @@ class WorkNodeService:
             for fid in input_file_ids:
                 f = found_files.get(fid)
                 if not f or f.organization_id != org_id:
-                    raise ValueError(f"File {fid} not found or not accessible")
+                    raise ValidationError(f"File {fid} not found or not accessible")
                 rel_path = _build_relative_path(f, name_cache)
                 input_files_spec.append(
                     {
@@ -324,7 +325,7 @@ class WorkNodeService:
     ) -> ComputeSession:
         compute_session = await WorkNodeService.get_work_node(session, session_id)
         if not compute_session:
-            raise ValueError("Work node not found")
+            raise NotFoundError("Work node not found")
 
         old_status = compute_session.status
 
