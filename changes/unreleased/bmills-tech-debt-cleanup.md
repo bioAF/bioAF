@@ -12,6 +12,13 @@
   failing outright.
 - The Provenance tab on a Pipeline Run now lists each input file by project,
   experiment, sample, and filename instead of showing bare numeric file IDs.
+- A previous pipeline run's output files are no longer fed back in as inputs to
+  the next run. Run inputs now use raw uploads only by default; a new
+  "include derived inputs" option opts back in. This stops the dataset from
+  compounding every run (which had been causing runs to balloon and get killed).
+- Pipeline output files are now associated with the specific sample they belong
+  to, instead of being linked to every sample in the run. Aggregate outputs
+  (e.g. MultiQC) that don't belong to one sample are still linked to all of them.
 
 ### API
 
