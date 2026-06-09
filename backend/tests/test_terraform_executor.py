@@ -406,6 +406,76 @@ async def test_run_apply_handles_failure(session):
     assert plan_run.error_message is not None
 
 
+@pytest.mark.asyncio
+async def test_run_apply_emits_failure_notification(session):
+    """A failed apply emits TERRAFORM_APPLY_FAILURE so admins get the
+    'Deployment failed' notification. (ADR-066: the executor is the single
+    terraform owner and owns this notification.)"""
+    from app.services.event_bus import event_bus
+    from app.services.event_types import TERRAFORM_APPLY_FAILURE
+
+    user_id = await _seed_user(session)
+    await _seed_gcp_config(session, configured=True, initialized=True)
+
+    show_stdout = _make_show_json_output(1)
+
+    def mock_plan(cmd, **kwargs):
+        if "show" in cmd:
+            return _mock_subprocess_run(show_stdout)
+        return _mock_subprocess_run(_make_plan_output(1))
+
+    with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_plan):
+        with _patch_work_dir():
+            plan_run = await TerraformExecutor.run_plan(session=session, user_id=user_id, module_name="compute")
+
+    mock_proc = _mock_async_process("", returncode=1, stderr="Error: boom")
+    emit_mock = AsyncMock()
+
+    with patch.object(event_bus, "emit", emit_mock):
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            with patch("app.services.terraform_executor.subprocess.run", return_value=_mock_subprocess_run("")):
+                with _patch_work_dir():
+                    async for _ in TerraformExecutor.run_apply(session=session, run_id=plan_run.id, user_id=user_id):
+                        pass
+
+    emitted = [call.args[0] for call in emit_mock.call_args_list if call.args]
+    assert TERRAFORM_APPLY_FAILURE in emitted
+
+
+@pytest.mark.asyncio
+async def test_run_apply_success_emits_no_failure_notification(session):
+    """A successful apply must not emit the failure notification."""
+    from app.services.event_bus import event_bus
+    from app.services.event_types import TERRAFORM_APPLY_FAILURE
+
+    user_id = await _seed_user(session)
+    await _seed_gcp_config(session, configured=True, initialized=True)
+
+    show_stdout = _make_show_json_output(1)
+
+    def mock_plan(cmd, **kwargs):
+        if "show" in cmd:
+            return _mock_subprocess_run(show_stdout)
+        return _mock_subprocess_run(_make_plan_output(1))
+
+    with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_plan):
+        with _patch_work_dir():
+            plan_run = await TerraformExecutor.run_plan(session=session, user_id=user_id, module_name="compute")
+
+    mock_proc = _mock_async_process('{"@level":"info","type":"apply_complete"}\n', returncode=0)
+    emit_mock = AsyncMock()
+
+    with patch.object(event_bus, "emit", emit_mock):
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            with patch("app.services.terraform_executor.subprocess.run", return_value=_mock_subprocess_run("{}")):
+                with _patch_work_dir():
+                    async for _ in TerraformExecutor.run_apply(session=session, run_id=plan_run.id, user_id=user_id):
+                        pass
+
+    emitted = [call.args[0] for call in emit_mock.call_args_list if call.args]
+    assert TERRAFORM_APPLY_FAILURE not in emitted
+
+
 # ---------------------------------------------------------------------------
 # Test 6: Concurrent run prevention
 # ---------------------------------------------------------------------------

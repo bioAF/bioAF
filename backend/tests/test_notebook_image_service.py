@@ -57,6 +57,59 @@ def test_dockerfile_fails_build_on_missing_r_packages():
     assert "Missing R packages" in DOCKERFILE_CONTENT
 
 
+def test_dockerfile_installs_openblas_runtime():
+    """igraph's compiled .so links against libopenblas.so.0. Without the OpenBLAS
+    runtime it fails to load, which cascades to Seurat, scran, batchelor, ggraph,
+    clusterProfiler, fgsea, ComplexHeatmap (all igraph-dependent) and fails the build
+    at the R package verification step. The apt step must install OpenBLAS."""
+    assert "libopenblas" in DOCKERFILE_CONTENT
+
+
+# The image must be reproducible: every input is pinned, nothing floats to :latest.
+# An unpinned :latest is what broke build 28b547ac (upstream drift left R 4.1.2 too
+# old for current packages). See ADR-066-era notebook-image hardening.
+def test_dockerfile_pins_base_image_by_digest():
+    assert "FROM jupyter/scipy-notebook@sha256:" in DOCKERFILE_CONTENT
+    assert "scipy-notebook:latest" not in DOCKERFILE_CONTENT
+
+
+def test_dockerfile_pins_modern_r_from_rbuilds():
+    # Ubuntu jammy ships R 4.1.2 (2021), too old for current CRAN/Bioconductor.
+    # Install a pinned modern R from Posit r-builds instead.
+    assert "cdn.posit.co/r/ubuntu-2204/pkgs/r-" in DOCKERFILE_CONTENT
+    assert "ARG R_VERSION=" in DOCKERFILE_CONTENT
+    assert "r-base r-base-dev" not in DOCKERFILE_CONTENT
+
+
+def test_dockerfile_pins_cran_to_dated_snapshot():
+    assert "ARG CRAN_SNAPSHOT=" in DOCKERFILE_CONTENT
+    assert "jammy/${CRAN_SNAPSHOT}" in DOCKERFILE_CONTENT
+    assert "jammy/latest" not in DOCKERFILE_CONTENT
+
+
+def test_dockerfile_pins_bioconductor_release():
+    assert "ARG BIOC_VERSION=" in DOCKERFILE_CONTENT
+    assert "BiocManager::install(version=" in DOCKERFILE_CONTENT
+
+
+def test_dockerfile_pins_presto_commit():
+    assert "ARG PRESTO_REF=" in DOCKERFILE_CONTENT
+    assert "ref='${PRESTO_REF}'" in DOCKERFILE_CONTENT
+
+
+def test_dockerfile_pins_python_package_versions():
+    assert "scanpy==" in DOCKERFILE_CONTENT
+    assert "scvi-tools==" in DOCKERFILE_CONTENT
+
+
+def test_dockerfile_builds_hdf5r_against_system_hdf5():
+    """hdf5r must link the system HDF5 (libhdf5-dev, on the runtime linker path),
+    not the base image's conda HDF5 (libhdf5_hl.so.310, which is not). Building it
+    with --with-hdf5 pointed at the system h5cc avoids the load failure."""
+    assert "install.packages('hdf5r'" in DOCKERFILE_CONTENT
+    assert "--with-hdf5=/usr/bin/h5cc" in DOCKERFILE_CONTENT
+
+
 @pytest_asyncio.fixture
 async def seed_build_config(session):
     """Seed platform_config with build-related keys."""

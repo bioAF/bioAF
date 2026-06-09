@@ -27,6 +27,8 @@ from app.exceptions import ConflictError, NotFoundError, StateError, ValidationE
 from app.models.component import TerraformRun
 from app.services.activity_feed_service import ActivityFeedService
 from app.services.audit_service import log_action
+from app.services.event_bus import event_bus
+from app.services.event_types import TERRAFORM_APPLY_FAILURE
 from app.platform.credential_injector import GCPCredentialInjector
 from app.services.plan_parser import TerraformPlanParser
 
@@ -177,6 +179,10 @@ class TerraformExecutor:
         module_name = run.module_name or "foundation"
         resources_total = run.resources_planned or 0
         resources_completed = 0
+        # Set on a real apply failure (non-zero exit or exception), NOT on a
+        # client-disconnect cancellation, so the failure notification fires only
+        # for genuine deploy failures.
+        apply_failed = False
 
         # Emit the full resource list from the plan so the frontend can
         # show all resources upfront with "Queued" status.
@@ -343,6 +349,7 @@ class TerraformExecutor:
                         pass
 
                 run.error_message = "; ".join(diagnostics) or stderr_output or "Terraform apply failed"
+                apply_failed = True
                 logger.error("Terraform apply failed for run %s: %s", run_id, run.error_message)
                 yield TerraformProgressEvent(
                     event_type="apply_error",
@@ -370,6 +377,7 @@ class TerraformExecutor:
             run.status = "failed"
             run.error_message = str(exc)
             run.completed_at = datetime.now(timezone.utc)
+            apply_failed = True
             yield TerraformProgressEvent(
                 event_type="apply_error",
                 message=str(exc),
@@ -382,6 +390,26 @@ class TerraformExecutor:
             if run.status == "failed":
                 await TerraformExecutor._auto_cleanup_lock(session, module_name)
             await session.flush()
+            if apply_failed:
+                # Notify admins of a real deploy failure. Terraform runs are
+                # global (single org); fire-and-forget so the stream is not
+                # blocked on notification delivery.
+                asyncio.create_task(
+                    event_bus.emit(
+                        TERRAFORM_APPLY_FAILURE,
+                        {
+                            "event_type": TERRAFORM_APPLY_FAILURE,
+                            "org_id": 1,
+                            "user_id": user_id,
+                            "entity_type": "terraform_run",
+                            "entity_id": run.id,
+                            "title": f"Terraform apply failed for {module_name}",
+                            "message": run.error_message or "Unknown error",
+                            "severity": "critical",
+                            "summary": f"Terraform apply failed for {module_name}",
+                        },
+                    )
+                )
 
         await log_action(
             session,
