@@ -259,21 +259,17 @@ async def launch_session(
             )
         image = scrna_image
 
-    try:
-        notebook_session = await NotebookService.launch_session(
-            session,
-            user_id=user_id,
-            org_id=org_id,
-            session_type=body.session_type,
-            resource_profile=body.resource_profile,
-            experiment_id=body.experiment_id,
-            image=image,
-            input_file_ids=body.input_file_ids or None,
-            environment_version_id=environment_version_id,
-        )
-    except ValueError as e:
-        logger.warning("Session launch failed: %s", e)
-        raise HTTPException(400, str(e))
+    notebook_session = await NotebookService.launch_session(
+        session,
+        user_id=user_id,
+        org_id=org_id,
+        session_type=body.session_type,
+        resource_profile=body.resource_profile,
+        experiment_id=body.experiment_id,
+        image=image,
+        input_file_ids=body.input_file_ids or None,
+        environment_version_id=environment_version_id,
+    )
 
     await session.commit()
 
@@ -326,11 +322,7 @@ async def stop_session(
     if not can_manage_all and notebook_session.user_id != user_id:
         raise HTTPException(403, "Can only stop your own sessions")
 
-    try:
-        notebook_session = await NotebookService.stop_session(session, session_id, user_id)
-    except ValueError as e:
-        logger.warning("Session stop failed for session %d: %s", session_id, e)
-        raise HTTPException(400, "Failed to stop session")
+    notebook_session = await NotebookService.stop_session(session, session_id, user_id)
 
     await session.commit()
     notebook_session = await NotebookService.get_session(session, notebook_session.id)

@@ -9,6 +9,7 @@ only inside the GCP implementation.
 from __future__ import annotations
 
 from app.adapters.iam.base import IamProvider
+from app.exceptions import ValidationError
 
 VALID_IAM_BACKENDS = ("gcp",)
 DEFAULT_IAM_BACKEND = "gcp"
@@ -17,7 +18,7 @@ DEFAULT_IAM_BACKEND = "gcp"
 def create_iam_provider(credentials=None, backend: str = DEFAULT_IAM_BACKEND) -> IamProvider:
     """Instantiate the IAM provider for ``backend`` (default GCP)."""
     if backend not in VALID_IAM_BACKENDS:
-        raise ValueError(f"Unknown IAM backend '{backend}'. Valid options: {VALID_IAM_BACKENDS}")
+        raise ValidationError(f"Unknown IAM backend '{backend}'. Valid options: {VALID_IAM_BACKENDS}")
     from app.adapters.iam.gcp import GcpIamProvider
 
     return GcpIamProvider(credentials=credentials)

@@ -6,6 +6,8 @@ import csv
 import io
 from typing import Any
 
+from app.exceptions import ValidationError
+
 
 def _csv_str(headers: list[str], rows: list[list[Any]]) -> str:
     """Build a CSV string from headers and rows."""
@@ -23,7 +25,7 @@ class CsvRenderer:
         """Return a dict of {filename: csv_content_string}."""
         renderer = _CSV_RENDERERS.get(entity_type)
         if not renderer:
-            raise ValueError(f"Unknown entity type: {entity_type}")
+            raise ValidationError(f"Unknown entity type: {entity_type}")
         return renderer(json_report)
 
 

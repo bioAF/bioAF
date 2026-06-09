@@ -60,20 +60,17 @@ async def publish_dataset(
     if not await ComponentService.is_enabled(session, "cellxgene"):
         raise HTTPException(400, "cellxgene component is not enabled")
 
-    try:
-        pub = await CellxgeneService.publish_dataset(
-            session,
-            org_id,
-            user_id,
-            file_id=body.file_id,
-            experiment_id=body.experiment_id,
-            dataset_name=body.dataset_name,
-        )
-        await session.commit()
-        pub = await CellxgeneService.get_publication(session, org_id, pub.id)
-        return _pub_response(pub)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    pub = await CellxgeneService.publish_dataset(
+        session,
+        org_id,
+        user_id,
+        file_id=body.file_id,
+        experiment_id=body.experiment_id,
+        dataset_name=body.dataset_name,
+    )
+    await session.commit()
+    pub = await CellxgeneService.get_publication(session, org_id, pub.id)
+    return _pub_response(pub)
 
 
 @router.delete("/{publication_id}")

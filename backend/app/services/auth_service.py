@@ -6,6 +6,7 @@ import bcrypt
 import jwt
 
 from app.config import settings
+from app.exceptions import ValidationError
 
 
 class AuthService:
@@ -45,7 +46,7 @@ class AuthService:
             payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
             return payload
         except jwt.PyJWTError as e:
-            raise ValueError(f"Invalid token: {e}") from e
+            raise ValidationError(f"Invalid token: {e}") from e
 
     @staticmethod
     def generate_verification_code() -> tuple[str, str]:

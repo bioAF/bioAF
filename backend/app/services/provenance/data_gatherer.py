@@ -10,6 +10,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.exceptions import ValidationError
 from app.models.analysis_snapshot import AnalysisSnapshot
 from app.models.sample_batch import SampleBatch
 from app.models.experiment import Experiment
@@ -115,7 +116,7 @@ class ProvenanceDataGatherer:
         }
         gatherer = gatherers.get(entity_type)
         if not gatherer:
-            raise ValueError(f"Unknown entity type: {entity_type}")
+            raise ValidationError(f"Unknown entity type: {entity_type}")
         return await gatherer(session, entity_id, org_id)
 
     @staticmethod

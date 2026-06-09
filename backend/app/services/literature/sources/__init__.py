@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Protocol
 
+from app.exceptions import ValidationError
+
 
 _TAG_RE = re.compile(r"<[^>]+>")
 
@@ -102,5 +104,5 @@ ADAPTERS = {
 
 def get_adapter(source_name: str):
     if source_name not in ADAPTERS:
-        raise ValueError(f"unknown literature source: {source_name}")
+        raise ValidationError(f"unknown literature source: {source_name}")
     return ADAPTERS[source_name]

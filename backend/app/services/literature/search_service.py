@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.database as _database
+from app.exceptions import ValidationError
 from app.models.literature import (
     EXTERNAL_SOURCES,
     LiteraturePaper,
@@ -61,7 +62,7 @@ async def create_search(
     sources = sources or list(EXTERNAL_SOURCES)
     invalid = [s for s in sources if s not in EXTERNAL_SOURCES]
     if invalid:
-        raise ValueError(f"unknown sources: {invalid}")
+        raise ValidationError(f"unknown sources: {invalid}")
     search = LiteratureSearch(
         organization_id=org_id,
         user_id=user_id,

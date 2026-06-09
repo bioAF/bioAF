@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 
+from app.exceptions import ValidationError
 from app.models.literature import LiteraturePaper
 
 _BIBTEX_KEY_NON_ASCII = re.compile(r"[^A-Za-z0-9]+")
@@ -109,4 +110,4 @@ def bulk_export(papers: list[LiteraturePaper], fmt: str) -> str:
         return "\n\n".join(to_bibtex(p) for p in papers)
     if fmt == "ris":
         return "\n\n".join(to_ris(p) for p in papers)
-    raise ValueError(f"unsupported format: {fmt}")
+    raise ValidationError(f"unsupported format: {fmt}")

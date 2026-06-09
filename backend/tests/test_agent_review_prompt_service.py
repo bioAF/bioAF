@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.exceptions import ValidationError
 from app.services import agent_review_prompt_service as svc
 
 
@@ -59,7 +60,7 @@ async def test_create_duplicate_name_rejected(db_engine, admin_user):
 @pytest.mark.asyncio
 async def test_create_empty_name_or_body_rejected(db_engine, admin_user):
     async with _factory(db_engine)() as session:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValidationError):
             await svc.create(
                 session,
                 org_id=admin_user.organization_id,
@@ -67,7 +68,7 @@ async def test_create_empty_name_or_body_rejected(db_engine, admin_user):
                 body="body",
                 created_by_user_id=admin_user.id,
             )
-        with pytest.raises(ValueError):
+        with pytest.raises(ValidationError):
             await svc.create(
                 session,
                 org_id=admin_user.organization_id,

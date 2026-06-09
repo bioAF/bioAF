@@ -215,16 +215,12 @@ async def run_plan(
     """Run terraform plan and return the plan summary."""
     user_id = int(current_user["sub"])
 
-    try:
-        run = await TerraformExecutor.run_plan(
-            session=session,
-            user_id=user_id,
-            module_name=body.module_name,
-        )
-        await session.commit()
-    except ValueError as exc:
-        logger.warning("Terraform plan failed for module %s: %s", body.module_name, exc)
-        raise HTTPException(status_code=409, detail="Cannot start plan")
+    run = await TerraformExecutor.run_plan(
+        session=session,
+        user_id=user_id,
+        module_name=body.module_name,
+    )
+    await session.commit()
 
     return TerraformRunDetail.model_validate(run)
 
@@ -281,16 +277,12 @@ async def abandon_run(
     """Abandon a stuck Terraform run and release the GCS state lock."""
     user_id = int(current_user["sub"])
 
-    try:
-        run = await TerraformExecutor.abandon_run(
-            session=session,
-            run_id=run_id,
-            user_id=user_id,
-        )
-        await session.commit()
-    except ValueError as exc:
-        logger.warning("Terraform abandon failed for run %d: %s", run_id, exc)
-        raise HTTPException(status_code=409, detail="Cannot abandon run")
+    run = await TerraformExecutor.abandon_run(
+        session=session,
+        run_id=run_id,
+        user_id=user_id,
+    )
+    await session.commit()
 
     return TerraformRunDetail.model_validate(run)
 

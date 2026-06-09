@@ -5,6 +5,7 @@ import re
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models.github_repo import GitHubRepo
 from app.services.audit_service import log_action
 
@@ -52,11 +53,11 @@ class GitHubRepoService:
         git_ssh_url = git_ssh_url.strip()
 
         if not GIT_SSH_URL_PATTERN.match(git_ssh_url):
-            raise ValueError("Invalid git SSH URL. Expected format: git@github.com:owner/repo.git")
+            raise ValidationError("Invalid git SSH URL. Expected format: git@github.com:owner/repo.git")
 
         resolved_name = display_name.strip() if display_name else _extract_repo_name(git_ssh_url)
         if not resolved_name:
-            raise ValueError("Display name cannot be empty")
+            raise ValidationError("Display name cannot be empty")
 
         # Check for duplicate
         existing = await session.execute(
@@ -66,7 +67,7 @@ class GitHubRepoService:
             )
         )
         if existing.scalar_one_or_none():
-            raise ValueError("This repository is already configured")
+            raise ConflictError("This repository is already configured")
 
         repo = GitHubRepo(
             user_id=user_id,
@@ -92,7 +93,7 @@ class GitHubRepoService:
     async def delete_repo(session: AsyncSession, repo_id: int, user_id: int) -> None:
         repo = await GitHubRepoService.get_repo(session, repo_id, user_id)
         if not repo:
-            raise ValueError("Repository not found")
+            raise NotFoundError("Repository not found")
 
         await log_action(
             session,

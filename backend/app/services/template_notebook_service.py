@@ -5,6 +5,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import NotFoundError
 from app.models.template_notebook import TemplateNotebook
 from app.services.audit_service import log_action
 from app.services.gitops_service import GitOpsService
@@ -178,7 +179,7 @@ class TemplateNotebookService:
         if local_file.exists():
             return local_file.read_text()
 
-        raise ValueError(f"Template notebook not found: {template.notebook_path}")
+        raise NotFoundError(f"Template notebook not found: {template.notebook_path}")
 
     @staticmethod
     async def clone_template(
@@ -193,7 +194,7 @@ class TemplateNotebookService:
         """Clone a template notebook with parameterization. Returns file path."""
         template = await TemplateNotebookService.get_template(session, org_id, template_id)
         if not template:
-            raise ValueError(f"Template {template_id} not found")
+            raise NotFoundError(f"Template {template_id} not found")
 
         content = await TemplateNotebookService.get_template_content(org_id, template)
         nb_data = json.loads(content)

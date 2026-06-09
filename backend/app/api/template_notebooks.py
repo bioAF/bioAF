@@ -77,10 +77,7 @@ async def get_template_content(
     if not template:
         raise HTTPException(404, "Template notebook not found")
 
-    try:
-        content = await TemplateNotebookService.get_template_content(org_id, template)
-    except ValueError as e:
-        raise HTTPException(404, str(e))
+    content = await TemplateNotebookService.get_template_content(org_id, template)
 
     return {"notebook_path": template.notebook_path, "content": content}
 
@@ -95,18 +92,15 @@ async def clone_template(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    try:
-        output_path = await TemplateNotebookService.clone_template(
-            session,
-            org_id,
-            user_id,
-            template_id,
-            new_name=data.new_name,
-            experiment_id=data.experiment_id,
-            parameter_overrides=data.parameters,
-        )
-        await session.commit()
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    output_path = await TemplateNotebookService.clone_template(
+        session,
+        org_id,
+        user_id,
+        template_id,
+        new_name=data.new_name,
+        experiment_id=data.experiment_id,
+        parameter_overrides=data.parameters,
+    )
+    await session.commit()
 
     return {"output_path": output_path}

@@ -7,6 +7,8 @@ instead of --auth-none=1.
 import time
 
 import pytest
+
+from app.exceptions import ValidationError
 from unittest.mock import AsyncMock, MagicMock
 
 from app.adapters.notebooks.kubernetes import KubernetesNotebookProvider
@@ -116,7 +118,7 @@ class TestRStudioSessionCredentials:
 
         spec = _session_spec()
         # No session_credentials key
-        with pytest.raises(ValueError, match="[Ss]ession credentials"):
+        with pytest.raises(ValidationError, match="[Ss]ession credentials"):
             await adapter._k8s_launch_session(spec)
 
     @pytest.mark.asyncio

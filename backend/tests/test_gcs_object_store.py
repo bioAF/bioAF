@@ -18,6 +18,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.exceptions import ValidationError
+
 from app.adapters.models import ObjectMetadata, StorageStore, StorageObjectNotFound
 from app.adapters.storage.gcs import GcsStorageProvider
 
@@ -446,7 +448,7 @@ class TestGcsStorageMetricsSelfContained:
             return {"storage_deployed": "false"}
 
         monkeypatch.setattr(gcs_adapter, "_read_storage_config", fake_storage_config)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValidationError):
             await gcs_adapter._gcs_storage_metrics()
 
     def test_adapter_does_not_import_gcs_storage_service(self):

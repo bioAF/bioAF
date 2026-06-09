@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.exceptions import ValidationError
+
 
 def _v(val: Any) -> str:
     """Format a value for display, rendering None as '--'."""
@@ -47,7 +49,7 @@ class MarkdownRenderer:
     def render(entity_type: str, json_report: dict[str, Any]) -> str:
         renderer = _MD_RENDERERS.get(entity_type)
         if not renderer:
-            raise ValueError(f"Unknown entity type: {entity_type}")
+            raise ValidationError(f"Unknown entity type: {entity_type}")
         return renderer(json_report)
 
 

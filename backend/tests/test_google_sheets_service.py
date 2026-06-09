@@ -7,6 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.exceptions import ValidationError
+
 from app.services.google_sheets_service import (
     _resolve_sheet_name,
     get_sheet_names,
@@ -56,12 +58,12 @@ def test_parse_url_no_trailing_path():
 
 
 def test_parse_invalid_url_raises():
-    with pytest.raises(ValueError, match="Not a valid Google Sheets URL"):
+    with pytest.raises(ValidationError, match="Not a valid Google Sheets URL"):
         parse_sheet_url("https://example.com/not-a-sheet")
 
 
 def test_parse_non_sheets_google_url_raises():
-    with pytest.raises(ValueError, match="Not a valid Google Sheets URL"):
+    with pytest.raises(ValidationError, match="Not a valid Google Sheets URL"):
         parse_sheet_url("https://docs.google.com/document/d/abc123/edit")
 
 
@@ -103,13 +105,13 @@ def test_resolve_sheet_unknown_gid_raises():
             {"properties": {"sheetId": 0, "title": "Sheet1"}},
         ]
     )
-    with pytest.raises(ValueError, match="No sheet found with gid=999"):
+    with pytest.raises(ValidationError, match="No sheet found with gid=999"):
         _resolve_sheet_name(service, "abc", 999)
 
 
 def test_resolve_sheet_empty_spreadsheet_raises():
     service = _mock_spreadsheet_meta([])
-    with pytest.raises(ValueError, match="Spreadsheet has no sheets"):
+    with pytest.raises(ValidationError, match="Spreadsheet has no sheets"):
         _resolve_sheet_name(service, "abc", None)
 
 
@@ -166,7 +168,7 @@ def test_read_header_row_empty_raises(mock_build):
     mock_service.spreadsheets().values().get().execute.return_value = {"values": []}
     mock_build.return_value = mock_service
 
-    with pytest.raises(ValueError, match="first row is empty"):
+    with pytest.raises(ValidationError, match="first row is empty"):
         read_header_row("fake_creds", "sid")
 
 

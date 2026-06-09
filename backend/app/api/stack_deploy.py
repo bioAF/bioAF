@@ -61,7 +61,7 @@ _KNOWN_STACK_ERROR_MESSAGES = frozenset(
 )
 
 
-def _safe_stack_error_message(exc: ValueError) -> str:
+def _safe_stack_error_message(exc: DomainError) -> str:
     msg = str(exc) if exc.args else ""
     # Return the matched allowlist constant rather than the exception-derived
     # `msg` so CodeQL's taint tracker sees the output as untainted. Behaviour
@@ -252,7 +252,7 @@ async def stack_deploy_endpoint(
                 if event.extra:
                     payload["extra"] = event.extra
                 yield f"data: {json.dumps(payload)}\n\n"
-        except ValueError as exc:
+        except DomainError as exc:
             logger.exception("Stack SSE stream failed")
             error_data = json.dumps({"event_type": "stack_error", "message": _safe_stack_error_message(exc)})
             yield f"data: {error_data}\n\n"
@@ -490,7 +490,7 @@ async def stack_teardown_endpoint(
                 if event.extra:
                     payload["extra"] = event.extra
                 yield f"data: {json.dumps(payload)}\n\n"
-        except ValueError as exc:
+        except DomainError as exc:
             logger.exception("Stack SSE stream failed")
             error_data = json.dumps({"event_type": "stack_error", "message": _safe_stack_error_message(exc)})
             yield f"data: {error_data}\n\n"
@@ -536,7 +536,7 @@ async def stack_destroy_storage_endpoint(
                 if event.extra:
                     payload["extra"] = event.extra
                 yield f"data: {json.dumps(payload)}\n\n"
-        except ValueError as exc:
+        except DomainError as exc:
             logger.exception("Stack SSE stream failed")
             error_data = json.dumps({"event_type": "stack_error", "message": _safe_stack_error_message(exc)})
             yield f"data: {error_data}\n\n"
@@ -1035,13 +1035,9 @@ async def notebook_image_cancel(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Cancel the active notebook image build."""
-    try:
-        build_id = await cancel_build(session)
-        await session.commit()
-        return {"cancelled": True, "build_id": build_id}
-    except ValueError as exc:
-        logger.warning("Notebook image build cancel failed: %s", exc)
-        raise HTTPException(status_code=400, detail="Cannot cancel build")
+    build_id = await cancel_build(session)
+    await session.commit()
+    return {"cancelled": True, "build_id": build_id}
 
 
 # -----------------------------------------------------------------------

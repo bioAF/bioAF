@@ -12,6 +12,8 @@ import asyncio
 
 import pytest
 
+from app.exceptions import ValidationError
+
 from app.adapters import registry
 from app.adapters.cellxgene.kubernetes import KubernetesCellxgeneProvider
 from app.adapters.registry import (
@@ -34,12 +36,12 @@ def test_cellxgene_backend_factory_resolves_kubernetes():
 
 
 def test_unknown_work_node_backend_raises():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError):
         _create_work_node_adapter("ec2")
 
 
 def test_unknown_cellxgene_backend_raises():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError):
         _create_cellxgene_adapter("posit")
 
 

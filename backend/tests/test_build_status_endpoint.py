@@ -172,7 +172,7 @@ async def test_cancel_build_no_active_build(client, session, admin_token, admin_
 
 @pytest.mark.asyncio
 async def test_cancel_build_already_finished(client, session, admin_token, admin_user, seed_platform):
-    """Cancel returns 400 when build already finished."""
+    """Cancel returns 409 when build already finished (StateError: wrong state)."""
     for key, value in [
         ("notebook_image_build_id", "build-done-1"),
         ("notebook_image_build_status", "FAILURE"),
@@ -190,7 +190,7 @@ async def test_cancel_build_already_finished(client, session, admin_token, admin
         "/api/v1/infrastructure/notebook-image/cancel",
         headers={"Authorization": f"Bearer {admin_token}"},
     )
-    assert response.status_code == 400
+    assert response.status_code == 409
 
 
 @pytest.mark.asyncio

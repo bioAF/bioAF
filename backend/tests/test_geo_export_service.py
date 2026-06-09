@@ -182,9 +182,10 @@ async def test_auto_selects_pipeline_run(session, export_experiment):
 
 @pytest.mark.asyncio
 async def test_nonexistent_experiment_raises(session):
+    from app.exceptions import NotFoundError
     from app.services.geo.geo_export_service import GeoExportService
 
-    with pytest.raises(ValueError, match="Experiment not found"):
+    with pytest.raises(NotFoundError, match="Experiment not found"):
         await GeoExportService.validate(session, 99999, 99999)
 
 
