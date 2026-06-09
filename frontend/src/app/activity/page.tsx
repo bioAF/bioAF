@@ -32,7 +32,9 @@ const entityLinks: Record<string, (id: number) => string> = {
   experiment: (id) => `/experiments/${id}`,
   pipeline_run: (id) => `/pipelines/runs/${id}`,
   project: (id) => `/projects/${id}`,
-  component: (id) => `/infrastructure/components/${id}`,
+  // Components are managed on the single Components screen (enable/disable toggles);
+  // there is no per-component detail page.
+  component: () => `/infrastructure/components`,
   reference_dataset: (id) => `/data/references/${id}`,
 };
 
