@@ -12,9 +12,7 @@ import re
 # Matches a subprocess command list that runs the terraform binary, e.g.
 # ["terraform", "init", ...] or ["terraform", "apply", ...]. A plain string
 # "terraform" used as a directory name (gitops repo layout) does not match.
-_TERRAFORM_CLI = re.compile(
-    r'"terraform",\s*"(init|plan|apply|destroy|output|show|validate|fmt|import|state|version)"'
-)
+_TERRAFORM_CLI = re.compile(r'"terraform",\s*"(init|plan|apply|destroy|output|show|validate|fmt|import|state|version)"')
 
 _APP_DIR = pathlib.Path(__file__).resolve().parents[1] / "app"
 _ALLOWED = {"terraform_executor.py"}

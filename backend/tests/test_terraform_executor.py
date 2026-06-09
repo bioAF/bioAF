@@ -426,9 +426,7 @@ async def test_run_apply_emits_failure_notification(session):
 
     with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_plan):
         with _patch_work_dir():
-            plan_run = await TerraformExecutor.run_plan(
-                session=session, user_id=user_id, module_name="compute"
-            )
+            plan_run = await TerraformExecutor.run_plan(session=session, user_id=user_id, module_name="compute")
 
     mock_proc = _mock_async_process("", returncode=1, stderr="Error: boom")
     emit_mock = AsyncMock()
@@ -437,9 +435,7 @@ async def test_run_apply_emits_failure_notification(session):
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             with patch("app.services.terraform_executor.subprocess.run", return_value=_mock_subprocess_run("")):
                 with _patch_work_dir():
-                    async for _ in TerraformExecutor.run_apply(
-                        session=session, run_id=plan_run.id, user_id=user_id
-                    ):
+                    async for _ in TerraformExecutor.run_apply(session=session, run_id=plan_run.id, user_id=user_id):
                         pass
 
     emitted = [call.args[0] for call in emit_mock.call_args_list if call.args]
@@ -464,9 +460,7 @@ async def test_run_apply_success_emits_no_failure_notification(session):
 
     with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_plan):
         with _patch_work_dir():
-            plan_run = await TerraformExecutor.run_plan(
-                session=session, user_id=user_id, module_name="compute"
-            )
+            plan_run = await TerraformExecutor.run_plan(session=session, user_id=user_id, module_name="compute")
 
     mock_proc = _mock_async_process('{"@level":"info","type":"apply_complete"}\n', returncode=0)
     emit_mock = AsyncMock()
@@ -475,9 +469,7 @@ async def test_run_apply_success_emits_no_failure_notification(session):
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             with patch("app.services.terraform_executor.subprocess.run", return_value=_mock_subprocess_run("{}")):
                 with _patch_work_dir():
-                    async for _ in TerraformExecutor.run_apply(
-                        session=session, run_id=plan_run.id, user_id=user_id
-                    ):
+                    async for _ in TerraformExecutor.run_apply(session=session, run_id=plan_run.id, user_id=user_id):
                         pass
 
     emitted = [call.args[0] for call in emit_mock.call_args_list if call.args]

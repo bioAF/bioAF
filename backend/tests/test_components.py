@@ -59,9 +59,7 @@ async def test_component_dependencies_in_catalog(client: AsyncClient, admin_toke
         ("get", "/api/components/slurm"),
     ],
 )
-async def test_orphaned_component_endpoints_removed(
-    client: AsyncClient, admin_token: str, method: str, path: str
-):
+async def test_orphaned_component_endpoints_removed(client: AsyncClient, admin_token: str, method: str, path: str):
     response = await client.request(
         method.upper(),
         path,
