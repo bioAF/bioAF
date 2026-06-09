@@ -19,22 +19,6 @@ class ComputeStackResponse(BaseModel):
     compute_stack: str
 
 
-class ComponentDefinitionResponse(BaseModel):
-    key: str
-    name: str
-    category: str
-    description: str
-    cost_estimate: str
-    dependencies: list[str]
-    configurable_fields: list[dict]
-    status: str  # "available" or "coming_soon"
-
-
-class ComponentsListResponse(BaseModel):
-    compute_stack: str
-    components: list[ComponentDefinitionResponse]
-
-
 class StorageBucketInfo(BaseModel):
     name: str
     purpose: str

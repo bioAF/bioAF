@@ -1,8 +1,14 @@
 # ADR-007: UI-Driven Terraform Execution for Infrastructure Management
 
-**Status:** Accepted
+**Status:** Accepted (implementation superseded by [ADR-066](ADR-066-terraform-single-execution-owner.md))
 **Date:** 2026-03-05
 **Deciders:** Brent (product owner)
+
+> **Note (2026-06-09):** The UI-driven principle below stands. The original
+> implementation (a single root Terraform config toggled by `enable_<component>`
+> tfvars, applied synchronously by `TerraformService` and committed to a GitOps repo)
+> is superseded by the per-module `TerraformExecutor`. See
+> [ADR-066](ADR-066-terraform-single-execution-owner.md).
 
 ## Context
 

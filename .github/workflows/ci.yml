@@ -21,7 +21,7 @@ jobs:
     if: true
     defaults:
       run:
-        working-directory: terraform
+        working-directory: backend/terraform/modules
     steps:
       - uses: actions/checkout@v5
 
@@ -32,11 +32,13 @@ jobs:
       - name: Terraform fmt check
         run: terraform fmt -check -recursive
 
-      - name: Terraform init
-        run: terraform init -backend=false
-
-      - name: Terraform validate
-        run: terraform validate
+      - name: Terraform validate (each module)
+        run: |
+          for m in foundation storage compute billing_export; do
+            echo "== $m =="
+            terraform -chdir="$m" init -backend=false -no-color
+            terraform -chdir="$m" validate -no-color
+          done
 
   # ──────────────────────────────────────────────
   # FastAPI backend
