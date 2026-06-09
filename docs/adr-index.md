@@ -8,7 +8,7 @@
 | [ADR-004](../decisions/ADR-004-tiered-backup-strategy.md) | Tiered Backup Strategy | 4-tier GCS-only backups: pg_dump, GCS versioning, platform config snapshots, terraform state |
 | [ADR-005](../decisions/ADR-005-github-based-upgrades.md) | GitHub-Based Upgrades | Use GitHub Releases for version checking and upgrade distribution |
 | [ADR-006](../decisions/ADR-006-experiment-tracking-as-foundation.md) | Experiment Tracking as Foundation | Build experiment lifecycle tracking as the core data model |
-| [ADR-007](../decisions/ADR-007-ui-driven-terraform.md) | UI-Driven Terraform | Users never touch HCL; all infrastructure changes through the web UI |
+| [ADR-007](../decisions/ADR-007-ui-driven-terraform.md) | UI-Driven Terraform | Users never touch HCL; all infrastructure changes through the web UI (execution superseded by [ADR-066](../decisions/ADR-066-terraform-single-execution-owner.md): per-module TerraformExecutor is the single owner) |
 | [ADR-008](../decisions/ADR-008-secret-manager.md) | Secret Manager Integration | Store all secrets in GCP Secret Manager, never in config files |
 | [ADR-009](../decisions/ADR-009-immutable-audit-log.md) | Immutable Audit Log | Append-only audit trail for compliance; no UPDATE or DELETE operations |
 | [ADR-010](../decisions/ADR-010-notification-system.md) | Notification System | In-process event bus with channel adapters (in-app, email, Slack) |
