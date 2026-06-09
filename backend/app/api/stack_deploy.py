@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import async_session_factory, get_session
+from app.exceptions import DomainError
 from app.services.audit_service import log_action
 from app.services.notebook_image_service import build_notebook_image, cancel_build
 from app.services import infra_update_service
@@ -60,7 +61,7 @@ _KNOWN_STACK_ERROR_MESSAGES = frozenset(
 )
 
 
-def _safe_stack_error_message(exc: ValueError) -> str:
+def _safe_stack_error_message(exc: DomainError) -> str:
     msg = str(exc) if exc.args else ""
     # Return the matched allowlist constant rather than the exception-derived
     # `msg` so CodeQL's taint tracker sees the output as untainted. Behaviour
@@ -251,7 +252,7 @@ async def stack_deploy_endpoint(
                 if event.extra:
                     payload["extra"] = event.extra
                 yield f"data: {json.dumps(payload)}\n\n"
-        except ValueError as exc:
+        except DomainError as exc:
             logger.exception("Stack SSE stream failed")
             error_data = json.dumps({"event_type": "stack_error", "message": _safe_stack_error_message(exc)})
             yield f"data: {error_data}\n\n"
@@ -489,7 +490,7 @@ async def stack_teardown_endpoint(
                 if event.extra:
                     payload["extra"] = event.extra
                 yield f"data: {json.dumps(payload)}\n\n"
-        except ValueError as exc:
+        except DomainError as exc:
             logger.exception("Stack SSE stream failed")
             error_data = json.dumps({"event_type": "stack_error", "message": _safe_stack_error_message(exc)})
             yield f"data: {error_data}\n\n"
@@ -535,7 +536,7 @@ async def stack_destroy_storage_endpoint(
                 if event.extra:
                     payload["extra"] = event.extra
                 yield f"data: {json.dumps(payload)}\n\n"
-        except ValueError as exc:
+        except DomainError as exc:
             logger.exception("Stack SSE stream failed")
             error_data = json.dumps({"event_type": "stack_error", "message": _safe_stack_error_message(exc)})
             yield f"data: {error_data}\n\n"
@@ -705,7 +706,11 @@ async def check_infra_updates_endpoint(
     user_id = int(current_user["sub"])
     try:
         result = await infra_update_service.check_for_updates(session, user_id)
-    except ValueError as exc:
+    except (DomainError, ValueError) as exc:
+        # DomainError comes from infra_update_service (e.g. not-initialized,
+        # nothing-deployed, plan-failed); the bare ValueError still guards the
+        # "Another Terraform operation is in progress" raised deeper in
+        # TerraformExecutor, which is not part of this migration.
         msg = str(exc)
         if msg in ("Terraform has not been initialized", "No infrastructure is deployed"):
             await session.rollback()
@@ -1030,13 +1035,9 @@ async def notebook_image_cancel(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Cancel the active notebook image build."""
-    try:
-        build_id = await cancel_build(session)
-        await session.commit()
-        return {"cancelled": True, "build_id": build_id}
-    except ValueError as exc:
-        logger.warning("Notebook image build cancel failed: %s", exc)
-        raise HTTPException(status_code=400, detail="Cannot cancel build")
+    build_id = await cancel_build(session)
+    await session.commit()
+    return {"cancelled": True, "build_id": build_id}
 
 
 # -----------------------------------------------------------------------

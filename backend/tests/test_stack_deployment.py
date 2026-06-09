@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 import pytest
 from sqlalchemy import text
+from app.exceptions import ConflictError, StateError, ValidationError
 from app.services.bootstrap_roles import seed_builtin_roles
 
 
@@ -100,7 +101,7 @@ async def test_deploy_stack_requires_gcp_configured(session):
     await _set_config(session, "compute_deployed", "false")
     await session.commit()
 
-    with pytest.raises(ValueError, match="GCP credentials"):
+    with pytest.raises(ValidationError, match="GCP credentials"):
         async for _ in deploy_stack(session, "kubernetes", user_id=1):
             pass
 
@@ -115,7 +116,7 @@ async def test_deploy_stack_requires_terraform_initialized(session):
     await _set_config(session, "compute_deployed", "false")
     await session.commit()
 
-    with pytest.raises(ValueError, match="[Tt]erraform.*initialized"):
+    with pytest.raises(ValidationError, match="[Tt]erraform.*initialized"):
         async for _ in deploy_stack(session, "kubernetes", user_id=1):
             pass
 
@@ -130,7 +131,7 @@ async def test_deploy_stack_requires_not_already_deployed(session):
     await _set_config(session, "compute_deployed", "true")
     await session.commit()
 
-    with pytest.raises(ValueError, match="already deployed"):
+    with pytest.raises(ConflictError, match="already deployed"):
         async for _ in deploy_stack(session, "kubernetes", user_id=1):
             pass
 
@@ -396,7 +397,7 @@ async def test_teardown_stack_requires_deployed(session):
     await _set_config(session, "compute_deployed", "false")
     await session.commit()
 
-    with pytest.raises(ValueError, match="not deployed"):
+    with pytest.raises(StateError, match="not deployed"):
         async for _ in teardown_stack(session, user_id=1):
             pass
 
@@ -858,7 +859,7 @@ async def test_destroy_storage_requires_compute_down(session):
     await _set_config(session, "storage_deployed", "true")
     await session.commit()
 
-    with pytest.raises(ValueError, match="compute"):
+    with pytest.raises(StateError, match="compute"):
         async for _ in destroy_storage(session, user_id=1):
             pass
 
@@ -872,7 +873,7 @@ async def test_destroy_storage_requires_storage_deployed(session):
     await _set_config(session, "storage_deployed", "false")
     await session.commit()
 
-    with pytest.raises(ValueError, match="not deployed"):
+    with pytest.raises(StateError, match="not deployed"):
         async for _ in destroy_storage(session, user_id=1):
             pass
 

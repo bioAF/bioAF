@@ -18,6 +18,7 @@ import google.auth.transport.requests
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import ValidationError
 from app.services.notebook_image_service import _get_credentials
 
 logger = logging.getLogger("bioaf.cellxgene_image")
@@ -106,7 +107,7 @@ async def submit_image_build(session: AsyncSession, project_id: str, region: str
     """Submit a Cloud Build job for the cellxgene image. Returns the build ID."""
     working_bucket = await _read_config(session, "working_bucket_name")
     if not working_bucket or working_bucket == "null":
-        raise ValueError("Working bucket not configured. Deploy storage first.")
+        raise ValidationError("Working bucket not configured. Deploy storage first.")
 
     object_path = await _upload_build_context(session, project_id, working_bucket)
 
@@ -177,9 +178,9 @@ async def build_cellxgene_image(session: AsyncSession) -> str:
     region = await _read_config(session, "gcp_region")
 
     if not project_id or project_id == "null":
-        raise ValueError("GCP project not configured")
+        raise ValidationError("GCP project not configured")
     if not region or region == "null":
-        raise ValueError("GCP region not configured")
+        raise ValidationError("GCP region not configured")
 
     await _set_config(session, "cellxgene_image", "null")
     await _set_config(session, "cellxgene_image_build_status", "null")

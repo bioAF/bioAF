@@ -1,18 +1,18 @@
 # CRO Naming Profiles
 
-When Contract Research Organizations (CROs) deliver data files, they follow structured naming conventions that encode project, experiment, sample, date, and version information into each filename. bioAF's naming profiles let you define parsing rules that automatically extract this metadata during auto-ingest, linking incoming files to the correct experiments and samples without manual intervention.
+When CROs (Contract Research Organizations) deliver data files, they follow structured naming conventions that encode project, experiment, sample, date, and version information into each filename. bioAF's Naming Profiles let you define parsing rules that automatically extract this metadata during auto-ingest, linking incoming files to the correct experiments and samples without manual intervention.
 
 ## How Naming Profiles Work
 
-A naming profile is a set of rules that describe the structure of filenames from a specific CRO. Each profile defines:
+A Naming Profile is a set of rules that describe the structure of filenames from a specific CRO. Each profile defines:
 
 - **Delimiter:** The character separating fields (typically underscore `_` or hyphen `-`).
-- **Field positions:** Which position in the delimited filename maps to which metadata field (project, experiment, sample, date, data type, researcher, version).
+- **Segments:** Which Segment in the delimited filename maps to which metadata field (project, experiment, sample, date, data type, researcher, version).
 - **Date format:** How the CRO encodes dates (e.g., `YYYY-MM-DD`, `YYMMDD`, `DD-Mon-YYYY`).
 - **Version pattern:** How version numbers are encoded (e.g., `v001`, `V1`, `rev2`).
 - **File type mappings:** Which filename patterns or extensions correspond to which bioAF data types (FASTQ, BAM, count matrix, QC report).
 
-When a file arrives in the auto-ingest bucket, bioAF tries each active naming profile against the filename. The first profile that successfully parses all required fields is used to catalog the file.
+When a file arrives in the auto-ingest bucket, bioAF tries each active Naming Profile against the filename. The first profile that successfully parses all required fields is used to catalog the file.
 
 ## Creating a Naming Profile
 
@@ -43,7 +43,7 @@ With underscore delimiter, this produces six fields:
 | 5 | `SmithE` | Researcher |
 | 6 | `v001` | Version |
 
-Use the dropdown for each position to assign it to a bioAF metadata field. Fields marked as "Ignore" are parsed but not used for cataloging.
+Use the dropdown for each Segment to assign it to a bioAF metadata field. Fields marked as "Ignore" are parsed but not used for cataloging.
 
 ### Step 4: Configure Code Mappings
 
@@ -125,4 +125,4 @@ To reorder priorities, go to **Data & Files > Naming Profiles** and drag profile
 - Always test a profile against at least 20-30 real filenames before activating it. Edge cases in CRO naming are common.
 - When a CRO changes their naming convention (even slightly), create a new profile version rather than editing the existing one. This preserves the parsing history for files already ingested under the old convention.
 - Use the "Fallback action" setting to control what happens when no profile matches a file: quarantine (default), notify admin, or ignore. Quarantined files appear in **Data Management > Quarantine** for manual review.
-- Export your naming profiles as JSON backups via the API (`GET /api/v1/naming-profiles/export`). This is useful when setting up a second bioAF instance or sharing profiles between teams.
+- Export your Naming Profiles as JSON backups via the API (`GET /api/v1/naming-profiles/export`). This is useful when setting up a second bioAF instance or sharing profiles between teams.

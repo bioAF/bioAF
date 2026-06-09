@@ -3,6 +3,7 @@ import asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import NotFoundError
 from app.models.component import ComponentState
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
@@ -310,7 +311,7 @@ class ComponentService:
     ) -> ComponentState:
         state = await ComponentService.get_state(session, component_key)
         if not state:
-            raise ValueError(f"Component {component_key} not found")
+            raise NotFoundError(f"Component {component_key} not found")
 
         old_status = state.status
         state.enabled = False
@@ -337,7 +338,7 @@ class ComponentService:
     ) -> ComponentState:
         state = await ComponentService.get_state(session, component_key)
         if not state:
-            raise ValueError(f"Component {component_key} not found")
+            raise NotFoundError(f"Component {component_key} not found")
 
         old_config = dict(state.config_json)
         state.config_json = config

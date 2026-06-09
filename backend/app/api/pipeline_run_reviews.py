@@ -51,19 +51,16 @@ async def create_review(
     if body.sample_verdicts:
         sample_verdicts_dict = {k: v.model_dump() for k, v in body.sample_verdicts.items()}
 
-    try:
-        review = await PipelineReviewService.create_review(
-            session=session,
-            pipeline_run_id=run_id,
-            reviewer_user_id=user_id,
-            verdict=body.verdict,
-            notes=body.notes,
-            sample_verdicts=sample_verdicts_dict,
-            recommended_exclusions=body.recommended_exclusions,
-        )
-        await session.commit()
-    except ValueError as e:
-        raise HTTPException(404, str(e))
+    review = await PipelineReviewService.create_review(
+        session=session,
+        pipeline_run_id=run_id,
+        reviewer_user_id=user_id,
+        verdict=body.verdict,
+        notes=body.notes,
+        sample_verdicts=sample_verdicts_dict,
+        recommended_exclusions=body.recommended_exclusions,
+    )
+    await session.commit()
 
     # Reload with reviewer relationship
     review = await PipelineReviewService.get_active_review(session, run_id)

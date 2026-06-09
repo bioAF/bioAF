@@ -9,7 +9,7 @@ External systems authenticate as a **service account**, which is just a
   `service_account_login_blocked`).
 - Hold exactly one **role**, set when the SA is created and changed only
   via Settings > Users & Accounts > Service Accounts.
-- Own one or more **API keys**. Keys carry their own scope list.
+- Own one or more **API Keys**. Keys carry their own scope list.
 
 ## Minting a key
 

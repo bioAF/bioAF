@@ -9,6 +9,7 @@ implementation.
 from __future__ import annotations
 
 from app.adapters.billing.base import BillingProvider
+from app.exceptions import ValidationError
 
 VALID_BILLING_BACKENDS = ("gcp",)
 DEFAULT_BILLING_BACKEND = "gcp"
@@ -17,7 +18,7 @@ DEFAULT_BILLING_BACKEND = "gcp"
 def create_billing_provider(credentials=None, backend: str = DEFAULT_BILLING_BACKEND) -> BillingProvider:
     """Instantiate the billing provider for ``backend`` (default GCP)."""
     if backend not in VALID_BILLING_BACKENDS:
-        raise ValueError(f"Unknown billing backend '{backend}'. Valid options: {VALID_BILLING_BACKENDS}")
+        raise ValidationError(f"Unknown billing backend '{backend}'. Valid options: {VALID_BILLING_BACKENDS}")
     from app.adapters.billing.gcp import GcpBillingProvider
 
     return GcpBillingProvider(credentials=credentials)

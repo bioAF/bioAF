@@ -24,6 +24,8 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import ValidationError
+
 logger = logging.getLogger("bioaf.gcs_storage")
 
 
@@ -64,7 +66,7 @@ class GcsStorageService:
         config = await GcsStorageService._read_storage_config(session)
 
         if config.get("storage_deployed", "false") != "true":
-            raise ValueError("Storage infrastructure has not been deployed yet")
+            raise ValidationError("Storage infrastructure has not been deployed yet")
 
         credentials = await GcsStorageService.get_credentials(session)
         client = storage.Client(credentials=credentials)

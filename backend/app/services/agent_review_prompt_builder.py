@@ -7,6 +7,7 @@ from the catalog sub-items the user selected.
 
 from __future__ import annotations
 
+from app.exceptions import ValidationError
 from app.services.agent_review_section_catalog import SECTIONS, all_sub_items
 
 PIPELINE_RUN_REVIEW_V2_BUILDER_NAME = "pipeline_run_review_v2_builder"
@@ -55,7 +56,7 @@ Begin your response with the JSON block, then the free-text body.
 """
 
 
-class EmptySectionSelection(ValueError):
+class EmptySectionSelection(ValidationError):
     """Raised when no sub-items are selected; the prompt body would be empty."""
 
 
@@ -77,7 +78,7 @@ def assemble_prompt(
     selected_set = set(selected_sub_item_ids)
     unknown = selected_set - catalog.keys()
     if unknown:
-        raise ValueError(f"unknown sub-item ids: {sorted(unknown)}")
+        raise ValidationError(f"unknown sub-item ids: {sorted(unknown)}")
 
     sections_block_parts: list[str] = []
     for sec in SECTIONS:

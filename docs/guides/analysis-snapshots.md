@@ -191,7 +191,7 @@ client.star(snapshot_id="snap-abc123")
 bioaf_star(client, snapshot_id = "snap-abc123")
 ```
 
-Starring a snapshot adds an entry to the audit log recording who selected this result and when. This is valuable for publication provenance: "We selected resolution 0.5 because it produced biologically distinct clusters without over-splitting the T cell compartment."
+Starring a snapshot adds an entry to the Audit Log recording who selected this result and when. This is valuable for publication provenance: "We selected resolution 0.5 because it produced biologically distinct clusters without over-splitting the T cell compartment."
 
 Only one snapshot per session can be starred. Starring a new snapshot in the same session automatically unstars the previous one.
 

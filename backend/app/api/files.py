@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import get_session
+from app.exceptions import DomainError
 from app.schemas.data_search import DataSearchItem, DataSearchResponse
 from app.schemas.experiment import UserSummary
 from app.schemas.file import (
@@ -66,21 +67,18 @@ async def initiate_upload(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
-    try:
-        result = await UploadService.initiate_upload(
-            session,
-            org_id,
-            user_id,
-            filename=body.filename,
-            expected_size=body.expected_size_bytes,
-            expected_md5=body.expected_md5,
-            project_id=body.project_id,
-            experiment_id=body.experiment_id,
-            sample_ids=body.sample_ids,
-            is_global=body.is_global,
-        )
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    result = await UploadService.initiate_upload(
+        session,
+        org_id,
+        user_id,
+        filename=body.filename,
+        expected_size=body.expected_size_bytes,
+        expected_md5=body.expected_md5,
+        project_id=body.project_id,
+        experiment_id=body.experiment_id,
+        sample_ids=body.sample_ids,
+        is_global=body.is_global,
+    )
     return FileUploadInitiateResponse(**result)
 
 
@@ -91,13 +89,10 @@ async def complete_upload(
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
-    try:
-        file = await UploadService.complete_upload(session, org_id, body.upload_id, body.actual_md5)
-        await session.commit()
-        file = await FileService.get_file(session, file.id, org_id)
-        return _file_response(file)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    file = await UploadService.complete_upload(session, org_id, body.upload_id, body.actual_md5)
+    await session.commit()
+    file = await FileService.get_file(session, file.id, org_id)
+    return _file_response(file)
 
 
 @router.post("/upload/simple", response_model=FileResponse)
@@ -126,8 +121,8 @@ async def simple_upload(
             sample_ids=sample_ids,
             is_global=is_global,
         )
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    except DomainError:
+        raise
     except Exception as e:
         raise HTTPException(500, f"Upload failed: {e}")
     await session.commit()

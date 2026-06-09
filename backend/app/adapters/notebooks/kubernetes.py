@@ -22,6 +22,7 @@ from kubernetes import client, config
 
 from app.adapters.base import NotebookProvider
 from app.adapters.capabilities import ProviderCapabilities
+from app.exceptions import ValidationError
 from app.adapters.models import (
     SessionInfo,
     SessionStatus,
@@ -526,7 +527,7 @@ class KubernetesNotebookProvider(NotebookProvider):
             # SSH work node (ADR-034): sshd as main process with PAM auth
             session_creds = session_spec.get("session_credentials")
             if not session_creds:
-                raise ValueError("Session credentials are required for SSH work nodes")
+                raise ValidationError("Session credentials are required for SSH work nodes")
 
             container_port = 22
             cred_username = session_creds["username"]
@@ -556,7 +557,7 @@ class KubernetesNotebookProvider(NotebookProvider):
             # of each container's own root filesystem and are not shared.
             session_creds = session_spec.get("session_credentials")
             if not session_creds:
-                raise ValueError("Session credentials are required for RStudio sessions")
+                raise ValidationError("Session credentials are required for RStudio sessions")
 
             container_port = 8787
             cred_username = session_creds["username"]

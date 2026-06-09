@@ -18,9 +18,9 @@
 | [ADR-014](../decisions/ADR-014-geo-export-service.md) | GEO Export Service | Support exporting data in GEO-compliant format |
 | [ADR-015](../decisions/ADR-015-analysis-snapshot-sdk.md) | Analysis Snapshot SDK | Capture reproducible analysis snapshots with environment and parameters |
 | [ADR-016](../decisions/ADR-016-snapshot-comparison-ui.md) | Snapshot Comparison UI | Visual diff tool for comparing analysis snapshots |
-| [ADR-017](../decisions/ADR-017-reference-data-management.md) | Reference Data Management | Centralized management of reference genomes and annotations |
+| [ADR-017](../decisions/ADR-017-reference-data-management.md) | Reference Data Management | Centralized management of Reference Datasets |
 | [ADR-018](../decisions/ADR-018-cross-experiment-projects.md) | Cross-Experiment Projects | Group related experiments into projects for organization |
-| [ADR-019](../decisions/ADR-019-pipeline-review-handoff.md) | Pipeline Review Handoff | Review gate between pipeline completion and data handoff |
+| [ADR-019](../decisions/ADR-019-pipeline-review-handoff.md) | Pipeline Review Handoff | Review Handoff gate between pipeline completion and data handoff |
 | [ADR-020](../decisions/ADR-020-bioaf-adapter-layer.md) | BioAF Adapter Layer (BAL) | Abstract compute, storage, and notebook providers behind clean interfaces |
 | [ADR-021](../decisions/ADR-021-kubernetes-compute-backend.md) | Kubernetes Compute Backend | GKE Autopilot as the recommended compute backend |
 | [ADR-022](../decisions/ADR-022-gcs-storage-backend.md) | GCS Storage Backend | GCS as the recommended storage backend, replacing Filestore |
@@ -35,7 +35,7 @@
 | [ADR-031](../decisions/ADR-031-notebook-image-build-pipeline.md) | Notebook Image Build Pipeline | Cloud Build pipeline for notebook container images |
 | [ADR-032](../decisions/ADR-032-custom-rbac.md) | Custom RBAC | Permission-based access control with custom roles |
 | [ADR-033](../decisions/ADR-033-versioned-compute-environments.md) | Versioned Compute Environments | Immutable, versioned notebook and compute environments |
-| [ADR-034](../decisions/ADR-034-custom-work-nodes.md) | Custom Work Nodes | Ephemeral Kubernetes pods for interactive compute sessions |
+| [ADR-034](../decisions/ADR-034-custom-work-nodes.md) | Custom Work Nodes | Ephemeral Kubernetes pods for Work Nodes |
 | [ADR-035](../decisions/ADR-035-bioaf-cli.md) | bioaf CLI | In-session CLI for provenance capture and heartbeat |
 | [ADR-036](../decisions/ADR-036-data-export-download.md) | Data Export and Download | Bulk export and download system for experiment data |
 | [ADR-037](../decisions/ADR-037-provenance-reporting.md) | Provenance Reporting | Full lineage reports for files and analysis outputs |

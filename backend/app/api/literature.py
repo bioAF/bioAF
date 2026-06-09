@@ -906,10 +906,7 @@ async def update_paper_endpoint(
     fields = body.model_dump(exclude_unset=True)
     if "authors" in fields and fields["authors"] is not None:
         fields["authors"] = [a if isinstance(a, dict) else a.model_dump(exclude_none=True) for a in fields["authors"]]
-    try:
-        await paper_service.update_paper_metadata(session, paper=paper, user_id=user_id, fields=fields)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    await paper_service.update_paper_metadata(session, paper=paper, user_id=user_id, fields=fields)
     await session.commit()
     await session.refresh(paper)
     return await _serialize_paper(session, paper, user_id)
@@ -1112,16 +1109,13 @@ async def create_comment_endpoint(
         await paper_service.get_paper(session, org_id, paper_id)
     except PaperNotFound:
         raise HTTPException(404, "paper not found")
-    try:
-        comment = await comment_service.create(
-            session,
-            paper_id=paper_id,
-            user_id=int(current_user["sub"]),
-            body=body.body,
-            parent_id=body.parent_id,
-        )
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    comment = await comment_service.create(
+        session,
+        paper_id=paper_id,
+        user_id=int(current_user["sub"]),
+        body=body.body,
+        parent_id=body.parent_id,
+    )
     await session.commit()
     user_name = await _resolve_user_label(session, comment.user_id)
     return _serialize_comment(comment, user_name=user_name)
@@ -1152,8 +1146,6 @@ async def update_comment_endpoint(
         )
     except CommentPermissionDenied:
         raise HTTPException(403, "cannot edit this comment")
-    except ValueError as e:
-        raise HTTPException(400, str(e))
     await session.commit()
     user_name = await _resolve_user_label(session, updated.user_id)
     return _serialize_comment(updated, user_name=user_name)
@@ -1382,17 +1374,14 @@ async def submit_search_endpoint(
 ):
     if not body.query or not body.query.strip():
         raise HTTPException(400, "query must not be empty")
-    try:
-        row = await search_service.create_search(
-            session,
-            org_id=int(current_user["org_id"]),
-            user_id=int(current_user["sub"]),
-            query=body.query.strip(),
-            sources=body.sources,
-            max_per_source=body.max_per_source,
-        )
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    row = await search_service.create_search(
+        session,
+        org_id=int(current_user["org_id"]),
+        user_id=int(current_user["sub"]),
+        query=body.query.strip(),
+        sources=body.sources,
+        max_per_source=body.max_per_source,
+    )
     await session.commit()
     await search_service.schedule_search_run(
         search_id=row.id, user_id=int(current_user["sub"]), max_per_source=body.max_per_source

@@ -212,12 +212,9 @@ async def start_scan(
     session: AsyncSession = Depends(get_session),
 ):
     org_id, user_id = int(current_user["org_id"]), int(current_user["sub"])
-    try:
-        job = await scan_svc.create_scan_job(
-            session, org_id=org_id, user_id=user_id, scan_type=body.scan_type, scan_input=body.scan_input
-        )
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
+    job = await scan_svc.create_scan_job(
+        session, org_id=org_id, user_id=user_id, scan_type=body.scan_type, scan_input=body.scan_input
+    )
     await session.commit()
     background_tasks.add_task(scan_svc.execute_scan, async_session_factory, job_id=job.id)
     return _job_response(job)
@@ -293,17 +290,14 @@ async def review_scan(
 ):
     org_id, user_id = int(current_user["org_id"]), int(current_user["sub"])
     decisions = {d.proposal_id: d.decision for d in body.decisions}
-    try:
-        summary = await scan_svc.review_proposals(
-            session,
-            org_id=org_id,
-            user_id=user_id,
-            job_id=job_id,
-            decisions=decisions,
-            accept_all_remaining=body.accept_all_remaining,
-            reject_all_remaining=body.reject_all_remaining,
-        )
-    except ValueError as exc:
-        raise HTTPException(404, str(exc))
+    summary = await scan_svc.review_proposals(
+        session,
+        org_id=org_id,
+        user_id=user_id,
+        job_id=job_id,
+        decisions=decisions,
+        accept_all_remaining=body.accept_all_remaining,
+        reject_all_remaining=body.reject_all_remaining,
+    )
     await session.commit()
     return LabGlossaryReviewResponse(**summary)

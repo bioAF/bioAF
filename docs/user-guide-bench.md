@@ -28,7 +28,7 @@ From your experiment detail page:
    - Sample name, organism, tissue type
    - Library strategy (e.g., scRNA-seq, ATAC-seq)
    - Custom fields defined by your experiment template
-3. Samples can be organized into **batches** for processing
+3. Samples can be organized into **Sample Batches** for processing
 
 ## Uploading Data
 
@@ -42,7 +42,7 @@ From your experiment detail page:
 When your experiment progresses to the analysis or complete stage:
 
 1. Navigate to **Results** in the sidebar
-2. View QC dashboards with quality metrics
+2. View QC Dashboards with quality metrics
 3. Access cellxgene for interactive single-cell data exploration
 4. Download result files and plots
 

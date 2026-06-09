@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { statusBadgeClass, statusLabel } from "@/lib/statusStyles";
 
 interface ExperimentItem {
   id: number;
@@ -14,21 +15,6 @@ interface ExperimentItem {
 interface ExperimentListResponse {
   experiments: ExperimentItem[];
   total: number;
-}
-
-const STATUS_STYLES: Record<string, string> = {
-  active: "bg-green-100 text-green-700",
-  in_progress: "bg-green-100 text-green-700",
-  completed: "bg-blue-100 text-blue-700",
-  draft: "bg-gray-100 text-gray-600",
-  planned: "bg-gray-100 text-gray-600",
-  archived: "bg-gray-100 text-gray-500",
-  failed: "bg-red-100 text-red-700",
-  cancelled: "bg-red-100 text-red-700",
-};
-
-function statusLabel(status: string): string {
-  return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export function ExperimentsStatusWidget() {
@@ -90,11 +76,12 @@ export function ExperimentsStatusWidget() {
                 >
                   <span className="truncate text-sm text-gray-800">{exp.name}</span>
                   <span
-                    className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
-                      STATUS_STYLES[exp.status] || "bg-gray-100 text-gray-600"
-                    }`}
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${statusBadgeClass(
+                      "experiment",
+                      exp.status,
+                    )}`}
                   >
-                    {statusLabel(exp.status)}
+                    {statusLabel("experiment", exp.status)}
                   </span>
                 </Link>
               </li>

@@ -11,6 +11,8 @@ card.
 
 from __future__ import annotations
 
+from app.exceptions import ValidationError
+
 PIPELINE_RUN_REVIEW_V1_NAME = "pipeline_run_review_v1"
 EXPERIMENT_RUN_COMPARISON_V1_NAME = "experiment_run_comparison_v1"
 
@@ -75,5 +77,5 @@ _TEMPLATES: dict[str, str] = {
 
 def get_template(name: str) -> str:
     if name not in _TEMPLATES:
-        raise ValueError(f"unknown prompt template: {name}")
+        raise ValidationError(f"unknown prompt template: {name}")
     return _TEMPLATES[name]

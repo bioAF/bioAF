@@ -24,6 +24,7 @@ from urllib.parse import urlparse
 
 from app.adapters.base import StorageProvider
 from app.adapters.capabilities import CapabilityNotSupported, ProviderCapabilities
+from app.exceptions import ValidationError
 from app.adapters.models import (
     BucketMetrics,
     ObjectMetadata,
@@ -99,7 +100,7 @@ class NfsStorageProvider(StorageProvider):
     def _parse_uri(uri: str) -> tuple[str, str]:
         """Parse ``file://<store>/<key>`` into (store, key)."""
         if not uri.startswith("file://"):
-            raise ValueError(f"Not an NFS storage URI: {uri!r}")
+            raise ValidationError(f"Not an NFS storage URI: {uri!r}")
         parsed = urlparse(uri)
         return parsed.netloc, parsed.path.lstrip("/")
 
@@ -117,11 +118,11 @@ class NfsStorageProvider(StorageProvider):
         # check is a CodeQL-recognised path-injection barrier), then confirm the
         # resolved real path stays under the mount root (the semantic guard).
         if os.path.isabs(key) or ".." in key.split("/"):
-            raise ValueError(f"Storage URI escapes the mount root: {uri!r}")
+            raise ValidationError(f"Storage URI escapes the mount root: {uri!r}")
         base = os.path.realpath(self._root)
         full = os.path.realpath(os.path.join(base, store, key))
         if full != base and not full.startswith(base + os.sep):
-            raise ValueError(f"Storage URI escapes the mount root: {uri!r}")
+            raise ValidationError(f"Storage URI escapes the mount root: {uri!r}")
         return full
 
     # -- pipeline staging -----------------------------------------------------

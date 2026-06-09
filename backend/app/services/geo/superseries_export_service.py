@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.exceptions import NotFoundError, ValidationError
 from app.models.experiment import Experiment
 from app.models.project import Project
 from app.services.geo.geo_export_service import GeoExportService
@@ -78,7 +79,7 @@ class SuperSeriesExportService:
         )
 
         if not experiments:
-            raise ValueError("No experiments found for project")
+            raise ValidationError("No experiments found for project")
 
         # Cross-experiment validation
         cross_validation = SuperSeriesExportService._cross_validate(experiments)
@@ -161,7 +162,7 @@ class SuperSeriesExportService:
         )
         project = result.scalar_one_or_none()
         if not project:
-            raise ValueError("Project not found")
+            raise NotFoundError("Project not found")
         return project
 
     @staticmethod

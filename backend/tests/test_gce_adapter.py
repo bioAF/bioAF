@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.adapters.work_nodes.gce import GCEWorkNodeProvider
+from app.exceptions import ValidationError
 
 
 def _launch_provider():
@@ -145,7 +146,7 @@ async def test_launch_raises_when_all_zones_exhausted():
         patch.object(provider, "_get_gcp_credentials", return_value=MagicMock()),
         patch.object(provider, "_poll_vm_ready", new=AsyncMock()),
     ):
-        with pytest.raises(ValueError, match="resources unavailable"):
+        with pytest.raises(ValidationError, match="resources unavailable"):
             await provider._gce_launch_vm(_launch_vm_spec())
 
     assert insert_calls == [

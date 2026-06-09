@@ -40,34 +40,31 @@ async def create_auto_run_config(
 ):
     user_id = int(current_user["sub"])
     org_id = int(current_user["org_id"])
-    try:
-        config = await AutoRunService.create_config(
-            session,
-            experiment_id=experiment_id,
-            org_id=org_id,
-            user_id=user_id,
-            pipeline_key=body.pipeline_key,
-            parameters=body.parameters,
-            reference_genome=body.reference_genome,
-            alignment_algorithm=body.alignment_algorithm,
-            delay_minutes=body.delay_minutes,
-        )
-        await log_action(
-            session,
-            user_id=user_id,
-            entity_type="experiment_auto_run",
-            entity_id=config.id,
-            action="create",
-            details={
-                "experiment_id": experiment_id,
-                "pipeline_key": body.pipeline_key,
-                "delay_minutes": body.delay_minutes,
-            },
-        )
-        await session.commit()
-        return _config_response(config)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
+    config = await AutoRunService.create_config(
+        session,
+        experiment_id=experiment_id,
+        org_id=org_id,
+        user_id=user_id,
+        pipeline_key=body.pipeline_key,
+        parameters=body.parameters,
+        reference_genome=body.reference_genome,
+        alignment_algorithm=body.alignment_algorithm,
+        delay_minutes=body.delay_minutes,
+    )
+    await log_action(
+        session,
+        user_id=user_id,
+        entity_type="experiment_auto_run",
+        entity_id=config.id,
+        action="create",
+        details={
+            "experiment_id": experiment_id,
+            "pipeline_key": body.pipeline_key,
+            "delay_minutes": body.delay_minutes,
+        },
+    )
+    await session.commit()
+    return _config_response(config)
 
 
 @router.get("/{experiment_id}/auto-runs", response_model=list[AutoRunConfigResponse])

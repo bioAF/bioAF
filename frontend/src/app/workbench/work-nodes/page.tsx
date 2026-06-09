@@ -30,15 +30,7 @@ import type {
   FileResponse,
   FileListResponse,
 } from "@/lib/types";
-
-const STATUS_COLORS: Record<string, string> = {
-  pending: "bg-gray-100 text-gray-800",
-  starting: "bg-blue-100 text-blue-800",
-  running: "bg-green-100 text-green-800",
-  stopping: "bg-orange-100 text-orange-800",
-  stopped: "bg-gray-100 text-gray-600",
-  failed: "bg-red-100 text-red-800",
-};
+import { statusBadgeClass } from "@/lib/statusStyles";
 
 function statusLabel(node: WorkNode): string {
   if (node.status === "stopping") return "Syncing outputs...";
@@ -577,7 +569,7 @@ export default function WorkNodesPage() {
                             Syncing outputs...
                           </span>
                         ) : (
-                          <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${STATUS_COLORS[node.status] || "bg-gray-100"}`}>
+                          <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${statusBadgeClass("computeSession", node.status)}`}>
                             {statusLabel(node)}
                           </span>
                         )}
@@ -640,7 +632,7 @@ export default function WorkNodesPage() {
                 <div className="space-y-3 text-sm">
                   <div className="flex justify-between">
                     <span className="text-gray-500">Status</span>
-                    <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${STATUS_COLORS[viewingNode.status] || "bg-gray-100"}`}>
+                    <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${statusBadgeClass("computeSession", viewingNode.status)}`}>
                       {statusLabel(viewingNode)}
                     </span>
                   </div>

@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.adapters.observability.base import LogSinkProvider
+from app.exceptions import ValidationError
 
 VALID_LOG_SINK_BACKENDS = ("gcp",)
 DEFAULT_LOG_SINK_BACKEND = "gcp"
@@ -22,7 +23,7 @@ def create_log_sink_provider(
 ) -> LogSinkProvider:
     """Instantiate the log-sink provider for ``backend`` (default GCP)."""
     if backend not in VALID_LOG_SINK_BACKENDS:
-        raise ValueError(f"Unknown log sink backend '{backend}'. Valid options: {VALID_LOG_SINK_BACKENDS}")
+        raise ValidationError(f"Unknown log sink backend '{backend}'. Valid options: {VALID_LOG_SINK_BACKENDS}")
     from app.adapters.observability.gcp import GcpLogSinkProvider
 
     return GcpLogSinkProvider(project_id, credentials)

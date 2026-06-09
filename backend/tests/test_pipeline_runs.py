@@ -52,7 +52,8 @@ async def experiment(session, admin_user):
 
 @pytest_asyncio.fixture
 async def samples(session, experiment):
-    from app.models.sample import Sample
+    from app.models.file import File
+    from app.models.sample import Sample, sample_files
 
     sample_list = []
     for i in range(3):
@@ -63,6 +64,20 @@ async def samples(session, experiment):
             tissue_type="PBMC",
         )
         session.add(s)
+        await session.flush()
+        # nf-core/scrnaseq consumes per-sample FASTQ; give each sample its own
+        # linked reads so the launch passes the file requirement.
+        for read in ("R1", "R2"):
+            f = File(
+                organization_id=experiment.organization_id,
+                experiment_id=experiment.id,
+                gcs_uri=f"gs://bucket/SAMPLE_{i + 1}_{read}_001.fastq.gz",
+                filename=f"SAMPLE_{i + 1}_{read}_001.fastq.gz",
+                file_type="fastq",
+            )
+            session.add(f)
+            await session.flush()
+            await session.execute(sample_files.insert().values(sample_id=s.id, file_id=f.id))
         sample_list.append(s)
     await session.flush()
     await session.commit()
@@ -345,6 +360,15 @@ async def test_provenance_export(client, admin_token, pipeline_run):
     assert "parameters" in data
     assert "samples" in data
     assert "experiment" in data
+
+    # Input files must be human-readable records, not bare ids (issue #3).
+    input_files = data["input_files"]
+    assert input_files, "run should have resolved input files"
+    first = input_files[0]
+    assert isinstance(first, dict), "input files must be enriched objects, not ids"
+    assert first["filename"].endswith(".fastq.gz")
+    assert first["experiment"]["name"] == "Test Experiment"
+    assert first["samples"] and first["samples"][0]["external_id"].startswith("SAMPLE_")
 
 
 @pytest.mark.asyncio

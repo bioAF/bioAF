@@ -8,6 +8,8 @@ import csv
 import io
 from dataclasses import dataclass, field
 
+from app.exceptions import ValidationError
+
 
 @dataclass
 class ManifestFileEntry:
@@ -32,14 +34,14 @@ def parse_manifest(content: str, format: str) -> ManifestParseResult:
         ManifestParseResult with batch_number and list of entries.
 
     Raises:
-        ValueError: If format is not supported.
+        ValidationError: If format is not supported.
     """
     if format in ("md5sum", "txt"):
         return _parse_md5sum(content)
     elif format == "csv":
         return _parse_csv(content)
     else:
-        raise ValueError(f"Unsupported manifest format: {format}")
+        raise ValidationError(f"Unsupported manifest format: {format}")
 
 
 def _parse_md5sum(content: str) -> ManifestParseResult:

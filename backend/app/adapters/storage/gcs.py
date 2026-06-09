@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 from app.adapters.base import StorageProvider
 from app.adapters.capabilities import ProviderCapabilities
+from app.exceptions import ValidationError
 from app.adapters.models import (
     BucketMetrics,
     ObjectMetadata,
@@ -181,7 +182,7 @@ class GcsStorageProvider(StorageProvider):
     def _parse_uri(uri: str) -> tuple[str, str]:
         """Parse ``gs://bucket/key`` into (bucket, key)."""
         if not uri.startswith("gs://"):
-            raise ValueError(f"Not a storage URI: {uri!r}")
+            raise ValidationError(f"Not a storage URI: {uri!r}")
         parsed = urlparse(uri)
         return parsed.netloc, parsed.path.lstrip("/")
 
@@ -195,11 +196,11 @@ class GcsStorageProvider(StorageProvider):
         # check is a CodeQL-recognised path-injection barrier), then confirm the
         # resolved real path stays under the local object root.
         if os.path.isabs(key) or ".." in key.split("/"):
-            raise ValueError(f"Storage key escapes the local object root: {key!r}")
+            raise ValidationError(f"Storage key escapes the local object root: {key!r}")
         base = os.path.realpath(os.path.join(LOCAL_DATA_ROOT, _LOCAL_OBJECTS_DIR))
         full = os.path.realpath(os.path.join(base, bucket, key))
         if full != base and not full.startswith(base + os.sep):
-            raise ValueError(f"Storage path escapes the local object root: {uri!r}")
+            raise ValidationError(f"Storage path escapes the local object root: {uri!r}")
         return full
 
     async def _get_credentials(self):
@@ -246,7 +247,7 @@ class GcsStorageProvider(StorageProvider):
         config = await self._get_bucket_config()
         bucket = config.get(f"{store.value}_bucket_name")
         if not bucket or bucket == "null":
-            raise ValueError(f"No bucket configured for store {store.value!r}")
+            raise ValidationError(f"No bucket configured for store {store.value!r}")
         return f"gs://{bucket}/{key}"
 
     async def read_text(self, uri: str, *, encoding: str = "utf-8") -> str:
@@ -767,7 +768,7 @@ class GcsStorageProvider(StorageProvider):
         """
         config = await self._read_storage_config()
         if config.get("storage_deployed", "false") != "true":
-            raise ValueError("Storage infrastructure has not been deployed yet")
+            raise ValidationError("Storage infrastructure has not been deployed yet")
 
         creds = await self._get_credentials()
         raw = await asyncio.to_thread(self._gcs_collect_bucket_metrics, config, creds)

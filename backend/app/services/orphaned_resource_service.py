@@ -7,6 +7,7 @@ from google.cloud import storage
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import NotFoundError, StateError, ValidationError
 from app.models.orphaned_resource import OrphanedResource
 
 logger = logging.getLogger(__name__)
@@ -126,7 +127,7 @@ class OrphanedResourceService:
         result = await session.execute(select(OrphanedResource).where(OrphanedResource.id == resource_id))
         resource = result.scalar_one_or_none()
         if not resource:
-            raise ValueError(f"Orphaned resource {resource_id} not found")
+            raise NotFoundError(f"Orphaned resource {resource_id} not found")
 
         resource.status = "cleaning"
         await session.flush()
@@ -139,7 +140,7 @@ class OrphanedResourceService:
             elif resource.resource_type == "service_account":
                 await OrphanedResourceService._cleanup_service_account(session, resource)
             else:
-                raise ValueError(f"Unknown resource type: {resource.resource_type}")
+                raise ValidationError(f"Unknown resource type: {resource.resource_type}")
 
             resource.status = "cleaned"
             resource.resolved_at = datetime.now(timezone.utc)
@@ -211,7 +212,7 @@ class OrphanedResourceService:
         result = await session.execute(select(OrphanedResource).where(OrphanedResource.id == resource_id))
         resource = result.scalar_one_or_none()
         if not resource:
-            raise ValueError(f"Orphaned resource {resource_id} not found")
+            raise NotFoundError(f"Orphaned resource {resource_id} not found")
 
         resource.status = "dismissed"
         resource.resolved_at = datetime.now(timezone.utc)
@@ -415,15 +416,15 @@ class OrphanedResourceService:
         result = await session.execute(select(OrphanedResource).where(OrphanedResource.id == resource_id))
         resource = result.scalar_one_or_none()
         if not resource:
-            raise ValueError(f"Orphaned resource {resource_id} not found")
+            raise NotFoundError(f"Orphaned resource {resource_id} not found")
 
         if resource.resource_type != "gke_cluster":
-            raise ValueError(f"Only GKE clusters can be adopted, got {resource.resource_type}")
+            raise ValidationError(f"Only GKE clusters can be adopted, got {resource.resource_type}")
 
         gke_status, cluster = await OrphanedResourceService._query_gke_status(session, resource)
 
         if gke_status not in _RECOVERABLE_STATUSES:
-            raise ValueError(
+            raise StateError(
                 f"Cluster {resource.resource_name} is not in a running state (current status: {gke_status})"
             )
 

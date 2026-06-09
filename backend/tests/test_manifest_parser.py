@@ -2,6 +2,7 @@
 
 import pytest
 
+from app.exceptions import ValidationError
 from app.services.manifest_parser import ManifestParseResult, parse_manifest
 
 
@@ -89,5 +90,5 @@ class TestMalformedInput:
         assert result.entries[0].filename == "good_file.fastq.gz"
 
     def test_unknown_format_raises(self):
-        with pytest.raises(ValueError, match="Unsupported manifest format"):
+        with pytest.raises(ValidationError, match="Unsupported manifest format"):
             parse_manifest("data", "unknown_format")

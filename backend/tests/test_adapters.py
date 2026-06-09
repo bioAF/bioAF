@@ -2,6 +2,8 @@
 
 import pytest
 
+from app.exceptions import ValidationError
+
 from app.adapters.base import ComputeProvider, NotebookProvider, StorageProvider
 from app.adapters.compute.slurm import SlurmComputeProvider
 from app.adapters.notebooks.slurm import SlurmNotebookProvider
@@ -158,7 +160,7 @@ class TestAdapterRegistry:
         assert isinstance(registry.get_notebook_adapter(), SlurmNotebookProvider)
 
     def test_registry_raises_for_unknown_stack(self):
-        with pytest.raises(ValueError, match="Unknown compute_stack 'hpc_magic'"):
+        with pytest.raises(ValidationError, match="Unknown compute_stack 'hpc_magic'"):
             registry.initialize_adapters_sync("hpc_magic")
 
     def test_registry_raises_when_not_initialized(self):

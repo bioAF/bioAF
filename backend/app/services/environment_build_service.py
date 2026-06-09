@@ -15,6 +15,7 @@ import time
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import NotFoundError, StateError, ValidationError
 from app.models.environment import Environment
 from app.models.environment_version import EnvironmentVersion
 from app.services.audit_service import log_action
@@ -289,7 +290,7 @@ class EnvironmentBuildService:
         )
         env = env_result.scalar_one_or_none()
         if not env:
-            raise ValueError("Environment not found")
+            raise NotFoundError("Environment not found")
 
         ver_result = await session.execute(
             select(EnvironmentVersion).where(
@@ -299,10 +300,10 @@ class EnvironmentBuildService:
         )
         version = ver_result.scalar_one_or_none()
         if not version:
-            raise ValueError("Version not found")
+            raise NotFoundError("Version not found")
 
         if version.status not in ("draft", "failed"):
-            raise ValueError(f"Cannot build version in '{version.status}' status")
+            raise StateError(f"Cannot build version in '{version.status}' status")
 
         # Route to the correct build pipeline based on environment type (ADR-043, ADR-045)
         # Notebooks and pipelines build Docker images via Cloud Build.
@@ -327,11 +328,11 @@ class EnvironmentBuildService:
         working_bucket = await _read_config(session, "working_bucket_name")
 
         if not project_id or project_id == "null":
-            raise ValueError("GCP project not configured")
+            raise ValidationError("GCP project not configured")
         if not region or region == "null":
-            raise ValueError("GCP region not configured")
+            raise ValidationError("GCP region not configured")
         if not working_bucket or working_bucket == "null":
-            raise ValueError("Working bucket not configured")
+            raise ValidationError("Working bucket not configured")
 
         # Ensure Artifact Registry repo exists
         await ensure_artifact_registry(session, project_id, region)
@@ -414,18 +415,18 @@ class EnvironmentBuildService:
         import yaml
 
         if version.definition_format != "conda":
-            raise ValueError("Work node environments only support conda definition format")
+            raise ValidationError("Work node environments only support conda definition format")
 
         project_id = await _read_config(session, "gcp_project_id")
         region = await _read_config(session, "gcp_region")
         working_bucket = await _read_config(session, "working_bucket_name")
 
         if not project_id or project_id == "null":
-            raise ValueError("GCP project not configured")
+            raise ValidationError("GCP project not configured")
         if not region or region == "null":
-            raise ValueError("GCP region not configured")
+            raise ValidationError("GCP region not configured")
         if not working_bucket or working_bucket == "null":
-            raise ValueError("Working bucket not configured")
+            raise ValidationError("Working bucket not configured")
 
         # Pick a zone for the Packer build VM, avoiding -a which is
         # often capacity-constrained.  The image itself is regional.

@@ -42,7 +42,13 @@ def _extract_fastq_lane_pairs(sample) -> list[tuple[str, str]]:
     falls back to Illumina filename convention (_R1_/_R2_).
     Returns one tuple per lane, sorted by lane number.
     """
-    files = getattr(sample, "files", None) or []
+    # Prefer the input-eligible set the launcher resolves (raw inputs only, with
+    # prior pipeline/notebook outputs excluded by default). Fall back to all
+    # linked files for callers that don't set it. isinstance guards against a
+    # MagicMock auto-vivifying the attribute in unit tests.
+    files = getattr(sample, "_input_files", None)
+    if not isinstance(files, list):
+        files = getattr(sample, "files", None) or []
     fastq_files = [f for f in files if getattr(f, "gcs_uri", None)]
     if not fastq_files:
         return [("", "")]

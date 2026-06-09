@@ -8,6 +8,7 @@ import zipfile
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import ValidationError
 from app.services.provenance.csv_renderer import CsvRenderer
 from app.services.provenance.data_gatherer import ProvenanceDataGatherer
 from app.services.provenance.json_renderer import JsonRenderer
@@ -69,7 +70,7 @@ class ProvenanceReportService:
         if format == "all":
             return _bundle_all(entity_type, json_report, base)
 
-        raise ValueError(f"Unknown format: {format}")
+        raise ValidationError(f"Unknown format: {format}")
 
 
 def _zip_csv_files(csv_files: dict[str, str], prefix: str) -> bytes:

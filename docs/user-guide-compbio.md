@@ -67,7 +67,7 @@ Navigate to **Data & Files** for file management:
 
 From **Results**:
 
-- View QC dashboards with quality metrics per pipeline run
+- View QC Dashboards with quality metrics per pipeline run
 - Launch cellxgene for interactive single-cell exploration
 - Browse publication-quality plots
 - Search across all results with the global search

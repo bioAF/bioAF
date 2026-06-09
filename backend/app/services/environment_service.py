@@ -3,6 +3,7 @@ import logging
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models.environment import Environment
 from app.models.environment_version import EnvironmentVersion
 from app.services.audit_service import log_action
@@ -185,9 +186,9 @@ class EnvironmentService:
         environment_type: str = "notebook",
     ) -> Environment:
         if visibility not in VALID_VISIBILITIES:
-            raise ValueError(f"Invalid visibility: {visibility}")
+            raise ValidationError(f"Invalid visibility: {visibility}")
         if environment_type not in VALID_ENVIRONMENT_TYPES:
-            raise ValueError(f"Invalid environment_type: {environment_type}")
+            raise ValidationError(f"Invalid environment_type: {environment_type}")
 
         # Check for duplicate name within org
         existing = await session.execute(
@@ -197,7 +198,7 @@ class EnvironmentService:
             )
         )
         if existing.scalar_one_or_none():
-            raise ValueError(f"Environment '{name}' already exists")
+            raise ConflictError(f"Environment '{name}' already exists")
 
         env = Environment(
             name=name,
@@ -231,10 +232,10 @@ class EnvironmentService:
     ) -> Environment:
         env = await EnvironmentService.get_environment(session, org_id, environment_id)
         if not env:
-            raise ValueError("Environment not found")
+            raise NotFoundError("Environment not found")
 
         if visibility and visibility not in VALID_VISIBILITIES:
-            raise ValueError(f"Invalid visibility: {visibility}")
+            raise ValidationError(f"Invalid visibility: {visibility}")
 
         if name is not None:
             existing = await session.execute(
@@ -245,7 +246,7 @@ class EnvironmentService:
                 )
             )
             if existing.scalar_one_or_none():
-                raise ValueError(f"Environment '{name}' already exists")
+                raise ConflictError(f"Environment '{name}' already exists")
             env.name = name
 
         if description is not None:
@@ -260,7 +261,7 @@ class EnvironmentService:
     async def delete_environment(session: AsyncSession, org_id: int, user_id: int, environment_id: int) -> None:
         env = await EnvironmentService.get_environment(session, org_id, environment_id)
         if not env:
-            raise ValueError("Environment not found")
+            raise NotFoundError("Environment not found")
 
         await log_action(
             session,
@@ -294,18 +295,18 @@ class EnvironmentService:
     ) -> EnvironmentVersion:
         env = await EnvironmentService.get_environment(session, org_id, environment_id)
         if not env:
-            raise ValueError("Environment not found")
+            raise NotFoundError("Environment not found")
 
         if definition_format not in VALID_DEFINITION_FORMATS:
-            raise ValueError(f"Invalid definition_format: {definition_format}")
+            raise ValidationError(f"Invalid definition_format: {definition_format}")
 
         # Work node environments only support conda (ADR-043)
         if env.environment_type == "work_node" and definition_format != "conda":
-            raise ValueError("Work node environments only support conda definition format")
+            raise ValidationError("Work node environments only support conda definition format")
 
         # Pipeline environments only support conda (ADR-045)
         if env.environment_type == "pipeline" and definition_format != "conda":
-            raise ValueError("Pipeline environments only support conda definition format")
+            raise ValidationError("Pipeline environments only support conda definition format")
 
         # Auto-increment version number
         result = await session.execute(
@@ -371,7 +372,7 @@ class EnvironmentService:
         """Delete a single environment version."""
         version = await EnvironmentService.get_version(session, org_id, environment_id, version_id)
         if not version:
-            raise ValueError("Version not found")
+            raise NotFoundError("Version not found")
 
         await session.delete(version)
         await session.flush()
@@ -387,11 +388,11 @@ class EnvironmentService:
         """Create a new build of an existing version (v1.1 -> v1.2)."""
         env = await EnvironmentService.get_environment(session, org_id, environment_id)
         if not env:
-            raise ValueError("Environment not found")
+            raise NotFoundError("Environment not found")
 
         original = await EnvironmentService.get_version(session, org_id, environment_id, version_id)
         if not original:
-            raise ValueError("Version not found")
+            raise NotFoundError("Version not found")
 
         # Find the max build_number for this version_number
         result = await session.execute(

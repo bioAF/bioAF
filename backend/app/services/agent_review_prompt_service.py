@@ -7,10 +7,11 @@ from collections.abc import Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import ConflictError, ValidationError
 from app.models.agent_review_prompt import AgentReviewPrompt
 
 
-class DuplicatePromptName(ValueError):
+class DuplicatePromptName(ConflictError):
     """Two prompts in the same org may not share a name."""
 
 
@@ -42,9 +43,9 @@ async def create(
     created_by_user_id: int,
 ) -> AgentReviewPrompt:
     if not name.strip():
-        raise ValueError("name is required")
+        raise ValidationError("name is required")
     if not body.strip():
-        raise ValueError("body is required")
+        raise ValidationError("body is required")
 
     existing = await session.execute(
         select(AgentReviewPrompt).where(
