@@ -9,9 +9,6 @@ reference across on ``(organization_id, event_type, created_at)``, only filling
 notifications that don't already carry one.
 """
 
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
-
 # ``jsonb_exists(col, key)`` is used instead of the ``?`` operator so the SQL has
 # no ``?`` that a driver could mistake for a bind placeholder.
 BACKFILL_NOTIFICATION_LINKS_SQL = """
@@ -31,10 +28,3 @@ WHERE a.organization_id = n.organization_id
   AND a.entity_id IS NOT NULL
   AND NOT jsonb_exists(n.metadata_json, 'entity_type')
 """
-
-
-async def backfill_notification_entity_refs(session: AsyncSession) -> int:
-    """Populate entity_type/entity_id on notifications that lack them. Returns the
-    number of rows updated."""
-    result = await session.execute(text(BACKFILL_NOTIFICATION_LINKS_SQL))
-    return result.rowcount

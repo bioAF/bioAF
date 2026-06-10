@@ -1,6 +1,5 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { LoadingState } from "@/components/shared/LoadingState";
 import { ErrorState } from "@/components/shared/ErrorState";
 
 describe("EmptyState", () => {
@@ -43,35 +42,6 @@ describe("EmptyState", () => {
     // No SVG should be rendered when icon is omitted
     const container = screen.getByTestId("empty-state");
     expect(container.querySelector("svg")).not.toBeInTheDocument();
-  });
-});
-
-describe("LoadingState", () => {
-  it("renders with default message", () => {
-    render(<LoadingState />);
-    expect(screen.getByTestId("loading-state")).toBeInTheDocument();
-    expect(screen.getByTestId("loading-spinner")).toBeInTheDocument();
-    expect(screen.getByTestId("loading-message")).toHaveTextContent(
-      "Loading..."
-    );
-  });
-
-  it("renders with custom message", () => {
-    render(<LoadingState message="Fetching data..." />);
-    expect(screen.getByTestId("loading-message")).toHaveTextContent(
-      "Fetching data..."
-    );
-  });
-
-  it("renders different sizes", () => {
-    const { rerender } = render(<LoadingState size="sm" />);
-    expect(screen.getByTestId("loading-spinner")).toHaveClass("w-5", "h-5");
-
-    rerender(<LoadingState size="md" />);
-    expect(screen.getByTestId("loading-spinner")).toHaveClass("w-8", "h-8");
-
-    rerender(<LoadingState size="lg" />);
-    expect(screen.getByTestId("loading-spinner")).toHaveClass("w-12", "h-12");
   });
 });
 

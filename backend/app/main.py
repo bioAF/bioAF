@@ -272,7 +272,6 @@ async def lifespan(app: FastAPI):
     background_tasks.append(asyncio.create_task(_pipeline_monitor_loop()))
     background_tasks.append(asyncio.create_task(_plot_archive_watcher_loop()))
     background_tasks.append(asyncio.create_task(_storage_stats_refresh_loop()))
-    background_tasks.append(asyncio.create_task(_reconciler_loop()))
     background_tasks.append(asyncio.create_task(_notification_cleanup_loop()))
     background_tasks.append(asyncio.create_task(_backup_health_check_loop()))
     background_tasks.append(asyncio.create_task(_postgres_backup_loop()))
@@ -428,22 +427,6 @@ async def _storage_stats_refresh_loop():
             break
         except Exception as e:
             logger.error("Storage stats refresh error: %s", e)
-
-
-async def _reconciler_loop():
-    """Process pending environment reconciliation tasks every 5 seconds."""
-    from app.database import async_session_factory
-    from app.services.reconciler_service import ReconcilerService
-
-    while True:
-        try:
-            await asyncio.sleep(5)
-            async with async_session_factory() as session:
-                await ReconcilerService.process_pending(session)
-        except asyncio.CancelledError:
-            break
-        except Exception as e:
-            logger.error("Reconciler error: %s", e)
 
 
 async def _notification_cleanup_loop():

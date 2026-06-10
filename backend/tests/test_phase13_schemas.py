@@ -18,7 +18,6 @@ from app.schemas.naming_profile import (
     NamingProfileTestRequest,
     SegmentDefinition,
 )
-from app.services.budget_service import BudgetCheckResult
 
 
 def _number_segment(**overrides) -> SegmentDefinition:
@@ -117,17 +116,3 @@ class TestBulkReassignRequest:
     def test_empty_file_ids_rejected(self):
         with pytest.raises(ValidationError):
             BulkReassignRequest(file_ids=[])
-
-
-class TestBudgetCheckResult:
-    def test_valid_result(self):
-        result = BudgetCheckResult(
-            estimated_cost=5.0,
-            confidence_interval_pct=15.0,
-            current_month_spend=100.0,
-            queued_running_cost=10.0,
-            projected_total=115.0,
-            monthly_budget=500.0,
-            decision="within_budget",
-        )
-        assert result.decision == "within_budget"
