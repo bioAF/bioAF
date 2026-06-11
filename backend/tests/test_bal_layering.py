@@ -554,11 +554,9 @@ def test_shell_cli_allowlist_count_is_pinned():
 # already-allowlisted file is not caught until that file is drained.
 
 GS_URI_LITERAL_ALLOWLIST: set[str] = {
-    "api/lab_documents.py",
     "services/backup_service.py",
     "services/custom_pipeline_service.py",
     "services/environment_build_service.py",
-    "services/lab_document_upload_service.py",
 }
 
 
@@ -596,4 +594,4 @@ def test_gs_uri_allowlist_has_no_stale_entries():
 
 def test_gs_uri_allowlist_count_is_pinned():
     """Pin the gs:// leak file count; decrement as Leak 3 drains. Target 0."""
-    assert len(GS_URI_LITERAL_ALLOWLIST) == 5
+    assert len(GS_URI_LITERAL_ALLOWLIST) == 3
