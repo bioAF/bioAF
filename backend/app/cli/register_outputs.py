@@ -33,7 +33,8 @@ async def _resolve_outdir(session: AsyncSession, run: PipelineRun) -> str:
     # Fall back: build the GCS URI from results_bucket_name in platform_config
     bucket = await PlatformConfigService.get(session, "results_bucket_name")
     if bucket is not None:
-        return f"gs://{bucket}/experiments/{run.experiment_id}/pipeline-runs/{run.id}"
+        key = f"experiments/{run.experiment_id}/pipeline-runs/{run.id}"
+        return get_storage_adapter().build_uri(bucket, key)
 
     # Last resort: local-style path (GCS adapter will use its default bucket)
     return f"/data/results/experiments/{run.experiment_id}/pipeline-runs/{run.id}"

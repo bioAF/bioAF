@@ -100,12 +100,13 @@ class UploadService:
         upload_id = str(uuid.uuid4())
         bucket_name = await UploadService._get_ingest_bucket(session)
         gcs_path = f"uploads/{upload_id}/{filename}"
-        gcs_uri = f"gs://{bucket_name}/{gcs_path}"
 
         # Generate signed PUT URL via the storage adapter
         from app.adapters.registry import get_storage_adapter
 
-        signed_url = await get_storage_adapter().generate_signed_url(
+        adapter = get_storage_adapter()
+        gcs_uri = adapter.build_uri(bucket_name, gcs_path)
+        signed_url = await adapter.generate_signed_url(
             gcs_uri, method="PUT", expiry_seconds=3600, content_type="application/octet-stream"
         )
 

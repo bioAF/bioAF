@@ -148,7 +148,8 @@ class PubSubListener:
             logger.info("Detected manifest file: %s", filename)
             from app.adapters.registry import get_storage_adapter
 
-            content = await get_storage_adapter().read_text(f"gs://{bucket}/{object_name}")
+            adapter = get_storage_adapter()
+            content = await adapter.read_text(adapter.build_uri(bucket, object_name))
             await process_manifest_ingest(
                 manifest_content=content,
                 manifest_format=manifest_config["manifest_format"],

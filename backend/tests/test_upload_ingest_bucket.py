@@ -20,6 +20,7 @@ def _storage_adapter():
     # resolve_uri is the backend-neutral URI factory (Phase 7); echo a realistic
     # store-scoped URI so callers that build write URIs through it get a string.
     adapter.resolve_uri.side_effect = lambda store, key: f"gs://bioaf-{store.value}-test/{key}"
+    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
     return adapter
 
 

@@ -1,6 +1,6 @@
 """Tests for pub-sub listener manifest file detection and routing."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import text
@@ -58,6 +58,7 @@ async def test_manifest_routes_to_manifest_ingest(session: AsyncSession):
 
     adapter = AsyncMock()
     adapter.read_text.return_value = manifest_content
+    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
     with (
         patch("app.adapters.registry.get_storage_adapter", return_value=adapter),
         patch(
@@ -121,6 +122,7 @@ async def test_custom_manifest_filename(session: AsyncSession):
 
     _adapter = AsyncMock()
     _adapter.read_text.return_value = "# batch: B1\nhash  file.fastq.gz\n"
+    _adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
     with (
         patch("app.adapters.registry.get_storage_adapter", return_value=_adapter),
         patch(
@@ -173,6 +175,7 @@ async def test_manifest_detection_case_insensitive(session: AsyncSession):
 
     _adapter = AsyncMock()
     _adapter.read_text.return_value = "# batch: B1\nhash  file.fastq.gz\n"
+    _adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
     with (
         patch("app.adapters.registry.get_storage_adapter", return_value=_adapter),
         patch(

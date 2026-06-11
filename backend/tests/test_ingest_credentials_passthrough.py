@@ -45,6 +45,7 @@ async def test_manifest_read_uses_storage_adapter(session: AsyncSession):
 
     adapter = AsyncMock()
     adapter.read_text.return_value = "# batch: B1\nhash  file.fastq.gz\n"
+    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
     listener = PubSubListener()
     msg_data = {
         "bucket": "my-ingest-bucket",
