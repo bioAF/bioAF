@@ -7,34 +7,17 @@ GCP service account key).
 """
 
 import asyncio
-import base64
 import logging
-import tempfile
-import time
 from datetime import datetime, timezone
 
-from kubernetes import client, config
+from kubernetes import client
 
 from app.adapters.base import CellxgeneProvider
 from app.adapters.capabilities import ProviderCapabilities
+from app.adapters.kubernetes.connection import GkeConnection
 from app.adapters.models import CellxgeneInstance, ServiceState
 
 logger = logging.getLogger("bioaf.adapters.cellxgene.k8s")
-
-
-def _get_gcp_token(cfg: dict) -> str:
-    """Mint a GCP access token via credential_injector.
-
-    Routes through impersonated bootstrap credentials in vm_default mode
-    or the stored JSON key in legacy service_account_key mode.
-    """
-    import google.auth.transport.requests
-
-    from app.platform import credential_injector
-
-    credentials = credential_injector.load_gcp_credentials(cfg)
-    credentials.refresh(google.auth.transport.requests.Request())
-    return credentials.token
 
 
 DEFAULT_CELLXGENE_NAMESPACE = "bioaf-cellxgene"
@@ -48,7 +31,18 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
     Docker Compose on a GCP VM).
     """
 
-    _TOKEN_TTL_SECONDS = 2700  # 45 minutes
+    # GKE cluster config keys this provider reads from platform_config.
+    _CONFIG_KEYS = [
+        "gke_cluster_endpoint",
+        "gke_cluster_ca_cert",
+        "gcp_credential_source",
+        "gcp_service_account_key",
+        "gcp_service_account_email",
+        "gcp_bootstrap_sa_email",
+        "gke_cluster_name",
+        "gcp_project_id",
+        "gcp_zone",
+    ]
 
     def capabilities(self) -> ProviderCapabilities:
         """This backend provides cellxgene visualization instances."""
@@ -56,10 +50,22 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
 
     def __init__(self, session_factory=None):
         self._session_factory = session_factory
-        self._api_client: client.ApiClient | None = None
-        self._client_created_at: float = 0.0
-        self._cluster_config: dict | None = None
+        self._gke = GkeConnection(
+            config_keys=self._CONFIG_KEYS,
+            session_factory=session_factory,
+            invalidate_client_on_force=True,
+            refresh_strategy="simple",
+        )
         self._namespace_ready = False
+
+    @property
+    def _cluster_config(self):
+        """Cluster config is owned by the shared GKE connection."""
+        return self._gke._cluster_config
+
+    @_cluster_config.setter
+    def _cluster_config(self, value):
+        self._gke._cluster_config = value
 
     async def _read_platform_config(self, *keys: str) -> dict[str, str]:
         """Read values from platform_config, decrypting any sensitive keys."""
@@ -279,147 +285,29 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
     # -- Cluster config --
 
     async def load_cluster_config(self, force: bool = False) -> dict:
-        """Read GKE cluster config from platform_config.
-
-        Caches the result. Re-reads when forced or when the cached endpoint
-        is missing/null so newly deployed clusters are picked up.
-        """
-        if self._cluster_config is not None and not force:
-            endpoint = self._cluster_config.get("gke_cluster_endpoint", "")
-            if endpoint and endpoint != "null":
-                return self._cluster_config
-
-        if not self._session_factory:
-            self._cluster_config = {}
-            return self._cluster_config
-
-        async with self._session_factory() as session:
-            from app.platform.platform_config_service import PlatformConfigService
-
-            self._cluster_config = await PlatformConfigService.get_many(
-                session,
-                [
-                    "gke_cluster_endpoint",
-                    "gke_cluster_ca_cert",
-                    "gcp_credential_source",
-                    "gcp_service_account_key",
-                    "gcp_service_account_email",
-                    "gcp_bootstrap_sa_email",
-                    "gke_cluster_name",
-                    "gcp_project_id",
-                    "gcp_zone",
-                ],
-            )
-
-        if force:
-            self._api_client = None
-
-        return self._cluster_config
+        """Read GKE cluster config from platform_config (shared connection)."""
+        return await self._gke.load_cluster_config(force=force)
 
     def _build_out_of_cluster_client(self) -> client.ApiClient:
-        """Build a K8s ApiClient using platform_config credentials."""
-        cfg = self._cluster_config or {}
-
-        endpoint = cfg.get("gke_cluster_endpoint", "")
-        ca_cert_b64 = cfg.get("gke_cluster_ca_cert", "")
-
-        if not endpoint or endpoint == "null":
-            raise RuntimeError("No GKE cluster endpoint in platform_config. Deploy the compute stack first.")
-
-        if not endpoint.startswith("https://"):
-            endpoint = f"https://{endpoint}"
-
-        token = _get_gcp_token(cfg)
-
-        ca_cert_bytes = base64.b64decode(ca_cert_b64)
-        ca_file = tempfile.NamedTemporaryFile(delete=False, suffix=".crt")
-        ca_file.write(ca_cert_bytes)
-        ca_file.close()
-
-        configuration = client.Configuration()
-        configuration.host = endpoint
-        configuration.ssl_ca_cert = ca_file.name
-
-        api_client = client.ApiClient(configuration)
-        # See backend/app/adapters/notebooks/kubernetes.py for the reasoning:
-        # Configuration.api_key is a silent no-op on the kubernetes-python
-        # release we ship with, so the header must be installed directly.
-        api_client.set_default_header("Authorization", f"Bearer {token}")
-
-        self._client_created_at = time.monotonic()
-        return api_client
+        return self._gke.build_out_of_cluster_client()
 
     def _is_token_expired(self) -> bool:
-        if self._client_created_at == 0.0:
-            return False
-        return (time.monotonic() - self._client_created_at) > self._TOKEN_TTL_SECONDS
+        return self._gke.is_token_expired()
 
     async def _get_api_client_async(self) -> client.ApiClient:
-        """Get or create a K8s ApiClient, trying incluster first."""
-        if self._api_client is not None and not self._is_token_expired():
-            return self._api_client
-
-        if self._is_token_expired():
-            logger.info("GCP access token approaching expiry, refreshing K8s client")
-            self._api_client = None
-
-        try:
-            config.load_incluster_config()
-            self._api_client = client.ApiClient()
-            logger.info("Using incluster K8s config")
-        except Exception:
-            logger.info("Not running in cluster, using platform_config credentials")
-            await self.load_cluster_config(force=True)
-            try:
-                self._api_client = self._build_out_of_cluster_client()
-                logger.info(
-                    "K8s client built for endpoint %s",
-                    (self._cluster_config or {}).get("gke_cluster_endpoint"),
-                )
-            except Exception:
-                logger.exception("Failed to build out-of-cluster K8s client")
-                raise
-
-        return self._api_client
+        return await self._gke.get_api_client_async()
 
     def _get_api_client(self) -> client.ApiClient:
-        """Get or create a K8s ApiClient (sync version).
-
-        Uses cached client if available; does not reload from DB.
-        """
-        if self._api_client is not None and not self._is_token_expired():
-            return self._api_client
-
-        if self._is_token_expired():
-            logger.info("GCP access token approaching expiry, refreshing K8s client")
-            self._api_client = None
-
-        try:
-            config.load_incluster_config()
-            self._api_client = client.ApiClient()
-            logger.info("Using incluster K8s config")
-        except Exception:
-            logger.info("Not running in cluster, using platform_config credentials")
-            try:
-                self._api_client = self._build_out_of_cluster_client()
-                logger.info(
-                    "K8s client built for endpoint %s",
-                    (self._cluster_config or {}).get("gke_cluster_endpoint"),
-                )
-            except Exception:
-                logger.exception("Failed to build out-of-cluster K8s client")
-                raise
-
-        return self._api_client
+        return self._gke.get_api_client()
 
     def _get_k8s_core_client(self):
-        return client.CoreV1Api(api_client=self._get_api_client())
+        return self._gke.core_v1()
 
     def _get_k8s_apps_client(self):
-        return client.AppsV1Api(api_client=self._get_api_client())
+        return self._gke.apps_v1()
 
     def _get_k8s_rbac_client(self):
-        return client.RbacAuthorizationV1Api(api_client=self._get_api_client())
+        return self._gke.rbac_v1()
 
     # -- Namespace setup --
 
