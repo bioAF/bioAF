@@ -32,6 +32,30 @@ def test_nfs_declares_no_signed_url_upload(nfs):
     assert caps.storage_tier_metrics is False
 
 
+# -- build_uri / parse_uri ----------------------------------------------------
+#
+# The NFS analogue of the GCS minting: a backend URI is file://<store>/<key>, so
+# build_uri / parse_uri round-trip on that scheme instead of gs://.
+
+
+def test_build_uri_mints_file_scheme(nfs):
+    assert nfs.build_uri("working", "a/b.txt") == "file://working/a/b.txt"
+
+
+def test_build_uri_strips_leading_slash_on_key(nfs):
+    assert nfs.build_uri("working", "/a/b.txt") == "file://working/a/b.txt"
+
+
+def test_parse_uri_round_trips_build_uri(nfs):
+    uri = nfs.build_uri("working", "a/b.txt")
+    assert nfs.parse_uri(uri) == ("working", "a/b.txt")
+
+
+def test_parse_uri_rejects_non_file_scheme(nfs):
+    with pytest.raises(ValidationError):
+        nfs.parse_uri("gs://bucket/a/b.txt")
+
+
 # -- object-store CRUD --------------------------------------------------------
 
 
