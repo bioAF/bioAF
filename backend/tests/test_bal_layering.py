@@ -553,9 +553,7 @@ def test_shell_cli_allowlist_count_is_pinned():
 # gone via resolve_uri(). Known limitation, accepted: a NEW gs:// added to an
 # already-allowlisted file is not caught until that file is drained.
 
-GS_URI_LITERAL_ALLOWLIST: set[str] = {
-    "services/backup_service.py",
-}
+GS_URI_LITERAL_ALLOWLIST: set[str] = set()
 
 
 def _gs_uri_in_source(source: str) -> bool:
@@ -592,4 +590,4 @@ def test_gs_uri_allowlist_has_no_stale_entries():
 
 def test_gs_uri_allowlist_count_is_pinned():
     """Pin the gs:// leak file count; decrement as Leak 3 drains. Target 0."""
-    assert len(GS_URI_LITERAL_ALLOWLIST) == 1
+    assert len(GS_URI_LITERAL_ALLOWLIST) == 0

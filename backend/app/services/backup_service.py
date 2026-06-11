@@ -86,8 +86,10 @@ async def _list_gcs_blobs(bucket_name: str, prefix: str, pattern: re.Pattern) ->
     """
     from app.adapters.registry import get_storage_adapter
 
+    adapter = get_storage_adapter()
+    uri = adapter.build_uri(bucket_name, prefix)
     try:
-        objs = await get_storage_adapter().list_objects(f"gs://{bucket_name}/{prefix}")
+        objs = await adapter.list_objects(uri)
         results = []
         for obj in objs:
             name = obj.storage_uri.split("/")[-1]
@@ -98,7 +100,7 @@ async def _list_gcs_blobs(bucket_name: str, prefix: str, pattern: re.Pattern) ->
         results.sort(key=lambda x: x["timestamp"], reverse=True)
         return results
     except Exception as e:
-        logger.warning("Failed to list objects gs://%s/%s: %s", bucket_name, prefix, e)
+        logger.warning("Failed to list objects %s: %s", uri, e)
         return []
 
 
@@ -109,15 +111,16 @@ async def _rotate_gcs_blobs(bucket_name: str, prefix: str, pattern: re.Pattern, 
     adapter = get_storage_adapter()
     cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
     deleted = 0
+    uri = adapter.build_uri(bucket_name, prefix)
     try:
-        for obj in await adapter.list_objects(f"gs://{bucket_name}/{prefix}"):
+        for obj in await adapter.list_objects(uri):
             name = obj.storage_uri.split("/")[-1]
             ts = _parse_timestamp_from_name(name, pattern)
             if ts and ts < cutoff:
                 await adapter.delete(obj.storage_uri)
                 deleted += 1
     except Exception as e:
-        logger.warning("Failed to rotate objects gs://%s/%s: %s", bucket_name, prefix, e)
+        logger.warning("Failed to rotate objects %s: %s", uri, e)
     return deleted
 
 
@@ -177,7 +180,8 @@ class BackupService:
 
         # GCS Object Versioning (check the backups bucket itself)
         try:
-            info = await get_storage_adapter().get_bucket_info(f"gs://{bucket_name}/")
+            adapter = get_storage_adapter()
+            info = await adapter.get_bucket_info(adapter.build_uri(bucket_name, ""))
             versioning = bool(info.get("versioning_enabled"))
             tiers.append(
                 {
@@ -420,7 +424,8 @@ class BackupService:
             # Upload to storage
             from app.adapters.registry import get_storage_adapter
 
-            await get_storage_adapter().upload_filename(f"gs://{bucket_name}/postgres/{filename}", output_path)
+            adapter = get_storage_adapter()
+            await adapter.upload_filename(adapter.build_uri(bucket_name, f"postgres/{filename}"), output_path)
 
             # Remove local temp file
             os.remove(output_path)
@@ -494,10 +499,11 @@ class BackupService:
         try:
             from app.adapters.registry import get_storage_adapter
 
-            objs = await get_storage_adapter().list_objects(f"gs://{bucket_name}/")
+            adapter = get_storage_adapter()
+            objs = await adapter.list_objects(adapter.build_uri(bucket_name, ""))
             files = []
             for obj in objs:
-                name = obj.storage_uri[len(f"gs://{bucket_name}/") :]
+                name = adapter.parse_uri(obj.storage_uri)[1]
                 if name.endswith(".tfstate") or name.endswith(".tflock"):
                     updated = obj.provider_details.get("updated")
                     files.append(
@@ -525,7 +531,8 @@ class BackupService:
             from app.adapters.registry import get_storage_adapter
 
             try:
-                return await get_storage_adapter().read_bytes(f"gs://{bucket_name}/{filename}")
+                adapter = get_storage_adapter()
+                return await adapter.read_bytes(adapter.build_uri(bucket_name, filename))
             except StorageObjectNotFound:
                 return None
         except Exception as e:
@@ -559,7 +566,8 @@ class BackupService:
             # Upload to storage
             from app.adapters.registry import get_storage_adapter
 
-            await get_storage_adapter().upload_filename(f"gs://{bucket_name}/config/{filename}", output_path)
+            adapter = get_storage_adapter()
+            await adapter.upload_filename(adapter.build_uri(bucket_name, f"config/{filename}"), output_path)
 
             os.remove(output_path)
 
@@ -878,7 +886,8 @@ class RestoreService:
             from app.adapters.registry import get_storage_adapter
 
             try:
-                await get_storage_adapter().download_to_filename(f"gs://{bucket_name}/postgres/{filename}", dump_path)
+                adapter = get_storage_adapter()
+                await adapter.download_to_filename(adapter.build_uri(bucket_name, f"postgres/{filename}"), dump_path)
             except StorageObjectNotFound:
                 return {"status": "error", "message": f"Backup file not found: {filename}"}
             logger.info("Downloaded %s from storage (%d bytes)", filename, os.path.getsize(dump_path))
