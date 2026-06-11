@@ -165,6 +165,87 @@ class GkeConnection:
 
         return self._api_client
 
+    def _cluster_fingerprint(self) -> tuple[str, str]:
+        """(endpoint, ca_cert) identity of the cluster in the current config."""
+        cfg = self._cluster_config or {}
+        return (
+            cfg.get("gke_cluster_endpoint", "") or "",
+            cfg.get("gke_cluster_ca_cert", "") or "",
+        )
+
+    async def get_api_client_async(self) -> client.ApiClient:
+        """Get or create a K8s ApiClient, trying incluster first (async).
+
+        Dispatches on the configured refresh strategy. ``simple`` reloads
+        cluster config only in the out-of-cluster fallback branch; ``fingerprint``
+        reloads on every call and rebuilds the client when the cluster identity
+        changed (e.g. a teardown + redeploy), not just when the token expires.
+        """
+        if self._refresh_strategy == "fingerprint":
+            return await self._get_api_client_async_fingerprint()
+        return await self._get_api_client_async_simple()
+
+    async def _get_api_client_async_simple(self) -> client.ApiClient:
+        if self._api_client is not None and not self.is_token_expired():
+            return self._api_client
+
+        if self.is_token_expired():
+            logger.info("GCP access token approaching expiry, refreshing K8s client")
+            self._api_client = None
+
+        try:
+            config.load_incluster_config()
+            self._api_client = client.ApiClient()
+            logger.info("Using incluster K8s config")
+        except Exception:
+            logger.info("Not running in cluster, using platform_config credentials")
+            # Reload config in case it was stale at startup.
+            await self.load_cluster_config(force=True)
+            try:
+                self._api_client = self.build_out_of_cluster_client()
+                logger.info("K8s client built for endpoint %s", (self._cluster_config or {}).get("gke_cluster_endpoint"))
+            except Exception:
+                logger.exception("Failed to build out-of-cluster K8s client")
+                raise
+
+        return self._api_client
+
+    async def _get_api_client_async_fingerprint(self) -> client.ApiClient:
+        # Re-read platform_config every call so a cluster teardown + redeploy
+        # (which rewrites endpoint and ca_cert) invalidates the cached client.
+        await self.load_cluster_config(force=True)
+        current_fp = self._cluster_fingerprint()
+
+        cluster_changed = self._api_client is not None and self._cached_cluster_fingerprint != current_fp
+        if self._api_client is not None and not self.is_token_expired() and not cluster_changed:
+            return self._api_client
+
+        if self.is_token_expired():
+            logger.info("GCP access token approaching expiry, refreshing K8s client")
+        elif cluster_changed:
+            logger.info(
+                "Cluster identity changed in platform_config, rebuilding K8s client (old endpoint=%s, new endpoint=%s)",
+                self._cached_cluster_fingerprint[0],
+                current_fp[0],
+            )
+        self._api_client = None
+
+        try:
+            config.load_incluster_config()
+            self._api_client = client.ApiClient()
+            logger.info("Using incluster K8s config")
+        except Exception:
+            logger.info("Not running in cluster, using platform_config credentials")
+            try:
+                self._api_client = self.build_out_of_cluster_client()
+                self._cached_cluster_fingerprint = current_fp
+                logger.info("K8s client built for endpoint %s", current_fp[0])
+            except Exception:
+                logger.exception("Failed to build out-of-cluster K8s client")
+                raise
+
+        return self._api_client
+
     def core_v1(self):
         """CoreV1Api bound to the shared API client."""
         return client.CoreV1Api(api_client=self.get_api_client())

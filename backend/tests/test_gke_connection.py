@@ -252,3 +252,101 @@ class TestTypedClientGetters:
             with patch(f"app.adapters.kubernetes.connection.client.{api_cls}") as cls:
                 getattr(conn, method)()
         cls.assert_called_once_with(api_client=sentinel)
+
+
+class TestGetApiClientAsyncSimple:
+    """Simple strategy (compute/cellxgene): cache while token valid, reload config
+    only in the out-of-cluster fallback branch. No cluster-change detection."""
+
+    @pytest.mark.asyncio
+    async def test_returns_cached_without_reload(self):
+        conn = _conn(refresh_strategy="simple")
+        cached = MagicMock()
+        conn._api_client = cached
+        with patch.object(conn, "load_cluster_config", new_callable=AsyncMock) as mock_load:
+            with patch(_INCLUSTER) as mock_incluster:
+                result = await conn.get_api_client_async()
+        assert result is cached
+        mock_load.assert_not_called()
+        mock_incluster.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_uses_incluster_when_available(self):
+        conn = _conn(refresh_strategy="simple")
+        sentinel = MagicMock()
+        with patch(_INCLUSTER) as mock_incluster, patch(_APICLIENT, return_value=sentinel):
+            with patch.object(conn, "build_out_of_cluster_client") as mock_build:
+                result = await conn.get_api_client_async()
+        mock_incluster.assert_called_once()
+        mock_build.assert_not_called()
+        assert result is sentinel
+
+    @pytest.mark.asyncio
+    async def test_fallback_reloads_config_then_builds(self):
+        conn = _conn(refresh_strategy="simple")
+        fresh = MagicMock()
+        with patch.object(conn, "load_cluster_config", new_callable=AsyncMock) as mock_load:
+            with patch(_INCLUSTER, side_effect=Exception("not in cluster")):
+                with patch.object(conn, "build_out_of_cluster_client", return_value=fresh) as mock_build:
+                    result = await conn.get_api_client_async()
+        mock_load.assert_awaited_once_with(force=True)
+        mock_build.assert_called_once()
+        assert result is fresh
+
+    @pytest.mark.asyncio
+    async def test_does_not_rebuild_on_cluster_change(self):
+        """Simple strategy is blind to cluster identity changes: a still-valid
+        token returns the cached client even if the config endpoint changed."""
+        conn = _conn(refresh_strategy="simple")
+        cached = MagicMock()
+        conn._api_client = cached
+        conn._cached_cluster_fingerprint = ("https://old", "caOld")
+        conn._cluster_config = {"gke_cluster_endpoint": "https://new", "gke_cluster_ca_cert": "caNew"}
+        with patch.object(conn, "build_out_of_cluster_client") as mock_build:
+            result = await conn.get_api_client_async()
+        assert result is cached
+        mock_build.assert_not_called()
+
+
+class TestGetApiClientAsyncFingerprint:
+    """Fingerprint strategy (notebooks): reload config every call and rebuild the
+    client when the cluster identity (endpoint, ca_cert) changed."""
+
+    @pytest.mark.asyncio
+    async def test_reloads_config_each_call(self):
+        conn = _conn(refresh_strategy="fingerprint")
+        conn._api_client = MagicMock()
+        conn._cluster_config = {"gke_cluster_endpoint": "https://x", "gke_cluster_ca_cert": "ca"}
+        conn._cached_cluster_fingerprint = ("https://x", "ca")
+        with patch.object(conn, "load_cluster_config", new_callable=AsyncMock) as mock_load:
+            await conn.get_api_client_async()
+        mock_load.assert_awaited_once_with(force=True)
+
+    @pytest.mark.asyncio
+    async def test_returns_cached_when_fingerprint_unchanged(self):
+        conn = _conn(refresh_strategy="fingerprint")
+        cached = MagicMock()
+        conn._api_client = cached
+        conn._cluster_config = {"gke_cluster_endpoint": "https://x", "gke_cluster_ca_cert": "ca"}
+        conn._cached_cluster_fingerprint = ("https://x", "ca")
+        with patch.object(conn, "load_cluster_config", new_callable=AsyncMock):
+            with patch(_INCLUSTER) as mock_incluster:
+                with patch.object(conn, "build_out_of_cluster_client") as mock_build:
+                    result = await conn.get_api_client_async()
+        assert result is cached
+        mock_incluster.assert_not_called()
+        mock_build.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_rebuilds_when_cluster_changed(self):
+        conn = _conn(refresh_strategy="fingerprint")
+        conn._api_client = MagicMock()  # built for the old cluster
+        conn._cached_cluster_fingerprint = ("https://old", "caOld")
+        conn._cluster_config = {"gke_cluster_endpoint": "https://new", "gke_cluster_ca_cert": "caNew"}
+        fresh = MagicMock()
+        with patch.object(conn, "load_cluster_config", new_callable=AsyncMock):
+            with patch(_INCLUSTER, side_effect=Exception("not in cluster")):
+                with patch.object(conn, "build_out_of_cluster_client", return_value=fresh):
+                    result = await conn.get_api_client_async()
+        assert result is fresh
+        assert conn._cached_cluster_fingerprint == ("https://new", "caNew")
