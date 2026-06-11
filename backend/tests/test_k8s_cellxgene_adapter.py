@@ -244,3 +244,168 @@ class TestCellxgeneOutOfClusterClientAuthHeader:
             "client will send anonymous requests and the cluster will 401."
         )
         assert headers[auth_key] == "Bearer test-token-xyz"
+
+
+class TestCellxgeneClusterChangeRebuild:
+    """A cluster teardown + redeploy (new endpoint/CA in platform_config) must
+    invalidate cellxgene's cached K8s client. Without this, a still-valid GCP
+    token keeps the adapter pointed at the dead cluster until the backend
+    restarts, and every deploy/teardown silently 401s. Mirrors the notebook
+    provider's cluster-change handling.
+    """
+
+    def _fake_load_cluster_config(self, provider, endpoint, ca_b64):
+        async def _fake(force: bool = False):
+            provider._cluster_config = {
+                "gke_cluster_endpoint": endpoint,
+                "gke_cluster_ca_cert": ca_b64,
+                "gcp_credential_source": "vm_default",
+                "gcp_bootstrap_sa_email": "bioaf-bootstrap@example.iam.gserviceaccount.com",
+            }
+            return provider._cluster_config
+
+        return _fake
+
+    def _setup(self, monkeypatch, token="tok"):
+        from app.adapters.kubernetes import connection as conn_mod
+        from app.platform import credential_injector as ci_mod
+
+        monkeypatch.setattr(
+            conn_mod.config,
+            "load_incluster_config",
+            MagicMock(side_effect=RuntimeError("not in cluster")),
+        )
+        fake_creds = MagicMock()
+        fake_creds.token = token
+        monkeypatch.setattr(ci_mod, "load_gcp_credentials", lambda *_: fake_creds)
+        return fake_creds
+
+    @pytest.mark.asyncio
+    async def test_cluster_endpoint_change_rebuilds_client(self, monkeypatch):
+        monkeypatch.delenv("BIOAF_COMPUTE_MODE", raising=False)
+        provider = KubernetesCellxgeneProvider()
+        fake_creds = self._setup(monkeypatch, token="tok-A")
+        ca_b64 = base64.b64encode(_DUMMY_CA_PEM).decode()
+
+        monkeypatch.setattr(
+            provider._gke, "load_cluster_config", self._fake_load_cluster_config(provider, "1.1.1.1", ca_b64)
+        )
+        client_a = await provider._get_api_client_async()
+        assert client_a.configuration.host == "https://1.1.1.1"
+
+        monkeypatch.setattr(
+            provider._gke, "load_cluster_config", self._fake_load_cluster_config(provider, "2.2.2.2", ca_b64)
+        )
+        fake_creds.token = "tok-B"
+        client_b = await provider._get_api_client_async()
+        assert client_b.configuration.host == "https://2.2.2.2", (
+            "Cellxgene reused its cached K8s client after the cluster endpoint "
+            "changed in platform_config. After a cluster teardown + redeploy this "
+            "401s every deploy/teardown until the backend restarts."
+        )
+
+    @pytest.mark.asyncio
+    async def test_unchanged_cluster_reuses_cached_client(self, monkeypatch):
+        monkeypatch.delenv("BIOAF_COMPUTE_MODE", raising=False)
+        provider = KubernetesCellxgeneProvider()
+        self._setup(monkeypatch)
+        ca_b64 = base64.b64encode(_DUMMY_CA_PEM).decode()
+        monkeypatch.setattr(
+            provider._gke, "load_cluster_config", self._fake_load_cluster_config(provider, "9.9.9.9", ca_b64)
+        )
+
+        first = await provider._get_api_client_async()
+        second = await provider._get_api_client_async()
+        assert first is second
+
+
+class TestCellxgeneVmDefaultDeploy:
+    """In vm_default mode no gcp_service_account_key is stored, so
+    _ensure_gcp_secret creates no 'gcp-sa-key' secret. The deploy must NOT then
+    mount that secret (which caused FailedMount -> pod never ready in prod); it
+    relies on Workload Identity via the annotated runner SA instead.
+    """
+
+    async def _deploy_pod_spec(self, adapter, has_key: bool):
+        mock_apps = MagicMock()
+        mock_core = MagicMock()
+        with (
+            patch.object(adapter, "_get_api_client_async", new_callable=AsyncMock),
+            patch.object(adapter, "_resolve_image", new_callable=AsyncMock, return_value="img:latest"),
+            patch.object(adapter, "_ensure_gcp_secret", new_callable=AsyncMock, return_value=has_key),
+            patch.object(adapter, "_get_k8s_apps_client", return_value=mock_apps),
+            patch.object(adapter, "_get_k8s_core_client", return_value=mock_core),
+            patch.object(adapter, "_get_k8s_rbac_client", return_value=MagicMock()),
+            patch("asyncio.create_task"),
+        ):
+            adapter._namespace_ready = True
+            await adapter.deploy(1, "gs://bucket/data.h5ad", "Dataset")
+        dep_body = mock_apps.create_namespaced_deployment.call_args[1]["body"]
+        return dep_body.spec.template.spec
+
+    @pytest.mark.asyncio
+    async def test_vm_default_omits_sa_key_secret_volume(self, adapter):
+        spec = await self._deploy_pod_spec(adapter, has_key=False)
+        vol_names = [v.name for v in (spec.volumes or [])]
+        assert "gcp-sa" not in vol_names, (
+            "vm_default deploy mounted the gcp-sa-key secret volume that was never created; "
+            "the pod FailedMounts and never becomes ready."
+        )
+        init_cmd = spec.init_containers[0].command[2]
+        assert "--key-file" not in init_cmd, "vm_default must not reference a key file that doesn't exist"
+        assert "gsutil cp" in init_cmd
+
+    @pytest.mark.asyncio
+    async def test_service_account_key_mode_mounts_secret(self, adapter):
+        spec = await self._deploy_pod_spec(adapter, has_key=True)
+        vol_names = [v.name for v in (spec.volumes or [])]
+        assert "gcp-sa" in vol_names
+        init_cmd = spec.init_containers[0].command[2]
+        assert "--key-file=/gcp/key.json" in init_cmd
+        assert "gsutil cp" in init_cmd
+
+
+class TestCellxgeneNamespaceWorkloadIdentity:
+    """vm_default mode needs the runner SA bound to the GCP SA via the
+    iam.gke.io/gcp-service-account annotation, or the pod has no GCP creds."""
+
+    @pytest.mark.asyncio
+    async def test_runner_sa_annotated_for_workload_identity(self, adapter):
+        from kubernetes.client.rest import ApiException
+
+        mock_core = MagicMock()
+        mock_core.read_namespace.side_effect = ApiException(status=404)
+        with (
+            patch.object(adapter, "_get_k8s_core_client", return_value=mock_core),
+            patch.object(adapter, "_get_k8s_rbac_client", return_value=MagicMock()),
+        ):
+            adapter._namespace_ready = False
+            await adapter.ensure_cellxgene_namespace(
+                "bioaf-cellxgene", gcp_sa_email="bioaf-runner@proj.iam.gserviceaccount.com"
+            )
+        sa_body = mock_core.create_namespaced_service_account.call_args[1]["body"]
+        annotations = sa_body.metadata.annotations or {}
+        assert annotations.get("iam.gke.io/gcp-service-account") == "bioaf-runner@proj.iam.gserviceaccount.com"
+
+    @pytest.mark.asyncio
+    async def test_deploy_annotates_with_dedicated_cellxgene_runner_sa(self, adapter):
+        """The runner KSA must be bound to the dedicated cellxgene_runner SA
+        (which has the Workload Identity binding + bucket read), not the generic
+        app SA, or gsutil in the init container 403s on the dataset bucket."""
+        adapter._cluster_config = {
+            "gke_cluster_endpoint": "https://10.0.0.1",
+            "cellxgene_runner_sa_email": "bioaf-cellxgene-runner@proj.iam.gserviceaccount.com",
+            "gcp_service_account_email": "bioaf-app@proj.iam.gserviceaccount.com",
+        }
+        with (
+            patch.object(adapter, "_get_api_client_async", new_callable=AsyncMock),
+            patch.object(adapter, "_resolve_image", new_callable=AsyncMock, return_value="img:latest"),
+            patch.object(adapter, "ensure_cellxgene_namespace", new_callable=AsyncMock) as mock_ns,
+            patch.object(adapter, "_ensure_gcp_secret", new_callable=AsyncMock, return_value=False),
+            patch.object(adapter, "_get_k8s_apps_client", return_value=MagicMock()),
+            patch.object(adapter, "_get_k8s_core_client", return_value=MagicMock()),
+            patch("asyncio.create_task"),
+        ):
+            await adapter.deploy(1, "gs://bucket/data.h5ad", "Dataset")
+        mock_ns.assert_awaited_once()
+        assert mock_ns.call_args.kwargs.get("gcp_sa_email") == "bioaf-cellxgene-runner@proj.iam.gserviceaccount.com"

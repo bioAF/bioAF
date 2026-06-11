@@ -18,3 +18,8 @@ output "notebook_runner_sa_email" {
   value       = google_service_account.notebook_runner.email
   description = "GCP service account email for notebook pod Workload Identity"
 }
+
+output "cellxgene_runner_sa_email" {
+  value       = google_service_account.cellxgene_runner.email
+  description = "GCP service account email for cellxgene pod Workload Identity"
+}

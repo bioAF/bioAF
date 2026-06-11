@@ -326,8 +326,8 @@ class TestOutOfClusterFallback:
         provider._mode = "k8s"
 
         with (
-            patch("app.adapters.notebooks.kubernetes.config") as mock_config,
-            patch("app.adapters.notebooks.kubernetes.client") as mock_client,
+            patch("app.adapters.kubernetes.connection.config") as mock_config,
+            patch("app.adapters.kubernetes.connection.client") as mock_client,
         ):
             mock_config.load_incluster_config.return_value = None
             mock_api_client = MagicMock()
@@ -358,10 +358,10 @@ class TestOutOfClusterFallback:
         provider._mode = "k8s"
 
         with (
-            patch("app.adapters.notebooks.kubernetes.config") as mock_config,
-            patch("app.adapters.notebooks.kubernetes._get_gcp_token", return_value="fake-token"),
-            patch("app.adapters.notebooks.kubernetes.tempfile") as mock_tempfile,
-            patch("app.adapters.notebooks.kubernetes.client") as mock_client,
+            patch("app.adapters.kubernetes.connection.config") as mock_config,
+            patch("app.adapters.kubernetes.connection._get_gcp_token", return_value="fake-token"),
+            patch("app.adapters.kubernetes.connection.tempfile") as mock_tempfile,
+            patch("app.adapters.kubernetes.connection.client") as mock_client,
         ):
             mock_config.load_incluster_config.side_effect = Exception("not in cluster")
             mock_tmpfile = MagicMock()
@@ -391,7 +391,7 @@ class TestOutOfClusterFallback:
         provider = KubernetesNotebookProvider(session_factory=mock_session_factory)
         provider._mode = "k8s"
 
-        with patch("app.adapters.notebooks.kubernetes.config") as mock_config:
+        with patch("app.adapters.kubernetes.connection.config") as mock_config:
             mock_config.load_incluster_config.side_effect = Exception("not in cluster")
 
             with pytest.raises(RuntimeError, match="No GKE cluster endpoint"):
@@ -406,7 +406,7 @@ class TestOutOfClusterFallback:
         provider._api_client = mock_client
         provider._client_created_at = 1.0  # recent enough
 
-        with patch("app.adapters.notebooks.kubernetes.time") as mock_time:
+        with patch("app.adapters.kubernetes.connection.time") as mock_time:
             mock_time.monotonic.return_value = 100.0  # well within TTL
 
             result = await provider._get_api_client_async()
@@ -422,8 +422,8 @@ class TestOutOfClusterFallback:
         provider._client_created_at = 1.0
 
         with (
-            patch("app.adapters.notebooks.kubernetes.time") as mock_time,
-            patch("app.adapters.notebooks.kubernetes.client") as mock_k8s,
+            patch("app.adapters.kubernetes.connection.time") as mock_time,
+            patch("app.adapters.kubernetes.connection.client") as mock_k8s,
         ):
             mock_time.monotonic.return_value = 100.0
             provider._get_k8s_core_client()
@@ -439,8 +439,8 @@ class TestOutOfClusterFallback:
         provider._client_created_at = 1.0
 
         with (
-            patch("app.adapters.notebooks.kubernetes.time") as mock_time,
-            patch("app.adapters.notebooks.kubernetes.client") as mock_k8s,
+            patch("app.adapters.kubernetes.connection.time") as mock_time,
+            patch("app.adapters.kubernetes.connection.client") as mock_k8s,
         ):
             mock_time.monotonic.return_value = 100.0
             provider._get_k8s_rbac_client()

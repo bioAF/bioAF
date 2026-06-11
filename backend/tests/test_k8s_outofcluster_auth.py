@@ -43,11 +43,11 @@ class TestOutOfClusterAuth:
 
         # Simulate not being inside a cluster
         with patch(
-            "app.adapters.compute.kubernetes.config.load_incluster_config",
+            "app.adapters.kubernetes.connection.config.load_incluster_config",
             side_effect=Exception("not in cluster"),
         ):
             with patch(
-                "app.adapters.compute.kubernetes.KubernetesComputeProvider._build_out_of_cluster_client",
+                "app.adapters.kubernetes.connection.GkeConnection.build_out_of_cluster_client",
                 return_value=MagicMock(),
             ) as mock_build:
                 adapter_k8s_mode._get_k8s_batch_client()
@@ -56,9 +56,9 @@ class TestOutOfClusterAuth:
     @pytest.mark.asyncio
     async def test_prefers_incluster_config_when_available(self, adapter_k8s_mode):
         """When running inside a pod, uses incluster config (no fallback)."""
-        with patch("app.adapters.compute.kubernetes.config.load_incluster_config") as mock_incluster:
+        with patch("app.adapters.kubernetes.connection.config.load_incluster_config") as mock_incluster:
             with patch(
-                "app.adapters.compute.kubernetes.KubernetesComputeProvider._build_out_of_cluster_client",
+                "app.adapters.kubernetes.connection.GkeConnection.build_out_of_cluster_client",
             ) as mock_build:
                 adapter_k8s_mode._get_k8s_batch_client()
                 mock_incluster.assert_called_once()
@@ -78,18 +78,18 @@ class TestOutOfClusterAuth:
         adapter_k8s_mode._cluster_config = platform_config
 
         with patch(
-            "app.adapters.compute.kubernetes.config.load_incluster_config",
+            "app.adapters.kubernetes.connection.config.load_incluster_config",
             side_effect=Exception("not in cluster"),
         ):
-            with patch("app.adapters.compute.kubernetes.client.Configuration") as mock_config_cls:
+            with patch("app.adapters.kubernetes.connection.client.Configuration") as mock_config_cls:
                 mock_config = MagicMock()
                 mock_config_cls.return_value = mock_config
 
-                with patch("app.adapters.compute.kubernetes.client.ApiClient") as mock_apiclient_cls:
+                with patch("app.adapters.kubernetes.connection.client.ApiClient") as mock_apiclient_cls:
                     mock_apiclient = MagicMock()
                     mock_apiclient_cls.return_value = mock_apiclient
                     with patch(
-                        "app.adapters.compute.kubernetes._get_gcp_token",
+                        "app.adapters.kubernetes.connection._get_gcp_token",
                         return_value="fake-token",
                     ):
                         adapter_k8s_mode._build_out_of_cluster_client()

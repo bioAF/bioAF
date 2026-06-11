@@ -383,6 +383,49 @@ resource "google_service_account_iam_member" "pipeline_runner_workload_identity"
   ]
 }
 
+# Cellxgene runner identity (Workload Identity).
+#
+# Cellxgene viewer pods in bioaf-cellxgene run as the bioaf-cellxgene-runner KSA
+# and download the published dataset from GCS via gsutil in an init container.
+# Without this GSA and its WI binding the pod has no GCP identity and the
+# download fails with 'storage.objects.list denied' on bioaf-raw-*. Read-only
+# (objectViewer) is sufficient, scoped to bioaf-* buckets via IAM Condition.
+
+resource "google_service_account" "cellxgene_runner" {
+  project      = var.project_id
+  account_id   = "bioaf-cellxgene-runner"
+  display_name = "bioAF Cellxgene Runner"
+  description  = "GCP service account for cellxgene viewer pods (Workload Identity)"
+}
+
+resource "google_project_iam_member" "cellxgene_runner_storage" {
+  project = var.project_id
+  role    = "roles/storage.objectViewer"
+  member  = "serviceAccount:${google_service_account.cellxgene_runner.email}"
+  condition {
+    title       = "bioaf_buckets_only"
+    description = "bioaf_buckets_only"
+    expression  = "resource.name.startsWith(\"projects/_/buckets/bioaf-\")"
+  }
+}
+
+resource "google_service_account_iam_member" "cellxgene_runner_workload_identity" {
+  service_account_id = google_service_account.cellxgene_runner.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "serviceAccount:${var.project_id}.svc.id.goog[bioaf-cellxgene/bioaf-cellxgene-runner]"
+
+  # The Workload Identity pool (<PROJECT>.svc.id.goog) is registered
+  # asynchronously after the cluster's create call returns. Without an
+  # explicit depends_on Terraform may schedule this binding before the
+  # pool exists, producing 'Identity Pool does not exist' errors.
+  depends_on = [
+    google_container_cluster.bioaf,
+    google_container_node_pool.pipelines,
+    google_container_node_pool.interactive,
+    google_container_node_pool.system,
+  ]
+}
+
 # SA hardening note: bioaf-app's roles/container.admin binding is scoped via
 # IAM Condition on the cluster name prefix (resource.name.extract(...) starts
 # with "bioaf-") rather than via a Resource Manager tag. GKE clusters are

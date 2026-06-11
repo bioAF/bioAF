@@ -219,6 +219,14 @@ async def check_for_updates(session: AsyncSession, user_id: int) -> dict:
         # uploads work and the Components view lists every bucket. Best-effort.
         await _persist_module_outputs(session, "storage")
 
+    # Persist compute outputs (cluster identity + per-workload runner SA emails)
+    # from live state too, so a runner SA added by a code update -- e.g. the
+    # cellxgene runner -- is recorded in platform_config even when this check
+    # finds nothing left to apply. Without this the adapter never learns the SA
+    # email and can't wire Workload Identity for the pod. Best-effort.
+    if "compute" in modules:
+        await _persist_module_outputs(session, "compute")
+
     module_results: list[dict] = []
     modules_with_additive: list[str] = []
     additive: list[dict] = []

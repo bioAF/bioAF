@@ -516,6 +516,7 @@ async def deploy_stack(
             cluster_endpoint = outputs.get("cluster_endpoint", {}).get("value", "")
             cluster_ca_cert = outputs.get("cluster_ca_cert", {}).get("value", "")
             notebook_runner_sa = outputs.get("notebook_runner_sa_email", {}).get("value", "")
+            cellxgene_runner_sa = outputs.get("cellxgene_runner_sa_email", {}).get("value", "")
 
             await _set_config(session, "compute_stack", "kubernetes")
             await _set_config(session, "compute_deployed", "true")
@@ -523,6 +524,7 @@ async def deploy_stack(
             await _set_config(session, "gke_cluster_endpoint", cluster_endpoint or "null")
             await _set_config(session, "gke_cluster_ca_cert", cluster_ca_cert or "null")
             await _set_config(session, "notebook_runner_sa_email", notebook_runner_sa or "null")
+            await _set_config(session, "cellxgene_runner_sa_email", cellxgene_runner_sa or "null")
 
             # Update kubernetes_cluster component state
             await session.execute(
@@ -901,6 +903,12 @@ _COMPUTE_OUTPUT_MAP = {
     "cluster_name": "gke_cluster_name",
     "cluster_endpoint": "gke_cluster_endpoint",
     "cluster_ca_cert": "gke_cluster_ca_cert",
+    # Per-workload Workload Identity runner SA emails. Persisted here (not only
+    # in the full-deploy hook) so the "Check for Infrastructure Updates" path
+    # records a newly added runner SA -- e.g. cellxgene -- in platform_config;
+    # the adapters read these to annotate their runner KSA.
+    "notebook_runner_sa_email": "notebook_runner_sa_email",
+    "cellxgene_runner_sa_email": "cellxgene_runner_sa_email",
 }
 
 
