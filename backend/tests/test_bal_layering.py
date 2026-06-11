@@ -566,7 +566,6 @@ GS_URI_LITERAL_ALLOWLIST: set[str] = {
     "services/lab_document_upload_service.py",
     "services/notebook_image_service.py",
     "services/pipeline_monitor_service.py",
-    "services/plot_archive_service.py",
     "services/qc/templates/scrnaseq.py",
     "services/reference_data_service.py",
     "services/session_output_service.py",
@@ -610,4 +609,4 @@ def test_gs_uri_allowlist_has_no_stale_entries():
 
 def test_gs_uri_allowlist_count_is_pinned():
     """Pin the gs:// leak file count; decrement as Leak 3 drains. Target 0."""
-    assert len(GS_URI_LITERAL_ALLOWLIST) == 19
+    assert len(GS_URI_LITERAL_ALLOWLIST) == 18

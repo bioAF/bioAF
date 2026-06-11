@@ -135,6 +135,7 @@ async def test_scan_and_index_lists_through_storage_adapter(session, admin_user)
     from app.services.plot_archive_service import PlotArchiveService
 
     adapter = AsyncMock()
+    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
     adapter.list_objects.return_value = []
 
     # Insert results_bucket_name so the scanner doesn't bail early

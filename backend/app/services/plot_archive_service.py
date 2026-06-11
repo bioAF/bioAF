@@ -164,11 +164,11 @@ class PlotArchiveService:
                 bucket_name = results_bucket
 
                 try:
-                    objs = await adapter.list_objects(f"gs://{bucket_name}/")
+                    objs = await adapter.list_objects(adapter.build_uri(bucket_name, ""))
 
                     for obj in objs:
                         gcs_uri = obj.storage_uri
-                        name = gcs_uri[len(f"gs://{bucket_name}/") :]
+                        name = adapter.parse_uri(gcs_uri)[1]
 
                         # Skip generated thumbnails
                         if name.startswith(THUMBNAIL_PREFIX):
@@ -239,8 +239,10 @@ class PlotArchiveService:
 
     @staticmethod
     def _parse_ids_from_path(gcs_uri: str) -> tuple[int | None, int | None]:
-        """Extract experiment_id and pipeline_run_id from a GCS URI path."""
-        parts = gcs_uri.replace("gs://", "").split("/")
+        """Extract experiment_id and pipeline_run_id from a storage URI path."""
+        # Strip any URI scheme prefix (everything up to and including "://"),
+        # then split the remainder into path segments.
+        parts = gcs_uri.split("://", 1)[-1].split("/")
         experiment_id = None
         pipeline_run_id = None
         for i, part in enumerate(parts):
