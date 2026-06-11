@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ast
 import json
+import typing
 from pathlib import Path
 
 import app.api.literature as lit_pkg
@@ -26,17 +27,34 @@ from app.api.literature import router
 GOLDEN_PATH = Path(__file__).resolve().parent / "data" / "literature_route_table.golden.json"
 
 
+def _model_repr(rm) -> str | None:
+    """Render a response_model so that ``list[A]`` and ``list[B]`` differ.
+
+    A plain ``__name__`` collapses every ``list[...]`` to ``"list"``, which would
+    hide a swapped inner type. Keep the generic's argument names.
+    """
+    if rm is None:
+        return None
+    if isinstance(rm, type):
+        return rm.__name__
+    origin = typing.get_origin(rm)
+    args = typing.get_args(rm)
+    if origin is not None and args:
+        inner = ", ".join(a.__name__ if isinstance(a, type) else str(a) for a in args)
+        return f"{getattr(origin, '__name__', str(origin))}[{inner}]"
+    return str(rm)
+
+
 def _live_route_table() -> list[dict]:
     rows = []
     for r in router.routes:
         methods = sorted(r.methods) if getattr(r, "methods", None) else []
-        rm = getattr(r, "response_model", None)
         rows.append(
             {
                 "path": r.path,
                 "methods": methods,
                 "name": r.name,
-                "response_model": getattr(rm, "__name__", str(rm)) if rm is not None else None,
+                "response_model": _model_repr(getattr(r, "response_model", None)),
                 "status_code": getattr(r, "status_code", None),
                 "tags": list(getattr(r, "tags", []) or []),
             }
@@ -49,6 +67,13 @@ def test_route_table_matches_golden():
     """The live router exposes exactly the pre-split set of routes, unchanged."""
     golden = json.loads(GOLDEN_PATH.read_text())
     live = _live_route_table()
+
+    # Catch an accidental duplicate registration: the dict comparison below
+    # dedups by (path, methods), so a route registered twice would otherwise
+    # slip through.
+    assert len(router.routes) == len(golden), (
+        f"route count changed: live has {len(router.routes)} routes, golden has {len(golden)}"
+    )
 
     # Compare path-by-path so a mismatch points at the offending route.
     golden_by_key = {(r["path"], tuple(r["methods"])): r for r in golden}

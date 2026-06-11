@@ -233,7 +233,7 @@
     ],
     "name": "list_associations_endpoint",
     "path": "/api/literature/papers/{paper_id}/associations",
-    "response_model": "list",
+    "response_model": "list[AssociationPayload]",
     "status_code": null,
     "tags": [
       "literature"
@@ -377,7 +377,7 @@
     ],
     "name": "list_recommendation_notes_endpoint",
     "path": "/api/literature/papers/{paper_id}/recommendation-notes",
-    "response_model": "list",
+    "response_model": "list[RecommendationNotePayload]",
     "status_code": null,
     "tags": [
       "literature"
