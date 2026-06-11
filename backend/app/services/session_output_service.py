@@ -122,24 +122,24 @@ class SessionOutputService:
 
         src_prefix = f"sessions/{session_id}/"
         dst_prefix = f"sessions/{session_id}/"
-        src_uri_prefix = f"gs://{working_bucket}/{src_prefix}"
+        src_uri_prefix = adapter.build_uri(working_bucket, src_prefix)
 
         copied = 0
         src_uris: list[str] = []
         objs = await adapter.list_objects(src_uri_prefix)
         for obj in objs:
             src_uri = obj.storage_uri
-            key = src_uri[len(f"gs://{working_bucket}/") :]
+            key = adapter.parse_uri(src_uri)[1]
             dst_name = dst_prefix + key[len(src_prefix) :]
-            dst_uri = f"gs://{results_bucket}/{dst_name}"
+            dst_uri = adapter.build_uri(results_bucket, dst_name)
             await adapter.copy(src_uri, dst_uri)
             src_uris.append(src_uri)
             copied += 1
 
         # Update File.gcs_uri to point to results bucket
         if copied:
-            old_uri_prefix = f"gs://{working_bucket}/{src_prefix}"
-            new_uri_prefix = f"gs://{results_bucket}/{dst_prefix}"
+            old_uri_prefix = adapter.build_uri(working_bucket, src_prefix)
+            new_uri_prefix = adapter.build_uri(results_bucket, dst_prefix)
             await db.execute(
                 sa_text(
                     "UPDATE files SET gcs_uri = REPLACE(gcs_uri, :old, :new), storage_uri = REPLACE(gcs_uri, :old, :new) "
@@ -165,4 +165,4 @@ class SessionOutputService:
             results_bucket,
         )
 
-        return f"gs://{results_bucket}/{dst_prefix}"
+        return adapter.build_uri(results_bucket, dst_prefix)
