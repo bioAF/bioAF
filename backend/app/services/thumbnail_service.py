@@ -72,8 +72,8 @@ class ThumbnailService:
             if not png_bytes:
                 return None
 
-            bucket_name = source_gcs_uri.replace("gs://", "").split("/", 1)[0]
-            thumb_uri = f"gs://{bucket_name}/{THUMBNAIL_PREFIX}plot_{plot_entry_id}.png"
+            bucket_name, _ = adapter.parse_uri(source_gcs_uri)
+            thumb_uri = adapter.build_uri(bucket_name, f"{THUMBNAIL_PREFIX}plot_{plot_entry_id}.png")
             await adapter.write_bytes(thumb_uri, png_bytes, content_type="image/png")
 
             logger.info("Generated thumbnail for plot %d: %s", plot_entry_id, thumb_uri)
