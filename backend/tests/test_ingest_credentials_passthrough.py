@@ -107,6 +107,7 @@ async def test_copy_to_raw_moves_via_storage_adapter(session: AsyncSession):
     from app.services.ingest_service import copy_to_raw_bucket
 
     adapter = AsyncMock()
+    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
     with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         dest = await copy_to_raw_bucket(
             source_bucket="ingest-bucket",
@@ -128,6 +129,7 @@ async def test_cleanup_ingest_deletes_via_storage_adapter(session: AsyncSession)
     from app.services.ingest_service import cleanup_ingest_file
 
     adapter = AsyncMock()
+    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
     with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         await cleanup_ingest_file(
             source_bucket="ingest-bucket",
