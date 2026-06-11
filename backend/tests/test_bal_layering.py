@@ -561,10 +561,7 @@ GS_URI_LITERAL_ALLOWLIST: set[str] = {
     "services/ingest_service.py",
     "services/lab_document_upload_service.py",
     "services/pipeline_monitor_service.py",
-    "services/reference_data_service.py",
-    "services/stack_deployment.py",
     "services/terraform_executor.py",
-    "workers/reference_importer.py",
 }
 
 
@@ -602,4 +599,4 @@ def test_gs_uri_allowlist_has_no_stale_entries():
 
 def test_gs_uri_allowlist_count_is_pinned():
     """Pin the gs:// leak file count; decrement as Leak 3 drains. Target 0."""
-    assert len(GS_URI_LITERAL_ALLOWLIST) == 11
+    assert len(GS_URI_LITERAL_ALLOWLIST) == 8
