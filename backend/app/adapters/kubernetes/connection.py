@@ -60,6 +60,37 @@ class GkeConnection:
         # the fingerprint refresh strategy to rebuild when the cluster changes.
         self._cached_cluster_fingerprint: tuple[str, str] = ("", "")
 
+    async def load_cluster_config(self, force: bool = False) -> dict:
+        """Read GKE cluster config from platform_config into _cluster_config.
+
+        Must be awaited (e.g. during app startup) so the DB query runs on the
+        correct event loop; the result is cached for later sync access. Re-reads
+        when forced or when the cached endpoint is missing/null so a newly
+        deployed cluster is picked up without a restart. When
+        ``invalidate_client_on_force`` is set, a forced reload also drops the
+        cached API client so it rebuilds against the fresh config.
+        """
+        if self._cluster_config is not None and not force:
+            endpoint = self._cluster_config.get("gke_cluster_endpoint", "")
+            if endpoint and endpoint != "null":
+                return self._cluster_config
+
+        if not self._session_factory:
+            self._cluster_config = {}
+            return self._cluster_config
+
+        from app.platform.platform_config_service import PlatformConfigService
+
+        async with self._session_factory() as session:
+            # get_many decrypts gcp_service_account_key; the credential consumers
+            # (credential_injector / kube client) expect the plaintext JSON.
+            self._cluster_config = await PlatformConfigService.get_many(session, self._config_keys)
+
+        if force and self._invalidate_client_on_force:
+            self._api_client = None
+
+        return self._cluster_config
+
     def is_token_expired(self) -> bool:
         """Check if the cached GCP access token is older than the TTL."""
         if self._client_created_at == 0.0:

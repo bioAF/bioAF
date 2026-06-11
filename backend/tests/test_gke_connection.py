@@ -7,7 +7,7 @@ tested implementation.
 """
 
 import base64
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -17,9 +17,19 @@ from app.adapters.kubernetes.connection import GkeConnection
 _KEYS = ["gke_cluster_endpoint", "gke_cluster_ca_cert", "gcp_credential_source"]
 _CA_B64 = base64.b64encode(b"-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n").decode()
 
+_GET_MANY = "app.platform.platform_config_service.PlatformConfigService.get_many"
+
 
 def _conn(**kwargs) -> GkeConnection:
     return GkeConnection(config_keys=_KEYS, **kwargs)
+
+
+def _session_factory():
+    """A session_factory whose () returns an async context manager (like AsyncSession)."""
+    mock_ctx = AsyncMock()
+    mock_ctx.__aenter__.return_value = MagicMock()
+    mock_ctx.__aexit__.return_value = False
+    return MagicMock(return_value=mock_ctx)
 
 
 class TestTokenExpiry:
@@ -111,3 +121,64 @@ class TestBuildOutOfClusterClient:
         }
         with pytest.raises(RuntimeError, match="endpoint"):
             conn.build_out_of_cluster_client()
+
+
+class TestLoadClusterConfig:
+    @pytest.mark.asyncio
+    async def test_returns_empty_without_session_factory(self):
+        conn = _conn(session_factory=None)
+        cfg = await conn.load_cluster_config()
+        assert cfg == {}
+        assert conn._cluster_config == {}
+
+    @pytest.mark.asyncio
+    async def test_reads_exactly_the_configured_keys(self):
+        conn = _conn(session_factory=_session_factory())
+        with patch(_GET_MANY, new_callable=AsyncMock, return_value={"gke_cluster_endpoint": "https://1.2.3.4"}) as mock_get:
+            cfg = await conn.load_cluster_config()
+        assert cfg["gke_cluster_endpoint"] == "https://1.2.3.4"
+        assert mock_get.call_args.args[1] == _KEYS
+
+    @pytest.mark.asyncio
+    async def test_caches_and_skips_reread_when_endpoint_present(self):
+        conn = _conn(session_factory=_session_factory())
+        conn._cluster_config = {"gke_cluster_endpoint": "https://cached"}
+        with patch(_GET_MANY, new_callable=AsyncMock) as mock_get:
+            cfg = await conn.load_cluster_config()
+        mock_get.assert_not_called()
+        assert cfg["gke_cluster_endpoint"] == "https://cached"
+
+    @pytest.mark.asyncio
+    async def test_rereads_when_cached_endpoint_is_null(self):
+        conn = _conn(session_factory=_session_factory())
+        conn._cluster_config = {"gke_cluster_endpoint": "null"}
+        with patch(_GET_MANY, new_callable=AsyncMock, return_value={"gke_cluster_endpoint": "https://fresh"}) as mock_get:
+            cfg = await conn.load_cluster_config()
+        mock_get.assert_called_once()
+        assert cfg["gke_cluster_endpoint"] == "https://fresh"
+
+    @pytest.mark.asyncio
+    async def test_force_rereads_even_when_endpoint_present(self):
+        conn = _conn(session_factory=_session_factory())
+        conn._cluster_config = {"gke_cluster_endpoint": "https://cached"}
+        with patch(_GET_MANY, new_callable=AsyncMock, return_value={"gke_cluster_endpoint": "https://fresh"}) as mock_get:
+            cfg = await conn.load_cluster_config(force=True)
+        mock_get.assert_called_once()
+        assert cfg["gke_cluster_endpoint"] == "https://fresh"
+
+    @pytest.mark.asyncio
+    async def test_force_invalidates_cached_client_when_enabled(self):
+        conn = _conn(session_factory=_session_factory(), invalidate_client_on_force=True)
+        conn._api_client = MagicMock()
+        with patch(_GET_MANY, new_callable=AsyncMock, return_value={"gke_cluster_endpoint": "https://x"}):
+            await conn.load_cluster_config(force=True)
+        assert conn._api_client is None
+
+    @pytest.mark.asyncio
+    async def test_force_preserves_cached_client_when_disabled(self):
+        conn = _conn(session_factory=_session_factory(), invalidate_client_on_force=False)
+        sentinel = MagicMock()
+        conn._api_client = sentinel
+        with patch(_GET_MANY, new_callable=AsyncMock, return_value={"gke_cluster_endpoint": "https://x"}):
+            await conn.load_cluster_config(force=True)
+        assert conn._api_client is sentinel
