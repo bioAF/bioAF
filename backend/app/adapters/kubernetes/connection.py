@@ -1,0 +1,107 @@
+"""Shared GKE connection + auth collaborator.
+
+`GkeConnection` owns the Kubernetes connection state and the plumbing that was
+previously copy-pasted into the compute, notebook, and cellxgene providers:
+reading cluster config from platform_config, building an out-of-cluster API
+client with a GCP bearer token, token-expiry tracking, and the cached API
+client. Per-provider differences (which config keys to read, whether to
+invalidate the cached client on a forced reload, and how aggressively to
+refresh) are passed in at construction so each provider keeps its exact
+current behavior while sharing one implementation.
+"""
+
+import base64
+import logging
+import tempfile
+import time
+
+from kubernetes import client
+
+logger = logging.getLogger(__name__)
+
+
+def _get_gcp_token(cfg: dict) -> str:
+    """Mint a GCP access token via credential_injector.
+
+    Returns a Bearer token suitable for the K8s API. In vm_default mode this
+    uses the node/metadata identity (optionally impersonating a bootstrap SA);
+    in service_account_key mode it uses the stored key.
+    """
+    import google.auth.transport.requests
+
+    from app.platform import credential_injector
+
+    credentials = credential_injector.load_gcp_credentials(cfg)
+    credentials.refresh(google.auth.transport.requests.Request())
+    return credentials.token
+
+
+class GkeConnection:
+    """GKE connection + auth shared by the Kubernetes BAL providers."""
+
+    _TOKEN_TTL_SECONDS = 2700  # 45 minutes
+
+    def __init__(
+        self,
+        *,
+        config_keys: list[str],
+        session_factory=None,
+        invalidate_client_on_force: bool = True,
+        refresh_strategy: str = "simple",
+    ):
+        self._config_keys = config_keys
+        self._session_factory = session_factory
+        self._invalidate_client_on_force = invalidate_client_on_force
+        self._refresh_strategy = refresh_strategy
+        self._api_client: client.ApiClient | None = None
+        self._client_created_at: float = 0.0
+        self._cluster_config: dict | None = None
+        # (endpoint, ca_cert) identity the cached client was built for; used by
+        # the fingerprint refresh strategy to rebuild when the cluster changes.
+        self._cached_cluster_fingerprint: tuple[str, str] = ("", "")
+
+    def is_token_expired(self) -> bool:
+        """Check if the cached GCP access token is older than the TTL."""
+        if self._client_created_at == 0.0:
+            return False
+        return (time.monotonic() - self._client_created_at) > self._TOKEN_TTL_SECONDS
+
+    def build_out_of_cluster_client(self) -> client.ApiClient:
+        """Build a K8s ApiClient using platform_config credentials.
+
+        Requires cluster config to have been loaded first so _cluster_config is
+        populated.
+        """
+        cfg = self._cluster_config or {}
+
+        endpoint = cfg.get("gke_cluster_endpoint", "")
+        ca_cert_b64 = cfg.get("gke_cluster_ca_cert", "")
+
+        if not endpoint or endpoint == "null":
+            raise RuntimeError("No GKE cluster endpoint in platform_config. Deploy the compute stack first.")
+
+        if not endpoint.startswith("https://"):
+            endpoint = f"https://{endpoint}"
+
+        token = _get_gcp_token(cfg)
+
+        ca_cert_bytes = base64.b64decode(ca_cert_b64)
+        ca_file = tempfile.NamedTemporaryFile(delete=False, suffix=".crt")
+        ca_file.write(ca_cert_bytes)
+        ca_file.close()
+
+        configuration = client.Configuration()
+        configuration.host = endpoint
+        configuration.ssl_ca_cert = ca_file.name
+
+        api_client = client.ApiClient(configuration)
+        # The kubernetes-python client does not route Configuration.api_key into
+        # request headers unless an OpenAPI security scheme references it. The
+        # K8s OpenAPI spec the library ships with does not declare one for the
+        # simple bearer-token case, so api_key is a silent no-op and every
+        # request goes out anonymously, yielding 401 Unauthorized. Set the
+        # header on the client directly instead.
+        api_client.set_default_header("Authorization", f"Bearer {token}")
+
+        self._client_created_at = time.monotonic()
+        return api_client
