@@ -42,6 +42,7 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         "gke_cluster_name",
         "gcp_project_id",
         "gcp_zone",
+        "cellxgene_runner_sa_email",
     ]
 
     def capabilities(self) -> ProviderCapabilities:
@@ -136,7 +137,13 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         image = await self._resolve_image()
 
         namespace = DEFAULT_CELLXGENE_NAMESPACE
-        gcp_sa_email = (self._cluster_config or {}).get("gcp_service_account_email", "") or ""
+        # Bind the runner KSA to the dedicated cellxgene_runner GCP SA (created by
+        # the compute Terraform module with a Workload Identity binding + bucket
+        # read). The generic app SA has no WI binding for this KSA, so gsutil in
+        # the init container would 403 on the dataset bucket.
+        gcp_sa_email = (self._cluster_config or {}).get("cellxgene_runner_sa_email", "") or ""
+        if gcp_sa_email == "null":
+            gcp_sa_email = ""
         await self.ensure_cellxgene_namespace(namespace, gcp_sa_email=gcp_sa_email)
         has_gcs_key = await self._ensure_gcp_secret(namespace)
 

@@ -386,3 +386,26 @@ class TestCellxgeneNamespaceWorkloadIdentity:
         sa_body = mock_core.create_namespaced_service_account.call_args[1]["body"]
         annotations = sa_body.metadata.annotations or {}
         assert annotations.get("iam.gke.io/gcp-service-account") == "bioaf-runner@proj.iam.gserviceaccount.com"
+
+    @pytest.mark.asyncio
+    async def test_deploy_annotates_with_dedicated_cellxgene_runner_sa(self, adapter):
+        """The runner KSA must be bound to the dedicated cellxgene_runner SA
+        (which has the Workload Identity binding + bucket read), not the generic
+        app SA, or gsutil in the init container 403s on the dataset bucket."""
+        adapter._cluster_config = {
+            "gke_cluster_endpoint": "https://10.0.0.1",
+            "cellxgene_runner_sa_email": "bioaf-cellxgene-runner@proj.iam.gserviceaccount.com",
+            "gcp_service_account_email": "bioaf-app@proj.iam.gserviceaccount.com",
+        }
+        with (
+            patch.object(adapter, "_get_api_client_async", new_callable=AsyncMock),
+            patch.object(adapter, "_resolve_image", new_callable=AsyncMock, return_value="img:latest"),
+            patch.object(adapter, "ensure_cellxgene_namespace", new_callable=AsyncMock) as mock_ns,
+            patch.object(adapter, "_ensure_gcp_secret", new_callable=AsyncMock, return_value=False),
+            patch.object(adapter, "_get_k8s_apps_client", return_value=MagicMock()),
+            patch.object(adapter, "_get_k8s_core_client", return_value=MagicMock()),
+            patch("asyncio.create_task"),
+        ):
+            await adapter.deploy(1, "gs://bucket/data.h5ad", "Dataset")
+        mock_ns.assert_awaited_once()
+        assert mock_ns.call_args.kwargs.get("gcp_sa_email") == "bioaf-cellxgene-runner@proj.iam.gserviceaccount.com"
