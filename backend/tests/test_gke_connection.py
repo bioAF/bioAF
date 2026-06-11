@@ -134,7 +134,9 @@ class TestLoadClusterConfig:
     @pytest.mark.asyncio
     async def test_reads_exactly_the_configured_keys(self):
         conn = _conn(session_factory=_session_factory())
-        with patch(_GET_MANY, new_callable=AsyncMock, return_value={"gke_cluster_endpoint": "https://1.2.3.4"}) as mock_get:
+        with patch(
+            _GET_MANY, new_callable=AsyncMock, return_value={"gke_cluster_endpoint": "https://1.2.3.4"}
+        ) as mock_get:
             cfg = await conn.load_cluster_config()
         assert cfg["gke_cluster_endpoint"] == "https://1.2.3.4"
         assert mock_get.call_args.args[1] == _KEYS
@@ -152,7 +154,9 @@ class TestLoadClusterConfig:
     async def test_rereads_when_cached_endpoint_is_null(self):
         conn = _conn(session_factory=_session_factory())
         conn._cluster_config = {"gke_cluster_endpoint": "null"}
-        with patch(_GET_MANY, new_callable=AsyncMock, return_value={"gke_cluster_endpoint": "https://fresh"}) as mock_get:
+        with patch(
+            _GET_MANY, new_callable=AsyncMock, return_value={"gke_cluster_endpoint": "https://fresh"}
+        ) as mock_get:
             cfg = await conn.load_cluster_config()
         mock_get.assert_called_once()
         assert cfg["gke_cluster_endpoint"] == "https://fresh"
@@ -161,7 +165,9 @@ class TestLoadClusterConfig:
     async def test_force_rereads_even_when_endpoint_present(self):
         conn = _conn(session_factory=_session_factory())
         conn._cluster_config = {"gke_cluster_endpoint": "https://cached"}
-        with patch(_GET_MANY, new_callable=AsyncMock, return_value={"gke_cluster_endpoint": "https://fresh"}) as mock_get:
+        with patch(
+            _GET_MANY, new_callable=AsyncMock, return_value={"gke_cluster_endpoint": "https://fresh"}
+        ) as mock_get:
             cfg = await conn.load_cluster_config(force=True)
         mock_get.assert_called_once()
         assert cfg["gke_cluster_endpoint"] == "https://fresh"

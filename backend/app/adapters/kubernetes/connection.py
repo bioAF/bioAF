@@ -158,7 +158,9 @@ class GkeConnection:
             logger.info("Not running in cluster, using platform_config credentials")
             try:
                 self._api_client = self.build_out_of_cluster_client()
-                logger.info("K8s client built for endpoint %s", (self._cluster_config or {}).get("gke_cluster_endpoint"))
+                logger.info(
+                    "K8s client built for endpoint %s", (self._cluster_config or {}).get("gke_cluster_endpoint")
+                )
             except Exception:
                 logger.exception("Failed to build out-of-cluster K8s client")
                 raise
@@ -203,7 +205,9 @@ class GkeConnection:
             await self.load_cluster_config(force=True)
             try:
                 self._api_client = self.build_out_of_cluster_client()
-                logger.info("K8s client built for endpoint %s", (self._cluster_config or {}).get("gke_cluster_endpoint"))
+                logger.info(
+                    "K8s client built for endpoint %s", (self._cluster_config or {}).get("gke_cluster_endpoint")
+                )
             except Exception:
                 logger.exception("Failed to build out-of-cluster K8s client")
                 raise
