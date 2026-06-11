@@ -307,7 +307,7 @@ async def test_delete_paper_files_targets_paper_prefix(session, monkeypatch):
 
     Routes through the BAL storage adapter (Phase 3): list_objects under the
     paper prefix, then delete each. Test mocks the adapter boundary."""
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import AsyncMock, MagicMock, patch
 
     from app.adapters.models import StoredObject
     from app.services.literature import storage, upload_service
@@ -318,6 +318,7 @@ async def test_delete_paper_files_targets_paper_prefix(session, monkeypatch):
     monkeypatch.setattr(storage, "get_literature_bucket", fake_bucket)
 
     adapter = AsyncMock()
+    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
     adapter.list_objects.return_value = [
         StoredObject(filename="a.pdf", storage_uri="gs://test-bucket/papers/123/a.pdf"),
         StoredObject(filename="b.txt", storage_uri="gs://test-bucket/papers/123/b.txt"),
