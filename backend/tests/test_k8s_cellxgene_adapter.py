@@ -244,3 +244,76 @@ class TestCellxgeneOutOfClusterClientAuthHeader:
             "client will send anonymous requests and the cluster will 401."
         )
         assert headers[auth_key] == "Bearer test-token-xyz"
+
+
+class TestCellxgeneClusterChangeRebuild:
+    """A cluster teardown + redeploy (new endpoint/CA in platform_config) must
+    invalidate cellxgene's cached K8s client. Without this, a still-valid GCP
+    token keeps the adapter pointed at the dead cluster until the backend
+    restarts, and every deploy/teardown silently 401s. Mirrors the notebook
+    provider's cluster-change handling.
+    """
+
+    def _fake_load_cluster_config(self, provider, endpoint, ca_b64):
+        async def _fake(force: bool = False):
+            provider._cluster_config = {
+                "gke_cluster_endpoint": endpoint,
+                "gke_cluster_ca_cert": ca_b64,
+                "gcp_credential_source": "vm_default",
+                "gcp_bootstrap_sa_email": "bioaf-bootstrap@example.iam.gserviceaccount.com",
+            }
+            return provider._cluster_config
+
+        return _fake
+
+    def _setup(self, monkeypatch, token="tok"):
+        from app.adapters.kubernetes import connection as conn_mod
+        from app.platform import credential_injector as ci_mod
+
+        monkeypatch.setattr(
+            conn_mod.config,
+            "load_incluster_config",
+            MagicMock(side_effect=RuntimeError("not in cluster")),
+        )
+        fake_creds = MagicMock()
+        fake_creds.token = token
+        monkeypatch.setattr(ci_mod, "load_gcp_credentials", lambda *_: fake_creds)
+        return fake_creds
+
+    @pytest.mark.asyncio
+    async def test_cluster_endpoint_change_rebuilds_client(self, monkeypatch):
+        monkeypatch.delenv("BIOAF_COMPUTE_MODE", raising=False)
+        provider = KubernetesCellxgeneProvider()
+        fake_creds = self._setup(monkeypatch, token="tok-A")
+        ca_b64 = base64.b64encode(_DUMMY_CA_PEM).decode()
+
+        monkeypatch.setattr(
+            provider._gke, "load_cluster_config", self._fake_load_cluster_config(provider, "1.1.1.1", ca_b64)
+        )
+        client_a = await provider._get_api_client_async()
+        assert client_a.configuration.host == "https://1.1.1.1"
+
+        monkeypatch.setattr(
+            provider._gke, "load_cluster_config", self._fake_load_cluster_config(provider, "2.2.2.2", ca_b64)
+        )
+        fake_creds.token = "tok-B"
+        client_b = await provider._get_api_client_async()
+        assert client_b.configuration.host == "https://2.2.2.2", (
+            "Cellxgene reused its cached K8s client after the cluster endpoint "
+            "changed in platform_config. After a cluster teardown + redeploy this "
+            "401s every deploy/teardown until the backend restarts."
+        )
+
+    @pytest.mark.asyncio
+    async def test_unchanged_cluster_reuses_cached_client(self, monkeypatch):
+        monkeypatch.delenv("BIOAF_COMPUTE_MODE", raising=False)
+        provider = KubernetesCellxgeneProvider()
+        self._setup(monkeypatch)
+        ca_b64 = base64.b64encode(_DUMMY_CA_PEM).decode()
+        monkeypatch.setattr(
+            provider._gke, "load_cluster_config", self._fake_load_cluster_config(provider, "9.9.9.9", ca_b64)
+        )
+
+        first = await provider._get_api_client_async()
+        second = await provider._get_api_client_async()
+        assert first is second

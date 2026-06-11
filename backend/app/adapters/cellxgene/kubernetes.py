@@ -50,11 +50,16 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
 
     def __init__(self, session_factory=None):
         self._session_factory = session_factory
+        # Cellxgene deploys are long-lived against a singleton provider, so the
+        # connection must rebuild its client when the cluster identity changes
+        # (fingerprint strategy), not only when the GCP token TTL elapses.
+        # Otherwise a cluster teardown + redeploy leaves the adapter pointed at
+        # the dead endpoint until the backend restarts.
         self._gke = GkeConnection(
             config_keys=self._CONFIG_KEYS,
             session_factory=session_factory,
-            invalidate_client_on_force=True,
-            refresh_strategy="simple",
+            invalidate_client_on_force=False,
+            refresh_strategy="fingerprint",
         )
         self._namespace_ready = False
 
