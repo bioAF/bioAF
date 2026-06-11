@@ -182,3 +182,73 @@ class TestLoadClusterConfig:
         with patch(_GET_MANY, new_callable=AsyncMock, return_value={"gke_cluster_endpoint": "https://x"}):
             await conn.load_cluster_config(force=True)
         assert conn._api_client is sentinel
+
+
+_INCLUSTER = "app.adapters.kubernetes.connection.config.load_incluster_config"
+_APICLIENT = "app.adapters.kubernetes.connection.client.ApiClient"
+
+
+class TestGetApiClientSync:
+    def test_uses_incluster_when_available(self):
+        conn = _conn()
+        sentinel = MagicMock()
+        with patch(_INCLUSTER) as mock_incluster, patch(_APICLIENT, return_value=sentinel):
+            with patch.object(conn, "build_out_of_cluster_client") as mock_build:
+                result = conn.get_api_client()
+        mock_incluster.assert_called_once()
+        mock_build.assert_not_called()
+        assert result is sentinel
+        assert conn._api_client is sentinel
+
+    def test_falls_back_to_out_of_cluster_when_not_in_pod(self):
+        conn = _conn()
+        sentinel = MagicMock()
+        with patch(_INCLUSTER, side_effect=Exception("not in cluster")):
+            with patch.object(conn, "build_out_of_cluster_client", return_value=sentinel) as mock_build:
+                result = conn.get_api_client()
+        mock_build.assert_called_once()
+        assert result is sentinel
+
+    def test_returns_cached_client_without_rebuild(self):
+        conn = _conn()
+        cached = MagicMock()
+        conn._api_client = cached  # _client_created_at == 0.0 -> not expired
+        with patch(_INCLUSTER) as mock_incluster:
+            with patch.object(conn, "build_out_of_cluster_client") as mock_build:
+                result = conn.get_api_client()
+        assert result is cached
+        mock_incluster.assert_not_called()
+        mock_build.assert_not_called()
+
+    def test_rebuilds_when_token_expired(self, monkeypatch):
+        conn = _conn()
+        conn._api_client = MagicMock()  # stale
+        conn._client_created_at = 1000.0
+        monkeypatch.setattr(
+            "app.adapters.kubernetes.connection.time.monotonic",
+            lambda: 1000.0 + conn._TOKEN_TTL_SECONDS + 1,
+        )
+        fresh = MagicMock()
+        with patch(_INCLUSTER, side_effect=Exception("nope")):
+            with patch.object(conn, "build_out_of_cluster_client", return_value=fresh):
+                result = conn.get_api_client()
+        assert result is fresh
+
+
+class TestTypedClientGetters:
+    @pytest.mark.parametrize(
+        "method,api_cls",
+        [
+            ("core_v1", "CoreV1Api"),
+            ("batch_v1", "BatchV1Api"),
+            ("rbac_v1", "RbacAuthorizationV1Api"),
+            ("apps_v1", "AppsV1Api"),
+        ],
+    )
+    def test_getter_wraps_shared_api_client(self, method, api_cls):
+        conn = _conn()
+        sentinel = MagicMock()
+        with patch.object(conn, "get_api_client", return_value=sentinel):
+            with patch(f"app.adapters.kubernetes.connection.client.{api_cls}") as cls:
+                getattr(conn, method)()
+        cls.assert_called_once_with(api_client=sentinel)

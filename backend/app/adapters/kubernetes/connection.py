@@ -15,7 +15,7 @@ import logging
 import tempfile
 import time
 
-from kubernetes import client
+from kubernetes import client, config
 
 logger = logging.getLogger(__name__)
 
@@ -136,3 +136,47 @@ class GkeConnection:
 
         self._client_created_at = time.monotonic()
         return api_client
+
+    def get_api_client(self) -> client.ApiClient:
+        """Get or create a K8s ApiClient, trying incluster first (sync).
+
+        Uses the cached client when present and the token is not near expiry;
+        does not reload cluster config from the DB.
+        """
+        if self._api_client is not None and not self.is_token_expired():
+            return self._api_client
+
+        if self.is_token_expired():
+            logger.info("GCP access token approaching expiry, refreshing K8s client")
+            self._api_client = None
+
+        try:
+            config.load_incluster_config()
+            self._api_client = client.ApiClient()
+            logger.info("Using incluster K8s config")
+        except Exception:
+            logger.info("Not running in cluster, using platform_config credentials")
+            try:
+                self._api_client = self.build_out_of_cluster_client()
+                logger.info("K8s client built for endpoint %s", (self._cluster_config or {}).get("gke_cluster_endpoint"))
+            except Exception:
+                logger.exception("Failed to build out-of-cluster K8s client")
+                raise
+
+        return self._api_client
+
+    def core_v1(self):
+        """CoreV1Api bound to the shared API client."""
+        return client.CoreV1Api(api_client=self.get_api_client())
+
+    def batch_v1(self):
+        """BatchV1Api bound to the shared API client."""
+        return client.BatchV1Api(api_client=self.get_api_client())
+
+    def rbac_v1(self):
+        """RbacAuthorizationV1Api bound to the shared API client."""
+        return client.RbacAuthorizationV1Api(api_client=self.get_api_client())
+
+    def apps_v1(self):
+        """AppsV1Api bound to the shared API client."""
+        return client.AppsV1Api(api_client=self.get_api_client())
