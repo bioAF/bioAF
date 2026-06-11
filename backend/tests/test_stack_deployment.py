@@ -1081,6 +1081,37 @@ async def test_sync_compute_config_writes_cluster_values(session):
 
 
 @pytest.mark.asyncio
+async def test_sync_compute_config_writes_runner_sa_emails(session):
+    """sync_compute_config persists the runner SA emails so the infra-update
+    path records a newly added runner (e.g. cellxgene) in platform_config.
+    Without this the cellxgene adapter can't annotate its KSA for Workload
+    Identity and the dataset download 403s."""
+    from unittest.mock import AsyncMock
+
+    from app.services.stack_deployment import sync_compute_config
+
+    mock_outputs = {
+        "cluster_name": {"value": "bioaf-test"},
+        "cluster_endpoint": {"value": "10.0.0.1"},
+        "cluster_ca_cert": {"value": "Y2VydA=="},
+        "notebook_runner_sa_email": {"value": "bioaf-notebook-runner@p.iam.gserviceaccount.com"},
+        "cellxgene_runner_sa_email": {"value": "bioaf-cellxgene-runner@p.iam.gserviceaccount.com"},
+    }
+
+    with patch(
+        "app.services.stack_deployment.TerraformExecutor.read_module_outputs",
+        new=AsyncMock(return_value=mock_outputs),
+    ):
+        populated = await sync_compute_config(session)
+
+    await session.commit()
+
+    assert populated["cellxgene_runner_sa_email"] == "bioaf-cellxgene-runner@p.iam.gserviceaccount.com"
+    assert await _get_config(session, "cellxgene_runner_sa_email") == "bioaf-cellxgene-runner@p.iam.gserviceaccount.com"
+    assert await _get_config(session, "notebook_runner_sa_email") == "bioaf-notebook-runner@p.iam.gserviceaccount.com"
+
+
+@pytest.mark.asyncio
 async def test_sync_compute_config_skips_empty_outputs(session):
     """sync_compute_config does not overwrite config with empty values."""
     from unittest.mock import AsyncMock

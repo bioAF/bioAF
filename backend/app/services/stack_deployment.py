@@ -903,6 +903,12 @@ _COMPUTE_OUTPUT_MAP = {
     "cluster_name": "gke_cluster_name",
     "cluster_endpoint": "gke_cluster_endpoint",
     "cluster_ca_cert": "gke_cluster_ca_cert",
+    # Per-workload Workload Identity runner SA emails. Persisted here (not only
+    # in the full-deploy hook) so the "Check for Infrastructure Updates" path
+    # records a newly added runner SA -- e.g. cellxgene -- in platform_config;
+    # the adapters read these to annotate their runner KSA.
+    "notebook_runner_sa_email": "notebook_runner_sa_email",
+    "cellxgene_runner_sa_email": "cellxgene_runner_sa_email",
 }
 
 
