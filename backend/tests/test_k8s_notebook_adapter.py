@@ -229,11 +229,11 @@ class TestApiClientCacheInvalidation:
     async def test_cluster_endpoint_change_invalidates_cached_client(self, provider, monkeypatch):
         """If platform_config now reports a different cluster, drop the cache."""
         # Force the out-of-cluster path: make load_incluster_config raise.
-        from app.adapters.notebooks import kubernetes as kmod
+        from app.adapters.kubernetes import connection as conn_mod
         from app.platform import credential_injector as ci_mod
 
         monkeypatch.setattr(
-            kmod.config,
+            conn_mod.config,
             "load_incluster_config",
             MagicMock(side_effect=RuntimeError("not in cluster")),
         )
@@ -244,7 +244,7 @@ class TestApiClientCacheInvalidation:
 
         # First call: cluster A.
         monkeypatch.setattr(
-            provider,
+            provider._gke,
             "load_cluster_config",
             self._fake_load_cluster_config(provider, "1.1.1.1", _DUMMY_CA_B64),
         )
@@ -255,7 +255,7 @@ class TestApiClientCacheInvalidation:
         # The cached _api_client must NOT be returned: we want a fresh build
         # against the new endpoint.
         monkeypatch.setattr(
-            provider,
+            provider._gke,
             "load_cluster_config",
             self._fake_load_cluster_config(provider, "2.2.2.2", _DUMMY_CA_B64),
         )
@@ -270,11 +270,11 @@ class TestApiClientCacheInvalidation:
     @pytest.mark.asyncio
     async def test_unchanged_cluster_reuses_cached_client(self, provider, monkeypatch):
         """Don't churn the client when nothing relevant changed."""
-        from app.adapters.notebooks import kubernetes as kmod
+        from app.adapters.kubernetes import connection as conn_mod
         from app.platform import credential_injector as ci_mod
 
         monkeypatch.setattr(
-            kmod.config,
+            conn_mod.config,
             "load_incluster_config",
             MagicMock(side_effect=RuntimeError("not in cluster")),
         )
@@ -282,7 +282,7 @@ class TestApiClientCacheInvalidation:
         fake_creds.token = "tok"
         monkeypatch.setattr(ci_mod, "load_gcp_credentials", lambda *_: fake_creds)
         monkeypatch.setattr(
-            provider,
+            provider._gke,
             "load_cluster_config",
             self._fake_load_cluster_config(provider, "9.9.9.9", _DUMMY_CA_B64),
         )
