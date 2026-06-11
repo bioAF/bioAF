@@ -1,0 +1,542 @@
+[
+  {
+    "methods": [
+      "GET"
+    ],
+    "name": "get_org_literature_config_endpoint",
+    "path": "/api/literature/agent-review-config",
+    "response_model": "LiteratureConfigPayload",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "PUT"
+    ],
+    "name": "update_org_literature_config_endpoint",
+    "path": "/api/literature/agent-review-config",
+    "response_model": "LiteratureConfigPayload",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "name": "get_scoped_literature_config_endpoint",
+    "path": "/api/literature/agent-review-config/{scope_type}/{scope_id}",
+    "response_model": "LiteratureConfigPayload",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "PUT"
+    ],
+    "name": "update_scoped_literature_config_endpoint",
+    "path": "/api/literature/agent-review-config/{scope_type}/{scope_id}",
+    "response_model": "LiteratureConfigPayload",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "name": "bulk_citation_endpoint",
+    "path": "/api/literature/citations/bulk",
+    "response_model": null,
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "DELETE"
+    ],
+    "name": "delete_comment_endpoint",
+    "path": "/api/literature/comments/{comment_id}",
+    "response_model": null,
+    "status_code": 204,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "PATCH"
+    ],
+    "name": "update_comment_endpoint",
+    "path": "/api/literature/comments/{comment_id}",
+    "response_model": "CommentPayload",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "name": "list_lit_review_runs_endpoint",
+    "path": "/api/literature/experiments/{experiment_id}/lit-review-runs",
+    "response_model": "LitReviewRunListResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "name": "create_lit_review_run_endpoint",
+    "path": "/api/literature/experiments/{experiment_id}/lit-review-runs",
+    "response_model": "LitReviewRunPayload",
+    "status_code": 201,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "name": "get_lit_review_run_endpoint",
+    "path": "/api/literature/lit-review-runs/{run_id}",
+    "response_model": "LitReviewRunPayload",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "name": "list_papers_endpoint",
+    "path": "/api/literature/papers",
+    "response_model": "PaperListResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "name": "create_paper_endpoint",
+    "path": "/api/literature/papers",
+    "response_model": "PaperResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "name": "bulk_add_to_library_endpoint",
+    "path": "/api/literature/papers/bulk-add-to-library",
+    "response_model": "BulkAddToLibraryResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "name": "bulk_dismiss_endpoint",
+    "path": "/api/literature/papers/bulk-dismiss",
+    "response_model": "BulkDismissResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "name": "upload_paper_pdf_endpoint",
+    "path": "/api/literature/papers/upload",
+    "response_model": "PaperResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "DELETE"
+    ],
+    "name": "delete_paper_endpoint",
+    "path": "/api/literature/papers/{paper_id}",
+    "response_model": null,
+    "status_code": 204,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "name": "get_paper_endpoint",
+    "path": "/api/literature/papers/{paper_id}",
+    "response_model": "PaperResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "PATCH"
+    ],
+    "name": "update_paper_endpoint",
+    "path": "/api/literature/papers/{paper_id}",
+    "response_model": "PaperResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "name": "add_paper_to_library_endpoint",
+    "path": "/api/literature/papers/{paper_id}/add-to-library",
+    "response_model": "PaperResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "name": "list_associations_endpoint",
+    "path": "/api/literature/papers/{paper_id}/associations",
+    "response_model": "list[AssociationPayload]",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "name": "create_association_endpoint",
+    "path": "/api/literature/papers/{paper_id}/associations",
+    "response_model": "AssociationPayload",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "DELETE"
+    ],
+    "name": "delete_association_endpoint",
+    "path": "/api/literature/papers/{paper_id}/associations/{association_id}",
+    "response_model": null,
+    "status_code": 204,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "name": "single_citation_endpoint",
+    "path": "/api/literature/papers/{paper_id}/citation",
+    "response_model": null,
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "name": "list_comments_endpoint",
+    "path": "/api/literature/papers/{paper_id}/comments",
+    "response_model": "CommentListResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "name": "create_comment_endpoint",
+    "path": "/api/literature/papers/{paper_id}/comments",
+    "response_model": "CommentPayload",
+    "status_code": 201,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "name": "dismiss_paper_endpoint",
+    "path": "/api/literature/papers/{paper_id}/dismiss",
+    "response_model": "DismissalResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "name": "reverse_dismissal_endpoint",
+    "path": "/api/literature/papers/{paper_id}/dismiss/reverse",
+    "response_model": "DismissalResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "name": "re_extract_paper_endpoint",
+    "path": "/api/literature/papers/{paper_id}/extract",
+    "response_model": "PaperResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "name": "download_pdf_endpoint",
+    "path": "/api/literature/papers/{paper_id}/pdf",
+    "response_model": null,
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "name": "get_reading_status_endpoint",
+    "path": "/api/literature/papers/{paper_id}/reading-status",
+    "response_model": "ReadingStatusResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "PUT"
+    ],
+    "name": "set_reading_status_endpoint",
+    "path": "/api/literature/papers/{paper_id}/reading-status",
+    "response_model": "ReadingStatusResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "name": "list_recommendation_notes_endpoint",
+    "path": "/api/literature/papers/{paper_id}/recommendation-notes",
+    "response_model": "list[RecommendationNotePayload]",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "name": "upload_pdf_to_paper_endpoint",
+    "path": "/api/literature/papers/{paper_id}/upload-pdf",
+    "response_model": "PaperResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "name": "list_recommendations_endpoint",
+    "path": "/api/literature/recommendations",
+    "response_model": "RecommendationListResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "name": "accept_recommendation_endpoint",
+    "path": "/api/literature/recommendations/{recommendation_id}/accept",
+    "response_model": "RecommendationPayload",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "name": "dismiss_recommendation_endpoint",
+    "path": "/api/literature/recommendations/{recommendation_id}/dismiss",
+    "response_model": "RecommendationPayload",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "name": "list_searches_endpoint",
+    "path": "/api/literature/searches",
+    "response_model": "SearchListResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "name": "submit_search_endpoint",
+    "path": "/api/literature/searches",
+    "response_model": "SearchPayload",
+    "status_code": 201,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "name": "get_search_endpoint",
+    "path": "/api/literature/searches/{search_id}",
+    "response_model": "SearchPayload",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "name": "get_search_results_endpoint",
+    "path": "/api/literature/searches/{search_id}/results",
+    "response_model": "PaperListResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "name": "get_lit_review_settings_endpoint",
+    "path": "/api/literature/settings/lit-review",
+    "response_model": "LitReviewSettingsPayload",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "PUT"
+    ],
+    "name": "update_lit_review_settings_endpoint",
+    "path": "/api/literature/settings/lit-review",
+    "response_model": "LitReviewSettingsPayload",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "name": "list_sources_endpoint",
+    "path": "/api/literature/sources",
+    "response_model": "SourceConfigListResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "PATCH"
+    ],
+    "name": "update_source_endpoint",
+    "path": "/api/literature/sources/{source}",
+    "response_model": "SourceConfigPayload",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "name": "test_source_endpoint",
+    "path": "/api/literature/sources/{source}/test",
+    "response_model": "SourceTestResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  }
+]
