@@ -333,6 +333,41 @@ class NotebookProvider(ABC):
         return None
 
 
+class VmInstance(ABC):
+    """Cloud-neutral VM lifecycle primitive (GCE today; EC2 in the AWS build).
+
+    The single VM primitive that the work-node provider, future VM-compute, and
+    install-time provisioning consume. A backend (``GceVmInstance`` / future
+    ``Ec2VmInstance``) implements provision/delete/inspect/list; the work-node
+    provider rides on one and exposes it under the ``WorkNodeProvider`` names the
+    service layer uses. Selected per-cloud (POLICY ``work_node``: gce | ec2).
+    """
+
+    @abstractmethod
+    async def provision(self, vm_spec: dict) -> VmInfo:
+        """Create and start a VM. Returns a VmInfo."""
+
+    @abstractmethod
+    async def delete(self, instance_name: str, zone: str, **kwargs) -> TerminationResult:
+        """Stop and delete a VM. Returns a TerminationResult."""
+
+    @abstractmethod
+    async def inspect(self, instance_name: str, zone: str) -> VmStatus:
+        """Get VM status and external IP."""
+
+    @abstractmethod
+    async def list_instances(self, filters: dict | None = None) -> list[VmStatus]:
+        """List managed VMs."""
+
+    async def probe_zone_capacity(self, zones: list[str], machine_type: str = "e2-medium") -> str:
+        """Return the first zone in ``zones`` with capacity for ``machine_type``.
+
+        Default raises so a backend that cannot probe capacity fails loudly rather
+        than silently. The GCE backend implements it via a throwaway instance insert.
+        """
+        raise NotImplementedError("This VM backend cannot probe zone capacity")
+
+
 class WorkNodeProvider(ABC):
     """Abstract interface for work node VM backends (GCE)."""
 
