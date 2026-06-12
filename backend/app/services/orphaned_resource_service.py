@@ -198,9 +198,10 @@ class OrphanedResourceService:
     ) -> None:
         """Delete a service account using the SA credentials."""
         from app.adapters.iam import create_iam_provider
+        from app.platform.cloud_provider import backend_for
 
         credentials = await _get_gke_credentials(session)
-        provider = create_iam_provider(credentials=credentials)
+        provider = create_iam_provider(credentials=credentials, backend=backend_for("iam"))
         provider.delete_service_account(resource.gcp_project_id, resource.resource_name)
 
     @staticmethod
@@ -312,8 +313,9 @@ class OrphanedResourceService:
         _COMPUTE_SA_IDS = {"bioaf-notebook-runner"}
         try:
             from app.adapters.iam import create_iam_provider
+            from app.platform.cloud_provider import backend_for
 
-            provider = create_iam_provider(credentials=credentials)
+            provider = create_iam_provider(credentials=credentials, backend=backend_for("iam"))
             sa_list = provider.list_service_accounts(project_id)
             for sa in sa_list:
                 sa_id = sa.account_id

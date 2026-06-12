@@ -260,7 +260,7 @@ async def test_cleanup_service_account_routes_through_iam_provider(session, admi
         result = await OrphanedResourceService.cleanup_resource(session, resource.id, admin_user.id)
 
     assert result.status == "cleaned"
-    create.assert_called_once_with(credentials=creds)
+    create.assert_called_once_with(credentials=creds, backend="gcp")
     provider.delete_service_account.assert_called_once_with("test-project", "bioaf-notebook-runner")
 
 

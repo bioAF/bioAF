@@ -176,3 +176,80 @@ async def test_resolve_backend_invalid_override_raises(monkeypatch):
     monkeypatch.setattr(PlatformConfigService, "get_many", fake_get_many)
     with pytest.raises(cp.InvalidBackendError):
         await cp.resolve_backend(object(), "storage")
+
+
+# --- resolved-backend cache (Stage 1c): backend_for / load_resolved_backends ----
+#
+# The registry loads this cache once at startup so the sessionless factory call
+# sites (secrets fetched pre-DB; billing/iam/messaging created on-demand) read
+# their backend synchronously. Unloaded, backend_for falls back to the gcp policy
+# default, preserving current behavior.
+
+
+def test_backend_for_defaults_to_gcp_policy_when_cache_empty():
+    cp.reset_resolved_backends()
+    for seam in cp.SEAMS:
+        assert cp.backend_for(seam) == cp.POLICY["gcp"][seam]
+
+
+def test_backend_for_unknown_seam_raises():
+    with pytest.raises(cp.InvalidBackendError):
+        cp.backend_for("not_a_seam")
+
+
+@pytest.mark.asyncio
+async def test_load_resolved_backends_caches_gcp(monkeypatch):
+    async def fake_get_many(session, keys):
+        return {}
+
+    monkeypatch.setattr(PlatformConfigService, "get_many", fake_get_many)
+    await cp.load_resolved_backends(object())
+    assert cp.backend_for("secrets") == "gcp"
+    assert cp.backend_for("storage") == "gcs"
+    cp.reset_resolved_backends()
+
+
+@pytest.mark.asyncio
+async def test_load_resolved_backends_caches_aws(monkeypatch):
+    async def fake_get_many(session, keys):
+        return {"cloud_provider": "aws"}
+
+    monkeypatch.setattr(PlatformConfigService, "get_many", fake_get_many)
+    await cp.load_resolved_backends(object())
+    assert cp.backend_for("secrets") == "aws"
+    assert cp.backend_for("storage") == "s3"
+    cp.reset_resolved_backends()
+
+
+@pytest.mark.asyncio
+async def test_load_resolved_backends_honors_valid_override(monkeypatch):
+    async def fake_get_many(session, keys):
+        return {"storage_backend": "nfs"}
+
+    monkeypatch.setattr(PlatformConfigService, "get_many", fake_get_many)
+    await cp.load_resolved_backends(object())
+    assert cp.backend_for("storage") == "nfs"
+    cp.reset_resolved_backends()
+
+
+@pytest.mark.asyncio
+async def test_load_resolved_backends_fails_closed_on_invalid_override(monkeypatch):
+    async def fake_get_many(session, keys):
+        return {"cloud_provider": "gcp", "storage_backend": "s3"}
+
+    monkeypatch.setattr(PlatformConfigService, "get_many", fake_get_many)
+    with pytest.raises(cp.InvalidBackendError):
+        await cp.load_resolved_backends(object())
+    cp.reset_resolved_backends()
+
+
+@pytest.mark.asyncio
+async def test_reset_resolved_backends_restores_defaults(monkeypatch):
+    async def fake_get_many(session, keys):
+        return {"cloud_provider": "aws"}
+
+    monkeypatch.setattr(PlatformConfigService, "get_many", fake_get_many)
+    await cp.load_resolved_backends(object())
+    assert cp.backend_for("secrets") == "aws"
+    cp.reset_resolved_backends()
+    assert cp.backend_for("secrets") == "gcp"

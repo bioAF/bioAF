@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.base import CellxgeneProvider, ComputeProvider, NotebookProvider, StorageProvider, WorkNodeProvider
 from app.adapters.capabilities import CapabilityNotSupported, ProviderCapabilities
 from app.exceptions import ValidationError
+from app.platform.cloud_provider import load_resolved_backends, reset_resolved_backends
 from app.platform.platform_config_service import PlatformConfigService
 
 logger = logging.getLogger("bioaf.adapters.registry")
@@ -105,6 +106,12 @@ async def initialize_adapters(session: AsyncSession, session_factory=None) -> No
         work_node_backend = cfg.get("work_node_backend") or DEFAULT_WORK_NODE_BACKEND
         cellxgene_backend = cfg.get("cellxgene_backend") or DEFAULT_CELLXGENE_BACKEND
 
+        # Resolve every cloud_provider-driven seam's backend once and cache it, so
+        # the sessionless factory call sites (secrets/messaging/iam/billing/log_sink)
+        # can read theirs synchronously via cloud_provider.backend_for. Fails closed
+        # here on an invalid (cloud, seam, backend) override.
+        await load_resolved_backends(session)
+
         logger.info(
             "Initializing BAL adapters (compute_stack=%s work_node_backend=%s cellxgene_backend=%s)",
             compute_stack,
@@ -137,6 +144,9 @@ def initialize_adapters_sync(
     """Initialize adapters synchronously from known values (for testing)."""
     global _compute_adapter, _storage_adapter, _notebook_adapter, _cellxgene_adapter, _work_node_adapter, _initialized
 
+    # Sync init is the local/test path (no DB to read cloud_provider from); clear
+    # the resolved-backend cache so backend_for falls back to the gcp defaults.
+    reset_resolved_backends()
     _compute_adapter, _storage_adapter, _notebook_adapter = _create_adapters(compute_stack)
     _cellxgene_adapter = _create_cellxgene_adapter(cellxgene_backend)
     _work_node_adapter = _create_work_node_adapter(work_node_backend)
@@ -223,3 +233,4 @@ def reset_registry() -> None:
     _cellxgene_adapter = None
     _work_node_adapter = None
     _initialized = False
+    reset_resolved_backends()

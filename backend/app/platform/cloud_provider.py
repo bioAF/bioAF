@@ -145,3 +145,45 @@ async def resolve_backend(session: AsyncSession, seam: str) -> str:
     cloud_provider = cfg.get(CLOUD_PROVIDER_KEY) or DEFAULT_CLOUD_PROVIDER
     override = cfg.get(f"{seam}_backend")
     return resolve(cloud_provider, seam, override)
+
+
+# --- Resolved-backend cache (for sessionless call sites) ----------------------
+#
+# cloud_provider is immutable for the life of the install, so each seam's backend
+# can be resolved once at startup and cached. The registry loads this cache during
+# adapter init (where a DB session exists, after cloud_provider is persisted); the
+# factory call sites that have no session in scope (the secrets provider is built
+# pre-DB; the billing / iam / messaging providers are created on-demand with only
+# credentials available) then read their backend synchronously via backend_for.
+_resolved_backends: dict[str, str] = {}
+
+
+async def load_resolved_backends(session: AsyncSession) -> None:
+    """Resolve and cache every seam's backend (called once at adapter init).
+
+    Reads ``cloud_provider`` and all per-seam overrides in one query, then applies
+    the pure policy per seam. An invalid override raises here, so a bad config
+    fails closed at startup rather than at first use.
+    """
+    global _resolved_backends
+    keys = [CLOUD_PROVIDER_KEY] + [f"{seam}_backend" for seam in SEAMS]
+    cfg = await PlatformConfigService.get_many(session, keys)
+    cloud_provider = cfg.get(CLOUD_PROVIDER_KEY) or DEFAULT_CLOUD_PROVIDER
+    _resolved_backends = {seam: resolve(cloud_provider, seam, cfg.get(f"{seam}_backend")) for seam in SEAMS}
+
+
+def backend_for(seam: str) -> str:
+    """Synchronously read a seam's resolved backend (cached at startup).
+
+    Falls back to the gcp policy default when the cache is unloaded (pre-DB
+    bootstrap, local dev, or tests that never call ``load_resolved_backends``), so
+    call sites behave exactly as before on GCP.
+    """
+    _require_seam(seam)
+    return _resolved_backends.get(seam, POLICY[DEFAULT_CLOUD_PROVIDER][seam])
+
+
+def reset_resolved_backends() -> None:
+    """Clear the resolved-backend cache (registry reset / test isolation)."""
+    global _resolved_backends
+    _resolved_backends = {}

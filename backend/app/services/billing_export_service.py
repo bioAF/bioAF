@@ -12,6 +12,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from app.adapters.billing import create_billing_provider
+from app.platform.cloud_provider import backend_for
 
 if TYPE_CHECKING:
     from google.auth.credentials import Credentials
@@ -42,7 +43,7 @@ class BillingExportService:
 
         Returns {"found": True, "table_id": "..."} or {"found": False}.
         """
-        provider = create_billing_provider(credentials=credentials)
+        provider = create_billing_provider(credentials=credentials, backend=backend_for("billing"))
         return await provider.verify_dataset(project_id, dataset_id)
 
     @staticmethod
@@ -58,7 +59,7 @@ class BillingExportService:
         Excludes today's data (it may be incomplete due to export lag). The
         provider returns raw per-service rows; this maps each to a bioAF component.
         """
-        provider = create_billing_provider(credentials=credentials)
+        provider = create_billing_provider(credentials=credentials, backend=backend_for("billing"))
         rows = await provider.query_mtd_costs(project_id, dataset_id, table_id)
         return [
             {
