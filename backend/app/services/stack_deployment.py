@@ -749,7 +749,7 @@ async def _empty_gcs_bucket(session: AsyncSession, bucket_name: str) -> int:
     from app.adapters.registry import get_storage_adapter
 
     adapter = get_storage_adapter()
-    uri_prefix = f"gs://{bucket_name}/"
+    uri_prefix = adapter.build_uri(bucket_name, "")
 
     deleted = 0
     for obj in await adapter.list_objects(uri_prefix, include_versions=True):

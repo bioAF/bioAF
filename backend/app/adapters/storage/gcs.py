@@ -250,6 +250,12 @@ class GcsStorageProvider(StorageProvider):
             raise ValidationError(f"No bucket configured for store {store.value!r}")
         return f"gs://{bucket}/{key}"
 
+    def build_uri(self, bucket: str, key: str) -> str:
+        return f"gs://{bucket}/{key.lstrip('/')}"
+
+    def parse_uri(self, uri: str) -> tuple[str, str]:
+        return self._parse_uri(uri)
+
     async def read_text(self, uri: str, *, encoding: str = "utf-8") -> str:
         return (await self.read_bytes(uri)).decode(encoding)
 

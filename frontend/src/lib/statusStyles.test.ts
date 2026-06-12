@@ -5,6 +5,7 @@ import {
   statusDotClass,
   statusLabel,
 } from "@/lib/statusStyles";
+import tailwindConfig from "../../tailwind.config.js";
 
 describe("statusStyles library", () => {
   it("disambiguates the same status across entities", () => {
@@ -62,5 +63,23 @@ describe("statusStyles library", () => {
 
   it("exposes the registry for enumerations (e.g. dropdowns/legends)", () => {
     expect(Object.keys(STATUS_STYLES.sdr)).toContain("flagged_for_review");
+  });
+});
+
+describe("tailwind content config covers statusStyles", () => {
+  // statusStyles.ts is the single source of truth for status colors, but its
+  // class names are plain string literals. Tailwind only emits CSS for classes
+  // it finds in a content-globbed file; if the config does not scan src/lib,
+  // colors used ONLY here (e.g. serviceHealth's bg-green-400 / bg-yellow-400 dots)
+  // are purged from the built CSS and the dots render invisible. A unit test on
+  // statusStyles' return values cannot catch this (the className is still set in
+  // the DOM; only the CSS rule is missing), so guard the glob coverage directly.
+  it("scans src/lib so statusStyles dot colors survive purge", () => {
+    const content = tailwindConfig.content as string[];
+    const coversLib = content.some((glob) => {
+      const normalized = glob.replace(/^\.\//, "");
+      return normalized.startsWith("src/**") || normalized.startsWith("src/lib");
+    });
+    expect(coversLib).toBe(true);
   });
 });

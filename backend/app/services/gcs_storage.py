@@ -152,7 +152,7 @@ class GcsStorageService:
 
     @staticmethod
     def _parse_gcs_uri(uri: str) -> tuple[str, str]:
-        """Parse gs://bucket/path into (bucket_name, blob_path)."""
+        """Parse a storage URI (scheme://bucket/path) into (bucket_name, blob_path)."""
         parsed = urlparse(uri)
         bucket = parsed.netloc
         path = parsed.path.lstrip("/")

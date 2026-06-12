@@ -264,10 +264,10 @@ async def _upload_version_build_context(
     buf.seek(0)
     safe_name = env_name.lower().replace(" ", "-").replace("_", "-")
     object_path = f"builds/{safe_name}/v{version.version_number}/source.tar.gz"
-    await get_storage_adapter().upload_file(
-        f"gs://{working_bucket}/{object_path}", buf, content_type="application/gzip"
-    )
-    logger.info("Uploaded build context to gs://%s/%s", working_bucket, object_path)
+    adapter = get_storage_adapter()
+    context_uri = adapter.build_uri(working_bucket, object_path)
+    await adapter.upload_file(context_uri, buf, content_type="application/gzip")
+    logger.info("Uploaded build context to %s", context_uri)
 
     return object_path
 
@@ -447,14 +447,13 @@ class EnvironmentBuildService:
 
         safe_name = env.name.lower().replace(" ", "-").replace("_", "-")
         env_yml_path = f"builds/{safe_name}/v{version.version_number}/environment.yml"
-        await adapter.write_text(
-            f"gs://{working_bucket}/{env_yml_path}", version.definition_content, content_type="text/yaml"
-        )
-        env_yml_gcs = f"gs://{working_bucket}/{env_yml_path}"
+        env_yml_gcs = adapter.build_uri(working_bucket, env_yml_path)
+        await adapter.write_text(env_yml_gcs, version.definition_content, content_type="text/yaml")
 
         # Upload Packer template
         packer_path = f"builds/{safe_name}/v{version.version_number}/work_node.pkr.hcl"
-        await adapter.write_text(f"gs://{working_bucket}/{packer_path}", PACKER_VM_TEMPLATE, content_type="text/plain")
+        packer_gcs = adapter.build_uri(working_bucket, packer_path)
+        await adapter.write_text(packer_gcs, PACKER_VM_TEMPLATE, content_type="text/plain")
 
         # Build image name and URI
         image_name = _get_vm_image_name(env.name, version.version_number, version.build_number)
@@ -469,8 +468,10 @@ class EnvironmentBuildService:
         build_body: dict = {
             "steps": [
                 {
+                    # NOTE: the gsutil step itself is a Leak-2 (shell CLI) item drained
+                    # separately; build_uri only makes the URI backend-neutral here.
                     "name": "gcr.io/cloud-builders/gsutil",
-                    "args": ["cp", f"gs://{working_bucket}/{packer_path}", "/workspace/work_node.pkr.hcl"],
+                    "args": ["cp", packer_gcs, "/workspace/work_node.pkr.hcl"],
                 },
                 {
                     "name": "hashicorp/packer",

@@ -139,6 +139,8 @@ async def _finalize_document_from_token(
     """Shared finalize path for both the browser-upload and URL-import flows:
     read the stored object's checksum/size, create the v1 record, then move the
     object into its versioned path and point the record at it."""
+    from app.adapters.registry import get_storage_adapter
+
     meta = await LabDocumentUploadService.read_metadata(session, upload_token=upload_token, org_id=org_id)
     doc = await LabDocumentService.create_document(
         session,
@@ -147,7 +149,9 @@ async def _finalize_document_from_token(
         title=title or meta["file_name"],
         description=description,
         file_name=meta["file_name"],
-        gcs_uri=f"gs://pending/{upload_token}",
+        # "pending" is a sentinel bucket; place() repoints the record at the real
+        # versioned URI immediately below, before any storage op.
+        gcs_uri=get_storage_adapter().build_uri("pending", upload_token),
         file_size_bytes=meta["size_bytes"],
         mime_type=meta["mime_type"],
         md5_checksum=meta["md5"],

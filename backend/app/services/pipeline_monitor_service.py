@@ -495,7 +495,9 @@ class PipelineMonitorService:
                 # Fall back: read results_bucket_name from platform_config
                 results_bucket = await PlatformConfigService.get(session, "results_bucket_name")
                 if results_bucket is not None:
-                    outdir = f"gs://{results_bucket}/experiments/{run.experiment_id}/pipeline-runs/{run.id}"
+                    outdir = storage_adapter.build_uri(
+                        results_bucket, f"experiments/{run.experiment_id}/pipeline-runs/{run.id}"
+                    )
                 else:
                     outdir = f"/data/results/experiments/{run.experiment_id}/pipeline-runs/{run.id}"
             collected = await storage_adapter.collect_outputs(
@@ -796,7 +798,7 @@ async def _read_gcs_text(gcs_uri: str) -> str | None:
     adapter offloads the blocking SDK call to a worker thread (fixing the
     event-loop stall the inline ``download_as_text`` previously caused).
     """
-    if not gcs_uri.startswith("gs://"):
+    if "://" not in gcs_uri:
         return None
     try:
         return await get_storage_adapter().read_text(gcs_uri)

@@ -9,10 +9,13 @@ def _echo_move_adapter():
     reconcile), so these API tests patch the adapter boundary rather than the
     retired GcsStorageService.move_file.
     """
-    from unittest.mock import AsyncMock
+    from unittest.mock import AsyncMock, MagicMock
+    from urllib.parse import urlparse
 
     adapter = AsyncMock()
     adapter.move.side_effect = lambda src, dst: dst
+    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
+    adapter.parse_uri = MagicMock(side_effect=lambda uri: (urlparse(uri).netloc, urlparse(uri).path.lstrip("/")))
     return adapter
 
 
@@ -401,7 +404,8 @@ async def test_link_fastq_transitions_experiment_to_fastq_uploaded(client, admin
 @pytest.mark.asyncio
 async def test_reconcile_moves_stuck_ingest_files_to_raw(client, admin_token, session, admin_user):
     """Files stuck in ingest bucket with an experiment_id should be moved to raw."""
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from urllib.parse import urlparse
 
     from app.models.experiment import Experiment
     from app.models.file import File
@@ -463,6 +467,8 @@ async def test_reconcile_moves_stuck_ingest_files_to_raw(client, admin_token, se
 
     adapter = AsyncMock()
     adapter.move.side_effect = fake_move
+    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
+    adapter.parse_uri = MagicMock(side_effect=lambda uri: (urlparse(uri).netloc, urlparse(uri).path.lstrip("/")))
     with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         resp = await client.post(
             "/api/files/reconcile",

@@ -41,7 +41,3 @@ def thumbnail_blob_path(paper_id: int) -> str:
 
 def page_image_blob_path(paper_id: int, page_n: int) -> str:
     return f"papers/{paper_id}/pages/{page_n}.png"
-
-
-def gcs_uri(bucket: str, path: str) -> str:
-    return f"gs://{bucket}/{path}"

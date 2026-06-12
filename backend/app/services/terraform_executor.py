@@ -586,6 +586,7 @@ class TerraformExecutor:
                     pass
 
             # Update platform_config
+            from app.adapters.registry import get_storage_adapter
             from app.platform.platform_config_service import PlatformConfigService
 
             for key, value in [
@@ -596,7 +597,11 @@ class TerraformExecutor:
                 await PlatformConfigService.set(session, key, value)
 
             run.status = "completed"
-            run.terraform_state_url = f"gs://{bucket_name}" if bucket_name else ""
+            # Bucket-root state URL with no trailing slash; build_uri mints the
+            # backend scheme, rstrip drops the slash it adds for an empty key.
+            run.terraform_state_url = (
+                get_storage_adapter().build_uri(bucket_name, "").rstrip("/") if bucket_name else ""
+            )
             run.completed_at = datetime.now(timezone.utc)
             await session.flush()
 
@@ -1260,11 +1265,13 @@ class TerraformExecutor:
         """
         from app.adapters.registry import get_storage_adapter
 
+        adapter = get_storage_adapter()
+        uri = adapter.build_uri(bucket_name, lock_path)
         try:
-            await get_storage_adapter().delete(f"gs://{bucket_name}/{lock_path}")
-            logger.info("Deleted lock file gs://%s/%s", bucket_name, lock_path)
+            await adapter.delete(uri)
+            logger.info("Deleted lock file %s", uri)
         except Exception as exc:
-            logger.warning("Error deleting lock file gs://%s/%s: %s", bucket_name, lock_path, exc)
+            logger.warning("Error deleting lock file %s: %s", uri, exc)
 
     @staticmethod
     async def _check_no_active_run(session: AsyncSession) -> None:

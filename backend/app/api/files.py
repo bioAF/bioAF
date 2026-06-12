@@ -162,6 +162,10 @@ async def reconcile_stuck_files(
     if not ingest_bucket or not raw_bucket:
         raise HTTPException(400, "Ingest or raw bucket not configured")
 
+    from app.adapters.registry import get_storage_adapter
+
+    adapter = get_storage_adapter()
+
     # Find stuck files: have experiment_id, URI still in ingest bucket
     stuck = (
         await session.execute(
@@ -170,7 +174,7 @@ async def reconcile_stuck_files(
                 "WHERE organization_id = :org_id "
                 "AND experiment_id IS NOT NULL "
                 "AND gcs_uri LIKE :pattern"
-            ).bindparams(org_id=org_id, pattern=f"gs://{ingest_bucket}/%")
+            ).bindparams(org_id=org_id, pattern=adapter.build_uri(ingest_bucket, "") + "%")
         )
     ).fetchall()
 
@@ -202,7 +206,7 @@ async def reconcile_stuck_files(
                 "WHERE organization_id = :org_id "
                 "AND experiment_id IS NOT NULL "
                 "AND gcs_uri LIKE :pattern"
-            ).bindparams(org_id=org_id, pattern=f"gs://{raw_bucket}/%")
+            ).bindparams(org_id=org_id, pattern=adapter.build_uri(raw_bucket, "") + "%")
         )
     ).scalar_one()
 

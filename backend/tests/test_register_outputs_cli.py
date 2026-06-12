@@ -2,7 +2,7 @@
 
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy import select
 
@@ -55,6 +55,7 @@ async def test_register_outputs_for_run_creates_files(session, completed_run):
     """CLI helper creates File records from collected outputs."""
     run = completed_run
     mock_storage = AsyncMock()
+    mock_storage.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
     mock_storage.collect_outputs.return_value = [
         StoredObject(
             filename="results.h5ad",
@@ -86,6 +87,7 @@ async def test_register_outputs_for_run_creates_files(session, completed_run):
 async def test_register_outputs_for_run_no_files(session, completed_run):
     """Returns 0 when no outputs are found in GCS."""
     mock_storage = AsyncMock()
+    mock_storage.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
     mock_storage.collect_outputs.return_value = []
 
     with patch("app.cli.register_outputs.get_storage_adapter", return_value=mock_storage):

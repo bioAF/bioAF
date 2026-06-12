@@ -7,7 +7,6 @@ Files are organized under experiments/{id}/ prefixes or unlinked/.
 from __future__ import annotations
 
 import logging
-from urllib.parse import urlparse
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,17 +59,18 @@ class FileOrganizationService:
             return
 
         # Use raw bucket as destination; fall back to source bucket
+        from app.adapters.registry import get_storage_adapter
+
+        adapter = get_storage_adapter()
         raw_bucket = await FileOrganizationService._get_raw_bucket(session)
-        source_bucket, _ = _parse_gcs_uri(old_uri)
+        source_bucket, _ = adapter.parse_uri(old_uri)
         dest_bucket = raw_bucket or source_bucket
         new_prefix = GcsStorageService.build_experiment_prefix(experiment_id)
-        new_uri = f"gs://{dest_bucket}/{new_prefix}{filename}"
+        new_uri = adapter.build_uri(dest_bucket, f"{new_prefix}{filename}")
 
         # Move file in GCS if URIs differ
         if old_uri != new_uri:
-            from app.adapters.registry import get_storage_adapter
-
-            new_uri = await get_storage_adapter().move(old_uri, new_uri)
+            new_uri = await adapter.move(old_uri, new_uri)
 
         # Look up the experiment's project so we can denormalize project_id onto the file
         exp_row = (
@@ -132,17 +132,18 @@ class FileOrganizationService:
         old_uri, old_exp_id, filename = row[0], row[1], row[2]
 
         # Use raw bucket as destination; fall back to source bucket
+        from app.adapters.registry import get_storage_adapter
+
+        adapter = get_storage_adapter()
         raw_bucket = await FileOrganizationService._get_raw_bucket(session)
-        source_bucket, _ = _parse_gcs_uri(old_uri)
+        source_bucket, _ = adapter.parse_uri(old_uri)
         dest_bucket = raw_bucket or source_bucket
         new_prefix = GcsStorageService.build_experiment_prefix(new_experiment_id)
-        new_uri = f"gs://{dest_bucket}/{new_prefix}{filename}"
+        new_uri = adapter.build_uri(dest_bucket, f"{new_prefix}{filename}")
 
         # Move in GCS
         if old_uri != new_uri:
-            from app.adapters.registry import get_storage_adapter
-
-            new_uri = await get_storage_adapter().move(old_uri, new_uri)
+            new_uri = await adapter.move(old_uri, new_uri)
 
         # Look up the new experiment's project_id to keep file.project_id in sync
         new_exp_row = (
@@ -204,17 +205,18 @@ class FileOrganizationService:
         old_uri, old_exp_id, filename = row[0], row[1], row[2]
 
         # Use raw bucket as destination; fall back to source bucket
+        from app.adapters.registry import get_storage_adapter
+
+        adapter = get_storage_adapter()
         raw_bucket = await FileOrganizationService._get_raw_bucket(session)
-        source_bucket, _ = _parse_gcs_uri(old_uri)
+        source_bucket, _ = adapter.parse_uri(old_uri)
         dest_bucket = raw_bucket or source_bucket
         unlinked_prefix = GcsStorageService.build_unlinked_prefix()
-        new_uri = f"gs://{dest_bucket}/{unlinked_prefix}{filename}"
+        new_uri = adapter.build_uri(dest_bucket, f"{unlinked_prefix}{filename}")
 
         # Move in GCS
         if old_uri != new_uri:
-            from app.adapters.registry import get_storage_adapter
-
-            new_uri = await get_storage_adapter().move(old_uri, new_uri)
+            new_uri = await adapter.move(old_uri, new_uri)
 
         # Update DB
         await session.execute(
@@ -236,9 +238,3 @@ class FileOrganizationService:
             },
         )
         await session.commit()
-
-
-def _parse_gcs_uri(uri: str) -> tuple[str, str]:
-    """Parse gs://bucket/path into (bucket_name, blob_path)."""
-    parsed = urlparse(uri)
-    return parsed.netloc, parsed.path.lstrip("/")

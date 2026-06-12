@@ -319,11 +319,15 @@ class ReferenceImporter:
             total_bytes=total_bytes,
         )
 
+        from app.adapters.registry import get_storage_adapter
+
+        adapter = get_storage_adapter()
+        prefix = cfg.gcs_prefix.rstrip("/") + "/"
         return ImportResult(
             files=[
                 ImportedFile(
                     filename=name,
-                    gcs_uri=f"gs://{cfg.gcs_bucket}/{cfg.gcs_prefix.rstrip('/') + '/' + name}",
+                    gcs_uri=adapter.build_uri(cfg.gcs_bucket, prefix + name),
                     size_bytes=size_hint if size_hint is not None else total_bytes,
                     md5=computed_md5 if cfg.extract_mode == "none" else None,
                 )

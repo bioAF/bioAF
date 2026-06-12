@@ -982,7 +982,11 @@ class CustomPipelineService:
         run_id: int,
     ) -> str:
         if results_bucket:
-            sync_target = f"gs://{results_bucket}/{output_prefix}/pipeline-runs/{run_id}/"
+            from app.adapters.registry import get_storage_adapter
+
+            # NOTE: the gcloud storage command below is a Leak-2 (shell CLI) item
+            # drained separately; build_uri only makes the URI backend-neutral here.
+            sync_target = get_storage_adapter().build_uri(results_bucket, f"{output_prefix}/pipeline-runs/{run_id}/")
             # Activate the mounted SA explicitly (same reason as stage-inputs:
             # gsutil's ~/.boto precedence picks up the wrong identity even with
             # GOOGLE_APPLICATION_CREDENTIALS set). `|| true` keeps the trap

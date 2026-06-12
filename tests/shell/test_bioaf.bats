@@ -230,3 +230,97 @@ BIOAF_SCRIPT="$BATS_TEST_DIRNAME/../../bioaf"
     grep -q '^BIOAF_IMAGE_TAG=v[0-9]' "$env_file"
     rm -f "$env_file"
 }
+
+# ---------------------------------------------------------------------------
+# build_setup_reexec_cmd
+#
+# When setup re-execs under `sg docker` to activate docker-group membership,
+# EVERY original flag must survive the hop. A previous version preserved only
+# --version, silently dropping --prefill / --local-build / --verbose, so users
+# whose shell lacked the docker group got a bare `./bioaf setup`.
+# ---------------------------------------------------------------------------
+
+@test "build_setup_reexec_cmd preserves --prefill and its path across re-exec" {
+    result=$(bash -c "source '$BIOAF_SCRIPT' && build_setup_reexec_cmd '/opt/bioaf/bioaf' --prefill /home/u/.bioaf-prefill.yaml")
+    eval "set -- $result"
+    [ "$1" = "/opt/bioaf/bioaf" ]
+    [ "$2" = "setup" ]
+    [ "$3" = "--prefill" ]
+    [ "$4" = "/home/u/.bioaf-prefill.yaml" ]
+}
+
+@test "build_setup_reexec_cmd preserves --local-build alongside --prefill" {
+    result=$(bash -c "source '$BIOAF_SCRIPT' && build_setup_reexec_cmd '/opt/bioaf/bioaf' --local-build --prefill /tmp/p.yaml")
+    eval "set -- $result"
+    [ "$2" = "setup" ]
+    [[ "$result" == *"--local-build"* ]]
+    [[ "$result" == *"--prefill"* ]]
+    [[ "$result" == *"/tmp/p.yaml"* ]]
+}
+
+@test "build_setup_reexec_cmd preserves --version (no regression)" {
+    result=$(bash -c "source '$BIOAF_SCRIPT' && build_setup_reexec_cmd '/opt/bioaf/bioaf' --version 0.8.1")
+    eval "set -- $result"
+    [ "$3" = "--version" ]
+    [ "$4" = "0.8.1" ]
+}
+
+@test "build_setup_reexec_cmd quotes paths with spaces so they round-trip as one arg" {
+    result=$(bash -c "source '$BIOAF_SCRIPT' && build_setup_reexec_cmd '/opt/bioaf/bioaf' --prefill '/tmp/my dir/p.yaml'")
+    eval "set -- $result"
+    [ "$4" = "/tmp/my dir/p.yaml" ]
+}
+
+@test "build_setup_reexec_cmd with no extra args yields bare 'setup'" {
+    result=$(bash -c "source '$BIOAF_SCRIPT' && build_setup_reexec_cmd '/opt/bioaf/bioaf'")
+    eval "set -- $result"
+    [ "$1" = "/opt/bioaf/bioaf" ]
+    [ "$2" = "setup" ]
+    [ "$#" -eq 2 ]
+}
+
+# ---------------------------------------------------------------------------
+# discover_prefill_file
+#
+# --local-build pre-applies the prefill install-gcp.sh already dropped on the
+# box, so `./bioaf setup --local-build` fills platform_config without an
+# explicit --prefill.
+# ---------------------------------------------------------------------------
+
+@test "discover_prefill_file finds the install-gcp.sh handoff prefill in HOME" {
+    local tmp
+    tmp="$(mktemp -d)"
+    : > "$tmp/.bioaf-prefill.yaml"
+    result=$(HOME="$tmp" bash -c "source '$BIOAF_SCRIPT' && discover_prefill_file")
+    [ "$result" = "$tmp/.bioaf-prefill.yaml" ]
+    rm -rf "$tmp"
+}
+
+@test "discover_prefill_file falls back to ~/.bioaf/prefill.yaml" {
+    local tmp
+    tmp="$(mktemp -d)"
+    mkdir -p "$tmp/.bioaf"
+    : > "$tmp/.bioaf/prefill.yaml"
+    result=$(HOME="$tmp" bash -c "source '$BIOAF_SCRIPT' && discover_prefill_file")
+    [ "$result" = "$tmp/.bioaf/prefill.yaml" ]
+    rm -rf "$tmp"
+}
+
+@test "discover_prefill_file prefers the handoff path when both exist" {
+    local tmp
+    tmp="$(mktemp -d)"
+    : > "$tmp/.bioaf-prefill.yaml"
+    mkdir -p "$tmp/.bioaf"
+    : > "$tmp/.bioaf/prefill.yaml"
+    result=$(HOME="$tmp" bash -c "source '$BIOAF_SCRIPT' && discover_prefill_file")
+    [ "$result" = "$tmp/.bioaf-prefill.yaml" ]
+    rm -rf "$tmp"
+}
+
+@test "discover_prefill_file outputs nothing when no prefill present" {
+    local tmp
+    tmp="$(mktemp -d)"
+    result=$(HOME="$tmp" bash -c "source '$BIOAF_SCRIPT' && discover_prefill_file")
+    [ -z "$result" ]
+    rm -rf "$tmp"
+}

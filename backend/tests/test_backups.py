@@ -483,6 +483,7 @@ def _mock_status_adapter(object_names: list[str], *, size: int = 1024, versionin
         for name in object_names
     ]
     adapter = AsyncMock()
+    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
     adapter.list_objects.return_value = objs
     adapter.get_bucket_info.return_value = {"versioning_enabled": versioning}
     return adapter
@@ -568,6 +569,7 @@ async def test_run_postgres_backup_uploads_to_gcs():
     mock_process.communicate = AsyncMock(return_value=(b"", b""))
 
     adapter = AsyncMock()
+    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
     adapter.list_objects.return_value = []  # rotation finds nothing to delete
 
     mock_session = AsyncMock()

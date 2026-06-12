@@ -115,6 +115,7 @@ async def test_extract_metrics_reads_cached_json():
     # The scrnaseq extractor reads the cache via the BAL storage adapter (Phase 3):
     # an empty prefix listing then a successful read_text of qc_metrics.json.
     adapter = AsyncMock()
+    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
     adapter.list_objects.return_value = []
     adapter.read_text.return_value = json.dumps(cached)
 

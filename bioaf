@@ -151,10 +151,46 @@ ensure_update_agent() {
     green "Update agent installed and running."
 }
 
+build_setup_reexec_cmd() {
+    # Build the single command string handed to `sg docker -c` when setup
+    # re-execs itself to activate docker-group membership. `sg ... -c` takes
+    # one string, so we shell-quote the script path plus EVERY original
+    # argument. Preserving them all is the whole point: a prior version hard-
+    # coded `setup [--version X]` and silently dropped --prefill/--local-build,
+    # so anyone whose shell lacked the docker group got a flagless setup.
+    local self="$1"
+    shift
+    local cmd
+    printf -v cmd '%q ' "$self" setup "$@"
+    printf '%s' "${cmd% }"
+}
+
+discover_prefill_file() {
+    # Echo the first prefill file present on this host, in priority order:
+    # the install-gcp.sh handoff drop (~/.bioaf-prefill.yaml), then the
+    # locally-generated copy (~/.bioaf/prefill.yaml). Echo nothing if neither
+    # exists. Used by --local-build so `./bioaf setup --local-build` fills
+    # platform_config from the values install-gcp.sh already produced, without
+    # requiring an explicit --prefill.
+    local candidate
+    for candidate in "$HOME/.bioaf-prefill.yaml" "$HOME/.bioaf/prefill.yaml"; do
+        if [ -f "$candidate" ]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+    return 0
+}
+
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
 cmd_setup() {
+    # Capture the full, original argument list up front. If we later have to
+    # re-exec under `sg docker` to activate docker-group membership, every flag
+    # (--prefill, --local-build, --version, --verbose) must survive the hop.
+    local -a _setup_args=("$@")
+
     # Parse flags
     local setup_version=""
     local prefill_path=""
@@ -241,8 +277,11 @@ cmd_setup() {
     #      startup script could not add them because /home was empty at boot) --
     #      add them via sudo, then re-exec under `sg docker`.
     if command -v docker &>/dev/null && ! docker info &>/dev/null; then
-        local reexec_cmd="'$0' setup"
-        [ -n "$setup_version" ] && reexec_cmd="'$0' setup --version $setup_version"
+        # Re-exec with the FULL original arg list so flags survive the hop.
+        # ${arr[@]+"${arr[@]}"} expands to nothing on an empty array without
+        # tripping `set -u` (the common `./bioaf setup` no-args case).
+        local reexec_cmd
+        reexec_cmd="$(build_setup_reexec_cmd "$0" ${_setup_args[@]+"${_setup_args[@]}"})"
 
         if id -nG 2>/dev/null | grep -qw docker || grep -q "docker.*$(whoami)\|$(whoami).*docker" /etc/group 2>/dev/null; then
             yellow "Activating docker group for this session..."
@@ -332,6 +371,15 @@ for v in cfg.get('volumes', {}).values():
     #   gcp_bootstrap_sa_email: bioaf-bootstrap@my-project.iam.gserviceaccount.com
     # Each pair is upserted into the existing platform_config table; existing
     # rows are overwritten so re-running setup with a fresh prefill always wins.
+    #
+    # --local-build pre-applies the prefill install-gcp.sh already dropped on
+    # this host, so `./bioaf setup --local-build` fills platform_config without
+    # an explicit --prefill. An explicit --prefill always wins.
+    if [ "$local_build" = true ] && [ -z "$prefill_path" ]; then
+        prefill_path="$(discover_prefill_file)"
+        [ -n "$prefill_path" ] && green "Using prefill found on this host: $prefill_path"
+    fi
+
     if [ -n "$prefill_path" ]; then
         step "Copy prefill into backend container" -- \
             $DC cp "$prefill_path" backend:/tmp/bioaf-prefill.yaml
@@ -1105,8 +1153,10 @@ cmd_help() {
     echo "Usage: ./bioaf <command> [args]"
     echo ""
     bold "First-Run:"
-    echo "  setup [--version X.Y.Z] [--prefill FILE] [--verbose]"
+    echo "  setup [--version X.Y.Z] [--prefill FILE] [--local-build] [--verbose]"
     echo "                      Pull images and generate a setup code for the web wizard."
+    echo "                      --local-build builds images from the local source tree and"
+    echo "                      applies any prefill found on this host (~/.bioaf-prefill.yaml)."
     echo "                      Verbose output goes to ~/.bioaf/install.log by default."
     echo ""
     bold "Service Management:"
