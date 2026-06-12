@@ -2,6 +2,7 @@ import io
 import json
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
 import pytest_asyncio
@@ -21,6 +22,9 @@ def _storage_adapter():
     # store-scoped URI so callers that build write URIs through it get a string.
     adapter.resolve_uri.side_effect = lambda store, key: f"gs://bioaf-{store.value}-test/{key}"
     adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
+    # parse_uri is sync (a pure string transform), so it must be a MagicMock,
+    # not the AsyncMock default which returns an un-unpackable coroutine.
+    adapter.parse_uri = MagicMock(side_effect=lambda uri: (urlparse(uri).netloc, urlparse(uri).path.lstrip("/")))
     return adapter
 
 
