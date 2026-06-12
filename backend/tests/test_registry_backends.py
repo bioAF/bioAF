@@ -18,13 +18,19 @@ from app.adapters import registry
 from app.adapters.cellxgene.kubernetes import KubernetesCellxgeneProvider
 from app.adapters.registry import (
     _create_cellxgene_adapter,
+    _create_storage_adapter,
     _create_work_node_adapter,
+    _resolve_storage_backend,
     get_cellxgene_adapter,
     get_work_node_adapter,
     initialize_adapters,
     reset_registry,
 )
+from app.adapters.storage.gcs import GcsStorageProvider
+from app.adapters.storage.nfs import NfsStorageProvider
 from app.adapters.work_nodes.gce import GCEWorkNodeProvider
+from app.platform import cloud_provider as cp
+from app.platform.platform_config_service import PlatformConfigService
 
 
 def test_work_node_backend_factory_resolves_gce():
@@ -43,6 +49,50 @@ def test_unknown_work_node_backend_raises():
 def test_unknown_cellxgene_backend_raises():
     with pytest.raises(ValidationError):
         _create_cellxgene_adapter("posit")
+
+
+# --- storage decoupled from compute_stack (Stage 2a) -------------------------
+
+
+def test_storage_backend_factory_resolves_gcs():
+    assert isinstance(_create_storage_adapter("gcs"), GcsStorageProvider)
+
+
+def test_storage_backend_factory_resolves_nfs():
+    assert isinstance(_create_storage_adapter("nfs"), NfsStorageProvider)
+
+
+def test_storage_backend_factory_s3_not_yet_implemented():
+    # s3 is a recognized backend (POLICY aws -> s3), but the S3StorageProvider is
+    # Stage 6a; selecting it must fail clearly, not silently fall back to GCS.
+    with pytest.raises(ValidationError):
+        _create_storage_adapter("s3")
+
+
+def test_unknown_storage_backend_raises():
+    with pytest.raises(ValidationError):
+        _create_storage_adapter("azure")
+
+
+def test_resolve_storage_backend_slurm_is_nfs():
+    # SLURM stages on NFS regardless of cloud; cloud_provider does not change it.
+    assert _resolve_storage_backend("slurm") == "nfs"
+
+
+def test_resolve_storage_backend_kubernetes_follows_cloud_provider_gcp():
+    cp.reset_resolved_backends()  # unloaded cache -> gcp policy default (gcs)
+    assert _resolve_storage_backend("kubernetes") == "gcs"
+
+
+@pytest.mark.asyncio
+async def test_resolve_storage_backend_kubernetes_aws_is_s3(monkeypatch):
+    async def fake_get_many(session, keys):
+        return {"cloud_provider": "aws"}
+
+    monkeypatch.setattr(PlatformConfigService, "get_many", fake_get_many)
+    await cp.load_resolved_backends(object())
+    assert _resolve_storage_backend("kubernetes") == "s3"
+    cp.reset_resolved_backends()
 
 
 @pytest.mark.asyncio

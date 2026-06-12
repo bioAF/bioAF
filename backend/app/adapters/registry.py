@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.base import CellxgeneProvider, ComputeProvider, NotebookProvider, StorageProvider, WorkNodeProvider
 from app.adapters.capabilities import CapabilityNotSupported, ProviderCapabilities
 from app.exceptions import ValidationError
-from app.platform.cloud_provider import load_resolved_backends, reset_resolved_backends
+from app.platform.cloud_provider import backend_for, load_resolved_backends, reset_resolved_backends
 from app.platform.platform_config_service import PlatformConfigService
 
 logger = logging.getLogger("bioaf.adapters.registry")
@@ -26,6 +26,10 @@ VALID_WORK_NODE_BACKENDS = ("gce",)
 VALID_CELLXGENE_BACKENDS = ("kubernetes",)
 DEFAULT_WORK_NODE_BACKEND = "gce"
 DEFAULT_CELLXGENE_BACKEND = "kubernetes"
+# Storage is decoupled from compute_stack (Stage 2): it follows cloud_provider
+# (gcs on GCP, s3 on AWS) except SLURM, which stages on NFS regardless of cloud.
+# s3 is recognized but unimplemented until Stage 6a (S3StorageProvider).
+VALID_STORAGE_BACKENDS = ("gcs", "nfs", "s3")
 
 # Serializes initialize_adapters so a concurrent or repeated startup call cannot
 # interleave the async read-then-assign of the singleton state.
@@ -40,14 +44,15 @@ _work_node_adapter: WorkNodeProvider | None = None
 _initialized: bool = False
 
 
-def _create_adapters(
+def _create_compute_notebook_adapters(
     compute_stack: str,
     session_factory=None,
-) -> tuple[ComputeProvider, StorageProvider, NotebookProvider]:
-    """Instantiate the compute/storage/notebook adapters for ``compute_stack``.
+) -> tuple[ComputeProvider, NotebookProvider]:
+    """Instantiate the compute + notebook adapters for ``compute_stack``.
 
-    Work-node and cellxgene backends are resolved separately (they are not tied
-    to compute_stack); see ``_create_work_node_adapter`` / ``_create_cellxgene_adapter``.
+    Storage is resolved separately (it is no longer welded to compute_stack); see
+    ``_resolve_storage_backend`` / ``_create_storage_adapter``. Work-node and
+    cellxgene backends are likewise resolved on their own.
     """
     if compute_stack not in VALID_COMPUTE_STACKS:
         raise ValidationError(f"Unknown compute_stack '{compute_stack}'. Valid options: {VALID_COMPUTE_STACKS}")
@@ -55,23 +60,49 @@ def _create_adapters(
     if compute_stack == "kubernetes":
         from app.adapters.compute.kubernetes import KubernetesComputeProvider
         from app.adapters.notebooks.kubernetes import KubernetesNotebookProvider
-        from app.adapters.storage.gcs import GcsStorageProvider
 
         return (
             KubernetesComputeProvider(session_factory=session_factory),
-            GcsStorageProvider(),
             KubernetesNotebookProvider(session_factory=session_factory),
         )
     else:
         from app.adapters.compute.slurm import SlurmComputeProvider
         from app.adapters.notebooks.slurm import SlurmNotebookProvider
+
+        return (SlurmComputeProvider(), SlurmNotebookProvider())
+
+
+def _create_storage_adapter(backend: str, session_factory=None) -> StorageProvider:
+    """Instantiate the storage adapter for ``backend`` (resolved from cloud_provider).
+
+    s3 is recognized (POLICY aws -> s3) but unimplemented until Stage 6a; selecting
+    it fails clearly rather than silently falling back to a GCS provider.
+    """
+    if backend == "gcs":
+        from app.adapters.storage.gcs import GcsStorageProvider
+
+        return GcsStorageProvider()
+    if backend == "nfs":
         from app.adapters.storage.nfs import NfsStorageProvider
 
-        return (
-            SlurmComputeProvider(),
-            NfsStorageProvider(),
-            SlurmNotebookProvider(),
-        )
+        return NfsStorageProvider()
+    if backend == "s3":
+        raise ValidationError("Storage backend 's3' is not yet implemented (Stage 6a: S3StorageProvider).")
+    raise ValidationError(f"Unknown storage backend '{backend}'. Valid options: {VALID_STORAGE_BACKENDS}")
+
+
+def _resolve_storage_backend(compute_stack: str) -> str:
+    """Resolve the storage backend from compute_stack + cloud_provider.
+
+    SLURM compute stages on NFS on any cloud, so it pins nfs; otherwise storage
+    follows the cloud_provider policy (gcs on GCP, s3 on AWS), honoring a per-seam
+    ``storage_backend`` override. Reads the startup-loaded backend cache, so on a
+    GCP install (or an unloaded cache, i.e. local/test mode) kubernetes resolves to
+    gcs, exactly as before this decoupling.
+    """
+    if compute_stack == "slurm":
+        return "nfs"
+    return backend_for("storage")
 
 
 def _create_work_node_adapter(backend: str, session_factory=None) -> WorkNodeProvider:
@@ -111,16 +142,19 @@ async def initialize_adapters(session: AsyncSession, session_factory=None) -> No
         # can read theirs synchronously via cloud_provider.backend_for. Fails closed
         # here on an invalid (cloud, seam, backend) override.
         await load_resolved_backends(session)
+        storage_backend = _resolve_storage_backend(compute_stack)
 
         logger.info(
-            "Initializing BAL adapters (compute_stack=%s work_node_backend=%s cellxgene_backend=%s)",
+            "Initializing BAL adapters (compute_stack=%s storage_backend=%s work_node_backend=%s cellxgene_backend=%s)",
             compute_stack,
+            storage_backend,
             work_node_backend,
             cellxgene_backend,
         )
-        _compute_adapter, _storage_adapter, _notebook_adapter = _create_adapters(
+        _compute_adapter, _notebook_adapter = _create_compute_notebook_adapters(
             compute_stack, session_factory=session_factory
         )
+        _storage_adapter = _create_storage_adapter(storage_backend, session_factory=session_factory)
         _cellxgene_adapter = _create_cellxgene_adapter(cellxgene_backend, session_factory=session_factory)
         _work_node_adapter = _create_work_node_adapter(work_node_backend, session_factory=session_factory)
 
@@ -145,9 +179,12 @@ def initialize_adapters_sync(
     global _compute_adapter, _storage_adapter, _notebook_adapter, _cellxgene_adapter, _work_node_adapter, _initialized
 
     # Sync init is the local/test path (no DB to read cloud_provider from); clear
-    # the resolved-backend cache so backend_for falls back to the gcp defaults.
+    # the resolved-backend cache so backend_for falls back to the gcp defaults
+    # (kubernetes -> gcs), preserving today's behavior.
     reset_resolved_backends()
-    _compute_adapter, _storage_adapter, _notebook_adapter = _create_adapters(compute_stack)
+    storage_backend = _resolve_storage_backend(compute_stack)
+    _compute_adapter, _notebook_adapter = _create_compute_notebook_adapters(compute_stack)
+    _storage_adapter = _create_storage_adapter(storage_backend)
     _cellxgene_adapter = _create_cellxgene_adapter(cellxgene_backend)
     _work_node_adapter = _create_work_node_adapter(work_node_backend)
     _initialized = True
