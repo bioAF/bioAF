@@ -136,6 +136,25 @@ def _sanitize_label_value(value: str) -> str:
     return sanitized[:63]
 
 
+def _resolve_results_bucket(cfg: dict) -> str | None:
+    """Resolve the pipeline results bucket from cluster config.
+
+    Prefers the explicit ``results_bucket_name`` (set by Terraform); falls back to
+    deriving it from ``raw_bucket_name`` (bioaf-raw-X -> bioaf-results-X) for
+    installs where the raw bucket was populated before the results bucket. Returns
+    None when neither yields a bucket. Sync mirror of
+    ``qc.extractors.gcs_helpers.get_results_bucket`` for the config-dict the compute
+    adapter holds (it has no DB session at job-build time).
+    """
+    results = cfg.get("results_bucket_name")
+    if results and results != "null":
+        return results
+    raw = cfg.get("raw_bucket_name", "")
+    if raw and raw.startswith("bioaf-raw-"):
+        return raw.replace("bioaf-raw-", "bioaf-results-", 1)
+    return None
+
+
 class KubernetesComputeProvider(ComputeProvider):
     """Kubernetes compute backend with local mode for development."""
 
@@ -152,6 +171,7 @@ class KubernetesComputeProvider(ComputeProvider):
         "gcp_project_id",
         "gcp_region",
         "raw_bucket_name",
+        "results_bucket_name",
         "k8s_pipeline_machine_type",
     ]
 
@@ -605,9 +625,9 @@ class KubernetesComputeProvider(ComputeProvider):
         if trace_gcs_path:
             parts.extend(["-with-trace", trace_gcs_path])
 
-        # Ensure outdir is always set (nf-core pipelines require it)
-        if "outdir" not in parameters:
-            parameters = {**parameters, "outdir": "/data/results"}
+        # outdir is guaranteed durable by _ensure_outdir before this runs (a gs://
+        # results path, or the launch already failed closed), so it is never
+        # defaulted to a pod-local path that pod cleanup would destroy.
 
         # Strip bioAF-internal config knobs that are not Nextflow parameters
         internal_keys = {"fusion_enabled"}
@@ -618,6 +638,32 @@ class KubernetesComputeProvider(ComputeProvider):
             parts.extend([f"--{key}", str(value)])
 
         return ["/bin/sh", "-c", " ".join(parts)]
+
+    def _ensure_outdir(self, job_spec: dict) -> dict:
+        """Return ``job_spec`` with a durable outdir guaranteed.
+
+        Keeps an explicitly-supplied outdir. Otherwise resolves the results bucket
+        (explicit results_bucket_name, else derived from raw_bucket_name) and sets
+        outdir to a durable gs:// path. FAILS CLOSED when no results bucket can be
+        resolved, rather than letting outdir fall back to a pod-local path that the
+        Job's ttlSecondsAfterFinished destroys an hour later (the (!)E silent-loss
+        path). Returns a new dict; the input job_spec is not mutated.
+        """
+        params = job_spec.get("parameters", {})
+        if "outdir" in params:
+            return job_spec
+        results_bucket = _resolve_results_bucket(self._cluster_config or {})
+        if not results_bucket:
+            raise RuntimeError(
+                "Cannot launch pipeline: no results bucket is configured (set "
+                "results_bucket_name in platform_config, or a bioaf-raw- prefixed "
+                "raw_bucket_name) and no explicit outdir was provided. Refusing to "
+                "write outputs to a pod-local path that is destroyed at pod cleanup."
+            )
+        experiment_id = job_spec.get("experiment_id", "unknown")
+        run_id = job_spec.get("run_id", 0)
+        outdir = f"gs://{results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}"
+        return {**job_spec, "parameters": {**params, "outdir": outdir}}
 
     # Allocatable resources per GCP machine type (after system reservations).
     # Used to set Nextflow resourceLimits so retry escalation never exceeds
@@ -861,17 +907,12 @@ class KubernetesComputeProvider(ComputeProvider):
             report_gcs_path = f"gs://{raw_bucket}/nextflow-reports/{job_name}/report.html" if raw_bucket else ""
             trace_gcs_path = f"gs://{raw_bucket}/nextflow-traces/{job_name}/trace.tsv" if raw_bucket else ""
 
-            # Set --outdir to a GCS path so pipeline outputs persist after
-            # pod cleanup.  The path mirrors the prefix that
+            # Set --outdir to a durable results-bucket path so pipeline outputs
+            # persist after pod cleanup. The path mirrors the prefix that
             # _gcs_collect_outputs and _extract_metrics use to find outputs.
-            experiment_id = job_spec.get("experiment_id", "unknown")
-            # Derive results bucket from raw_bucket_name (bioaf-raw-X -> bioaf-results-X)
-            results_bucket = (
-                raw_bucket.replace("bioaf-raw-", "bioaf-results-", 1) if raw_bucket.startswith("bioaf-raw-") else ""
-            )
-            if results_bucket and "outdir" not in job_spec.get("parameters", {}):
-                gcs_outdir = f"gs://{results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}"
-                job_spec = {**job_spec, "parameters": {**job_spec.get("parameters", {}), "outdir": gcs_outdir}}
+            # _ensure_outdir resolves the results bucket explicitly and fails closed
+            # if none is configured (rather than silently using a pod-local path).
+            job_spec = self._ensure_outdir(job_spec)
 
             command = self._build_nextflow_command(
                 job_spec,
