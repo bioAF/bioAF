@@ -9,13 +9,14 @@ verify/query orchestration, holding no cloud SDK.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import Any
 
 from app.adapters.billing import create_billing_provider
 from app.platform.cloud_provider import backend_for
 
-if TYPE_CHECKING:
-    from google.auth.credentials import Credentials
+# Credentials are an opaque handle from the Credentials seam, passed straight
+# through to the billing provider; the service names no cloud credential type.
+Credentials = Any
 
 logger = logging.getLogger("bioaf.billing_export_service")
 

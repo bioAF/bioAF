@@ -13,15 +13,15 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from google.api_core.exceptions import Forbidden
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapters.credentials import get_credentials_provider
 from app.api.dependencies import require_permission
 from app.database import get_session
+from app.platform.credential_injector import load_gcp_credentials
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.billing_export_service import BillingExportService
-from app.platform.credential_injector import load_gcp_credentials
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
 
 logger = logging.getLogger("bioaf.billing_export_api")
@@ -176,6 +176,7 @@ async def billing_export_verify(
             detail="Billing export dataset has not been created. Run enable first.",
         )
 
+    provider = get_credentials_provider()
     try:
         creds = load_gcp_credentials(config)
     except Exception:
@@ -184,7 +185,9 @@ async def billing_export_verify(
 
     try:
         result = await BillingExportService.verify_dataset(project_id, dataset_id, credentials=creds)
-    except Forbidden:
+    except Exception as exc:
+        if not provider.is_permission_denied(exc):
+            raise
         # The dataset exists but the backend SA cannot read it. This is the
         # pre-fix state where the dataViewer grant landed on the project's
         # default compute SA instead of the runtime SA (ADR-028). Re-apply the
@@ -202,7 +205,9 @@ async def billing_export_verify(
             )
         try:
             result = await BillingExportService.verify_dataset(project_id, dataset_id, credentials=creds)
-        except Forbidden:
+        except Exception as retry_exc:
+            if not provider.is_permission_denied(retry_exc):
+                raise
             logger.exception("BQ verify still denied after reconciling dataset IAM")
             raise HTTPException(
                 status_code=503,

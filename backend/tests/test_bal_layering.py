@@ -400,12 +400,10 @@ def test_platform_layer_has_no_upward_imports():
 # AWS role / keys), at which point GCP credential SDK use moves under adapters/.
 
 CREDENTIAL_SDK_ALLOWLIST: set[tuple[str, str]] = {
-    ("api/billing_export.py", "google.api_core.exceptions"),
     ("platform/credential_injector.py", "google.auth"),
     ("platform/credential_injector.py", "google.auth.credentials"),
     ("platform/credential_injector.py", "google.auth.impersonated_credentials"),
     ("platform/credential_injector.py", "google.oauth2.service_account"),
-    ("services/billing_export_service.py", "google.auth.credentials"),
     ("services/gcp_config.py", "google.auth"),
     ("services/gcp_config.py", "google.auth.impersonated_credentials"),
     ("services/gcp_config.py", "google.oauth2.service_account"),
@@ -474,7 +472,7 @@ def test_credential_sdk_allowlist_count_is_pinned():
     Decrement this as the credential seam drains leaks; target 0 once all
     credential resolution is backend-aware and behind adapters/.
     """
-    assert len(CREDENTIAL_SDK_ALLOWLIST) == 13
+    assert len(CREDENTIAL_SDK_ALLOWLIST) == 11
 
 
 # --- Tree scan: no GCP CLI shell strings outside adapters --------------------
