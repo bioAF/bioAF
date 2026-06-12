@@ -38,6 +38,7 @@ def test_gcp_policy_matches_current_hard_defaults():
         "messaging": "gcp",
         "secrets": "gcp",
         "log_sink": "gcp",
+        "credentials": "gcp",
     }
 
 
@@ -50,13 +51,16 @@ def test_aws_policy_values():
         "messaging": "aws",
         "secrets": "aws",
         "log_sink": "aws",
+        "credentials": "aws",
     }
 
 
 # --- resolve(): defaults --------------------------------------------------------
 
 
-@pytest.mark.parametrize("seam", sorted(["storage", "work_node", "iam", "billing", "messaging", "secrets", "log_sink"]))
+@pytest.mark.parametrize(
+    "seam", sorted(["storage", "work_node", "iam", "billing", "messaging", "secrets", "log_sink", "credentials"])
+)
 def test_resolve_returns_policy_default_when_no_override(seam):
     assert cp.resolve("gcp", seam) == cp.POLICY["gcp"][seam]
     assert cp.resolve("aws", seam) == cp.POLICY["aws"][seam]

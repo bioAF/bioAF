@@ -51,6 +51,7 @@ POLICY: dict[str, dict[str, str]] = {
         "messaging": "gcp",
         "secrets": "gcp",
         "log_sink": "gcp",
+        "credentials": "gcp",
     },
     "aws": {
         "storage": "s3",
@@ -60,6 +61,7 @@ POLICY: dict[str, dict[str, str]] = {
         "messaging": "aws",
         "secrets": "aws",
         "log_sink": "aws",
+        "credentials": "aws",
     },
 }
 
