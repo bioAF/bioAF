@@ -406,13 +406,9 @@ CREDENTIAL_SDK_ALLOWLIST: set[tuple[str, str]] = {
     ("platform/credential_injector.py", "google.auth.impersonated_credentials"),
     ("platform/credential_injector.py", "google.oauth2.service_account"),
     ("services/billing_export_service.py", "google.auth.credentials"),
-    ("services/cellxgene_image_service.py", "google.auth"),
-    ("services/cellxgene_image_service.py", "google.auth.transport.requests"),
     ("services/gcp_config.py", "google.auth"),
     ("services/gcp_config.py", "google.auth.impersonated_credentials"),
     ("services/gcp_config.py", "google.oauth2.service_account"),
-    ("services/notebook_image_service.py", "google.auth"),
-    ("services/notebook_image_service.py", "google.auth.transport.requests"),
     ("services/sheets_reader_sa_service.py", "google.auth"),
     ("services/sheets_reader_sa_service.py", "google.auth.impersonated_credentials"),
     ("services/sheets_reader_sa_service.py", "google.oauth2.service_account"),
@@ -478,7 +474,7 @@ def test_credential_sdk_allowlist_count_is_pinned():
     Decrement this as the credential seam drains leaks; target 0 once all
     credential resolution is backend-aware and behind adapters/.
     """
-    assert len(CREDENTIAL_SDK_ALLOWLIST) == 17
+    assert len(CREDENTIAL_SDK_ALLOWLIST) == 13
 
 
 # --- Tree scan: no GCP CLI shell strings outside adapters --------------------

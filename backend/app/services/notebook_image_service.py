@@ -13,11 +13,10 @@ import logging
 import tarfile
 import time
 
-import google.auth
-import google.auth.transport.requests
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapters.credentials import get_credentials_provider
 from app.exceptions import StateError, ValidationError
 from app.platform.credential_injector import load_gcp_credentials
 
@@ -166,11 +165,9 @@ def _authorized_request(credentials, method: str, url: str, body: dict | None = 
     """Make an authenticated HTTP request to a GCP REST API."""
     import urllib.request
 
-    auth_req = google.auth.transport.requests.Request()
-    credentials.refresh(auth_req)
-
+    token = get_credentials_provider().bearer_token(credentials)
     headers = {
-        "Authorization": f"Bearer {credentials.token}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
 
