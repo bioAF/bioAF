@@ -119,8 +119,9 @@ class LabDocumentUploadService:
         """
         from app.adapters.registry import get_storage_adapter
 
-        return await get_storage_adapter().create_resumable_upload_url(
-            f"gs://{bucket_name}/{blob_path}",
+        adapter = get_storage_adapter()
+        return await adapter.create_resumable_upload_url(
+            adapter.build_uri(bucket_name, blob_path),
             content_type=content_type,
             size_bytes=size_bytes,
             origin=origin,
@@ -136,10 +137,12 @@ class LabDocumentUploadService:
         size_bytes: int | None = None,
         origin: str | None = None,
     ) -> dict:
+        from app.adapters.registry import get_storage_adapter
+
         token = str(uuid.uuid4())
         bucket = await LabDocumentUploadService._get_working_bucket(session)
         gcs_path = f"{PREFIX}/uploads/{token}/{file_name}"
-        gcs_uri = f"gs://{bucket}/{gcs_path}"
+        gcs_uri = get_storage_adapter().build_uri(bucket, gcs_path)
         signed_url = await LabDocumentUploadService._create_resumable_session(
             bucket,
             gcs_path,
@@ -219,8 +222,9 @@ class LabDocumentUploadService:
         Patch point in tests."""
         from app.adapters.registry import get_storage_adapter
 
-        await get_storage_adapter().write_bytes(
-            f"gs://{bucket_name}/{gcs_path}", content, content_type=content_type or "application/octet-stream"
+        adapter = get_storage_adapter()
+        await adapter.write_bytes(
+            adapter.build_uri(bucket_name, gcs_path), content, content_type=content_type or "application/octet-stream"
         )
 
     # --- URL import job (fetch decoupled from the request) -------------------
@@ -332,6 +336,7 @@ class LabDocumentUploadService:
         document. Returns the new document id."""
         from sqlalchemy import update as sa_update
 
+        from app.adapters.registry import get_storage_adapter
         from app.models.lab_document import LabDocumentVersion
         from app.services.lab_document_service import LabDocumentService
 
@@ -339,9 +344,10 @@ class LabDocumentUploadService:
         content, fetched_name, mime_type = await fetch(url)
         name = fetched_name or "document"
         token = str(uuid.uuid4())
+        adapter = get_storage_adapter()
         bucket = await LabDocumentUploadService._get_working_bucket(session)
         gcs_path = f"{PREFIX}/uploads/{token}/{name}"
-        gcs_uri = f"gs://{bucket}/{gcs_path}"
+        gcs_uri = adapter.build_uri(bucket, gcs_path)
         await LabDocumentUploadService._upload_bytes(bucket, gcs_path, content, mime_type)
         _pending[token] = {
             "org_id": org_id,
@@ -359,7 +365,9 @@ class LabDocumentUploadService:
             title=title or meta["file_name"],
             description=description,
             file_name=meta["file_name"],
-            gcs_uri=f"gs://pending/{token}",
+            # "pending" is a sentinel bucket; the record is repointed at the real
+            # versioned URI by place() immediately below, before any storage op.
+            gcs_uri=adapter.build_uri("pending", token),
             file_size_bytes=meta["size_bytes"],
             mime_type=meta["mime_type"],
             md5_checksum=meta["md5"],
@@ -425,9 +433,10 @@ class LabDocumentUploadService:
         """Move the uploaded object into its versioned path and return the dest URI."""
         pending = LabDocumentUploadService._peek(upload_token, org_id)
         dest_path = f"{PREFIX}/{document_id}/v{version}/{pending['file_name']}"
-        dest_uri = f"gs://{pending['bucket']}/{dest_path}"
         from app.adapters.registry import get_storage_adapter
 
-        await get_storage_adapter().move(pending["gcs_uri"], dest_uri)
+        adapter = get_storage_adapter()
+        dest_uri = adapter.build_uri(pending["bucket"], dest_path)
+        await adapter.move(pending["gcs_uri"], dest_uri)
         _pending.pop(upload_token, None)
         return dest_uri

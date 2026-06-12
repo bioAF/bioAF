@@ -126,6 +126,7 @@ async def test_initiate_upload_uses_signing_credentials(session):
 
     adapter = AsyncMock()
     adapter.generate_signed_url.return_value = "https://signed.example/?sig=…"
+    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
 
     with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         result = await UploadService.initiate_upload(

@@ -221,6 +221,12 @@ class NfsStorageProvider(StorageProvider):
     async def resolve_uri(self, store: StorageStore, key: str) -> str:
         return f"file://{store.value}/{key.lstrip('/')}"
 
+    def build_uri(self, bucket: str, key: str) -> str:
+        return f"file://{bucket}/{key.lstrip('/')}"
+
+    def parse_uri(self, uri: str) -> tuple[str, str]:
+        return self._parse_uri(uri)
+
     async def read_text(self, uri: str, *, encoding: str = "utf-8") -> str:
         return (await self.read_bytes(uri)).decode(encoding)
 

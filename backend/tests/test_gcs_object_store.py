@@ -70,6 +70,31 @@ class TestResolveUri:
         assert uri == "gs://my-refs-bucket/panel.csv"
 
 
+# --- build_uri / parse_uri (explicit-bucket scheme minting) ------------------
+#
+# resolve_uri resolves a logical StorageStore to its configured bucket. build_uri
+# is its scheme-neutral counterpart for when the bucket is a runtime value (a
+# backup bucket, an event's source bucket): it lets callers stop hardcoding the
+# gs:// scheme. Pure string transforms, so they are sync (no DB/credentials).
+
+
+class TestBuildAndParseUri:
+    def test_build_uri_mints_gs_scheme(self, local_adapter):
+        assert local_adapter.build_uri("my-bucket", "a/b.txt") == "gs://my-bucket/a/b.txt"
+
+    def test_build_uri_strips_leading_slash_on_key(self, local_adapter):
+        # Mirrors resolve_uri's normalization so the two mint identical URIs.
+        assert local_adapter.build_uri("my-bucket", "/a/b.txt") == "gs://my-bucket/a/b.txt"
+
+    def test_parse_uri_round_trips_build_uri(self, local_adapter):
+        uri = local_adapter.build_uri("my-bucket", "deep/a/b.txt")
+        assert local_adapter.parse_uri(uri) == ("my-bucket", "deep/a/b.txt")
+
+    def test_parse_uri_rejects_non_gs_scheme(self, local_adapter):
+        with pytest.raises(ValidationError):
+            local_adapter.parse_uri("s3://my-bucket/a/b.txt")
+
+
 # --- read / write round-trips (local) ----------------------------------------
 
 

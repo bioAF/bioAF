@@ -803,13 +803,15 @@ async def _export_cleanup_loop():
                 adapter = get_storage_adapter()
                 cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
                 deleted = 0
-                for obj in await adapter.list_objects(f"gs://{bucket_name}/exports/"):
+                for obj in await adapter.list_objects(adapter.build_uri(bucket_name, "exports/")):
                     created = obj.provider_details.get("time_created")
                     if created and created < cutoff:
                         await adapter.delete(obj.storage_uri)
                         deleted += 1
                 if deleted:
-                    logger.info("Export cleanup: deleted %d expired ZIP(s) from gs://%s/exports/", deleted, bucket_name)
+                    logger.info(
+                        "Export cleanup: deleted %d expired ZIP(s) from the %s exports/ prefix", deleted, bucket_name
+                    )
         except asyncio.CancelledError:
             break
         except Exception as e:

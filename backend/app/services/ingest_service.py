@@ -182,10 +182,11 @@ async def copy_to_raw_bucket(
     """
     from app.adapters.registry import get_storage_adapter
 
-    source_uri = f"gs://{source_bucket}/{source_path}"
-    destination_uri = f"gs://{raw_bucket}/{destination_prefix}{filename}"
+    adapter = get_storage_adapter()
+    source_uri = adapter.build_uri(source_bucket, source_path)
+    destination_uri = adapter.build_uri(raw_bucket, f"{destination_prefix}{filename}")
 
-    await get_storage_adapter().move(source_uri, destination_uri)
+    await adapter.move(source_uri, destination_uri)
     return destination_uri
 
 
@@ -200,18 +201,15 @@ async def cleanup_ingest_file(
     With delete_after_copy, delete the object immediately.
     With retain_* policies, leave it in place.
     """
-    if policy == "delete_after_copy":
-        from app.adapters.registry import get_storage_adapter
+    from app.adapters.registry import get_storage_adapter
 
-        await get_storage_adapter().delete(f"gs://{source_bucket}/{source_path}")
-        logger.info("Deleted ingest file gs://%s/%s", source_bucket, source_path)
+    adapter = get_storage_adapter()
+    uri = adapter.build_uri(source_bucket, source_path)
+    if policy == "delete_after_copy":
+        await adapter.delete(uri)
+        logger.info("Deleted ingest file %s", uri)
     else:
-        logger.info(
-            "Retaining ingest file gs://%s/%s (policy=%s)",
-            source_bucket,
-            source_path,
-            policy,
-        )
+        logger.info("Retaining ingest file %s (policy=%s)", uri, policy)
 
 
 async def process_ingest_event(
@@ -339,7 +337,9 @@ async def process_ingest_event(
     if match_result.status == "matched" and match_result.parse_result:
         file_version = match_result.parse_result.segments.get("version")
 
-    gcs_uri = f"gs://{source_bucket}/{source_path}"
+    from app.adapters.registry import get_storage_adapter
+
+    gcs_uri = get_storage_adapter().build_uri(source_bucket, source_path)
     file_record = File(
         organization_id=org_id,
         gcs_uri=gcs_uri,

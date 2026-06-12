@@ -153,6 +153,25 @@ class StorageProvider(ABC):
         """
         raise NotImplementedError
 
+    def build_uri(self, bucket: str, key: str) -> str:
+        """Mint a backend URI from an explicit container + key.
+
+        The scheme-neutral counterpart to ``resolve_uri``: use it when the
+        container (bucket) is a runtime value (a backup bucket, an event's source
+        bucket) rather than one of the logical StorageStores. GCS -> ``gs://...``,
+        S3 -> ``s3://...``. A pure string transform with no I/O, so it is sync;
+        this is what lets callers stop hardcoding the ``gs://`` scheme.
+        """
+        raise NotImplementedError
+
+    def parse_uri(self, uri: str) -> tuple[str, str]:
+        """Split a backend URI into (container, key). Inverse of ``build_uri``.
+
+        ``gs://bucket/a/b.txt -> ("bucket", "a/b.txt")``. Raises ValidationError
+        if ``uri`` is not a URI this backend recognizes.
+        """
+        raise NotImplementedError
+
     async def read_text(self, uri: str, *, encoding: str = "utf-8") -> str:
         """Download an object and decode it as text. Raises StorageObjectNotFound."""
         raise NotImplementedError

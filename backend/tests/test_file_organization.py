@@ -8,7 +8,8 @@ Tests:
 14. assign when already assigned is treated as reassign
 """
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
 from sqlalchemy import text
@@ -19,10 +20,15 @@ def _move_adapter():
     """Storage-adapter mock whose move() echoes the destination URI.
 
     Phase 3 routes file moves through the BAL storage adapter; the prefix
-    builders still live on GcsStorageService (pure path helpers).
+    builders still live on GcsStorageService (pure path helpers). build_uri /
+    parse_uri are the backend-neutral URI minters the service uses instead of
+    hardcoding the gs:// scheme; they are sync on the real adapter, so they are
+    MagicMocks here (not AsyncMock) with the real GCS string behavior.
     """
     adapter = AsyncMock()
     adapter.move.side_effect = lambda src, dst: dst
+    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
+    adapter.parse_uri = MagicMock(side_effect=lambda uri: (urlparse(uri).netloc, urlparse(uri).path.lstrip("/")))
     return adapter
 
 

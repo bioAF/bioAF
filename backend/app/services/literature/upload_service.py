@@ -38,21 +38,22 @@ async def upload_pdf_to_gcs(
     paper_id: int,
     pdf_bytes: bytes,
 ) -> str | None:
-    """Upload the PDF bytes to gs://{literature_bucket}/papers/{paper_id}/original.pdf.
+    """Upload the PDF bytes to the Literature bucket at papers/{paper_id}/original.pdf.
 
-    Returns the gs:// URI on success. Returns None when the Literature bucket
+    Returns the storage URI on success. Returns None when the Literature bucket
     is not provisioned yet (e.g., dev install without storage stack); the
     caller leaves gcs_pdf_uri NULL but proceeds with extraction-from-bytes."""
     bucket = await storage.get_literature_bucket(session)
     if not bucket:
         return None
     path = storage.pdf_blob_path(paper_id)
-    uri = storage.gcs_uri(bucket, path)
 
     from app.adapters.registry import get_storage_adapter
 
+    adapter = get_storage_adapter()
+    uri = adapter.build_uri(bucket, path)
     try:
-        await get_storage_adapter().write_bytes(uri, pdf_bytes, content_type="application/pdf")
+        await adapter.write_bytes(uri, pdf_bytes, content_type="application/pdf")
         return uri
     except Exception as e:
         logger.warning("Failed to upload paper %s PDF to storage: %s", paper_id, e)
@@ -74,7 +75,7 @@ async def delete_paper_files(session: AsyncSession, *, paper_id: int) -> bool:
 
     try:
         adapter = get_storage_adapter()
-        objs = await adapter.list_objects(f"gs://{bucket}/{prefix}")
+        objs = await adapter.list_objects(adapter.build_uri(bucket, prefix))
         for obj in objs:
             await adapter.delete(obj.storage_uri)
         return True
@@ -93,11 +94,12 @@ async def upload_extracted_text_to_gcs(
     if not bucket:
         return None
     path = storage.extracted_text_blob_path(paper_id)
-    uri = storage.gcs_uri(bucket, path)
     from app.adapters.registry import get_storage_adapter
 
+    adapter = get_storage_adapter()
+    uri = adapter.build_uri(bucket, path)
     try:
-        await get_storage_adapter().write_text(uri, text, content_type="text/plain; charset=utf-8")
+        await adapter.write_text(uri, text, content_type="text/plain; charset=utf-8")
         return uri
     except Exception as e:
         logger.warning("Failed to upload paper %s extracted text to storage: %s", paper_id, e)

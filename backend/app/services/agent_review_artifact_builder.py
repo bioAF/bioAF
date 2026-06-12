@@ -249,7 +249,11 @@ async def build_for_run(
             markdown = markdown + "\n" + payload.markdown
 
     suffix = f"_job{job_id}" if job_id is not None else ""
-    gcs_path = f"gs://bioaf-agent-reviews/pipeline_runs/{run_id}/agent_review_inputs/agent_review_input{suffix}.md"
+    from app.adapters.registry import get_storage_adapter
+
+    gcs_path = get_storage_adapter().build_uri(
+        "bioaf-agent-reviews", f"pipeline_runs/{run_id}/agent_review_inputs/agent_review_input{suffix}.md"
+    )
     if gcs_writer is not None:
         await gcs_writer(gcs_path, markdown)
 

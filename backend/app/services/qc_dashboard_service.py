@@ -167,10 +167,11 @@ class QCDashboardService:
             from app.adapters.models import StorageObjectNotFound
             from app.adapters.registry import get_storage_adapter
 
+            adapter = get_storage_adapter()
             prefix = f"experiments/{run.experiment_id}/pipeline-runs/{run.id}/"
-            uri = f"gs://{results_bucket}/{prefix}qc_metrics.json"
+            uri = adapter.build_uri(results_bucket, f"{prefix}qc_metrics.json")
             try:
-                return _json.loads(await get_storage_adapter().read_text(uri))
+                return _json.loads(await adapter.read_text(uri))
             except StorageObjectNotFound:
                 logger.info("No qc_metrics.json found for custom pipeline run %d", run.id)
                 return {}
@@ -216,10 +217,11 @@ class QCDashboardService:
         try:
             from app.adapters.registry import get_storage_adapter
 
+            adapter = get_storage_adapter()
             prefix = f"experiments/{run.experiment_id}/pipeline-runs/{run.id}/"
             plot_prefix = f"{prefix}multiqc/multiqc_plots/png/"
 
-            objs = await get_storage_adapter().list_objects(f"gs://{results_bucket}/{plot_prefix}")
+            objs = await adapter.list_objects(adapter.build_uri(results_bucket, plot_prefix))
             available: dict[str, object] = {}
             for obj in objs:
                 if obj.storage_uri.endswith(".png"):

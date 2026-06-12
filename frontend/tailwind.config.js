@@ -1,8 +1,13 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: [
-    "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
-    "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
+    // Scan all of src/, not just app/ + components/. statusStyles.ts (under
+    // src/lib/) is the single source of truth for status colors as string
+    // literals; classes used only there (e.g. serviceHealth's bg-green-400 dot)
+    // get purged from the built CSS if their file is not scanned, which silently
+    // breaks the Service Health dots. A src-wide glob keeps every class literal
+    // in any helper module visible to Tailwind.
+    "./src/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
     extend: {

@@ -253,10 +253,9 @@ async def _upload_build_context(session: AsyncSession, project_id: str, working_
 
     buf.seek(0)
     object_path = "builds/bioaf-scrna/source.tar.gz"
-    await get_storage_adapter().upload_file(
-        f"gs://{working_bucket}/{object_path}", buf, content_type="application/gzip"
-    )
-    logger.info("Uploaded build context to gs://%s/%s", working_bucket, object_path)
+    adapter = get_storage_adapter()
+    await adapter.upload_file(adapter.build_uri(working_bucket, object_path), buf, content_type="application/gzip")
+    logger.info("Uploaded build context to the %s bucket at %s", working_bucket, object_path)
 
     return object_path
 

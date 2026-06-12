@@ -523,8 +523,10 @@ class ReferenceDataService:
         session.add(dataset)
         await session.flush()
 
+        from app.adapters.registry import get_storage_adapter
         from app.services.upload_service import UploadService
 
+        adapter = get_storage_adapter()
         credentials = await UploadService._get_gcs_credentials(session)
 
         uploads: list[dict] = []
@@ -537,7 +539,7 @@ class ReferenceDataService:
                 ReferenceDatasetFile(
                     reference_dataset_id=dataset.id,
                     filename=spec.filename,
-                    gcs_uri=f"gs://{bucket_name}/{blob_path}",
+                    gcs_uri=adapter.build_uri(bucket_name, blob_path),
                     size_bytes=spec.size_bytes,
                     md5_checksum=spec.md5_checksum,
                 )
@@ -1094,21 +1096,24 @@ class ReferenceDataService:
             )
 
         bucket_name = await ReferenceDataService._get_references_bucket(session)
+        from app.adapters.registry import get_storage_adapter
         from app.services.upload_service import UploadService
         from app.workers.reference_importer import ImportedFile, ImportResult
 
+        adapter = get_storage_adapter()
         credentials = await UploadService._get_gcs_credentials(session)
         blobs = ReferenceDataService._list_uploaded_blobs(bucket_name, ds.gcs_prefix, credentials=credentials)
         if not blobs:
             raise ValidationError(
-                f"Reference dataset {reference_id} has no files under gs://{bucket_name}/{ds.gcs_prefix}; cancel and re-import."
+                f"Reference dataset {reference_id} has no files under "
+                f"{adapter.build_uri(bucket_name, ds.gcs_prefix)}; cancel and re-import."
             )
 
         prefix_len = len(ds.gcs_prefix)
         files = [
             ImportedFile(
                 filename=blob.name[prefix_len:] if blob.name.startswith(ds.gcs_prefix) else blob.name,
-                gcs_uri=f"gs://{bucket_name}/{blob.name}",
+                gcs_uri=adapter.build_uri(bucket_name, blob.name),
                 size_bytes=int(blob.size or 0),
                 md5=getattr(blob, "md5_hash", None) or None,
             )

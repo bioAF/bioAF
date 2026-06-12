@@ -615,7 +615,7 @@ async def extract(
         return dict(EMPTY_METRICS)
 
     logger.info(
-        "Looking for metrics in gs://%s/experiments/%s/pipeline-runs/%s/",
+        "Looking for metrics in the %s bucket at experiments/%s/pipeline-runs/%s/",
         results_bucket,
         run.experiment_id,
         run.id,
@@ -627,7 +627,7 @@ async def extract(
 
         adapter = get_storage_adapter()
         prefix = f"experiments/{run.experiment_id}/pipeline-runs/{run.id}/"
-        base = f"gs://{results_bucket}/"
+        base = adapter.build_uri(results_bucket, "")
 
         sample = await adapter.list_objects(f"{base}{prefix}", max_results=20)
         logger.info("Files at prefix for run %d: %s", run.id, [o.storage_uri[len(base) :] for o in sample])

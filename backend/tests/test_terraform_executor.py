@@ -1337,6 +1337,7 @@ async def test_abandon_run_rejects_nonexistent_run(session):
 async def test_delete_gcs_lock_file_uses_storage_adapter():
     """_delete_gcs_lock_file deletes the lock object via the BAL storage adapter."""
     adapter = AsyncMock()
+    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
     with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         await TerraformExecutor._delete_gcs_lock_file("my-bucket", "compute/default.tflock")
 
@@ -1347,6 +1348,7 @@ async def test_delete_gcs_lock_file_uses_storage_adapter():
 async def test_delete_gcs_lock_file_swallows_errors():
     """A delete failure must not raise (the run is already cancelled/failed)."""
     adapter = AsyncMock()
+    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
     adapter.delete.side_effect = RuntimeError("boom")
     with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         # Should not raise

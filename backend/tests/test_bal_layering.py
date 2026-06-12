@@ -553,36 +553,7 @@ def test_shell_cli_allowlist_count_is_pinned():
 # gone via resolve_uri(). Known limitation, accepted: a NEW gs:// added to an
 # already-allowlisted file is not caught until that file is drained.
 
-GS_URI_LITERAL_ALLOWLIST: set[str] = {
-    "api/files.py",
-    "api/lab_documents.py",
-    "cli/register_outputs.py",
-    "main.py",
-    "services/agent_review_artifact_builder.py",
-    "services/backup_service.py",
-    "services/cellxgene_image_service.py",
-    "services/custom_pipeline_service.py",
-    "services/environment_build_service.py",
-    "services/file_organization.py",
-    "services/gcs_storage.py",
-    "services/ingest_service.py",
-    "services/lab_document_upload_service.py",
-    "services/literature/storage.py",
-    "services/literature/upload_service.py",
-    "services/notebook_image_service.py",
-    "services/pipeline_monitor_service.py",
-    "services/plot_archive_service.py",
-    "services/pubsub_listener.py",
-    "services/qc/templates/scrnaseq.py",
-    "services/qc_dashboard_service.py",
-    "services/reference_data_service.py",
-    "services/session_output_service.py",
-    "services/stack_deployment.py",
-    "services/terraform_executor.py",
-    "services/thumbnail_service.py",
-    "services/upload_service.py",
-    "workers/reference_importer.py",
-}
+GS_URI_LITERAL_ALLOWLIST: set[str] = set()
 
 
 def _gs_uri_in_source(source: str) -> bool:
@@ -619,4 +590,4 @@ def test_gs_uri_allowlist_has_no_stale_entries():
 
 def test_gs_uri_allowlist_count_is_pinned():
     """Pin the gs:// leak file count; decrement as Leak 3 drains. Target 0."""
-    assert len(GS_URI_LITERAL_ALLOWLIST) == 28
+    assert len(GS_URI_LITERAL_ALLOWLIST) == 0
