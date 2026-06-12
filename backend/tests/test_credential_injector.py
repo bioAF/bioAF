@@ -315,8 +315,10 @@ def test_load_gcp_credentials_explicit_none_disables_impersonation():
 
 
 def test_load_gcp_credentials_scopes_and_lifetime_passthrough():
-    """Custom scopes reach both ADC and the impersonated creds; lifetime is set."""
+    """Custom scopes apply to the minted (target) token + lifetime; the source ADC
+    stays cloud-platform so it can mint the impersonated token."""
     config = {"gcp_credential_source": "vm_default"}
+    cloud_platform = ["https://www.googleapis.com/auth/cloud-platform"]
     sheets_scope = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
     fake_source = MagicMock(name="adc_source_credentials")
     with (
@@ -332,7 +334,8 @@ def test_load_gcp_credentials_scopes_and_lifetime_passthrough():
             impersonate_target="reader@my-project.iam.gserviceaccount.com",
             lifetime=3600,
         )
-        assert default.call_args.kwargs["scopes"] == sheets_scope
+        # Source ADC must keep cloud-platform scope; only the target token narrows.
+        assert default.call_args.kwargs["scopes"] == cloud_platform
         kwargs = imp_cls.call_args.kwargs
         assert kwargs["target_scopes"] == sheets_scope
         assert kwargs["lifetime"] == 3600

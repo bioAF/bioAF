@@ -78,9 +78,12 @@ def load_gcp_credentials(
         return service_account.Credentials.from_service_account_info(key_data, scopes=scopes)
 
     # vm_default: use ADC, optionally impersonating a target SA.
-    source_creds, _ = _google_auth.default(scopes=scopes)
     target = _impersonation_target(config) if impersonate_target is _USE_CONFIG_TARGET else impersonate_target
     if target:
+        # The source identity needs full cloud-platform scope to mint the
+        # impersonated token (the iamcredentials generateAccessToken call); the
+        # minted token itself then carries the requested ``scopes``.
+        source_creds, _ = _google_auth.default(scopes=_GCP_SCOPES)
         kwargs: dict[str, Any] = {
             "source_credentials": source_creds,
             "target_principal": target,
@@ -89,6 +92,7 @@ def load_gcp_credentials(
         if lifetime is not None:
             kwargs["lifetime"] = lifetime
         return _impersonated_credentials.Credentials(**kwargs)
+    source_creds, _ = _google_auth.default(scopes=scopes)
     return source_creds
 
 

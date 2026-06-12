@@ -72,11 +72,12 @@ class StackStatus(BaseModel):
 async def _get_gke_credentials(session: AsyncSession):
     """Read SA credentials from platform_config for GKE API calls.
 
-    Returns google.oauth2 Credentials or None to fall back to ADC.
+    Returns a credentials object (from the Credentials seam) or None to fall back
+    to ADC. Only the legacy service_account_key path resolves explicit creds;
+    vm_default returns None so the GKE client uses the VM's attached identity.
     Same pattern as GcsStorageService.get_credentials().
     """
-    import json as _json
-
+    from app.adapters.credentials import get_credentials_provider
     from app.platform.platform_config_service import PlatformConfigService
 
     config = await PlatformConfigService.get_many(
@@ -92,13 +93,7 @@ async def _get_gke_credentials(session: AsyncSession):
         return None
 
     try:
-        from google.oauth2 import service_account
-
-        key_data = _json.loads(key_json)
-        return service_account.Credentials.from_service_account_info(
-            key_data,
-            scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        )
+        return get_credentials_provider().load_credentials(config)
     except Exception as e:
         logger.warning("Failed to load GKE credentials from platform_config: %s", e)
         return None
