@@ -21,6 +21,15 @@ a stale entry whose leak is already gone; pin the count so changes are reviewed)
 4. ``gs://`` scheme literals -- callers baking in the scheme instead of asking
    the adapter to mint URIs via ``resolve_uri``. See ``GS_URI_LITERAL_ALLOWLIST``.
 
+Those four GCP tiers SHRINK toward 0 as the GCP leaks drain. The AWS-readiness
+tiers at the bottom of this file do the inverse: they are seeded EMPTY and FROZEN
+at 0 (multi-platform plan, Stage 0), so the first AWS leak in a non-adapter path
+fails the build immediately, holding the AWS column to the GCP column's standard
+from its first line of code. The escape routes mirror the GCP ones: boto3 /
+botocore SDK imports (already covered by ``FORBIDDEN_SDK_PREFIXES`` above),
+``s3://`` scheme literals (``S3_URI_LITERAL_ALLOWLIST``), and ``aws `` CLI shell
+strings (``AWS_CLI_ALLOWLIST``).
+
 Together these make "is bioAF AWS-ready?" a green/red CI signal instead of a
 manual grep hunt, and stop new GCP assumptions taking root while AWS is built.
 
@@ -591,3 +600,152 @@ def test_gs_uri_allowlist_has_no_stale_entries():
 def test_gs_uri_allowlist_count_is_pinned():
     """Pin the gs:// leak file count; decrement as Leak 3 drains. Target 0."""
     assert len(GS_URI_LITERAL_ALLOWLIST) == 0
+
+
+# =============================================================================
+# AWS-readiness guards (multi-platform plan, Stage 0): close the guard to AWS.
+#
+# The GCP tiers above shrink toward 0 as the GCP leaks drain. These AWS tiers do
+# the inverse job: they are seeded EMPTY and FROZEN at 0, so the first AWS leak
+# that lands in a non-adapter path (a stray ``s3://`` literal or ``aws`` CLI
+# shell string) fails the build immediately. This holds the AWS column to the
+# same "no cloud concern escapes the seam" standard as the GCP column from the
+# very first line of AWS code, instead of letting leaks accumulate and then
+# draining them later. boto3/botocore are already covered by the SDK guard
+# (they live in FORBIDDEN_SDK_PREFIXES and are absent from SDK_IMPORT_ALLOWLIST,
+# so any boto3 import outside adapters/ already fails as a new leak); the unit
+# test below locks that behavior in so it cannot silently regress.
+# =============================================================================
+
+
+# --- AWS SDK imports: boto3 / botocore are forbidden pre-emptively -----------
+
+
+def test_detects_boto3_and_botocore_imports():
+    """The service-SDK scanner already forbids boto3/botocore (they are in
+    FORBIDDEN_SDK_PREFIXES and not in SDK_IMPORT_ALLOWLIST). Lock that in: any
+    boto3/botocore import outside adapters/ is caught by
+    test_no_cloud_sdk_imports_outside_adapters exactly like google.cloud.*."""
+    source = "import boto3\nfrom botocore.config import Config\nfrom boto3.session import Session\n"
+    assert _forbidden_sdk_imports_in_source(source) == {
+        "boto3",
+        "botocore.config",
+        "boto3.session",
+    }
+
+
+# --- Tree scan: no s3:// literals outside adapters ---------------------------
+#
+# The AWS analog of the gs:// guard (Leak 3). The S3 storage provider treats
+# s3:// as an opaque scheme and mints URIs via build_uri/resolve_uri; any caller
+# baking the literal in defeats that. Seeded EMPTY: there is no AWS storage code
+# yet, so the correct frozen count is 0, and the first stray s3:// in the service
+# layer fails the build. Same file-level substring contract as the gs:// guard.
+
+
+S3_URI_LITERAL_ALLOWLIST: set[str] = set()
+
+
+def _s3_uri_in_source(source: str) -> bool:
+    """True if ``source`` contains a hardcoded ``s3://`` literal."""
+    return "s3://" in source
+
+
+def test_s3_uri_detector_matches_only_s3_scheme():
+    assert _s3_uri_in_source('uri = "s3://bucket/key"') is True
+    assert _s3_uri_in_source('uri = "gs://bucket/key"') is False
+    assert _s3_uri_in_source("path = '/local/s3/file'") is False
+
+
+def test_no_s3_uri_literals_outside_adapters():
+    violations = {rel for rel, source in _iter_app_modules(exclude_adapters=True) if _s3_uri_in_source(source)}
+
+    new_leaks = sorted(violations - S3_URI_LITERAL_ALLOWLIST)
+    assert not new_leaks, (
+        "New s3:// literal(s) outside backend/app/adapters/. Mint URIs via "
+        "get_storage_adapter().build_uri(bucket, key) (or resolve_uri) instead, "
+        "so the scheme stays the storage adapter's concern:\n" + "\n".join(f"  {rel}" for rel in new_leaks)
+    )
+
+
+def test_s3_uri_allowlist_has_no_stale_entries():
+    actual = {rel for rel, source in _iter_app_modules(exclude_adapters=True) if _s3_uri_in_source(source)}
+
+    stale = sorted(S3_URI_LITERAL_ALLOWLIST - actual)
+    assert not stale, (
+        "Stale S3_URI_LITERAL_ALLOWLIST entr(ies): the file no longer contains an "
+        "s3:// literal. Delete these entries:\n" + "\n".join(f"  {rel}" for rel in stale)
+    )
+
+
+def test_s3_uri_allowlist_count_is_pinned():
+    """Frozen at 0: AWS storage URIs must never be hardcoded outside adapters/."""
+    assert len(S3_URI_LITERAL_ALLOWLIST) == 0
+
+
+# --- Tree scan: no AWS CLI shell strings outside adapters --------------------
+#
+# The AWS analog of the gsutil/gcloud shell guard (Leak 2). Detection is a
+# case-sensitive substring match for ``aws `` (the CLI binary followed by a
+# subcommand, e.g. ``aws s3 cp ...`` / ``aws ec2 ...``), seeded EMPTY and frozen.
+#
+# It deliberately does NOT match the bare token ``aws`` / ``"aws"``: that is the
+# legitimate ``cloud_provider`` config VALUE, used throughout the resolution
+# policy (``POLICY["aws"]``, ``== "aws"``, dict subscripts), so matching it would
+# be a perpetual false positive. The trailing space distinguishes a command
+# invocation from a quoted config value (``"aws"`` has no following space).
+# Case-sensitivity means prose should say "AWS" (uppercase), which is ignored.
+# Known blind spot (accepted, mirroring the guard's other documented limits): the
+# argv-list form ``["aws", ...]`` is indistinguishable from a ``POLICY["aws"]``
+# subscript by substring, so it is not caught here; the boto3 SDK ban is the
+# primary protection against AWS shell-outs, this is a secondary tripwire.
+
+
+AWS_CLI_ALLOWLIST: set[str] = set()
+
+
+def _aws_cli_in_source(source: str) -> bool:
+    """True if ``source`` contains an ``aws <subcommand>`` CLI invocation."""
+    return "aws " in source
+
+
+def test_aws_cli_detector_finds_command_form():
+    assert _aws_cli_in_source('cmd = f"aws s3 cp {src} {dst}"') is True
+    assert _aws_cli_in_source("RUN aws ecr get-login-password") is True
+
+
+def test_aws_cli_detector_ignores_config_value_and_sdk_and_prose():
+    # The cloud_provider config value and policy subscripts must not match.
+    assert _aws_cli_in_source('cloud_provider = "aws"') is False
+    assert _aws_cli_in_source('backend = POLICY["aws"]["store"]') is False
+    assert _aws_cli_in_source('if provider == "aws":') is False
+    # boto3 SDK usage is the SDK guard's job, not this one.
+    assert _aws_cli_in_source('client = boto3.client("s3")') is False
+    # Prose written as "AWS" (uppercase) is ignored (case-sensitive scan).
+    assert _aws_cli_in_source("# AWS-readiness: route through the adapter") is False
+
+
+def test_no_aws_cli_shell_strings_outside_adapters():
+    violations = {rel for rel, source in _iter_app_modules(exclude_adapters=True) if _aws_cli_in_source(source)}
+
+    new_leaks = sorted(violations - AWS_CLI_ALLOWLIST)
+    assert not new_leaks, (
+        "New AWS CLI shell string(s) outside backend/app/adapters/. Replace with "
+        "an adapter method (or a cloud_provider-selected command), not a raw "
+        "`aws ...` invocation in the service layer:\n" + "\n".join(f"  {rel}" for rel in new_leaks)
+    )
+
+
+def test_aws_cli_allowlist_has_no_stale_entries():
+    actual = {rel for rel, source in _iter_app_modules(exclude_adapters=True) if _aws_cli_in_source(source)}
+
+    stale = sorted(AWS_CLI_ALLOWLIST - actual)
+    assert not stale, (
+        "Stale AWS_CLI_ALLOWLIST entr(ies): the file no longer contains an `aws ` "
+        "CLI string. Delete these entries:\n" + "\n".join(f"  {rel}" for rel in stale)
+    )
+
+
+def test_aws_cli_allowlist_count_is_pinned():
+    """Frozen at 0: AWS CLI calls must go through an adapter, never the service layer."""
+    assert len(AWS_CLI_ALLOWLIST) == 0
