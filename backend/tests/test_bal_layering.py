@@ -476,11 +476,7 @@ def test_credential_sdk_allowlist_count_is_pinned():
 
 SHELL_CLI_TOKENS = ("gsutil", "gcloud")
 
-SHELL_CLI_ALLOWLIST: set[tuple[str, str]] = {
-    ("services/environment_build_service.py", "gcloud"),
-    ("services/environment_build_service.py", "gsutil"),
-    ("services/notebook_image_service.py", "gsutil"),
-}
+SHELL_CLI_ALLOWLIST: set[tuple[str, str]] = set()
 
 
 def _shell_cli_tokens_in_source(source: str) -> set[str]:
@@ -528,7 +524,7 @@ def test_shell_cli_allowlist_has_no_stale_entries():
 
 def test_shell_cli_allowlist_count_is_pinned():
     """Pin the shell-string leak count; decrement as Leak 2 drains. Target 0."""
-    assert len(SHELL_CLI_ALLOWLIST) == 3
+    assert len(SHELL_CLI_ALLOWLIST) == 0
 
 
 # --- Tree scan: no gs:// literals outside adapters ---------------------------

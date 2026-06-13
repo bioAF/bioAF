@@ -111,6 +111,14 @@ class TestCliStaging:
             "gcloud storage cp -r /outputs/* gs://b/runs/1/"
         )
 
+    def test_image_storage_pip_packages(self, local_adapter):
+        pkgs = local_adapter.image_storage_pip_packages()
+        assert "google-cloud-storage" in pkgs and "gsutil" in pkgs
+
+    def test_cloud_build_copy_step(self, local_adapter):
+        step = local_adapter.cloud_build_copy_step("gs://b/x.hcl", "/workspace/x.hcl")
+        assert step == {"name": "gcr.io/cloud-builders/gsutil", "args": ["cp", "gs://b/x.hcl", "/workspace/x.hcl"]}
+
 
 # --- read / write round-trips (local) ----------------------------------------
 

@@ -269,6 +269,12 @@ class GcsStorageProvider(StorageProvider):
     def cli_copy_out(self, local_path: str, uri: str) -> str:
         return f"gcloud storage cp -r {local_path} {uri}"
 
+    def image_storage_pip_packages(self) -> str:
+        return "google-cloud-storage==3.11.0 gsutil==5.37"
+
+    def cloud_build_copy_step(self, uri: str, dest: str) -> dict:
+        return {"name": "gcr.io/cloud-builders/gsutil", "args": ["cp", uri, dest]}
+
     async def read_text(self, uri: str, *, encoding: str = "utf-8") -> str:
         return (await self.read_bytes(uri)).decode(encoding)
 

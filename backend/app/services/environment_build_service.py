@@ -129,11 +129,12 @@ build {
     ]
   }
 
-  # Download environment.yml from GCS and create conda env
+  # Download environment.yml from the bucket and create conda env. The download
+  # command is filled in by the storage adapter (cloud-selected CLI) at build time.
   provisioner "shell" {
     inline = [
       "export PATH=/opt/conda/bin:$PATH",
-      "gsutil cp ${var.environment_yml_gcs} /tmp/environment.yml",
+      "__DOWNLOAD_ENV_YML__",
       "conda env create -f /tmp/environment.yml",
       "conda clean -afy",
       "rm /tmp/environment.yml",
@@ -173,11 +174,11 @@ def _get_vm_image_uri(project_id: str, env_name: str, version_number: int, build
 
 # Template for wrapping a conda environment.yml in a Dockerfile.
 #
-# Google Cloud SDK is installed at the OS layer (parallel to how GCE work-node
+# The cloud SDK / CLI is installed at the OS layer (parallel to how GCE work-node
 # base images already carry it) so the pipeline entrypoint trap can sync
-# /outputs/ to GCS without depending on whatever the user puts in their conda
-# env. Without this, `gsutil`/`gcloud storage` are missing from the container
-# and the output-sync trap silently no-ops.
+# /outputs/ to the results bucket without depending on whatever the user puts in
+# their conda env. Without the CLI in the container, the output-sync trap (which
+# shells out to the storage adapter's copy command) silently no-ops.
 CONDA_DOCKERFILE_TEMPLATE = """\
 FROM continuumio/miniconda3:latest
 
@@ -450,10 +451,15 @@ class EnvironmentBuildService:
         env_yml_gcs = adapter.build_uri(working_bucket, env_yml_path)
         await adapter.write_text(env_yml_gcs, version.definition_content, content_type="text/yaml")
 
-        # Upload Packer template
+        # Upload Packer template, filling the cloud-selected download command from
+        # the storage adapter (the build VM has the cloud CLI installed).
         packer_path = f"builds/{safe_name}/v{version.version_number}/work_node.pkr.hcl"
         packer_gcs = adapter.build_uri(working_bucket, packer_path)
-        await adapter.write_text(packer_gcs, PACKER_VM_TEMPLATE, content_type="text/plain")
+        packer_template = PACKER_VM_TEMPLATE.replace(
+            "__DOWNLOAD_ENV_YML__",
+            adapter.cli_copy_in("${var.environment_yml_gcs}", "/tmp/environment.yml"),
+        )
+        await adapter.write_text(packer_gcs, packer_template, content_type="text/plain")
 
         # Build image name and URI
         image_name = _get_vm_image_name(env.name, version.version_number, version.build_number)
@@ -467,12 +473,9 @@ class EnvironmentBuildService:
         build_url = f"https://cloudbuild.googleapis.com/v1/projects/{project_id}/builds"
         build_body: dict = {
             "steps": [
-                {
-                    # NOTE: the gsutil step itself is a Leak-2 (shell CLI) item drained
-                    # separately; build_uri only makes the URI backend-neutral here.
-                    "name": "gcr.io/cloud-builders/gsutil",
-                    "args": ["cp", packer_gcs, "/workspace/work_node.pkr.hcl"],
-                },
+                # Stage the Packer template into the build workspace via the
+                # cloud-selected object-copy step (the CLI builder lives in the adapter).
+                adapter.cloud_build_copy_step(packer_gcs, "/workspace/work_node.pkr.hcl"),
                 {
                     "name": "hashicorp/packer",
                     "args": ["init", "/workspace/work_node.pkr.hcl"],

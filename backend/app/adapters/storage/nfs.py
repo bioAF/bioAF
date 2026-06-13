@@ -237,6 +237,10 @@ class NfsStorageProvider(StorageProvider):
     def cli_copy_out(self, local_path: str, uri: str) -> str:
         return f"cp -r {local_path} {self._path(uri)}"
 
+    def image_storage_pip_packages(self) -> str:
+        # A mounted filesystem needs no cloud storage client library.
+        return ""
+
     async def read_text(self, uri: str, *, encoding: str = "utf-8") -> str:
         return (await self.read_bytes(uri)).decode(encoding)
 

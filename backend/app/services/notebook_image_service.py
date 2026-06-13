@@ -80,7 +80,7 @@ RUN pip install --no-cache-dir \\
     scikit-misc==0.5.2 statsmodels==0.14.6 scvelo==0.3.4 \\
     pandas==2.3.3 numpy==1.26.4 scipy==1.17.1 seaborn==0.13.2 plotly==6.8.0 \\
     umap-learn==0.5.12 pybiomart==0.2.0 biopython==1.87 pysam==0.24.0 anndata2ri==2.0 \\
-    google-cloud-storage==3.11.0 gsutil==5.37
+    __STORAGE_PIP_PACKAGES__
 
 # Install R packages as precompiled binaries from a DATED Posit P3M snapshot, so
 # every CRAN version is frozen to that date (reproducible) and builds are fast
@@ -123,6 +123,17 @@ USER ${NB_UID}
 
 WORKDIR /home/jovyan
 """
+
+
+def _render_dockerfile() -> str:
+    """Fill the storage-client pip packages from the cloud-selected adapter.
+
+    Keeps the cloud-specific storage dependency out of the service-layer template;
+    the storage backend owns which client libraries a built image needs.
+    """
+    from app.adapters.registry import get_storage_adapter
+
+    return DOCKERFILE_CONTENT.replace("__STORAGE_PIP_PACKAGES__", get_storage_adapter().image_storage_pip_packages())
 
 
 def get_image_uri(project_id: str, region: str) -> str:
@@ -242,7 +253,7 @@ async def _upload_build_context(session: AsyncSession, project_id: str, working_
     # Create tar.gz in memory with the Dockerfile
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-        dockerfile_bytes = DOCKERFILE_CONTENT.encode()
+        dockerfile_bytes = _render_dockerfile().encode()
         info = tarfile.TarInfo(name="Dockerfile")
         info.size = len(dockerfile_bytes)
         info.mtime = int(time.time())
@@ -460,7 +471,7 @@ async def _ensure_default_environment(session: AsyncSession, image_uri: str) -> 
         version_number=1,
         status="ready",
         definition_format="dockerfile",
-        definition_content=DOCKERFILE_CONTENT,
+        definition_content=_render_dockerfile(),
         image_uri=image_uri,
         created_by_user_id=user_id,
     )

@@ -68,6 +68,11 @@ def test_cli_copy_commands_use_plain_cp(nfs):
     assert copy_out.startswith("cp -r /outputs/* ")
 
 
+def test_image_storage_pip_packages_empty_for_nfs(nfs):
+    # A mounted filesystem needs no cloud storage client library.
+    assert nfs.image_storage_pip_packages() == ""
+
+
 # -- object-store CRUD --------------------------------------------------------
 
 

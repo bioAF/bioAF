@@ -207,6 +207,25 @@ class StorageProvider(ABC):
         """Shell command to recursively copy ``local_path`` to a bucket ``uri`` in a container."""
         raise NotImplementedError
 
+    def image_storage_pip_packages(self) -> str:
+        """Pip requirement string for the client libs a built image needs for this store.
+
+        Baked into pipeline/notebook image recipes so a container can read/write the
+        backend. GCS -> ``google-cloud-storage gsutil``; S3 -> ``boto3 awscli``; a
+        mounted NFS backend needs none.
+        """
+        raise NotImplementedError
+
+    def cloud_build_copy_step(self, uri: str, dest: str) -> dict:
+        """A managed-build step that copies object ``uri`` to local ``dest``.
+
+        Returned to the cloud's managed image-builder (GCP Cloud Build today) as a
+        step that stages a file into the build workspace. GCS uses the gsutil
+        builder; the AWS realization (a CodeBuild phase) lands with the image-build
+        seam. The cloud-specific builder/CLI lives here, not in the service layer.
+        """
+        raise NotImplementedError
+
     async def read_text(self, uri: str, *, encoding: str = "utf-8") -> str:
         """Download an object and decode it as text. Raises StorageObjectNotFound."""
         raise NotImplementedError
