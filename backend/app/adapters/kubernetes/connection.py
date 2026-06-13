@@ -19,6 +19,17 @@ from kubernetes import client, config
 
 logger = logging.getLogger(__name__)
 
+# First-time client setup for kubectl access to a GKE cluster. Lives in the K8s
+# adapter package (cloud CLI strings are allowed here); the EKS realization
+# (Stage 6e) returns the `aws eks update-kubeconfig` form behind the same seam.
+KUBECTL_SETUP_GUIDE = """First-time setup for kubectl access:
+
+1. Install gcloud CLI: https://cloud.google.com/sdk/docs/install
+2. Authenticate: gcloud auth login
+3. Get cluster credentials:
+   gcloud container clusters get-credentials bioaf-cluster --region <region> --project <project-id>
+4. Verify access: kubectl get pods -n bioaf-pipelines"""
+
 
 def _get_gcp_token(cfg: dict) -> str:
     """Mint a GCP access token via credential_injector.

@@ -90,6 +90,15 @@ class ComputeProvider(ABC):
     async def get_connection_command(self, job_id: str) -> str:
         """Get kubectl exec/SSH command for direct access to a running job."""
 
+    def connection_setup_guide(self) -> str:
+        """First-time client setup instructions to accompany a connection command.
+
+        Cloud/compute-specific (a GKE cluster needs gcloud + kubectl creds; an EKS
+        cluster needs aws). The default is the cloud-neutral SLURM/SSH guidance;
+        the Kubernetes backends override with the cluster-access steps.
+        """
+        return "For SLURM-based clusters, ensure SSH access is configured with your system administrator."
+
     async def persist_job_logs(self, job_id: str) -> bool:
         """Persist job logs to durable storage before the pod is cleaned up.
 
@@ -347,6 +356,14 @@ class NotebookProvider(ABC):
     @abstractmethod
     async def get_connection_command(self, session_id: str) -> str:
         """Get SSH/exec command for direct access to the session."""
+
+    def connection_setup_guide(self) -> str:
+        """First-time client setup instructions to accompany a connection command.
+
+        See ``ComputeProvider.connection_setup_guide``. Default is SLURM/SSH; the
+        Kubernetes notebook backend overrides with the cluster-access steps.
+        """
+        return "For SLURM-based clusters, ensure SSH access is configured with your system administrator."
 
     async def sync_session_storage(self, session_id: str, **kwargs) -> None:
         """Best-effort push of a running session's working files to durable storage.

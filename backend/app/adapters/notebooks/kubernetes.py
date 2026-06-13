@@ -173,6 +173,11 @@ class KubernetesNotebookProvider(NotebookProvider):
         namespace = DEFAULT_NOTEBOOK_NAMESPACE
         return f"kubectl exec -it -n {namespace} pod/bioaf-notebook-{session_id} -- /bin/bash"
 
+    def connection_setup_guide(self) -> str:
+        from app.adapters.kubernetes.connection import KUBECTL_SETUP_GUIDE
+
+        return KUBECTL_SETUP_GUIDE
+
     async def sync_session_storage(  # type: ignore[override]
         self,
         session_id: str,

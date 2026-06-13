@@ -305,6 +305,11 @@ class KubernetesComputeProvider(ComputeProvider):
         namespace = "bioaf-pipelines"
         return f"kubectl exec -it -n {namespace} job/{job_id} -- /bin/bash"
 
+    def connection_setup_guide(self) -> str:
+        from app.adapters.kubernetes.connection import KUBECTL_SETUP_GUIDE
+
+        return KUBECTL_SETUP_GUIDE
+
     # -- Local mode implementations --
 
     async def _local_submit_job(self, job_spec: dict) -> dict:
