@@ -12,6 +12,7 @@ from app.adapters.models import (
     CellxgeneInstance,
     ClusterDetail,
     ClusterMetrics,
+    ClusterProbe,
     ClusterStatus,
     CostEstimate,
     JobProgress,
@@ -88,6 +89,27 @@ class ComputeProvider(ABC):
         the default raises so callers fall back (the stack view reports no
         cluster). Non-abstract so the interface can grow without a flag day.
         """
+        raise NotImplementedError
+
+    # -- Cluster lifecycle management (orphan scan / recovery / teardown) ------
+    #
+    # Look up, probe, and DELETE clusters by (project/account, location, name).
+    # Used by orphaned-resource cleanup; the managed-control-plane SDK lives in
+    # the adapter. Backends without a managed control plane (SLURM) raise.
+
+    async def list_cluster_names(self, project_id: str, location: str) -> list[str]:
+        """Names of all clusters under ``(project_id, location)``."""
+        raise NotImplementedError
+
+    async def probe_cluster(self, project_id: str, location: str, cluster_name: str) -> ClusterProbe:
+        """Probe one named cluster's liveness + connection info (for adoption).
+
+        Returns ``ClusterProbe(state="NOT_FOUND")`` if it cannot be fetched.
+        """
+        raise NotImplementedError
+
+    async def delete_cluster(self, project_id: str, location: str, cluster_name: str) -> None:
+        """Delete a cluster by name. DESTRUCTIVE and irreversible."""
         raise NotImplementedError
 
     @abstractmethod
@@ -365,6 +387,13 @@ class StorageProvider(ABC):
         Backends without buckets (NFS) return the degenerate default.
         """
         return BucketAdminMetrics()
+
+    async def delete_bucket(self, bucket_name: str) -> None:
+        """Delete a bucket and ALL of its contents. DESTRUCTIVE and irreversible.
+
+        Used by orphaned-resource cleanup. Backends without buckets (NFS) raise.
+        """
+        raise NotImplementedError
 
     async def list_lifecycle_policies(self, prefix: str) -> list[dict]:
         """List lifecycle policy status for buckets matching ``prefix``.

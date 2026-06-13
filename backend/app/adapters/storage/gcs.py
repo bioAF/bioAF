@@ -848,6 +848,19 @@ class GcsStorageProvider(StorageProvider):
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._gcs_bucket_admin_metrics, bucket_name, creds)
 
+    async def delete_bucket(self, bucket_name: str) -> None:
+        """Delete a bucket and all its contents (force=True). DESTRUCTIVE.
+
+        Owns the whole-bucket delete that previously lived in
+        OrphanedResourceService._cleanup_gcs_bucket (Phase 9 / Stage 3b.5).
+        """
+        creds = await self._get_credentials()
+        await asyncio.to_thread(self._gcs_delete_bucket, bucket_name, creds)
+
+    def _gcs_delete_bucket(self, bucket_name: str, creds) -> None:
+        client = self._get_gcs_client(creds)
+        client.bucket(bucket_name).delete(force=True)
+
     def _gcs_bucket_admin_metrics(self, bucket_name: str, creds) -> BucketAdminMetrics:
         client = self._get_gcs_client(creds)
         bucket = client.get_bucket(bucket_name)

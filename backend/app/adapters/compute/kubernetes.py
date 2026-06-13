@@ -23,6 +23,7 @@ from app.adapters.kubernetes.connection import GkeConnection
 from app.adapters.models import (
     ClusterDetail,
     ClusterMetrics,
+    ClusterProbe,
     ClusterStatus,
     CostEstimate,
     JobProgress,
@@ -299,6 +300,36 @@ class KubernetesComputeProvider(ComputeProvider):
             node_count=cluster.current_node_count,
             node_pools=node_pools,
         )
+
+    # -- Cluster lifecycle management (orphan scan / recovery / teardown) ------
+
+    async def list_cluster_names(self, project_id: str, location: str) -> list[str]:
+        client = self._get_gke_client()
+        response = client.list_clusters(parent=f"projects/{project_id}/locations/{location}")
+        return [c.name for c in (response.clusters or [])]
+
+    async def probe_cluster(self, project_id: str, location: str, cluster_name: str) -> ClusterProbe:
+        client = self._get_gke_client()
+        cluster_path = f"projects/{project_id}/locations/{location}/clusters/{cluster_name}"
+        try:
+            cluster = client.get_cluster(name=cluster_path)
+        except Exception as exc:
+            logger.info("GKE cluster %s not reachable: %s", cluster_name, exc)
+            return ClusterProbe(state="NOT_FOUND")
+        endpoint = getattr(cluster, "endpoint", "") or None
+        ca_cert = None
+        master_auth = getattr(cluster, "master_auth", None)
+        if master_auth:
+            ca_cert = getattr(master_auth, "cluster_ca_certificate", "") or None
+        return ClusterProbe(
+            state=self._GKE_STATUS_MAP.get(cluster.status, "UNKNOWN"),
+            endpoint=endpoint,
+            ca_cert=ca_cert,
+        )
+
+    async def delete_cluster(self, project_id: str, location: str, cluster_name: str) -> None:
+        client = self._get_gke_client()
+        client.delete_cluster(name=f"projects/{project_id}/locations/{location}/clusters/{cluster_name}")
 
     def _cost_estimate_dict(self, job_spec: dict) -> dict:
         # Return the hourly node rate for the pipeline pool so the UI

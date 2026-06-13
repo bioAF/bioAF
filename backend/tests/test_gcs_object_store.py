@@ -624,6 +624,20 @@ class TestBucketEnumeration:
         ]
 
     @pytest.mark.asyncio
+    async def test_delete_bucket_force(self, gcs_adapter):
+        """delete_bucket wipes the bucket and all contents (force=True). DESTRUCTIVE;
+        owns the whole-bucket delete drained from orphaned_resource cleanup."""
+        bucket = MagicMock()
+        client = MagicMock()
+        client.bucket.return_value = bucket
+
+        with patch.object(gcs_adapter, "_get_gcs_client", return_value=client):
+            await gcs_adapter.delete_bucket("bioaf-orphan-xyz")
+
+        client.bucket.assert_called_once_with("bioaf-orphan-xyz")
+        bucket.delete.assert_called_once_with(force=True)
+
+    @pytest.mark.asyncio
     async def test_query_bucket_stats_passes_resolved_credentials(self, monkeypatch):
         """Security: the adapter must build the GCS client with the impersonated
         bootstrap creds so project-level list_buckets is authorized (bioaf-app's
