@@ -16,6 +16,7 @@ import { useDeploymentProgress } from "@/hooks/useDeploymentProgress";
 import { isAuthenticated } from "@/lib/auth";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { useStackOptions } from "@/hooks/useStackOptions";
+import { storageDisplay } from "@/lib/storageDisplay";
 import { GCP_REGIONS, zonesForRegion } from "@/lib/gcp-regions";
 import { api } from "@/lib/api";
 import { invalidateComponentCache } from "@/hooks/useComponents";
@@ -123,6 +124,7 @@ export default function InfraComponentsPage() {
   // to GCP defaults so a GCP install renders unchanged.
   const { kubernetesOption } = useStackOptions();
   const k8sStackLabel = kubernetesOption?.label ?? "Kubernetes + GCS";
+  const storageLabel = storageDisplay(kubernetesOption?.storage_backend).label;
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const [tfStatus, setTfStatus] = useState<TerraformStatus | null>(null);
@@ -573,7 +575,7 @@ export default function InfraComponentsPage() {
                     Storage infrastructure is provisioned
                   </h3>
                   <p className="text-xs text-amber-700 mt-1">
-                    GCS buckets and Pub/Sub topics are still running and accruing costs.
+                    {storageLabel} buckets and messaging topics are still running and accruing costs.
                   </p>
                 </div>
                 <button
@@ -1317,9 +1319,9 @@ export default function InfraComponentsPage() {
                 All data will be permanently deleted
               </p>
               <p className="text-xs text-red-700">
-                This will permanently destroy all GCS buckets and their contents,
-                including raw sample data, processed pipeline outputs, and results.
-                This action cannot be undone.
+                This will permanently destroy all {storageLabel} buckets and their
+                contents, including raw sample data, processed pipeline outputs, and
+                results. This action cannot be undone.
               </p>
             </div>
 
@@ -1331,7 +1333,7 @@ export default function InfraComponentsPage() {
                 className="mt-0.5"
               />
               <span className="text-sm text-gray-700">
-                I understand all files stored in GCS will be permanently lost
+                I understand all files stored in {storageLabel} will be permanently lost
               </span>
             </label>
 
