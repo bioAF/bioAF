@@ -20,7 +20,7 @@ from app.adapters.models import (
     to_service_state,
 )
 from app.exceptions import ValidationError
-from app.platform.credential_injector import load_gcp_credentials
+from app.adapters.credentials.credential_injector import load_gcp_credentials
 
 logger = logging.getLogger("bioaf.adapters.work_nodes.gce")
 

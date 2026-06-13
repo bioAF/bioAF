@@ -292,7 +292,7 @@ def test_service_import_detector_matches_both_forms():
         "from app.services import session_persistence\n"
         "from app.services.gcs_storage import GcsStorageService\n"
         "import app.services.foo\n"
-        "from app.platform import credential_injector\n"
+        "from app.platform import cloud_provider\n"
     )
     assert _service_imports_in_source(source) == {
         "app.services.session_persistence",
@@ -399,12 +399,7 @@ def test_platform_layer_has_no_upward_imports():
 # one drains when the backend-aware credential seam lands (GCP ADC / SA-key vs
 # AWS role / keys), at which point GCP credential SDK use moves under adapters/.
 
-CREDENTIAL_SDK_ALLOWLIST: set[tuple[str, str]] = {
-    ("platform/credential_injector.py", "google.auth"),
-    ("platform/credential_injector.py", "google.auth.credentials"),
-    ("platform/credential_injector.py", "google.auth.impersonated_credentials"),
-    ("platform/credential_injector.py", "google.oauth2.service_account"),
-}
+CREDENTIAL_SDK_ALLOWLIST: set[tuple[str, str]] = set()
 
 
 def test_credential_sdk_detector_finds_auth_imports():
@@ -465,7 +460,7 @@ def test_credential_sdk_allowlist_count_is_pinned():
     Decrement this as the credential seam drains leaks; target 0 once all
     credential resolution is backend-aware and behind adapters/.
     """
-    assert len(CREDENTIAL_SDK_ALLOWLIST) == 4
+    assert len(CREDENTIAL_SDK_ALLOWLIST) == 0
 
 
 # --- Tree scan: no GCP CLI shell strings outside adapters --------------------

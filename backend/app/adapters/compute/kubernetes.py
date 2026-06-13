@@ -118,7 +118,7 @@ def _load_gcp_credentials(cfg: dict):
     impersonated bootstrap credentials and legacy installs get
     service_account.Credentials from the stored JSON key.
     """
-    from app.platform import credential_injector
+    from app.adapters.credentials import credential_injector
 
     return credential_injector.load_gcp_credentials(cfg)
 

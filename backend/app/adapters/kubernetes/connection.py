@@ -29,7 +29,7 @@ def _get_gcp_token(cfg: dict) -> str:
     """
     import google.auth.transport.requests
 
-    from app.platform import credential_injector
+    from app.adapters.credentials import credential_injector
 
     credentials = credential_injector.load_gcp_credentials(cfg)
     credentials.refresh(google.auth.transport.requests.Request())

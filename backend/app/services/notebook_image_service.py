@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.credentials import get_credentials_provider
 from app.exceptions import StateError, ValidationError
-from app.platform.credential_injector import load_gcp_credentials
+from app.adapters.credentials.credential_injector import load_gcp_credentials
 
 logger = logging.getLogger("bioaf.notebook_image")
 

@@ -29,7 +29,7 @@ from app.services.activity_feed_service import ActivityFeedService
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import TERRAFORM_APPLY_FAILURE
-from app.platform.credential_injector import GCPCredentialInjector
+from app.adapters.credentials.credential_injector import GCPCredentialInjector
 from app.services.plan_parser import TerraformPlanParser
 
 logger = logging.getLogger("bioaf.terraform_executor")

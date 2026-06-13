@@ -218,7 +218,7 @@ class GcsStorageProvider(StorageProvider):
 
     async def _load_credentials(self):
         from app.database import async_session_factory
-        from app.platform import credential_injector
+        from app.adapters.credentials import credential_injector
         from app.platform.platform_config_service import PlatformConfigService
 
         async with async_session_factory() as session:

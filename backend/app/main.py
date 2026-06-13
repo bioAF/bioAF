@@ -91,7 +91,7 @@ async def lifespan(app: FastAPI):
     # Attach Cloud Logging using the app's configured GCP credentials
     try:
         from app.database import async_session_factory as cl_session_factory
-        from app.platform import credential_injector
+        from app.adapters.credentials import credential_injector
         from app.platform.platform_config_service import PlatformConfigService
 
         async with cl_session_factory() as cl_session:

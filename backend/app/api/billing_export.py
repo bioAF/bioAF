@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.credentials import get_credentials_provider
 from app.api.dependencies import require_permission
 from app.database import get_session
-from app.platform.credential_injector import load_gcp_credentials
+from app.adapters.credentials.credential_injector import load_gcp_credentials
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.billing_export_service import BillingExportService
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent

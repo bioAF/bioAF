@@ -30,7 +30,7 @@ def test_notebook_adapter_get_gcp_token_uses_credential_injector():
     fake_creds.token = "ya29.fake"
     with (
         patch(
-            "app.platform.credential_injector.load_gcp_credentials",
+            "app.adapters.credentials.credential_injector.load_gcp_credentials",
             return_value=fake_creds,
         ) as load,
         patch("google.auth.transport.requests.Request"),
@@ -47,7 +47,7 @@ def test_compute_adapter_get_gcp_token_uses_credential_injector():
     fake_creds.token = "ya29.fake"
     with (
         patch(
-            "app.platform.credential_injector.load_gcp_credentials",
+            "app.adapters.credentials.credential_injector.load_gcp_credentials",
             return_value=fake_creds,
         ) as load,
         patch("google.auth.transport.requests.Request"),
@@ -63,7 +63,7 @@ def test_cellxgene_adapter_get_gcp_token_uses_credential_injector():
     fake_creds.token = "ya29.fake"
     with (
         patch(
-            "app.platform.credential_injector.load_gcp_credentials",
+            "app.adapters.credentials.credential_injector.load_gcp_credentials",
             return_value=fake_creds,
         ) as load,
         patch("google.auth.transport.requests.Request"),

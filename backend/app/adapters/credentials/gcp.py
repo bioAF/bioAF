@@ -1,15 +1,12 @@
 """GcpCredentialsProvider: the GCP realization of the Credentials seam (Stage 3c).
 
-Forwards credential resolution to ``app.platform.credential_injector`` (the
-existing, tested GCP implementation) so the service-layer credential leaks can
-drain onto this seam without first relocating the injector: every mock that
-patches ``credential_injector.load_gcp_credentials`` keeps working through this
-provider. The injector folds into this class in the final 3c block, when it is
-removed from ``platform/`` and its remaining callers re-point here.
-
-The two shapes the injector did not expose are implemented here directly (GCP
-credential SDK imports are allowed inside ``adapters/``): ``bearer_token`` (mint a
-fresh REST access token) and ``is_permission_denied`` (classify a Forbidden).
+Delegates credential resolution to the sibling ``credential_injector`` module (the
+GCP implementation: ADC / SA-key / impersonation for ``load_credentials``, and the
+Terraform subprocess env for ``build_subprocess_env``). Both live under
+``adapters/`` now, so their google-auth imports are allowed and invisible to the
+BAL guard. The two shapes the injector does not own are implemented here directly:
+``bearer_token`` (mint a fresh REST access token) and ``is_permission_denied``
+(classify a Forbidden).
 """
 
 from __future__ import annotations
@@ -19,8 +16,8 @@ from typing import Any, Callable, Coroutine
 import google.auth.transport.requests as _ga_transport
 from google.api_core import exceptions as _gapi_exceptions
 
+from app.adapters.credentials import credential_injector
 from app.adapters.credentials.base import USE_DEFAULT_IMPERSONATION, CredentialsProvider
-from app.platform import credential_injector
 
 
 class GcpCredentialsProvider(CredentialsProvider):

@@ -54,7 +54,7 @@ class UploadService:
         that signs locally with its private key. Either way, the returned
         credentials work for blob.generate_signed_url(version="v4").
         """
-        from app.platform import credential_injector
+        from app.adapters.credentials import credential_injector
         from app.platform.platform_config_service import PlatformConfigService
 
         config = await PlatformConfigService.get_many(

@@ -2,12 +2,11 @@
 
 The seam (`app/adapters/credentials/`) is the single place credential resolution
 lives on the adapter side of the BAL. Its GCP implementation
-(`GcpCredentialsProvider`) currently forwards to the existing
-`platform.credential_injector` (so existing mocks that patch the injector keep
-working while the service-layer leaks drain), and adds the two shapes the seam
-must expose that the injector did not: a bearer-token minter and a
-permission-denied classifier. AWS (STS / assume-role / instance profile) slots in
-behind the same interface later.
+(`GcpCredentialsProvider`) delegates to the sibling
+`adapters.credentials.credential_injector` module (ADC / SA-key / impersonation +
+the Terraform subprocess env) and adds the two shapes the injector does not own: a
+bearer-token minter and a permission-denied classifier. AWS (STS / assume-role /
+instance profile) slots in behind the same interface later.
 
 All local-runnable (no DB): the google-auth calls are patched.
 """

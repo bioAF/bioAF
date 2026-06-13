@@ -10,7 +10,7 @@ support-only and drains in Phase 9:
     to Phase 9, so it keeps the google-cloud-storage import here).
   - ``get_credentials``: GCP credential resolution used by get_bucket_metrics
     and a few non-storage callers (terraform subprocess, pubsub). This belongs
-    in ``app.platform.credential_injector``; relocate when Phase 9 lands.
+    in ``app.adapters.credentials.credential_injector``; relocate when Phase 9 lands.
   - ``build_*_prefix`` / ``_parse_gcs_uri``: pure path helpers (no SDK).
 """
 
@@ -121,7 +121,7 @@ class GcsStorageService:
         Returns None on failure -- caller falls back to ADC, which
         works for non-signing operations only.
         """
-        from app.platform import credential_injector
+        from app.adapters.credentials import credential_injector
         from app.platform.platform_config_service import PlatformConfigService
 
         config = await PlatformConfigService.get_many(

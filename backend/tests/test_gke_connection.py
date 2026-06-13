@@ -74,7 +74,7 @@ class TestBuildOutOfClusterClient:
         fake_creds = MagicMock()
         fake_creds.token = "tok-123"
         with patch(
-            "app.platform.credential_injector.load_gcp_credentials",
+            "app.adapters.credentials.credential_injector.load_gcp_credentials",
             return_value=fake_creds,
         ):
             api_client = conn.build_out_of_cluster_client()
@@ -89,7 +89,7 @@ class TestBuildOutOfClusterClient:
         self._seed(conn, endpoint="1.2.3.4")
         fake_creds = MagicMock()
         fake_creds.token = "tok"
-        with patch("app.platform.credential_injector.load_gcp_credentials", return_value=fake_creds):
+        with patch("app.adapters.credentials.credential_injector.load_gcp_credentials", return_value=fake_creds):
             api_client = conn.build_out_of_cluster_client()
         assert api_client.configuration.host == "https://1.2.3.4"
 
@@ -98,7 +98,7 @@ class TestBuildOutOfClusterClient:
         self._seed(conn, endpoint="https://5.6.7.8")
         fake_creds = MagicMock()
         fake_creds.token = "tok"
-        with patch("app.platform.credential_injector.load_gcp_credentials", return_value=fake_creds):
+        with patch("app.adapters.credentials.credential_injector.load_gcp_credentials", return_value=fake_creds):
             api_client = conn.build_out_of_cluster_client()
         assert api_client.configuration.host == "https://5.6.7.8"
 
@@ -108,7 +108,7 @@ class TestBuildOutOfClusterClient:
         assert conn._client_created_at == 0.0
         fake_creds = MagicMock()
         fake_creds.token = "tok"
-        with patch("app.platform.credential_injector.load_gcp_credentials", return_value=fake_creds):
+        with patch("app.adapters.credentials.credential_injector.load_gcp_credentials", return_value=fake_creds):
             conn.build_out_of_cluster_client()
         assert conn._client_created_at > 0.0
 
