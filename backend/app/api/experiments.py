@@ -655,7 +655,7 @@ async def list_experiment_files(
             FileResponse(
                 id=f.id,
                 filename=f.filename,
-                gcs_uri=f.gcs_uri,
+                gcs_uri=f.storage_uri,
                 size_bytes=f.size_bytes,
                 md5_checksum=f.md5_checksum,
                 file_type=f.file_type,

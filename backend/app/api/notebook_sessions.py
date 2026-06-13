@@ -380,7 +380,7 @@ async def get_session_provenance(
         file_info = {
             "id": f.id,
             "filename": f.filename,
-            "gcs_uri": f.gcs_uri,
+            "gcs_uri": f.storage_uri,
             "file_type": f.file_type,
             "size_bytes": f.size_bytes,
         }

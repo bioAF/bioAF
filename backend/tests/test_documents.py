@@ -52,6 +52,29 @@ async def test_get_document(client, admin_token, sample_document):
 
 
 @pytest.mark.asyncio
+async def test_get_document_file_uri_sources_storage_uri(client, admin_token, sample_document, session):
+    """Stage 3a: the embedded FileResponse.gcs_uri is sourced from the neutral
+    storage_uri column. Diverge the columns (raw UPDATE bypasses the sync shim)
+    and assert the response carries the storage_uri value."""
+    from sqlalchemy import text
+
+    neutral = "gs://neutral-bucket/protocol-from-storage-uri.pdf"
+    await session.execute(
+        text("UPDATE files SET storage_uri = :s WHERE gcs_uri = :g").bindparams(
+            s=neutral, g="gs://test-bucket/protocol.pdf"
+        )
+    )
+    await session.commit()
+
+    resp = await client.get(
+        f"/api/documents/{sample_document.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["file"]["gcs_uri"] == neutral
+
+
+@pytest.mark.asyncio
 async def test_update_document(client, admin_token, sample_document):
     resp = await client.patch(
         f"/api/documents/{sample_document.id}",

@@ -17,7 +17,7 @@ def _pub_response(pub) -> CellxgenePublicationResponse:
         file_resp = FileResponse(
             id=pub.file.id,
             filename=pub.file.filename,
-            gcs_uri=pub.file.gcs_uri,
+            gcs_uri=pub.file.storage_uri,
             size_bytes=pub.file.size_bytes,
             md5_checksum=pub.file.md5_checksum,
             file_type=pub.file.file_type,
@@ -115,7 +115,7 @@ async def list_publishable_files(
         CellxgenePublishableFile(
             id=f.id,
             filename=f.filename,
-            gcs_uri=f.gcs_uri,
+            gcs_uri=f.storage_uri,
             size_bytes=f.size_bytes,
             file_type=f.file_type,
             project_name=f.project.name if f.project else None,
@@ -153,7 +153,7 @@ async def inspect_file(
     if not file:
         raise HTTPException(404, "File not found")
 
-    info = await inspect_h5ad(file.gcs_uri)
+    info = await inspect_h5ad(file.storage_uri)
     return info
 
 
