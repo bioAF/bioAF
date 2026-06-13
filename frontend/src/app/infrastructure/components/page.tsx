@@ -15,6 +15,7 @@ import { InfraUpdatesCard } from "@/components/infrastructure/InfraUpdatesCard";
 import { useDeploymentProgress } from "@/hooks/useDeploymentProgress";
 import { isAuthenticated } from "@/lib/auth";
 import { useCapabilities } from "@/hooks/useCapabilities";
+import { useStackOptions } from "@/hooks/useStackOptions";
 import { GCP_REGIONS, zonesForRegion } from "@/lib/gcp-regions";
 import { api } from "@/lib/api";
 import { invalidateComponentCache } from "@/hooks/useComponents";
@@ -118,6 +119,10 @@ const CATEGORY_ORDER = [
 export default function InfraComponentsPage() {
   const router = useRouter();
   const { has } = useCapabilities();
+  // Provider-appropriate stack labels (GCP -> GKE+GCS, AWS -> EKS+S3); fails safe
+  // to GCP defaults so a GCP install renders unchanged.
+  const { kubernetesOption } = useStackOptions();
+  const k8sStackLabel = kubernetesOption?.label ?? "Kubernetes + GCS";
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const [tfStatus, setTfStatus] = useState<TerraformStatus | null>(null);
@@ -594,13 +599,14 @@ export default function InfraComponentsPage() {
                 <div className="bg-white rounded-lg shadow-md border-2 border-blue-200 p-6">
                   <div className="flex items-start justify-between mb-3">
                     <h3 className="text-lg font-semibold text-blue-900">
-                      Kubernetes + GCS (Recommended)
+                      {k8sStackLabel} (Recommended)
                     </h3>
                   </div>
                   <p className="text-sm text-gray-600 mb-4">
                     Cloud-native compute with automatic scaling. Pipeline jobs run as
-                    containers on Google Kubernetes Engine. Storage is pay-per-use with
-                    Google Cloud Storage. Best for most teams.
+                    containers on managed {kubernetesOption?.compute_label ?? "Kubernetes (GKE)"}.
+                    Storage is pay-per-use with {kubernetesOption?.storage_label ?? "GCS"} object
+                    storage. Best for most teams.
                   </p>
                   <p className="text-xs text-gray-500 mb-4">
                     $0 when idle. Scales automatically with your workloads.
@@ -667,7 +673,7 @@ export default function InfraComponentsPage() {
               {/* Compute Stack Banner */}
               <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mb-6">
                 <span className="text-sm font-medium text-blue-700">
-                  Compute Stack: Kubernetes + GCS
+                  Compute Stack: {k8sStackLabel}
                 </span>
                 <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
                   Active
