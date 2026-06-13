@@ -623,6 +623,15 @@ class TestBucketEnumeration:
             }
         ]
 
+    def test_native_upload_client_returns_raw_client(self, gcs_adapter):
+        """native_upload_client hands back the raw GCS client (transitional escape
+        hatch for the reference-upload helpers + half-built importer)."""
+        sentinel = MagicMock()
+        with patch.object(gcs_adapter, "_get_gcs_client", return_value=sentinel) as factory:
+            client = gcs_adapter.native_upload_client("creds")
+        assert client is sentinel
+        factory.assert_called_once_with("creds")
+
     @pytest.mark.asyncio
     async def test_delete_bucket_force(self, gcs_adapter):
         """delete_bucket wipes the bucket and all contents (force=True). DESTRUCTIVE;

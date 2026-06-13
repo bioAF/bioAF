@@ -169,37 +169,26 @@ def _iter_app_modules(*, exclude_adapters: bool):
 # SHRINKS: each later phase drains the leaks it owns and deletes the matching
 # entries. A new leak not listed here fails the build; an entry whose import is
 # gone fails the build as stale (see the stale-entry test below).
-SDK_IMPORT_ALLOWLIST: set[tuple[str, str]] = {
-    # Object storage (GCS). Phase 3 drained all object-CRUD callers (46 -> 19).
-    # The entries below remain by deliberate scope decision, not omission:
-    #   - gcs_storage.py: DRAINED in Phase 9 (Stage 3b). get_bucket_metrics now
-    #     maps the storage adapter's neutral get_bucket_admin_metrics; the bucket
-    #     walk lives in adapters/storage/gcs.py.
-    #   - reference_data_service.py: hands a raw client to the half-built GKE-Job
-    #     ReferenceImporter; drains when the importer is addressed.
-    #   - storage_service.py: DRAINED in Phase 9 (Stage 3b). Lifecycle + bucket-stat
-    #     enumeration now run in adapters/storage/gcs.py via list_lifecycle_policies /
-    #     query_bucket_stats; the service only scopes the prefix.
-    #   - gcp_config.py: DRAINED in Phase 9 (Stage 3b.3). The whole GCP account
-    #     validation routine (+ its 4 SDK clients) relocated to
-    #     adapters/validation/gcp.py; the service module is a re-export shim.
-    #   - orphaned_resource_service.py: DRAINED in Phase 9 (Stage 3b.5). Whole-bucket
-    #     delete -> StorageProvider.delete_bucket; cluster scan/probe/delete ->
-    #     ComputeProvider.list_cluster_names / probe_cluster / delete_cluster.
-    ("services/reference_data_service.py", "google.cloud.storage"),
-    # GCE capacity probe was drained in Phase 6 (folded into the GCE work-node
-    # adapter as WorkNodeProvider.probe_zone_capacity; the compute_v1 import now
-    # lives in adapters/work_nodes/gce_capacity.py).
-    # iam_admin_v1 drained in Phase 9B (routed through adapters/iam/IamProvider).
-    # stack_deployment.py container_v1 DRAINED in Phase 9 (Stage 3b.4): cluster
-    # status reads now go through ComputeProvider.get_cluster_detail.
-    # gcp_config.py's container_v1/resourcemanager_v3/service_usage_v1/storage
-    # DRAINED in Phase 9 (Stage 3b.3): relocated to adapters/validation/gcp.py.
-    # orphaned_resource_service.py's storage + container_v1 DRAINED in Phase 9
-    # (Stage 3b.5): whole-bucket + whole-cluster deletes routed through the
-    # storage/compute adapters.
-    # bigquery drained in Phase 9D (routed through adapters/billing/BillingProvider).
-}
+# Phase 9 (Stage 3b) drained the last GCP cloud-SDK imports out of the service
+# layer. Provenance of every former entry (the set is now EMPTY, frozen at 0; a
+# new google.cloud/k8s SDK import outside adapters/ must route through an adapter,
+# not get added here):
+#   - gcs_storage.py / storage_service.py: bucket metrics + lifecycle/stat
+#     enumeration -> adapters/storage/gcs.py (Stage 3b.2).
+#   - gcp_config.py: the whole GCP account-validation routine (+ its 4 SDK
+#     clients) relocated to adapters/validation/gcp.py (Stage 3b.3); the service
+#     module is a re-export shim.
+#   - stack_deployment.py container_v1: cluster status -> ComputeProvider.
+#     get_cluster_detail (Stage 3b.4).
+#   - orphaned_resource_service.py storage + container_v1: whole-bucket +
+#     whole-cluster deletes -> StorageProvider.delete_bucket /
+#     ComputeProvider.list_cluster_names/probe_cluster/delete_cluster (3b.5).
+#   - reference_data_service.py: resumable-upload + blob helpers + the half-built
+#     URL importer source their raw client from
+#     StorageProvider.native_upload_client (Stage 3b.1).
+#   - GCE capacity probe -> adapters/work_nodes/gce_capacity.py (Phase 6);
+#     iam_admin_v1 -> adapters/iam (Phase 9B); bigquery -> adapters/billing (9D).
+SDK_IMPORT_ALLOWLIST: set[tuple[str, str]] = set()
 
 
 def test_no_cloud_sdk_imports_outside_adapters():
@@ -240,7 +229,7 @@ def test_sdk_allowlist_count_is_pinned():
 
     Decrement this as phases drain leaks; it must reach 0 by end of Phase 9.
     """
-    assert len(SDK_IMPORT_ALLOWLIST) == 1
+    assert len(SDK_IMPORT_ALLOWLIST) == 0
 
 
 # --- Tree scan: no adapter imports services (the layering inversion) ---------

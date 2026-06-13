@@ -861,6 +861,15 @@ class GcsStorageProvider(StorageProvider):
         client = self._get_gcs_client(creds)
         client.bucket(bucket_name).delete(force=True)
 
+    def native_upload_client(self, credentials=None):
+        """Raw synchronous google-cloud-storage client (transitional escape hatch).
+
+        Mirrors the prior ``storage.Client(credentials=...)`` construction the
+        reference-data upload helpers + the half-built importer used inline, so
+        the SDK import now lives here instead of the service layer.
+        """
+        return self._get_gcs_client(credentials)
+
     def _gcs_bucket_admin_metrics(self, bucket_name: str, creds) -> BucketAdminMetrics:
         client = self._get_gcs_client(creds)
         bucket = client.get_bucket(bucket_name)

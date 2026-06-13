@@ -395,6 +395,20 @@ class StorageProvider(ABC):
         """
         raise NotImplementedError
 
+    def native_upload_client(self, credentials=None):
+        """Return the backend's raw, SYNCHRONOUS object-store client.
+
+        TRANSITIONAL escape hatch for callers that still need direct SDK access
+        rather than the neutral async object methods: the reference-data upload
+        machinery (resumable-session minting, blob enumeration) and the half-built
+        reference URL importer, which streams resumable uploads from a worker
+        thread (memory: do not build out the importer in isolation). It keeps the
+        cloud SDK import inside ``adapters/`` while those callers await a proper
+        seam. Remove when they move onto the neutral methods. Backends without a
+        native client (NFS) raise.
+        """
+        raise NotImplementedError
+
     async def list_lifecycle_policies(self, prefix: str) -> list[dict]:
         """List lifecycle policy status for buckets matching ``prefix``.
 

@@ -460,12 +460,13 @@ class ReferenceDataService:
     ) -> str:
         """Create a GCS resumable upload session and return its session URL.
 
-        Tests monkey-patch this to avoid real GCS calls; production calls
-        Google Cloud Storage via the SDK.
+        Tests monkey-patch this to avoid real GCS calls; production mints the
+        session via the storage adapter's raw client (the resumable-session API
+        has no neutral object-store analog yet).
         """
-        from google.cloud import storage as gcs_storage
+        from app.adapters.registry import get_storage_adapter
 
-        client = gcs_storage.Client(credentials=credentials)
+        client = get_storage_adapter().native_upload_client(credentials)
         bucket = client.bucket(bucket_name)
         blob = bucket.blob(blob_path)
         return blob.create_resumable_upload_session(
@@ -584,18 +585,18 @@ class ReferenceDataService:
     @staticmethod
     def _list_uploaded_blobs(bucket_name: str, prefix: str, credentials=None):
         """List blobs under `prefix`. Tests monkey-patch this."""
-        from google.cloud import storage as gcs_storage
+        from app.adapters.registry import get_storage_adapter
 
-        client = gcs_storage.Client(credentials=credentials)
+        client = get_storage_adapter().native_upload_client(credentials)
         bucket = client.bucket(bucket_name)
         return list(bucket.list_blobs(prefix=prefix))
 
     @staticmethod
     def _delete_blobs(bucket_name: str, prefix: str, credentials=None) -> None:
         """Delete every blob under `prefix`. Tests monkey-patch this."""
-        from google.cloud import storage as gcs_storage
+        from app.adapters.registry import get_storage_adapter
 
-        client = gcs_storage.Client(credentials=credentials)
+        client = get_storage_adapter().native_upload_client(credentials)
         bucket = client.bucket(bucket_name)
         for blob in bucket.list_blobs(prefix=prefix):
             try:
@@ -814,10 +815,14 @@ class ReferenceDataService:
 
         def _build_and_run() -> None:
             import httpx
-            from google.cloud import storage as gcs_storage
+
+            from app.adapters.registry import get_storage_adapter
 
             with httpx.Client(timeout=httpx.Timeout(connect=30.0, read=None, write=60.0, pool=None)) as http_client:
-                storage_client = gcs_storage.Client(credentials=credentials) if credentials else gcs_storage.Client()
+                # The half-built importer streams resumable uploads from this
+                # worker thread via the raw client; the storage adapter owns the
+                # SDK import (transitional escape hatch).
+                storage_client = get_storage_adapter().native_upload_client(credentials)
                 # Capture the worker's ImportResult so the service can
                 # finalize the dataset (write file rows + flip status)
                 # once the bytes are safely in GCS.

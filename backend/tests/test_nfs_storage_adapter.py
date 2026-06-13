@@ -233,6 +233,12 @@ async def test_bucket_admin_metrics_degenerate(nfs):
     assert result.versioning_enabled is False
 
 
+def test_native_upload_client_unsupported(nfs):
+    """NFS has no native object-store client: the escape hatch raises."""
+    with pytest.raises(NotImplementedError):
+        nfs.native_upload_client()
+
+
 # -- integration: stage inputs -> collect outputs -----------------------------
 
 
