@@ -143,7 +143,7 @@ class GeoExportService:
         files_result = await session.execute(
             select(File).where(
                 File.organization_id == org_id,
-                File.gcs_uri.contains(f"/experiments/{experiment_id}/"),
+                File.storage_uri.contains(f"/experiments/{experiment_id}/"),
             )
         )
         files = list(files_result.scalars().all())
@@ -236,22 +236,23 @@ class GeoExportService:
             sd["files"] = {
                 "raw_filenames": ", ".join(f.filename for f in s_raw),
                 "processed_filenames": ", ".join(f.filename for f in s_proc),
-                "processed_gcs_uris": ", ".join(f.gcs_uri for f in s_proc),
+                "processed_gcs_uris": ", ".join(f.storage_uri for f in s_proc),
             }
 
         files_data: dict | None = None
         if files:
             files_data = {
                 "raw_files": [
-                    {"filename": f.filename, "md5_checksum": f.md5_checksum, "gcs_uri": f.gcs_uri} for f in raw_files
+                    {"filename": f.filename, "md5_checksum": f.md5_checksum, "gcs_uri": f.storage_uri}
+                    for f in raw_files
                 ],
                 "processed_files": [
-                    {"filename": f.filename, "md5_checksum": f.md5_checksum, "gcs_uri": f.gcs_uri}
+                    {"filename": f.filename, "md5_checksum": f.md5_checksum, "gcs_uri": f.storage_uri}
                     for f in processed_files
                 ],
                 "raw_filenames": ", ".join(f.filename for f in raw_files),
                 "processed_filenames": ", ".join(f.filename for f in processed_files),
-                "processed_gcs_uris": ", ".join(f.gcs_uri for f in processed_files),
+                "processed_gcs_uris": ", ".join(f.storage_uri for f in processed_files),
             }
 
         return experiment_data, samples_data, pipeline_data, files_data

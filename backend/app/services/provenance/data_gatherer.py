@@ -300,7 +300,7 @@ class ProvenanceDataGatherer:
                     "md5": f.md5_checksum,
                     "sha256": f.sha256_checksum,
                     "source_type": f.source_type,
-                    "gcs_uri": f.gcs_uri,
+                    "gcs_uri": f.storage_uri,
                 }
                 for f in files
             ],
@@ -508,7 +508,7 @@ class ProvenanceDataGatherer:
                     "size_bytes": f.size_bytes,
                     "md5": f.md5_checksum,
                     "sha256": f.sha256_checksum,
-                    "gcs_uri": f.gcs_uri,
+                    "gcs_uri": f.storage_uri,
                     "artifact_type": f.artifact_type,
                     "upload_timestamp": _dt(f.upload_timestamp),
                 }
@@ -522,7 +522,7 @@ class ProvenanceDataGatherer:
                     "size_bytes": f.size_bytes,
                     "md5": f.md5_checksum,
                     "sha256": f.sha256_checksum,
-                    "gcs_uri": f.gcs_uri,
+                    "gcs_uri": f.storage_uri,
                     "artifact_type": f.artifact_type,
                     "source_pipeline_run_id": f.source_pipeline_run_id,
                     "upload_timestamp": _dt(f.upload_timestamp),
@@ -868,7 +868,7 @@ class ProvenanceDataGatherer:
                             "id": inp_file.id,
                             "filename": inp_file.filename,
                             "file_type": inp_file.file_type,
-                            "gcs_uri": inp_file.gcs_uri,
+                            "gcs_uri": inp_file.storage_uri,
                         }
                     )
                 if session_inputs:
@@ -955,7 +955,7 @@ class ProvenanceDataGatherer:
                     "md5": file.md5_checksum,
                     "sha256": file.sha256_checksum,
                 },
-                "gcs_uri": file.gcs_uri,
+                "gcs_uri": file.storage_uri,
                 "source": {
                     "type": "pipeline_output" if file.source_pipeline_run_id else file.source_type,
                     "pipeline_run": source_run_data,

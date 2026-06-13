@@ -643,7 +643,7 @@ class CustomPipelineService:
                     "file_id": f.id,
                     "filename": f.filename,
                     "relative_path": rel_path,
-                    "gcs_uri": f.gcs_uri,
+                    "gcs_uri": f.storage_uri,
                     "project_id": f.project_id,
                     "project_name": name_cache["projects"].get(f.project_id) if f.project_id else None,
                     "experiment_id": f.experiment_id,

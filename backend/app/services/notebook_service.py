@@ -197,7 +197,7 @@ class NotebookService:
                     input_files_spec.append(
                         {
                             "file_id": f.id,
-                            "gcs_uri": f.gcs_uri,
+                            "gcs_uri": f.storage_uri,
                             "relative_path": rel_path,
                         }
                     )
