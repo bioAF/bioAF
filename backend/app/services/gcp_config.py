@@ -15,33 +15,24 @@ In ``vm_default`` mode the IAM-permissions check splits in two:
 The merged result is the AND of the two probes. Legacy ``service_account_key``
 mode keeps the single-probe code path so existing installs see no change.
 
-External GCP names (``service_account``, ``resourcemanager_v3``, ``storage``,
-``google_auth_default``, ``impersonated_credentials``, ``service_usage_v1``,
-``container_v1``) are module-level for tests to patch.
+External GCP SDK clients (``resourcemanager_v3``, ``storage``,
+``service_usage_v1``, ``container_v1``) are module-level for tests to patch;
+credential resolution goes through the Credentials seam.
 """
 
-import json
 from pathlib import Path
 
-import google.auth as _google_auth
 import yaml
-from google.auth import impersonated_credentials as _impersonated_credentials
 from google.cloud import container_v1, resourcemanager_v3, storage
 from google.cloud import service_usage_v1
-from google.oauth2 import service_account
 
+from app.adapters.credentials import get_credentials_provider
 from app.schemas.gcp_config import (
     GCPValidationCheck,
     GCPValidationResult,
     PermissionDetail,
     SAProbeResult,
 )
-
-# Aliases for patching in tests
-google_auth_default = _google_auth.default
-impersonated_credentials = _impersonated_credentials
-
-_GCP_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 
 # Maps each tested IAM permission to the role we recommend for granting it.
 _PERMISSION_ROLE_MAP: dict[str, str] = {
@@ -224,27 +215,28 @@ def validate_gcp_credentials(
     # Track creds available for downstream probes.
     app_creds = None
     bootstrap_creds = None
-    legacy_creds = None
     use_dual_probe = credential_source == "vm_default"
+
+    provider = get_credentials_provider()
+    config = {
+        "gcp_credential_source": credential_source,
+        "gcp_service_account_key": service_account_key or "",
+    }
 
     # ------------------------------------------------------------------
     # Check 1: Load credentials
     # ------------------------------------------------------------------
     try:
         if credential_source == "service_account_key":
-            key_data = json.loads(service_account_key or "")
-            legacy_creds = service_account.Credentials.from_service_account_info(key_data, scopes=_GCP_SCOPES)
-            primary_creds = legacy_creds
+            primary_creds = provider.load_credentials(config)
             msg = "Credentials loaded successfully"
         else:
-            source_creds, _ = google_auth_default(scopes=_GCP_SCOPES)
-            app_creds = source_creds
+            # The dual probe needs both the un-impersonated bioaf-app identity
+            # and the impersonated bioaf-bootstrap identity, so resolve each
+            # explicitly (impersonate_target=None vs the bootstrap email).
+            app_creds = provider.load_credentials(config, impersonate_target=None)
             if service_account_email:
-                bootstrap_creds = impersonated_credentials.Credentials(
-                    source_credentials=source_creds,
-                    target_principal=service_account_email,
-                    target_scopes=_GCP_SCOPES,
-                )
+                bootstrap_creds = provider.load_credentials(config, impersonate_target=service_account_email)
                 primary_creds = bootstrap_creds
                 msg = f"Credentials loaded successfully (impersonating {service_account_email})"
             else:

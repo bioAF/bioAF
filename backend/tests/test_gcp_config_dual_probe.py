@@ -79,21 +79,18 @@ def test_app_and_bootstrap_role_lists_are_distinct():
 @patch("app.services.gcp_config.container_v1")
 @patch("app.services.gcp_config.storage")
 @patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.impersonated_credentials")
-@patch("app.services.gcp_config.google_auth_default")
+@patch("app.services.gcp_config.get_credentials_provider")
 def test_vm_default_dual_probe_both_pass(
-    mock_auth_default,
-    mock_impersonated,
+    mock_get_provider,
     mock_rm,
     mock_storage,
     mock_gke,
     mock_su,
 ):
     """Both probes pass -> merged passed=True; both probe sub-results populated."""
-    mock_source = MagicMock(name="adc_source")
-    mock_auth_default.return_value = (mock_source, "my-project")
-    mock_imp = MagicMock(name="impersonated")
-    mock_impersonated.Credentials.return_value = mock_imp
+    provider = MagicMock()
+    provider.load_credentials.return_value = MagicMock(name="creds")
+    mock_get_provider.return_value = provider
 
     mock_rm.ProjectsClient.return_value.get_project.return_value = MagicMock()
     # testIamPermissions echoes back whatever permissions were asked.
@@ -124,21 +121,18 @@ def test_vm_default_dual_probe_both_pass(
 @patch("app.services.gcp_config.container_v1")
 @patch("app.services.gcp_config.storage")
 @patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.impersonated_credentials")
-@patch("app.services.gcp_config.google_auth_default")
+@patch("app.services.gcp_config.get_credentials_provider")
 def test_vm_default_dual_probe_app_missing_permission(
-    mock_auth_default,
-    mock_impersonated,
+    mock_get_provider,
     mock_rm,
     mock_storage,
     mock_gke,
     mock_su,
 ):
     """If the app probe is missing a permission, merged passed=False, app_probe.passed=False."""
-    mock_source = MagicMock(name="adc_source")
-    mock_auth_default.return_value = (mock_source, "my-project")
-    mock_imp = MagicMock(name="impersonated")
-    mock_impersonated.Credentials.return_value = mock_imp
+    provider = MagicMock()
+    provider.load_credentials.return_value = MagicMock(name="creds")
+    mock_get_provider.return_value = provider
 
     # Track whether the probe request used app or bootstrap creds by
     # the credentials passed when constructing ProjectsClient. The mock
@@ -176,21 +170,18 @@ def test_vm_default_dual_probe_app_missing_permission(
 @patch("app.services.gcp_config.container_v1")
 @patch("app.services.gcp_config.storage")
 @patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.impersonated_credentials")
-@patch("app.services.gcp_config.google_auth_default")
+@patch("app.services.gcp_config.get_credentials_provider")
 def test_vm_default_dual_probe_bootstrap_missing_permission(
-    mock_auth_default,
-    mock_impersonated,
+    mock_get_provider,
     mock_rm,
     mock_storage,
     mock_gke,
     mock_su,
 ):
     """If the bootstrap probe is missing a permission, merged passed=False, bootstrap_probe.passed=False."""
-    mock_source = MagicMock(name="adc_source")
-    mock_auth_default.return_value = (mock_source, "my-project")
-    mock_imp = MagicMock(name="impersonated")
-    mock_impersonated.Credentials.return_value = mock_imp
+    provider = MagicMock()
+    provider.load_credentials.return_value = MagicMock(name="creds")
+    mock_get_provider.return_value = provider
 
     def fake_test_iam_permissions(resource, permissions):
         perms = list(permissions)
@@ -223,11 +214,12 @@ def test_vm_default_dual_probe_bootstrap_missing_permission(
 @patch("app.services.gcp_config.container_v1")
 @patch("app.services.gcp_config.storage")
 @patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.service_account")
-def test_service_account_key_mode_skips_dual_probe(mock_sa, mock_rm, mock_storage, mock_gke, mock_su):
+@patch("app.services.gcp_config.get_credentials_provider")
+def test_service_account_key_mode_skips_dual_probe(mock_get_provider, mock_rm, mock_storage, mock_gke, mock_su):
     """Legacy key mode keeps the single-probe code path; probe sub-results stay None."""
-    mock_creds = MagicMock()
-    mock_sa.Credentials.from_service_account_info.return_value = mock_creds
+    provider = MagicMock()
+    provider.load_credentials.return_value = MagicMock()
+    mock_get_provider.return_value = provider
     mock_rm.ProjectsClient.return_value.get_project.return_value = MagicMock()
     mock_rm.ProjectsClient.return_value.test_iam_permissions.side_effect = lambda resource, permissions: (
         _mock_iam_response(list(permissions))
