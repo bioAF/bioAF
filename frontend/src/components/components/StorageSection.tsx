@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useStackOptions } from "@/hooks/useStackOptions";
+import { storageDisplay, type StorageDisplay } from "@/lib/storageDisplay";
 import { AutoIngestControls } from "./AutoIngestControls";
 
 interface BucketMetrics {
@@ -57,9 +59,15 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function IngestGuidancePanel({ bucket }: { bucket: BucketMetrics }) {
-  const gsUri = `gs://${bucket.bucket_name}/`;
-  const gsutilCmd = `gsutil cp your_file.fastq.gz ${gsUri}`;
+function IngestGuidancePanel({
+  bucket,
+  storage,
+}: {
+  bucket: BucketMetrics;
+  storage: StorageDisplay;
+}) {
+  const objectUri = `${storage.uriScheme}${bucket.bucket_name}/`;
+  const uploadCmd = `${storage.cliCopy} your_file.fastq.gz ${objectUri}`;
 
   return (
     <div className="mt-3 p-3 bg-teal-50 border border-teal-200 rounded text-sm space-y-2">
@@ -67,8 +75,8 @@ function IngestGuidancePanel({ bucket }: { bucket: BucketMetrics }) {
         How to send data to bioAF
       </p>
       <p className="text-xs text-teal-700">
-        Upload files to this GCS bucket. bioAF automatically detects new files,
-        parses their filenames, and catalogs them.
+        Upload files to this {storage.label} bucket. bioAF automatically detects
+        new files, parses their filenames, and catalogs them.
       </p>
       <div className="flex items-center gap-2">
         <span className="text-xs text-gray-600">Bucket:</span>
@@ -79,9 +87,9 @@ function IngestGuidancePanel({ bucket }: { bucket: BucketMetrics }) {
       </div>
       <div className="flex items-center gap-2">
         <code className="flex-1 text-xs bg-white border border-teal-200 rounded px-2 py-1 font-mono text-gray-800 truncate">
-          {gsutilCmd}
+          {uploadCmd}
         </code>
-        <CopyButton text={gsutilCmd} />
+        <CopyButton text={uploadCmd} />
       </div>
       <div className="flex gap-4 text-xs text-teal-700">
         <Link
@@ -102,10 +110,12 @@ function BucketCard({
   bucket,
   pubsubConfigured,
   onUpdateStorage,
+  storage,
 }: {
   bucket: BucketMetrics;
   pubsubConfigured?: boolean;
   onUpdateStorage?: () => void;
+  storage: StorageDisplay;
 }) {
   const isIngest = bucket.purpose === "ingest";
   const cardClass = isIngest
@@ -144,7 +154,7 @@ function BucketCard({
           ))}
         </div>
       )}
-      {isIngest && <IngestGuidancePanel bucket={bucket} />}
+      {isIngest && <IngestGuidancePanel bucket={bucket} storage={storage} />}
       {isIngest && (
         <AutoIngestControls
           storageDeployed={true}
@@ -159,9 +169,11 @@ function BucketCard({
 function DeployStorageCard({
   terraformInitialized,
   onDeploy,
+  storage,
 }: {
   terraformInitialized: boolean;
   onDeploy: () => void;
+  storage: StorageDisplay;
 }) {
   return (
     <div className="bg-white rounded-lg border-2 border-dashed border-gray-300 p-6 text-center">
@@ -169,8 +181,8 @@ function DeployStorageCard({
         Storage Infrastructure
       </h3>
       <p className="text-sm text-gray-500 mb-4">
-        Storage infrastructure has not been deployed. Deploy GCS buckets to
-        enable file storage.
+        Storage infrastructure has not been deployed. Deploy {storage.label}{" "}
+        buckets to enable file storage.
       </p>
       {!terraformInitialized && (
         <p className="text-xs text-amber-600 mb-3">
@@ -203,6 +215,10 @@ export function StorageSection({
   onUpdateStorage,
 }: StorageSectionProps) {
   const [buckets, setBuckets] = useState<BucketMetrics[]>([]);
+  // Provider-appropriate object-storage labels (GCS / S3), resolved from the
+  // install's cloud via /stack-options; defaults to GCS so GCP is unchanged.
+  const { kubernetesOption } = useStackOptions();
+  const storage = storageDisplay(kubernetesOption?.storage_backend);
 
   useEffect(() => {
     if (!storageDeployed) return;
@@ -218,6 +234,7 @@ export function StorageSection({
       <DeployStorageCard
         terraformInitialized={terraformInitialized}
         onDeploy={onDeploy}
+        storage={storage}
       />
     );
   }
@@ -233,6 +250,7 @@ export function StorageSection({
             bucket={bucket}
             pubsubConfigured={pubsubConfigured}
             onUpdateStorage={onUpdateStorage}
+            storage={storage}
           />
         ))}
       </div>
