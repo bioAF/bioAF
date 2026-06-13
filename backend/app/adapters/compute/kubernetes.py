@@ -21,6 +21,7 @@ from app.adapters.base import ComputeProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.kubernetes.connection import GkeConnection
 from app.adapters.models import (
+    ClusterDetail,
     ClusterMetrics,
     ClusterStatus,
     CostEstimate,
@@ -260,6 +261,44 @@ class KubernetesComputeProvider(ComputeProvider):
     async def get_cluster_metrics(self) -> ClusterMetrics:
         d = self._local_cluster_metrics() if self.is_local else await self._k8s_get_cluster_metrics()
         return _cluster_metrics_from_dict(d)
+
+    async def get_cluster_detail(self) -> ClusterDetail:
+        """Cluster name/status/node-count + per-pool detail for the stack view.
+
+        Owns the GKE cluster read that previously lived in
+        stack_deployment.get_cluster_status (Phase 9 / Stage 3b). Status fields
+        use the uppercase enum-name mapping with an ``UNKNOWN`` default to
+        preserve the stack view's existing contract (distinct from the lowercased
+        controller_status that get_cluster_status reports).
+        """
+        await self.load_cluster_config()
+        cfg = self._cluster_config or {}
+        cluster_name = _resolve_cfg(cfg, "gke_cluster_name", "GKE_CLUSTER_NAME")
+        project_id = _resolve_cfg(cfg, "gcp_project_id", "GCP_PROJECT_ID")
+        region = _resolve_cfg(cfg, "gcp_region", "GCP_REGION", default="us-central1")
+
+        gke_client = self._get_gke_client()
+        cluster = gke_client.get_cluster(name=f"projects/{project_id}/locations/{region}/clusters/{cluster_name}")
+
+        node_pools = [
+            NodePoolStatus(
+                name=pool.name,
+                machine_type=pool.config.machine_type,
+                min_nodes=pool.autoscaling.min_node_count,
+                max_nodes=pool.autoscaling.max_node_count,
+                current_nodes=pool.initial_node_count,
+                spot=pool.config.spot,
+                status=self._GKE_STATUS_MAP.get(pool.status, "UNKNOWN"),
+            )
+            for pool in cluster.node_pools
+        ]
+
+        return ClusterDetail(
+            name=cluster.name,
+            status=self._GKE_STATUS_MAP.get(cluster.status, "UNKNOWN"),
+            node_count=cluster.current_node_count,
+            node_pools=node_pools,
+        )
 
     def _cost_estimate_dict(self, job_spec: dict) -> dict:
         # Return the hourly node rate for the pipeline pool so the UI

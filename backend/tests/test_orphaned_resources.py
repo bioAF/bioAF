@@ -173,7 +173,7 @@ async def test_cleanup_gke_cluster(session, admin_user):
 
     with (
         patch(
-            "app.services.stack_deployment._get_gke_client",
+            "app.services.orphaned_resource_service._get_gke_client",
             return_value=mock_client,
         ),
         patch(
@@ -284,7 +284,7 @@ async def test_cleanup_failure_sets_status_failed(session, admin_user):
 
     with (
         patch(
-            "app.services.stack_deployment._get_gke_client",
+            "app.services.orphaned_resource_service._get_gke_client",
             return_value=mock_client,
         ),
         patch(
@@ -369,7 +369,7 @@ async def test_cleanup_orphaned_resource_endpoint(client: AsyncClient, admin_tok
 
     with (
         patch(
-            "app.services.stack_deployment._get_gke_client",
+            "app.services.orphaned_resource_service._get_gke_client",
             return_value=mock_client,
         ),
         patch(

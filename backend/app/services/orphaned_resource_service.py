@@ -166,8 +166,6 @@ class OrphanedResourceService:
         resource: OrphanedResource,
     ) -> None:
         """Delete a GKE cluster using the SA credentials."""
-        from app.services.stack_deployment import _get_gke_client, _get_gke_credentials
-
         credentials = await _get_gke_credentials(session)
         client = _get_gke_client(credentials)
         cluster_path = (

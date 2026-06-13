@@ -154,6 +154,22 @@ class ClusterStatus(BaseModel):
     provider_details: dict = Field(default_factory=dict)
 
 
+class ClusterDetail(BaseModel):
+    """Provider-neutral cluster detail with node-pool breakdown.
+
+    Richer than ``ClusterStatus`` (which the compute dashboard aggregates): it
+    carries the cluster's own name/status/node-count plus per-pool detail, with
+    ``status`` fields already mapped to neutral strings so the service layer
+    consumes no backend status enum. Backends without a managed control plane
+    (SLURM) do not implement it.
+    """
+
+    name: str
+    status: str
+    node_count: int = 0
+    node_pools: list[NodePoolStatus] = Field(default_factory=list)
+
+
 class NodePoolMetrics(BaseModel):
     name: str
     cpu_utilization_pct: float | None = None

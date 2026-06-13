@@ -10,6 +10,7 @@ from typing import BinaryIO
 from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.models import (
     CellxgeneInstance,
+    ClusterDetail,
     ClusterMetrics,
     ClusterStatus,
     CostEstimate,
@@ -78,6 +79,16 @@ class ComputeProvider(ABC):
     @abstractmethod
     async def get_cluster_metrics(self) -> ClusterMetrics:
         """Get cluster metrics: CPU, memory, cost rate."""
+
+    async def get_cluster_detail(self) -> ClusterDetail:
+        """Cluster name/status/node-count plus per-pool detail, status pre-mapped.
+
+        Richer than ``get_cluster_status`` and used by the stack-status view.
+        Backends without a managed control plane (SLURM) do not implement it;
+        the default raises so callers fall back (the stack view reports no
+        cluster). Non-abstract so the interface can grow without a flag day.
+        """
+        raise NotImplementedError
 
     @abstractmethod
     async def get_cost_estimate(self, job_spec: dict) -> CostEstimate:

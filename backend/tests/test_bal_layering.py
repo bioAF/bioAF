@@ -197,7 +197,9 @@ SDK_IMPORT_ALLOWLIST: set[tuple[str, str]] = {
     ("services/gcp_config.py", "google.cloud.service_usage_v1"),
     ("services/orphaned_resource_service.py", "google.cloud.container_v1"),
     # iam_admin_v1 drained in Phase 9B (routed through adapters/iam/IamProvider).
-    ("services/stack_deployment.py", "google.cloud.container_v1"),
+    # stack_deployment.py container_v1 DRAINED in Phase 9 (Stage 3b.4): cluster
+    # status reads now go through ComputeProvider.get_cluster_detail; the shared
+    # GKE client factory moved out (orphaned_resource keeps its own until 3b.5).
     # bigquery drained in Phase 9D (routed through adapters/billing/BillingProvider).
 }
 
@@ -240,7 +242,7 @@ def test_sdk_allowlist_count_is_pinned():
 
     Decrement this as phases drain leaks; it must reach 0 by end of Phase 9.
     """
-    assert len(SDK_IMPORT_ALLOWLIST) == 8
+    assert len(SDK_IMPORT_ALLOWLIST) == 7
 
 
 # --- Tree scan: no adapter imports services (the layering inversion) ---------

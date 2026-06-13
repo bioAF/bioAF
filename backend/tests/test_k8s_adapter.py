@@ -76,6 +76,60 @@ async def test_k8s_adapter_get_cluster_status_with_mock():
 
 
 @pytest.mark.asyncio
+async def test_k8s_adapter_get_cluster_detail_with_mock():
+    """get_cluster_detail returns the stack-view ClusterDetail (name/status/
+    node-count + per-pool detail), with status mapped to the uppercase enum-name
+    contract the stack view expects (distinct from get_cluster_status's lowercase
+    controller_status)."""
+    from app.adapters.compute.kubernetes import KubernetesComputeProvider
+
+    provider = KubernetesComputeProvider()
+    provider._mode = "production"
+    provider._cluster_config = {
+        "gke_cluster_endpoint": "https://10.0.0.1",
+        "gke_cluster_name": "bioaf-test",
+        "gcp_project_id": "test-project",
+        "gcp_region": "us-central1",
+    }
+
+    mock_cluster = MagicMock()
+    mock_cluster.name = "bioaf-test"
+    mock_cluster.status = 2  # RUNNING
+    mock_cluster.current_node_count = 3
+
+    mock_pool = MagicMock()
+    mock_pool.name = "bioaf-pipelines"
+    mock_pool.config.machine_type = "n2-highmem-8"
+    mock_pool.autoscaling.min_node_count = 0
+    mock_pool.autoscaling.max_node_count = 20
+    mock_pool.initial_node_count = 3
+    mock_pool.config.spot = True
+    mock_pool.status = 99  # unmapped -> UNKNOWN
+
+    mock_cluster.node_pools = [mock_pool]
+
+    mock_client = MagicMock()
+    mock_client.get_cluster.return_value = mock_cluster
+
+    with patch(
+        "app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client",
+        return_value=mock_client,
+    ):
+        detail = await provider.get_cluster_detail()
+
+    assert detail.name == "bioaf-test"
+    assert detail.status == "RUNNING"
+    assert detail.node_count == 3
+    assert len(detail.node_pools) == 1
+    pool = detail.node_pools[0]
+    assert pool.name == "bioaf-pipelines"
+    assert pool.machine_type == "n2-highmem-8"
+    assert pool.max_nodes == 20
+    assert pool.spot is True
+    assert pool.status == "UNKNOWN"  # unmapped enum falls back to UNKNOWN
+
+
+@pytest.mark.asyncio
 async def test_k8s_adapter_get_cluster_metrics_with_mock():
     """Adapter get_cluster_metrics returns metrics from mocked GKE API."""
     from app.adapters.compute.kubernetes import KubernetesComputeProvider
