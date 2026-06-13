@@ -256,6 +256,19 @@ class GcsStorageProvider(StorageProvider):
     def parse_uri(self, uri: str) -> tuple[str, str]:
         return self._parse_uri(uri)
 
+    def cli_auth_command(self, key_file: str) -> str:
+        # gsutil consults ~/.boto before GOOGLE_APPLICATION_CREDENTIALS, which in
+        # cloud-sdk:slim picks up the wrong identity even with the SA key mounted.
+        # Activate the SA explicitly and use `gcloud storage` (cli_copy_*), which
+        # honors the activated account directly.
+        return f"gcloud auth activate-service-account --key-file={key_file} --quiet"
+
+    def cli_copy_in(self, uri: str, local_path: str) -> str:
+        return f"gcloud storage cp {uri} {local_path}"
+
+    def cli_copy_out(self, local_path: str, uri: str) -> str:
+        return f"gcloud storage cp -r {local_path} {uri}"
+
     async def read_text(self, uri: str, *, encoding: str = "utf-8") -> str:
         return (await self.read_bytes(uri)).decode(encoding)
 

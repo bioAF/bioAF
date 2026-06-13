@@ -95,6 +95,23 @@ class TestBuildAndParseUri:
             local_adapter.parse_uri("s3://my-bucket/a/b.txt")
 
 
+class TestCliStaging:
+    """The container-side CLI command builders (Leak 2 drain). GCS emits gcloud."""
+
+    def test_cli_auth_command_activates_service_account(self, local_adapter):
+        assert local_adapter.cli_auth_command("/secrets/gcp/key.json") == (
+            "gcloud auth activate-service-account --key-file=/secrets/gcp/key.json --quiet"
+        )
+
+    def test_cli_copy_in_uses_gcloud_storage(self, local_adapter):
+        assert local_adapter.cli_copy_in("gs://b/k.txt", "/data/k.txt") == "gcloud storage cp gs://b/k.txt /data/k.txt"
+
+    def test_cli_copy_out_is_recursive(self, local_adapter):
+        assert local_adapter.cli_copy_out("/outputs/*", "gs://b/runs/1/") == (
+            "gcloud storage cp -r /outputs/* gs://b/runs/1/"
+        )
+
+
 # --- read / write round-trips (local) ----------------------------------------
 
 

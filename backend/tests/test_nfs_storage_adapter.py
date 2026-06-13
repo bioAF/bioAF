@@ -56,6 +56,18 @@ def test_parse_uri_rejects_non_file_scheme(nfs):
         nfs.parse_uri("gs://bucket/a/b.txt")
 
 
+def test_cli_auth_command_is_empty_for_nfs(nfs):
+    # A mounted filesystem needs no CLI authentication step.
+    assert nfs.cli_auth_command("/secrets/gcp/key.json") == ""
+
+
+def test_cli_copy_commands_use_plain_cp(nfs):
+    copy_in = nfs.cli_copy_in("file://working/a/b.txt", "/data/b.txt")
+    assert copy_in.startswith("cp ") and copy_in.endswith(" /data/b.txt")
+    copy_out = nfs.cli_copy_out("/outputs/*", "file://working/runs/1/")
+    assert copy_out.startswith("cp -r /outputs/* ")
+
+
 # -- object-store CRUD --------------------------------------------------------
 
 

@@ -227,6 +227,16 @@ class NfsStorageProvider(StorageProvider):
     def parse_uri(self, uri: str) -> tuple[str, str]:
         return self._parse_uri(uri)
 
+    def cli_auth_command(self, key_file: str) -> str:
+        # NFS is a mounted filesystem; no CLI authentication step is needed.
+        return ""
+
+    def cli_copy_in(self, uri: str, local_path: str) -> str:
+        return f"cp {self._path(uri)} {local_path}"
+
+    def cli_copy_out(self, local_path: str, uri: str) -> str:
+        return f"cp -r {local_path} {self._path(uri)}"
+
     async def read_text(self, uri: str, *, encoding: str = "utf-8") -> str:
         return (await self.read_bytes(uri)).decode(encoding)
 

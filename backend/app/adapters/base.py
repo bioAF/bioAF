@@ -172,6 +172,32 @@ class StorageProvider(ABC):
         """
         raise NotImplementedError
 
+    # -- Container-side CLI staging (Leak 2 drain) ----------------------------
+    #
+    # These mint SHELL COMMAND STRINGS for a remote pipeline container to stage
+    # data via the backend's own CLI (the container has no Python adapter). They
+    # are how the service layer stops hardcoding ``gsutil`` / ``gcloud`` /
+    # ``aws s3``: the cloud-specific CLI tokens live here in adapters/, selected by
+    # the storage backend. GCS -> ``gcloud storage`` / ``gcloud auth ...``; S3 ->
+    # ``aws s3``; NFS -> plain ``cp`` (a mounted filesystem, no CLI auth).
+
+    def cli_auth_command(self, key_file: str) -> str:
+        """Shell command to authenticate this backend's CLI from a mounted key file.
+
+        GCS -> ``gcloud auth activate-service-account --key-file=<key_file> ...``.
+        Backends that authenticate ambiently (NFS mount, S3 instance profile/IRSA)
+        return ``""`` (no auth step needed).
+        """
+        raise NotImplementedError
+
+    def cli_copy_in(self, uri: str, local_path: str) -> str:
+        """Shell command to copy a single object ``uri`` to ``local_path`` in a container."""
+        raise NotImplementedError
+
+    def cli_copy_out(self, local_path: str, uri: str) -> str:
+        """Shell command to recursively copy ``local_path`` to a bucket ``uri`` in a container."""
+        raise NotImplementedError
+
     async def read_text(self, uri: str, *, encoding: str = "utf-8") -> str:
         """Download an object and decode it as text. Raises StorageObjectNotFound."""
         raise NotImplementedError
