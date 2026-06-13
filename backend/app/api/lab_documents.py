@@ -357,7 +357,7 @@ async def download_document(
         raise HTTPException(404, "Document not found")
 
     target = version or doc.current_version
-    gcs_uri = next((v.gcs_uri for v in doc.versions if v.version_number == target), None)
+    gcs_uri = next((v.storage_uri for v in doc.versions if v.version_number == target), None)
     if gcs_uri is None:
         raise HTTPException(404, "Version not found")
 
@@ -411,7 +411,7 @@ async def stream_document_content(
     if chosen is None:
         raise HTTPException(404, "Version not found")
 
-    data = await _download_document_bytes(session, chosen.gcs_uri)
+    data = await _download_document_bytes(session, chosen.storage_uri)
     if data is None:
         raise HTTPException(502, "Could not fetch document")
 
