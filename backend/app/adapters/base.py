@@ -15,6 +15,7 @@ from app.adapters.models import (
     CostEstimate,
     JobProgress,
     JobStatus,
+    BucketAdminMetrics,
     JobSubmitResult,
     ObjectMetadata,
     SessionInfo,
@@ -339,6 +340,20 @@ class StorageProvider(ABC):
         declare ``signed_url_upload=False`` and raise CapabilityNotSupported.
         """
         raise NotImplementedError
+
+    # -- Bucket-admin enumeration (Tier-2 / Phase 9) --------------------------
+    #
+    # Rich bucket-level enumeration (per-bucket size/lifecycle/versioning, and
+    # project-level bucket listing). The cloud SDK that walks buckets lives in
+    # the adapter; the service layer consumes neutral results. Non-abstract so
+    # backends without the concept (NFS) keep the degenerate default.
+
+    async def get_bucket_admin_metrics(self, bucket_name: str) -> BucketAdminMetrics:
+        """Return rich admin metrics for a single named bucket.
+
+        Backends without buckets (NFS) return the degenerate default.
+        """
+        return BucketAdminMetrics()
 
 
 class NotebookProvider(ABC):

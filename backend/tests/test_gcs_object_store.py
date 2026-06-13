@@ -509,3 +509,61 @@ class TestGcsStorageMetricsSelfContained:
         src = open(mod.__file__).read()
         assert "from app.services.gcs_storage import" not in src
         assert "import app.services.gcs_storage" not in src
+
+
+class TestBucketAdminMetrics:
+    """get_bucket_admin_metrics owns the rich per-bucket enumeration that
+    GcsStorageService.get_bucket_metrics used to do inline (Stage 3b drain)."""
+
+    @pytest.mark.asyncio
+    async def test_returns_rich_per_bucket_metrics(self, gcs_adapter):
+        blob_a = MagicMock(size=1024)
+        blob_b = MagicMock(size=2048)
+
+        bucket = MagicMock()
+        bucket.storage_class = "NEARLINE"
+        bucket.versioning_enabled = True
+        bucket.time_created = "2026-03-11T00:00:00Z"
+        bucket.lifecycle_rules = [
+            {"action": {"type": "SetStorageClass", "storageClass": "COLDLINE"}, "condition": {"age": 30}},
+            {"action": {"type": "Delete"}, "condition": {"age": 365}},
+        ]
+
+        client = MagicMock()
+        client.get_bucket.return_value = bucket
+        client.list_blobs.return_value = [blob_a, blob_b]
+
+        with patch.object(gcs_adapter, "_get_gcs_client", return_value=client):
+            result = await gcs_adapter.get_bucket_admin_metrics("bioaf-raw-demo")
+
+        assert result.size_bytes == 3072
+        assert result.object_count == 2
+        assert result.storage_class == "NEARLINE"
+        assert result.versioning_enabled is True
+        assert result.created_at == "2026-03-11T00:00:00Z"
+        assert result.lifecycle_summaries == [
+            "Transition to COLDLINE after 30 days",
+            "Delete after 365 days",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_defaults_when_no_lifecycle_or_versioning(self, gcs_adapter):
+        bucket = MagicMock()
+        bucket.storage_class = None
+        bucket.versioning_enabled = None
+        bucket.time_created = None
+        bucket.lifecycle_rules = []
+
+        client = MagicMock()
+        client.get_bucket.return_value = bucket
+        client.list_blobs.return_value = []
+
+        with patch.object(gcs_adapter, "_get_gcs_client", return_value=client):
+            result = await gcs_adapter.get_bucket_admin_metrics("bioaf-empty")
+
+        assert result.size_bytes == 0
+        assert result.object_count == 0
+        assert result.storage_class == "STANDARD"
+        assert result.versioning_enabled is False
+        assert result.lifecycle_summaries == []
+        assert result.created_at is None

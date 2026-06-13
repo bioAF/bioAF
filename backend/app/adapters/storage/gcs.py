@@ -16,6 +16,7 @@ from app.adapters.base import StorageProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.exceptions import ValidationError
 from app.adapters.models import (
+    BucketAdminMetrics,
     BucketMetrics,
     ObjectMetadata,
     StorageMetrics,
@@ -836,3 +837,48 @@ class GcsStorageProvider(StorageProvider):
             storage_class = bucket.storage_class or "STANDARD"
             out.append((bucket_name, total_size, len(blobs), storage_class))
         return out
+
+    async def get_bucket_admin_metrics(self, bucket_name: str) -> BucketAdminMetrics:
+        """Rich per-bucket admin metrics (size/lifecycle/versioning/created).
+
+        Owns the bucket-level google-cloud-storage enumeration that previously
+        lived in GcsStorageService.get_bucket_metrics (Phase 9 / Stage 3b). The
+        blocking SDK walk runs off the event loop.
+        """
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._gcs_bucket_admin_metrics, bucket_name, creds)
+
+    def _gcs_bucket_admin_metrics(self, bucket_name: str, creds) -> BucketAdminMetrics:
+        client = self._get_gcs_client(creds)
+        bucket = client.get_bucket(bucket_name)
+        blobs = list(client.list_blobs(bucket_name))
+        total_size = sum(b.size or 0 for b in blobs)
+        return BucketAdminMetrics(
+            size_bytes=total_size,
+            object_count=len(blobs),
+            storage_class=bucket.storage_class or "STANDARD",
+            versioning_enabled=bool(bucket.versioning_enabled),
+            lifecycle_summaries=self._summarize_lifecycle(bucket.lifecycle_rules or []),
+            created_at=str(bucket.time_created) if bucket.time_created else None,
+        )
+
+    @staticmethod
+    def _summarize_lifecycle(rules) -> list[str]:
+        """Render GCS lifecycle rules into cloud-agnostic human summaries.
+
+        The GCS-specific rule shape (action.type / condition.age) is parsed here
+        so the service layer consumes neutral strings only.
+        """
+        summaries: list[str] = []
+        for rule in rules:
+            action = rule.get("action", {})
+            condition = rule.get("condition", {})
+            action_type = action.get("type", "")
+            if action_type == "SetStorageClass":
+                target = action.get("storageClass", "")
+                age = condition.get("age", "?")
+                summaries.append(f"Transition to {target} after {age} days")
+            elif action_type == "Delete":
+                age = condition.get("age", "?")
+                summaries.append(f"Delete after {age} days")
+        return summaries

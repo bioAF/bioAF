@@ -222,6 +222,17 @@ async def test_storage_metrics_reports_usage(nfs):
     assert "filesystem" in metrics.provider_details
 
 
+@pytest.mark.asyncio
+async def test_bucket_admin_metrics_degenerate(nfs):
+    """NFS has no buckets: the bucket-admin enumeration returns the neutral
+    default rather than reaching for a cloud SDK."""
+    result = await nfs.get_bucket_admin_metrics("anything")
+    assert result.size_bytes == 0
+    assert result.object_count == 0
+    assert result.lifecycle_summaries == []
+    assert result.versioning_enabled is False
+
+
 # -- integration: stage inputs -> collect outputs -----------------------------
 
 

@@ -2,15 +2,16 @@
 
 After Phase 3 of the BAL rework, all object-store operations (upload/download/
 move/read/delete/list/signed-URL) go through ``get_storage_adapter()``; this
-module no longer performs object I/O. What remains is intentionally Tier-2 /
-support-only and drains in Phase 9:
+module no longer performs object I/O. After Phase 9 (Stage 3b) it no longer
+performs bucket I/O either. What remains is support-only:
 
-  - ``get_bucket_metrics``: per-bucket size/lifecycle/versioning enumeration
-    (bucket-level admin metrics; the owner scoped bucket lifecycle/enumeration
-    to Phase 9, so it keeps the google-cloud-storage import here).
-  - ``get_credentials``: GCP credential resolution used by get_bucket_metrics
-    and a few non-storage callers (terraform subprocess, pubsub). This belongs
-    in ``app.adapters.credentials.credential_injector``; relocate when Phase 9 lands.
+  - ``get_bucket_metrics``: maps the storage adapter's neutral
+    ``get_bucket_admin_metrics`` onto the per-purpose ``BucketMetrics`` the
+    Components view renders. The google-cloud-storage walk now lives in the
+    adapter; this service holds no cloud SDK.
+  - ``get_credentials``: GCP credential resolution used by a few non-storage
+    callers (terraform subprocess, pubsub). Routes through
+    ``app.adapters.credentials.credential_injector`` (no cloud SDK here).
   - ``build_*_prefix`` / ``_parse_gcs_uri``: pure path helpers (no SDK).
 """
 
@@ -19,7 +20,6 @@ from __future__ import annotations
 import logging
 from urllib.parse import urlparse
 
-from google.cloud import storage
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -56,19 +56,24 @@ class GcsStorageService:
 
     @staticmethod
     async def get_bucket_metrics(session: AsyncSession) -> list[BucketMetrics]:
-        """Query GCS API for each managed bucket and return metrics.
+        """Return per-managed-bucket metrics for the Components view.
+
+        The bucket enumeration runs in the storage adapter (cloud-selected);
+        this method maps the adapter's neutral ``BucketAdminMetrics`` onto the
+        per-purpose ``BucketMetrics`` the UI renders.
 
         NOTE: Listing all objects to compute size and count can be expensive
         for large buckets. For production, replace with GCS Storage Insights
         or a cached background job.
         """
+        from app.adapters.registry import get_storage_adapter
+
         config = await GcsStorageService._read_storage_config(session)
 
         if config.get("storage_deployed", "false") != "true":
             raise ValidationError("Storage infrastructure has not been deployed yet")
 
-        credentials = await GcsStorageService.get_credentials(session)
-        client = storage.Client(credentials=credentials)
+        adapter = get_storage_adapter()
         metrics: list[BucketMetrics] = []
 
         for config_key, purpose in _BUCKET_CONFIG_KEYS.items():
@@ -76,35 +81,18 @@ class GcsStorageService:
             if not bucket_name or bucket_name == "null":
                 continue
 
-            bucket = client.get_bucket(bucket_name)
-            blobs = list(client.list_blobs(bucket_name))
-            total_size = sum(b.size or 0 for b in blobs)
-
-            lifecycle_summaries: list[str] = []
-            for rule in bucket.lifecycle_rules or []:
-                action = rule.get("action", {})
-                condition = rule.get("condition", {})
-                action_type = action.get("type", "")
-                if action_type == "SetStorageClass":
-                    target = action.get("storageClass", "")
-                    age = condition.get("age", "?")
-                    lifecycle_summaries.append(f"Transition to {target} after {age} days")
-                elif action_type == "Delete":
-                    age = condition.get("age", "?")
-                    lifecycle_summaries.append(f"Delete after {age} days")
-
-            created = str(bucket.time_created) if bucket.time_created else None
+            admin = await adapter.get_bucket_admin_metrics(bucket_name)
 
             metrics.append(
                 BucketMetrics(
                     bucket_name=bucket_name,
                     purpose=purpose,
-                    size_bytes=total_size,
-                    object_count=len(blobs),
-                    storage_class=bucket.storage_class or "STANDARD",
-                    versioning_enabled=bool(bucket.versioning_enabled),
-                    lifecycle_rules=lifecycle_summaries,
-                    created_at=created,
+                    size_bytes=admin.size_bytes,
+                    object_count=admin.object_count,
+                    storage_class=admin.storage_class,
+                    versioning_enabled=admin.versioning_enabled,
+                    lifecycle_rules=admin.lifecycle_summaries,
+                    created_at=admin.created_at,
                 )
             )
 

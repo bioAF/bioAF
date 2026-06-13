@@ -240,6 +240,24 @@ class StorageMetrics(BaseModel):
     provider_details: dict = Field(default_factory=dict)
 
 
+class BucketAdminMetrics(BaseModel):
+    """Rich per-bucket admin view: size, lifecycle, versioning, creation time.
+
+    Distinct from the coarse cost-oriented ``BucketMetrics`` (which the storage
+    dashboard aggregates). Backend-neutral: the GCS adapter populates it from the
+    google-cloud-storage client, an S3 adapter from boto3 later. ``lifecycle_summaries``
+    are already-formatted, cloud-agnostic human strings so the service layer never
+    parses a backend-specific rule shape.
+    """
+
+    size_bytes: int = 0
+    object_count: int = 0
+    storage_class: str = "STANDARD"
+    versioning_enabled: bool = False
+    lifecycle_summaries: list[str] = Field(default_factory=list)
+    created_at: str | None = None
+
+
 # --- Notebook sessions -------------------------------------------------------
 
 
