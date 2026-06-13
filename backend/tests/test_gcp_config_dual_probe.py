@@ -75,11 +75,11 @@ def test_app_and_bootstrap_role_lists_are_distinct():
     assert "roles/iam.serviceAccountTokenCreator" in {r for r in APP_ROLES}
 
 
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_vm_default_dual_probe_both_pass(
     mock_get_provider,
     mock_rm,
@@ -117,11 +117,11 @@ def test_vm_default_dual_probe_both_pass(
     assert result.bootstrap_probe.sa_email == "bioaf-bootstrap@my-project.iam.gserviceaccount.com"
 
 
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_vm_default_dual_probe_app_missing_permission(
     mock_get_provider,
     mock_rm,
@@ -166,11 +166,11 @@ def test_vm_default_dual_probe_app_missing_permission(
     assert not result.passed
 
 
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_vm_default_dual_probe_bootstrap_missing_permission(
     mock_get_provider,
     mock_rm,
@@ -210,11 +210,11 @@ def test_vm_default_dual_probe_bootstrap_missing_permission(
     assert not result.passed
 
 
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_service_account_key_mode_skips_dual_probe(mock_get_provider, mock_rm, mock_storage, mock_gke, mock_su):
     """Legacy key mode keeps the single-probe code path; probe sub-results stay None."""
     provider = MagicMock()

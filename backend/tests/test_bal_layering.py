@@ -180,26 +180,25 @@ SDK_IMPORT_ALLOWLIST: set[tuple[str, str]] = {
     #   - storage_service.py: DRAINED in Phase 9 (Stage 3b). Lifecycle + bucket-stat
     #     enumeration now run in adapters/storage/gcs.py via list_lifecycle_policies /
     #     query_bucket_stats; the service only scopes the prefix.
-    #   - gcp_config.py / orphaned_resource_service.py: these do bucket-level work
-    #     (project validation, whole-bucket delete) that the owner scoped to Tier-2
-    #     -> Phase 9, not the Phase 3 object-store interface. (Object-store bucket
+    #   - gcp_config.py: DRAINED in Phase 9 (Stage 3b.3). The whole GCP account
+    #     validation routine (+ its 4 SDK clients) relocated to
+    #     adapters/validation/gcp.py; the service module is a re-export shim.
+    #   - orphaned_resource_service.py: bucket-level + whole-cluster delete work
+    #     scoped to Tier-2 -> Phase 9 (Stage 3b.5, destructive). (Object-store bucket
     #     *versioning* + generation-aware delete were added in Phase 3 for
     #     backup_service / stack_deployment.)
     ("services/reference_data_service.py", "google.cloud.storage"),
-    ("services/gcp_config.py", "google.cloud.storage"),  # Tier-2 bundle -> Phase 9
     ("services/orphaned_resource_service.py", "google.cloud.storage"),  # bucket delete -> Phase 9
     # GCE capacity probe was drained in Phase 6 (folded into the GCE work-node
     # adapter as WorkNodeProvider.probe_zone_capacity; the compute_v1 import now
     # lives in adapters/work_nodes/gce_capacity.py).
-    # Tier 2 platform-service SDKs. Drained in Phase 9 (9A-9G).
-    ("services/gcp_config.py", "google.cloud.container_v1"),
-    ("services/gcp_config.py", "google.cloud.resourcemanager_v3"),
-    ("services/gcp_config.py", "google.cloud.service_usage_v1"),
     ("services/orphaned_resource_service.py", "google.cloud.container_v1"),
     # iam_admin_v1 drained in Phase 9B (routed through adapters/iam/IamProvider).
     # stack_deployment.py container_v1 DRAINED in Phase 9 (Stage 3b.4): cluster
     # status reads now go through ComputeProvider.get_cluster_detail; the shared
     # GKE client factory moved out (orphaned_resource keeps its own until 3b.5).
+    # gcp_config.py's container_v1/resourcemanager_v3/service_usage_v1/storage
+    # DRAINED in Phase 9 (Stage 3b.3): relocated to adapters/validation/gcp.py.
     # bigquery drained in Phase 9D (routed through adapters/billing/BillingProvider).
 }
 
@@ -242,7 +241,7 @@ def test_sdk_allowlist_count_is_pinned():
 
     Decrement this as phases drain leaks; it must reach 0 by end of Phase 9.
     """
-    assert len(SDK_IMPORT_ALLOWLIST) == 7
+    assert len(SDK_IMPORT_ALLOWLIST) == 3
 
 
 # --- Tree scan: no adapter imports services (the layering inversion) ---------

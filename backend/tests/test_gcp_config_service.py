@@ -131,8 +131,8 @@ def test_malformed_service_account_key_fails_credential_check():
 # ---------------------------------------------------------------------------
 # Test 3: Project not accessible marks downstream checks as skipped
 # ---------------------------------------------------------------------------
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_project_not_accessible_skips_downstream(mock_get_provider, mock_rm):
     """When project access check fails, subsequent checks are skipped."""
     provider = MagicMock()
@@ -158,11 +158,11 @@ def test_project_not_accessible_skips_downstream(mock_get_provider, mock_rm):
 # ---------------------------------------------------------------------------
 # Test 4: Storage API disabled returns failed check
 # ---------------------------------------------------------------------------
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_storage_api_disabled_marks_check_failed(mock_get_provider, mock_rm, mock_storage, mock_gke, mock_su):
     """When Cloud Storage API is not enabled the check fails."""
     provider = MagicMock()
@@ -188,11 +188,11 @@ def test_storage_api_disabled_marks_check_failed(mock_get_provider, mock_rm, moc
 # ---------------------------------------------------------------------------
 # Test 5: vm_default credential source uses google.auth.default
 # ---------------------------------------------------------------------------
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_vm_default_resolves_via_credentials_seam(mock_get_provider, mock_rm, mock_storage, mock_gke, mock_su):
     """When credential_source is 'vm_default', credentials resolve through the seam."""
     provider = MagicMock()
@@ -216,11 +216,11 @@ def test_vm_default_resolves_via_credentials_seam(mock_get_provider, mock_rm, mo
 # ---------------------------------------------------------------------------
 # Test 6: All checks pass when GCP APIs respond correctly
 # ---------------------------------------------------------------------------
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_all_checks_pass_with_valid_credentials(mock_get_provider, mock_rm, mock_storage, mock_gke, mock_su):
     """When all GCP API calls succeed, all checks pass and result.passed is True."""
     provider = MagicMock()
@@ -247,11 +247,11 @@ def test_all_checks_pass_with_valid_credentials(mock_get_provider, mock_rm, mock
 # ---------------------------------------------------------------------------
 # Test 7: vm_default with service_account_email uses impersonation
 # ---------------------------------------------------------------------------
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_vm_default_with_sa_email_uses_impersonation(mock_get_provider, mock_rm, mock_storage, mock_gke, mock_su):
     """vm_default + service_account_email asks the seam to impersonate the bootstrap SA."""
     provider = MagicMock()
@@ -284,11 +284,11 @@ def test_vm_default_with_sa_email_uses_impersonation(mock_get_provider, mock_rm,
 # ---------------------------------------------------------------------------
 # Test 8: GKE API check fails when API is disabled
 # ---------------------------------------------------------------------------
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_gke_api_disabled_marks_check_failed(mock_get_provider, mock_rm, mock_storage, mock_gke, mock_su):
     """When GKE API is not enabled, the gke_api_enabled check fails."""
     provider = MagicMock()
@@ -316,11 +316,11 @@ def test_gke_api_disabled_marks_check_failed(mock_get_provider, mock_rm, mock_st
 # ---------------------------------------------------------------------------
 # Test 9: Missing required APIs are reported in iam_permissions check
 # ---------------------------------------------------------------------------
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_missing_required_apis_reported(mock_get_provider, mock_rm, mock_storage, mock_gke, mock_su):
     """When required APIs are not enabled, apis_enabled check reports them."""
     provider = MagicMock()
@@ -356,11 +356,11 @@ def test_missing_required_apis_reported(mock_get_provider, mock_rm, mock_storage
 # ---------------------------------------------------------------------------
 # Test 10: storage_access is skipped when storage API is disabled
 # ---------------------------------------------------------------------------
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_storage_access_skipped_when_storage_api_disabled(mock_get_provider, mock_rm, mock_storage, mock_gke, mock_su):
     """When storage API check fails, storage_access is skipped."""
     provider = MagicMock()
@@ -385,11 +385,11 @@ def test_storage_access_skipped_when_storage_api_disabled(mock_get_provider, moc
 # ---------------------------------------------------------------------------
 # Test 11: All six checks are returned in expected order
 # ---------------------------------------------------------------------------
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_all_seven_checks_returned_in_order(mock_get_provider, mock_rm, mock_storage, mock_gke, mock_su):
     """Validation returns all seven checks in the expected order."""
     provider = MagicMock()
@@ -423,11 +423,11 @@ def test_all_seven_checks_returned_in_order(mock_get_provider, mock_rm, mock_sto
 # ---------------------------------------------------------------------------
 # Test 12: Missing pubsub API is detected
 # ---------------------------------------------------------------------------
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_missing_pubsub_api_reported(mock_get_provider, mock_rm, mock_storage, mock_gke, mock_su):
     """When pubsub API is not enabled, apis_enabled check reports it."""
     provider = MagicMock()
@@ -457,11 +457,11 @@ def test_missing_pubsub_api_reported(mock_get_provider, mock_rm, mock_storage, m
 # ---------------------------------------------------------------------------
 # Test 13: Missing IAM permissions are reported
 # ---------------------------------------------------------------------------
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_missing_iam_permissions_reported(mock_get_provider, mock_rm, mock_storage, mock_gke, mock_su):
     """When SA lacks required permissions, iam_permissions check reports them."""
     provider = MagicMock()
@@ -494,11 +494,11 @@ def test_missing_iam_permissions_reported(mock_get_provider, mock_rm, mock_stora
 # ---------------------------------------------------------------------------
 # Test 14: IAM permissions check handles API errors gracefully
 # ---------------------------------------------------------------------------
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_iam_permissions_check_handles_api_error(mock_get_provider, mock_rm, mock_storage, mock_gke, mock_su):
     """When testIamPermissions API call fails, the check fails gracefully."""
     provider = MagicMock()
@@ -524,11 +524,11 @@ def test_iam_permissions_check_handles_api_error(mock_get_provider, mock_rm, moc
 # ---------------------------------------------------------------------------
 # Test 15: Validation includes per-permission details
 # ---------------------------------------------------------------------------
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_result_includes_permission_details(mock_get_provider, mock_rm, mock_storage, mock_gke, mock_su):
     """Validation result includes per-permission granted status and recommended role.
 
@@ -569,11 +569,11 @@ def test_result_includes_permission_details(mock_get_provider, mock_rm, mock_sto
 # ---------------------------------------------------------------------------
 # Test 16: Validation includes recommended roles
 # ---------------------------------------------------------------------------
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_result_includes_recommended_roles(mock_get_provider, mock_rm, mock_storage, mock_gke, mock_su):
     """Validation result includes the full list of recommended IAM roles."""
     provider = MagicMock()
@@ -604,11 +604,11 @@ def test_result_includes_recommended_roles(mock_get_provider, mock_rm, mock_stor
 # ---------------------------------------------------------------------------
 # Test 17: bigquery.googleapis.com is in required APIs
 # ---------------------------------------------------------------------------
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_missing_bigquery_api_reported(mock_get_provider, mock_rm, mock_storage, mock_gke, mock_su):
     """When bigquery API is not enabled, apis_enabled check reports it."""
     provider = MagicMock()
@@ -637,11 +637,11 @@ def test_missing_bigquery_api_reported(mock_get_provider, mock_rm, mock_storage,
 # ---------------------------------------------------------------------------
 # Test 18: Missing Artifact Registry API is detected
 # ---------------------------------------------------------------------------
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_missing_artifact_registry_api_reported(mock_get_provider, mock_rm, mock_storage, mock_gke, mock_su):
     """When Artifact Registry API is not enabled, apis_enabled check reports it."""
     provider = MagicMock()
@@ -669,11 +669,11 @@ def test_missing_artifact_registry_api_reported(mock_get_provider, mock_rm, mock
 # ---------------------------------------------------------------------------
 # Test 19: Missing Cloud Build API is detected
 # ---------------------------------------------------------------------------
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_missing_cloud_build_api_reported(mock_get_provider, mock_rm, mock_storage, mock_gke, mock_su):
     """When Cloud Build API is not enabled, apis_enabled check reports it."""
     provider = MagicMock()
@@ -701,11 +701,11 @@ def test_missing_cloud_build_api_reported(mock_get_provider, mock_rm, mock_stora
 # ---------------------------------------------------------------------------
 # Test 20: AR and Cloud Build permissions are validated
 # ---------------------------------------------------------------------------
-@patch("app.services.gcp_config.service_usage_v1")
-@patch("app.services.gcp_config.container_v1")
-@patch("app.services.gcp_config.storage")
-@patch("app.services.gcp_config.resourcemanager_v3")
-@patch("app.services.gcp_config.get_credentials_provider")
+@patch("app.adapters.validation.gcp.service_usage_v1")
+@patch("app.adapters.validation.gcp.container_v1")
+@patch("app.adapters.validation.gcp.storage")
+@patch("app.adapters.validation.gcp.resourcemanager_v3")
+@patch("app.adapters.validation.gcp.get_credentials_provider")
 def test_missing_artifact_registry_permission_reported(mock_get_provider, mock_rm, mock_storage, mock_gke, mock_su):
     """Missing artifactregistry.repositories.create is reported with recommended role."""
     provider = MagicMock()
