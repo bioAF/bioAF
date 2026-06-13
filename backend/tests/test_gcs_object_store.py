@@ -567,3 +567,86 @@ class TestBucketAdminMetrics:
         assert result.versioning_enabled is False
         assert result.lifecycle_summaries == []
         assert result.created_at is None
+
+
+class TestBucketEnumeration:
+    """list_lifecycle_policies / query_bucket_stats own the project-level bucket
+    walk that StorageService used to do inline (Stage 3b drain)."""
+
+    @pytest.mark.asyncio
+    async def test_list_lifecycle_policies(self, gcs_adapter):
+        b1 = MagicMock(name="b1")
+        b1.name = "bioaf-1-raw"
+        b1.lifecycle_rules = [{"action": {"type": "Delete"}, "condition": {"age": 90}}]
+        b2 = MagicMock(name="b2")
+        b2.name = "bioaf-1-results"
+        b2.lifecycle_rules = []
+
+        client = MagicMock()
+        client.list_buckets.return_value = [b1, b2]
+
+        with patch.object(gcs_adapter, "_get_gcs_client", return_value=client):
+            policies = await gcs_adapter.list_lifecycle_policies("bioaf-1-")
+
+        client.list_buckets.assert_called_once_with(prefix="bioaf-1-")
+        assert policies == [
+            {
+                "bucket_name": "bioaf-1-raw",
+                "rules": [{"action": {"type": "Delete"}, "condition": {"age": 90}}],
+                "enabled": True,
+            },
+            {"bucket_name": "bioaf-1-results", "rules": [], "enabled": False},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_query_bucket_stats(self, gcs_adapter):
+        bucket = MagicMock()
+        bucket.name = "bioaf-1-raw"
+        bucket.list_blobs.return_value = [
+            MagicMock(size=100, storage_class="STANDARD"),
+            MagicMock(size=200, storage_class="NEARLINE"),
+            MagicMock(size=50, storage_class="STANDARD"),
+        ]
+        client = MagicMock()
+        client.list_buckets.return_value = [bucket]
+
+        with patch.object(gcs_adapter, "_get_gcs_client", return_value=client):
+            stats = await gcs_adapter.query_bucket_stats("bioaf-1-")
+
+        client.list_buckets.assert_called_once_with(prefix="bioaf-1-")
+        assert stats == [
+            {
+                "name": "bioaf-1-raw",
+                "total_bytes": 350,
+                "object_count": 3,
+                "by_storage_class": {"STANDARD": 150, "NEARLINE": 200},
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_query_bucket_stats_passes_resolved_credentials(self, monkeypatch):
+        """Security: the adapter must build the GCS client with the impersonated
+        bootstrap creds so project-level list_buckets is authorized (bioaf-app's
+        storage.admin is bucket-name-conditioned and never matches at the project)."""
+        monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
+        adapter = GcsStorageProvider(org_slug="testorg")
+
+        fake_creds = MagicMock(name="impersonated_creds")
+
+        async def _creds():
+            return fake_creds
+
+        monkeypatch.setattr(adapter, "_get_credentials", _creds)
+
+        captured = {}
+
+        def _fake_client(credentials=None):
+            captured["credentials"] = credentials
+            client = MagicMock()
+            client.list_buckets.return_value = []
+            return client
+
+        monkeypatch.setattr(adapter, "_get_gcs_client", _fake_client)
+        await adapter.query_bucket_stats("bioaf-1-")
+
+        assert captured["credentials"] is fake_creds

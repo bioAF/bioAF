@@ -355,6 +355,22 @@ class StorageProvider(ABC):
         """
         return BucketAdminMetrics()
 
+    async def list_lifecycle_policies(self, prefix: str) -> list[dict]:
+        """List lifecycle policy status for buckets matching ``prefix``.
+
+        Each entry is ``{"bucket_name", "rules", "enabled"}``. Backends without
+        buckets (NFS) return ``[]``.
+        """
+        return []
+
+    async def query_bucket_stats(self, prefix: str) -> list[dict]:
+        """Per-bucket usage for buckets matching ``prefix``.
+
+        Each entry is ``{"name", "total_bytes", "object_count", "by_storage_class"}``.
+        Backends without buckets (NFS) return ``[]``.
+        """
+        return []
+
 
 class NotebookProvider(ABC):
     """Abstract interface for notebook session backends (Kubernetes, SLURM)."""

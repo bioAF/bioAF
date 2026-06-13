@@ -882,3 +882,57 @@ class GcsStorageProvider(StorageProvider):
                 age = condition.get("age", "?")
                 summaries.append(f"Delete after {age} days")
         return summaries
+
+    async def list_lifecycle_policies(self, prefix: str) -> list[dict]:
+        """Project-level lifecycle enumeration for buckets matching ``prefix``.
+
+        Owns the google-cloud-storage walk that previously lived in
+        StorageService.get_lifecycle_policies (Phase 9 / Stage 3b). Off the loop.
+        """
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._gcs_list_lifecycle_policies, prefix, creds)
+
+    def _gcs_list_lifecycle_policies(self, prefix: str, creds) -> list[dict]:
+        client = self._get_gcs_client(creds)
+        policies: list[dict] = []
+        for bucket in client.list_buckets(prefix=prefix):
+            rules = [dict(rule) for rule in (bucket.lifecycle_rules or [])]
+            policies.append(
+                {
+                    "bucket_name": bucket.name,
+                    "rules": rules,
+                    "enabled": len(rules) > 0,
+                }
+            )
+        return policies
+
+    async def query_bucket_stats(self, prefix: str) -> list[dict]:
+        """Project-level per-bucket usage for buckets matching ``prefix``.
+
+        Owns the google-cloud-storage walk that previously lived in
+        StorageService._query_gcs_buckets (Phase 9 / Stage 3b). Off the loop.
+        """
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._gcs_query_bucket_stats, prefix, creds)
+
+    def _gcs_query_bucket_stats(self, prefix: str, creds) -> list[dict]:
+        client = self._get_gcs_client(creds)
+        results: list[dict] = []
+        for bucket in client.list_buckets(prefix=prefix):
+            total_bytes = 0
+            object_count = 0
+            by_class: dict[str, int] = {}
+            for blob in bucket.list_blobs():
+                total_bytes += blob.size or 0
+                object_count += 1
+                sc = blob.storage_class or "STANDARD"
+                by_class[sc] = by_class.get(sc, 0) + (blob.size or 0)
+            results.append(
+                {
+                    "name": bucket.name,
+                    "total_bytes": total_bytes,
+                    "object_count": object_count,
+                    "by_storage_class": by_class,
+                }
+            )
+        return results

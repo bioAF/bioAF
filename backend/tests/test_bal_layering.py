@@ -177,13 +177,15 @@ SDK_IMPORT_ALLOWLIST: set[tuple[str, str]] = {
     #     walk lives in adapters/storage/gcs.py.
     #   - reference_data_service.py: hands a raw client to the half-built GKE-Job
     #     ReferenceImporter; drains when the importer is addressed.
-    #   - storage_service.py / gcp_config.py / orphaned_resource_service.py: these
-    #     do bucket-level work (bucket enumeration+lifecycle, whole-bucket delete)
-    #     that the owner scoped to Tier-2 -> Phase 9, not the Phase 3 object-store
-    #     interface. (Object-store bucket *versioning* + generation-aware delete
-    #     were added in Phase 3 for backup_service / stack_deployment.)
+    #   - storage_service.py: DRAINED in Phase 9 (Stage 3b). Lifecycle + bucket-stat
+    #     enumeration now run in adapters/storage/gcs.py via list_lifecycle_policies /
+    #     query_bucket_stats; the service only scopes the prefix.
+    #   - gcp_config.py / orphaned_resource_service.py: these do bucket-level work
+    #     (project validation, whole-bucket delete) that the owner scoped to Tier-2
+    #     -> Phase 9, not the Phase 3 object-store interface. (Object-store bucket
+    #     *versioning* + generation-aware delete were added in Phase 3 for
+    #     backup_service / stack_deployment.)
     ("services/reference_data_service.py", "google.cloud.storage"),
-    ("services/storage_service.py", "google.cloud.storage"),  # bucket enum -> Phase 9
     ("services/gcp_config.py", "google.cloud.storage"),  # Tier-2 bundle -> Phase 9
     ("services/orphaned_resource_service.py", "google.cloud.storage"),  # bucket delete -> Phase 9
     # GCE capacity probe was drained in Phase 6 (folded into the GCE work-node
@@ -238,7 +240,7 @@ def test_sdk_allowlist_count_is_pinned():
 
     Decrement this as phases drain leaks; it must reach 0 by end of Phase 9.
     """
-    assert len(SDK_IMPORT_ALLOWLIST) == 9
+    assert len(SDK_IMPORT_ALLOWLIST) == 8
 
 
 # --- Tree scan: no adapter imports services (the layering inversion) ---------
