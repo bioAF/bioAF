@@ -237,6 +237,11 @@ class NfsStorageProvider(StorageProvider):
     def cli_copy_out(self, local_path: str, uri: str) -> str:
         return f"cp -r {local_path} {self._path(uri)}"
 
+    def staging_image(self) -> str:
+        # A mounted filesystem stages by plain `cp`, so it needs only a tiny
+        # coreutils image, not a cloud CLI.
+        return "busybox:stable"
+
     def image_storage_pip_packages(self) -> str:
         # A mounted filesystem needs no cloud storage client library.
         return ""

@@ -241,6 +241,17 @@ class StorageProvider(ABC):
         """Shell command to recursively copy ``local_path`` to a bucket ``uri`` in a container."""
         raise NotImplementedError
 
+    def staging_image(self) -> str:
+        """Container image whose CLI stages data for this backend (CopyStager).
+
+        The init/sidecar containers that run ``cli_copy_in`` / ``cli_copy_out``
+        need an image that ships the backend's CLI. GCS -> ``google/cloud-sdk:slim``
+        (gsutil/gcloud); S3 -> ``amazon/aws-cli``; a mounted NFS backend stages by
+        plain ``cp`` and needs only a minimal coreutils image. Lives here so the
+        k8s adapters stop hardcoding the cloud's staging image.
+        """
+        raise NotImplementedError
+
     def image_storage_pip_packages(self) -> str:
         """Pip requirement string for the client libs a built image needs for this store.
 

@@ -1005,14 +1005,17 @@ class KubernetesComputeProvider(ComputeProvider):
                 trace_gcs_path=trace_gcs_path,
             )
 
-        # Build init containers for GCS input staging
+        # Build init containers for input staging. The stage container runs the
+        # storage backend's CLI image (CopyStager seam); GCS -> google/cloud-sdk:slim.
         init_containers = []
         if stage_commands:
+            from app.adapters.registry import get_storage_adapter
+
             stage_script = " && ".join(stage_commands)
             init_containers.append(
                 {
                     "name": "stage-inputs",
-                    "image": "google/cloud-sdk:slim",
+                    "image": get_storage_adapter().staging_image(),
                     "command": ["/bin/sh", "-c", stage_script],
                     "volumeMounts": [{"name": "data", "mountPath": "/data"}],
                 }

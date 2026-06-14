@@ -162,6 +162,12 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         apps_v1 = self._get_k8s_apps_client()
         core_v1 = self._get_k8s_core_client()
 
+        # The data-download init container runs the storage backend's CLI image
+        # (CopyStager seam); GCS -> google/cloud-sdk:slim.
+        from app.adapters.registry import get_storage_adapter
+
+        staging_image = get_storage_adapter().staging_image()
+
         # GCS download auth: in service_account_key mode activate the mounted key;
         # in vm_default mode rely on Workload Identity (the runner SA's metadata
         # credentials), and do NOT mount the gcp-sa-key secret (it doesn't exist).
@@ -214,7 +220,7 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
                         init_containers=[
                             client.V1Container(
                                 name="gcs-download",
-                                image="google/cloud-sdk:slim",
+                                image=staging_image,
                                 command=["/bin/sh", "-c", download_cmd],
                                 volume_mounts=init_volume_mounts,
                             )

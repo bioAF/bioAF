@@ -270,6 +270,10 @@ class GcsStorageProvider(StorageProvider):
     def cli_copy_out(self, local_path: str, uri: str) -> str:
         return f"gcloud storage cp -r {local_path} {uri}"
 
+    def staging_image(self) -> str:
+        # google/cloud-sdk:slim ships gsutil + gcloud storage for stage in/out.
+        return "google/cloud-sdk:slim"
+
     def image_storage_pip_packages(self) -> str:
         return "google-cloud-storage==3.11.0 gsutil==5.37"
 

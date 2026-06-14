@@ -513,11 +513,17 @@ class KubernetesNotebookProvider(NotebookProvider):
         else:
             home_dir = HOME_DIR
 
+        # The init/sidecar containers that stage data run the storage backend's
+        # CLI image (CopyStager seam); GCS -> google/cloud-sdk:slim.
+        from app.adapters.registry import get_storage_adapter
+
+        staging_image = get_storage_adapter().staging_image()
+
         # Build GCS sync init container
         sync_in_cmd = generate_sync_in_command(gcs_home_prefix, home_dir)
         init_container = {
             "name": "gcs-sync-in",
-            "image": "google/cloud-sdk:slim",
+            "image": staging_image,
             "command": sync_in_cmd,
             "volumeMounts": [{"name": "home", "mountPath": home_dir}],
         }
@@ -551,7 +557,7 @@ class KubernetesNotebookProvider(NotebookProvider):
             init_containers.append(
                 {
                     "name": "gcs-data-sync",
-                    "image": "google/cloud-sdk:slim",
+                    "image": staging_image,
                     "command": ["/bin/sh", "-c", data_sync_cmd],
                     "volumeMounts": [{"name": "data", "mountPath": "/data"}],
                 }
@@ -695,7 +701,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         containers.append(
             {
                 "name": "gcs-sync",
-                "image": "google/cloud-sdk:slim",
+                "image": staging_image,
                 "command": ["/bin/sh", "-c", "trap 'exit 0' TERM; while true; do sleep 3600; done"],
                 "volumeMounts": gcs_sync_mounts,
                 "env": gcs_sync_env,
