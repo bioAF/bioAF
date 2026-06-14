@@ -28,11 +28,7 @@ from app.adapters.models import (
     TerminationResult,
     to_service_state,
 )
-from app.adapters.notebooks.gcs_sync import (
-    generate_sync_in_command,
-    generate_sync_out_command,
-    parse_gsutil_ls_output,
-)
+from app.adapters.notebooks.gcs_sync import parse_gsutil_ls_output
 
 logger = logging.getLogger("bioaf.adapters.notebooks.k8s")
 
@@ -203,8 +199,10 @@ class KubernetesNotebookProvider(NotebookProvider):
             return
         from kubernetes.stream import stream
 
+        from app.adapters.registry import get_storage_adapter
+
         core_client = self._get_k8s_core_client()
-        sync_cmd = generate_sync_out_command(local_dir, gcs_prefix)
+        sync_cmd = get_storage_adapter().sync_out_command(local_dir, gcs_prefix)
         logger.info("Syncing session data to GCS from pod %s", pod_name)
         stream(
             core_client.connect_get_namespaced_pod_exec,
@@ -521,8 +519,8 @@ class KubernetesNotebookProvider(NotebookProvider):
         storage_adapter = get_storage_adapter()
         staging_image = storage_adapter.staging_image()
 
-        # Build GCS sync init container
-        sync_in_cmd = generate_sync_in_command(gcs_home_prefix, home_dir)
+        # Build the home stage-in init container (CopyStager sync seam)
+        sync_in_cmd = storage_adapter.sync_in_command(gcs_home_prefix, home_dir)
         init_container = {
             "name": "gcs-sync-in",
             "image": staging_image,
@@ -1048,10 +1046,12 @@ class KubernetesNotebookProvider(NotebookProvider):
             except Exception:
                 logger.exception("Failed to store git info for compute session")
 
-        # Sync home directory to GCS before termination
+        # Sync home directory to GCS before termination (CopyStager sync seam)
         if gcs_home_prefix and pod_name:
             try:
-                sync_cmd = generate_sync_out_command(HOME_DIR, gcs_home_prefix)
+                from app.adapters.registry import get_storage_adapter
+
+                sync_cmd = get_storage_adapter().sync_out_command(HOME_DIR, gcs_home_prefix)
                 stream(
                     core_client.connect_get_namespaced_pod_exec,
                     name=pod_name,

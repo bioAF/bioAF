@@ -237,6 +237,13 @@ class NfsStorageProvider(StorageProvider):
     def cli_copy_out(self, local_path: str, uri: str) -> str:
         return f"cp -r {local_path} {self._path(uri)}"
 
+    def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
+        # A mounted filesystem mirrors a directory with plain recursive copy.
+        return ["/bin/sh", "-c", f"cp -r {remote_prefix}/. {local_dir} || true"]
+
+    def sync_out_command(self, local_dir: str, remote_prefix: str) -> list[str]:
+        return ["/bin/sh", "-c", f"cp -r {local_dir}/. {remote_prefix}"]
+
     def staging_image(self) -> str:
         # A mounted filesystem stages by plain `cp`, so it needs only a tiny
         # coreutils image, not a cloud CLI.

@@ -1,42 +1,20 @@
-"""Tests for the K8s notebook adapter's gsutil sync helpers + pod-exec sync.
+"""Tests for the K8s notebook adapter's gsutil-ls parser + pod-exec sync.
 
-BAL rework, Phase 5: the gsutil command builders and gsutil-ls parser moved out
-of app.services into the notebook adapter package (draining the adapter->service
-inversion), and the pod-exec home-dir sync became a NotebookProvider method
-(draining the kubernetes SDK import from app.services).
+BAL rework, Phase 5: the gsutil-ls parser moved out of app.services into the
+notebook adapter package (draining the adapter->service inversion), and the
+pod-exec home-dir sync became a NotebookProvider method (draining the kubernetes
+SDK import from app.services).
+
+Stage 4d.4: the directory-sync command builders that used to live here moved to
+the StorageProvider CopyStager seam (``sync_in_command`` / ``sync_out_command``);
+those are covered by test_storage_staging_image. The gsutil-ls parser stays here
+(the remaining GCS-coupled teardown island).
 """
 
 import pytest
 from unittest.mock import MagicMock, patch
 
-from app.adapters.notebooks.gcs_sync import (
-    generate_sync_in_command,
-    generate_sync_out_command,
-    parse_gsutil_ls_output,
-)
-
-
-def test_generate_sync_in_command():
-    cmd = generate_sync_in_command(
-        gcs_prefix="gs://bioaf-working/notebooks/42/",
-        local_dir="/home/jovyan",
-    )
-    assert isinstance(cmd, list)
-    joined = " ".join(cmd)
-    assert "gsutil" in joined and "rsync" in joined
-    assert "gs://bioaf-working/notebooks/42/" in joined
-    assert "/home/jovyan" in joined
-
-
-def test_generate_sync_out_command():
-    cmd = generate_sync_out_command(
-        local_dir="/home/jovyan",
-        gcs_prefix="gs://bioaf-working/notebooks/42/",
-    )
-    joined = " ".join(cmd)
-    assert "gsutil" in joined and "rsync" in joined
-    assert "/home/jovyan" in joined
-    assert "gs://bioaf-working/notebooks/42/" in joined
+from app.adapters.notebooks.gcs_sync import parse_gsutil_ls_output
 
 
 def test_parse_gsutil_ls_output():

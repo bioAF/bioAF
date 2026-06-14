@@ -44,3 +44,17 @@ def test_nfs_nextflow_scratch_directives_are_plain_workdir():
     # A mounted POSIX filesystem is the workDir directly; no Wave/Fusion overlay.
     directives = NfsStorageProvider().nextflow_scratch_directives("/mnt/scratch/work")
     assert directives == ["workDir = '/mnt/scratch/work'"]
+
+
+def test_gcs_sync_commands_are_gsutil_rsync():
+    gcs = GcsStorageProvider()
+    sync_in = gcs.sync_in_command("gs://work/notebooks/42/", "/home/jovyan")
+    assert sync_in == ["/bin/sh", "-c", "gsutil -m rsync -r gs://work/notebooks/42/ /home/jovyan || true"]
+    sync_out = gcs.sync_out_command("/home/jovyan", "gs://work/notebooks/42/")
+    assert sync_out == ["/bin/sh", "-c", "gsutil -m rsync -r /home/jovyan gs://work/notebooks/42/"]
+
+
+def test_nfs_sync_commands_are_plain_cp():
+    nfs = NfsStorageProvider()
+    assert nfs.sync_in_command("/srv/in", "/local")[2] == "cp -r /srv/in/. /local || true"
+    assert nfs.sync_out_command("/local", "/srv/out")[2] == "cp -r /local/. /srv/out"

@@ -241,6 +241,24 @@ class StorageProvider(ABC):
         """Shell command to recursively copy ``local_path`` to a bucket ``uri`` in a container."""
         raise NotImplementedError
 
+    def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
+        """Shell command (argv) to recursively sync ``remote_prefix`` -> ``local_dir``.
+
+        The directory-mirror counterpart to ``cli_copy_in`` (single object). Run in
+        a stage-in init container. GCS -> ``gsutil -m rsync -r`` (tolerant of an
+        empty/missing prefix); S3 -> ``aws s3 sync``; NFS -> ``cp -r``.
+        """
+        raise NotImplementedError
+
+    def sync_out_command(self, local_dir: str, remote_prefix: str) -> list[str]:
+        """Shell command (argv) to recursively sync ``local_dir`` -> ``remote_prefix``.
+
+        The directory-mirror counterpart to ``cli_copy_out``. Run at session
+        shutdown to persist a home/outputs dir. GCS -> ``gsutil -m rsync -r``;
+        S3 -> ``aws s3 sync``; NFS -> ``cp -r``.
+        """
+        raise NotImplementedError
+
     def staging_image(self) -> str:
         """Container image whose CLI stages data for this backend (CopyStager).
 
