@@ -72,6 +72,7 @@ async def test_get_document_file_uri_sources_storage_uri(client, admin_token, sa
     )
     assert resp.status_code == 200
     assert resp.json()["file"]["gcs_uri"] == neutral
+    assert resp.json()["file"]["storage_uri"] == neutral
 
 
 @pytest.mark.asyncio

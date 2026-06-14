@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
 from app.schemas.experiment import UserSummary
 
@@ -71,6 +71,14 @@ class FileResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @computed_field
+    @property
+    def storage_uri(self) -> str:
+        """Backend-neutral alias of the object-store URI. gcs_uri is the retained
+        legacy mirror on the wire; clients should read storage_uri. Remove gcs_uri
+        from the response once no client reads it."""
+        return self.gcs_uri
+
 
 class FileListResponse(BaseModel):
     files: list[FileResponse]
@@ -90,3 +98,9 @@ class FileUploadInitiateResponse(BaseModel):
     upload_id: str
     signed_url: str
     gcs_uri: str
+
+    @computed_field
+    @property
+    def storage_uri(self) -> str:
+        """Neutral alias of gcs_uri (retained legacy mirror); read storage_uri."""
+        return self.gcs_uri

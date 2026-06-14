@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from app.schemas.experiment import UserSummary
 
@@ -65,6 +65,12 @@ class LabDocumentUploadUrlResponse(BaseModel):
     upload_token: str
     signed_url: str
     gcs_uri: str
+
+    @computed_field
+    @property
+    def storage_uri(self) -> str:
+        """Neutral alias of gcs_uri (retained legacy mirror); read storage_uri."""
+        return self.gcs_uri
 
 
 class LabDocumentCreate(BaseModel):

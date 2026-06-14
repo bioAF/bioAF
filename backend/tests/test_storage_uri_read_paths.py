@@ -15,10 +15,30 @@ column is kept and the sync shim left in place; dropping it is deferred to the
 end-of-project cleanup sweep.
 """
 
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import text
+
+
+def test_file_response_exposes_storage_uri_alias():
+    """The FileResponse serializes a neutral storage_uri mirroring gcs_uri (DB-free)."""
+    from app.schemas.file import FileResponse
+
+    r = FileResponse(
+        id=1,
+        filename="x.bam",
+        gcs_uri="gs://bucket/x.bam",
+        size_bytes=None,
+        md5_checksum=None,
+        file_type="bam",
+        upload_timestamp=datetime(2020, 1, 1),
+        created_at=datetime(2020, 1, 1),
+    )
+    dumped = r.model_dump()
+    assert dumped["gcs_uri"] == "gs://bucket/x.bam"
+    assert dumped["storage_uri"] == "gs://bucket/x.bam"
 
 
 async def _diverge_file_storage_uri(session, file_id: int, storage_uri: str) -> None:
@@ -42,7 +62,9 @@ async def test_file_response_sources_uri_from_storage_uri(client, admin_token, s
     )
 
     assert resp.status_code == 200
+    # Both the legacy wire key and the neutral one carry the storage_uri value.
     assert resp.json()["gcs_uri"] == neutral
+    assert resp.json()["storage_uri"] == neutral
 
 
 @pytest.mark.asyncio
