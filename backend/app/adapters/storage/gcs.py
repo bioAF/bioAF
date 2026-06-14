@@ -274,6 +274,27 @@ class GcsStorageProvider(StorageProvider):
         # google/cloud-sdk:slim ships gsutil + gcloud storage for stage in/out.
         return "google/cloud-sdk:slim"
 
+    def input_mount_spec(
+        self, *, name: str, bucket: str, mount_path: str, key_prefix: str = ""
+    ) -> tuple[dict, dict, dict]:
+        # gcsfuse mounts the whole bucket read-only; key_prefix is unused on GCS
+        # (the caller mounts at a sub-path). The annotation triggers GKE's
+        # gcsfuse CSI sidecar injection.
+        volume_mount = {"name": name, "mountPath": mount_path, "readOnly": True}
+        volume = {
+            "name": name,
+            "csi": {
+                "driver": "gcsfuse.csi.storage.gke.io",
+                "readOnly": True,
+                "volumeAttributes": {
+                    "bucketName": bucket,
+                    "mountOptions": "implicit-dirs,file-cache:max-size-mb:-1",
+                    "gcsfuseLoggingSeverity": "warning",
+                },
+            },
+        }
+        return volume, volume_mount, {"gke-gcsfuse/volumes": "true"}
+
     def image_storage_pip_packages(self) -> str:
         return "google-cloud-storage==3.11.0 gsutil==5.37"
 

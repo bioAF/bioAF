@@ -252,6 +252,20 @@ class StorageProvider(ABC):
         """
         raise NotImplementedError
 
+    def input_mount_spec(
+        self, *, name: str, bucket: str, mount_path: str, key_prefix: str = ""
+    ) -> tuple[dict, dict, dict]:
+        """Read-only object FUSE mount for INPUTS only (ReadOnlyInputMount seam).
+
+        Returns ``(volume, volume_mount, pod_annotations)`` for a pod that streams
+        objects from ``bucket`` (optionally under ``key_prefix``) read-only at
+        ``mount_path``. GCS -> gcsfuse CSI volume + the ``gke-gcsfuse/volumes``
+        pod annotation; S3 -> Mountpoint-S3 CSI (readOnly); NFS -> a plain nfs
+        volume. NEVER the workDir (that is a POSIX scratch volume, not an object
+        mount). Backends without an object FUSE mount do not implement this.
+        """
+        raise NotImplementedError
+
     def image_storage_pip_packages(self) -> str:
         """Pip requirement string for the client libs a built image needs for this store.
 

@@ -514,10 +514,12 @@ class KubernetesNotebookProvider(NotebookProvider):
             home_dir = HOME_DIR
 
         # The init/sidecar containers that stage data run the storage backend's
-        # CLI image (CopyStager seam); GCS -> google/cloud-sdk:slim.
+        # CLI image (CopyStager seam); GCS -> google/cloud-sdk:slim. The same
+        # adapter supplies read-only input mounts (ReadOnlyInputMount seam).
         from app.adapters.registry import get_storage_adapter
 
-        staging_image = get_storage_adapter().staging_image()
+        storage_adapter = get_storage_adapter()
+        staging_image = storage_adapter.staging_image()
 
         # Build GCS sync init container
         sync_in_cmd = generate_sync_in_command(gcs_home_prefix, home_dir)
@@ -569,41 +571,27 @@ class KubernetesNotebookProvider(NotebookProvider):
         volume_mounts.append({"name": "outputs", "mountPath": "/outputs"})
         volumes.append({"name": "outputs", "emptyDir": {"sizeLimit": "50Gi"}})
 
-        # Track whether any GCS FUSE CSI volumes are used
-        has_fuse_volumes = False
+        # Pod annotations the read-only input mounts require (e.g. GCS gcsfuse
+        # CSI sidecar injection); accumulated from the ReadOnlyInputMount seam.
+        input_mount_annotations: dict[str, str] = {}
 
         # SSH work nodes get additional volumes: scratch and data mounts
         if session_type == "ssh":
             volume_mounts.append({"name": "scratch", "mountPath": "/scratch"})
             volumes.append({"name": "scratch", "emptyDir": {"sizeLimit": "100Gi"}})
 
-            # GCS FUSE data mounts (read-only)
+            # Read-only object input mounts (ReadOnlyInputMount seam): the storage
+            # backend supplies the volume / mount / pod annotations (GCS gcsfuse CSI).
             data_mount_paths = session_spec.get("data_mount_paths", [])
-            if data_mount_paths:
-                has_fuse_volumes = True
             for i, mount_path in enumerate(data_mount_paths):
-                vol_name = f"data-{i}"
-                volume_mounts.append(
-                    {
-                        "name": vol_name,
-                        "mountPath": f"/data/{mount_path.lstrip('/')}",
-                        "readOnly": True,
-                    }
+                volume, volume_mount, pod_annotations = storage_adapter.input_mount_spec(
+                    name=f"data-{i}",
+                    bucket=working_bucket,
+                    mount_path=f"/data/{mount_path.lstrip('/')}",
                 )
-                volumes.append(
-                    {
-                        "name": vol_name,
-                        "csi": {
-                            "driver": "gcsfuse.csi.storage.gke.io",
-                            "readOnly": True,
-                            "volumeAttributes": {
-                                "bucketName": working_bucket,
-                                "mountOptions": "implicit-dirs,file-cache:max-size-mb:-1",
-                                "gcsfuseLoggingSeverity": "warning",
-                            },
-                        },
-                    }
-                )
+                volume_mounts.append(volume_mount)
+                volumes.append(volume)
+                input_mount_annotations.update(pod_annotations)
 
         notebook_container: dict = {
             "name": "notebook",
@@ -709,10 +697,9 @@ class KubernetesNotebookProvider(NotebookProvider):
             }
         )
 
-        # Pod annotations -- GCS FUSE CSI driver requires this for sidecar injection
-        annotations: dict[str, str] = {}
-        if has_fuse_volumes:
-            annotations["gke-gcsfuse/volumes"] = "true"
+        # Pod annotations required by the read-only input mounts (e.g. the GCS
+        # FUSE CSI driver's sidecar-injection annotation), supplied by the seam.
+        annotations: dict[str, str] = dict(input_mount_annotations)
 
         # Pod manifest
         metadata: dict = {

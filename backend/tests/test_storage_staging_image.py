@@ -17,3 +17,16 @@ def test_nfs_staging_image_is_minimal_coreutils():
     # A mounted filesystem stages by plain `cp`, so it needs only a tiny
     # coreutils image, not a cloud CLI.
     assert NfsStorageProvider().staging_image() == "busybox:stable"
+
+
+def test_gcs_input_mount_spec_is_readonly_gcsfuse_csi():
+    volume, volume_mount, pod_annotations = GcsStorageProvider().input_mount_spec(
+        name="data-0", bucket="work-bucket", mount_path="/data/pipeline-outputs/1"
+    )
+    assert volume_mount == {"name": "data-0", "mountPath": "/data/pipeline-outputs/1", "readOnly": True}
+    assert volume["name"] == "data-0"
+    assert volume["csi"]["driver"] == "gcsfuse.csi.storage.gke.io"
+    assert volume["csi"]["readOnly"] is True
+    assert volume["csi"]["volumeAttributes"]["bucketName"] == "work-bucket"
+    # The pod annotation that triggers GKE gcsfuse CSI sidecar injection.
+    assert pod_annotations == {"gke-gcsfuse/volumes": "true"}
