@@ -1,10 +1,10 @@
-"""storage_uri is a real backend-neutral column kept in sync with gcs_uri.
+"""storage_uri is the authoritative backend-neutral column; gcs_uri is a mirror.
 
-BAL rework, Phase 4 (expand/contract). storage_uri is being introduced as the
-physical column to eventually replace the GCS-presuming gcs_uri. During the
-transition BOTH are real columns and must hold the same value (so live installs
-and external readers of gcs_uri keep working until a later migration drops it).
-The ORM mirrors them on every write (app.models._storage_uri_sync).
+AWS-prep. storage_uri is the canonical physical object-store URI column. gcs_uri
+is a RETAINED legacy mirror kept in sync (it stays NOT NULL) so an operator can
+confirm nothing depends on it and drop it later; we do NOT drop it here. The ORM
+mirrors them on every write (app.models._storage_uri_sync), with storage_uri
+canonical: app code writes storage_uri and gcs_uri follows.
 """
 
 import pytest
@@ -14,30 +14,8 @@ from app.models.file import File
 
 
 @pytest.mark.asyncio
-async def test_write_legacy_name_mirrors_to_storage_uri(session, admin_user):
-    f = File(
-        organization_id=admin_user.organization_id,
-        gcs_uri="gs://bioaf-raw/x/y.h5ad",
-        filename="y.h5ad",
-        file_type="h5ad",
-        source_type="upload",
-    )
-    session.add(f)
-    await session.flush()
-
-    assert f.gcs_uri == "gs://bioaf-raw/x/y.h5ad"
-    assert f.storage_uri == "gs://bioaf-raw/x/y.h5ad"
-
-    # Both columns are real and query the same value.
-    by_legacy = (await session.execute(select(File).where(File.gcs_uri == "gs://bioaf-raw/x/y.h5ad"))).scalar_one()
-    by_neutral = (await session.execute(select(File).where(File.storage_uri == "gs://bioaf-raw/x/y.h5ad"))).scalar_one()
-    assert by_legacy.id == by_neutral.id == f.id
-
-
-@pytest.mark.asyncio
-async def test_write_neutral_name_backfills_gcs_uri(session, admin_user):
-    # New-style write that only sets storage_uri must still populate gcs_uri
-    # (which is NOT NULL during the transition).
+async def test_write_neutral_name_mirrors_to_gcs_uri(session, admin_user):
+    # The primary path: app code writes the canonical storage_uri; gcs_uri mirrors.
     f = File(
         organization_id=admin_user.organization_id,
         storage_uri="gs://bioaf-raw/a/b.bam",
@@ -47,15 +25,38 @@ async def test_write_neutral_name_backfills_gcs_uri(session, admin_user):
     )
     session.add(f)
     await session.flush()
-    assert f.gcs_uri == "gs://bioaf-raw/a/b.bam"
+
     assert f.storage_uri == "gs://bioaf-raw/a/b.bam"
+    assert f.gcs_uri == "gs://bioaf-raw/a/b.bam"
+
+    # Both columns are real and query the same value.
+    by_neutral = (await session.execute(select(File).where(File.storage_uri == "gs://bioaf-raw/a/b.bam"))).scalar_one()
+    by_legacy = (await session.execute(select(File).where(File.gcs_uri == "gs://bioaf-raw/a/b.bam"))).scalar_one()
+    assert by_neutral.id == by_legacy.id == f.id
 
 
 @pytest.mark.asyncio
-async def test_orm_update_to_gcs_uri_resyncs_storage_uri(session, admin_user):
+async def test_write_legacy_name_backfills_storage_uri(session, admin_user):
+    # A legacy-style write that sets only gcs_uri is still mirrored INTO
+    # storage_uri so readers (which read storage_uri) stay correct.
     f = File(
         organization_id=admin_user.organization_id,
-        gcs_uri="gs://bioaf-ingest/old.fastq.gz",
+        gcs_uri="gs://bioaf-raw/x/y.h5ad",
+        filename="y.h5ad",
+        file_type="h5ad",
+        source_type="upload",
+    )
+    session.add(f)
+    await session.flush()
+    assert f.storage_uri == "gs://bioaf-raw/x/y.h5ad"
+    assert f.gcs_uri == "gs://bioaf-raw/x/y.h5ad"
+
+
+@pytest.mark.asyncio
+async def test_orm_update_to_storage_uri_resyncs_gcs_uri(session, admin_user):
+    f = File(
+        organization_id=admin_user.organization_id,
+        storage_uri="gs://bioaf-ingest/old.fastq.gz",
         filename="old.fastq.gz",
         file_type="fastq",
         source_type="upload",
@@ -63,6 +64,6 @@ async def test_orm_update_to_gcs_uri_resyncs_storage_uri(session, admin_user):
     session.add(f)
     await session.flush()
 
-    f.gcs_uri = "gs://bioaf-raw/new.fastq.gz"  # ORM update (e.g. a file move)
+    f.storage_uri = "gs://bioaf-raw/new.fastq.gz"  # ORM update (e.g. a file move)
     await session.flush()
-    assert f.storage_uri == "gs://bioaf-raw/new.fastq.gz"
+    assert f.gcs_uri == "gs://bioaf-raw/new.fastq.gz"

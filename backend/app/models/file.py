@@ -13,10 +13,11 @@ class File(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False)
-    # Opaque object-store URI. Expand/contract rename (BAL Phase 4): storage_uri
-    # is the backend-neutral column being introduced to replace gcs_uri. Both are
-    # real columns and kept in sync (see _storage_uri_sync) until a later
-    # migration drops gcs_uri; gcs_uri stays NOT NULL during the transition.
+    # Opaque object-store URI. storage_uri is the AUTHORITATIVE backend-neutral
+    # column (app code reads/writes it); gcs_uri is a RETAINED legacy mirror kept
+    # in sync (see _storage_uri_sync, storage_uri canonical). We do NOT drop
+    # gcs_uri; an operator drops it later once nothing depends on it (and makes
+    # storage_uri NOT NULL at that point). storage_uri is always populated today.
     gcs_uri: Mapped[str] = mapped_column(String(1000), nullable=False)
     storage_uri: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     filename: Mapped[str] = mapped_column(String(500), nullable=False)
