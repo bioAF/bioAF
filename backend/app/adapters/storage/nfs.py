@@ -242,6 +242,10 @@ class NfsStorageProvider(StorageProvider):
         # coreutils image, not a cloud CLI.
         return "busybox:stable"
 
+    def nextflow_scratch_directives(self, work_dir: str) -> list[str]:
+        # A mounted POSIX filesystem is the workDir directly; no Fusion overlay.
+        return [f"workDir = '{work_dir}'"]
+
     def image_storage_pip_packages(self) -> str:
         # A mounted filesystem needs no cloud storage client library.
         return ""

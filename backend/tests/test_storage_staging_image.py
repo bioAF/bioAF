@@ -30,3 +30,17 @@ def test_gcs_input_mount_spec_is_readonly_gcsfuse_csi():
     assert volume["csi"]["volumeAttributes"]["bucketName"] == "work-bucket"
     # The pod annotation that triggers GKE gcsfuse CSI sidecar injection.
     assert pod_annotations == {"gke-gcsfuse/volumes": "true"}
+
+
+def test_gcs_nextflow_scratch_directives_enable_wave_and_fusion():
+    directives = GcsStorageProvider().nextflow_scratch_directives("gs://work-bucket/nextflow-work")
+    assert "workDir = 'gs://work-bucket/nextflow-work'" in directives
+    assert "wave.enabled = true" in directives
+    assert "fusion.enabled = true" in directives
+    assert "fusion.exportStorageCredentials = true" in directives
+
+
+def test_nfs_nextflow_scratch_directives_are_plain_workdir():
+    # A mounted POSIX filesystem is the workDir directly; no Wave/Fusion overlay.
+    directives = NfsStorageProvider().nextflow_scratch_directives("/mnt/scratch/work")
+    assert directives == ["workDir = '/mnt/scratch/work'"]

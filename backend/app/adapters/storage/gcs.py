@@ -295,6 +295,16 @@ class GcsStorageProvider(StorageProvider):
         }
         return volume, volume_mount, {"gke-gcsfuse/volumes": "true"}
 
+    def nextflow_scratch_directives(self, work_dir: str) -> list[str]:
+        # Wave + Fusion mount the gs:// workDir as a local filesystem inside each
+        # task pod so head and process pods can exchange .command.run scripts.
+        return [
+            f"workDir = '{work_dir}'",
+            "wave.enabled = true",
+            "fusion.enabled = true",
+            "fusion.exportStorageCredentials = true",
+        ]
+
     def image_storage_pip_packages(self) -> str:
         return "google-cloud-storage==3.11.0 gsutil==5.37"
 

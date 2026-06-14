@@ -787,14 +787,13 @@ class KubernetesComputeProvider(ComputeProvider):
             "k8s.serviceAccount = 'bioaf-pipeline-runner'",
         ]
 
-        # GCS work directory so head and process pods share files.
-        # Wave + Fusion mount GCS paths as a local filesystem inside
-        # process pods so they can access .command.run scripts.
+        # Scratch workDir so head and process pods share files. The storage
+        # backend supplies its Nextflow workDir directives (ScratchWorkDir seam):
+        # GCS overlays the gs:// workDir with Wave+Fusion as a local filesystem.
         if gcs_work_dir:
-            lines.append(f"workDir = '{gcs_work_dir}'")
-            lines.append("wave.enabled = true")
-            lines.append("fusion.enabled = true")
-            lines.append("fusion.exportStorageCredentials = true")
+            from app.adapters.registry import get_storage_adapter
+
+            lines.extend(get_storage_adapter().nextflow_scratch_directives(gcs_work_dir))
 
         # Resource limits and preemption-aware retry strategy (ADR-042).
         # Prevents retry escalation from requesting more than a single

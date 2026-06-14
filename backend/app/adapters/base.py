@@ -266,6 +266,18 @@ class StorageProvider(ABC):
         """
         raise NotImplementedError
 
+    def nextflow_scratch_directives(self, work_dir: str) -> list[str]:
+        """Nextflow config lines for the pipeline scratch workDir (ScratchWorkDir).
+
+        The workDir is where Nextflow exchanges ``.command.run`` scripts and task
+        I/O across head/process pods, so it must behave POSIX. GCS overlays the
+        ``gs://`` workDir with Wave+Fusion (which mounts it as a local filesystem
+        in each task pod); a mounted POSIX backend (NFS, or an AWS EBS/EFS PVC in
+        Stage 6e) is the workDir directly with no Fusion overlay. Returns the
+        backend-specific config directives so the compute adapter names no cloud.
+        """
+        raise NotImplementedError
+
     def image_storage_pip_packages(self) -> str:
         """Pip requirement string for the client libs a built image needs for this store.
 
