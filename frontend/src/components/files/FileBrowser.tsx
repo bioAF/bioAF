@@ -321,7 +321,7 @@ export function FileBrowser({
     }
   };
 
-  const stuckCount = files.filter((f) => f.experiment_id != null && f.gcs_uri.includes("/uploads/")).length;
+  const stuckCount = files.filter((f) => f.experiment_id != null && f.storage_uri.includes("/uploads/")).length;
 
   const handleReconcile = async () => {
     setReconciling(true);
@@ -973,7 +973,7 @@ export function FileBrowser({
               <div className="col-span-2">
                 <dt className="text-xs font-medium text-gray-500 uppercase">GCS URI</dt>
                 <dd className="mt-0.5 text-xs text-gray-600 font-mono break-all">
-                  {viewingFile.gcs_uri}
+                  {viewingFile.storage_uri}
                 </dd>
               </div>
             </dl>

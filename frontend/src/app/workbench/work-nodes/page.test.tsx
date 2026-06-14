@@ -113,6 +113,7 @@ const experimentFiles = {
       id: 100,
       filename: "matrix.mtx.gz",
       gcs_uri: "gs://bucket/experiments/42/uploads/matrix.mtx.gz",
+      storage_uri: "gs://bucket/experiments/42/uploads/matrix.mtx.gz",
       size_bytes: 1024,
       md5_checksum: null,
       file_type: "count_matrix",
