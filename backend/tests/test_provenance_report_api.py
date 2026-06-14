@@ -34,9 +34,9 @@ async def _seed_experiment(session, org_id: int, owner_id: int) -> dict:
     )
     await session.execute(
         text(
-            "INSERT INTO files (id, organization_id, filename, gcs_uri, file_type, size_bytes, "
+            "INSERT INTO files (id, organization_id, filename, gcs_uri, storage_uri, file_type, size_bytes, "
             "md5_checksum, experiment_id, source_type, uploader_user_id) "
-            "VALUES (1, :org, 'reads.fastq.gz', 'gs://b/reads.fastq.gz', 'fastq', 1024, "
+            "VALUES (1, :org, 'reads.fastq.gz', 'gs://b/reads.fastq.gz', 'gs://b/reads.fastq.gz', 'fastq', 1024, "
             "'abc', 1, 'upload', :owner)"
         ),
         {"org": org_id, "owner": owner_id},
