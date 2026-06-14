@@ -20,7 +20,7 @@ class CellxgenePublishableFile(BaseModel):
     cellxgene_status: str = "unknown"
     created_at: datetime
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def storage_uri(self) -> str:
         """Neutral alias of gcs_uri (retained legacy mirror); read storage_uri."""

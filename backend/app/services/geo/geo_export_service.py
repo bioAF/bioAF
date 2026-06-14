@@ -236,7 +236,7 @@ class GeoExportService:
             sd["files"] = {
                 "raw_filenames": ", ".join(f.filename for f in s_raw),
                 "processed_filenames": ", ".join(f.filename for f in s_proc),
-                "processed_gcs_uris": ", ".join(f.storage_uri for f in s_proc),
+                "processed_gcs_uris": ", ".join(f.storage_uri or "" for f in s_proc),
             }
 
         files_data: dict | None = None
@@ -252,7 +252,7 @@ class GeoExportService:
                 ],
                 "raw_filenames": ", ".join(f.filename for f in raw_files),
                 "processed_filenames": ", ".join(f.filename for f in processed_files),
-                "processed_gcs_uris": ", ".join(f.storage_uri for f in processed_files),
+                "processed_gcs_uris": ", ".join(f.storage_uri or "" for f in processed_files),
             }
 
         return experiment_data, samples_data, pipeline_data, files_data

@@ -66,7 +66,7 @@ class LabDocumentUploadUrlResponse(BaseModel):
     signed_url: str
     gcs_uri: str
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def storage_uri(self) -> str:
         """Neutral alias of gcs_uri (retained legacy mirror); read storage_uri."""

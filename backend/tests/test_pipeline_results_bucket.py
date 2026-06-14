@@ -72,6 +72,6 @@ def test_ensure_outdir_fails_closed_when_no_results_bucket():
 
 
 def test_ensure_outdir_does_not_mutate_input_spec():
-    spec = {"parameters": {}, "experiment_id": 3, "run_id": 7}
+    spec: dict = {"parameters": {}, "experiment_id": 3, "run_id": 7}
     _provider({"results_bucket_name": "r"})._ensure_outdir(spec)
     assert "outdir" not in spec["parameters"]  # returns a new dict; input untouched

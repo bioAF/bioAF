@@ -71,7 +71,7 @@ class FileResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def storage_uri(self) -> str:
         """Backend-neutral alias of the object-store URI. gcs_uri is the retained
@@ -99,7 +99,7 @@ class FileUploadInitiateResponse(BaseModel):
     signed_url: str
     gcs_uri: str
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def storage_uri(self) -> str:
         """Neutral alias of gcs_uri (retained legacy mirror); read storage_uri."""

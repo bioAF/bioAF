@@ -36,7 +36,8 @@ def test_gke_associate_is_a_noop():
     # GCP binds via the KSA annotation, so there is no out-of-band association
     # call (that hook exists for EKS Pod Identity). It must be a harmless no-op.
     p = GkePodIdentityProvider()
-    assert p.associate("runner@proj.iam.gserviceaccount.com", "bioaf-pipelines", "bioaf-pipeline-runner") is None
+    # associate returns None by contract; calling it must simply not raise.
+    p.associate("runner@proj.iam.gserviceaccount.com", "bioaf-pipelines", "bioaf-pipeline-runner")
 
 
 def test_factory_defaults_to_gke():
