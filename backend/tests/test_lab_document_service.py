@@ -44,7 +44,7 @@ async def test_create_document_makes_v1_and_audit(session, admin_user):
         title="Centrifuge Manual",
         description="How to use the centrifuge",
         file_name="manual.pdf",
-        gcs_uri="gs://wb/lab-knowledge/documents/x/v1/manual.pdf",
+        storage_uri="gs://wb/lab-knowledge/documents/x/v1/manual.pdf",
         file_size_bytes=2048,
         mime_type="application/pdf",
         md5_checksum="deadbeef",
@@ -70,7 +70,7 @@ async def test_new_version_increments_and_updates_current(session, admin_user):
         user_id=uid,
         title="Policy",
         file_name="p.pdf",
-        gcs_uri="gs://wb/.../v1/p.pdf",
+        storage_uri="gs://wb/.../v1/p.pdf",
         md5_checksum="v1hash",
     )
     updated = await LabDocumentService.add_version(
@@ -78,7 +78,7 @@ async def test_new_version_increments_and_updates_current(session, admin_user):
         org_id=org_id,
         user_id=uid,
         document_id=doc.id,
-        gcs_uri="gs://wb/.../v2/p.pdf",
+        storage_uri="gs://wb/.../v2/p.pdf",
         file_name="p.pdf",
         md5_checksum="v2hash",
         change_note="Updated section 3",
@@ -104,7 +104,7 @@ async def test_archive_hides_from_default_list_and_restore_reveals(session, admi
         user_id=uid,
         title="Old SOP",
         file_name="s.pdf",
-        gcs_uri="gs://wb/v1/s.pdf",
+        storage_uri="gs://wb/v1/s.pdf",
     )
     await LabDocumentService.set_archived(session, org_id=org_id, user_id=uid, document_id=doc.id, archived=True)
     docs, total = await LabDocumentService.list_documents(session, org_id=org_id)
@@ -126,7 +126,7 @@ async def test_list_filters_by_tag(session, admin_user):
         user_id=uid,
         title="Manual A",
         file_name="a.pdf",
-        gcs_uri="gs://wb/v1/a.pdf",
+        storage_uri="gs://wb/v1/a.pdf",
         tag_ids=[t_manual.id],
     )
     await LabDocumentService.create_document(
@@ -135,7 +135,7 @@ async def test_list_filters_by_tag(session, admin_user):
         user_id=uid,
         title="Policy B",
         file_name="b.pdf",
-        gcs_uri="gs://wb/v1/b.pdf",
+        storage_uri="gs://wb/v1/b.pdf",
         tag_ids=[t_policy.id],
     )
     docs, total = await LabDocumentService.list_documents(session, org_id=org_id, tag_ids=[t_manual.id])
@@ -153,7 +153,7 @@ async def test_update_metadata_and_set_tags_audited(session, admin_user):
         user_id=uid,
         title="Doc",
         file_name="d.pdf",
-        gcs_uri="gs://wb/v1/d.pdf",
+        storage_uri="gs://wb/v1/d.pdf",
         tag_ids=[t1.id],
     )
     await LabDocumentService.update_metadata(
@@ -179,7 +179,7 @@ async def test_org_isolation_on_get(session, admin_user):
         user_id=uid,
         title="Mine",
         file_name="m.pdf",
-        gcs_uri="gs://wb/v1/m.pdf",
+        storage_uri="gs://wb/v1/m.pdf",
     )
     assert await LabDocumentService.get_document(session, document_id=doc.id, org_id=org_id + 999) is None
 
@@ -206,7 +206,7 @@ async def test_delete_tag_in_use_raises(session, admin_user):
         user_id=uid,
         title="Doc",
         file_name="d.pdf",
-        gcs_uri="gs://wb/v1/d.pdf",
+        storage_uri="gs://wb/v1/d.pdf",
         tag_ids=[tag.id],
     )
     with pytest.raises(TagInUseError):

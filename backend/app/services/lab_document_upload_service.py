@@ -367,7 +367,7 @@ class LabDocumentUploadService:
             file_name=meta["file_name"],
             # "pending" is a sentinel bucket; the record is repointed at the real
             # versioned URI by place() immediately below, before any storage op.
-            gcs_uri=adapter.build_uri("pending", token),
+            storage_uri=adapter.build_uri("pending", token),
             file_size_bytes=meta["size_bytes"],
             mime_type=meta["mime_type"],
             md5_checksum=meta["md5"],

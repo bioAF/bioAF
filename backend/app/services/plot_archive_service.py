@@ -196,7 +196,7 @@ class PlotArchiveService:
                             org_id=org_id,
                             user_id=None,
                             filename=name.split("/")[-1],
-                            gcs_uri=gcs_uri,
+                            storage_uri=gcs_uri,
                             size_bytes=obj.size_bytes,
                             md5_checksum=None,
                             file_type=file_type,

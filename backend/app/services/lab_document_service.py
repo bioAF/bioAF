@@ -1,9 +1,9 @@
 """Lab Documents service layer (ADR-059, ADR-060, ADR-061).
 
-Pure DB/business logic. GCS bytes are handled at the API layer through the
-existing signed-URL UploadService; callers pass an already-resolved ``gcs_uri``
-and the GCS-reported ``md5_checksum``. This mirrors how FileService (DB records)
-is split from UploadService (GCS I/O) elsewhere in the codebase.
+Pure DB/business logic. Object bytes are handled at the API layer through the
+existing signed-URL UploadService; callers pass an already-resolved ``storage_uri``
+and the storage-reported ``md5_checksum``. This mirrors how FileService (DB records)
+is split from UploadService (storage I/O) elsewhere in the codebase.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ class LabDocumentService:
         user_id: int,
         title: str,
         file_name: str,
-        gcs_uri: str,
+        storage_uri: str,
         description: str | None = None,
         file_size_bytes: int | None = None,
         mime_type: str | None = None,
@@ -53,7 +53,7 @@ class LabDocumentService:
             organization_id=org_id,
             title=title,
             description=description,
-            storage_uri=gcs_uri,
+            storage_uri=storage_uri,
             current_version=1,
             file_name=file_name,
             file_size_bytes=file_size_bytes,
@@ -68,7 +68,7 @@ class LabDocumentService:
             LabDocumentVersion(
                 document_id=doc.id,
                 version_number=1,
-                storage_uri=gcs_uri,
+                storage_uri=storage_uri,
                 file_name=file_name,
                 file_size_bytes=file_size_bytes,
                 md5_checksum=md5_checksum,
@@ -95,7 +95,7 @@ class LabDocumentService:
         org_id: int,
         user_id: int,
         document_id: int,
-        gcs_uri: str,
+        storage_uri: str,
         file_name: str,
         file_size_bytes: int | None = None,
         md5_checksum: str | None = None,
@@ -110,7 +110,7 @@ class LabDocumentService:
             LabDocumentVersion(
                 document_id=doc.id,
                 version_number=new_number,
-                storage_uri=gcs_uri,
+                storage_uri=storage_uri,
                 file_name=file_name,
                 file_size_bytes=file_size_bytes,
                 md5_checksum=md5_checksum,
@@ -119,7 +119,7 @@ class LabDocumentService:
             )
         )
         doc.current_version = new_number
-        doc.storage_uri = gcs_uri
+        doc.storage_uri = storage_uri
         doc.file_name = file_name
         doc.file_size_bytes = file_size_bytes
         doc.md5_checksum = md5_checksum

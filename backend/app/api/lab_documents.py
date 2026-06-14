@@ -151,7 +151,7 @@ async def _finalize_document_from_token(
         file_name=meta["file_name"],
         # "pending" is a sentinel bucket; place() repoints the record at the real
         # versioned URI immediately below, before any storage op.
-        gcs_uri=get_storage_adapter().build_uri("pending", upload_token),
+        storage_uri=get_storage_adapter().build_uri("pending", upload_token),
         file_size_bytes=meta["size_bytes"],
         mime_type=meta["mime_type"],
         md5_checksum=meta["md5"],
@@ -332,7 +332,7 @@ async def upload_version(
         org_id=org_id,
         user_id=user_id,
         document_id=doc.id,
-        gcs_uri=dest_uri,
+        storage_uri=dest_uri,
         file_name=meta["file_name"],
         file_size_bytes=meta["size_bytes"],
         md5_checksum=meta["md5"],
