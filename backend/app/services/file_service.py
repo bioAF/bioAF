@@ -32,7 +32,7 @@ class FileService:
     ) -> File:
         file = File(
             organization_id=org_id,
-            gcs_uri=gcs_uri,
+            storage_uri=gcs_uri,
             filename=filename,
             size_bytes=size_bytes,
             md5_checksum=md5_checksum,

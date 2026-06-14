@@ -166,7 +166,7 @@ class ReferenceDataService:
             file_record = ReferenceDatasetFile(
                 reference_dataset_id=dataset.id,
                 filename=f.filename,
-                gcs_uri=f.gcs_uri,
+                storage_uri=f.gcs_uri,
                 size_bytes=f.size_bytes,
                 md5_checksum=f.md5_checksum,
                 file_type=f.file_type,
@@ -540,7 +540,7 @@ class ReferenceDataService:
                 ReferenceDatasetFile(
                     reference_dataset_id=dataset.id,
                     filename=spec.filename,
-                    gcs_uri=adapter.build_uri(bucket_name, blob_path),
+                    storage_uri=adapter.build_uri(bucket_name, blob_path),
                     size_bytes=spec.size_bytes,
                     md5_checksum=spec.md5_checksum,
                 )
@@ -1170,7 +1170,7 @@ class ReferenceDataService:
                 ReferenceDatasetFile(
                     reference_dataset_id=dataset.id,
                     filename=f.filename,
-                    gcs_uri=f.gcs_uri,
+                    storage_uri=f.gcs_uri,
                     size_bytes=f.size_bytes,
                     md5_checksum=f.md5,
                     file_type=detect_reference_file_type(f.filename),

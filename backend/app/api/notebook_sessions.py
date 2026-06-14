@@ -502,7 +502,7 @@ async def register_outputs(
 
         file_record = File(
             organization_id=notebook_session.organization_id,
-            gcs_uri=gcs_uri,
+            storage_uri=gcs_uri,
             filename=filename,
             size_bytes=size_bytes,
             file_type=_file_type_from_extension(filename),

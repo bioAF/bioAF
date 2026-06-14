@@ -376,11 +376,11 @@ class LabDocumentUploadService:
         dest_uri = await LabDocumentUploadService.place(
             session, upload_token=token, org_id=org_id, document_id=doc.id, version=1
         )
-        doc.gcs_uri = dest_uri
+        doc.storage_uri = dest_uri
         await session.execute(
             sa_update(LabDocumentVersion)
             .where(LabDocumentVersion.document_id == doc.id, LabDocumentVersion.version_number == 1)
-            .values(gcs_uri=dest_uri)
+            .values(storage_uri=dest_uri, gcs_uri=dest_uri)
         )
         return doc.id
 

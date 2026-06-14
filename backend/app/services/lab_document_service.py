@@ -53,7 +53,7 @@ class LabDocumentService:
             organization_id=org_id,
             title=title,
             description=description,
-            gcs_uri=gcs_uri,
+            storage_uri=gcs_uri,
             current_version=1,
             file_name=file_name,
             file_size_bytes=file_size_bytes,
@@ -68,7 +68,7 @@ class LabDocumentService:
             LabDocumentVersion(
                 document_id=doc.id,
                 version_number=1,
-                gcs_uri=gcs_uri,
+                storage_uri=gcs_uri,
                 file_name=file_name,
                 file_size_bytes=file_size_bytes,
                 md5_checksum=md5_checksum,
@@ -110,7 +110,7 @@ class LabDocumentService:
             LabDocumentVersion(
                 document_id=doc.id,
                 version_number=new_number,
-                gcs_uri=gcs_uri,
+                storage_uri=gcs_uri,
                 file_name=file_name,
                 file_size_bytes=file_size_bytes,
                 md5_checksum=md5_checksum,
@@ -119,7 +119,7 @@ class LabDocumentService:
             )
         )
         doc.current_version = new_number
-        doc.gcs_uri = gcs_uri
+        doc.storage_uri = gcs_uri
         doc.file_name = file_name
         doc.file_size_bytes = file_size_bytes
         doc.md5_checksum = md5_checksum
