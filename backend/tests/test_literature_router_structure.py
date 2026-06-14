@@ -45,9 +45,30 @@ def _model_repr(rm) -> str | None:
     return str(rm)
 
 
+def _iter_routes(rt):
+    """Yield concrete routes with their full (prefixed) paths.
+
+    Starlette >= 1.3 keeps each ``include_router()`` as an ``_IncludedRouter``
+    wrapper in ``.routes`` (with no ``.path``) instead of flattening the routes the
+    way older versions did. For such a wrapper, ``effective_route_contexts()``
+    yields the resolved routes carrying the full prefixed ``path`` plus the same
+    ``methods`` / ``name`` / ``response_model`` / ``status_code`` / ``tags`` /
+    ``endpoint`` attributes a concrete route has. This keeps the enumeration
+    independent of the installed starlette version (old: flat routes with
+    ``.path``; new: wrappers to resolve).
+    """
+    for r in getattr(rt, "routes", []):
+        if hasattr(r, "path"):
+            yield r
+            continue
+        contexts = getattr(r, "effective_route_contexts", None)
+        if callable(contexts):
+            yield from contexts()
+
+
 def _live_route_table() -> list[dict]:
     rows = []
-    for r in router.routes:
+    for r in _iter_routes(router):
         methods = sorted(r.methods) if getattr(r, "methods", None) else []
         rows.append(
             {
@@ -70,10 +91,9 @@ def test_route_table_matches_golden():
 
     # Catch an accidental duplicate registration: the dict comparison below
     # dedups by (path, methods), so a route registered twice would otherwise
-    # slip through.
-    assert len(router.routes) == len(golden), (
-        f"route count changed: live has {len(router.routes)} routes, golden has {len(golden)}"
-    )
+    # slip through. Count the flattened live routes (router.routes itself may hold
+    # _IncludedRouter wrappers on newer starlette, not the concrete routes).
+    assert len(live) == len(golden), f"route count changed: live has {len(live)} routes, golden has {len(golden)}"
 
     # Compare path-by-path so a mismatch points at the offending route.
     golden_by_key = {(r["path"], tuple(r["methods"])): r for r in golden}
@@ -94,7 +114,7 @@ def test_literature_is_a_package():
 
 def test_router_assembled_from_multiple_modules():
     """The router is composed from many sub-router modules, not one God module."""
-    modules = {r.endpoint.__module__ for r in router.routes if hasattr(r, "endpoint")}
+    modules = {r.endpoint.__module__ for r in _iter_routes(router) if hasattr(r, "endpoint")}
     assert len(modules) >= 5, f"expected the router to span several sub-modules, got {sorted(modules)}"
 
 
