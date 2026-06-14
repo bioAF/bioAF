@@ -94,3 +94,51 @@ class TestComputeStackEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["compute_stack"] == "kubernetes"
+
+
+class TestStackOptionsEndpoint:
+    @pytest.mark.asyncio
+    async def test_defaults_to_gcp_options(self, client, admin_token):
+        """No cloud_provider row -> GCP options (behavior-preserving)."""
+        response = await client.get(
+            "/api/v1/infrastructure/stack-options",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["cloud_provider"] == "gcp"
+        labels = {o["label"] for o in data["options"]}
+        assert labels == {"Kubernetes + GCS", "SLURM + NFS"}
+        k8s = next(o for o in data["options"] if o["compute_stack"] == "kubernetes")
+        assert k8s["compute_label"] == "Kubernetes (GKE)"
+        assert k8s["available"] is True and k8s["recommended"] is True
+
+    @pytest.mark.asyncio
+    async def test_aws_cloud_provider_yields_eks_s3(self, client, admin_token, session):
+        await session.execute(
+            text(
+                "INSERT INTO platform_config (key, value) VALUES ('cloud_provider', 'aws') "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+            )
+        )
+        await session.commit()
+
+        response = await client.get(
+            "/api/v1/infrastructure/stack-options",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["cloud_provider"] == "aws"
+        k8s = next(o for o in data["options"] if o["compute_stack"] == "kubernetes")
+        assert k8s["label"] == "Kubernetes + S3"
+        assert k8s["compute_label"] == "Kubernetes (EKS)"
+        assert k8s["storage_backend"] == "s3"
+
+    @pytest.mark.asyncio
+    async def test_bench_denied(self, client, bench_token):
+        response = await client.get(
+            "/api/v1/infrastructure/stack-options",
+            headers={"Authorization": f"Bearer {bench_token}"},
+        )
+        assert response.status_code == 403

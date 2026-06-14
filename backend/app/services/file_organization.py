@@ -44,7 +44,7 @@ class FileOrganizationService:
         """
         row = (
             await session.execute(
-                text("SELECT gcs_uri, experiment_id, filename FROM files WHERE id = :fid").bindparams(fid=file_id)
+                text("SELECT storage_uri, experiment_id, filename FROM files WHERE id = :fid").bindparams(fid=file_id)
             )
         ).fetchone()
 
@@ -122,7 +122,7 @@ class FileOrganizationService:
         """Move a file from one experiment to another."""
         row = (
             await session.execute(
-                text("SELECT gcs_uri, experiment_id, filename FROM files WHERE id = :fid").bindparams(fid=file_id)
+                text("SELECT storage_uri, experiment_id, filename FROM files WHERE id = :fid").bindparams(fid=file_id)
             )
         ).fetchone()
 
@@ -195,7 +195,7 @@ class FileOrganizationService:
         """Unlink a file from its experiment, moving to unlinked prefix."""
         row = (
             await session.execute(
-                text("SELECT gcs_uri, experiment_id, filename FROM files WHERE id = :fid").bindparams(fid=file_id)
+                text("SELECT storage_uri, experiment_id, filename FROM files WHERE id = :fid").bindparams(fid=file_id)
             )
         ).fetchone()
 

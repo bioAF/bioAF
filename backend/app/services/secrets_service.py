@@ -20,11 +20,14 @@ class SecretsService:
         self.project_id = project_id
         self._cache: dict[str, str] = {}
         # The managed secret store is reached through the BAL SecretsProvider
-        # (Phase 9C), so this service holds no cloud SDK. Selected by bootstrap
-        # config (default GCP) since secrets are fetched before the DB/registry.
+        # (Phase 9C), so this service holds no cloud SDK. Secrets are fetched
+        # before the DB/registry, so backend_for has no cached value yet and
+        # returns the gcp policy default; the AWS secrets bootstrap (resolving the
+        # backend from pre-DB detection) is future work in the AWS build.
         from app.adapters.secrets import create_secrets_provider
+        from app.platform.cloud_provider import backend_for
 
-        self._provider = create_secrets_provider(project_id)
+        self._provider = create_secrets_provider(project_id, backend=backend_for("secrets"))
 
     def fetch_all(self) -> dict[str, str]:
         for idx, entry in enumerate(_MANAGED_ENTRIES):

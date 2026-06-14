@@ -173,7 +173,7 @@ async def test_cleanup_gke_cluster(session, admin_user):
 
     with (
         patch(
-            "app.services.stack_deployment._get_gke_client",
+            "app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client",
             return_value=mock_client,
         ),
         patch(
@@ -210,16 +210,11 @@ async def test_cleanup_gcs_bucket(session, admin_user):
     mock_storage_client = MagicMock()
     mock_storage_client.bucket.return_value = mock_bucket
 
-    with (
-        patch(
-            "app.services.stack_deployment._get_gke_credentials",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
-        patch(
-            "app.services.orphaned_resource_service.storage.Client",
-            return_value=mock_storage_client,
-        ),
+    # The whole-bucket delete now lives on the storage adapter; patch its GCS
+    # client factory so delete_bucket drives the mock.
+    with patch(
+        "app.adapters.storage.gcs.GcsStorageProvider._get_gcs_client",
+        return_value=mock_storage_client,
     ):
         result = await OrphanedResourceService.cleanup_resource(session, resource.id, admin_user.id)
 
@@ -260,7 +255,7 @@ async def test_cleanup_service_account_routes_through_iam_provider(session, admi
         result = await OrphanedResourceService.cleanup_resource(session, resource.id, admin_user.id)
 
     assert result.status == "cleaned"
-    create.assert_called_once_with(credentials=creds)
+    create.assert_called_once_with(credentials=creds, backend="gcp")
     provider.delete_service_account.assert_called_once_with("test-project", "bioaf-notebook-runner")
 
 
@@ -284,7 +279,7 @@ async def test_cleanup_failure_sets_status_failed(session, admin_user):
 
     with (
         patch(
-            "app.services.stack_deployment._get_gke_client",
+            "app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client",
             return_value=mock_client,
         ),
         patch(
@@ -369,7 +364,7 @@ async def test_cleanup_orphaned_resource_endpoint(client: AsyncClient, admin_tok
 
     with (
         patch(
-            "app.services.stack_deployment._get_gke_client",
+            "app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client",
             return_value=mock_client,
         ),
         patch(

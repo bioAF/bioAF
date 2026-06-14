@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
 from app.schemas.experiment import UserSummary
 from app.schemas.file import FileResponse
@@ -19,6 +19,12 @@ class CellxgenePublishableFile(BaseModel):
     cellxgene_ready: bool = False
     cellxgene_status: str = "unknown"
     created_at: datetime
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def storage_uri(self) -> str:
+        """Neutral alias of gcs_uri (retained legacy mirror); read storage_uri."""
+        return self.gcs_uri
 
 
 class CellxgenePublishRequest(BaseModel):

@@ -83,7 +83,7 @@ class PipelineOutputService:
 
         # Collect existing gcs_uris to skip duplicates
         uris = [f["gcs_uri"] for f in collected_files]
-        existing = await session.execute(select(File.gcs_uri).where(File.gcs_uri.in_(uris)))
+        existing = await session.execute(select(File.storage_uri).where(File.storage_uri.in_(uris)))
         existing_uris: set[str] = {row[0] for row in existing.all()}
 
         created: list[File] = []
@@ -103,7 +103,7 @@ class PipelineOutputService:
                 org_id=run.organization_id,
                 user_id=run.submitted_by_user_id,
                 filename=filename,
-                gcs_uri=gcs_uri,
+                storage_uri=gcs_uri,
                 size_bytes=file_dict.get("size_bytes"),
                 md5_checksum=file_dict.get("md5_hash"),
                 file_type=file_type,
@@ -177,7 +177,7 @@ class PipelineOutputService:
 
         # Check which URIs already exist in DB
         uris = [f["gcs_uri"] for f in metadata_files]
-        existing = await session.execute(select(File.gcs_uri).where(File.gcs_uri.in_(uris)))
+        existing = await session.execute(select(File.storage_uri).where(File.storage_uri.in_(uris)))
         existing_uris: set[str] = {row[0] for row in existing.all()}
 
         # Check which blobs exist in GCS
@@ -197,7 +197,7 @@ class PipelineOutputService:
                 org_id=run.organization_id,
                 user_id=run.submitted_by_user_id,
                 filename=meta["filename"],
-                gcs_uri=gcs_uri,
+                storage_uri=gcs_uri,
                 size_bytes=existing_blobs[gcs_uri],
                 md5_checksum=None,
                 file_type=meta["file_type"],

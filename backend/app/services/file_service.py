@@ -18,7 +18,7 @@ class FileService:
         org_id: int,
         user_id: int | None,
         filename: str,
-        gcs_uri: str,
+        storage_uri: str,
         size_bytes: int | None,
         md5_checksum: str | None,
         file_type: str,
@@ -32,7 +32,7 @@ class FileService:
     ) -> File:
         file = File(
             organization_id=org_id,
-            gcs_uri=gcs_uri,
+            storage_uri=storage_uri,
             filename=filename,
             size_bytes=size_bytes,
             md5_checksum=md5_checksum,

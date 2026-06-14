@@ -59,8 +59,8 @@ class ReferenceDatasetFile(Base):
         Integer, ForeignKey("reference_datasets.id", ondelete="CASCADE"), nullable=False
     )
     filename: Mapped[str] = mapped_column(String(500), nullable=False)
-    # BAL Phase 4 expand/contract: gcs_uri + storage_uri kept in sync until a
-    # later migration drops gcs_uri (see _storage_uri_sync).
+    # storage_uri is authoritative; gcs_uri is a retained legacy mirror kept in
+    # sync (see _storage_uri_sync, storage_uri canonical). We do NOT drop gcs_uri.
     gcs_uri: Mapped[str] = mapped_column(Text, nullable=False)
     storage_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

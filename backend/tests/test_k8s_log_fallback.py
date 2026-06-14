@@ -93,3 +93,26 @@ class TestLogFallback:
             logs = await adapter._k8s_get_job_logs("bioaf-pipeline-1")
 
         assert logs == "Nextflow output here..."
+
+    @pytest.mark.asyncio
+    async def test_decodes_bytes_pod_logs(self, adapter):
+        """Newer kubernetes clients (>=31) return bytes from read_namespaced_pod_log.
+
+        The adapter's contract is ``-> str``; if it passes bytes through, the log
+        renders as a Python bytes repr (``b"...\\n..."`` with literal newlines).
+        Decode defensively so the contract holds across client versions.
+        """
+        pod = _make_pod()
+        pod_list = MagicMock()
+        pod_list.items = [pod]
+
+        mock_core = MagicMock()
+        mock_core.list_namespaced_pod.return_value = pod_list
+        mock_core.read_namespaced_pod_log.return_value = b"process.executor = 'k8s'\nNextflow output\n"
+
+        with patch.object(adapter, "_get_k8s_core_client", return_value=mock_core):
+            logs = await adapter._k8s_get_job_logs("bioaf-pipeline-1")
+
+        assert isinstance(logs, str)
+        assert logs == "process.executor = 'k8s'\nNextflow output\n"
+        assert not logs.startswith("b'") and not logs.startswith('b"')

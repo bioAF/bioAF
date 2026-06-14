@@ -64,30 +64,34 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("SELECT 1"))
     logger.info("Database connection verified")
 
-    # SA hardening: persist the bioaf-bootstrap and bioaf-app SA emails from VM
-    # metadata. The installer attaches the bootstrap email to instance metadata
-    # (--metadata=bioaf_bootstrap_sa_email=...) and bioaf-app as the VM's
-    # attached SA, so the backend can persist both to platform_config on first
-    # startup. The app SA email is what Terraform grants dataset read on the BQ
-    # billing export (ADR-028). No-op when not running on GCE or when the rows
-    # already exist.
+    # Bootstrap identity from VM metadata. cloud_provider first (the foundational
+    # identity every BAL seam resolves from): explicit installer-stamped value, else
+    # auto-detect (GCE metadata vs EC2 IMDSv2), immutable once set. Then the
+    # bioaf-bootstrap and bioaf-app SA emails: the installer attaches the bootstrap
+    # email to instance metadata (--metadata=bioaf_bootstrap_sa_email=...) and
+    # bioaf-app as the VM's attached SA, so the backend persists both to
+    # platform_config on first startup. The app SA email is what Terraform grants
+    # dataset read on the BQ billing export (ADR-028). No-op when not running on a
+    # known cloud or when the rows already exist.
     try:
         from app.database import async_session_factory as _bootstrap_session_factory
         from app.services.bootstrap_metadata import (
             persist_app_sa_from_metadata,
             persist_bootstrap_sa_from_metadata,
+            persist_cloud_provider,
         )
 
         async with _bootstrap_session_factory() as _bootstrap_session:
+            await persist_cloud_provider(_bootstrap_session)
             await persist_bootstrap_sa_from_metadata(_bootstrap_session)
             await persist_app_sa_from_metadata(_bootstrap_session)
     except Exception as e:
-        logger.info("Bootstrap SA metadata read skipped: %s", e)
+        logger.info("Bootstrap metadata read skipped: %s", e)
 
     # Attach Cloud Logging using the app's configured GCP credentials
     try:
         from app.database import async_session_factory as cl_session_factory
-        from app.platform import credential_injector
+        from app.adapters.credentials import credential_injector
         from app.platform.platform_config_service import PlatformConfigService
 
         async with cl_session_factory() as cl_session:

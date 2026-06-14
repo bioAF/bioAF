@@ -232,7 +232,7 @@ class TestCellxgeneOutOfClusterClientAuthHeader:
         fake_creds = MagicMock()
         fake_creds.token = "test-token-xyz"
         with patch(
-            "app.platform.credential_injector.load_gcp_credentials",
+            "app.adapters.credentials.credential_injector.load_gcp_credentials",
             return_value=fake_creds,
         ):
             api_client = provider._build_out_of_cluster_client()
@@ -268,7 +268,7 @@ class TestCellxgeneClusterChangeRebuild:
 
     def _setup(self, monkeypatch, token="tok"):
         from app.adapters.kubernetes import connection as conn_mod
-        from app.platform import credential_injector as ci_mod
+        from app.adapters.credentials import credential_injector as ci_mod
 
         monkeypatch.setattr(
             conn_mod.config,

@@ -9,6 +9,7 @@ interface UploadUrlResponse {
   upload_token: string;
   signed_url: string;
   gcs_uri: string;
+  storage_uri: string;
 }
 
 // Origin-aware resumable upload to GCS (fixes the cross-origin "Failed to fetch"

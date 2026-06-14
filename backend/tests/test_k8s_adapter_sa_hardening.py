@@ -12,8 +12,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.adapters.cluster_auth import gcp as cluster_auth_gcp
 from app.adapters.compute import kubernetes as compute_k8s
-from app.adapters.kubernetes import connection as gke_conn
 
 
 def _vm_default_cfg() -> dict:
@@ -30,12 +30,12 @@ def test_notebook_adapter_get_gcp_token_uses_credential_injector():
     fake_creds.token = "ya29.fake"
     with (
         patch(
-            "app.platform.credential_injector.load_gcp_credentials",
+            "app.adapters.credentials.credential_injector.load_gcp_credentials",
             return_value=fake_creds,
         ) as load,
         patch("google.auth.transport.requests.Request"),
     ):
-        token = gke_conn._get_gcp_token(cfg)
+        token = cluster_auth_gcp._get_gcp_token(cfg)
     load.assert_called_once_with(cfg)
     fake_creds.refresh.assert_called_once()
     assert token == "ya29.fake"
@@ -47,12 +47,12 @@ def test_compute_adapter_get_gcp_token_uses_credential_injector():
     fake_creds.token = "ya29.fake"
     with (
         patch(
-            "app.platform.credential_injector.load_gcp_credentials",
+            "app.adapters.credentials.credential_injector.load_gcp_credentials",
             return_value=fake_creds,
         ) as load,
         patch("google.auth.transport.requests.Request"),
     ):
-        token = gke_conn._get_gcp_token(cfg)
+        token = cluster_auth_gcp._get_gcp_token(cfg)
     load.assert_called_once_with(cfg)
     assert token == "ya29.fake"
 
@@ -63,12 +63,12 @@ def test_cellxgene_adapter_get_gcp_token_uses_credential_injector():
     fake_creds.token = "ya29.fake"
     with (
         patch(
-            "app.platform.credential_injector.load_gcp_credentials",
+            "app.adapters.credentials.credential_injector.load_gcp_credentials",
             return_value=fake_creds,
         ) as load,
         patch("google.auth.transport.requests.Request"),
     ):
-        token = gke_conn._get_gcp_token(cfg)
+        token = cluster_auth_gcp._get_gcp_token(cfg)
     load.assert_called_once_with(cfg)
     assert token == "ya29.fake"
 

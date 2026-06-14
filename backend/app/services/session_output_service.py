@@ -75,7 +75,7 @@ class SessionOutputService:
 
             file_record = File(
                 organization_id=organization_id,
-                gcs_uri=f["gcs_uri"],
+                storage_uri=f["gcs_uri"],
                 filename=filename,
                 size_bytes=f.get("size_bytes"),
                 file_type=_file_type_from_extension(filename),
@@ -136,14 +136,14 @@ class SessionOutputService:
             src_uris.append(src_uri)
             copied += 1
 
-        # Update File.gcs_uri to point to results bucket
+        # Update File.storage_uri (+ the gcs_uri mirror) to point to results bucket
         if copied:
             old_uri_prefix = adapter.build_uri(working_bucket, src_prefix)
             new_uri_prefix = adapter.build_uri(results_bucket, dst_prefix)
             await db.execute(
                 sa_text(
-                    "UPDATE files SET gcs_uri = REPLACE(gcs_uri, :old, :new), storage_uri = REPLACE(gcs_uri, :old, :new) "
-                    "WHERE source_notebook_session_id = :sid AND gcs_uri LIKE :pattern"
+                    "UPDATE files SET storage_uri = REPLACE(storage_uri, :old, :new), gcs_uri = REPLACE(storage_uri, :old, :new) "
+                    "WHERE source_notebook_session_id = :sid AND storage_uri LIKE :pattern"
                 ),
                 {
                     "old": old_uri_prefix,

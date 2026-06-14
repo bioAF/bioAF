@@ -43,6 +43,7 @@ const makeFile = (overrides = {}) => ({
   id: 1,
   filename: "sample.fastq.gz",
   gcs_uri: "gs://bucket/sample.fastq.gz",
+  storage_uri: "gs://bucket/sample.fastq.gz",
   size_bytes: 1048576,
   md5_checksum: "abc123",
   file_type: "fastq",
@@ -264,4 +265,39 @@ test("renders provenance breadcrumb when API returns provenance", async () => {
   await waitFor(() => {
     expect(screen.getByText("Exp Alpha › S010, S011")).toBeInTheDocument();
   });
+});
+
+test("file detail shows the cloud-neutral storage_uri, not the legacy gcs_uri", async () => {
+  // storage_uri is the authoritative, backend-neutral field; gcs_uri is a legacy
+  // mirror that will diverge once the backend stops populating it. Force a
+  // divergence so the assertion can only pass if the UI reads storage_uri.
+  mockGet.mockImplementation((url: string) => {
+    if (url.includes("/api/projects")) return Promise.resolve({ projects: [] });
+    if (url.includes("/api/experiments")) return Promise.resolve({ experiments: [] });
+    return Promise.resolve({
+      files: [
+        makeFile({
+          gcs_uri: "gs://old/legacy.fastq.gz",
+          storage_uri: "gs://NEUTRAL/legacy.fastq.gz",
+        }),
+      ],
+      total: 1,
+      page: 1,
+      page_size: 25,
+    });
+  });
+
+  render(<FileBrowser />);
+
+  await waitFor(() => {
+    expect(screen.getByText("sample.fastq.gz")).toBeInTheDocument();
+  });
+
+  // Open the file detail modal (the URI is only rendered there).
+  fireEvent.click(screen.getByText("sample.fastq.gz"));
+
+  await waitFor(() => {
+    expect(screen.getByText("gs://NEUTRAL/legacy.fastq.gz")).toBeInTheDocument();
+  });
+  expect(screen.queryByText("gs://old/legacy.fastq.gz")).not.toBeInTheDocument();
 });

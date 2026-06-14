@@ -43,7 +43,7 @@ class TestTokenExpiry:
         conn._client_created_at = 1000.0
         monkeypatch.setattr(
             "app.adapters.kubernetes.connection.time.monotonic",
-            lambda: 1000.0 + conn._TOKEN_TTL_SECONDS + 1,
+            lambda: 1000.0 + conn._cluster_auth.token_ttl_seconds + 1,
         )
         assert conn.is_token_expired() is True
 
@@ -74,7 +74,7 @@ class TestBuildOutOfClusterClient:
         fake_creds = MagicMock()
         fake_creds.token = "tok-123"
         with patch(
-            "app.platform.credential_injector.load_gcp_credentials",
+            "app.adapters.credentials.credential_injector.load_gcp_credentials",
             return_value=fake_creds,
         ):
             api_client = conn.build_out_of_cluster_client()
@@ -89,7 +89,7 @@ class TestBuildOutOfClusterClient:
         self._seed(conn, endpoint="1.2.3.4")
         fake_creds = MagicMock()
         fake_creds.token = "tok"
-        with patch("app.platform.credential_injector.load_gcp_credentials", return_value=fake_creds):
+        with patch("app.adapters.credentials.credential_injector.load_gcp_credentials", return_value=fake_creds):
             api_client = conn.build_out_of_cluster_client()
         assert api_client.configuration.host == "https://1.2.3.4"
 
@@ -98,7 +98,7 @@ class TestBuildOutOfClusterClient:
         self._seed(conn, endpoint="https://5.6.7.8")
         fake_creds = MagicMock()
         fake_creds.token = "tok"
-        with patch("app.platform.credential_injector.load_gcp_credentials", return_value=fake_creds):
+        with patch("app.adapters.credentials.credential_injector.load_gcp_credentials", return_value=fake_creds):
             api_client = conn.build_out_of_cluster_client()
         assert api_client.configuration.host == "https://5.6.7.8"
 
@@ -108,7 +108,7 @@ class TestBuildOutOfClusterClient:
         assert conn._client_created_at == 0.0
         fake_creds = MagicMock()
         fake_creds.token = "tok"
-        with patch("app.platform.credential_injector.load_gcp_credentials", return_value=fake_creds):
+        with patch("app.adapters.credentials.credential_injector.load_gcp_credentials", return_value=fake_creds):
             conn.build_out_of_cluster_client()
         assert conn._client_created_at > 0.0
 
@@ -232,7 +232,7 @@ class TestGetApiClientSync:
         conn._client_created_at = 1000.0
         monkeypatch.setattr(
             "app.adapters.kubernetes.connection.time.monotonic",
-            lambda: 1000.0 + conn._TOKEN_TTL_SECONDS + 1,
+            lambda: 1000.0 + conn._cluster_auth.token_ttl_seconds + 1,
         )
         fresh = MagicMock()
         with patch(_INCLUSTER, side_effect=Exception("nope")):

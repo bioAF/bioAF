@@ -17,54 +17,42 @@ import pytest
 from app.services import sheets_reader_sa_service
 
 
-def test_load_primary_credentials_prefers_bootstrap_sa_email():
-    """vm_default + gcp_bootstrap_sa_email targets the new key."""
+def test_load_primary_credentials_delegates_to_seam():
+    """_load_primary_credentials asks the Credentials seam for the primary SA
+    creds (default cloud-platform scope + config-derived impersonation) and
+    returns them with the project id. Impersonation precedence (bootstrap over
+    legacy) now lives in the seam and is tested in test_credential_injector."""
     config = {
         "gcp_credential_source": "vm_default",
         "gcp_project_id": "my-project",
         "gcp_bootstrap_sa_email": "bioaf-bootstrap@my-project.iam.gserviceaccount.com",
-        "gcp_service_account_email": "legacy-sa@my-project.iam.gserviceaccount.com",
     }
-    fake_source = MagicMock(name="adc")
-    with (
-        patch("google.auth.default", return_value=(fake_source, "my-project")),
-        patch("google.auth.impersonated_credentials.Credentials") as imp_cls,
-    ):
-        sheets_reader_sa_service._load_primary_credentials(config)
-        imp_cls.assert_called_once()
-        assert imp_cls.call_args.kwargs["target_principal"] == "bioaf-bootstrap@my-project.iam.gserviceaccount.com"
-
-
-def test_load_primary_credentials_falls_back_to_service_account_email():
-    """Existing installs without the new key still impersonate via legacy field."""
-    config = {
-        "gcp_credential_source": "vm_default",
-        "gcp_project_id": "my-project",
-        "gcp_service_account_email": "legacy-sa@my-project.iam.gserviceaccount.com",
-    }
-    fake_source = MagicMock(name="adc")
-    with (
-        patch("google.auth.default", return_value=(fake_source, "my-project")),
-        patch("google.auth.impersonated_credentials.Credentials") as imp_cls,
-    ):
-        sheets_reader_sa_service._load_primary_credentials(config)
-        assert imp_cls.call_args.kwargs["target_principal"] == "legacy-sa@my-project.iam.gserviceaccount.com"
-
-
-def test_load_primary_credentials_raw_adc_when_no_email():
-    config = {
-        "gcp_credential_source": "vm_default",
-        "gcp_project_id": "my-project",
-    }
-    fake_source = MagicMock(name="adc")
-    with (
-        patch("google.auth.default", return_value=(fake_source, "my-project")),
-        patch("google.auth.impersonated_credentials.Credentials") as imp_cls,
-    ):
+    sentinel = MagicMock(name="primary_creds")
+    provider = MagicMock()
+    provider.load_credentials.return_value = sentinel
+    with patch.object(sheets_reader_sa_service, "get_credentials_provider", return_value=provider):
         creds, project = sheets_reader_sa_service._load_primary_credentials(config)
-        imp_cls.assert_not_called()
-        assert creds is fake_source
-        assert project == "my-project"
+    assert creds is sentinel
+    assert project == "my-project"
+    provider.load_credentials.assert_called_once_with(config)
+
+
+def test_load_primary_credentials_raises_without_project():
+    provider = MagicMock()
+    with patch.object(sheets_reader_sa_service, "get_credentials_provider", return_value=provider):
+        with pytest.raises(RuntimeError, match="project ID"):
+            sheets_reader_sa_service._load_primary_credentials({"gcp_credential_source": "vm_default"})
+    provider.load_credentials.assert_not_called()
+
+
+def test_load_primary_credentials_raises_when_sa_key_missing():
+    """service_account_key source but no key configured fails before the seam."""
+    config = {"gcp_credential_source": "service_account_key", "gcp_project_id": "my-project"}
+    provider = MagicMock()
+    with patch.object(sheets_reader_sa_service, "get_credentials_provider", return_value=provider):
+        with pytest.raises(RuntimeError, match="service account key"):
+            sheets_reader_sa_service._load_primary_credentials(config)
+    provider.load_credentials.assert_not_called()
 
 
 def test_gcp_keys_constant_includes_bootstrap_sa_email():
@@ -75,7 +63,8 @@ def test_gcp_keys_constant_includes_bootstrap_sa_email():
 
 @pytest.mark.asyncio
 async def test_get_reader_credentials_impersonates_in_vm_default_mode():
-    """vm_default install: returns impersonated creds targeting the reader SA, no key needed."""
+    """vm_default install: asks the seam to impersonate the reader SA with a
+    short-lived Sheets-scoped token, no key needed."""
     session = MagicMock()
     config_rows = {
         "sheets_reader_sa_email": "bioaf-reader@my-project.iam.gserviceaccount.com",
@@ -87,45 +76,56 @@ async def test_get_reader_credentials_impersonates_in_vm_default_mode():
     async def fake_read_keys(_session, _keys):
         return config_rows
 
-    fake_source = MagicMock(name="adc")
+    sentinel = MagicMock(name="reader_creds")
+    provider = MagicMock()
+    provider.load_credentials.return_value = sentinel
     with (
         patch.object(sheets_reader_sa_service, "_read_keys", side_effect=fake_read_keys),
-        patch("google.auth.default", return_value=(fake_source, "my-project")),
-        patch.object(sheets_reader_sa_service, "impersonated_credentials") as imp_module,
+        patch.object(sheets_reader_sa_service, "get_credentials_provider", return_value=provider),
     ):
-        await sheets_reader_sa_service.get_reader_credentials(session)
-        imp_module.Credentials.assert_called_once()
-        kwargs = imp_module.Credentials.call_args.kwargs
-        assert kwargs["target_principal"] == "bioaf-reader@my-project.iam.gserviceaccount.com"
-        assert kwargs["target_scopes"] == sheets_reader_sa_service._SHEETS_SCOPE
-        assert kwargs["source_credentials"] is fake_source
+        result = await sheets_reader_sa_service.get_reader_credentials(session)
+    assert result is sentinel
+    provider.load_credentials.assert_called_once_with(
+        config_rows,
+        scopes=sheets_reader_sa_service._SHEETS_SCOPE,
+        impersonate_target="bioaf-reader@my-project.iam.gserviceaccount.com",
+        lifetime=3600,
+    )
 
 
 @pytest.mark.asyncio
 async def test_get_reader_credentials_uses_stored_key_for_legacy_installs():
-    """service_account_key (legacy) install: still loads the JSON key from platform_config."""
+    """service_account_key (legacy) install: asks the seam to build creds from the
+    reader SA's own stored JSON key, scoped to Sheets readonly."""
     session = MagicMock()
-    fake_key = {
-        "type": "service_account",
-        "project_id": "my-project",
-        "client_email": "bioaf-reader@my-project.iam.gserviceaccount.com",
-    }
+    reader_key = json.dumps(
+        {
+            "type": "service_account",
+            "project_id": "my-project",
+            "client_email": "bioaf-reader@my-project.iam.gserviceaccount.com",
+        }
+    )
     config_rows = {
         "sheets_reader_sa_email": "bioaf-reader@my-project.iam.gserviceaccount.com",
         "sheets_reader_sa_created": "true",
-        "sheets_reader_sa_key": json.dumps(fake_key),
+        "sheets_reader_sa_key": reader_key,
         "gcp_credential_source": "service_account_key",
     }
 
     async def fake_read_keys(_session, _keys):
         return config_rows
 
+    provider = MagicMock()
     with (
         patch.object(sheets_reader_sa_service, "_read_keys", side_effect=fake_read_keys),
-        patch.object(sheets_reader_sa_service.service_account.Credentials, "from_service_account_info") as mk,
+        patch.object(sheets_reader_sa_service, "get_credentials_provider", return_value=provider),
     ):
         await sheets_reader_sa_service.get_reader_credentials(session)
-        mk.assert_called_once_with(fake_key, scopes=sheets_reader_sa_service._SHEETS_SCOPE)
+    provider.load_credentials.assert_called_once_with(
+        config_rows,
+        scopes=sheets_reader_sa_service._SHEETS_SCOPE,
+        key_json=reader_key,
+    )
 
 
 @pytest.mark.asyncio

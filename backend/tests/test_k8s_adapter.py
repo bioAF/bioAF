@@ -76,6 +76,120 @@ async def test_k8s_adapter_get_cluster_status_with_mock():
 
 
 @pytest.mark.asyncio
+async def test_k8s_adapter_get_cluster_detail_with_mock():
+    """get_cluster_detail returns the stack-view ClusterDetail (name/status/
+    node-count + per-pool detail), with status mapped to the uppercase enum-name
+    contract the stack view expects (distinct from get_cluster_status's lowercase
+    controller_status)."""
+    from app.adapters.compute.kubernetes import KubernetesComputeProvider
+
+    provider = KubernetesComputeProvider()
+    provider._mode = "production"
+    provider._cluster_config = {
+        "gke_cluster_endpoint": "https://10.0.0.1",
+        "gke_cluster_name": "bioaf-test",
+        "gcp_project_id": "test-project",
+        "gcp_region": "us-central1",
+    }
+
+    mock_cluster = MagicMock()
+    mock_cluster.name = "bioaf-test"
+    mock_cluster.status = 2  # RUNNING
+    mock_cluster.current_node_count = 3
+
+    mock_pool = MagicMock()
+    mock_pool.name = "bioaf-pipelines"
+    mock_pool.config.machine_type = "n2-highmem-8"
+    mock_pool.autoscaling.min_node_count = 0
+    mock_pool.autoscaling.max_node_count = 20
+    mock_pool.initial_node_count = 3
+    mock_pool.config.spot = True
+    mock_pool.status = 99  # unmapped -> UNKNOWN
+
+    mock_cluster.node_pools = [mock_pool]
+
+    mock_client = MagicMock()
+    mock_client.get_cluster.return_value = mock_cluster
+
+    with patch(
+        "app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client",
+        return_value=mock_client,
+    ):
+        detail = await provider.get_cluster_detail()
+
+    assert detail.name == "bioaf-test"
+    assert detail.status == "RUNNING"
+    assert detail.node_count == 3
+    assert len(detail.node_pools) == 1
+    pool = detail.node_pools[0]
+    assert pool.name == "bioaf-pipelines"
+    assert pool.machine_type == "n2-highmem-8"
+    assert pool.max_nodes == 20
+    assert pool.spot is True
+    assert pool.status == "UNKNOWN"  # unmapped enum falls back to UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_k8s_adapter_cluster_lifecycle_management():
+    """list_cluster_names / probe_cluster / delete_cluster own the orphan
+    scan/recovery/teardown GKE calls drained from orphaned_resource (Stage 3b.5)."""
+    from app.adapters.compute.kubernetes import KubernetesComputeProvider
+
+    provider = KubernetesComputeProvider()
+    provider._mode = "production"
+
+    c1 = MagicMock()
+    c1.name = "bioaf-a"
+    c2 = MagicMock()
+    c2.name = "bioaf-b"
+
+    probe_cluster = MagicMock()
+    probe_cluster.status = 2  # RUNNING
+    probe_cluster.endpoint = "10.0.0.1"
+    probe_cluster.master_auth.cluster_ca_certificate = "fake-ca"
+
+    mock_client = MagicMock()
+    mock_client.list_clusters.return_value.clusters = [c1, c2]
+    mock_client.get_cluster.return_value = probe_cluster
+
+    with patch(
+        "app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client",
+        return_value=mock_client,
+    ):
+        names = await provider.list_cluster_names("proj", "us-central1-a")
+        probe = await provider.probe_cluster("proj", "us-central1-a", "bioaf-a")
+        await provider.delete_cluster("proj", "us-central1-a", "bioaf-a")
+
+    assert names == ["bioaf-a", "bioaf-b"]
+    mock_client.list_clusters.assert_called_once_with(parent="projects/proj/locations/us-central1-a")
+    assert probe.state == "RUNNING"
+    assert probe.endpoint == "10.0.0.1"
+    assert probe.ca_cert == "fake-ca"
+    mock_client.delete_cluster.assert_called_once_with(name="projects/proj/locations/us-central1-a/clusters/bioaf-a")
+
+
+@pytest.mark.asyncio
+async def test_k8s_adapter_probe_cluster_not_found():
+    """A cluster that can't be fetched probes as NOT_FOUND (orphan already gone)."""
+    from app.adapters.compute.kubernetes import KubernetesComputeProvider
+
+    provider = KubernetesComputeProvider()
+    provider._mode = "production"
+
+    mock_client = MagicMock()
+    mock_client.get_cluster.side_effect = Exception("404 not found")
+
+    with patch(
+        "app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client",
+        return_value=mock_client,
+    ):
+        probe = await provider.probe_cluster("proj", "zone-a", "gone")
+
+    assert probe.state == "NOT_FOUND"
+    assert probe.endpoint is None
+
+
+@pytest.mark.asyncio
 async def test_k8s_adapter_get_cluster_metrics_with_mock():
     """Adapter get_cluster_metrics returns metrics from mocked GKE API."""
     from app.adapters.compute.kubernetes import KubernetesComputeProvider

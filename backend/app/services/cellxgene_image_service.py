@@ -8,23 +8,21 @@ upload, Cloud Build submission, and polling.
 from __future__ import annotations
 
 import io
-import json
 import logging
 import tarfile
 import time
 
-import google.auth
-import google.auth.transport.requests
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapters.image_build import get_image_build_provider
+from app.adapters.image_registry import get_image_registry_provider
 from app.exceptions import ValidationError
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.notebook_image_service import _get_credentials
 
 logger = logging.getLogger("bioaf.cellxgene_image")
 
-AR_REPO_ID = "bioaf-images"
 IMAGE_NAME = "bioaf-cellxgene"
 IMAGE_TAG = "latest"
 
@@ -40,32 +38,8 @@ ENTRYPOINT ["cellxgene"]
 
 
 def get_image_uri(project_id: str, region: str) -> str:
-    """Construct the full Artifact Registry image URI."""
-    return f"{region}-docker.pkg.dev/{project_id}/{AR_REPO_ID}/{IMAGE_NAME}:{IMAGE_TAG}"
-
-
-def _authorized_request(credentials, method: str, url: str, body: dict | None = None) -> dict:
-    """Make an authenticated HTTP request to a GCP REST API."""
-    import urllib.request
-
-    auth_req = google.auth.transport.requests.Request()
-    credentials.refresh(auth_req)
-
-    headers = {
-        "Authorization": f"Bearer {credentials.token}",
-        "Content-Type": "application/json",
-    }
-
-    data = json.dumps(body).encode() if body else None
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
-
-    try:
-        with urllib.request.urlopen(req) as resp:
-            return json.loads(resp.read().decode())
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode() if e.fp else ""
-        logger.error("GCP API %s %s -> %d: %s", method, url, e.code, error_body)
-        raise
+    """Construct the full image URI via the cloud-selected image registry."""
+    return get_image_registry_provider().image_uri({"project_id": project_id, "region": region}, IMAGE_NAME, IMAGE_TAG)
 
 
 async def _read_config(session: AsyncSession, key: str) -> str:
@@ -104,7 +78,10 @@ async def submit_image_build(session: AsyncSession, project_id: str, region: str
     if not working_bucket or working_bucket == "null":
         raise ValidationError("Working bucket not configured. Deploy storage first.")
 
+    from app.adapters.registry import get_storage_adapter
+
     object_path = await _upload_build_context(session, project_id, working_bucket)
+    context_uri = get_storage_adapter().build_uri(working_bucket, object_path)
 
     image_uri = get_image_uri(project_id, region)
     credentials = await _get_credentials(session)
@@ -113,34 +90,14 @@ async def submit_image_build(session: AsyncSession, project_id: str, region: str
     if not sa_email or sa_email == "null":
         sa_email = getattr(credentials, "service_account_email", None)
 
-    build_url = f"https://cloudbuild.googleapis.com/v1/projects/{project_id}/builds"
-    build_body: dict = {
-        "source": {
-            "storageSource": {
-                "bucket": working_bucket,
-                "object": object_path,
-            }
-        },
-        "steps": [
-            {
-                "name": "gcr.io/cloud-builders/docker",
-                "args": ["build", "-t", image_uri, "-f", "Dockerfile", "."],
-            }
-        ],
-        "images": [image_uri],
-        "options": {
-            "machineType": "E2_HIGHCPU_8",
-        },
-        "timeout": "3600s",
-    }
-    if sa_email and sa_email != "null":
-        build_body["serviceAccount"] = f"projects/{project_id}/serviceAccounts/{sa_email}"
-        build_body["options"]["defaultLogsBucketBehavior"] = "REGIONAL_USER_OWNED_BUCKET"
-        logger.info("Cloud Build will run as SA: %s", sa_email)
-
-    result = _authorized_request(credentials, "POST", build_url, build_body)
-    build_id = result.get("metadata", {}).get("build", {}).get("id", "")
-    logger.info("Submitted Cloud Build %s for image %s", build_id, image_uri)
+    build_id = get_image_build_provider().submit_build(
+        credentials,
+        {"project_id": project_id, "region": region},
+        context_object_uri=context_uri,
+        image_uri=image_uri,
+        build_sa=sa_email,
+        timeout="3600s",
+    )
 
     await _set_config(session, "cellxgene_image_build_id", build_id)
     await _set_config(session, "cellxgene_image_build_status", "WORKING")
@@ -149,16 +106,9 @@ async def submit_image_build(session: AsyncSession, project_id: str, region: str
 
 
 async def check_build_status(session: AsyncSession, project_id: str, build_id: str) -> str:
-    """Check the status of a Cloud Build job."""
+    """Check the status of the image build via the image-build provider."""
     credentials = await _get_credentials(session)
-    url = f"https://cloudbuild.googleapis.com/v1/projects/{project_id}/builds/{build_id}"
-
-    try:
-        result = _authorized_request(credentials, "GET", url)
-        return result.get("status", "UNKNOWN")
-    except Exception as e:
-        logger.error("Failed to check build %s: %s", build_id, e)
-        return "UNKNOWN"
+    return get_image_build_provider().check_build_status(credentials, {"project_id": project_id}, build_id)
 
 
 async def build_cellxgene_image(session: AsyncSession) -> str:

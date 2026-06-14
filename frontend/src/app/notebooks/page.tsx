@@ -600,7 +600,7 @@ export default function NotebooksPage() {
                               <p className="text-xs text-gray-500 mb-1">Input files ({provenance.input_files.length})</p>
                               <ul className="text-sm space-y-0.5 max-h-32 overflow-y-auto">
                                 {provenance.input_files.map((f) => (
-                                  <li key={f.id} className="text-gray-700 truncate" title={f.gcs_uri}>{f.filename}</li>
+                                  <li key={f.id} className="text-gray-700 truncate" title={f.storage_uri}>{f.filename}</li>
                                 ))}
                               </ul>
                             </div>
@@ -610,7 +610,7 @@ export default function NotebooksPage() {
                               <p className="text-xs text-gray-500 mb-1">Output files ({provenance.output_files.length})</p>
                               <ul className="text-sm space-y-0.5 max-h-32 overflow-y-auto">
                                 {provenance.output_files.map((f) => (
-                                  <li key={f.id} className="text-gray-700 truncate" title={f.gcs_uri}>{f.filename}</li>
+                                  <li key={f.id} className="text-gray-700 truncate" title={f.storage_uri}>{f.filename}</li>
                                 ))}
                               </ul>
                             </div>

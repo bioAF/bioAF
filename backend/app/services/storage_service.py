@@ -84,86 +84,33 @@ class StorageService:
         return stats
 
     @staticmethod
-    async def _load_gcs_credentials(session: AsyncSession):
-        """Load credentials suitable for project-level GCS list operations.
-
-        Returns impersonated bootstrap credentials in vm_default mode (bootstrap
-        has unconditioned roles/storage.admin), service_account.Credentials in
-        legacy mode, or None on failure (caller falls back gracefully).
-        """
-        from app.platform import credential_injector
-        from app.platform.platform_config_service import PlatformConfigService
-
-        config = await PlatformConfigService.get_many(
-            session,
-            [
-                "gcp_credential_source",
-                "gcp_service_account_key",
-                "gcp_service_account_email",
-                "gcp_bootstrap_sa_email",
-            ],
-        )
-        try:
-            return credential_injector.load_gcp_credentials(config)
-        except Exception as exc:
-            logger.warning("Failed to load credentials for GCS bucket query: %s", exc)
-            return None
-
-    @staticmethod
     async def get_lifecycle_policies(session: AsyncSession, org_id: int) -> list[dict]:
-        """Get lifecycle policy status from GCS buckets."""
-        try:
-            from google.cloud import storage as gcs_storage
+        """Get lifecycle policy status from the org's buckets.
 
-            credentials = await StorageService._load_gcs_credentials(session)
-            client = gcs_storage.Client(credentials=credentials) if credentials else gcs_storage.Client()
-            prefix = f"bioaf-{org_id}-"
-            policies = []
-            for bucket in client.list_buckets(prefix=prefix):
-                rules = []
-                if bucket.lifecycle_rules:
-                    for rule in bucket.lifecycle_rules:
-                        rules.append(dict(rule))
-                policies.append(
-                    {
-                        "bucket_name": bucket.name,
-                        "rules": rules,
-                        "enabled": len(rules) > 0,
-                    }
-                )
-            return policies
+        The cloud-selected storage adapter owns the bucket walk (and resolves the
+        impersonated/legacy credentials it needs); this service only scopes the
+        prefix and keeps the graceful empty-list fallback.
+        """
+        from app.adapters.registry import get_storage_adapter
+
+        try:
+            return await get_storage_adapter().list_lifecycle_policies(f"bioaf-{org_id}-")
         except Exception as e:
             logger.warning("Failed to get lifecycle policies: %s", e)
             return []
 
     @staticmethod
     async def _query_gcs_buckets(session: AsyncSession, org_id: int) -> list[dict]:
-        """Query GCS for bucket stats. Falls back to empty list on failure."""
-        try:
-            from google.cloud import storage as gcs_storage
+        """Query the org's buckets for stats. Falls back to a placeholder on failure.
 
-            credentials = await StorageService._load_gcs_credentials(session)
-            client = gcs_storage.Client(credentials=credentials) if credentials else gcs_storage.Client()
-            prefix = f"bioaf-{org_id}-"
-            results = []
-            for bucket in client.list_buckets(prefix=prefix):
-                total_bytes = 0
-                object_count = 0
-                by_class: dict[str, int] = {}
-                for blob in bucket.list_blobs():
-                    total_bytes += blob.size or 0
-                    object_count += 1
-                    sc = blob.storage_class or "STANDARD"
-                    by_class[sc] = by_class.get(sc, 0) + (blob.size or 0)
-                results.append(
-                    {
-                        "name": bucket.name,
-                        "total_bytes": total_bytes,
-                        "object_count": object_count,
-                        "by_storage_class": by_class,
-                    }
-                )
-            return results
+        The cloud-selected storage adapter owns the bucket walk (and resolves the
+        impersonated/legacy credentials it needs); this service only scopes the
+        prefix and keeps the graceful fallback.
+        """
+        from app.adapters.registry import get_storage_adapter
+
+        try:
+            return await get_storage_adapter().query_bucket_stats(f"bioaf-{org_id}-")
         except Exception as e:
             logger.warning("GCS bucket query failed: %s", e)
             return [

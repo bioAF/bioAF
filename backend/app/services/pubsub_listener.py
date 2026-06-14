@@ -74,8 +74,11 @@ class PubSubListener:
         credentials = await GcsStorageService.get_credentials(session)
         # Event subscription is reached through the BAL MessagingProvider (Phase
         # 9E); no Pub/Sub SDK lives in this service. The provider owns the client
-        # and the blocking-call offload and hands back normalized messages.
-        provider = create_messaging_provider(credentials=credentials)
+        # and the blocking-call offload and hands back normalized messages. Backend
+        # resolves from cloud_provider (gcp -> Pub/Sub) via the startup-loaded cache.
+        from app.platform.cloud_provider import backend_for
+
+        provider = create_messaging_provider(credentials=credentials, backend=backend_for("messaging"))
         subscription_path = f"projects/{project_id}/subscriptions/{subscription_name}"
 
         self._running = True

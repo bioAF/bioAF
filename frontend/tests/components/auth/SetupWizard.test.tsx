@@ -19,6 +19,9 @@ jest.mock("@/lib/api", () => ({
 
 jest.mock("@/lib/auth", () => ({
   setToken: jest.fn(),
+  // SetupWizard transitively imports isAuthenticated via useStackOptions; return
+  // false so the hook uses GCP defaults without an extra fetch in these tests.
+  isAuthenticated: jest.fn(() => false),
 }));
 
 function mockFetchResponse(status: number, body: unknown) {

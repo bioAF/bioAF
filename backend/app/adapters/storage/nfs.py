@@ -227,6 +227,36 @@ class NfsStorageProvider(StorageProvider):
     def parse_uri(self, uri: str) -> tuple[str, str]:
         return self._parse_uri(uri)
 
+    def cli_auth_command(self, key_file: str) -> str:
+        # NFS is a mounted filesystem; no CLI authentication step is needed.
+        return ""
+
+    def cli_copy_in(self, uri: str, local_path: str) -> str:
+        return f"cp {self._path(uri)} {local_path}"
+
+    def cli_copy_out(self, local_path: str, uri: str) -> str:
+        return f"cp -r {local_path} {self._path(uri)}"
+
+    def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
+        # A mounted filesystem mirrors a directory with plain recursive copy.
+        return ["/bin/sh", "-c", f"cp -r {remote_prefix}/. {local_dir} || true"]
+
+    def sync_out_command(self, local_dir: str, remote_prefix: str) -> list[str]:
+        return ["/bin/sh", "-c", f"cp -r {local_dir}/. {remote_prefix}"]
+
+    def staging_image(self) -> str:
+        # A mounted filesystem stages by plain `cp`, so it needs only a tiny
+        # coreutils image, not a cloud CLI.
+        return "busybox:stable"
+
+    def nextflow_scratch_directives(self, work_dir: str) -> list[str]:
+        # A mounted POSIX filesystem is the workDir directly; no Fusion overlay.
+        return [f"workDir = '{work_dir}'"]
+
+    def image_storage_pip_packages(self) -> str:
+        # A mounted filesystem needs no cloud storage client library.
+        return ""
+
     async def read_text(self, uri: str, *, encoding: str = "utf-8") -> str:
         return (await self.read_bytes(uri)).decode(encoding)
 

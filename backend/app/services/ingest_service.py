@@ -342,7 +342,7 @@ async def process_ingest_event(
     gcs_uri = get_storage_adapter().build_uri(source_bucket, source_path)
     file_record = File(
         organization_id=org_id,
-        gcs_uri=gcs_uri,
+        storage_uri=gcs_uri,
         filename=filename,
         size_bytes=file_size_bytes,
         md5_checksum=content_md5,
@@ -424,7 +424,7 @@ async def process_ingest_event(
                 filename,
                 credentials=credentials,
             )
-            file_record.gcs_uri = new_uri
+            file_record.storage_uri = new_uri
             await db.flush()
 
             # move_file already deletes the source after copy+verify.

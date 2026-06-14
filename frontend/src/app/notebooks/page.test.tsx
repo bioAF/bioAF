@@ -375,6 +375,7 @@ describe("NotebooksPage file picker auto-shows when experiment selected", () => 
           id: 100,
           filename: "matrix.mtx.gz",
           gcs_uri: "gs://b/x/matrix.mtx.gz",
+          storage_uri: "gs://b/x/matrix.mtx.gz",
           size_bytes: 1024,
           md5_checksum: null,
           file_type: "count_matrix",

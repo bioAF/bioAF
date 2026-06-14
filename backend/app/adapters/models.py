@@ -154,6 +154,36 @@ class ClusterStatus(BaseModel):
     provider_details: dict = Field(default_factory=dict)
 
 
+class ClusterDetail(BaseModel):
+    """Provider-neutral cluster detail with node-pool breakdown.
+
+    Richer than ``ClusterStatus`` (which the compute dashboard aggregates): it
+    carries the cluster's own name/status/node-count plus per-pool detail, with
+    ``status`` fields already mapped to neutral strings so the service layer
+    consumes no backend status enum. Backends without a managed control plane
+    (SLURM) do not implement it.
+    """
+
+    name: str
+    status: str
+    node_count: int = 0
+    node_pools: list[NodePoolStatus] = Field(default_factory=list)
+
+
+class ClusterProbe(BaseModel):
+    """Liveness probe of a (possibly orphaned) cluster looked up by name.
+
+    ``state`` is a mapped status string ("RUNNING"/"PROVISIONING"/.../"UNKNOWN")
+    or "NOT_FOUND" when the cluster cannot be fetched. ``endpoint``/``ca_cert``
+    let an orphan-adoption flow re-populate connection config without the caller
+    touching a backend cluster object.
+    """
+
+    state: str
+    endpoint: str | None = None
+    ca_cert: str | None = None
+
+
 class NodePoolMetrics(BaseModel):
     name: str
     cpu_utilization_pct: float | None = None
@@ -238,6 +268,24 @@ class StorageMetrics(BaseModel):
     total_size_gb: float = 0.0
     total_cost_monthly_usd: float = 0.0
     provider_details: dict = Field(default_factory=dict)
+
+
+class BucketAdminMetrics(BaseModel):
+    """Rich per-bucket admin view: size, lifecycle, versioning, creation time.
+
+    Distinct from the coarse cost-oriented ``BucketMetrics`` (which the storage
+    dashboard aggregates). Backend-neutral: the GCS adapter populates it from the
+    google-cloud-storage client, an S3 adapter from boto3 later. ``lifecycle_summaries``
+    are already-formatted, cloud-agnostic human strings so the service layer never
+    parses a backend-specific rule shape.
+    """
+
+    size_bytes: int = 0
+    object_count: int = 0
+    storage_class: str = "STANDARD"
+    versioning_enabled: bool = False
+    lifecycle_summaries: list[str] = Field(default_factory=list)
+    created_at: str | None = None
 
 
 # --- Notebook sessions -------------------------------------------------------

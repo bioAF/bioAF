@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.platform.credential_injector import GCPCredentialInjector, load_gcp_credentials
+from app.adapters.credentials.credential_injector import GCPCredentialInjector, load_gcp_credentials
 
 
 # ---------------------------------------------------------------------------
@@ -135,10 +135,10 @@ def test_load_gcp_credentials_vm_default_uses_bootstrap_sa_email():
     fake_source = MagicMock(name="adc_source_credentials")
     with (
         patch(
-            "app.platform.credential_injector._google_auth.default",
+            "app.adapters.credentials.credential_injector._google_auth.default",
             return_value=(fake_source, "my-project"),
         ),
-        patch("app.platform.credential_injector._impersonated_credentials.Credentials") as imp_cls,
+        patch("app.adapters.credentials.credential_injector._impersonated_credentials.Credentials") as imp_cls,
     ):
         load_gcp_credentials(config)
         imp_cls.assert_called_once()
@@ -156,10 +156,10 @@ def test_load_gcp_credentials_vm_default_falls_back_to_service_account_email():
     fake_source = MagicMock(name="adc_source_credentials")
     with (
         patch(
-            "app.platform.credential_injector._google_auth.default",
+            "app.adapters.credentials.credential_injector._google_auth.default",
             return_value=(fake_source, "my-project"),
         ),
-        patch("app.platform.credential_injector._impersonated_credentials.Credentials") as imp_cls,
+        patch("app.adapters.credentials.credential_injector._impersonated_credentials.Credentials") as imp_cls,
     ):
         load_gcp_credentials(config)
         imp_cls.assert_called_once()
@@ -176,10 +176,10 @@ def test_load_gcp_credentials_vm_default_prefers_bootstrap_over_legacy():
     fake_source = MagicMock(name="adc_source_credentials")
     with (
         patch(
-            "app.platform.credential_injector._google_auth.default",
+            "app.adapters.credentials.credential_injector._google_auth.default",
             return_value=(fake_source, "my-project"),
         ),
-        patch("app.platform.credential_injector._impersonated_credentials.Credentials") as imp_cls,
+        patch("app.adapters.credentials.credential_injector._impersonated_credentials.Credentials") as imp_cls,
     ):
         load_gcp_credentials(config)
         assert imp_cls.call_args.kwargs["target_principal"] == "bioaf-bootstrap@my-project.iam.gserviceaccount.com"
@@ -191,10 +191,10 @@ def test_load_gcp_credentials_vm_default_no_emails_returns_raw_adc():
     fake_source = MagicMock(name="adc_source_credentials")
     with (
         patch(
-            "app.platform.credential_injector._google_auth.default",
+            "app.adapters.credentials.credential_injector._google_auth.default",
             return_value=(fake_source, "my-project"),
         ),
-        patch("app.platform.credential_injector._impersonated_credentials.Credentials") as imp_cls,
+        patch("app.adapters.credentials.credential_injector._impersonated_credentials.Credentials") as imp_cls,
     ):
         result = load_gcp_credentials(config)
         imp_cls.assert_not_called()
@@ -266,3 +266,91 @@ async def test_build_env_vm_default_no_impersonation_when_no_email():
     env, cleanup = await GCPCredentialInjector.build_env(config=config)
     assert "GOOGLE_IMPERSONATE_SERVICE_ACCOUNT" not in env
     await cleanup()
+
+
+# ---------------------------------------------------------------------------
+# Generalized kwargs (Stage 3c): scopes / impersonate_target / key_json /
+# lifetime overrides, so the one resolution path can serve every consumer the
+# credential seam absorbs (the gcp_config dual probe, the Sheets reader SA).
+# Each default-unset call must stay byte-identical to the current behavior.
+# ---------------------------------------------------------------------------
+
+
+def test_load_gcp_credentials_explicit_target_overrides_config():
+    """An explicit impersonate_target wins over the config-derived bootstrap SA."""
+    config = {
+        "gcp_credential_source": "vm_default",
+        "gcp_bootstrap_sa_email": "bootstrap@my-project.iam.gserviceaccount.com",
+    }
+    fake_source = MagicMock(name="adc_source_credentials")
+    with (
+        patch(
+            "app.adapters.credentials.credential_injector._google_auth.default",
+            return_value=(fake_source, "my-project"),
+        ),
+        patch("app.adapters.credentials.credential_injector._impersonated_credentials.Credentials") as imp_cls,
+    ):
+        load_gcp_credentials(config, impersonate_target="reader@my-project.iam.gserviceaccount.com")
+        assert imp_cls.call_args.kwargs["target_principal"] == "reader@my-project.iam.gserviceaccount.com"
+
+
+def test_load_gcp_credentials_explicit_none_disables_impersonation():
+    """impersonate_target=None forces raw ADC even when a bootstrap SA is set
+    (the gcp_config app-credentials probe needs the un-impersonated source)."""
+    config = {
+        "gcp_credential_source": "vm_default",
+        "gcp_bootstrap_sa_email": "bootstrap@my-project.iam.gserviceaccount.com",
+    }
+    fake_source = MagicMock(name="adc_source_credentials")
+    with (
+        patch(
+            "app.adapters.credentials.credential_injector._google_auth.default",
+            return_value=(fake_source, "my-project"),
+        ),
+        patch("app.adapters.credentials.credential_injector._impersonated_credentials.Credentials") as imp_cls,
+    ):
+        result = load_gcp_credentials(config, impersonate_target=None)
+        imp_cls.assert_not_called()
+        assert result is fake_source
+
+
+def test_load_gcp_credentials_scopes_and_lifetime_passthrough():
+    """Custom scopes apply to the minted (target) token + lifetime; the source ADC
+    stays cloud-platform so it can mint the impersonated token."""
+    config = {"gcp_credential_source": "vm_default"}
+    cloud_platform = ["https://www.googleapis.com/auth/cloud-platform"]
+    sheets_scope = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+    fake_source = MagicMock(name="adc_source_credentials")
+    with (
+        patch(
+            "app.adapters.credentials.credential_injector._google_auth.default",
+            return_value=(fake_source, "my-project"),
+        ) as default,
+        patch("app.adapters.credentials.credential_injector._impersonated_credentials.Credentials") as imp_cls,
+    ):
+        load_gcp_credentials(
+            config,
+            scopes=sheets_scope,
+            impersonate_target="reader@my-project.iam.gserviceaccount.com",
+            lifetime=3600,
+        )
+        # Source ADC must keep cloud-platform scope; only the target token narrows.
+        assert default.call_args.kwargs["scopes"] == cloud_platform
+        kwargs = imp_cls.call_args.kwargs
+        assert kwargs["target_scopes"] == sheets_scope
+        assert kwargs["lifetime"] == 3600
+
+
+def test_load_gcp_credentials_key_json_override_for_service_account_key():
+    """key_json overrides the config's gcp_service_account_key (reader-SA key)."""
+    reader_key = json.dumps({"type": "service_account", "client_email": "reader@x.iam"})
+    sheets_scope = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+    config = {
+        "gcp_credential_source": "service_account_key",
+        "gcp_service_account_key": FAKE_SA_KEY,
+    }
+    with patch("app.adapters.credentials.credential_injector.service_account.Credentials") as sa_cls:
+        load_gcp_credentials(config, scopes=sheets_scope, key_json=reader_key)
+        info = sa_cls.from_service_account_info.call_args.args[0]
+        assert info["client_email"] == "reader@x.iam"
+        assert sa_cls.from_service_account_info.call_args.kwargs["scopes"] == sheets_scope

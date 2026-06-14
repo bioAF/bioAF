@@ -89,7 +89,7 @@ async def test_recovery_check_running_cluster(session, admin_user):
     mock_client.get_cluster.return_value = _make_gke_cluster(status_code=2)
 
     with (
-        patch("app.services.orphaned_resource_service._get_gke_client", return_value=mock_client),
+        patch("app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client", return_value=mock_client),
         patch(
             "app.services.orphaned_resource_service._get_gke_credentials",
             new_callable=AsyncMock,
@@ -124,7 +124,7 @@ async def test_recovery_check_provisioning_cluster(session, admin_user):
     mock_client.get_cluster.return_value = _make_gke_cluster(status_code=1)
 
     with (
-        patch("app.services.orphaned_resource_service._get_gke_client", return_value=mock_client),
+        patch("app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client", return_value=mock_client),
         patch(
             "app.services.orphaned_resource_service._get_gke_credentials",
             new_callable=AsyncMock,
@@ -158,7 +158,7 @@ async def test_recovery_check_dead_cluster(session, admin_user):
     mock_client.get_cluster.side_effect = Exception("404 Not Found")
 
     with (
-        patch("app.services.orphaned_resource_service._get_gke_client", return_value=mock_client),
+        patch("app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client", return_value=mock_client),
         patch(
             "app.services.orphaned_resource_service._get_gke_credentials",
             new_callable=AsyncMock,
@@ -227,7 +227,7 @@ async def test_recovery_check_error_cluster(session, admin_user):
     mock_client.get_cluster.return_value = _make_gke_cluster(status_code=5)
 
     with (
-        patch("app.services.orphaned_resource_service._get_gke_client", return_value=mock_client),
+        patch("app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client", return_value=mock_client),
         patch(
             "app.services.orphaned_resource_service._get_gke_credentials",
             new_callable=AsyncMock,
@@ -265,7 +265,7 @@ async def test_adopt_running_cluster(session, admin_user):
     mock_client.get_cluster.return_value = _make_gke_cluster(status_code=2)
 
     with (
-        patch("app.services.orphaned_resource_service._get_gke_client", return_value=mock_client),
+        patch("app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client", return_value=mock_client),
         patch(
             "app.services.orphaned_resource_service._get_gke_credentials",
             new_callable=AsyncMock,
@@ -309,7 +309,7 @@ async def test_adopt_provisioning_cluster_rejected(session, admin_user):
     mock_client.get_cluster.return_value = _make_gke_cluster(status_code=1)
 
     with (
-        patch("app.services.orphaned_resource_service._get_gke_client", return_value=mock_client),
+        patch("app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client", return_value=mock_client),
         patch(
             "app.services.orphaned_resource_service._get_gke_credentials",
             new_callable=AsyncMock,
@@ -354,7 +354,7 @@ async def test_cleanup_dead_orphans(session, admin_user):
     mock_client.get_cluster.side_effect = Exception("404 Not Found")
 
     with (
-        patch("app.services.orphaned_resource_service._get_gke_client", return_value=mock_client),
+        patch("app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client", return_value=mock_client),
         patch(
             "app.services.orphaned_resource_service._get_gke_credentials",
             new_callable=AsyncMock,
@@ -391,7 +391,7 @@ async def test_cleanup_dead_orphans_skips_running(session, admin_user):
     mock_client.get_cluster.return_value = _make_gke_cluster(status_code=2)
 
     with (
-        patch("app.services.orphaned_resource_service._get_gke_client", return_value=mock_client),
+        patch("app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client", return_value=mock_client),
         patch(
             "app.services.orphaned_resource_service._get_gke_credentials",
             new_callable=AsyncMock,
@@ -425,7 +425,7 @@ async def test_cleanup_dead_deletes_error_clusters(session, admin_user):
     mock_client.delete_cluster = MagicMock(return_value=MagicMock())
 
     with (
-        patch("app.services.orphaned_resource_service._get_gke_client", return_value=mock_client),
+        patch("app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client", return_value=mock_client),
         patch(
             "app.services.orphaned_resource_service._get_gke_credentials",
             new_callable=AsyncMock,
@@ -492,7 +492,7 @@ async def test_recovery_check_endpoint(client: AsyncClient, admin_token: str, se
     mock_client.get_cluster.return_value = _make_gke_cluster(status_code=2)
 
     with (
-        patch("app.services.orphaned_resource_service._get_gke_client", return_value=mock_client),
+        patch("app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client", return_value=mock_client),
         patch(
             "app.services.orphaned_resource_service._get_gke_credentials",
             new_callable=AsyncMock,
@@ -530,7 +530,7 @@ async def test_adopt_endpoint(client: AsyncClient, admin_token: str, session):
     mock_client.get_cluster.return_value = _make_gke_cluster(status_code=2)
 
     with (
-        patch("app.services.orphaned_resource_service._get_gke_client", return_value=mock_client),
+        patch("app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client", return_value=mock_client),
         patch(
             "app.services.orphaned_resource_service._get_gke_credentials",
             new_callable=AsyncMock,
@@ -566,7 +566,7 @@ async def test_adopt_endpoint_rejects_provisioning(client: AsyncClient, admin_to
     mock_client.get_cluster.return_value = _make_gke_cluster(status_code=1)
 
     with (
-        patch("app.services.orphaned_resource_service._get_gke_client", return_value=mock_client),
+        patch("app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client", return_value=mock_client),
         patch(
             "app.services.orphaned_resource_service._get_gke_credentials",
             new_callable=AsyncMock,
@@ -601,7 +601,7 @@ async def test_cleanup_all_endpoint(client: AsyncClient, admin_token: str, sessi
     mock_client.get_cluster.side_effect = Exception("404 Not Found")
 
     with (
-        patch("app.services.orphaned_resource_service._get_gke_client", return_value=mock_client),
+        patch("app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client", return_value=mock_client),
         patch(
             "app.services.orphaned_resource_service._get_gke_credentials",
             new_callable=AsyncMock,

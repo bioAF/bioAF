@@ -30,17 +30,6 @@ logger = logging.getLogger("bioaf.stack_deployment")
 # Pydantic models for cluster status
 # -----------------------------------------------------------------------
 
-# GKE cluster status enum mapping
-_GKE_STATUS_MAP = {
-    0: "STATUS_UNSPECIFIED",
-    1: "PROVISIONING",
-    2: "RUNNING",
-    3: "RECONCILING",
-    4: "STOPPING",
-    5: "ERROR",
-    6: "DEGRADED",
-}
-
 
 class NodePoolStatus(BaseModel):
     name: str
@@ -72,11 +61,12 @@ class StackStatus(BaseModel):
 async def _get_gke_credentials(session: AsyncSession):
     """Read SA credentials from platform_config for GKE API calls.
 
-    Returns google.oauth2 Credentials or None to fall back to ADC.
+    Returns a credentials object (from the Credentials seam) or None to fall back
+    to ADC. Only the legacy service_account_key path resolves explicit creds;
+    vm_default returns None so the GKE client uses the VM's attached identity.
     Same pattern as GcsStorageService.get_credentials().
     """
-    import json as _json
-
+    from app.adapters.credentials import get_credentials_provider
     from app.platform.platform_config_service import PlatformConfigService
 
     config = await PlatformConfigService.get_many(
@@ -92,25 +82,10 @@ async def _get_gke_credentials(session: AsyncSession):
         return None
 
     try:
-        from google.oauth2 import service_account
-
-        key_data = _json.loads(key_json)
-        return service_account.Credentials.from_service_account_info(
-            key_data,
-            scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        )
+        return get_credentials_provider().load_credentials(config)
     except Exception as e:
         logger.warning("Failed to load GKE credentials from platform_config: %s", e)
         return None
-
-
-def _get_gke_client(credentials=None):
-    """Get a GKE ClusterManager client. Tests mock this function."""
-    from google.cloud import container_v1
-
-    if credentials:
-        return container_v1.ClusterManagerClient(credentials=credentials)
-    return container_v1.ClusterManagerClient()
 
 
 async def _select_default_pool_zone(session: AsyncSession, compute_region: str | None) -> str:
@@ -165,29 +140,25 @@ async def get_cluster_status(session: AsyncSession) -> StackStatus:
             has_orphaned_clusters=has_orphans,
         )
 
-    # Query GKE API for cluster details
-    cluster_name = await _read_config(session, "gke_cluster_name")
-    project_id = await _read_config(session, "gcp_project_id")
-    region = await _read_config(session, "gcp_region") or "us-central1"
-
+    # Query the cluster control plane for live detail (cloud-selected adapter
+    # owns the GKE/EKS read and resolves its own identity).
     try:
-        credentials = await _get_gke_credentials(session)
-        client = _get_gke_client(credentials)
-        cluster = client.get_cluster(name=f"projects/{project_id}/locations/{region}/clusters/{cluster_name}")
+        from app.adapters.registry import get_compute_adapter
+
+        detail = await get_compute_adapter().get_cluster_detail()
 
         pipeline_pool = None
         interactive_pool = None
 
-        for pool in cluster.node_pools:
-            pool_status = _GKE_STATUS_MAP.get(pool.status, "UNKNOWN")
+        for pool in detail.node_pools:
             pool_info = NodePoolStatus(
                 name=pool.name,
-                machine_type=pool.config.machine_type,
-                min_nodes=pool.autoscaling.min_node_count,
-                max_nodes=pool.autoscaling.max_node_count,
-                current_nodes=pool.initial_node_count,
-                spot=pool.config.spot,
-                status=pool_status,
+                machine_type=pool.machine_type,
+                min_nodes=pool.min_nodes,
+                max_nodes=pool.max_nodes,
+                current_nodes=pool.current_nodes,
+                spot=pool.spot,
+                status=pool.status,
             )
             if "pipeline" in pool.name:
                 pipeline_pool = pool_info
@@ -217,9 +188,9 @@ async def get_cluster_status(session: AsyncSession) -> StackStatus:
             )
 
         cluster_info = ClusterInfo(
-            cluster_name=cluster.name,
-            status=_GKE_STATUS_MAP.get(cluster.status, "UNKNOWN"),
-            node_count=cluster.current_node_count,
+            cluster_name=detail.name,
+            status=detail.status,
+            node_count=detail.node_count,
             pipeline_pool=pipeline_pool,
             interactive_pool=interactive_pool,
         )

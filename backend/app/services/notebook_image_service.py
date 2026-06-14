@@ -8,22 +8,21 @@ credentials to avoid additional package dependencies.
 from __future__ import annotations
 
 import io
-import json
 import logging
 import tarfile
 import time
 
-import google.auth
-import google.auth.transport.requests
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapters.credentials.credential_injector import load_gcp_credentials
+from app.adapters.image_build import get_image_build_provider
+from app.adapters.image_registry import get_image_registry_provider
+from app.adapters.image_registry.gcp import AR_REPO_ID
 from app.exceptions import StateError, ValidationError
-from app.platform.credential_injector import load_gcp_credentials
 
 logger = logging.getLogger("bioaf.notebook_image")
 
-AR_REPO_ID = "bioaf-images"
 IMAGE_NAME = "bioaf-scrna"
 IMAGE_TAG = "latest"
 
@@ -81,7 +80,7 @@ RUN pip install --no-cache-dir \\
     scikit-misc==0.5.2 statsmodels==0.14.6 scvelo==0.3.4 \\
     pandas==2.3.3 numpy==1.26.4 scipy==1.17.1 seaborn==0.13.2 plotly==6.8.0 \\
     umap-learn==0.5.12 pybiomart==0.2.0 biopython==1.87 pysam==0.24.0 anndata2ri==2.0 \\
-    google-cloud-storage==3.11.0 gsutil==5.37
+    __STORAGE_PIP_PACKAGES__
 
 # Install R packages as precompiled binaries from a DATED Posit P3M snapshot, so
 # every CRAN version is frozen to that date (reproducible) and builds are fast
@@ -126,9 +125,20 @@ WORKDIR /home/jovyan
 """
 
 
+def _render_dockerfile() -> str:
+    """Fill the storage-client pip packages from the cloud-selected adapter.
+
+    Keeps the cloud-specific storage dependency out of the service-layer template;
+    the storage backend owns which client libraries a built image needs.
+    """
+    from app.adapters.registry import get_storage_adapter
+
+    return DOCKERFILE_CONTENT.replace("__STORAGE_PIP_PACKAGES__", get_storage_adapter().image_storage_pip_packages())
+
+
 def get_image_uri(project_id: str, region: str) -> str:
-    """Construct the full Artifact Registry image URI."""
-    return f"{region}-docker.pkg.dev/{project_id}/{AR_REPO_ID}/{IMAGE_NAME}:{IMAGE_TAG}"
+    """Construct the full image URI via the cloud-selected image registry."""
+    return get_image_registry_provider().image_uri({"project_id": project_id, "region": region}, IMAGE_NAME, IMAGE_TAG)
 
 
 async def _get_credentials(session: AsyncSession):
@@ -162,30 +172,6 @@ async def _get_credentials(session: AsyncSession):
     return load_gcp_credentials(config)
 
 
-def _authorized_request(credentials, method: str, url: str, body: dict | None = None) -> dict:
-    """Make an authenticated HTTP request to a GCP REST API."""
-    import urllib.request
-
-    auth_req = google.auth.transport.requests.Request()
-    credentials.refresh(auth_req)
-
-    headers = {
-        "Authorization": f"Bearer {credentials.token}",
-        "Content-Type": "application/json",
-    }
-
-    data = json.dumps(body).encode() if body else None
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
-
-    try:
-        with urllib.request.urlopen(req) as resp:
-            return json.loads(resp.read().decode())
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode() if e.fp else ""
-        logger.error("GCP API %s %s -> %d: %s", method, url, e.code, error_body)
-        raise
-
-
 async def _read_config(session: AsyncSession, key: str) -> str:
     """Read a single platform_config value."""
     from app.platform.platform_config_service import PlatformConfigService
@@ -202,37 +188,15 @@ async def _set_config(session: AsyncSession, key: str, value: str) -> None:
 
 
 async def ensure_artifact_registry(session: AsyncSession, project_id: str, region: str) -> str:
-    """Create the Artifact Registry Docker repo if it does not exist.
+    """Create the image repository if it does not exist (idempotent).
 
-    Returns the full repository name.
+    Returns the full repository resource name. Delegates the cloud-specific
+    repo-ensure to the image-registry provider.
     """
     credentials = await _get_credentials(session)
-    parent = f"projects/{project_id}/locations/{region}"
-    repo_name = f"{parent}/repositories/{AR_REPO_ID}"
-
-    # Check if repo exists
-    url = f"https://artifactregistry.googleapis.com/v1/{repo_name}"
-    try:
-        _authorized_request(credentials, "GET", url)
-        logger.info("Artifact Registry repo %s already exists", repo_name)
-        return repo_name
-    except Exception:
-        pass  # 404 expected, create it
-
-    # Create repo
-    create_url = f"https://artifactregistry.googleapis.com/v1/{parent}/repositories?repositoryId={AR_REPO_ID}"
-    body = {
-        "format": "DOCKER",
-        "description": "bioAF container images for notebook environments",
-    }
-    try:
-        _authorized_request(credentials, "POST", create_url, body)
-        logger.info("Created Artifact Registry repo %s", repo_name)
-    except Exception as e:
-        # May be ALREADY_EXISTS race or permission error
-        logger.warning("Artifact Registry create returned error (may already exist): %s", e)
-
-    return repo_name
+    return get_image_registry_provider().ensure_repository(
+        credentials, {"project_id": project_id, "region": region}, IMAGE_NAME
+    )
 
 
 async def _upload_build_context(session: AsyncSession, project_id: str, working_bucket: str) -> str:
@@ -245,7 +209,7 @@ async def _upload_build_context(session: AsyncSession, project_id: str, working_
     # Create tar.gz in memory with the Dockerfile
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-        dockerfile_bytes = DOCKERFILE_CONTENT.encode()
+        dockerfile_bytes = _render_dockerfile().encode()
         info = tarfile.TarInfo(name="Dockerfile")
         info.size = len(dockerfile_bytes)
         info.mtime = int(time.time())
@@ -270,46 +234,29 @@ async def submit_image_build(session: AsyncSession, project_id: str, region: str
         raise ValidationError("Working bucket not configured. Deploy storage first.")
 
     # Upload Dockerfile as build context
+    from app.adapters.registry import get_storage_adapter
+
     object_path = await _upload_build_context(session, project_id, working_bucket)
+    context_uri = get_storage_adapter().build_uri(working_bucket, object_path)
 
     image_uri = get_image_uri(project_id, region)
     credentials = await _get_credentials(session)
 
-    # Resolve the platform SA email for Cloud Build to use.
+    # Resolve the platform SA email for the build to run as.
     # Priority: gcp_service_account_email from config, then credentials object.
     sa_email = await _read_config(session, "gcp_service_account_email")
     if not sa_email or sa_email == "null":
         sa_email = getattr(credentials, "service_account_email", None)
 
-    # Submit Cloud Build
-    build_url = f"https://cloudbuild.googleapis.com/v1/projects/{project_id}/builds"
-    build_body: dict = {
-        "source": {
-            "storageSource": {
-                "bucket": working_bucket,
-                "object": object_path,
-            }
-        },
-        "steps": [
-            {
-                "name": "gcr.io/cloud-builders/docker",
-                "args": ["build", "-t", image_uri, "-f", "Dockerfile", "."],
-            }
-        ],
-        "images": [image_uri],
-        "options": {
-            "machineType": "E2_HIGHCPU_8",
-        },
-        "timeout": "7200s",
-    }
-    if sa_email and sa_email != "null":
-        build_body["serviceAccount"] = f"projects/{project_id}/serviceAccounts/{sa_email}"
-        build_body["options"]["defaultLogsBucketBehavior"] = "REGIONAL_USER_OWNED_BUCKET"
-        logger.info("Cloud Build will run as SA: %s", sa_email)
-
-    result = _authorized_request(credentials, "POST", build_url, build_body)
-    build_id = result.get("metadata", {}).get("build", {}).get("id", "")
-    logger.info("Submitted Cloud Build %s for image %s", build_id, image_uri)
+    # Submit the build via the cloud-selected image-build provider.
+    build_id = get_image_build_provider().submit_build(
+        credentials,
+        {"project_id": project_id, "region": region},
+        context_object_uri=context_uri,
+        image_uri=image_uri,
+        build_sa=sa_email,
+        timeout="7200s",
+    )
 
     # Store build ID for monitoring
     await _set_config(session, "notebook_image_build_id", build_id)
@@ -319,19 +266,13 @@ async def submit_image_build(session: AsyncSession, project_id: str, region: str
 
 
 async def check_build_status(session: AsyncSession, project_id: str, build_id: str) -> str:
-    """Check the status of a Cloud Build job.
+    """Check the status of an image build.
 
-    Returns one of: QUEUED, WORKING, SUCCESS, FAILURE, CANCELLED, TIMEOUT.
+    Returns one of: QUEUED, WORKING, SUCCESS, FAILURE, CANCELLED, TIMEOUT (or
+    UNKNOWN). Delegates the cloud-specific status read to the image-build provider.
     """
     credentials = await _get_credentials(session)
-    url = f"https://cloudbuild.googleapis.com/v1/projects/{project_id}/builds/{build_id}"
-
-    try:
-        result = _authorized_request(credentials, "GET", url)
-        return result.get("status", "UNKNOWN")
-    except Exception as e:
-        logger.error("Failed to check build %s: %s", build_id, e)
-        return "UNKNOWN"
+    return get_image_build_provider().check_build_status(credentials, {"project_id": project_id}, build_id)
 
 
 async def cancel_build(session: AsyncSession) -> str:
@@ -353,11 +294,7 @@ async def cancel_build(session: AsyncSession) -> str:
         raise ValidationError("GCP project not configured.")
 
     credentials = await _get_credentials(session)
-    url = f"https://cloudbuild.googleapis.com/v1/projects/{project_id}/builds/{build_id}:cancel"
-    try:
-        _authorized_request(credentials, "POST", url, {})
-    except Exception as e:
-        logger.warning("Cloud Build cancel API returned error (may already be done): %s", e)
+    get_image_build_provider().cancel_build(credentials, {"project_id": project_id}, build_id)
 
     await _set_config(session, "notebook_image_build_status", "CANCELLED")
     # Mark notebook components back to build_failed so user can retry
@@ -463,7 +400,7 @@ async def _ensure_default_environment(session: AsyncSession, image_uri: str) -> 
         version_number=1,
         status="ready",
         definition_format="dockerfile",
-        definition_content=DOCKERFILE_CONTENT,
+        definition_content=_render_dockerfile(),
         image_uri=image_uri,
         created_by_user_id=user_id,
     )

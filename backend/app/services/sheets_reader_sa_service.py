@@ -12,14 +12,12 @@ token at request time. Only the SA email and a "created" flag live in
 service_account_key``) continue to use the stored JSON key.
 """
 
-import json
 import secrets
 
-from google.auth import impersonated_credentials
-from google.oauth2 import service_account
 from googleapiclient import discovery as google_discovery
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapters.credentials import get_credentials_provider
 from app.platform.platform_config_service import PlatformConfigService
 
 # Patchable aliases for tests
@@ -65,29 +63,12 @@ def _load_primary_credentials(config: dict[str, str]) -> tuple[object, str]:
         raise RuntimeError("GCP project ID is not configured")
 
     source = config.get("gcp_credential_source", "vm_default")
-    if source == "service_account_key":
-        key_json = config.get("gcp_service_account_key", "")
-        if not key_json:
-            raise RuntimeError("GCP service account key is not configured")
-        key_data = json.loads(key_json)
-        creds = service_account.Credentials.from_service_account_info(
-            key_data,
-            scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        )
-    else:
-        import google.auth as _google_auth
+    if source == "service_account_key" and not config.get("gcp_service_account_key"):
+        raise RuntimeError("GCP service account key is not configured")
 
-        creds, _ = _google_auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-        sa_email = config.get("gcp_bootstrap_sa_email") or config.get("gcp_service_account_email")
-        if sa_email:
-            from google.auth import impersonated_credentials
-
-            creds = impersonated_credentials.Credentials(
-                source_credentials=creds,
-                target_principal=sa_email,
-                target_scopes=["https://www.googleapis.com/auth/cloud-platform"],
-            )
-
+    # The primary SA path is the seam's default resolution: cloud-platform scope,
+    # config-derived impersonation (bootstrap SA, else the legacy email).
+    creds = get_credentials_provider().load_credentials(config)
     return creds, project_id
 
 
@@ -252,21 +233,21 @@ async def get_reader_credentials(session: AsyncSession):
     if not sa_email:
         raise RuntimeError("Reader SA email is missing from configuration")
 
-    # Legacy installs still use the stored JSON key.
+    provider = get_credentials_provider()
+
+    # Legacy installs still use the stored JSON key (the reader SA's own key,
+    # scoped to Sheets readonly).
     if config.get("gcp_credential_source") == "service_account_key":
         key_json = config.get("sheets_reader_sa_key", "")
         if not key_json:
             raise RuntimeError("Reader SA key is missing from configuration")
-        key_data = json.loads(key_json)
-        return service_account.Credentials.from_service_account_info(key_data, scopes=_SHEETS_SCOPE)
+        return provider.load_credentials(config, scopes=_SHEETS_SCOPE, key_json=key_json)
 
-    # Greenfield: impersonate the reader SA using bioaf-app's ADC.
-    import google.auth as _google_auth
-
-    source_creds, _ = _google_auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-    return impersonated_credentials.Credentials(
-        source_credentials=source_creds,
-        target_principal=sa_email,
-        target_scopes=_SHEETS_SCOPE,
+    # Greenfield: impersonate the reader SA using bioaf-app's ADC, with a
+    # short-lived Sheets-scoped token.
+    return provider.load_credentials(
+        config,
+        scopes=_SHEETS_SCOPE,
+        impersonate_target=sa_email,
         lifetime=3600,
     )

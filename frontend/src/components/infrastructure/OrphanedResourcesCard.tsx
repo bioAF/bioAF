@@ -22,9 +22,14 @@ interface OrphanedResourceListResponse {
   total: number;
 }
 
+// Resource-type labels keyed by the backend's orphaned-resource type strings.
+// GCP emits gke_cluster / gcs_bucket; the AWS equivalents are listed so an AWS
+// install labels its orphans correctly once AWS orphan-detection lands.
 const RESOURCE_LABELS: Record<string, string> = {
   gke_cluster: "GKE Cluster",
   gcs_bucket: "GCS Bucket",
+  eks_cluster: "EKS Cluster",
+  s3_bucket: "S3 Bucket",
 };
 
 export function OrphanedResourcesCard() {
@@ -84,7 +89,7 @@ export function OrphanedResourcesCard() {
         Orphaned Resources
       </h3>
       <p className="text-xs text-amber-700 mb-3">
-        These GCP resources were left behind by a failed deployment and may still
+        These cloud resources were left behind by a failed deployment and may still
         be accruing costs. Clean them up or dismiss if already handled.
       </p>
       <div className="space-y-2">

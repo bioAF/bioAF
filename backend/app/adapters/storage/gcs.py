@@ -16,6 +16,7 @@ from app.adapters.base import StorageProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.exceptions import ValidationError
 from app.adapters.models import (
+    BucketAdminMetrics,
     BucketMetrics,
     ObjectMetadata,
     StorageMetrics,
@@ -218,7 +219,7 @@ class GcsStorageProvider(StorageProvider):
 
     async def _load_credentials(self):
         from app.database import async_session_factory
-        from app.platform import credential_injector
+        from app.adapters.credentials import credential_injector
         from app.platform.platform_config_service import PlatformConfigService
 
         async with async_session_factory() as session:
@@ -255,6 +256,67 @@ class GcsStorageProvider(StorageProvider):
 
     def parse_uri(self, uri: str) -> tuple[str, str]:
         return self._parse_uri(uri)
+
+    def cli_auth_command(self, key_file: str) -> str:
+        # gsutil consults ~/.boto before GOOGLE_APPLICATION_CREDENTIALS, which in
+        # cloud-sdk:slim picks up the wrong identity even with the SA key mounted.
+        # Activate the SA explicitly and use `gcloud storage` (cli_copy_*), which
+        # honors the activated account directly.
+        return f"gcloud auth activate-service-account --key-file={key_file} --quiet"
+
+    def cli_copy_in(self, uri: str, local_path: str) -> str:
+        return f"gcloud storage cp {uri} {local_path}"
+
+    def cli_copy_out(self, local_path: str, uri: str) -> str:
+        return f"gcloud storage cp -r {local_path} {uri}"
+
+    def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
+        # `|| true` so a missing/empty prefix does not fail the init container.
+        return ["/bin/sh", "-c", f"gsutil -m rsync -r {remote_prefix} {local_dir} || true"]
+
+    def sync_out_command(self, local_dir: str, remote_prefix: str) -> list[str]:
+        return ["/bin/sh", "-c", f"gsutil -m rsync -r {local_dir} {remote_prefix}"]
+
+    def staging_image(self) -> str:
+        # google/cloud-sdk:slim ships gsutil + gcloud storage for stage in/out.
+        return "google/cloud-sdk:slim"
+
+    def input_mount_spec(
+        self, *, name: str, bucket: str, mount_path: str, key_prefix: str = ""
+    ) -> tuple[dict, dict, dict]:
+        # gcsfuse mounts the whole bucket read-only; key_prefix is unused on GCS
+        # (the caller mounts at a sub-path). The annotation triggers GKE's
+        # gcsfuse CSI sidecar injection.
+        volume_mount = {"name": name, "mountPath": mount_path, "readOnly": True}
+        volume = {
+            "name": name,
+            "csi": {
+                "driver": "gcsfuse.csi.storage.gke.io",
+                "readOnly": True,
+                "volumeAttributes": {
+                    "bucketName": bucket,
+                    "mountOptions": "implicit-dirs,file-cache:max-size-mb:-1",
+                    "gcsfuseLoggingSeverity": "warning",
+                },
+            },
+        }
+        return volume, volume_mount, {"gke-gcsfuse/volumes": "true"}
+
+    def nextflow_scratch_directives(self, work_dir: str) -> list[str]:
+        # Wave + Fusion mount the gs:// workDir as a local filesystem inside each
+        # task pod so head and process pods can exchange .command.run scripts.
+        return [
+            f"workDir = '{work_dir}'",
+            "wave.enabled = true",
+            "fusion.enabled = true",
+            "fusion.exportStorageCredentials = true",
+        ]
+
+    def image_storage_pip_packages(self) -> str:
+        return "google-cloud-storage==3.11.0 gsutil==5.37"
+
+    def cloud_build_copy_step(self, uri: str, dest: str) -> dict:
+        return {"name": "gcr.io/cloud-builders/gsutil", "args": ["cp", uri, dest]}
 
     async def read_text(self, uri: str, *, encoding: str = "utf-8") -> str:
         return (await self.read_bytes(uri)).decode(encoding)
@@ -817,3 +879,124 @@ class GcsStorageProvider(StorageProvider):
             storage_class = bucket.storage_class or "STANDARD"
             out.append((bucket_name, total_size, len(blobs), storage_class))
         return out
+
+    async def get_bucket_admin_metrics(self, bucket_name: str) -> BucketAdminMetrics:
+        """Rich per-bucket admin metrics (size/lifecycle/versioning/created).
+
+        Owns the bucket-level google-cloud-storage enumeration that previously
+        lived in GcsStorageService.get_bucket_metrics (Phase 9 / Stage 3b). The
+        blocking SDK walk runs off the event loop.
+        """
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._gcs_bucket_admin_metrics, bucket_name, creds)
+
+    async def delete_bucket(self, bucket_name: str) -> None:
+        """Delete a bucket and all its contents (force=True). DESTRUCTIVE.
+
+        Owns the whole-bucket delete that previously lived in
+        OrphanedResourceService._cleanup_gcs_bucket (Phase 9 / Stage 3b.5).
+        """
+        creds = await self._get_credentials()
+        await asyncio.to_thread(self._gcs_delete_bucket, bucket_name, creds)
+
+    def _gcs_delete_bucket(self, bucket_name: str, creds) -> None:
+        client = self._get_gcs_client(creds)
+        client.bucket(bucket_name).delete(force=True)
+
+    def native_upload_client(self, credentials=None):
+        """Raw synchronous google-cloud-storage client (transitional escape hatch).
+
+        Mirrors the prior ``storage.Client(credentials=...)`` construction the
+        reference-data upload helpers + the half-built importer used inline, so
+        the SDK import now lives here instead of the service layer.
+        """
+        return self._get_gcs_client(credentials)
+
+    def _gcs_bucket_admin_metrics(self, bucket_name: str, creds) -> BucketAdminMetrics:
+        client = self._get_gcs_client(creds)
+        bucket = client.get_bucket(bucket_name)
+        blobs = list(client.list_blobs(bucket_name))
+        total_size = sum(b.size or 0 for b in blobs)
+        return BucketAdminMetrics(
+            size_bytes=total_size,
+            object_count=len(blobs),
+            storage_class=bucket.storage_class or "STANDARD",
+            versioning_enabled=bool(bucket.versioning_enabled),
+            lifecycle_summaries=self._summarize_lifecycle(bucket.lifecycle_rules or []),
+            created_at=str(bucket.time_created) if bucket.time_created else None,
+        )
+
+    @staticmethod
+    def _summarize_lifecycle(rules) -> list[str]:
+        """Render GCS lifecycle rules into cloud-agnostic human summaries.
+
+        The GCS-specific rule shape (action.type / condition.age) is parsed here
+        so the service layer consumes neutral strings only.
+        """
+        summaries: list[str] = []
+        for rule in rules:
+            action = rule.get("action", {})
+            condition = rule.get("condition", {})
+            action_type = action.get("type", "")
+            if action_type == "SetStorageClass":
+                target = action.get("storageClass", "")
+                age = condition.get("age", "?")
+                summaries.append(f"Transition to {target} after {age} days")
+            elif action_type == "Delete":
+                age = condition.get("age", "?")
+                summaries.append(f"Delete after {age} days")
+        return summaries
+
+    async def list_lifecycle_policies(self, prefix: str) -> list[dict]:
+        """Project-level lifecycle enumeration for buckets matching ``prefix``.
+
+        Owns the google-cloud-storage walk that previously lived in
+        StorageService.get_lifecycle_policies (Phase 9 / Stage 3b). Off the loop.
+        """
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._gcs_list_lifecycle_policies, prefix, creds)
+
+    def _gcs_list_lifecycle_policies(self, prefix: str, creds) -> list[dict]:
+        client = self._get_gcs_client(creds)
+        policies: list[dict] = []
+        for bucket in client.list_buckets(prefix=prefix):
+            rules = [dict(rule) for rule in (bucket.lifecycle_rules or [])]
+            policies.append(
+                {
+                    "bucket_name": bucket.name,
+                    "rules": rules,
+                    "enabled": len(rules) > 0,
+                }
+            )
+        return policies
+
+    async def query_bucket_stats(self, prefix: str) -> list[dict]:
+        """Project-level per-bucket usage for buckets matching ``prefix``.
+
+        Owns the google-cloud-storage walk that previously lived in
+        StorageService._query_gcs_buckets (Phase 9 / Stage 3b). Off the loop.
+        """
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._gcs_query_bucket_stats, prefix, creds)
+
+    def _gcs_query_bucket_stats(self, prefix: str, creds) -> list[dict]:
+        client = self._get_gcs_client(creds)
+        results: list[dict] = []
+        for bucket in client.list_buckets(prefix=prefix):
+            total_bytes = 0
+            object_count = 0
+            by_class: dict[str, int] = {}
+            for blob in bucket.list_blobs():
+                total_bytes += blob.size or 0
+                object_count += 1
+                sc = blob.storage_class or "STANDARD"
+                by_class[sc] = by_class.get(sc, 0) + (blob.size or 0)
+            results.append(
+                {
+                    "name": bucket.name,
+                    "total_bytes": total_bytes,
+                    "object_count": object_count,
+                    "by_storage_class": by_class,
+                }
+            )
+        return results

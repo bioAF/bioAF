@@ -578,6 +578,7 @@ export interface SessionProvenance {
     id: number;
     filename: string;
     gcs_uri: string;
+    storage_uri: string;
     file_type: string;
     size_bytes: number | null;
   }[];
@@ -585,6 +586,7 @@ export interface SessionProvenance {
     id: number;
     filename: string;
     gcs_uri: string;
+    storage_uri: string;
     file_type: string;
     size_bytes: number | null;
   }[];
@@ -920,6 +922,7 @@ export interface FileResponse {
   id: number;
   filename: string;
   gcs_uri: string;
+  storage_uri: string;
   size_bytes: number | null;
   md5_checksum: string | null;
   file_type: string;
@@ -949,6 +952,7 @@ export interface FileUploadInitiateResponse {
   upload_id: string;
   signed_url: string;
   gcs_uri: string;
+  storage_uri: string;
 }
 
 export interface DatasetExperimentSummary {
@@ -1021,6 +1025,7 @@ export interface CellxgenePublishableFile {
   id: number;
   filename: string;
   gcs_uri: string;
+  storage_uri: string;
   size_bytes: number | null;
   file_type: string;
   project_name: string | null;
@@ -1454,6 +1459,7 @@ export interface ReferenceDatasetFile {
   id: number;
   filename: string;
   gcs_uri: string;
+  storage_uri: string;
   size_bytes: number | null;
   md5_checksum: string | null;
   file_type: string | null;

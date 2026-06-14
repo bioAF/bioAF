@@ -19,27 +19,26 @@ from kubernetes import client, config
 
 logger = logging.getLogger(__name__)
 
+# First-time client setup for kubectl access to a GKE cluster. Lives in the K8s
+# adapter package (cloud CLI strings are allowed here); the EKS realization
+# (Stage 6e) returns the `aws eks update-kubeconfig` form behind the same seam.
+KUBECTL_SETUP_GUIDE = """First-time setup for kubectl access:
 
-def _get_gcp_token(cfg: dict) -> str:
-    """Mint a GCP access token via credential_injector.
-
-    Returns a Bearer token suitable for the K8s API. In vm_default mode this
-    uses the node/metadata identity (optionally impersonating a bootstrap SA);
-    in service_account_key mode it uses the stored key.
-    """
-    import google.auth.transport.requests
-
-    from app.platform import credential_injector
-
-    credentials = credential_injector.load_gcp_credentials(cfg)
-    credentials.refresh(google.auth.transport.requests.Request())
-    return credentials.token
+1. Install gcloud CLI: https://cloud.google.com/sdk/docs/install
+2. Authenticate: gcloud auth login
+3. Get cluster credentials:
+   gcloud container clusters get-credentials bioaf-cluster --region <region> --project <project-id>
+4. Verify access: kubectl get pods -n bioaf-pipelines"""
 
 
 class GkeConnection:
-    """GKE connection + auth shared by the Kubernetes BAL providers."""
+    """Managed-Kubernetes connection + auth shared by the K8s BAL providers.
 
-    _TOKEN_TTL_SECONDS = 2700  # 45 minutes
+    Cloud-neutral plumbing (CA-to-tempfile, ``Configuration`` assembly,
+    in-cluster-first fallback, cached-client refresh). The cloud-specific bits -
+    the control-plane endpoint, CA cert, bearer token, and refresh TTL - come
+    from a ``ClusterAuthProvider`` resolved from ``cloud_provider`` (Stage 4a).
+    """
 
     def __init__(
         self,
@@ -59,6 +58,16 @@ class GkeConnection:
         # (endpoint, ca_cert) identity the cached client was built for; used by
         # the fingerprint refresh strategy to rebuild when the cluster changes.
         self._cached_cluster_fingerprint: tuple[str, str] = ("", "")
+        self._cluster_auth_provider = None
+
+    @property
+    def _cluster_auth(self):
+        """The cloud-resolved ClusterAuthProvider (lazy; GKE by default)."""
+        if self._cluster_auth_provider is None:
+            from app.adapters.cluster_auth import get_cluster_auth_provider
+
+            self._cluster_auth_provider = get_cluster_auth_provider()
+        return self._cluster_auth_provider
 
     async def load_cluster_config(self, force: bool = False) -> dict:
         """Read GKE cluster config from platform_config into _cluster_config.
@@ -71,7 +80,7 @@ class GkeConnection:
         cached API client so it rebuilds against the fresh config.
         """
         if self._cluster_config is not None and not force:
-            endpoint = self._cluster_config.get("gke_cluster_endpoint", "")
+            endpoint = self._cluster_auth.cluster_endpoint(self._cluster_config)
             if endpoint and endpoint != "null":
                 return self._cluster_config
 
@@ -92,10 +101,10 @@ class GkeConnection:
         return self._cluster_config
 
     def is_token_expired(self) -> bool:
-        """Check if the cached GCP access token is older than the TTL."""
+        """Check if the cached bearer token is older than the provider's TTL."""
         if self._client_created_at == 0.0:
             return False
-        return (time.monotonic() - self._client_created_at) > self._TOKEN_TTL_SECONDS
+        return (time.monotonic() - self._client_created_at) > self._cluster_auth.token_ttl_seconds
 
     def build_out_of_cluster_client(self) -> client.ApiClient:
         """Build a K8s ApiClient using platform_config credentials.
@@ -105,16 +114,16 @@ class GkeConnection:
         """
         cfg = self._cluster_config or {}
 
-        endpoint = cfg.get("gke_cluster_endpoint", "")
-        ca_cert_b64 = cfg.get("gke_cluster_ca_cert", "")
+        endpoint = self._cluster_auth.cluster_endpoint(cfg)
+        ca_cert_b64 = self._cluster_auth.cluster_ca_cert(cfg)
 
         if not endpoint or endpoint == "null":
-            raise RuntimeError("No GKE cluster endpoint in platform_config. Deploy the compute stack first.")
+            raise RuntimeError("No cluster endpoint in platform_config. Deploy the compute stack first.")
 
         if not endpoint.startswith("https://"):
             endpoint = f"https://{endpoint}"
 
-        token = _get_gcp_token(cfg)
+        token = self._cluster_auth.bearer_token(cfg)
 
         ca_cert_bytes = base64.b64decode(ca_cert_b64)
         ca_file = tempfile.NamedTemporaryFile(delete=False, suffix=".crt")
@@ -159,7 +168,8 @@ class GkeConnection:
             try:
                 self._api_client = self.build_out_of_cluster_client()
                 logger.info(
-                    "K8s client built for endpoint %s", (self._cluster_config or {}).get("gke_cluster_endpoint")
+                    "K8s client built for endpoint %s",
+                    self._cluster_auth.cluster_endpoint(self._cluster_config or {}),
                 )
             except Exception:
                 logger.exception("Failed to build out-of-cluster K8s client")
@@ -171,8 +181,8 @@ class GkeConnection:
         """(endpoint, ca_cert) identity of the cluster in the current config."""
         cfg = self._cluster_config or {}
         return (
-            cfg.get("gke_cluster_endpoint", "") or "",
-            cfg.get("gke_cluster_ca_cert", "") or "",
+            self._cluster_auth.cluster_endpoint(cfg),
+            self._cluster_auth.cluster_ca_cert(cfg),
         )
 
     async def get_api_client_async(self) -> client.ApiClient:
@@ -206,7 +216,8 @@ class GkeConnection:
             try:
                 self._api_client = self.build_out_of_cluster_client()
                 logger.info(
-                    "K8s client built for endpoint %s", (self._cluster_config or {}).get("gke_cluster_endpoint")
+                    "K8s client built for endpoint %s",
+                    self._cluster_auth.cluster_endpoint(self._cluster_config or {}),
                 )
             except Exception:
                 logger.exception("Failed to build out-of-cluster K8s client")

@@ -529,7 +529,7 @@ async def _lab_document_gcs_uri(session: AsyncSession, doc_id: int, org_id: int)
             )
         )
     ).scalar_one_or_none()
-    return version.gcs_uri if version is not None else None
+    return version.storage_uri if version is not None else None
 
 
 async def _file_gcs_uri(session: AsyncSession, file_id: int, org_id: int) -> str | None:
@@ -538,7 +538,7 @@ async def _file_gcs_uri(session: AsyncSession, file_id: int, org_id: int) -> str
     f = (
         await session.execute(select(File).where(File.id == file_id, File.organization_id == org_id))
     ).scalar_one_or_none()
-    return f.gcs_uri if f is not None else None
+    return f.storage_uri if f is not None else None
 
 
 async def _collect_platform_content(session: AsyncSession, job: LabGlossaryScanJob) -> str:

@@ -3,7 +3,6 @@
 import logging
 from datetime import datetime, timezone
 
-from google.cloud import storage
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,18 +12,8 @@ from app.platform.platform_config_service import PlatformConfigService
 
 logger = logging.getLogger(__name__)
 
-# GKE cluster status enum mapping (mirrors stack_deployment._GKE_STATUS_MAP)
-_GKE_STATUS_MAP = {
-    0: "STATUS_UNSPECIFIED",
-    1: "PROVISIONING",
-    2: "RUNNING",
-    3: "RECONCILING",
-    4: "STOPPING",
-    5: "ERROR",
-    6: "DEGRADED",
-}
-
-# Statuses that indicate the cluster is alive and usable
+# Cluster status strings (as mapped by the compute adapter's ClusterProbe):
+# statuses that indicate the cluster is alive and usable
 _RECOVERABLE_STATUSES = {"RUNNING", "RECONCILING"}
 
 # Statuses that indicate the cluster is not yet ready but still starting
@@ -32,15 +21,6 @@ _PROVISIONING_STATUSES = {"PROVISIONING"}
 
 # Statuses that indicate the cluster is dead or should be cleaned up
 _DEAD_STATUSES = {"ERROR", "DEGRADED", "STOPPING", "STATUS_UNSPECIFIED"}
-
-
-def _get_gke_client(credentials=None):
-    """Get a GKE ClusterManager client. Tests mock this function."""
-    from google.cloud import container_v1
-
-    if credentials:
-        return container_v1.ClusterManagerClient(credentials=credentials)
-    return container_v1.ClusterManagerClient()
 
 
 async def _get_gke_credentials(session: AsyncSession):
@@ -165,31 +145,24 @@ class OrphanedResourceService:
         session: AsyncSession,
         resource: OrphanedResource,
     ) -> None:
-        """Delete a GKE cluster using the SA credentials."""
-        from app.services.stack_deployment import _get_gke_client, _get_gke_credentials
+        """Delete a GKE cluster via the cloud-selected compute adapter."""
+        from app.adapters.registry import get_compute_adapter
 
-        credentials = await _get_gke_credentials(session)
-        client = _get_gke_client(credentials)
-        cluster_path = (
-            f"projects/{resource.gcp_project_id}/locations/{resource.gcp_zone}/clusters/{resource.resource_name}"
+        await get_compute_adapter().delete_cluster(
+            resource.gcp_project_id,
+            resource.gcp_zone,
+            resource.resource_name,
         )
-        client.delete_cluster(name=cluster_path)
 
     @staticmethod
     async def _cleanup_gcs_bucket(
         session: AsyncSession,
         resource: OrphanedResource,
     ) -> None:
-        """Delete a GCS bucket using the SA credentials."""
-        from app.services.stack_deployment import _get_gke_credentials
+        """Delete a bucket (and contents) via the cloud-selected storage adapter."""
+        from app.adapters.registry import get_storage_adapter
 
-        credentials = await _get_gke_credentials(session)
-        if credentials:
-            client = storage.Client(credentials=credentials, project=resource.gcp_project_id)
-        else:
-            client = storage.Client(project=resource.gcp_project_id)
-        bucket = client.bucket(resource.resource_name)
-        bucket.delete(force=True)
+        await get_storage_adapter().delete_bucket(resource.resource_name)
 
     @staticmethod
     async def _cleanup_service_account(
@@ -198,9 +171,10 @@ class OrphanedResourceService:
     ) -> None:
         """Delete a service account using the SA credentials."""
         from app.adapters.iam import create_iam_provider
+        from app.platform.cloud_provider import backend_for
 
         credentials = await _get_gke_credentials(session)
-        provider = create_iam_provider(credentials=credentials)
+        provider = create_iam_provider(credentials=credentials, backend=backend_for("iam"))
         provider.delete_service_account(resource.gcp_project_id, resource.resource_name)
 
     @staticmethod
@@ -225,28 +199,22 @@ class OrphanedResourceService:
     async def _query_gke_status(
         session: AsyncSession,
         resource: OrphanedResource,
-    ) -> tuple[str, object | None]:
-        """Query GKE API for the live status of an orphaned cluster.
+    ):
+        """Probe the live state of an orphaned cluster via the compute adapter.
 
-        Returns (status_string, cluster_object_or_None).
-        If the cluster cannot be found, returns ("NOT_FOUND", None).
+        Returns (status_string, ClusterProbe_or_None). If the cluster cannot be
+        found, returns ("NOT_FOUND", None).
         """
-        credentials = await _get_gke_credentials(session)
-        client = _get_gke_client(credentials)
-        cluster_path = (
-            f"projects/{resource.gcp_project_id}/locations/{resource.gcp_zone}/clusters/{resource.resource_name}"
+        from app.adapters.registry import get_compute_adapter
+
+        probe = await get_compute_adapter().probe_cluster(
+            resource.gcp_project_id,
+            resource.gcp_zone,
+            resource.resource_name,
         )
-        try:
-            cluster = client.get_cluster(name=cluster_path)
-            status_str = _GKE_STATUS_MAP.get(cluster.status, "UNKNOWN")
-            return status_str, cluster
-        except Exception as exc:
-            logger.info(
-                "GKE cluster %s not reachable: %s",
-                resource.resource_name,
-                exc,
-            )
-            return "NOT_FOUND", None
+        if probe.state == "NOT_FOUND":
+            return probe.state, None
+        return probe.state, probe
 
     @staticmethod
     async def scan_for_orphans(session: AsyncSession) -> int:
@@ -278,18 +246,16 @@ class OrphanedResourceService:
         credentials = await _get_gke_credentials(session)
         detected = 0
 
-        # Scan GKE clusters
+        # Scan clusters via the compute adapter (it resolves its own identity).
+        from app.adapters.registry import get_compute_adapter
+
         try:
-            client = _get_gke_client(credentials)
-            parent = f"projects/{project_id}/locations/{zone}"
-            response = client.list_clusters(parent=parent)
-            live_clusters = list(response.clusters) if response.clusters else []
+            live_cluster_names = await get_compute_adapter().list_cluster_names(project_id, zone)
         except Exception as exc:
             logger.warning("Failed to scan GKE clusters: %s", exc)
-            live_clusters = []
+            live_cluster_names = []
 
-        for cluster in live_clusters:
-            name = cluster.name
+        for name in live_cluster_names:
             if not name.startswith("bioaf-"):
                 continue
             if name == active_cluster:
@@ -312,8 +278,9 @@ class OrphanedResourceService:
         _COMPUTE_SA_IDS = {"bioaf-notebook-runner"}
         try:
             from app.adapters.iam import create_iam_provider
+            from app.platform.cloud_provider import backend_for
 
-            provider = create_iam_provider(credentials=credentials)
+            provider = create_iam_provider(credentials=credentials, backend=backend_for("iam"))
             sa_list = provider.list_service_accounts(project_id)
             for sa in sa_list:
                 sa_id = sa.account_id
@@ -417,7 +384,7 @@ class OrphanedResourceService:
         if resource.resource_type != "gke_cluster":
             raise ValidationError(f"Only GKE clusters can be adopted, got {resource.resource_type}")
 
-        gke_status, cluster = await OrphanedResourceService._query_gke_status(session, resource)
+        gke_status, probe = await OrphanedResourceService._query_gke_status(session, resource)
 
         if gke_status not in _RECOVERABLE_STATUSES:
             raise StateError(
@@ -431,13 +398,9 @@ class OrphanedResourceService:
         await _set_config(session, "compute_deployed", "true")
         await _set_config(session, "gke_cluster_name", resource.resource_name)
 
-        if cluster:
-            endpoint = getattr(cluster, "endpoint", "") or ""
-            ca_cert = ""
-            if hasattr(cluster, "master_auth") and cluster.master_auth:
-                ca_cert = getattr(cluster.master_auth, "cluster_ca_certificate", "") or ""
-            await _set_config(session, "gke_cluster_endpoint", endpoint or "null")
-            await _set_config(session, "gke_cluster_ca_cert", ca_cert or "null")
+        if probe:
+            await _set_config(session, "gke_cluster_endpoint", probe.endpoint or "null")
+            await _set_config(session, "gke_cluster_ca_cert", probe.ca_cert or "null")
 
         # Update kubernetes_cluster component state
         await session.execute(
@@ -515,14 +478,13 @@ class OrphanedResourceService:
                     continue
 
                 try:
-                    credentials = await _get_gke_credentials(session)
-                    client = _get_gke_client(credentials)
-                    cluster_path = (
-                        f"projects/{resource.gcp_project_id}"
-                        f"/locations/{resource.gcp_zone}"
-                        f"/clusters/{resource.resource_name}"
+                    from app.adapters.registry import get_compute_adapter
+
+                    await get_compute_adapter().delete_cluster(
+                        resource.gcp_project_id,
+                        resource.gcp_zone,
+                        resource.resource_name,
                     )
-                    client.delete_cluster(name=cluster_path)
                     resource.status = "cleaned"
                     resource.resolved_at = datetime.now(timezone.utc)
                     resource.resolved_by_user_id = user_id

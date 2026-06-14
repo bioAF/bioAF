@@ -7,10 +7,11 @@ Tests:
 9. move_file does NOT delete on copy failure
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.adapters.models import BucketAdminMetrics
 from app.exceptions import ValidationError
 from sqlalchemy import text
 
@@ -41,22 +42,21 @@ async def test_get_bucket_metrics_returns_all_buckets(session):
         )
     await session.commit()
 
-    # Mock the GCS client
-    mock_blob = MagicMock()
-    mock_blob.size = 1024
-    mock_blobs = [mock_blob]
+    # The bucket walk now lives in the storage adapter; stub its neutral result
+    # so the service's per-purpose mapping is what's under test.
+    admin = BucketAdminMetrics(
+        size_bytes=1024,
+        object_count=1,
+        storage_class="STANDARD",
+        versioning_enabled=True,
+        lifecycle_summaries=["Delete after 365 days"],
+        created_at="2026-03-11T00:00:00Z",
+    )
 
-    mock_bucket = MagicMock()
-    mock_bucket.storage_class = "STANDARD"
-    mock_bucket.versioning_enabled = True
-    mock_bucket.lifecycle_rules = []
-    mock_bucket.time_created = "2026-03-11T00:00:00Z"
-
-    mock_client = MagicMock()
-    mock_client.get_bucket.return_value = mock_bucket
-    mock_client.list_blobs.return_value = mock_blobs
-
-    with patch("app.services.gcs_storage.storage.Client", return_value=mock_client):
+    with patch(
+        "app.adapters.storage.gcs.GcsStorageProvider.get_bucket_admin_metrics",
+        AsyncMock(return_value=admin),
+    ):
         from app.services.gcs_storage import GcsStorageService
 
         metrics = await GcsStorageService.get_bucket_metrics(session)
@@ -72,6 +72,12 @@ async def test_get_bucket_metrics_returns_all_buckets(session):
         "literature",
         "config_backups",
     }
+    # The adapter's neutral fields map straight onto the rendered BucketMetrics.
+    sample = metrics[0]
+    assert sample.size_bytes == 1024
+    assert sample.versioning_enabled is True
+    assert sample.lifecycle_rules == ["Delete after 365 days"]
+    assert sample.created_at == "2026-03-11T00:00:00Z"
 
 
 @pytest.mark.asyncio

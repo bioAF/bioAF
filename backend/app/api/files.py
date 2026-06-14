@@ -35,7 +35,8 @@ def _file_response(f, sample_ids: list[int] | None = None, provenance: dict | No
     return FileResponse(
         id=f.id,
         filename=f.filename,
-        gcs_uri=f.gcs_uri,
+        # Wire field stays ``gcs_uri`` (frontend contract); source is the neutral column.
+        gcs_uri=f.storage_uri,
         size_bytes=f.size_bytes,
         md5_checksum=f.md5_checksum,
         file_type=f.file_type,
@@ -173,7 +174,7 @@ async def reconcile_stuck_files(
                 "SELECT id, experiment_id, file_type FROM files "
                 "WHERE organization_id = :org_id "
                 "AND experiment_id IS NOT NULL "
-                "AND gcs_uri LIKE :pattern"
+                "AND storage_uri LIKE :pattern"
             ).bindparams(org_id=org_id, pattern=adapter.build_uri(ingest_bucket, "") + "%")
         )
     ).fetchall()
@@ -205,7 +206,7 @@ async def reconcile_stuck_files(
                 "SELECT COUNT(*) FROM files "
                 "WHERE organization_id = :org_id "
                 "AND experiment_id IS NOT NULL "
-                "AND gcs_uri LIKE :pattern"
+                "AND storage_uri LIKE :pattern"
             ).bindparams(org_id=org_id, pattern=adapter.build_uri(raw_bucket, "") + "%")
         )
     ).scalar_one()
@@ -372,7 +373,7 @@ async def download_file(
     try:
         from app.adapters.registry import get_storage_adapter
 
-        url = await get_storage_adapter().generate_signed_url(file.gcs_uri, method="GET", expiry_seconds=3600)
+        url = await get_storage_adapter().generate_signed_url(file.storage_uri, method="GET", expiry_seconds=3600)
     except Exception:
         raise HTTPException(502, "Could not generate download URL")
 
@@ -421,7 +422,7 @@ async def file_content(
     try:
         from app.adapters.registry import get_storage_adapter
 
-        data = await get_storage_adapter().read_bytes(file.gcs_uri)
+        data = await get_storage_adapter().read_bytes(file.storage_uri)
 
         content_type = "application/octet-stream"
         if file.filename.endswith(".png"):

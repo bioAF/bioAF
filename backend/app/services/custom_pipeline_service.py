@@ -643,7 +643,7 @@ class CustomPipelineService:
                     "file_id": f.id,
                     "filename": f.filename,
                     "relative_path": rel_path,
-                    "gcs_uri": f.gcs_uri,
+                    "gcs_uri": f.storage_uri,
                     "project_id": f.project_id,
                     "project_name": name_cache["projects"].get(f.project_id) if f.project_id else None,
                     "experiment_id": f.experiment_id,
@@ -899,22 +899,26 @@ class CustomPipelineService:
 
     @staticmethod
     def _build_stage_commands(file_specs: list[dict]) -> list[str]:
-        # gsutil consults ~/.boto before GOOGLE_APPLICATION_CREDENTIALS, which
-        # in cloud-sdk:slim picks up the wrong identity even with the SA key
-        # mounted. Activate the SA explicitly and use `gcloud storage`, which
-        # honors the activated account directly.
+        # The cloud-specific staging CLI (auth + per-object copy) lives on the
+        # storage adapter, selected by backend; the service names no CLI.
         commands: list[str] = []
         if not file_specs:
             return commands
-        commands.append("gcloud auth activate-service-account --key-file=/secrets/gcp/key.json --quiet")
+        from app.adapters.registry import get_storage_adapter
+
+        adapter = get_storage_adapter()
+        auth = adapter.cli_auth_command("/secrets/gcp/key.json")
+        if auth:
+            commands.append(auth)
         for fs in file_specs:
             rel = fs["relative_path"]
-            gcs = fs["gcs_uri"]
+            uri = fs["gcs_uri"]
+            copy = adapter.cli_copy_in(uri, f"/data/{rel}")
             dirname = "/".join(rel.split("/")[:-1])
             if dirname:
-                commands.append(f"mkdir -p /data/{dirname} && gcloud storage cp {gcs} /data/{rel}")
+                commands.append(f"mkdir -p /data/{dirname} && {copy}")
             else:
-                commands.append(f"gcloud storage cp {gcs} /data/{rel}")
+                commands.append(copy)
         return commands
 
     @staticmethod
@@ -984,20 +988,15 @@ class CustomPipelineService:
         if results_bucket:
             from app.adapters.registry import get_storage_adapter
 
-            # NOTE: the gcloud storage command below is a Leak-2 (shell CLI) item
-            # drained separately; build_uri only makes the URI backend-neutral here.
-            sync_target = get_storage_adapter().build_uri(results_bucket, f"{output_prefix}/pipeline-runs/{run_id}/")
-            # Activate the mounted SA explicitly (same reason as stage-inputs:
-            # gsutil's ~/.boto precedence picks up the wrong identity even with
-            # GOOGLE_APPLICATION_CREDENTIALS set). `|| true` keeps the trap
-            # non-fatal so a sync failure doesn't mask the pipeline's real
-            # exit status, but stderr is left visible so failures show up in
-            # pod logs instead of silently dropping outputs.
-            sync_cmd = (
-                "gcloud auth activate-service-account "
-                "--key-file=/secrets/gcp/key.json --quiet && "
-                f"gcloud storage cp -r /outputs/* {sync_target}"
-            )
+            adapter = get_storage_adapter()
+            sync_target = adapter.build_uri(results_bucket, f"{output_prefix}/pipeline-runs/{run_id}/")
+            # Stage outputs back via the backend's CLI (auth + recursive copy live
+            # on the adapter). `|| true` keeps the trap non-fatal so a sync failure
+            # doesn't mask the pipeline's real exit status, but stderr stays visible
+            # so failures show up in pod logs instead of silently dropping outputs.
+            auth = adapter.cli_auth_command("/secrets/gcp/key.json")
+            copy_out = adapter.cli_copy_out("/outputs/*", sync_target)
+            sync_cmd = f"{auth} && {copy_out}" if auth else copy_out
             trap = f"trap '{sync_cmd} || true' EXIT"
         else:
             trap = "trap 'true' EXIT"

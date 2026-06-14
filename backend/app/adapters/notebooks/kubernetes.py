@@ -28,11 +28,7 @@ from app.adapters.models import (
     TerminationResult,
     to_service_state,
 )
-from app.adapters.notebooks.gcs_sync import (
-    generate_sync_in_command,
-    generate_sync_out_command,
-    parse_gsutil_ls_output,
-)
+from app.adapters.notebooks.gcs_sync import parse_gsutil_ls_output
 
 logger = logging.getLogger("bioaf.adapters.notebooks.k8s")
 
@@ -111,6 +107,16 @@ class KubernetesNotebookProvider(NotebookProvider):
             refresh_strategy="fingerprint",
         )
         self._namespace_ready = False
+        self._pod_identity_provider = None
+
+    @property
+    def _pod_identity(self):
+        """The cloud-resolved PodIdentityProvider (lazy; GKE by default)."""
+        if self._pod_identity_provider is None:
+            from app.adapters.pod_identity import get_pod_identity_provider
+
+            self._pod_identity_provider = get_pod_identity_provider()
+        return self._pod_identity_provider
 
     @property
     def _cluster_config(self):
@@ -173,6 +179,11 @@ class KubernetesNotebookProvider(NotebookProvider):
         namespace = DEFAULT_NOTEBOOK_NAMESPACE
         return f"kubectl exec -it -n {namespace} pod/bioaf-notebook-{session_id} -- /bin/bash"
 
+    def connection_setup_guide(self) -> str:
+        from app.adapters.kubernetes.connection import KUBECTL_SETUP_GUIDE
+
+        return KUBECTL_SETUP_GUIDE
+
     async def sync_session_storage(  # type: ignore[override]
         self,
         session_id: str,
@@ -188,8 +199,10 @@ class KubernetesNotebookProvider(NotebookProvider):
             return
         from kubernetes.stream import stream
 
+        from app.adapters.registry import get_storage_adapter
+
         core_client = self._get_k8s_core_client()
-        sync_cmd = generate_sync_out_command(local_dir, gcs_prefix)
+        sync_cmd = get_storage_adapter().sync_out_command(local_dir, gcs_prefix)
         logger.info("Syncing session data to GCS from pod %s", pod_name)
         stream(
             core_client.connect_get_namespaced_pod_exec,
@@ -272,10 +285,9 @@ class KubernetesNotebookProvider(NotebookProvider):
         )
         logger.info("Created namespace %s", namespace)
 
-        # Build SA annotations for Workload Identity
-        sa_annotations = {}
-        if gcp_sa_email:
-            sa_annotations["iam.gke.io/gcp-service-account"] = gcp_sa_email
+        # KSA annotations binding the pod to a cloud IAM identity (GKE Workload
+        # Identity today); empty when no SA email is configured.
+        sa_annotations = self._pod_identity.pod_identity_annotations(gcp_sa_email)
 
         core_v1.create_namespaced_service_account(
             namespace=namespace,
@@ -351,21 +363,21 @@ class KubernetesNotebookProvider(NotebookProvider):
         logger.info("Created GCS SA key secret in %s", namespace)
         return True
 
-    @staticmethod
-    def _patch_sa_annotation(core_v1, namespace: str, gcp_sa_email: str) -> None:
-        """Ensure the notebook-runner SA has the Workload Identity annotation."""
+    def _patch_sa_annotation(self, core_v1, namespace: str, gcp_sa_email: str) -> None:
+        """Ensure the notebook-runner KSA carries the pod-identity binding."""
+        desired = self._pod_identity.pod_identity_annotations(gcp_sa_email)
         try:
             sa = core_v1.read_namespaced_service_account(name="bioaf-notebook-runner", namespace=namespace)
-            current = (sa.metadata.annotations or {}).get("iam.gke.io/gcp-service-account", "")
-            if current != gcp_sa_email:
+            current = sa.metadata.annotations or {}
+            if desired and any(current.get(k) != v for k, v in desired.items()):
                 core_v1.patch_namespaced_service_account(
                     name="bioaf-notebook-runner",
                     namespace=namespace,
-                    body={"metadata": {"annotations": {"iam.gke.io/gcp-service-account": gcp_sa_email}}},
+                    body={"metadata": {"annotations": desired}},
                 )
-                logger.info("Patched Workload Identity annotation on bioaf-notebook-runner")
+                logger.info("Patched pod-identity annotation on bioaf-notebook-runner")
         except Exception:
-            logger.exception("Failed to patch Workload Identity annotation on bioaf-notebook-runner")
+            logger.exception("Failed to patch pod-identity annotation on bioaf-notebook-runner")
 
     # -- K8s API implementations (production) --
 
@@ -499,11 +511,19 @@ class KubernetesNotebookProvider(NotebookProvider):
         else:
             home_dir = HOME_DIR
 
-        # Build GCS sync init container
-        sync_in_cmd = generate_sync_in_command(gcs_home_prefix, home_dir)
+        # The init/sidecar containers that stage data run the storage backend's
+        # CLI image (CopyStager seam); GCS -> google/cloud-sdk:slim. The same
+        # adapter supplies read-only input mounts (ReadOnlyInputMount seam).
+        from app.adapters.registry import get_storage_adapter
+
+        storage_adapter = get_storage_adapter()
+        staging_image = storage_adapter.staging_image()
+
+        # Build the home stage-in init container (CopyStager sync seam)
+        sync_in_cmd = storage_adapter.sync_in_command(gcs_home_prefix, home_dir)
         init_container = {
             "name": "gcs-sync-in",
-            "image": "google/cloud-sdk:slim",
+            "image": staging_image,
             "command": sync_in_cmd,
             "volumeMounts": [{"name": "home", "mountPath": home_dir}],
         }
@@ -537,7 +557,7 @@ class KubernetesNotebookProvider(NotebookProvider):
             init_containers.append(
                 {
                     "name": "gcs-data-sync",
-                    "image": "google/cloud-sdk:slim",
+                    "image": staging_image,
                     "command": ["/bin/sh", "-c", data_sync_cmd],
                     "volumeMounts": [{"name": "data", "mountPath": "/data"}],
                 }
@@ -549,41 +569,27 @@ class KubernetesNotebookProvider(NotebookProvider):
         volume_mounts.append({"name": "outputs", "mountPath": "/outputs"})
         volumes.append({"name": "outputs", "emptyDir": {"sizeLimit": "50Gi"}})
 
-        # Track whether any GCS FUSE CSI volumes are used
-        has_fuse_volumes = False
+        # Pod annotations the read-only input mounts require (e.g. GCS gcsfuse
+        # CSI sidecar injection); accumulated from the ReadOnlyInputMount seam.
+        input_mount_annotations: dict[str, str] = {}
 
         # SSH work nodes get additional volumes: scratch and data mounts
         if session_type == "ssh":
             volume_mounts.append({"name": "scratch", "mountPath": "/scratch"})
             volumes.append({"name": "scratch", "emptyDir": {"sizeLimit": "100Gi"}})
 
-            # GCS FUSE data mounts (read-only)
+            # Read-only object input mounts (ReadOnlyInputMount seam): the storage
+            # backend supplies the volume / mount / pod annotations (GCS gcsfuse CSI).
             data_mount_paths = session_spec.get("data_mount_paths", [])
-            if data_mount_paths:
-                has_fuse_volumes = True
             for i, mount_path in enumerate(data_mount_paths):
-                vol_name = f"data-{i}"
-                volume_mounts.append(
-                    {
-                        "name": vol_name,
-                        "mountPath": f"/data/{mount_path.lstrip('/')}",
-                        "readOnly": True,
-                    }
+                volume, volume_mount, pod_annotations = storage_adapter.input_mount_spec(
+                    name=f"data-{i}",
+                    bucket=working_bucket,
+                    mount_path=f"/data/{mount_path.lstrip('/')}",
                 )
-                volumes.append(
-                    {
-                        "name": vol_name,
-                        "csi": {
-                            "driver": "gcsfuse.csi.storage.gke.io",
-                            "readOnly": True,
-                            "volumeAttributes": {
-                                "bucketName": working_bucket,
-                                "mountOptions": "implicit-dirs,file-cache:max-size-mb:-1",
-                                "gcsfuseLoggingSeverity": "warning",
-                            },
-                        },
-                    }
-                )
+                volume_mounts.append(volume_mount)
+                volumes.append(volume)
+                input_mount_annotations.update(pod_annotations)
 
         notebook_container: dict = {
             "name": "notebook",
@@ -681,7 +687,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         containers.append(
             {
                 "name": "gcs-sync",
-                "image": "google/cloud-sdk:slim",
+                "image": staging_image,
                 "command": ["/bin/sh", "-c", "trap 'exit 0' TERM; while true; do sleep 3600; done"],
                 "volumeMounts": gcs_sync_mounts,
                 "env": gcs_sync_env,
@@ -689,10 +695,9 @@ class KubernetesNotebookProvider(NotebookProvider):
             }
         )
 
-        # Pod annotations -- GCS FUSE CSI driver requires this for sidecar injection
-        annotations: dict[str, str] = {}
-        if has_fuse_volumes:
-            annotations["gke-gcsfuse/volumes"] = "true"
+        # Pod annotations required by the read-only input mounts (e.g. the GCS
+        # FUSE CSI driver's sidecar-injection annotation), supplied by the seam.
+        annotations: dict[str, str] = dict(input_mount_annotations)
 
         # Pod manifest
         metadata: dict = {
@@ -1041,10 +1046,12 @@ class KubernetesNotebookProvider(NotebookProvider):
             except Exception:
                 logger.exception("Failed to store git info for compute session")
 
-        # Sync home directory to GCS before termination
+        # Sync home directory to GCS before termination (CopyStager sync seam)
         if gcs_home_prefix and pod_name:
             try:
-                sync_cmd = generate_sync_out_command(HOME_DIR, gcs_home_prefix)
+                from app.adapters.registry import get_storage_adapter
+
+                sync_cmd = get_storage_adapter().sync_out_command(HOME_DIR, gcs_home_prefix)
                 stream(
                     core_client.connect_get_namespaced_pod_exec,
                     name=pod_name,

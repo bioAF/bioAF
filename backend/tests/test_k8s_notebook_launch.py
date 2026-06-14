@@ -359,7 +359,7 @@ class TestOutOfClusterFallback:
 
         with (
             patch("app.adapters.kubernetes.connection.config") as mock_config,
-            patch("app.adapters.kubernetes.connection._get_gcp_token", return_value="fake-token"),
+            patch("app.adapters.cluster_auth.gcp._get_gcp_token", return_value="fake-token"),
             patch("app.adapters.kubernetes.connection.tempfile") as mock_tempfile,
             patch("app.adapters.kubernetes.connection.client") as mock_client,
         ):
@@ -378,7 +378,7 @@ class TestOutOfClusterFallback:
 
     @pytest.mark.asyncio
     async def test_raises_when_no_cluster_endpoint(self):
-        """Raises RuntimeError when no GKE endpoint is configured."""
+        """Raises RuntimeError when no cluster endpoint is configured."""
         mock_session = AsyncMock()
         mock_result = MagicMock()
         mock_result.fetchall.return_value = []
@@ -394,7 +394,9 @@ class TestOutOfClusterFallback:
         with patch("app.adapters.kubernetes.connection.config") as mock_config:
             mock_config.load_incluster_config.side_effect = Exception("not in cluster")
 
-            with pytest.raises(RuntimeError, match="No GKE cluster endpoint"):
+            # Stage 4a genericized this message ("cluster endpoint", was "GKE
+            # cluster endpoint") when the auth provider was extracted.
+            with pytest.raises(RuntimeError, match="No cluster endpoint"):
                 await provider._get_api_client_async()
 
     @pytest.mark.asyncio

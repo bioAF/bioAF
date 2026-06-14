@@ -63,6 +63,16 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
             refresh_strategy="fingerprint",
         )
         self._namespace_ready = False
+        self._pod_identity_provider = None
+
+    @property
+    def _pod_identity(self):
+        """The cloud-resolved PodIdentityProvider (lazy; GKE by default)."""
+        if self._pod_identity_provider is None:
+            from app.adapters.pod_identity import get_pod_identity_provider
+
+            self._pod_identity_provider = get_pod_identity_provider()
+        return self._pod_identity_provider
 
     @property
     def _cluster_config(self):
@@ -152,6 +162,12 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         apps_v1 = self._get_k8s_apps_client()
         core_v1 = self._get_k8s_core_client()
 
+        # The data-download init container runs the storage backend's CLI image
+        # (CopyStager seam); GCS -> google/cloud-sdk:slim.
+        from app.adapters.registry import get_storage_adapter
+
+        staging_image = get_storage_adapter().staging_image()
+
         # GCS download auth: in service_account_key mode activate the mounted key;
         # in vm_default mode rely on Workload Identity (the runner SA's metadata
         # credentials), and do NOT mount the gcp-sa-key secret (it doesn't exist).
@@ -204,7 +220,7 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
                         init_containers=[
                             client.V1Container(
                                 name="gcs-download",
-                                image="google/cloud-sdk:slim",
+                                image=staging_image,
                                 command=["/bin/sh", "-c", download_cmd],
                                 volume_mounts=init_volume_mounts,
                             )
@@ -382,9 +398,9 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         )
         logger.info("Created namespace %s", namespace)
 
-        sa_annotations = {}
-        if gcp_sa_email:
-            sa_annotations["iam.gke.io/gcp-service-account"] = gcp_sa_email
+        # KSA annotations binding the pod to a cloud IAM identity (GKE Workload
+        # Identity today); empty when no SA email is configured.
+        sa_annotations = self._pod_identity.pod_identity_annotations(gcp_sa_email)
 
         core_v1.create_namespaced_service_account(
             namespace=namespace,
@@ -422,25 +438,25 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         logger.info("Created role binding in %s", namespace)
         self._namespace_ready = True
 
-    @staticmethod
-    def _patch_sa_annotation(core_v1, namespace: str, gcp_sa_email: str) -> None:
-        """Ensure the cellxgene-runner SA has the Workload Identity annotation.
+    def _patch_sa_annotation(self, core_v1, namespace: str, gcp_sa_email: str) -> None:
+        """Ensure the cellxgene-runner KSA carries the pod-identity binding.
 
-        Used on the upgrade path where the namespace was created before
-        Workload Identity was wired (no annotation on the existing KSA).
+        Used on the upgrade path where the namespace was created before pod
+        identity was wired (no binding annotation on the existing KSA).
         """
+        desired = self._pod_identity.pod_identity_annotations(gcp_sa_email)
         try:
             sa = core_v1.read_namespaced_service_account(name="bioaf-cellxgene-runner", namespace=namespace)
-            current = (sa.metadata.annotations or {}).get("iam.gke.io/gcp-service-account", "")
-            if current != gcp_sa_email:
+            current = sa.metadata.annotations or {}
+            if desired and any(current.get(k) != v for k, v in desired.items()):
                 core_v1.patch_namespaced_service_account(
                     name="bioaf-cellxgene-runner",
                     namespace=namespace,
-                    body={"metadata": {"annotations": {"iam.gke.io/gcp-service-account": gcp_sa_email}}},
+                    body={"metadata": {"annotations": desired}},
                 )
-                logger.info("Patched Workload Identity annotation on bioaf-cellxgene-runner")
+                logger.info("Patched pod-identity annotation on bioaf-cellxgene-runner")
         except Exception:
-            logger.exception("Failed to patch Workload Identity annotation on bioaf-cellxgene-runner")
+            logger.exception("Failed to patch pod-identity annotation on bioaf-cellxgene-runner")
 
     # -- Background readiness polling --
 

@@ -49,7 +49,7 @@ def _extract_fastq_lane_pairs(sample) -> list[tuple[str, str]]:
     files = getattr(sample, "_input_files", None)
     if not isinstance(files, list):
         files = getattr(sample, "files", None) or []
-    fastq_files = [f for f in files if getattr(f, "gcs_uri", None)]
+    fastq_files = [f for f in files if getattr(f, "storage_uri", None)]
     if not fastq_files:
         return [("", "")]
 
@@ -63,7 +63,7 @@ def _extract_fastq_lane_pairs(sample) -> list[tuple[str, str]]:
         if read_type in ("R1", "R2"):
             lane = _get_lane(f)
             lanes.setdefault(lane, {})
-            lanes[lane][read_type] = f.gcs_uri
+            lanes[lane][read_type] = f.storage_uri
         else:
             unclassified.append(f)
 
@@ -76,9 +76,9 @@ def _extract_fastq_lane_pairs(sample) -> list[tuple[str, str]]:
         return result
 
     # Fallback for files without read type info: sort by filename
-    unclassified.sort(key=lambda f: getattr(f, "filename", "") or getattr(f, "gcs_uri", ""))
-    fastq_1 = unclassified[0].gcs_uri if len(unclassified) > 0 else ""
-    fastq_2 = unclassified[1].gcs_uri if len(unclassified) > 1 else ""
+    unclassified.sort(key=lambda f: getattr(f, "filename", "") or getattr(f, "storage_uri", ""))
+    fastq_1 = unclassified[0].storage_uri if len(unclassified) > 0 else ""
+    fastq_2 = unclassified[1].storage_uri if len(unclassified) > 1 else ""
     return [(fastq_1, fastq_2)]
 
 
