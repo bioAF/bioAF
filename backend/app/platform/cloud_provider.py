@@ -54,6 +54,8 @@ POLICY: dict[str, dict[str, str]] = {
         "credentials": "gcp",
         "cluster_auth": "gke",
         "pod_identity": "gke",
+        "image_registry": "artifact_registry",
+        "image_build": "cloud_build",
     },
     "aws": {
         "storage": "s3",
@@ -66,6 +68,8 @@ POLICY: dict[str, dict[str, str]] = {
         "credentials": "aws",
         "cluster_auth": "eks",
         "pod_identity": "eks",
+        "image_registry": "ecr",
+        "image_build": "codebuild",
     },
 }
 

@@ -41,6 +41,8 @@ def test_gcp_policy_matches_current_hard_defaults():
         "credentials": "gcp",
         "cluster_auth": "gke",
         "pod_identity": "gke",
+        "image_registry": "artifact_registry",
+        "image_build": "cloud_build",
     }
 
 
@@ -56,6 +58,8 @@ def test_aws_policy_values():
         "credentials": "aws",
         "cluster_auth": "eks",
         "pod_identity": "eks",
+        "image_registry": "ecr",
+        "image_build": "codebuild",
     }
 
 
@@ -76,6 +80,8 @@ def test_aws_policy_values():
             "credentials",
             "cluster_auth",
             "pod_identity",
+            "image_registry",
+            "image_build",
         ]
     ),
 )

@@ -21,9 +21,9 @@ from app.models.environment_version import EnvironmentVersion
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import ENVIRONMENT_BUILD_COMPLETED
+from app.adapters.image_build.gcp import authorized_request as _authorized_request
+from app.adapters.image_registry.gcp import AR_REPO_ID
 from app.services.notebook_image_service import (
-    AR_REPO_ID,
-    _authorized_request,
     _get_credentials,
     _read_config,
     ensure_artifact_registry,
