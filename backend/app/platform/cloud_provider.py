@@ -53,6 +53,7 @@ POLICY: dict[str, dict[str, str]] = {
         "log_sink": "gcp",
         "credentials": "gcp",
         "cluster_auth": "gke",
+        "pod_identity": "gke",
     },
     "aws": {
         "storage": "s3",
@@ -64,6 +65,7 @@ POLICY: dict[str, dict[str, str]] = {
         "log_sink": "aws",
         "credentials": "aws",
         "cluster_auth": "eks",
+        "pod_identity": "eks",
     },
 }
 

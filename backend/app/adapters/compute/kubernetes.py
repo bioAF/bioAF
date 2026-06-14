@@ -185,6 +185,16 @@ class KubernetesComputeProvider(ComputeProvider):
             invalidate_client_on_force=True,
             refresh_strategy="simple",
         )
+        self._pod_identity_provider = None
+
+    @property
+    def _pod_identity(self):
+        """The cloud-resolved PodIdentityProvider (lazy; GKE by default)."""
+        if self._pod_identity_provider is None:
+            from app.adapters.pod_identity import get_pod_identity_provider
+
+            self._pod_identity_provider = get_pod_identity_provider()
+        return self._pod_identity_provider
 
     @property
     def _session_factory(self):
@@ -576,9 +586,9 @@ class KubernetesComputeProvider(ComputeProvider):
         )
         logger.info("Created namespace %s", namespace)
 
-        sa_annotations: dict[str, str] = {}
-        if gcp_sa_email:
-            sa_annotations["iam.gke.io/gcp-service-account"] = gcp_sa_email
+        # KSA annotations binding the pod to a cloud IAM identity (GKE Workload
+        # Identity today); empty when no SA email is configured.
+        sa_annotations = self._pod_identity.pod_identity_annotations(gcp_sa_email)
 
         # Create service account
         core_v1.create_namespaced_service_account(
@@ -618,25 +628,25 @@ class KubernetesComputeProvider(ComputeProvider):
         logger.info("Created role binding in %s", namespace)
         self._namespace_ready = True
 
-    @staticmethod
-    def _patch_sa_annotation(core_v1, namespace: str, gcp_sa_email: str) -> None:
-        """Ensure the pipeline-runner SA has the Workload Identity annotation.
+    def _patch_sa_annotation(self, core_v1, namespace: str, gcp_sa_email: str) -> None:
+        """Ensure the pipeline-runner KSA carries the pod-identity binding.
 
-        Used on the upgrade path where the namespace was created before
-        Workload Identity was wired (no annotation on the existing KSA).
+        Used on the upgrade path where the namespace was created before pod
+        identity was wired (no binding annotation on the existing KSA).
         """
+        desired = self._pod_identity.pod_identity_annotations(gcp_sa_email)
         try:
             sa = core_v1.read_namespaced_service_account(name="bioaf-pipeline-runner", namespace=namespace)
-            current = (sa.metadata.annotations or {}).get("iam.gke.io/gcp-service-account", "")
-            if current != gcp_sa_email:
+            current = sa.metadata.annotations or {}
+            if desired and any(current.get(k) != v for k, v in desired.items()):
                 core_v1.patch_namespaced_service_account(
                     name="bioaf-pipeline-runner",
                     namespace=namespace,
-                    body={"metadata": {"annotations": {"iam.gke.io/gcp-service-account": gcp_sa_email}}},
+                    body={"metadata": {"annotations": desired}},
                 )
-                logger.info("Patched Workload Identity annotation on bioaf-pipeline-runner")
+                logger.info("Patched pod-identity annotation on bioaf-pipeline-runner")
         except Exception:
-            logger.exception("Failed to patch Workload Identity annotation on bioaf-pipeline-runner")
+            logger.exception("Failed to patch pod-identity annotation on bioaf-pipeline-runner")
 
     # -- K8s API implementations (production) --
 
