@@ -19,7 +19,29 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import text
+
+
+@pytest_asyncio.fixture
+async def sample_file(session, admin_user):
+    """A persisted files row to read back through the API (storage_uri starts equal
+    to gcs_uri via the sync shim; the tests then diverge them with raw SQL)."""
+    from app.models.file import File
+
+    f = File(
+        organization_id=admin_user.organization_id,
+        gcs_uri="gs://test-bucket/storage-uri-read.fastq.gz",
+        filename="storage-uri-read.fastq.gz",
+        size_bytes=2048000,
+        md5_checksum="def456",
+        file_type="fastq",
+        uploader_user_id=admin_user.id,
+    )
+    session.add(f)
+    await session.flush()
+    await session.commit()
+    return f
 
 
 def test_file_response_exposes_storage_uri_alias():
