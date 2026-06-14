@@ -179,7 +179,7 @@ class PlotArchiveService:
                             continue
 
                         # Check not already in archive
-                        existing = await session.execute(select(File.id).where(File.gcs_uri == gcs_uri))
+                        existing = await session.execute(select(File.id).where(File.storage_uri == gcs_uri))
                         if existing.scalar_one_or_none():
                             continue
 
@@ -196,7 +196,7 @@ class PlotArchiveService:
                             org_id=org_id,
                             user_id=None,
                             filename=name.split("/")[-1],
-                            gcs_uri=gcs_uri,
+                            storage_uri=gcs_uri,
                             size_bytes=obj.size_bytes,
                             md5_checksum=None,
                             file_type=file_type,
@@ -268,9 +268,9 @@ class PlotArchiveService:
         entries = list(result.scalars().all())
         updated = 0
         for entry in entries:
-            if not entry.file or not entry.file.gcs_uri:
+            if not entry.file or not entry.file.storage_uri:
                 continue
-            exp_id, run_id = PlotArchiveService._parse_ids_from_path(entry.file.gcs_uri)
+            exp_id, run_id = PlotArchiveService._parse_ids_from_path(entry.file.storage_uri)
             changed = False
             if exp_id is not None and entry.experiment_id != exp_id:
                 exists = await session.execute(select(Experiment.id).where(Experiment.id == exp_id))
@@ -306,12 +306,12 @@ class PlotArchiveService:
         generated = 0
         batch = 0
         for entry in entries:
-            if not entry.file or not entry.file.gcs_uri:
+            if not entry.file or not entry.file.storage_uri:
                 continue
             if not entry.file.filename.lower().endswith(".pdf"):
                 continue
 
-            thumb_uri = await ThumbnailService.generate_and_upload(session, entry.file.gcs_uri, entry.id)
+            thumb_uri = await ThumbnailService.generate_and_upload(session, entry.file.storage_uri, entry.id)
             if thumb_uri:
                 entry.thumbnail_gcs_uri = thumb_uri
                 generated += 1

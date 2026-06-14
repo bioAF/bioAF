@@ -142,7 +142,7 @@ async def test_create_reader_sa_success(client, admin_token, session):
     with (
         patch("app.services.sheets_reader_sa_service.discovery_build", side_effect=fake_build),
         patch(
-            "app.services.sheets_reader_sa_service.service_account.Credentials.from_service_account_info",
+            "app.services.sheets_reader_sa_service.get_credentials_provider",
             return_value=MagicMock(),
         ),
         patch(
@@ -251,7 +251,7 @@ async def test_preview_sheet_headers(client, admin_token, session):
     with (
         patch("app.services.google_sheets_service.discovery_build") as mock_build,
         patch(
-            "app.services.sheets_reader_sa_service.service_account.Credentials.from_service_account_info",
+            "app.services.sheets_reader_sa_service.get_credentials_provider",
             return_value=MagicMock(),
         ),
     ):
@@ -296,7 +296,7 @@ async def test_preview_sheet_with_aliases(client, admin_token, session):
     with (
         patch("app.services.google_sheets_service.discovery_build") as mock_build,
         patch(
-            "app.services.sheets_reader_sa_service.service_account.Credentials.from_service_account_info",
+            "app.services.sheets_reader_sa_service.get_credentials_provider",
             return_value=MagicMock(),
         ),
     ):
@@ -355,7 +355,7 @@ async def test_preview_sheet_not_shared(client, admin_token, session):
     with (
         patch("app.services.google_sheets_service.discovery_build") as mock_build,
         patch(
-            "app.services.sheets_reader_sa_service.service_account.Credentials.from_service_account_info",
+            "app.services.sheets_reader_sa_service.get_credentials_provider",
             return_value=MagicMock(),
         ),
     ):
@@ -383,7 +383,7 @@ async def test_preview_non_defaultable_fields_recognized_with_flag(client, admin
     with (
         patch("app.services.google_sheets_service.discovery_build") as mock_build,
         patch(
-            "app.services.sheets_reader_sa_service.service_account.Credentials.from_service_account_info",
+            "app.services.sheets_reader_sa_service.get_credentials_provider",
             return_value=MagicMock(),
         ),
     ):
@@ -434,7 +434,7 @@ async def test_sheet_sample_preview(client, admin_token, session):
     with (
         patch("app.services.google_sheets_service.discovery_build") as mock_build,
         patch(
-            "app.services.sheets_reader_sa_service.service_account.Credentials.from_service_account_info",
+            "app.services.sheets_reader_sa_service.get_credentials_provider",
             return_value=MagicMock(),
         ),
     ):

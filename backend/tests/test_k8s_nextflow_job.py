@@ -83,6 +83,7 @@ class TestNextflowCommandBuilt:
     @pytest.mark.asyncio
     async def test_writes_sample_sheet_to_data_volume(self, adapter):
         """Nextflow command should reference sample sheet at /data/samplesheet.csv."""
+        adapter._cluster_config = {"raw_bucket_name": "bioaf-raw-test"}  # so outdir resolves
         mock_batch = _mock_batch_client()
         job_spec = {
             "run_id": 3,
@@ -188,6 +189,7 @@ class TestNextflowCommandBuilt:
     @pytest.mark.asyncio
     async def test_includes_input_param_for_samplesheet(self, adapter):
         """Nextflow command should include --input /data/samplesheet.csv."""
+        adapter._cluster_config = {"raw_bucket_name": "bioaf-raw-test"}  # so outdir resolves
         mock_batch = _mock_batch_client()
         job_spec = {
             "run_id": 6,
@@ -210,8 +212,11 @@ class TestNextflowCommandBuilt:
         assert "--input /data/samplesheet.csv" in command_str
 
     @pytest.mark.asyncio
-    async def test_default_outdir_when_not_in_parameters(self, adapter):
-        """Nextflow command should include --outdir /data/results by default."""
+    async def test_fails_closed_when_no_results_bucket_and_no_outdir(self, adapter):
+        """With no results bucket configured and no explicit outdir, the launch must
+        fail closed (the (!)E fix) rather than silently defaulting to a pod-local
+        /data/results that the Job's TTL destroys an hour later, losing outputs."""
+        adapter._cluster_config = {}  # no results_bucket_name, no raw_bucket_name
         mock_batch = _mock_batch_client()
         job_spec = {
             "run_id": 7,
@@ -225,10 +230,5 @@ class TestNextflowCommandBuilt:
         }
 
         with patch.object(adapter, "_get_k8s_batch_client", return_value=mock_batch):
-            await adapter._k8s_submit_job(job_spec)
-
-        body = mock_batch.create_namespaced_job.call_args[1]["body"]
-        main_container = body["spec"]["template"]["spec"]["containers"][0]
-        command_str = " ".join(main_container["command"])
-
-        assert "--outdir /data/results" in command_str
+            with pytest.raises(RuntimeError, match="no results bucket"):
+                await adapter._k8s_submit_job(job_spec)

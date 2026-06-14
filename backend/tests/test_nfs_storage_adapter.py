@@ -56,6 +56,23 @@ def test_parse_uri_rejects_non_file_scheme(nfs):
         nfs.parse_uri("gs://bucket/a/b.txt")
 
 
+def test_cli_auth_command_is_empty_for_nfs(nfs):
+    # A mounted filesystem needs no CLI authentication step.
+    assert nfs.cli_auth_command("/secrets/gcp/key.json") == ""
+
+
+def test_cli_copy_commands_use_plain_cp(nfs):
+    copy_in = nfs.cli_copy_in("file://working/a/b.txt", "/data/b.txt")
+    assert copy_in.startswith("cp ") and copy_in.endswith(" /data/b.txt")
+    copy_out = nfs.cli_copy_out("/outputs/*", "file://working/runs/1/")
+    assert copy_out.startswith("cp -r /outputs/* ")
+
+
+def test_image_storage_pip_packages_empty_for_nfs(nfs):
+    # A mounted filesystem needs no cloud storage client library.
+    assert nfs.image_storage_pip_packages() == ""
+
+
 # -- object-store CRUD --------------------------------------------------------
 
 
@@ -203,6 +220,23 @@ async def test_storage_metrics_reports_usage(nfs):
     assert metrics.total_size_gb >= 0.0
     # Filesystem capacity is surfaced for admins even though there are no tiers.
     assert "filesystem" in metrics.provider_details
+
+
+@pytest.mark.asyncio
+async def test_bucket_admin_metrics_degenerate(nfs):
+    """NFS has no buckets: the bucket-admin enumeration returns the neutral
+    default rather than reaching for a cloud SDK."""
+    result = await nfs.get_bucket_admin_metrics("anything")
+    assert result.size_bytes == 0
+    assert result.object_count == 0
+    assert result.lifecycle_summaries == []
+    assert result.versioning_enabled is False
+
+
+def test_native_upload_client_unsupported(nfs):
+    """NFS has no native object-store client: the escape hatch raises."""
+    with pytest.raises(NotImplementedError):
+        nfs.native_upload_client()
 
 
 # -- integration: stage inputs -> collect outputs -----------------------------

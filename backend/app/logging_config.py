@@ -117,9 +117,10 @@ def attach_cloud_logging(
     fallback stay here.
     """
     from app.adapters.observability import create_log_sink_provider
+    from app.platform.cloud_provider import backend_for
 
     bioaf_logger = logging.getLogger("bioaf")
-    provider = create_log_sink_provider(project_id, credentials)
+    provider = create_log_sink_provider(project_id, credentials, backend=backend_for("log_sink"))
     handler = provider.build_handler(debug=debug)
     if handler is None:
         bioaf_logger.warning("Centralized logging unavailable, stdout only")

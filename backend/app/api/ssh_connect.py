@@ -15,16 +15,6 @@ from fastapi import Depends
 
 router = APIRouter(tags=["ssh-connect"])
 
-SETUP_GUIDE = """First-time setup for kubectl access:
-
-1. Install gcloud CLI: https://cloud.google.com/sdk/docs/install
-2. Authenticate: gcloud auth login
-3. Get cluster credentials:
-   gcloud container clusters get-credentials bioaf-cluster --region <region> --project <project-id>
-4. Verify access: kubectl get pods -n bioaf-pipelines
-
-For SLURM-based clusters, ensure SSH access is configured with your system administrator."""
-
 WARNING_TEXT = (
     "Actions performed inside this container are NOT tracked by bioAF audit logs. "
     "Changes may create drift from the tracked pipeline state. "
@@ -79,7 +69,7 @@ async def connect_pipeline_run(
 
     return ConnectionCommandResponse(
         command=command,
-        setup_guide=SETUP_GUIDE,
+        setup_guide=compute_adapter.connection_setup_guide(),
         warning=WARNING_TEXT,
         target_type="pipeline_job",
         target_id=job_id,
@@ -134,7 +124,7 @@ async def connect_notebook_session(
 
     return ConnectionCommandResponse(
         command=command,
-        setup_guide=SETUP_GUIDE,
+        setup_guide=notebook_adapter.connection_setup_guide(),
         warning=WARNING_TEXT,
         target_type="notebook_session",
         target_id=target_id,

@@ -61,7 +61,7 @@ class CellxgeneService:
         # "published" with the access_url.
         try:
             adapter = get_cellxgene_adapter()
-            await adapter.deploy(pub.id, file.gcs_uri, dataset_name)
+            await adapter.deploy(pub.id, file.storage_uri, dataset_name)
         except Exception as e:
             logger.error("Failed to deploy cellxgene pod for publication %d: %s", pub.id, e)
             pub.status = "failed"

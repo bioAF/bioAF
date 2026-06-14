@@ -1,10 +1,14 @@
-"""gsutil sync command builders + output parsing for the K8s notebook adapter.
+"""gsutil ls output parsing for the K8s notebook adapter.
 
-These are notebook-backend (Kubernetes) helpers: they build the ``gsutil rsync``
-shell commands run in a session's init/exec containers and parse the ``gsutil
-ls`` listing of a session's outputs. They live in the adapter package (not in
-``app.services``) so the notebook adapter does not invert the BAL layering rule
-by importing a service (BAL rework, Phase 5).
+Parses the ``gsutil ls -l -r`` listing of a session's outputs at teardown. Lives
+in the adapter package (not in ``app.services``) so the notebook adapter does not
+invert the BAL layering rule by importing a service (BAL rework, Phase 5).
+
+The directory-sync command builders that used to live here moved to the storage
+backend's CopyStager seam (``StorageProvider.sync_in_command`` /
+``sync_out_command``), so the notebook adapter names no cloud CLI (Stage 4d.4).
+The ``gsutil ls`` exec + this parser are the remaining GCS-coupled teardown
+island (their S3 ``aws s3 ls`` shape is a Stage 6e follow-up).
 """
 
 from __future__ import annotations
@@ -22,24 +26,6 @@ _EXCLUDED_FILENAMES = {
     ".DS_Store",
 }
 _EXCLUDED_PREFIXES = (".git/", "__pycache__/", ".ipynb_checkpoints/", ".cache/", ".local/")
-
-
-def generate_sync_in_command(gcs_prefix: str, local_dir: str) -> list[str]:
-    """Return the shell command to sync from GCS to a local directory (init container)."""
-    return [
-        "/bin/sh",
-        "-c",
-        f"gsutil -m rsync -r {gcs_prefix} {local_dir} || true",
-    ]
-
-
-def generate_sync_out_command(local_dir: str, gcs_prefix: str) -> list[str]:
-    """Return the shell command to sync from a local directory to GCS."""
-    return [
-        "/bin/sh",
-        "-c",
-        f"gsutil -m rsync -r {local_dir} {gcs_prefix}",
-    ]
 
 
 def parse_gsutil_ls_output(raw_output: str) -> list[dict]:

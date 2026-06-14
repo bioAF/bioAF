@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, computed_field, field_validator
 
 from app.models.reference_dataset import REFERENCE_CATEGORIES, REFERENCE_SCOPES
 
@@ -175,6 +175,12 @@ class ReferenceDatasetFileResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def storage_uri(self) -> str:
+        """Neutral alias of gcs_uri (retained legacy mirror); read storage_uri."""
+        return self.gcs_uri
 
 
 class UserSummary(BaseModel):

@@ -28,6 +28,13 @@ if TYPE_CHECKING:
 
 _GCP_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 
+# Sentinel for load_gcp_credentials(impersonate_target=...). It distinguishes
+# three states the credential seam needs: derive the target from config (the
+# default, used by almost every caller), an explicit None (raw ADC, no
+# impersonation: the gcp_config app-credentials probe), and an explicit SA email
+# (impersonate a named SA: the gcp_config bootstrap probe, the Sheets reader SA).
+_USE_CONFIG_TARGET: Any = object()
+
 
 def _impersonation_target(config: dict[str, Any]) -> str:
     """Pick the SA email to impersonate in vm_default mode.
@@ -38,28 +45,54 @@ def _impersonation_target(config: dict[str, Any]) -> str:
     return config.get("gcp_bootstrap_sa_email") or config.get("gcp_service_account_email") or ""
 
 
-def load_gcp_credentials(config: dict[str, Any]) -> "Credentials":
+def load_gcp_credentials(
+    config: dict[str, Any],
+    *,
+    scopes: list[str] | None = None,
+    impersonate_target: str | None = _USE_CONFIG_TARGET,
+    key_json: str | None = None,
+    lifetime: int | None = None,
+) -> "Credentials":
     """Load GCP credentials from a platform_config dict.
 
-    Returns a Credentials object with full cloud-platform scope, suitable
-    for passing to any GCP Python client (BigQuery, Storage, etc.).
+    Returns a Credentials object suitable for passing to any GCP Python client
+    (BigQuery, Storage, etc.). Called with no keyword arguments it is byte-for-byte
+    the prior behavior (full cloud-platform scope, config-derived impersonation);
+    the keywords let the credential seam serve the few callers that need a narrower
+    scope, an explicit impersonation target, a different key, or a token lifetime:
+
+    - ``scopes``: OAuth scopes (default cloud-platform).
+    - ``impersonate_target``: ``_USE_CONFIG_TARGET`` (derive from config, the
+      default), ``None`` (raw ADC, no impersonation), or an explicit SA email.
+    - ``key_json``: override the service-account-key JSON (else
+      ``gcp_service_account_key`` from config).
+    - ``lifetime``: impersonated-token lifetime in seconds (else the library
+      default).
     """
+    scopes = scopes or _GCP_SCOPES
     credential_source = config.get("gcp_credential_source", "vm_default")
 
     if credential_source == "service_account_key":
-        key_json = config.get("gcp_service_account_key", "")
-        key_data = json.loads(key_json)
-        return service_account.Credentials.from_service_account_info(key_data, scopes=_GCP_SCOPES)
+        key = key_json if key_json is not None else config.get("gcp_service_account_key", "")
+        key_data = json.loads(key)
+        return service_account.Credentials.from_service_account_info(key_data, scopes=scopes)
 
-    # vm_default: use ADC, optionally impersonating bioaf-bootstrap.
-    source_creds, _ = _google_auth.default(scopes=_GCP_SCOPES)
-    target = _impersonation_target(config)
+    # vm_default: use ADC, optionally impersonating a target SA.
+    target = _impersonation_target(config) if impersonate_target is _USE_CONFIG_TARGET else impersonate_target
     if target:
-        return _impersonated_credentials.Credentials(
-            source_credentials=source_creds,
-            target_principal=target,
-            target_scopes=_GCP_SCOPES,
-        )
+        # The source identity needs full cloud-platform scope to mint the
+        # impersonated token (the iamcredentials generateAccessToken call); the
+        # minted token itself then carries the requested ``scopes``.
+        source_creds, _ = _google_auth.default(scopes=_GCP_SCOPES)
+        kwargs: dict[str, Any] = {
+            "source_credentials": source_creds,
+            "target_principal": target,
+            "target_scopes": scopes,
+        }
+        if lifetime is not None:
+            kwargs["lifetime"] = lifetime
+        return _impersonated_credentials.Credentials(**kwargs)
+    source_creds, _ = _google_auth.default(scopes=scopes)
     return source_creds
 
 

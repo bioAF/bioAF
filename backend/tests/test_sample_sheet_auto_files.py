@@ -23,11 +23,11 @@ class TestAutoPopulateFiles:
     def test_uses_linked_files_when_no_input_paths(self):
         """When input_paths is empty, use sample.files GCS URIs."""
         file1 = MagicMock()
-        file1.gcs_uri = "gs://bucket/sample1_R1.fastq.gz"
+        file1.storage_uri = "gs://bucket/sample1_R1.fastq.gz"
         file1.filename = "sample1_R1.fastq.gz"
 
         file2 = MagicMock()
-        file2.gcs_uri = "gs://bucket/sample1_R2.fastq.gz"
+        file2.storage_uri = "gs://bucket/sample1_R2.fastq.gz"
         file2.filename = "sample1_R2.fastq.gz"
 
         sample = _make_sample(1, "PBMC_donor1", files=[file1, file2])
@@ -43,7 +43,7 @@ class TestAutoPopulateFiles:
     def test_input_paths_takes_precedence_over_linked_files(self):
         """Explicit input_paths should override linked files."""
         file1 = MagicMock()
-        file1.gcs_uri = "gs://bucket/linked_R1.fastq.gz"
+        file1.storage_uri = "gs://bucket/linked_R1.fastq.gz"
         file1.filename = "linked_R1.fastq.gz"
 
         sample = _make_sample(1, "PBMC_donor1", files=[file1])
@@ -77,11 +77,11 @@ class TestAutoPopulateFiles:
     def test_sorts_files_r1_before_r2(self):
         """FASTQ files should be sorted so R1 comes before R2."""
         file_r2 = MagicMock()
-        file_r2.gcs_uri = "gs://bucket/sample1_R2_001.fastq.gz"
+        file_r2.storage_uri = "gs://bucket/sample1_R2_001.fastq.gz"
         file_r2.filename = "sample1_R2_001.fastq.gz"
 
         file_r1 = MagicMock()
-        file_r1.gcs_uri = "gs://bucket/sample1_R1_001.fastq.gz"
+        file_r1.storage_uri = "gs://bucket/sample1_R1_001.fastq.gz"
         file_r1.filename = "sample1_R1_001.fastq.gz"
 
         # Pass R2 first to verify sorting
@@ -101,17 +101,17 @@ class TestAutoPopulateFiles:
     def test_excludes_index_reads_from_fastq_paths(self):
         """I1 (index) files must be excluded; only R1 and R2 used."""
         file_i1 = MagicMock()
-        file_i1.gcs_uri = "gs://bucket/PBMC_S1_L001_I1_001.fastq.gz"
+        file_i1.storage_uri = "gs://bucket/PBMC_S1_L001_I1_001.fastq.gz"
         file_i1.filename = "PBMC_S1_L001_I1_001.fastq.gz"
         file_i1.tags_json = ["read:I1", "lane:001", "sample:PBMC"]
 
         file_r1 = MagicMock()
-        file_r1.gcs_uri = "gs://bucket/PBMC_S1_L001_R1_001.fastq.gz"
+        file_r1.storage_uri = "gs://bucket/PBMC_S1_L001_R1_001.fastq.gz"
         file_r1.filename = "PBMC_S1_L001_R1_001.fastq.gz"
         file_r1.tags_json = ["read:R1", "lane:001", "sample:PBMC"]
 
         file_r2 = MagicMock()
-        file_r2.gcs_uri = "gs://bucket/PBMC_S1_L001_R2_001.fastq.gz"
+        file_r2.storage_uri = "gs://bucket/PBMC_S1_L001_R2_001.fastq.gz"
         file_r2.filename = "PBMC_S1_L001_R2_001.fastq.gz"
         file_r2.tags_json = ["read:R2", "lane:001", "sample:PBMC"]
 
@@ -133,7 +133,7 @@ class TestAutoPopulateFiles:
             for read in ["I1", "R1", "R2"]:
                 f = MagicMock()
                 f.filename = f"PBMC_S1_{lane}_{read}_001.fastq.gz"
-                f.gcs_uri = f"gs://bucket/PBMC_S1_{lane}_{read}_001.fastq.gz"
+                f.storage_uri = f"gs://bucket/PBMC_S1_{lane}_{read}_001.fastq.gz"
                 f.tags_json = [f"read:{read}", f"lane:{lane[-3:]}", "sample:PBMC"]
                 files.append(f)
 
@@ -158,12 +158,12 @@ class TestAutoPopulateFiles:
     def test_read_type_from_tags_json(self):
         """Uses tags_json read type when available, not filename sort."""
         file_r1 = MagicMock()
-        file_r1.gcs_uri = "gs://bucket/reads_barcode.fastq.gz"
+        file_r1.storage_uri = "gs://bucket/reads_barcode.fastq.gz"
         file_r1.filename = "reads_barcode.fastq.gz"
         file_r1.tags_json = ["read:R1"]
 
         file_r2 = MagicMock()
-        file_r2.gcs_uri = "gs://bucket/reads_cdna.fastq.gz"
+        file_r2.storage_uri = "gs://bucket/reads_cdna.fastq.gz"
         file_r2.filename = "reads_cdna.fastq.gz"
         file_r2.tags_json = ["read:R2"]
 

@@ -19,6 +19,9 @@ jest.mock("@/lib/auth", () => ({
   setToken: jest.fn(),
   removeToken: jest.fn(),
   getCurrentUser: () => ({ role_name: "admin", email: "admin@test.com" }),
+  // SetupWizard transitively imports isAuthenticated via useStackOptions; return
+  // false so the hook uses GCP defaults without an extra fetch in these tests.
+  isAuthenticated: jest.fn(() => false),
 }));
 
 import { api } from "@/lib/api";

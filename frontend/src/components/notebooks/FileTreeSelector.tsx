@@ -180,7 +180,7 @@ export function FileTreeSelector({
     function buildSubgroups(groupFiles: FileResponse[]): SourceSubgroup[] {
       const subMap = new Map<string, FileResponse[]>();
       for (const f of groupFiles) {
-        const path = f.gcs_uri ? gcsSubpath(f.gcs_uri) : sourceLabel(f.source_type);
+        const path = f.storage_uri ? gcsSubpath(f.storage_uri) : sourceLabel(f.source_type);
         const existing = subMap.get(path) || [];
         existing.push(f);
         subMap.set(path, existing);

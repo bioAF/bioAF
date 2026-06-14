@@ -21,6 +21,15 @@ a stale entry whose leak is already gone; pin the count so changes are reviewed)
 4. ``gs://`` scheme literals -- callers baking in the scheme instead of asking
    the adapter to mint URIs via ``resolve_uri``. See ``GS_URI_LITERAL_ALLOWLIST``.
 
+Those four GCP tiers SHRINK toward 0 as the GCP leaks drain. The AWS-readiness
+tiers at the bottom of this file do the inverse: they are seeded EMPTY and FROZEN
+at 0 (multi-platform plan, Stage 0), so the first AWS leak in a non-adapter path
+fails the build immediately, holding the AWS column to the GCP column's standard
+from its first line of code. The escape routes mirror the GCP ones: boto3 /
+botocore SDK imports (already covered by ``FORBIDDEN_SDK_PREFIXES`` above),
+``s3://`` scheme literals (``S3_URI_LITERAL_ALLOWLIST``), and ``aws `` CLI shell
+strings (``AWS_CLI_ALLOWLIST``).
+
 Together these make "is bioAF AWS-ready?" a green/red CI signal instead of a
 manual grep hunt, and stop new GCP assumptions taking root while AWS is built.
 
@@ -160,37 +169,26 @@ def _iter_app_modules(*, exclude_adapters: bool):
 # SHRINKS: each later phase drains the leaks it owns and deletes the matching
 # entries. A new leak not listed here fails the build; an entry whose import is
 # gone fails the build as stale (see the stale-entry test below).
-SDK_IMPORT_ALLOWLIST: set[tuple[str, str]] = {
-    # Object storage (GCS). Phase 3 drained all object-CRUD callers (46 -> 19).
-    # The entries below remain by deliberate scope decision, not omission:
-    #   - gcs_storage.py: object I/O (move/read) was removed in Phase 3 (now via
-    #     the adapter); what's left is get_bucket_metrics (bucket-level lifecycle/
-    #     versioning enumeration = Tier-2 -> Phase 9) plus get_credentials + path
-    #     helpers. The SDK import stays for get_bucket_metrics; drains in Phase 9.
-    #   - reference_data_service.py: hands a raw client to the half-built GKE-Job
-    #     ReferenceImporter; drains when the importer is addressed.
-    #   - storage_service.py / gcp_config.py / orphaned_resource_service.py: these
-    #     do bucket-level work (bucket enumeration+lifecycle, whole-bucket delete)
-    #     that the owner scoped to Tier-2 -> Phase 9, not the Phase 3 object-store
-    #     interface. (Object-store bucket *versioning* + generation-aware delete
-    #     were added in Phase 3 for backup_service / stack_deployment.)
-    ("services/gcs_storage.py", "google.cloud.storage"),
-    ("services/reference_data_service.py", "google.cloud.storage"),
-    ("services/storage_service.py", "google.cloud.storage"),  # bucket enum -> Phase 9
-    ("services/gcp_config.py", "google.cloud.storage"),  # Tier-2 bundle -> Phase 9
-    ("services/orphaned_resource_service.py", "google.cloud.storage"),  # bucket delete -> Phase 9
-    # GCE capacity probe was drained in Phase 6 (folded into the GCE work-node
-    # adapter as WorkNodeProvider.probe_zone_capacity; the compute_v1 import now
-    # lives in adapters/work_nodes/gce_capacity.py).
-    # Tier 2 platform-service SDKs. Drained in Phase 9 (9A-9G).
-    ("services/gcp_config.py", "google.cloud.container_v1"),
-    ("services/gcp_config.py", "google.cloud.resourcemanager_v3"),
-    ("services/gcp_config.py", "google.cloud.service_usage_v1"),
-    ("services/orphaned_resource_service.py", "google.cloud.container_v1"),
-    # iam_admin_v1 drained in Phase 9B (routed through adapters/iam/IamProvider).
-    ("services/stack_deployment.py", "google.cloud.container_v1"),
-    # bigquery drained in Phase 9D (routed through adapters/billing/BillingProvider).
-}
+# Phase 9 (Stage 3b) drained the last GCP cloud-SDK imports out of the service
+# layer. Provenance of every former entry (the set is now EMPTY, frozen at 0; a
+# new google.cloud/k8s SDK import outside adapters/ must route through an adapter,
+# not get added here):
+#   - gcs_storage.py / storage_service.py: bucket metrics + lifecycle/stat
+#     enumeration -> adapters/storage/gcs.py (Stage 3b.2).
+#   - gcp_config.py: the whole GCP account-validation routine (+ its 4 SDK
+#     clients) relocated to adapters/validation/gcp.py (Stage 3b.3); the service
+#     module is a re-export shim.
+#   - stack_deployment.py container_v1: cluster status -> ComputeProvider.
+#     get_cluster_detail (Stage 3b.4).
+#   - orphaned_resource_service.py storage + container_v1: whole-bucket +
+#     whole-cluster deletes -> StorageProvider.delete_bucket /
+#     ComputeProvider.list_cluster_names/probe_cluster/delete_cluster (3b.5).
+#   - reference_data_service.py: resumable-upload + blob helpers + the half-built
+#     URL importer source their raw client from
+#     StorageProvider.native_upload_client (Stage 3b.1).
+#   - GCE capacity probe -> adapters/work_nodes/gce_capacity.py (Phase 6);
+#     iam_admin_v1 -> adapters/iam (Phase 9B); bigquery -> adapters/billing (9D).
+SDK_IMPORT_ALLOWLIST: set[tuple[str, str]] = set()
 
 
 def test_no_cloud_sdk_imports_outside_adapters():
@@ -231,7 +229,7 @@ def test_sdk_allowlist_count_is_pinned():
 
     Decrement this as phases drain leaks; it must reach 0 by end of Phase 9.
     """
-    assert len(SDK_IMPORT_ALLOWLIST) == 10
+    assert len(SDK_IMPORT_ALLOWLIST) == 0
 
 
 # --- Tree scan: no adapter imports services (the layering inversion) ---------
@@ -283,7 +281,7 @@ def test_service_import_detector_matches_both_forms():
         "from app.services import session_persistence\n"
         "from app.services.gcs_storage import GcsStorageService\n"
         "import app.services.foo\n"
-        "from app.platform import credential_injector\n"
+        "from app.platform import cloud_provider\n"
     )
     assert _service_imports_in_source(source) == {
         "app.services.session_persistence",
@@ -390,25 +388,7 @@ def test_platform_layer_has_no_upward_imports():
 # one drains when the backend-aware credential seam lands (GCP ADC / SA-key vs
 # AWS role / keys), at which point GCP credential SDK use moves under adapters/.
 
-CREDENTIAL_SDK_ALLOWLIST: set[tuple[str, str]] = {
-    ("api/billing_export.py", "google.api_core.exceptions"),
-    ("platform/credential_injector.py", "google.auth"),
-    ("platform/credential_injector.py", "google.auth.credentials"),
-    ("platform/credential_injector.py", "google.auth.impersonated_credentials"),
-    ("platform/credential_injector.py", "google.oauth2.service_account"),
-    ("services/billing_export_service.py", "google.auth.credentials"),
-    ("services/cellxgene_image_service.py", "google.auth"),
-    ("services/cellxgene_image_service.py", "google.auth.transport.requests"),
-    ("services/gcp_config.py", "google.auth"),
-    ("services/gcp_config.py", "google.auth.impersonated_credentials"),
-    ("services/gcp_config.py", "google.oauth2.service_account"),
-    ("services/notebook_image_service.py", "google.auth"),
-    ("services/notebook_image_service.py", "google.auth.transport.requests"),
-    ("services/sheets_reader_sa_service.py", "google.auth"),
-    ("services/sheets_reader_sa_service.py", "google.auth.impersonated_credentials"),
-    ("services/sheets_reader_sa_service.py", "google.oauth2.service_account"),
-    ("services/stack_deployment.py", "google.oauth2.service_account"),
-}
+CREDENTIAL_SDK_ALLOWLIST: set[tuple[str, str]] = set()
 
 
 def test_credential_sdk_detector_finds_auth_imports():
@@ -469,7 +449,7 @@ def test_credential_sdk_allowlist_count_is_pinned():
     Decrement this as the credential seam drains leaks; target 0 once all
     credential resolution is backend-aware and behind adapters/.
     """
-    assert len(CREDENTIAL_SDK_ALLOWLIST) == 17
+    assert len(CREDENTIAL_SDK_ALLOWLIST) == 0
 
 
 # --- Tree scan: no GCP CLI shell strings outside adapters --------------------
@@ -485,14 +465,7 @@ def test_credential_sdk_allowlist_count_is_pinned():
 
 SHELL_CLI_TOKENS = ("gsutil", "gcloud")
 
-SHELL_CLI_ALLOWLIST: set[tuple[str, str]] = {
-    ("api/ssh_connect.py", "gcloud"),
-    ("services/custom_pipeline_service.py", "gcloud"),
-    ("services/custom_pipeline_service.py", "gsutil"),
-    ("services/environment_build_service.py", "gcloud"),
-    ("services/environment_build_service.py", "gsutil"),
-    ("services/notebook_image_service.py", "gsutil"),
-}
+SHELL_CLI_ALLOWLIST: set[tuple[str, str]] = set()
 
 
 def _shell_cli_tokens_in_source(source: str) -> set[str]:
@@ -540,7 +513,7 @@ def test_shell_cli_allowlist_has_no_stale_entries():
 
 def test_shell_cli_allowlist_count_is_pinned():
     """Pin the shell-string leak count; decrement as Leak 2 drains. Target 0."""
-    assert len(SHELL_CLI_ALLOWLIST) == 6
+    assert len(SHELL_CLI_ALLOWLIST) == 0
 
 
 # --- Tree scan: no gs:// literals outside adapters ---------------------------
@@ -591,3 +564,152 @@ def test_gs_uri_allowlist_has_no_stale_entries():
 def test_gs_uri_allowlist_count_is_pinned():
     """Pin the gs:// leak file count; decrement as Leak 3 drains. Target 0."""
     assert len(GS_URI_LITERAL_ALLOWLIST) == 0
+
+
+# =============================================================================
+# AWS-readiness guards (multi-platform plan, Stage 0): close the guard to AWS.
+#
+# The GCP tiers above shrink toward 0 as the GCP leaks drain. These AWS tiers do
+# the inverse job: they are seeded EMPTY and FROZEN at 0, so the first AWS leak
+# that lands in a non-adapter path (a stray ``s3://`` literal or ``aws`` CLI
+# shell string) fails the build immediately. This holds the AWS column to the
+# same "no cloud concern escapes the seam" standard as the GCP column from the
+# very first line of AWS code, instead of letting leaks accumulate and then
+# draining them later. boto3/botocore are already covered by the SDK guard
+# (they live in FORBIDDEN_SDK_PREFIXES and are absent from SDK_IMPORT_ALLOWLIST,
+# so any boto3 import outside adapters/ already fails as a new leak); the unit
+# test below locks that behavior in so it cannot silently regress.
+# =============================================================================
+
+
+# --- AWS SDK imports: boto3 / botocore are forbidden pre-emptively -----------
+
+
+def test_detects_boto3_and_botocore_imports():
+    """The service-SDK scanner already forbids boto3/botocore (they are in
+    FORBIDDEN_SDK_PREFIXES and not in SDK_IMPORT_ALLOWLIST). Lock that in: any
+    boto3/botocore import outside adapters/ is caught by
+    test_no_cloud_sdk_imports_outside_adapters exactly like google.cloud.*."""
+    source = "import boto3\nfrom botocore.config import Config\nfrom boto3.session import Session\n"
+    assert _forbidden_sdk_imports_in_source(source) == {
+        "boto3",
+        "botocore.config",
+        "boto3.session",
+    }
+
+
+# --- Tree scan: no s3:// literals outside adapters ---------------------------
+#
+# The AWS analog of the gs:// guard (Leak 3). The S3 storage provider treats
+# s3:// as an opaque scheme and mints URIs via build_uri/resolve_uri; any caller
+# baking the literal in defeats that. Seeded EMPTY: there is no AWS storage code
+# yet, so the correct frozen count is 0, and the first stray s3:// in the service
+# layer fails the build. Same file-level substring contract as the gs:// guard.
+
+
+S3_URI_LITERAL_ALLOWLIST: set[str] = set()
+
+
+def _s3_uri_in_source(source: str) -> bool:
+    """True if ``source`` contains a hardcoded ``s3://`` literal."""
+    return "s3://" in source
+
+
+def test_s3_uri_detector_matches_only_s3_scheme():
+    assert _s3_uri_in_source('uri = "s3://bucket/key"') is True
+    assert _s3_uri_in_source('uri = "gs://bucket/key"') is False
+    assert _s3_uri_in_source("path = '/local/s3/file'") is False
+
+
+def test_no_s3_uri_literals_outside_adapters():
+    violations = {rel for rel, source in _iter_app_modules(exclude_adapters=True) if _s3_uri_in_source(source)}
+
+    new_leaks = sorted(violations - S3_URI_LITERAL_ALLOWLIST)
+    assert not new_leaks, (
+        "New s3:// literal(s) outside backend/app/adapters/. Mint URIs via "
+        "get_storage_adapter().build_uri(bucket, key) (or resolve_uri) instead, "
+        "so the scheme stays the storage adapter's concern:\n" + "\n".join(f"  {rel}" for rel in new_leaks)
+    )
+
+
+def test_s3_uri_allowlist_has_no_stale_entries():
+    actual = {rel for rel, source in _iter_app_modules(exclude_adapters=True) if _s3_uri_in_source(source)}
+
+    stale = sorted(S3_URI_LITERAL_ALLOWLIST - actual)
+    assert not stale, (
+        "Stale S3_URI_LITERAL_ALLOWLIST entr(ies): the file no longer contains an "
+        "s3:// literal. Delete these entries:\n" + "\n".join(f"  {rel}" for rel in stale)
+    )
+
+
+def test_s3_uri_allowlist_count_is_pinned():
+    """Frozen at 0: AWS storage URIs must never be hardcoded outside adapters/."""
+    assert len(S3_URI_LITERAL_ALLOWLIST) == 0
+
+
+# --- Tree scan: no AWS CLI shell strings outside adapters --------------------
+#
+# The AWS analog of the gsutil/gcloud shell guard (Leak 2). Detection is a
+# case-sensitive substring match for ``aws `` (the CLI binary followed by a
+# subcommand, e.g. ``aws s3 cp ...`` / ``aws ec2 ...``), seeded EMPTY and frozen.
+#
+# It deliberately does NOT match the bare token ``aws`` / ``"aws"``: that is the
+# legitimate ``cloud_provider`` config VALUE, used throughout the resolution
+# policy (``POLICY["aws"]``, ``== "aws"``, dict subscripts), so matching it would
+# be a perpetual false positive. The trailing space distinguishes a command
+# invocation from a quoted config value (``"aws"`` has no following space).
+# Case-sensitivity means prose should say "AWS" (uppercase), which is ignored.
+# Known blind spot (accepted, mirroring the guard's other documented limits): the
+# argv-list form ``["aws", ...]`` is indistinguishable from a ``POLICY["aws"]``
+# subscript by substring, so it is not caught here; the boto3 SDK ban is the
+# primary protection against AWS shell-outs, this is a secondary tripwire.
+
+
+AWS_CLI_ALLOWLIST: set[str] = set()
+
+
+def _aws_cli_in_source(source: str) -> bool:
+    """True if ``source`` contains an ``aws <subcommand>`` CLI invocation."""
+    return "aws " in source
+
+
+def test_aws_cli_detector_finds_command_form():
+    assert _aws_cli_in_source('cmd = f"aws s3 cp {src} {dst}"') is True
+    assert _aws_cli_in_source("RUN aws ecr get-login-password") is True
+
+
+def test_aws_cli_detector_ignores_config_value_and_sdk_and_prose():
+    # The cloud_provider config value and policy subscripts must not match.
+    assert _aws_cli_in_source('cloud_provider = "aws"') is False
+    assert _aws_cli_in_source('backend = POLICY["aws"]["store"]') is False
+    assert _aws_cli_in_source('if provider == "aws":') is False
+    # boto3 SDK usage is the SDK guard's job, not this one.
+    assert _aws_cli_in_source('client = boto3.client("s3")') is False
+    # Prose written as "AWS" (uppercase) is ignored (case-sensitive scan).
+    assert _aws_cli_in_source("# AWS-readiness: route through the adapter") is False
+
+
+def test_no_aws_cli_shell_strings_outside_adapters():
+    violations = {rel for rel, source in _iter_app_modules(exclude_adapters=True) if _aws_cli_in_source(source)}
+
+    new_leaks = sorted(violations - AWS_CLI_ALLOWLIST)
+    assert not new_leaks, (
+        "New AWS CLI shell string(s) outside backend/app/adapters/. Replace with "
+        "an adapter method (or a cloud_provider-selected command), not a raw "
+        "`aws ...` invocation in the service layer:\n" + "\n".join(f"  {rel}" for rel in new_leaks)
+    )
+
+
+def test_aws_cli_allowlist_has_no_stale_entries():
+    actual = {rel for rel, source in _iter_app_modules(exclude_adapters=True) if _aws_cli_in_source(source)}
+
+    stale = sorted(AWS_CLI_ALLOWLIST - actual)
+    assert not stale, (
+        "Stale AWS_CLI_ALLOWLIST entr(ies): the file no longer contains an `aws ` "
+        "CLI string. Delete these entries:\n" + "\n".join(f"  {rel}" for rel in stale)
+    )
+
+
+def test_aws_cli_allowlist_count_is_pinned():
+    """Frozen at 0: AWS CLI calls must go through an adapter, never the service layer."""
+    assert len(AWS_CLI_ALLOWLIST) == 0

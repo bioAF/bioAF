@@ -19,7 +19,11 @@ matplotlib>=3.8
 anndata>=0.10
 scanpy>=1.10
 meilisearch>=0.31
-kubernetes>=29.0
+# Pinned to the tested major: read_namespaced_pod_log returns bytes on some client
+# versions (~31-34) and str on others, which drifted prod vs dev (logs rendered as a
+# bytes repr). 35.x is the tested-good version; the adapter also decodes defensively
+# (compute/kubernetes.py _pod_log_to_text). Bump deliberately after re-testing logs.
+kubernetes>=35.0,<36
 # Phase 6: GitOps + Package Management
 PyGithub>=2.1.0
 pyyaml>=6.0

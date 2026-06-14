@@ -12,9 +12,17 @@ from app.services import notebook_image_service as nis
 
 
 def test_artifact_registry_repo_is_docker_format():
-    """ensure_artifact_registry creates the bioaf-images repo as a DOCKER repo."""
+    """The image registry creates the bioaf-images repo as a DOCKER repo.
+
+    The Artifact Registry REST moved behind the ImageRegistry seam in Stage 4e;
+    ensure_artifact_registry now delegates to GcpArtifactRegistryProvider, so the
+    DOCKER-format contract is asserted against the provider.
+    """
+    from app.adapters.image_registry import gcp as ar_gcp
+
     assert nis.AR_REPO_ID == "bioaf-images"
-    src = inspect.getsource(nis.ensure_artifact_registry)
+    assert ar_gcp.AR_REPO_ID == "bioaf-images"
+    src = inspect.getsource(ar_gcp)
     assert "artifactregistry.googleapis.com" in src
     assert "repositoryId=" in src
     assert '"format": "DOCKER"' in src

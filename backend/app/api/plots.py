@@ -18,7 +18,7 @@ def _plot_response(p) -> PlotArchiveResponse:
         file_resp = FileResponse(
             id=p.file.id,
             filename=p.file.filename,
-            gcs_uri=p.file.gcs_uri,
+            gcs_uri=p.file.storage_uri,
             size_bytes=p.file.size_bytes,
             md5_checksum=p.file.md5_checksum,
             file_type=p.file.file_type,
@@ -126,7 +126,7 @@ async def get_thumbnail(
     if plot.thumbnail_gcs_uri:
         return {"thumbnail_url": plot.thumbnail_gcs_uri}
     elif plot.file:
-        return {"thumbnail_url": plot.file.gcs_uri}
+        return {"thumbnail_url": plot.file.storage_uri}
     return {"thumbnail_url": None}
 
 

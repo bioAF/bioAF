@@ -10,7 +10,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-from app.adapters.base import WorkNodeProvider
+from app.adapters.base import VmInstance, WorkNodeProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.models import (
     StoredObject,
@@ -20,7 +20,7 @@ from app.adapters.models import (
     to_service_state,
 )
 from app.exceptions import ValidationError
-from app.platform.credential_injector import load_gcp_credentials
+from app.adapters.credentials.credential_injector import load_gcp_credentials
 
 logger = logging.getLogger("bioaf.adapters.work_nodes.gce")
 
@@ -280,8 +280,14 @@ def _build_startup_script(vm_spec: dict) -> str:
     return "\n".join(lines)
 
 
-class GCEWorkNodeProvider(WorkNodeProvider):
-    """GCE work node backend with local mode for development."""
+class GceVmInstance(VmInstance):
+    """GCE VM lifecycle backend (compute_v1), with local mode for development.
+
+    Implements the cloud-neutral VmInstance primitive (provision/delete/inspect/
+    list) for GCE, and carries the GCE work-node session orchestration (readiness
+    poll, SSH output sync, DB session updates) that the launch/terminate flows
+    spawn. ``GCEWorkNodeProvider`` rides on this under the WorkNodeProvider names.
+    """
 
     def __init__(self, session_factory=None):
         self._mode = os.environ.get("BIOAF_COMPUTE_MODE", "local")
@@ -290,10 +296,6 @@ class GCEWorkNodeProvider(WorkNodeProvider):
         # In-memory store for sync SSH private keys, keyed by session_id.
         # Generated at launch, used at terminate to SSH in for output sync.
         self._sync_keys: dict[int, str] = {}
-
-    def capabilities(self) -> ProviderCapabilities:
-        """GCE provides on-demand work-node VMs."""
-        return ProviderCapabilities(work_nodes=True)
 
     @property
     def is_local(self) -> bool:
@@ -338,11 +340,11 @@ class GCEWorkNodeProvider(WorkNodeProvider):
         cfg = self._gcp_config or {}
         return load_gcp_credentials(cfg)
 
-    async def launch_vm(self, vm_spec: dict) -> VmInfo:
+    async def provision(self, vm_spec: dict) -> VmInfo:
         d = self._local_launch_vm(vm_spec) if self.is_local else await self._gce_launch_vm(vm_spec)
         return _vm_info_from_dict(d)
 
-    async def terminate_vm(self, instance_name: str, zone: str, **kwargs) -> TerminationResult:
+    async def delete(self, instance_name: str, zone: str, **kwargs) -> TerminationResult:
         d = (
             self._local_terminate_vm(instance_name)
             if self.is_local
@@ -350,7 +352,7 @@ class GCEWorkNodeProvider(WorkNodeProvider):
         )
         return _termination_result_from_dict(d)
 
-    async def get_vm_status(self, instance_name: str, zone: str) -> VmStatus:
+    async def inspect(self, instance_name: str, zone: str) -> VmStatus:
         d = (
             self._local_get_vm_status(instance_name)
             if self.is_local
@@ -358,7 +360,7 @@ class GCEWorkNodeProvider(WorkNodeProvider):
         )
         return _vm_status_from_dict(d)
 
-    async def list_vms(self, filters: dict | None = None) -> list[VmStatus]:
+    async def list_instances(self, filters: dict | None = None) -> list[VmStatus]:
         items = self._local_list_vms(filters) if self.is_local else await self._gce_list_vms(filters)
         return [_vm_status_from_dict(d) for d in items]
 
@@ -980,3 +982,30 @@ class GCEWorkNodeProvider(WorkNodeProvider):
 
     def _local_list_vms(self, filters: dict | None = None) -> list[dict]:
         return list(_local_vms.values())
+
+
+class GCEWorkNodeProvider(GceVmInstance, WorkNodeProvider):
+    """GCE work-node adapter: a ``GceVmInstance`` exposed under the
+    ``WorkNodeProvider`` interface the service layer and registry consume.
+
+    The VM primitive (provision/delete/inspect/list) and the session orchestration
+    are inherited from ``GceVmInstance``; this thin layer maps them to the
+    work-node method names and declares the work_nodes capability. Stage 6d adds
+    the EC2 analog (``Ec2VmInstance`` + an EC2 work-node) behind the same seam.
+    """
+
+    def capabilities(self) -> ProviderCapabilities:
+        """GCE provides on-demand work-node VMs."""
+        return ProviderCapabilities(work_nodes=True)
+
+    async def launch_vm(self, vm_spec: dict) -> VmInfo:
+        return await self.provision(vm_spec)
+
+    async def terminate_vm(self, instance_name: str, zone: str, **kwargs) -> TerminationResult:
+        return await self.delete(instance_name, zone, **kwargs)
+
+    async def get_vm_status(self, instance_name: str, zone: str) -> VmStatus:
+        return await self.inspect(instance_name, zone)
+
+    async def list_vms(self, filters: dict | None = None) -> list[VmStatus]:
+        return await self.list_instances(filters)

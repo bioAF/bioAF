@@ -1147,67 +1147,59 @@ async def test_sync_compute_config_skips_empty_outputs(session):
 
 
 @pytest.mark.asyncio
-async def test_get_cluster_status_uses_sa_credentials(session):
-    """get_cluster_status passes SA credentials to the GKE client."""
-    from unittest.mock import AsyncMock, MagicMock
+async def test_get_cluster_status_delegates_to_compute_adapter(session):
+    """get_cluster_status reads the cluster control plane via the compute
+    adapter's get_cluster_detail (which owns GKE identity/credentials now) and
+    surfaces it as StackStatus. Credential handling moved into the adapter with
+    the Stage 3b.4 SDK drain."""
+    from unittest.mock import AsyncMock
 
+    from app.adapters.models import ClusterDetail, NodePoolStatus
     from app.services.stack_deployment import get_cluster_status
 
     await _set_config(session, "compute_deployed", "true")
     await _set_config(session, "compute_stack", "kubernetes")
     await _set_config(session, "storage_deployed", "true")
-    await _set_config(session, "gke_cluster_name", "bioaf-test")
-    await _set_config(session, "gcp_project_id", "my-project")
-    await _set_config(session, "gcp_zone", "us-central1-a")
-    await _set_config(session, "gcp_credential_source", "service_account_key")
-    await _set_config(session, "gcp_service_account_key", '{"type": "service_account"}')
     await session.commit()
 
-    mock_creds = MagicMock()
+    detail = ClusterDetail(
+        name="bioaf-test",
+        status="RUNNING",
+        node_count=0,
+        node_pools=[
+            NodePoolStatus(
+                name="bioaf-pipelines",
+                machine_type="n2-highmem-16",
+                min_nodes=0,
+                max_nodes=10,
+                current_nodes=0,
+                spot=True,
+                status="RUNNING",
+            ),
+            NodePoolStatus(
+                name="bioaf-interactive",
+                machine_type="n2-standard-4",
+                min_nodes=0,
+                max_nodes=3,
+                current_nodes=0,
+                spot=False,
+                status="RUNNING",
+            ),
+        ],
+    )
 
-    mock_pool = MagicMock()
-    mock_pool.name = "bioaf-pipelines"
-    mock_pool.config.machine_type = "n2-highmem-16"
-    mock_pool.autoscaling.min_node_count = 0
-    mock_pool.autoscaling.max_node_count = 10
-    mock_pool.initial_node_count = 0
-    mock_pool.config.spot = True
-    mock_pool.status = 2
-
-    mock_pool2 = MagicMock()
-    mock_pool2.name = "bioaf-interactive"
-    mock_pool2.config.machine_type = "n2-standard-4"
-    mock_pool2.autoscaling.min_node_count = 0
-    mock_pool2.autoscaling.max_node_count = 3
-    mock_pool2.initial_node_count = 0
-    mock_pool2.config.spot = False
-    mock_pool2.status = 2
-
-    mock_cluster = MagicMock()
-    mock_cluster.name = "bioaf-test"
-    mock_cluster.status = 2
-    mock_cluster.current_node_count = 0
-    mock_cluster.node_pools = [mock_pool, mock_pool2]
-
-    mock_client = MagicMock()
-    mock_client.get_cluster.return_value = mock_cluster
-
-    with (
-        patch(
-            "app.services.stack_deployment._get_gke_credentials",
-            new=AsyncMock(return_value=mock_creds),
-        ),
-        patch(
-            "app.services.stack_deployment._get_gke_client",
-            return_value=mock_client,
-        ) as mock_get_client,
+    detail_mock = AsyncMock(return_value=detail)
+    with patch(
+        "app.adapters.compute.kubernetes.KubernetesComputeProvider.get_cluster_detail",
+        detail_mock,
     ):
         result = await get_cluster_status(session)
 
-    mock_get_client.assert_called_once_with(mock_creds)
+    detail_mock.assert_awaited_once()
     assert result.compute_deployed is True
     assert result.cluster is not None
     assert result.cluster.cluster_name == "bioaf-test"
+    assert result.cluster.pipeline_pool.machine_type == "n2-highmem-16"
 
 
 # -----------------------------------------------------------------------

@@ -29,8 +29,8 @@ class LabDocument(Base):
     organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # BAL Phase 4 expand/contract: gcs_uri + storage_uri kept in sync until a
-    # later migration drops gcs_uri (see _storage_uri_sync).
+    # storage_uri is authoritative; gcs_uri is a retained legacy mirror kept in
+    # sync (see _storage_uri_sync, storage_uri canonical). We do NOT drop gcs_uri.
     gcs_uri: Mapped[str] = mapped_column(String(1000), nullable=False)
     storage_uri: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     current_version: Mapped[int] = mapped_column(Integer, server_default="1", nullable=False)
@@ -65,8 +65,8 @@ class LabDocumentVersion(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     document_id: Mapped[int] = mapped_column(Integer, ForeignKey("lab_documents.id"), nullable=False, index=True)
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    # BAL Phase 4 expand/contract: gcs_uri + storage_uri kept in sync until a
-    # later migration drops gcs_uri (see _storage_uri_sync).
+    # storage_uri is authoritative; gcs_uri is a retained legacy mirror kept in
+    # sync (see _storage_uri_sync, storage_uri canonical). We do NOT drop gcs_uri.
     gcs_uri: Mapped[str] = mapped_column(String(1000), nullable=False)
     storage_uri: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     file_name: Mapped[str] = mapped_column(String(500), nullable=False)

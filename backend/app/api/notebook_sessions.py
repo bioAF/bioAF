@@ -380,7 +380,9 @@ async def get_session_provenance(
         file_info = {
             "id": f.id,
             "filename": f.filename,
-            "gcs_uri": f.gcs_uri,
+            # gcs_uri is the retained legacy wire key; storage_uri is the neutral one.
+            "gcs_uri": f.storage_uri,
+            "storage_uri": f.storage_uri,
             "file_type": f.file_type,
             "size_bytes": f.size_bytes,
         }
@@ -502,7 +504,7 @@ async def register_outputs(
 
         file_record = File(
             organization_id=notebook_session.organization_id,
-            gcs_uri=gcs_uri,
+            storage_uri=gcs_uri,
             filename=filename,
             size_bytes=size_bytes,
             file_type=_file_type_from_extension(filename),

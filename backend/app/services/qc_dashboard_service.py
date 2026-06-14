@@ -238,7 +238,7 @@ class QCDashboardService:
                     org_id=org_id,
                     user_id=None,
                     filename=png_name,
-                    gcs_uri=obj.storage_uri,
+                    storage_uri=obj.storage_uri,
                     size_bytes=obj.size_bytes,
                     md5_checksum=None,
                     file_type="png",

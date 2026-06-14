@@ -21,7 +21,7 @@ def _doc_response(doc) -> DocumentResponse:
         file_resp = FileResponse(
             id=doc.file.id,
             filename=doc.file.filename,
-            gcs_uri=doc.file.gcs_uri,
+            gcs_uri=doc.file.storage_uri,
             size_bytes=doc.file.size_bytes,
             md5_checksum=doc.file.md5_checksum,
             file_type=doc.file.file_type,
@@ -124,10 +124,10 @@ async def download_document(
     try:
         from app.adapters.registry import get_storage_adapter
 
-        url = await get_storage_adapter().generate_signed_url(doc.file.gcs_uri, method="GET", expiry_seconds=3600)
+        url = await get_storage_adapter().generate_signed_url(doc.file.storage_uri, method="GET", expiry_seconds=3600)
         return {"download_url": url}
     except Exception:
-        return {"download_url": doc.file.gcs_uri if doc.file else ""}
+        return {"download_url": doc.file.storage_uri if doc.file else ""}
 
 
 @router.patch("/{document_id}", response_model=DocumentResponse)

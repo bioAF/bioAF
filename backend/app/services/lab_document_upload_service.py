@@ -367,7 +367,7 @@ class LabDocumentUploadService:
             file_name=meta["file_name"],
             # "pending" is a sentinel bucket; the record is repointed at the real
             # versioned URI by place() immediately below, before any storage op.
-            gcs_uri=adapter.build_uri("pending", token),
+            storage_uri=adapter.build_uri("pending", token),
             file_size_bytes=meta["size_bytes"],
             mime_type=meta["mime_type"],
             md5_checksum=meta["md5"],
@@ -376,11 +376,11 @@ class LabDocumentUploadService:
         dest_uri = await LabDocumentUploadService.place(
             session, upload_token=token, org_id=org_id, document_id=doc.id, version=1
         )
-        doc.gcs_uri = dest_uri
+        doc.storage_uri = dest_uri
         await session.execute(
             sa_update(LabDocumentVersion)
             .where(LabDocumentVersion.document_id == doc.id, LabDocumentVersion.version_number == 1)
-            .values(gcs_uri=dest_uri)
+            .values(storage_uri=dest_uri, gcs_uri=dest_uri)
         )
         return doc.id
 

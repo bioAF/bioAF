@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { setToken } from "@/lib/auth";
 import { ComponentPicker, type PickerComponent } from "@/components/components/ComponentPicker";
+import { useStackOptions } from "@/hooks/useStackOptions";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -97,6 +98,10 @@ interface SetupWizardProps {
 export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [step, setStep] = useState(0);
   const [error, setError] = useState("");
+  // Provider-appropriate stack labels (GCP -> GKE+GCS, AWS -> EKS+S3). Fails safe
+  // to GCP defaults pre-auth / on error, so a GCP setup renders unchanged.
+  const { kubernetesOption } = useStackOptions();
+  const k8sStackLabel = kubernetesOption?.label ?? "Kubernetes + GCS";
 
   // Steps the user has already moved past at least once. Used to render a
   // Forward affordance and to short-circuit the per-step submit if the user
@@ -1005,13 +1010,15 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               }`}
             >
               <div className="flex items-center justify-between mb-2">
-                <h3 className="font-semibold text-gray-900">Kubernetes + GCS</h3>
+                <h3 className="font-semibold text-gray-900">{k8sStackLabel}</h3>
                 <span className="text-xs bg-bioaf-100 text-bioaf-700 px-2 py-0.5 rounded-full font-medium">
                   Recommended
                 </span>
               </div>
               <p className="text-sm text-gray-600">
-                Cloud-native autoscaling with Google Kubernetes Engine and Cloud Storage.
+                Cloud-native autoscaling with managed{" "}
+                {kubernetesOption?.compute_label ?? "Kubernetes (GKE)"} and{" "}
+                {kubernetesOption?.storage_label ?? "GCS"} object storage.
               </p>
             </div>
 
@@ -1034,7 +1041,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           <button onClick={handleSelectStack}
             disabled={stackDeploying}
             className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50">
-            {stackDeploying ? "Initializing infrastructure..." : `Continue with ${computeStack === "kubernetes" ? "Kubernetes + GCS" : "SLURM + NFS"}`}
+            {stackDeploying ? "Initializing infrastructure..." : `Continue with ${computeStack === "kubernetes" ? k8sStackLabel : "SLURM + NFS"}`}
           </button>
         </div>
       )}

@@ -5,11 +5,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
 from app.api.dependencies import require_permission
 from app.adapters.registry import get_storage_adapter
+from app.platform.cloud_provider import get_cloud_provider
 from app.platform.platform_config_service import PlatformConfigService
+from app.platform.stack_options import stack_options_for
 from app.schemas.infrastructure import (
     InfraStorageMetricsResponse,
     ComputeStackResponse,
     BucketMetrics,
+    StackOptionsResponse,
 )
 
 router = APIRouter(prefix="/api/v1/infrastructure", tags=["infrastructure"])
@@ -50,6 +53,24 @@ async def get_compute_stack(
     """Returns the current compute stack selection."""
     compute_stack = await PlatformConfigService.get(session, "compute_stack") or "kubernetes"
     return ComputeStackResponse(compute_stack=compute_stack)
+
+
+@router.get("/stack-options", response_model=StackOptionsResponse)
+async def get_stack_options(
+    current_user: dict = require_permission("infrastructure", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Valid compute+storage stack options for this install's cloud_provider.
+
+    Reads the cloud-provider policy (the same source the BAL resolves backends
+    from) so the setup UI presents provider-appropriate options: GCP -> GKE+GCS /
+    SLURM+NFS, AWS -> EKS+S3 / SLURM+NFS. Behavior-preserving on GCP.
+    """
+    cloud_provider = await get_cloud_provider(session)
+    return StackOptionsResponse(
+        cloud_provider=cloud_provider,
+        options=stack_options_for(cloud_provider),
+    )
 
 
 # NOTE: The /storage/buckets endpoint was moved to app/api/storage_deploy.py

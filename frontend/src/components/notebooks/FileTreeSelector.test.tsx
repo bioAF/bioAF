@@ -8,6 +8,10 @@ function makeFile(overrides: Partial<FileResponse> & { id: number; filename: str
     id: overrides.id,
     filename: overrides.filename,
     gcs_uri: overrides.gcs_uri ?? `gs://bucket/experiments/1/uploads/${overrides.filename}`,
+    storage_uri:
+      overrides.storage_uri ??
+      overrides.gcs_uri ??
+      `gs://bucket/experiments/1/uploads/${overrides.filename}`,
     size_bytes: overrides.size_bytes ?? 1024,
     md5_checksum: null,
     file_type: overrides.file_type ?? "other",

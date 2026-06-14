@@ -151,7 +151,7 @@ async def _finalize_document_from_token(
         file_name=meta["file_name"],
         # "pending" is a sentinel bucket; place() repoints the record at the real
         # versioned URI immediately below, before any storage op.
-        gcs_uri=get_storage_adapter().build_uri("pending", upload_token),
+        storage_uri=get_storage_adapter().build_uri("pending", upload_token),
         file_size_bytes=meta["size_bytes"],
         mime_type=meta["mime_type"],
         md5_checksum=meta["md5"],
@@ -160,11 +160,11 @@ async def _finalize_document_from_token(
     dest_uri = await LabDocumentUploadService.place(
         session, upload_token=upload_token, org_id=org_id, document_id=doc.id, version=1
     )
-    doc.gcs_uri = dest_uri
+    doc.storage_uri = dest_uri
     await session.execute(
         update(LabDocumentVersion)
         .where(LabDocumentVersion.document_id == doc.id, LabDocumentVersion.version_number == 1)
-        .values(gcs_uri=dest_uri)
+        .values(storage_uri=dest_uri, gcs_uri=dest_uri)
     )
     await session.commit()
     return doc.id
@@ -332,7 +332,7 @@ async def upload_version(
         org_id=org_id,
         user_id=user_id,
         document_id=doc.id,
-        gcs_uri=dest_uri,
+        storage_uri=dest_uri,
         file_name=meta["file_name"],
         file_size_bytes=meta["size_bytes"],
         md5_checksum=meta["md5"],
@@ -357,7 +357,7 @@ async def download_document(
         raise HTTPException(404, "Document not found")
 
     target = version or doc.current_version
-    gcs_uri = next((v.gcs_uri for v in doc.versions if v.version_number == target), None)
+    gcs_uri = next((v.storage_uri for v in doc.versions if v.version_number == target), None)
     if gcs_uri is None:
         raise HTTPException(404, "Version not found")
 
@@ -411,7 +411,7 @@ async def stream_document_content(
     if chosen is None:
         raise HTTPException(404, "Version not found")
 
-    data = await _download_document_bytes(session, chosen.gcs_uri)
+    data = await _download_document_bytes(session, chosen.storage_uri)
     if data is None:
         raise HTTPException(502, "Could not fetch document")
 

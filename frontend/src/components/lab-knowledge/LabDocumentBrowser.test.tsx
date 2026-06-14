@@ -137,6 +137,7 @@ test("device upload requests a sized resumable URL and PUTs to the session", asy
         upload_token: "tok",
         signed_url: "https://storage.example/session",
         gcs_uri: "gs://wb/x",
+        storage_uri: "gs://wb/x",
       });
     return Promise.resolve({ id: 1 });
   });

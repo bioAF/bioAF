@@ -4,10 +4,12 @@
 13. test_get_cluster_status_returns_pool_info
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import text
+
+from app.adapters.models import ClusterDetail, NodePoolStatus
 
 
 async def _set_config(session, key: str, value: str):
@@ -49,36 +51,38 @@ async def test_get_cluster_status_returns_pool_info(session):
     await _set_config(session, "gcp_zone", "us-central1-a")
     await session.commit()
 
-    # Mock the GKE API client
-    mock_cluster = MagicMock()
-    mock_cluster.name = "bioaf-test"
-    mock_cluster.status = 2  # RUNNING
-    mock_cluster.current_node_count = 0
+    # The GKE cluster read now lives in the compute adapter; stub the neutral
+    # ClusterDetail so the service's pool-matching + assembly is what's tested.
+    detail = ClusterDetail(
+        name="bioaf-test",
+        status="RUNNING",
+        node_count=0,
+        node_pools=[
+            NodePoolStatus(
+                name="bioaf-pipelines",
+                machine_type="n2-highmem-8",
+                min_nodes=0,
+                max_nodes=20,
+                current_nodes=0,
+                spot=True,
+                status="RUNNING",
+            ),
+            NodePoolStatus(
+                name="bioaf-interactive",
+                machine_type="n2-standard-4",
+                min_nodes=0,
+                max_nodes=5,
+                current_nodes=0,
+                spot=False,
+                status="RUNNING",
+            ),
+        ],
+    )
 
-    mock_pipeline_pool = MagicMock()
-    mock_pipeline_pool.name = "bioaf-pipelines"
-    mock_pipeline_pool.config.machine_type = "n2-highmem-8"
-    mock_pipeline_pool.autoscaling.min_node_count = 0
-    mock_pipeline_pool.autoscaling.max_node_count = 20
-    mock_pipeline_pool.initial_node_count = 0
-    mock_pipeline_pool.config.spot = True
-    mock_pipeline_pool.status = 2  # RUNNING
-
-    mock_interactive_pool = MagicMock()
-    mock_interactive_pool.name = "bioaf-interactive"
-    mock_interactive_pool.config.machine_type = "n2-standard-4"
-    mock_interactive_pool.autoscaling.min_node_count = 0
-    mock_interactive_pool.autoscaling.max_node_count = 5
-    mock_interactive_pool.initial_node_count = 0
-    mock_interactive_pool.config.spot = False
-    mock_interactive_pool.status = 2  # RUNNING
-
-    mock_cluster.node_pools = [mock_pipeline_pool, mock_interactive_pool]
-
-    mock_client = MagicMock()
-    mock_client.get_cluster.return_value = mock_cluster
-
-    with patch("app.services.stack_deployment._get_gke_client", return_value=mock_client):
+    with patch(
+        "app.adapters.compute.kubernetes.KubernetesComputeProvider.get_cluster_detail",
+        AsyncMock(return_value=detail),
+    ):
         result = await get_cluster_status(session)
 
     assert result.compute_deployed is True

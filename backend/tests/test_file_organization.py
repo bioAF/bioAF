@@ -80,8 +80,8 @@ async def _create_file(session, org_id, gcs_uri, experiment_id=None):
     """Insert a file record and return its id."""
     result = await session.execute(
         text("""
-        INSERT INTO files (organization_id, gcs_uri, filename, file_type, experiment_id)
-        VALUES (:org_id, :uri, :fname, 'fastq', :exp_id)
+        INSERT INTO files (organization_id, gcs_uri, storage_uri, filename, file_type, experiment_id)
+        VALUES (:org_id, :uri, :uri, :fname, 'fastq', :exp_id)
         RETURNING id
         """).bindparams(
             org_id=org_id,

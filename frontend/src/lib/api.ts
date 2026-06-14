@@ -177,6 +177,7 @@ async function uploadFileSigned<T>(
     upload_id: string;
     signed_url: string;
     gcs_uri: string;
+    storage_uri: string;
   }>("/api/files/upload/initiate", {
     method: "POST",
     body: JSON.stringify(initiateBody),

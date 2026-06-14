@@ -21,7 +21,7 @@ async def test_full_search_finds_lab_document_by_title(session, admin_user):
         title="Centrifuge Operating Manual",
         description="how to spin",
         file_name="c.pdf",
-        gcs_uri="gs://wb/v1/c.pdf",
+        storage_uri="gs://wb/v1/c.pdf",
     )
     results, total, counts = await SearchService.full_search(
         session, org_id, "Centrifuge", entity_types=["lab_document"], count_types=["lab_document"]
@@ -41,7 +41,7 @@ async def test_full_search_excludes_archived_lab_documents(session, admin_user):
         user_id=uid,
         title="Archived Cleaning Schedule",
         file_name="a.pdf",
-        gcs_uri="gs://wb/v1/a.pdf",
+        storage_uri="gs://wb/v1/a.pdf",
     )
     await LabDocumentService.set_archived(session, org_id=org_id, user_id=uid, document_id=doc.id, archived=True)
     results, total, _ = await SearchService.full_search(
@@ -59,7 +59,7 @@ async def test_quick_search_finds_lab_document(session, admin_user):
         user_id=uid,
         title="Onboarding Checklist",
         file_name="o.pdf",
-        gcs_uri="gs://wb/v1/o.pdf",
+        storage_uri="gs://wb/v1/o.pdf",
     )
     hits = await SearchService.quick_search(session, org_id, "Onboarding")
     assert any(h["entity_type"] == "lab_document" and h["name"] == "Onboarding Checklist" for h in hits)

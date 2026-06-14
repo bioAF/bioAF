@@ -10,11 +10,14 @@ from typing import BinaryIO
 from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.models import (
     CellxgeneInstance,
+    ClusterDetail,
     ClusterMetrics,
+    ClusterProbe,
     ClusterStatus,
     CostEstimate,
     JobProgress,
     JobStatus,
+    BucketAdminMetrics,
     JobSubmitResult,
     ObjectMetadata,
     SessionInfo,
@@ -78,6 +81,37 @@ class ComputeProvider(ABC):
     async def get_cluster_metrics(self) -> ClusterMetrics:
         """Get cluster metrics: CPU, memory, cost rate."""
 
+    async def get_cluster_detail(self) -> ClusterDetail:
+        """Cluster name/status/node-count plus per-pool detail, status pre-mapped.
+
+        Richer than ``get_cluster_status`` and used by the stack-status view.
+        Backends without a managed control plane (SLURM) do not implement it;
+        the default raises so callers fall back (the stack view reports no
+        cluster). Non-abstract so the interface can grow without a flag day.
+        """
+        raise NotImplementedError
+
+    # -- Cluster lifecycle management (orphan scan / recovery / teardown) ------
+    #
+    # Look up, probe, and DELETE clusters by (project/account, location, name).
+    # Used by orphaned-resource cleanup; the managed-control-plane SDK lives in
+    # the adapter. Backends without a managed control plane (SLURM) raise.
+
+    async def list_cluster_names(self, project_id: str, location: str) -> list[str]:
+        """Names of all clusters under ``(project_id, location)``."""
+        raise NotImplementedError
+
+    async def probe_cluster(self, project_id: str, location: str, cluster_name: str) -> ClusterProbe:
+        """Probe one named cluster's liveness + connection info (for adoption).
+
+        Returns ``ClusterProbe(state="NOT_FOUND")`` if it cannot be fetched.
+        """
+        raise NotImplementedError
+
+    async def delete_cluster(self, project_id: str, location: str, cluster_name: str) -> None:
+        """Delete a cluster by name. DESTRUCTIVE and irreversible."""
+        raise NotImplementedError
+
     @abstractmethod
     async def get_cost_estimate(self, job_spec: dict) -> CostEstimate:
         """Estimate cost for a job spec."""
@@ -89,6 +123,15 @@ class ComputeProvider(ABC):
     @abstractmethod
     async def get_connection_command(self, job_id: str) -> str:
         """Get kubectl exec/SSH command for direct access to a running job."""
+
+    def connection_setup_guide(self) -> str:
+        """First-time client setup instructions to accompany a connection command.
+
+        Cloud/compute-specific (a GKE cluster needs gcloud + kubectl creds; an EKS
+        cluster needs aws). The default is the cloud-neutral SLURM/SSH guidance;
+        the Kubernetes backends override with the cluster-access steps.
+        """
+        return "For SLURM-based clusters, ensure SSH access is configured with your system administrator."
 
     async def persist_job_logs(self, job_id: str) -> bool:
         """Persist job logs to durable storage before the pod is cleaned up.
@@ -169,6 +212,106 @@ class StorageProvider(ABC):
 
         ``gs://bucket/a/b.txt -> ("bucket", "a/b.txt")``. Raises ValidationError
         if ``uri`` is not a URI this backend recognizes.
+        """
+        raise NotImplementedError
+
+    # -- Container-side CLI staging (Leak 2 drain) ----------------------------
+    #
+    # These mint SHELL COMMAND STRINGS for a remote pipeline container to stage
+    # data via the backend's own CLI (the container has no Python adapter). They
+    # are how the service layer stops hardcoding ``gsutil`` / ``gcloud`` /
+    # ``aws s3``: the cloud-specific CLI tokens live here in adapters/, selected by
+    # the storage backend. GCS -> ``gcloud storage`` / ``gcloud auth ...``; S3 ->
+    # ``aws s3``; NFS -> plain ``cp`` (a mounted filesystem, no CLI auth).
+
+    def cli_auth_command(self, key_file: str) -> str:
+        """Shell command to authenticate this backend's CLI from a mounted key file.
+
+        GCS -> ``gcloud auth activate-service-account --key-file=<key_file> ...``.
+        Backends that authenticate ambiently (NFS mount, S3 instance profile/IRSA)
+        return ``""`` (no auth step needed).
+        """
+        raise NotImplementedError
+
+    def cli_copy_in(self, uri: str, local_path: str) -> str:
+        """Shell command to copy a single object ``uri`` to ``local_path`` in a container."""
+        raise NotImplementedError
+
+    def cli_copy_out(self, local_path: str, uri: str) -> str:
+        """Shell command to recursively copy ``local_path`` to a bucket ``uri`` in a container."""
+        raise NotImplementedError
+
+    def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
+        """Shell command (argv) to recursively sync ``remote_prefix`` -> ``local_dir``.
+
+        The directory-mirror counterpart to ``cli_copy_in`` (single object). Run in
+        a stage-in init container. GCS -> ``gsutil -m rsync -r`` (tolerant of an
+        empty/missing prefix); S3 -> ``aws s3 sync``; NFS -> ``cp -r``.
+        """
+        raise NotImplementedError
+
+    def sync_out_command(self, local_dir: str, remote_prefix: str) -> list[str]:
+        """Shell command (argv) to recursively sync ``local_dir`` -> ``remote_prefix``.
+
+        The directory-mirror counterpart to ``cli_copy_out``. Run at session
+        shutdown to persist a home/outputs dir. GCS -> ``gsutil -m rsync -r``;
+        S3 -> ``aws s3 sync``; NFS -> ``cp -r``.
+        """
+        raise NotImplementedError
+
+    def staging_image(self) -> str:
+        """Container image whose CLI stages data for this backend (CopyStager).
+
+        The init/sidecar containers that run ``cli_copy_in`` / ``cli_copy_out``
+        need an image that ships the backend's CLI. GCS -> ``google/cloud-sdk:slim``
+        (gsutil/gcloud); S3 -> ``amazon/aws-cli``; a mounted NFS backend stages by
+        plain ``cp`` and needs only a minimal coreutils image. Lives here so the
+        k8s adapters stop hardcoding the cloud's staging image.
+        """
+        raise NotImplementedError
+
+    def input_mount_spec(
+        self, *, name: str, bucket: str, mount_path: str, key_prefix: str = ""
+    ) -> tuple[dict, dict, dict]:
+        """Read-only object FUSE mount for INPUTS only (ReadOnlyInputMount seam).
+
+        Returns ``(volume, volume_mount, pod_annotations)`` for a pod that streams
+        objects from ``bucket`` (optionally under ``key_prefix``) read-only at
+        ``mount_path``. GCS -> gcsfuse CSI volume + the ``gke-gcsfuse/volumes``
+        pod annotation; S3 -> Mountpoint-S3 CSI (readOnly); NFS -> a plain nfs
+        volume. NEVER the workDir (that is a POSIX scratch volume, not an object
+        mount). Backends without an object FUSE mount do not implement this.
+        """
+        raise NotImplementedError
+
+    def nextflow_scratch_directives(self, work_dir: str) -> list[str]:
+        """Nextflow config lines for the pipeline scratch workDir (ScratchWorkDir).
+
+        The workDir is where Nextflow exchanges ``.command.run`` scripts and task
+        I/O across head/process pods, so it must behave POSIX. GCS overlays the
+        ``gs://`` workDir with Wave+Fusion (which mounts it as a local filesystem
+        in each task pod); a mounted POSIX backend (NFS, or an AWS EBS/EFS PVC in
+        Stage 6e) is the workDir directly with no Fusion overlay. Returns the
+        backend-specific config directives so the compute adapter names no cloud.
+        """
+        raise NotImplementedError
+
+    def image_storage_pip_packages(self) -> str:
+        """Pip requirement string for the client libs a built image needs for this store.
+
+        Baked into pipeline/notebook image recipes so a container can read/write the
+        backend. GCS -> ``google-cloud-storage gsutil``; S3 -> ``boto3 awscli``; a
+        mounted NFS backend needs none.
+        """
+        raise NotImplementedError
+
+    def cloud_build_copy_step(self, uri: str, dest: str) -> dict:
+        """A managed-build step that copies object ``uri`` to local ``dest``.
+
+        Returned to the cloud's managed image-builder (GCP Cloud Build today) as a
+        step that stages a file into the build workspace. GCS uses the gsutil
+        builder; the AWS realization (a CodeBuild phase) lands with the image-build
+        seam. The cloud-specific builder/CLI lives here, not in the service layer.
         """
         raise NotImplementedError
 
@@ -286,6 +429,57 @@ class StorageProvider(ABC):
         """
         raise NotImplementedError
 
+    # -- Bucket-admin enumeration (Tier-2 / Phase 9) --------------------------
+    #
+    # Rich bucket-level enumeration (per-bucket size/lifecycle/versioning, and
+    # project-level bucket listing). The cloud SDK that walks buckets lives in
+    # the adapter; the service layer consumes neutral results. Non-abstract so
+    # backends without the concept (NFS) keep the degenerate default.
+
+    async def get_bucket_admin_metrics(self, bucket_name: str) -> BucketAdminMetrics:
+        """Return rich admin metrics for a single named bucket.
+
+        Backends without buckets (NFS) return the degenerate default.
+        """
+        return BucketAdminMetrics()
+
+    async def delete_bucket(self, bucket_name: str) -> None:
+        """Delete a bucket and ALL of its contents. DESTRUCTIVE and irreversible.
+
+        Used by orphaned-resource cleanup. Backends without buckets (NFS) raise.
+        """
+        raise NotImplementedError
+
+    def native_upload_client(self, credentials=None):
+        """Return the backend's raw, SYNCHRONOUS object-store client.
+
+        TRANSITIONAL escape hatch for callers that still need direct SDK access
+        rather than the neutral async object methods: the reference-data upload
+        machinery (resumable-session minting, blob enumeration) and the half-built
+        reference URL importer, which streams resumable uploads from a worker
+        thread (memory: do not build out the importer in isolation). It keeps the
+        cloud SDK import inside ``adapters/`` while those callers await a proper
+        seam. Remove when they move onto the neutral methods. Backends without a
+        native client (NFS) raise.
+        """
+        raise NotImplementedError
+
+    async def list_lifecycle_policies(self, prefix: str) -> list[dict]:
+        """List lifecycle policy status for buckets matching ``prefix``.
+
+        Each entry is ``{"bucket_name", "rules", "enabled"}``. Backends without
+        buckets (NFS) return ``[]``.
+        """
+        return []
+
+    async def query_bucket_stats(self, prefix: str) -> list[dict]:
+        """Per-bucket usage for buckets matching ``prefix``.
+
+        Each entry is ``{"name", "total_bytes", "object_count", "by_storage_class"}``.
+        Backends without buckets (NFS) return ``[]``.
+        """
+        return []
+
 
 class NotebookProvider(ABC):
     """Abstract interface for notebook session backends (Kubernetes, SLURM)."""
@@ -322,6 +516,14 @@ class NotebookProvider(ABC):
     async def get_connection_command(self, session_id: str) -> str:
         """Get SSH/exec command for direct access to the session."""
 
+    def connection_setup_guide(self) -> str:
+        """First-time client setup instructions to accompany a connection command.
+
+        See ``ComputeProvider.connection_setup_guide``. Default is SLURM/SSH; the
+        Kubernetes notebook backend overrides with the cluster-access steps.
+        """
+        return "For SLURM-based clusters, ensure SSH access is configured with your system administrator."
+
     async def sync_session_storage(self, session_id: str, **kwargs) -> None:
         """Best-effort push of a running session's working files to durable storage.
 
@@ -331,6 +533,41 @@ class NotebookProvider(ABC):
         the pod.
         """
         return None
+
+
+class VmInstance(ABC):
+    """Cloud-neutral VM lifecycle primitive (GCE today; EC2 in the AWS build).
+
+    The single VM primitive that the work-node provider, future VM-compute, and
+    install-time provisioning consume. A backend (``GceVmInstance`` / future
+    ``Ec2VmInstance``) implements provision/delete/inspect/list; the work-node
+    provider rides on one and exposes it under the ``WorkNodeProvider`` names the
+    service layer uses. Selected per-cloud (POLICY ``work_node``: gce | ec2).
+    """
+
+    @abstractmethod
+    async def provision(self, vm_spec: dict) -> VmInfo:
+        """Create and start a VM. Returns a VmInfo."""
+
+    @abstractmethod
+    async def delete(self, instance_name: str, zone: str, **kwargs) -> TerminationResult:
+        """Stop and delete a VM. Returns a TerminationResult."""
+
+    @abstractmethod
+    async def inspect(self, instance_name: str, zone: str) -> VmStatus:
+        """Get VM status and external IP."""
+
+    @abstractmethod
+    async def list_instances(self, filters: dict | None = None) -> list[VmStatus]:
+        """List managed VMs."""
+
+    async def probe_zone_capacity(self, zones: list[str], machine_type: str = "e2-medium") -> str:
+        """Return the first zone in ``zones`` with capacity for ``machine_type``.
+
+        Default raises so a backend that cannot probe capacity fails loudly rather
+        than silently. The GCE backend implements it via a throwaway instance insert.
+        """
+        raise NotImplementedError("This VM backend cannot probe zone capacity")
 
 
 class WorkNodeProvider(ABC):

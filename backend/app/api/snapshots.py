@@ -17,8 +17,8 @@ router = APIRouter(prefix="/api/snapshots", tags=["snapshots"])
 
 def _snapshot_to_response(snap) -> dict:
     figure_url = None
-    if snap.figure_file and hasattr(snap.figure_file, "gcs_uri"):
-        figure_url = snap.figure_file.gcs_uri
+    if snap.figure_file and hasattr(snap.figure_file, "storage_uri"):
+        figure_url = snap.figure_file.storage_uri
 
     return {
         "id": snap.id,
@@ -42,8 +42,8 @@ def _snapshot_to_response(snap) -> dict:
 def _snapshot_to_detail(snap) -> dict:
     base = _snapshot_to_response(snap)
     checkpoint_url = None
-    if snap.checkpoint_file and hasattr(snap.checkpoint_file, "gcs_uri"):
-        checkpoint_url = snap.checkpoint_file.gcs_uri
+    if snap.checkpoint_file and hasattr(snap.checkpoint_file, "storage_uri"):
+        checkpoint_url = snap.checkpoint_file.storage_uri
 
     base.update(
         {

@@ -12,6 +12,7 @@ function fileStub(overrides: Partial<FileResponse> = {}): FileResponse {
     id: 7,
     filename: "plot.png",
     gcs_uri: "gs://bucket/plot.png",
+    storage_uri: "gs://bucket/plot.png",
     size_bytes: 1024,
     md5_checksum: "abc",
     file_type: "png",

@@ -21,7 +21,9 @@ from app.adapters.base import ComputeProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.kubernetes.connection import GkeConnection
 from app.adapters.models import (
+    ClusterDetail,
     ClusterMetrics,
+    ClusterProbe,
     ClusterStatus,
     CostEstimate,
     JobProgress,
@@ -118,7 +120,7 @@ def _load_gcp_credentials(cfg: dict):
     impersonated bootstrap credentials and legacy installs get
     service_account.Credentials from the stored JSON key.
     """
-    from app.platform import credential_injector
+    from app.adapters.credentials import credential_injector
 
     return credential_injector.load_gcp_credentials(cfg)
 
@@ -134,6 +136,39 @@ def _sanitize_label_value(value: str) -> str:
     sanitized = re.sub(r"[^A-Za-z0-9\-_.]", "-", value)
     sanitized = sanitized.strip("-_.")
     return sanitized[:63]
+
+
+def _pod_log_to_text(value) -> str:
+    """Coerce a ``read_namespaced_pod_log`` payload to ``str``.
+
+    Newer kubernetes Python clients (>= ~31) return ``bytes`` from
+    ``read_namespaced_pod_log``; older ones return ``str``. If bytes leak through
+    the adapter's ``-> str`` contract, the log renders as a Python bytes repr
+    (``b"...\\n..."`` with literal ``\\n``) instead of clean text. Decode
+    defensively so the contract holds regardless of the installed client version.
+    """
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _resolve_results_bucket(cfg: dict) -> str | None:
+    """Resolve the pipeline results bucket from cluster config.
+
+    Prefers the explicit ``results_bucket_name`` (set by Terraform); falls back to
+    deriving it from ``raw_bucket_name`` (bioaf-raw-X -> bioaf-results-X) for
+    installs where the raw bucket was populated before the results bucket. Returns
+    None when neither yields a bucket. Sync mirror of
+    ``qc.extractors.gcs_helpers.get_results_bucket`` for the config-dict the compute
+    adapter holds (it has no DB session at job-build time).
+    """
+    results = cfg.get("results_bucket_name")
+    if results and results != "null":
+        return results
+    raw = cfg.get("raw_bucket_name", "")
+    if raw and raw.startswith("bioaf-raw-"):
+        return raw.replace("bioaf-raw-", "bioaf-results-", 1)
+    return None
 
 
 class KubernetesComputeProvider(ComputeProvider):
@@ -152,6 +187,7 @@ class KubernetesComputeProvider(ComputeProvider):
         "gcp_project_id",
         "gcp_region",
         "raw_bucket_name",
+        "results_bucket_name",
         "k8s_pipeline_machine_type",
     ]
 
@@ -163,6 +199,16 @@ class KubernetesComputeProvider(ComputeProvider):
             invalidate_client_on_force=True,
             refresh_strategy="simple",
         )
+        self._pod_identity_provider = None
+
+    @property
+    def _pod_identity(self):
+        """The cloud-resolved PodIdentityProvider (lazy; GKE by default)."""
+        if self._pod_identity_provider is None:
+            from app.adapters.pod_identity import get_pod_identity_provider
+
+            self._pod_identity_provider = get_pod_identity_provider()
+        return self._pod_identity_provider
 
     @property
     def _session_factory(self):
@@ -241,6 +287,74 @@ class KubernetesComputeProvider(ComputeProvider):
         d = self._local_cluster_metrics() if self.is_local else await self._k8s_get_cluster_metrics()
         return _cluster_metrics_from_dict(d)
 
+    async def get_cluster_detail(self) -> ClusterDetail:
+        """Cluster name/status/node-count + per-pool detail for the stack view.
+
+        Owns the GKE cluster read that previously lived in
+        stack_deployment.get_cluster_status (Phase 9 / Stage 3b). Status fields
+        use the uppercase enum-name mapping with an ``UNKNOWN`` default to
+        preserve the stack view's existing contract (distinct from the lowercased
+        controller_status that get_cluster_status reports).
+        """
+        await self.load_cluster_config()
+        cfg = self._cluster_config or {}
+        cluster_name = _resolve_cfg(cfg, "gke_cluster_name", "GKE_CLUSTER_NAME")
+        project_id = _resolve_cfg(cfg, "gcp_project_id", "GCP_PROJECT_ID")
+        region = _resolve_cfg(cfg, "gcp_region", "GCP_REGION", default="us-central1")
+
+        gke_client = self._get_gke_client()
+        cluster = gke_client.get_cluster(name=f"projects/{project_id}/locations/{region}/clusters/{cluster_name}")
+
+        node_pools = [
+            NodePoolStatus(
+                name=pool.name,
+                machine_type=pool.config.machine_type,
+                min_nodes=pool.autoscaling.min_node_count,
+                max_nodes=pool.autoscaling.max_node_count,
+                current_nodes=pool.initial_node_count,
+                spot=pool.config.spot,
+                status=self._GKE_STATUS_MAP.get(pool.status, "UNKNOWN"),
+            )
+            for pool in cluster.node_pools
+        ]
+
+        return ClusterDetail(
+            name=cluster.name,
+            status=self._GKE_STATUS_MAP.get(cluster.status, "UNKNOWN"),
+            node_count=cluster.current_node_count,
+            node_pools=node_pools,
+        )
+
+    # -- Cluster lifecycle management (orphan scan / recovery / teardown) ------
+
+    async def list_cluster_names(self, project_id: str, location: str) -> list[str]:
+        client = self._get_gke_client()
+        response = client.list_clusters(parent=f"projects/{project_id}/locations/{location}")
+        return [c.name for c in (response.clusters or [])]
+
+    async def probe_cluster(self, project_id: str, location: str, cluster_name: str) -> ClusterProbe:
+        client = self._get_gke_client()
+        cluster_path = f"projects/{project_id}/locations/{location}/clusters/{cluster_name}"
+        try:
+            cluster = client.get_cluster(name=cluster_path)
+        except Exception as exc:
+            logger.info("GKE cluster %s not reachable: %s", cluster_name, exc)
+            return ClusterProbe(state="NOT_FOUND")
+        endpoint = getattr(cluster, "endpoint", "") or None
+        ca_cert = None
+        master_auth = getattr(cluster, "master_auth", None)
+        if master_auth:
+            ca_cert = getattr(master_auth, "cluster_ca_certificate", "") or None
+        return ClusterProbe(
+            state=self._GKE_STATUS_MAP.get(cluster.status, "UNKNOWN"),
+            endpoint=endpoint,
+            ca_cert=ca_cert,
+        )
+
+    async def delete_cluster(self, project_id: str, location: str, cluster_name: str) -> None:
+        client = self._get_gke_client()
+        client.delete_cluster(name=f"projects/{project_id}/locations/{location}/clusters/{cluster_name}")
+
     def _cost_estimate_dict(self, job_spec: dict) -> dict:
         # Return the hourly node rate for the pipeline pool so the UI
         # can show $/hr and let the user reason about total cost from
@@ -284,6 +398,11 @@ class KubernetesComputeProvider(ComputeProvider):
     async def get_connection_command(self, job_id: str) -> str:
         namespace = "bioaf-pipelines"
         return f"kubectl exec -it -n {namespace} job/{job_id} -- /bin/bash"
+
+    def connection_setup_guide(self) -> str:
+        from app.adapters.kubernetes.connection import KUBECTL_SETUP_GUIDE
+
+        return KUBECTL_SETUP_GUIDE
 
     # -- Local mode implementations --
 
@@ -481,9 +600,9 @@ class KubernetesComputeProvider(ComputeProvider):
         )
         logger.info("Created namespace %s", namespace)
 
-        sa_annotations: dict[str, str] = {}
-        if gcp_sa_email:
-            sa_annotations["iam.gke.io/gcp-service-account"] = gcp_sa_email
+        # KSA annotations binding the pod to a cloud IAM identity (GKE Workload
+        # Identity today); empty when no SA email is configured.
+        sa_annotations = self._pod_identity.pod_identity_annotations(gcp_sa_email)
 
         # Create service account
         core_v1.create_namespaced_service_account(
@@ -523,25 +642,25 @@ class KubernetesComputeProvider(ComputeProvider):
         logger.info("Created role binding in %s", namespace)
         self._namespace_ready = True
 
-    @staticmethod
-    def _patch_sa_annotation(core_v1, namespace: str, gcp_sa_email: str) -> None:
-        """Ensure the pipeline-runner SA has the Workload Identity annotation.
+    def _patch_sa_annotation(self, core_v1, namespace: str, gcp_sa_email: str) -> None:
+        """Ensure the pipeline-runner KSA carries the pod-identity binding.
 
-        Used on the upgrade path where the namespace was created before
-        Workload Identity was wired (no annotation on the existing KSA).
+        Used on the upgrade path where the namespace was created before pod
+        identity was wired (no binding annotation on the existing KSA).
         """
+        desired = self._pod_identity.pod_identity_annotations(gcp_sa_email)
         try:
             sa = core_v1.read_namespaced_service_account(name="bioaf-pipeline-runner", namespace=namespace)
-            current = (sa.metadata.annotations or {}).get("iam.gke.io/gcp-service-account", "")
-            if current != gcp_sa_email:
+            current = sa.metadata.annotations or {}
+            if desired and any(current.get(k) != v for k, v in desired.items()):
                 core_v1.patch_namespaced_service_account(
                     name="bioaf-pipeline-runner",
                     namespace=namespace,
-                    body={"metadata": {"annotations": {"iam.gke.io/gcp-service-account": gcp_sa_email}}},
+                    body={"metadata": {"annotations": desired}},
                 )
-                logger.info("Patched Workload Identity annotation on bioaf-pipeline-runner")
+                logger.info("Patched pod-identity annotation on bioaf-pipeline-runner")
         except Exception:
-            logger.exception("Failed to patch Workload Identity annotation on bioaf-pipeline-runner")
+            logger.exception("Failed to patch pod-identity annotation on bioaf-pipeline-runner")
 
     # -- K8s API implementations (production) --
 
@@ -605,9 +724,9 @@ class KubernetesComputeProvider(ComputeProvider):
         if trace_gcs_path:
             parts.extend(["-with-trace", trace_gcs_path])
 
-        # Ensure outdir is always set (nf-core pipelines require it)
-        if "outdir" not in parameters:
-            parameters = {**parameters, "outdir": "/data/results"}
+        # outdir is guaranteed durable by _ensure_outdir before this runs (a gs://
+        # results path, or the launch already failed closed), so it is never
+        # defaulted to a pod-local path that pod cleanup would destroy.
 
         # Strip bioAF-internal config knobs that are not Nextflow parameters
         internal_keys = {"fusion_enabled"}
@@ -618,6 +737,32 @@ class KubernetesComputeProvider(ComputeProvider):
             parts.extend([f"--{key}", str(value)])
 
         return ["/bin/sh", "-c", " ".join(parts)]
+
+    def _ensure_outdir(self, job_spec: dict) -> dict:
+        """Return ``job_spec`` with a durable outdir guaranteed.
+
+        Keeps an explicitly-supplied outdir. Otherwise resolves the results bucket
+        (explicit results_bucket_name, else derived from raw_bucket_name) and sets
+        outdir to a durable gs:// path. FAILS CLOSED when no results bucket can be
+        resolved, rather than letting outdir fall back to a pod-local path that the
+        Job's ttlSecondsAfterFinished destroys an hour later (the (!)E silent-loss
+        path). Returns a new dict; the input job_spec is not mutated.
+        """
+        params = job_spec.get("parameters", {})
+        if "outdir" in params:
+            return job_spec
+        results_bucket = _resolve_results_bucket(self._cluster_config or {})
+        if not results_bucket:
+            raise RuntimeError(
+                "Cannot launch pipeline: no results bucket is configured (set "
+                "results_bucket_name in platform_config, or a bioaf-raw- prefixed "
+                "raw_bucket_name) and no explicit outdir was provided. Refusing to "
+                "write outputs to a pod-local path that is destroyed at pod cleanup."
+            )
+        experiment_id = job_spec.get("experiment_id", "unknown")
+        run_id = job_spec.get("run_id", 0)
+        outdir = f"gs://{results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}"
+        return {**job_spec, "parameters": {**params, "outdir": outdir}}
 
     # Allocatable resources per GCP machine type (after system reservations).
     # Used to set Nextflow resourceLimits so retry escalation never exceeds
@@ -656,14 +801,13 @@ class KubernetesComputeProvider(ComputeProvider):
             "k8s.serviceAccount = 'bioaf-pipeline-runner'",
         ]
 
-        # GCS work directory so head and process pods share files.
-        # Wave + Fusion mount GCS paths as a local filesystem inside
-        # process pods so they can access .command.run scripts.
+        # Scratch workDir so head and process pods share files. The storage
+        # backend supplies its Nextflow workDir directives (ScratchWorkDir seam):
+        # GCS overlays the gs:// workDir with Wave+Fusion as a local filesystem.
         if gcs_work_dir:
-            lines.append(f"workDir = '{gcs_work_dir}'")
-            lines.append("wave.enabled = true")
-            lines.append("fusion.enabled = true")
-            lines.append("fusion.exportStorageCredentials = true")
+            from app.adapters.registry import get_storage_adapter
+
+            lines.extend(get_storage_adapter().nextflow_scratch_directives(gcs_work_dir))
 
         # Resource limits and preemption-aware retry strategy (ADR-042).
         # Prevents retry escalation from requesting more than a single
@@ -861,17 +1005,12 @@ class KubernetesComputeProvider(ComputeProvider):
             report_gcs_path = f"gs://{raw_bucket}/nextflow-reports/{job_name}/report.html" if raw_bucket else ""
             trace_gcs_path = f"gs://{raw_bucket}/nextflow-traces/{job_name}/trace.tsv" if raw_bucket else ""
 
-            # Set --outdir to a GCS path so pipeline outputs persist after
-            # pod cleanup.  The path mirrors the prefix that
+            # Set --outdir to a durable results-bucket path so pipeline outputs
+            # persist after pod cleanup. The path mirrors the prefix that
             # _gcs_collect_outputs and _extract_metrics use to find outputs.
-            experiment_id = job_spec.get("experiment_id", "unknown")
-            # Derive results bucket from raw_bucket_name (bioaf-raw-X -> bioaf-results-X)
-            results_bucket = (
-                raw_bucket.replace("bioaf-raw-", "bioaf-results-", 1) if raw_bucket.startswith("bioaf-raw-") else ""
-            )
-            if results_bucket and "outdir" not in job_spec.get("parameters", {}):
-                gcs_outdir = f"gs://{results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}"
-                job_spec = {**job_spec, "parameters": {**job_spec.get("parameters", {}), "outdir": gcs_outdir}}
+            # _ensure_outdir resolves the results bucket explicitly and fails closed
+            # if none is configured (rather than silently using a pod-local path).
+            job_spec = self._ensure_outdir(job_spec)
 
             command = self._build_nextflow_command(
                 job_spec,
@@ -879,14 +1018,17 @@ class KubernetesComputeProvider(ComputeProvider):
                 trace_gcs_path=trace_gcs_path,
             )
 
-        # Build init containers for GCS input staging
+        # Build init containers for input staging. The stage container runs the
+        # storage backend's CLI image (CopyStager seam); GCS -> google/cloud-sdk:slim.
         init_containers = []
         if stage_commands:
+            from app.adapters.registry import get_storage_adapter
+
             stage_script = " && ".join(stage_commands)
             init_containers.append(
                 {
                     "name": "stage-inputs",
-                    "image": "google/cloud-sdk:slim",
+                    "image": get_storage_adapter().staging_image(),
                     "command": ["/bin/sh", "-c", stage_script],
                     "volumeMounts": [{"name": "data", "mountPath": "/data"}],
                 }
@@ -1204,7 +1346,7 @@ class KubernetesComputeProvider(ComputeProvider):
                     namespace=namespace,
                     container="pipeline",
                 )
-                return logs
+                return _pod_log_to_text(logs)
             except Exception:
                 logger.warning("Could not read logs from %s, trying GCS fallback", pod_name)
 
@@ -1249,10 +1391,12 @@ class KubernetesComputeProvider(ComputeProvider):
 
         pod_name = pod_list.items[0].metadata.name
         try:
-            logs = core_client.read_namespaced_pod_log(
-                name=pod_name,
-                namespace=namespace,
-                container="pipeline",
+            logs = _pod_log_to_text(
+                core_client.read_namespaced_pod_log(
+                    name=pod_name,
+                    namespace=namespace,
+                    container="pipeline",
+                )
             )
         except Exception:
             logger.warning("Could not read logs from %s for persistence", pod_name)
