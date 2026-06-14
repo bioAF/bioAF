@@ -138,6 +138,20 @@ def _sanitize_label_value(value: str) -> str:
     return sanitized[:63]
 
 
+def _pod_log_to_text(value) -> str:
+    """Coerce a ``read_namespaced_pod_log`` payload to ``str``.
+
+    Newer kubernetes Python clients (>= ~31) return ``bytes`` from
+    ``read_namespaced_pod_log``; older ones return ``str``. If bytes leak through
+    the adapter's ``-> str`` contract, the log renders as a Python bytes repr
+    (``b"...\\n..."`` with literal ``\\n``) instead of clean text. Decode
+    defensively so the contract holds regardless of the installed client version.
+    """
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
 def _resolve_results_bucket(cfg: dict) -> str | None:
     """Resolve the pipeline results bucket from cluster config.
 
@@ -1332,7 +1346,7 @@ class KubernetesComputeProvider(ComputeProvider):
                     namespace=namespace,
                     container="pipeline",
                 )
-                return logs
+                return _pod_log_to_text(logs)
             except Exception:
                 logger.warning("Could not read logs from %s, trying GCS fallback", pod_name)
 
@@ -1377,10 +1391,12 @@ class KubernetesComputeProvider(ComputeProvider):
 
         pod_name = pod_list.items[0].metadata.name
         try:
-            logs = core_client.read_namespaced_pod_log(
-                name=pod_name,
-                namespace=namespace,
-                container="pipeline",
+            logs = _pod_log_to_text(
+                core_client.read_namespaced_pod_log(
+                    name=pod_name,
+                    namespace=namespace,
+                    container="pipeline",
+                )
             )
         except Exception:
             logger.warning("Could not read logs from %s for persistence", pod_name)
