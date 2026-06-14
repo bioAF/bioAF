@@ -43,7 +43,7 @@ class TestTokenExpiry:
         conn._client_created_at = 1000.0
         monkeypatch.setattr(
             "app.adapters.kubernetes.connection.time.monotonic",
-            lambda: 1000.0 + conn._TOKEN_TTL_SECONDS + 1,
+            lambda: 1000.0 + conn._cluster_auth.token_ttl_seconds + 1,
         )
         assert conn.is_token_expired() is True
 
@@ -232,7 +232,7 @@ class TestGetApiClientSync:
         conn._client_created_at = 1000.0
         monkeypatch.setattr(
             "app.adapters.kubernetes.connection.time.monotonic",
-            lambda: 1000.0 + conn._TOKEN_TTL_SECONDS + 1,
+            lambda: 1000.0 + conn._cluster_auth.token_ttl_seconds + 1,
         )
         fresh = MagicMock()
         with patch(_INCLUSTER, side_effect=Exception("nope")):

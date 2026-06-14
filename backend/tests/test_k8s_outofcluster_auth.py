@@ -89,7 +89,7 @@ class TestOutOfClusterAuth:
                     mock_apiclient = MagicMock()
                     mock_apiclient_cls.return_value = mock_apiclient
                     with patch(
-                        "app.adapters.kubernetes.connection._get_gcp_token",
+                        "app.adapters.cluster_auth.gcp._get_gcp_token",
                         return_value="fake-token",
                     ):
                         adapter_k8s_mode._build_out_of_cluster_client()

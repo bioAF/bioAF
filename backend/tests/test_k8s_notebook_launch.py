@@ -359,7 +359,7 @@ class TestOutOfClusterFallback:
 
         with (
             patch("app.adapters.kubernetes.connection.config") as mock_config,
-            patch("app.adapters.kubernetes.connection._get_gcp_token", return_value="fake-token"),
+            patch("app.adapters.cluster_auth.gcp._get_gcp_token", return_value="fake-token"),
             patch("app.adapters.kubernetes.connection.tempfile") as mock_tempfile,
             patch("app.adapters.kubernetes.connection.client") as mock_client,
         ):
