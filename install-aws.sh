@@ -110,9 +110,15 @@ KEY_NAME="bioaf"                   # EC2 key pair name
 SECURITY_GROUP_NAME="bioaf-allow-web"
 APP_ROLE_NAME="bioaf-app"          # IAM role + instance profile (analog of the app SA)
 APP_POLICY_NAME="bioaf-app-starter"
-# Canonical's public SSM parameter for the latest Ubuntu 22.04 amd64 AMI. Region
-# resolves the right AMI id, so we never hardcode a per-region id.
-UBUNTU_SSM_PARAM="/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
+# Canonical's public SSM parameters for the latest Ubuntu 22.04 amd64 AMI, in
+# preference order. ebs-gp2 is the variant Canonical publishes in every region;
+# ebs-gp3 is NOT (it 404s in e.g. us-west-1), so we resolve the first that exists.
+# The boot volume type is set independently at launch (gp3 below), so the AMI's
+# own backing type does not matter.
+UBUNTU_SSM_PARAMS=(
+    "/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id"
+    "/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
+)
 
 SUGGESTED_REGIONS=("us-east-1" "us-east-2" "us-west-2" "eu-west-1" "ap-southeast-1")
 
@@ -347,11 +353,17 @@ else
     step "Create instance profile ${APP_ROLE_NAME}" -- \
         aws iam create-instance-profile --instance-profile-name "$APP_ROLE_NAME"
 fi
-# add-role-to-instance-profile is idempotent-ish: a second add returns
-# LimitExceeded (a profile holds one role), so treat failure as already-linked.
-maybe_step "Link role ${APP_ROLE_NAME} to its instance profile" -- \
-    aws iam add-role-to-instance-profile \
-        --instance-profile-name "$APP_ROLE_NAME" --role-name "$APP_ROLE_NAME"
+# A profile holds at most one role, so a second add-role returns LimitExceeded.
+# Check the current link first so re-runs show a clean check instead of a warning.
+LINKED_ROLE="$(aws iam get-instance-profile --instance-profile-name "$APP_ROLE_NAME" \
+    --query 'InstanceProfile.Roles[0].RoleName' --output text 2>/dev/null || echo "None")"
+if [ "$LINKED_ROLE" = "$APP_ROLE_NAME" ]; then
+    step "Role ${APP_ROLE_NAME} already linked to its instance profile" -- true
+else
+    step "Link role ${APP_ROLE_NAME} to its instance profile" -- \
+        aws iam add-role-to-instance-profile \
+            --instance-profile-name "$APP_ROLE_NAME" --role-name "$APP_ROLE_NAME"
+fi
 # IAM is eventually consistent; RunInstances can 400 on a just-created profile.
 step "Wait 10s for the instance profile to propagate" -- sleep 10
 
@@ -359,9 +371,16 @@ step "Wait 10s for the instance profile to propagate" -- sleep 10
 # 7. EC2 VM
 # ---------------------------------------------------------------------------
 section "Step 7 / 8  -  EC2 VM"
-AMI_ID="$(aws ssm get-parameters --names "$UBUNTU_SSM_PARAM" \
-    --query 'Parameters[0].Value' --output text 2>/dev/null || echo "None")"
-if [ "$AMI_ID" = "None" ] || [ -z "$AMI_ID" ]; then
+AMI_ID=""
+for _ami_param in "${UBUNTU_SSM_PARAMS[@]}"; do
+    AMI_ID="$(aws ssm get-parameters --names "$_ami_param" \
+        --query 'Parameters[0].Value' --output text 2>/dev/null || true)"
+    if [ -n "$AMI_ID" ] && [ "$AMI_ID" != "None" ]; then
+        break
+    fi
+    AMI_ID=""
+done
+if [ -z "$AMI_ID" ]; then
     red "  Could not resolve the Ubuntu 22.04 AMI in ${REGION} from SSM."
     exit 1
 fi
