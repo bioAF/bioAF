@@ -586,3 +586,99 @@ class TestStorageMetrics:
         monkeypatch.setattr(adapter, "_read_storage_config", fake_config)
         with pytest.raises(ValidationError):
             await adapter.get_storage_metrics()
+
+
+# --- 6a.6 bucket admin (real S3 only, mocked client) -------------------------
+
+
+class TestBucketAdmin:
+    @pytest.mark.asyncio
+    async def test_get_bucket_admin_metrics(self, s3_adapter):
+        adapter, client = s3_adapter
+        client.get_paginator.return_value.paginate.return_value = [
+            {"Contents": [{"Key": "a", "Size": 100}, {"Key": "b", "Size": 200}]}
+        ]
+        client.get_bucket_versioning.return_value = {"Status": "Enabled"}
+        client.get_bucket_lifecycle_configuration.return_value = {
+            "Rules": [
+                {
+                    "Status": "Enabled",
+                    "Transitions": [{"Days": 30, "StorageClass": "GLACIER"}],
+                    "Expiration": {"Days": 365},
+                }
+            ]
+        }
+        m = await adapter.get_bucket_admin_metrics("bioaf-raw-x")
+        assert m.size_bytes == 300
+        assert m.object_count == 2
+        assert m.versioning_enabled is True
+        assert "Transition to GLACIER after 30 days" in m.lifecycle_summaries
+        assert "Delete after 365 days" in m.lifecycle_summaries
+
+    @pytest.mark.asyncio
+    async def test_lifecycle_summaries_empty_when_unconfigured(self, s3_adapter):
+        from botocore.exceptions import ClientError
+
+        adapter, client = s3_adapter
+        client.get_paginator.return_value.paginate.return_value = [{"Contents": []}]
+        client.get_bucket_versioning.return_value = {}
+        client.get_bucket_lifecycle_configuration.side_effect = ClientError(
+            {"Error": {"Code": "NoSuchLifecycleConfiguration"}}, "GetBucketLifecycleConfiguration"
+        )
+        m = await adapter.get_bucket_admin_metrics("bk")
+        assert m.lifecycle_summaries == []
+        assert m.versioning_enabled is False
+
+    @pytest.mark.asyncio
+    async def test_delete_bucket_purges_versions_then_deletes(self, s3_adapter):
+        adapter, client = s3_adapter
+        client.get_paginator.return_value.paginate.return_value = [
+            {
+                "Versions": [{"Key": "a", "VersionId": "v1"}],
+                "DeleteMarkers": [{"Key": "a", "VersionId": "v0"}],
+            }
+        ]
+        await adapter.delete_bucket("bk")
+        client.delete_objects.assert_called_once_with(
+            Bucket="bk",
+            Delete={"Objects": [{"Key": "a", "VersionId": "v1"}, {"Key": "a", "VersionId": "v0"}]},
+        )
+        client.delete_bucket.assert_called_once_with(Bucket="bk")
+
+    @pytest.mark.asyncio
+    async def test_delete_bucket_empty_skips_delete_objects(self, s3_adapter):
+        adapter, client = s3_adapter
+        client.get_paginator.return_value.paginate.return_value = [{}]
+        await adapter.delete_bucket("bk")
+        client.delete_objects.assert_not_called()
+        client.delete_bucket.assert_called_once_with(Bucket="bk")
+
+    @pytest.mark.asyncio
+    async def test_list_lifecycle_policies_filters_by_prefix(self, s3_adapter):
+        adapter, client = s3_adapter
+        client.list_buckets.return_value = {"Buckets": [{"Name": "bioaf-raw-x"}, {"Name": "other"}]}
+        client.get_bucket_lifecycle_configuration.return_value = {"Rules": [{"ID": "r"}]}
+        out = await adapter.list_lifecycle_policies("bioaf-")
+        assert [p["bucket_name"] for p in out] == ["bioaf-raw-x"]
+        assert out[0]["enabled"] is True
+
+    @pytest.mark.asyncio
+    async def test_query_bucket_stats_sums_by_class(self, s3_adapter):
+        adapter, client = s3_adapter
+        client.list_buckets.return_value = {"Buckets": [{"Name": "bioaf-raw-x"}]}
+        client.get_paginator.return_value.paginate.return_value = [
+            {
+                "Contents": [
+                    {"Key": "a", "Size": 10, "StorageClass": "STANDARD"},
+                    {"Key": "b", "Size": 5, "StorageClass": "GLACIER"},
+                ]
+            }
+        ]
+        stats = await adapter.query_bucket_stats("bioaf-")
+        assert stats[0]["total_bytes"] == 15
+        assert stats[0]["object_count"] == 2
+        assert stats[0]["by_storage_class"] == {"STANDARD": 10, "GLACIER": 5}
+
+    def test_native_upload_client_returns_boto_client(self, s3_adapter):
+        adapter, client = s3_adapter
+        assert adapter.native_upload_client() is client

@@ -29,6 +29,7 @@ from app.adapters.base import StorageProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.exceptions import ValidationError
 from app.adapters.models import (
+    BucketAdminMetrics,
     BucketMetrics,
     ObjectMetadata,
     StorageMetrics,
@@ -129,6 +130,24 @@ _METRICS_STORES = (
 # ALLOWED-DIVERGENCE surface (provider-reported), so this differs from the GCS
 # adapter's ~0.026 by design.
 _S3_STANDARD_COST_PER_GB = 0.023
+
+
+def _summarize_s3_lifecycle(rules) -> list[str]:
+    """Render S3 lifecycle rules into the same cloud-agnostic human summaries the
+    GCS adapter emits, so the service layer consumes neutral strings on both clouds.
+    The S3 rule shape (Transitions[].Days/StorageClass, Expiration.Days) is parsed
+    here. Disabled rules are skipped."""
+    summaries: list[str] = []
+    for rule in rules:
+        if rule.get("Status") != "Enabled":
+            continue
+        for transition in rule.get("Transitions", []):
+            days = transition.get("Days", "?")
+            summaries.append(f"Transition to {transition.get('StorageClass', '')} after {days} days")
+        expiration = rule.get("Expiration", {})
+        if "Days" in expiration:
+            summaries.append(f"Delete after {expiration['Days']} days")
+    return summaries
 
 
 class S3StorageProvider(StorageProvider):
@@ -508,6 +527,35 @@ class S3StorageProvider(StorageProvider):
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._s3_create_presigned_put, uri, content_type, creds)
 
+    # -- Bucket-admin enumeration (Tier-2): real S3 only, no local mode -------
+
+    async def get_bucket_admin_metrics(self, bucket_name: str) -> BucketAdminMetrics:
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._s3_bucket_admin_metrics, bucket_name, creds)
+
+    async def delete_bucket(self, bucket_name: str) -> None:
+        """Delete a bucket and ALL its contents. DESTRUCTIVE and irreversible.
+
+        S3 DeleteBucket requires an empty bucket, so this purges every object
+        (and all noncurrent versions + delete markers) first, then deletes the
+        bucket. Used by orphaned-resource cleanup.
+        """
+        creds = await self._get_credentials()
+        await asyncio.to_thread(self._s3_delete_bucket, bucket_name, creds)
+
+    def native_upload_client(self, credentials=None):
+        """Raw synchronous boto3 S3 client (transitional escape hatch), mirroring the
+        GCS adapter's native_upload_client for the reference-data upload helpers."""
+        return self._get_s3_client(credentials)
+
+    async def list_lifecycle_policies(self, prefix: str) -> list[dict]:
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._s3_list_lifecycle_policies, prefix, creds)
+
+    async def query_bucket_stats(self, prefix: str) -> list[dict]:
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._s3_query_bucket_stats, prefix, creds)
+
     # -- Local-mode object-store helpers (s3:// emulation) --------------------
 
     def _local_list_objects(self, uri_prefix: str, max_results: int | None) -> list[StoredObject]:
@@ -876,3 +924,97 @@ class S3StorageProvider(StorageProvider):
                     count += 1
             out.append((bucket_name, total_size, count, "STANDARD"))
         return out
+
+    def _s3_lifecycle_summaries(self, client, bucket_name: str) -> list[str]:
+        from botocore.exceptions import ClientError
+
+        try:
+            rules = client.get_bucket_lifecycle_configuration(Bucket=bucket_name).get("Rules", [])
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") == "NoSuchLifecycleConfiguration":
+                return []
+            raise
+        return _summarize_s3_lifecycle(rules)
+
+    def _s3_bucket_admin_metrics(self, bucket_name: str, creds) -> BucketAdminMetrics:
+        client = self._get_s3_client(creds)
+        total_size = 0
+        count = 0
+        for page in client.get_paginator("list_objects_v2").paginate(Bucket=bucket_name):
+            for obj in page.get("Contents", []):
+                total_size += obj.get("Size", 0)
+                count += 1
+        versioning = client.get_bucket_versioning(Bucket=bucket_name).get("Status") == "Enabled"
+        return BucketAdminMetrics(
+            size_bytes=total_size,
+            object_count=count,
+            # S3 has no bucket-level storage class (it is per-object); created_at is
+            # not available from a single bucket call (it needs ListBuckets), so it
+            # is left None here.
+            storage_class="STANDARD",
+            versioning_enabled=versioning,
+            lifecycle_summaries=self._s3_lifecycle_summaries(client, bucket_name),
+            created_at=None,
+        )
+
+    def _s3_delete_bucket(self, bucket_name: str, creds) -> None:
+        client = self._get_s3_client(creds)
+        # Purge every object plus all noncurrent versions + delete markers (each page
+        # holds <=1000, the delete_objects batch limit), then delete the empty bucket.
+        for page in client.get_paginator("list_object_versions").paginate(Bucket=bucket_name):
+            to_delete = [
+                {"Key": o["Key"], "VersionId": o["VersionId"]}
+                for o in (*page.get("Versions", []), *page.get("DeleteMarkers", []))
+            ]
+            if to_delete:
+                client.delete_objects(Bucket=bucket_name, Delete={"Objects": to_delete})
+        client.delete_bucket(Bucket=bucket_name)
+
+    def _s3_list_lifecycle_policies(self, prefix: str, creds) -> list[dict]:
+        client = self._get_s3_client(creds)
+        policies: list[dict] = []
+        # S3 ListBuckets has no server-side prefix filter, so match on bucket name.
+        for bucket in client.list_buckets().get("Buckets", []):
+            name = bucket["Name"]
+            if prefix and not name.startswith(prefix):
+                continue
+            rules = self._s3_lifecycle_summaries_raw(client, name)
+            policies.append({"bucket_name": name, "rules": rules, "enabled": len(rules) > 0})
+        return policies
+
+    def _s3_lifecycle_summaries_raw(self, client, bucket_name: str) -> list[dict]:
+        from botocore.exceptions import ClientError
+
+        try:
+            return client.get_bucket_lifecycle_configuration(Bucket=bucket_name).get("Rules", [])
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") == "NoSuchLifecycleConfiguration":
+                return []
+            raise
+
+    def _s3_query_bucket_stats(self, prefix: str, creds) -> list[dict]:
+        client = self._get_s3_client(creds)
+        results: list[dict] = []
+        for bucket in client.list_buckets().get("Buckets", []):
+            name = bucket["Name"]
+            if prefix and not name.startswith(prefix):
+                continue
+            total_bytes = 0
+            object_count = 0
+            by_class: dict[str, int] = {}
+            for page in client.get_paginator("list_objects_v2").paginate(Bucket=name):
+                for obj in page.get("Contents", []):
+                    size = obj.get("Size", 0)
+                    total_bytes += size
+                    object_count += 1
+                    sc = obj.get("StorageClass", "STANDARD")
+                    by_class[sc] = by_class.get(sc, 0) + size
+            results.append(
+                {
+                    "name": name,
+                    "total_bytes": total_bytes,
+                    "object_count": object_count,
+                    "by_storage_class": by_class,
+                }
+            )
+        return results
