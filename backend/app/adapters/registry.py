@@ -75,8 +75,10 @@ def _create_compute_notebook_adapters(
 def _create_storage_adapter(backend: str, session_factory=None) -> StorageProvider:
     """Instantiate the storage adapter for ``backend`` (resolved from cloud_provider).
 
-    s3 is recognized (POLICY aws -> s3) but unimplemented until Stage 6a; selecting
-    it fails clearly rather than silently falling back to a GCS provider.
+    s3 (POLICY aws -> s3) is the S3StorageProvider built in Stage 6a. It is
+    incomplete until every sub-block lands, but unreachable on a GCP install
+    (POLICY never resolves ``s3`` there, and combo validation fails closed on a
+    forced one), so a partial S3 provider cannot regress the live product.
     """
     if backend == "gcs":
         from app.adapters.storage.gcs import GcsStorageProvider
@@ -87,7 +89,9 @@ def _create_storage_adapter(backend: str, session_factory=None) -> StorageProvid
 
         return NfsStorageProvider()
     if backend == "s3":
-        raise ValidationError("Storage backend 's3' is not yet implemented (Stage 6a: S3StorageProvider).")
+        from app.adapters.storage.s3 import S3StorageProvider
+
+        return S3StorageProvider()
     raise ValidationError(f"Unknown storage backend '{backend}'. Valid options: {VALID_STORAGE_BACKENDS}")
 
 
