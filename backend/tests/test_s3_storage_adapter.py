@@ -546,3 +546,43 @@ class TestCollectOutputs:
         assert len(objs) == 1
         assert objs[0].filename == "out.txt"
         assert objs[0].storage_uri == "s3://bioaf-results-testorg/experiments/e1/pipeline-runs/r1/out.txt"
+
+
+# --- 6a.5b storage metrics ---------------------------------------------------
+
+
+class TestStorageMetrics:
+    @pytest.mark.asyncio
+    async def test_local_storage_metrics_structure(self, local_adapter):
+        metrics = await local_adapter.get_storage_metrics()
+        names = {b.name for b in metrics.buckets}
+        assert "bioaf-results-testorg" in names
+        assert metrics.total_size_gb > 0
+
+    @pytest.mark.asyncio
+    async def test_real_storage_metrics_sums_objects(self, s3_adapter, monkeypatch):
+        adapter, client = s3_adapter
+
+        async def fake_config():
+            return {"storage_deployed": "true", "raw_bucket_name": "bioaf-raw-x"}
+
+        monkeypatch.setattr(adapter, "_read_storage_config", fake_config)
+        page = {"Contents": [{"Key": "a", "Size": 1024**3}, {"Key": "b", "Size": 1024**3}]}  # 2 GiB
+        client.get_paginator.return_value.paginate.return_value = [page]
+        metrics = await adapter.get_storage_metrics()
+        assert len(metrics.buckets) == 1
+        assert metrics.buckets[0].name == "bioaf-raw-x"
+        assert metrics.buckets[0].object_count == 2
+        assert metrics.buckets[0].size_gb == 2.0
+        assert metrics.total_size_gb == 2.0
+
+    @pytest.mark.asyncio
+    async def test_real_storage_metrics_requires_deployed(self, s3_adapter, monkeypatch):
+        adapter, _ = s3_adapter
+
+        async def fake_config():
+            return {"storage_deployed": "false"}
+
+        monkeypatch.setattr(adapter, "_read_storage_config", fake_config)
+        with pytest.raises(ValidationError):
+            await adapter.get_storage_metrics()

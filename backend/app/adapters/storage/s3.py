@@ -29,7 +29,9 @@ from app.adapters.base import StorageProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.exceptions import ValidationError
 from app.adapters.models import (
+    BucketMetrics,
     ObjectMetadata,
+    StorageMetrics,
     StorageObjectNotFound,
     StorageStore,
     StoredObject,
@@ -111,6 +113,23 @@ _S3_PRESIGN_METHODS = {
     "HEAD": "head_object",
 }
 
+# The logical stores enumerated for storage metrics (parity with the GCS adapter's
+# _METRICS_STORES: BACKUPS is not a managed-metrics bucket).
+_METRICS_STORES = (
+    StorageStore.INGEST,
+    StorageStore.RAW,
+    StorageStore.WORKING,
+    StorageStore.RESULTS,
+    StorageStore.REFERENCES,
+    StorageStore.LITERATURE,
+    StorageStore.CONFIG_BACKUPS,
+)
+
+# Rough S3 Standard $/GiB-month for the dashboard cost estimate. Cost is an
+# ALLOWED-DIVERGENCE surface (provider-reported), so this differs from the GCS
+# adapter's ~0.026 by design.
+_S3_STANDARD_COST_PER_GB = 0.023
+
 
 class S3StorageProvider(StorageProvider):
     """S3 storage backend with local mode for development."""
@@ -188,9 +207,13 @@ class S3StorageProvider(StorageProvider):
         objs = await self.list_objects(prefix_uri)
         return [o for o in objs if o.filename]
 
-    async def get_storage_metrics(self):
-        # Storage metrics (local + real-S3) lands in sub-block 6a.5b.
-        raise NotImplementedError("S3 get_storage_metrics is implemented in Stage 6a.5b")
+    async def get_storage_metrics(self) -> StorageMetrics:
+        d = self._local_storage_metrics() if self.is_local else await self._s3_storage_metrics()
+        return StorageMetrics(
+            buckets=[BucketMetrics(**b) for b in d.get("buckets", [])],
+            total_size_gb=d.get("total_size_gb", 0.0),
+            total_cost_monthly_usd=d.get("total_cost_monthly_usd", 0.0),
+        )
 
     def generate_stage_commands(self, file_records: list[dict], working_dir: str) -> list[str]:
         """Generate ``aws s3 cp`` commands for an init container to stage inputs.
@@ -559,6 +582,66 @@ class S3StorageProvider(StorageProvider):
                     )
         return collected
 
+    def _local_storage_metrics(self) -> dict:
+        from app.config import settings
+
+        total_monthly = settings.local_storage_cost_monthly
+        # Distribute proportionally across buckets (raw ~55%, working ~27%, results ~18%),
+        # parity with the GCS adapter's local metrics.
+        raw_cost = round(total_monthly * 0.545, 4)
+        working_cost = round(total_monthly * 0.273, 4)
+        results_cost = round(total_monthly - raw_cost - working_cost, 4)
+        return {
+            "buckets": [
+                {
+                    "name": self.ingest_bucket,
+                    "size_gb": 0.0,
+                    "object_count": 0,
+                    "storage_class": "STANDARD",
+                    "cost_monthly_usd": 0.0,
+                },
+                {
+                    "name": self.raw_bucket,
+                    "size_gb": 2.5,
+                    "object_count": 45,
+                    "storage_class": "STANDARD",
+                    "cost_monthly_usd": raw_cost,
+                },
+                {
+                    "name": self.working_bucket,
+                    "size_gb": 1.2,
+                    "object_count": 120,
+                    "storage_class": "STANDARD",
+                    "cost_monthly_usd": working_cost,
+                },
+                {
+                    "name": self.results_bucket,
+                    "size_gb": 0.8,
+                    "object_count": 35,
+                    "storage_class": "STANDARD",
+                    "cost_monthly_usd": results_cost,
+                },
+                {
+                    "name": self.config_backups_bucket,
+                    "size_gb": 0.01,
+                    "object_count": 5,
+                    "storage_class": "STANDARD_IA",
+                    "cost_monthly_usd": 0.0,
+                },
+            ],
+            "total_size_gb": 4.51,
+            "total_cost_monthly_usd": total_monthly,
+        }
+
+    async def _read_storage_config(self) -> dict[str, str]:
+        """Read storage_deployed + the per-store bucket-name keys (parity with GCS)."""
+        from app.database import async_session_factory
+        from app.platform.platform_config_service import PlatformConfigService
+
+        keys = ["storage_deployed", *[f"{s.value}_bucket_name" for s in _METRICS_STORES]]
+        async with async_session_factory() as session:
+            return await PlatformConfigService.get_many(session, keys)
+
     # -- boto3-backed helpers (run in a thread; real S3 only) -----------------
 
     def _s3_read_bytes(self, uri: str, creds) -> bytes:
@@ -741,3 +824,55 @@ class S3StorageProvider(StorageProvider):
             Params={"Bucket": bucket, "Key": key, "ContentType": content_type},
             ExpiresIn=3600,
         )
+
+    async def _s3_storage_metrics(self) -> dict:
+        config = await self._read_storage_config()
+        if config.get("storage_deployed", "false") != "true":
+            raise ValidationError("Storage infrastructure has not been deployed yet")
+        creds = await self._get_credentials()
+        raw = await asyncio.to_thread(self._s3_collect_bucket_metrics, config, creds)
+        buckets: list[dict] = []
+        total_gb = 0.0
+        total_cost = 0.0
+        for name, size_bytes, object_count, storage_class in raw:
+            size_gb = size_bytes / (1024**3)
+            cost = round(size_gb * _S3_STANDARD_COST_PER_GB, 2)
+            total_gb += size_gb
+            total_cost += cost
+            buckets.append(
+                {
+                    "name": name,
+                    "size_gb": round(size_gb, 2),
+                    "object_count": object_count,
+                    "storage_class": storage_class,
+                    "cost_monthly_usd": cost,
+                }
+            )
+        return {
+            "buckets": buckets,
+            "total_size_gb": round(total_gb, 2),
+            "total_cost_monthly_usd": round(total_cost, 2),
+        }
+
+    def _s3_collect_bucket_metrics(self, config: dict, creds) -> list[tuple]:
+        """Enumerate configured buckets and return (name, size_bytes, count, class).
+
+        Sums object sizes via list_objects_v2 (streamed by paginator), the S3
+        analog of the GCS adapter's blob enumeration. S3 has no bucket-level storage
+        class (it is per-object), so the bucket class is reported as STANDARD; a
+        CloudWatch BucketSizeBytes path is a later optimization.
+        """
+        client = self._get_s3_client(creds)
+        out: list[tuple] = []
+        for store in _METRICS_STORES:
+            bucket_name = config.get(f"{store.value}_bucket_name", "")
+            if not bucket_name or bucket_name == "null":
+                continue
+            total_size = 0
+            count = 0
+            for page in client.get_paginator("list_objects_v2").paginate(Bucket=bucket_name):
+                for obj in page.get("Contents", []):
+                    total_size += obj.get("Size", 0)
+                    count += 1
+            out.append((bucket_name, total_size, count, "STANDARD"))
+        return out
