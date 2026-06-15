@@ -65,6 +65,28 @@ class TerraformCloud(ABC):
         cleanup is a no-op.
         """
 
+    @abstractmethod
+    def is_configured(self, config: dict) -> bool:
+        """Whether this cloud's deploy identity/credentials are configured.
+
+        The bootstrap gate: GCP reads the gcp_credentials_configured flag; AWS
+        checks the account identity is set (the VM's instance profile is ambient).
+        """
+
+    @abstractmethod
+    def not_configured_message(self) -> str:
+        """Operator-facing message raised when ``is_configured`` is False."""
+
+    def lock_object_path(self, module_name: str | None) -> str | None:
+        """State-store object key for ``module_name``'s lock, or None when this
+        cloud has no executor-deletable lock object.
+
+        The executor deletes this object via the storage adapter after a failed or
+        abandoned run. Default None (no deletable lock); each cloud overrides for
+        its remote-state backend's lock convention.
+        """
+        return None
+
 
 class AwsTerraformCloud(TerraformCloud):
     """AWS column: AWS modules, S3 remote state, ambient instance-profile creds."""
@@ -133,6 +155,21 @@ class AwsTerraformCloud(TerraformCloud):
         env = {"AWS_REGION": region, "AWS_DEFAULT_REGION": region}
         return env, _noop_cleanup
 
+    def is_configured(self, config: dict) -> bool:
+        # The account identity gates bootstrap; the VM's instance profile supplies
+        # the actual credentials ambiently (no stored key to validate).
+        return bool(config.get("aws_account_id"))
+
+    def not_configured_message(self) -> str:
+        return "AWS is not configured. Set the AWS account before bootstrapping."
+
+    def lock_object_path(self, module_name: str | None) -> str | None:
+        # Deferred: Terraform's S3 backend with use_lockfile writes a <key>.tflock
+        # object whose deletion path differs from GCS; faithful S3 lock cleanup is
+        # a separate follow-up (see cleanup-items). Until then, no executor-driven
+        # lock deletion on AWS, so this returns None and lock cleanup no-ops.
+        return None
+
 
 class GcpTerraformCloud(TerraformCloud):
     """GCP column: delegates to the executor's existing GCP logic (behavior-
@@ -198,6 +235,19 @@ class GcpTerraformCloud(TerraformCloud):
 
         env, cleanup = await GCPCredentialInjector.build_env(config)
         return env, cleanup
+
+    def is_configured(self, config: dict) -> bool:
+        return config.get("gcp_credentials_configured", "false") == "true"
+
+    def not_configured_message(self) -> str:
+        return "GCP credentials are not configured. Configure GCP settings before bootstrapping."
+
+    def lock_object_path(self, module_name: str | None) -> str | None:
+        # Unchanged from the executor's previous hardcoded path: the GCS backend
+        # writes the lock at "<prefix>/default.tflock" and prefix == module_name.
+        if not module_name:
+            return None
+        return f"{module_name}/default.tflock"
 
 
 def get_terraform_cloud(cloud_provider: str | None) -> TerraformCloud:

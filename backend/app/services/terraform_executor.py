@@ -1,10 +1,15 @@
 """Phase 17 Terraform Executor Service.
 
 Provides real-world Terraform plan, apply, and bootstrap operations with:
-- GCP credential injection from platform_config
+- Per-cloud deploy mechanics behind the TerraformCloud seam (modules dir, tfvars,
+  remote-state backend config, provider credentials) - GCP or AWS
 - Real-time progress streaming via async generators
 - Concurrency lock with stale run recovery
-- Foundation bootstrap that creates the GCS state bucket
+- Foundation bootstrap that creates the remote-state bucket
+
+The run lifecycle (run records, plan/apply, progress, recovery) is identical on
+every cloud; the cloud-divergent bits are resolved once per operation via
+``_resolve_cloud_and_config`` and delegated to ``app.services.terraform_cloud``.
 """
 
 from __future__ import annotations
@@ -18,7 +23,7 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import AsyncIterator
+from typing import TYPE_CHECKING, AsyncIterator
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,13 +34,12 @@ from app.services.activity_feed_service import ActivityFeedService
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import TERRAFORM_APPLY_FAILURE
-from app.adapters.credentials.credential_injector import GCPCredentialInjector
 from app.services.plan_parser import TerraformPlanParser
 
-logger = logging.getLogger("bioaf.terraform_executor")
+if TYPE_CHECKING:
+    from app.services.terraform_cloud import TerraformCloud
 
-# Path inside the container / local dev where Terraform modules live
-MODULES_DIR = Path("/app/terraform/modules")
+logger = logging.getLogger("bioaf.terraform_executor")
 
 # Safety ceiling: if a process runs longer than this, mark failed regardless.
 # This is a last-resort safeguard, not the primary recovery mechanism.
@@ -65,7 +69,11 @@ class TerraformProgressEvent:
 
 
 class TerraformExecutor:
-    """Execute Terraform operations against real GCP infrastructure."""
+    """Execute Terraform operations against real cloud infrastructure (GCP or AWS).
+
+    The per-cloud differences are delegated to the TerraformCloud seam; the executor
+    itself is cloud-blind.
+    """
 
     # ------------------------------------------------------------------
     # Public API
@@ -82,7 +90,7 @@ class TerraformExecutor:
         Steps:
         1. Recover stale runs then check concurrency lock
         2. Create a TerraformRun record
-        3. Read GCP config from platform_config
+        3. Resolve the cloud + read its deploy config from platform_config
         4. Copy module to a temp working directory
         5. Run `terraform init` and `terraform plan -out=tfplan -json`
         6. Run `terraform show -json tfplan` to get structured plan output
@@ -100,16 +108,16 @@ class TerraformExecutor:
         session.add(run)
         await session.flush()
 
-        config = await TerraformExecutor._read_gcp_config(session)
+        cloud, config = await TerraformExecutor._resolve_cloud_and_config(session)
 
         try:
-            work_dir = await asyncio.to_thread(TerraformExecutor._prepare_work_dir, module_name)
-            tfvars = TerraformExecutor._write_tfvars(work_dir, module_name, config)
+            work_dir = await asyncio.to_thread(TerraformExecutor._prepare_work_dir, module_name, cloud.modules_dir())
+            tfvars = cloud.write_tfvars(work_dir, module_name, config)
             run.tfvars_json = tfvars
 
-            env, cleanup = await GCPCredentialInjector.build_env(config)
+            env, cleanup = await cloud.build_provider_env(config)
             try:
-                await TerraformExecutor._run_init(work_dir, env, config, module_name=module_name)
+                await TerraformExecutor._run_init(work_dir, env, config, cloud, module_name=module_name)
                 plan_json = await TerraformExecutor._run_plan_capture(work_dir, env)
                 parsed = TerraformPlanParser.parse(plan_json)
 
@@ -175,7 +183,7 @@ class TerraformExecutor:
         run.status = "applying"
         await session.flush()
 
-        config = await TerraformExecutor._read_gcp_config(session)
+        cloud, config = await TerraformExecutor._resolve_cloud_and_config(session)
         module_name = run.module_name or "foundation"
         resources_total = run.resources_planned or 0
         resources_completed = 0
@@ -196,15 +204,15 @@ class TerraformExecutor:
                 extra={"addresses": planned_addrs},
             )
 
-        env, cleanup = await GCPCredentialInjector.build_env(config)
+        env, cleanup = await cloud.build_provider_env(config)
         log_lines: list[str] = []
         process = None
         try:
-            work_dir = await asyncio.to_thread(TerraformExecutor._prepare_work_dir, module_name)
-            tfvars = TerraformExecutor._write_tfvars(work_dir, module_name, config)
+            work_dir = await asyncio.to_thread(TerraformExecutor._prepare_work_dir, module_name, cloud.modules_dir())
+            tfvars = cloud.write_tfvars(work_dir, module_name, config)
             if not run.tfvars_json:
                 run.tfvars_json = tfvars
-            await TerraformExecutor._run_init(work_dir, env, config, module_name=module_name)
+            await TerraformExecutor._run_init(work_dir, env, config, cloud, module_name=module_name)
 
             process = await asyncio.create_subprocess_exec(
                 *TerraformExecutor._build_apply_args(targets),
@@ -426,18 +434,18 @@ class TerraformExecutor:
         user_id: int,
         org_id: int | None = None,
     ) -> AsyncIterator[TerraformProgressEvent]:
-        """Bootstrap GCS state bucket via the foundation module.
+        """Bootstrap the remote-state bucket via the foundation module.
 
         Steps:
-        1. Validate GCP is configured and not already initialized
+        1. Validate the cloud is configured (seam) and not already initialized
         2. Plan + apply the foundation module with local backend
         3. Run `terraform output -json` to get the state bucket name
         4. Update platform_config: terraform_state_bucket, terraform_initialized
         """
-        config = await TerraformExecutor._read_gcp_config(session)
+        cloud, config = await TerraformExecutor._resolve_cloud_and_config(session)
 
-        if config.get("gcp_credentials_configured", "false") != "true":
-            raise ValidationError("GCP credentials are not configured. Configure GCP settings before bootstrapping.")
+        if not cloud.is_configured(config):
+            raise ValidationError(cloud.not_configured_message())
 
         if config.get("terraform_initialized", "false") == "true":
             raise ConflictError("Infrastructure is already initialized. terraform_initialized = true.")
@@ -447,15 +455,15 @@ class TerraformExecutor:
             message="Starting foundation bootstrap...",
         )
 
-        env, cleanup = await GCPCredentialInjector.build_env(config)
+        env, cleanup = await cloud.build_provider_env(config)
         work_dir = None
 
         try:
-            work_dir = await asyncio.to_thread(TerraformExecutor._prepare_work_dir, "foundation")
-            TerraformExecutor._write_tfvars(work_dir, "foundation", config)
+            work_dir = await asyncio.to_thread(TerraformExecutor._prepare_work_dir, "foundation", cloud.modules_dir())
+            cloud.write_tfvars(work_dir, "foundation", config)
 
             yield TerraformProgressEvent(event_type="progress", message="Running terraform init...")
-            await TerraformExecutor._run_init(work_dir, env, config, local_backend=True)
+            await TerraformExecutor._run_init(work_dir, env, config, cloud, local_backend=True)
 
             yield TerraformProgressEvent(event_type="progress", message="Running terraform plan...")
             plan_json = await TerraformExecutor._run_plan_capture(work_dir, env)
@@ -668,18 +676,18 @@ class TerraformExecutor:
         session.add(run)
         await session.flush()
 
-        config = await TerraformExecutor._read_gcp_config(session)
+        cloud, config = await TerraformExecutor._resolve_cloud_and_config(session)
         resources_completed = 0
         resources_total = 0
 
-        env, cleanup = await GCPCredentialInjector.build_env(config)
+        env, cleanup = await cloud.build_provider_env(config)
         log_lines: list[str] = []
         process = None
         try:
-            work_dir = await asyncio.to_thread(TerraformExecutor._prepare_work_dir, module_name)
-            tfvars = TerraformExecutor._write_tfvars(work_dir, module_name, config)
+            work_dir = await asyncio.to_thread(TerraformExecutor._prepare_work_dir, module_name, cloud.modules_dir())
+            tfvars = cloud.write_tfvars(work_dir, module_name, config)
             run.tfvars_json = tfvars
-            await TerraformExecutor._run_init(work_dir, env, config, module_name=module_name)
+            await TerraformExecutor._run_init(work_dir, env, config, cloud, module_name=module_name)
 
             process = await asyncio.create_subprocess_exec(
                 "terraform",
@@ -837,13 +845,13 @@ class TerraformExecutor:
 
         Raises RuntimeError if the init or output command fails.
         """
-        config = await TerraformExecutor._read_gcp_config(session)
-        env, cleanup = await GCPCredentialInjector.build_env(config)
+        cloud, config = await TerraformExecutor._resolve_cloud_and_config(session)
+        env, cleanup = await cloud.build_provider_env(config)
         work_dir = None
         try:
-            work_dir = await asyncio.to_thread(TerraformExecutor._prepare_work_dir, module_name)
-            TerraformExecutor._write_tfvars(work_dir, module_name, config)
-            await TerraformExecutor._run_init(work_dir, env, config, module_name=module_name)
+            work_dir = await asyncio.to_thread(TerraformExecutor._prepare_work_dir, module_name, cloud.modules_dir())
+            cloud.write_tfvars(work_dir, module_name, config)
+            await TerraformExecutor._run_init(work_dir, env, config, cloud, module_name=module_name)
 
             output_result = await asyncio.to_thread(
                 subprocess.run,
@@ -893,9 +901,13 @@ class TerraformExecutor:
         return base
 
     @staticmethod
-    def _prepare_work_dir(module_name: str) -> Path:
-        """Copy module files to a fresh temp directory and return its Path."""
-        src = MODULES_DIR / module_name
+    def _prepare_work_dir(module_name: str, modules_dir: Path) -> Path:
+        """Copy a module's files from ``modules_dir`` to a fresh temp dir.
+
+        ``modules_dir`` is the cloud's modules root (the seam's ``modules_dir()``):
+        GCP modules at /app/terraform/modules, AWS at /app/terraform/aws/modules.
+        """
+        src = modules_dir / module_name
         tmp = Path(tempfile.mkdtemp(prefix=f"bioaf_tf_{module_name}_"))
         if src.exists():
             shutil.copytree(str(src), str(tmp), dirs_exist_ok=True)
@@ -1017,21 +1029,18 @@ class TerraformExecutor:
         work_dir: Path,
         env: dict,
         config: dict,
+        cloud: TerraformCloud,
         local_backend: bool = False,
         module_name: str | None = None,
     ) -> None:
-        """Run `terraform init` in work_dir."""
+        """Run `terraform init` in work_dir with the cloud's backend-config flags.
+
+        The remote-state backend differs per cloud (GCS bucket + prefix vs S3
+        bucket + key + region + native locking), so the backend-config flags come
+        from the seam; GCP returns the same bucket/prefix flags as before.
+        """
         cmd = ["terraform", "init", "-no-color", "-input=false"]
-        if local_backend:
-            cmd += ["-backend=false"]
-        else:
-            bucket = config.get("terraform_state_bucket")
-            if bucket:
-                cmd += [f"-backend-config=bucket={bucket}"]
-            # Each module gets its own state prefix so they don't
-            # clobber each other's terraform.tfstate in the bucket.
-            if module_name:
-                cmd += [f"-backend-config=prefix={module_name}"]
+        cmd += cloud.backend_init_args(config, module_name, local_backend)
 
         result = await asyncio.to_thread(
             subprocess.run,
@@ -1078,50 +1087,34 @@ class TerraformExecutor:
             return {}
 
     @staticmethod
-    async def _read_gcp_config(session: AsyncSession) -> dict:
-        """Read GCP and terraform keys from platform_config."""
-        keys = [
-            "gcp_credentials_configured",
-            "gcp_credential_source",
-            "gcp_project_id",
-            "gcp_region",
-            "gcp_zone",
-            "gcp_service_account_key",
-            "gcp_service_account_email",
-            "gcp_bootstrap_sa_email",
-            "bioaf_app_sa_email",
-            "org_slug",
-            "deploy_suffix",
-            "storage_stack_uid",
-            "compute_stack_uid",
-            "terraform_initialized",
-            "terraform_state_bucket",
-            "backend_service_account_email",
-            "k8s_pipeline_machine_type",
-            "k8s_pipeline_max_nodes",
-            "k8s_pipeline_use_spot",
-            "k8s_interactive_machine_type",
-            "k8s_interactive_max_nodes",
-        ]
-        from app.platform.platform_config_service import PlatformConfigService
+    async def _resolve_cloud_and_config(session: AsyncSession) -> tuple[TerraformCloud, dict]:
+        """Resolve the install's TerraformCloud seam and read its deploy config.
 
-        config = await PlatformConfigService.get_many(session, keys)
-        # vm_default mode: ensure the credential injector sees the bootstrap
-        # impersonation target. Falls back to the legacy email field for
-        # installs that pre-date SA hardening.
-        if config.get("gcp_credential_source", "vm_default") == "vm_default":
-            target = config.get("gcp_bootstrap_sa_email") or config.get("gcp_service_account_email")
-            if target:
-                config["gcp_bootstrap_sa_email"] = target
-        return config
+        Reads cloud_provider (default gcp for legacy installs), selects the matching
+        TerraformCloud, reads that cloud's platform_config keys, and applies the
+        cloud's normalization. On a GCP install this returns the exact same key set
+        and the vm_default bootstrap-SA fill the executor did inline before, so GCP
+        behavior is unchanged; an AWS install gets the AWS key set instead.
+        """
+        from app.platform.cloud_provider import get_cloud_provider
+        from app.platform.platform_config_service import PlatformConfigService
+        from app.services.terraform_cloud import get_terraform_cloud
+
+        cloud = get_terraform_cloud(await get_cloud_provider(session))
+        config = await PlatformConfigService.get_many(session, cloud.config_keys())
+        return cloud, cloud.postprocess_config(config)
 
     @staticmethod
     async def _auto_cleanup_lock(session: AsyncSession, module_name: str) -> None:
-        """Delete the GCS lock file for a module after a failed run."""
-        config = await TerraformExecutor._read_gcp_config(session)
+        """Delete the remote-state lock object for a module after a failed run.
+
+        The lock object key is the cloud's concern (the seam's lock_object_path); a
+        cloud with no executor-deletable lock object (None) makes this a no-op.
+        """
+        cloud, config = await TerraformExecutor._resolve_cloud_and_config(session)
         state_bucket = config.get("terraform_state_bucket", "")
-        if state_bucket:
-            lock_path = f"{module_name}/default.tflock"
+        lock_path = cloud.lock_object_path(module_name)
+        if state_bucket and lock_path:
             credentials = await TerraformExecutor._load_gcs_credentials(session)
             await TerraformExecutor._delete_gcs_lock_file(state_bucket, lock_path, credentials)
 
@@ -1178,13 +1171,19 @@ class TerraformExecutor:
                 runs_to_fail.append((run_id, module_name))
 
         if runs_to_fail:
-            credentials = await TerraformExecutor._load_gcs_credentials(session)
-            config = await TerraformExecutor._read_gcp_config(session)
+            cloud, config = await TerraformExecutor._resolve_cloud_and_config(session)
             state_bucket = config.get("terraform_state_bucket", "")
+            # Lock cleanup is per-cloud; the GCS credential load is GCP-specific and
+            # only needed when there is a deletable lock object (None on AWS today).
+            credentials = None
+            creds_loaded = False
 
             for run_id, module_name in runs_to_fail:
-                if state_bucket and module_name:
-                    lock_path = f"{module_name}/default.tflock"
+                lock_path = cloud.lock_object_path(module_name) if module_name else None
+                if state_bucket and lock_path:
+                    if not creds_loaded:
+                        credentials = await TerraformExecutor._load_gcs_credentials(session)
+                        creds_loaded = True
                     await TerraformExecutor._delete_gcs_lock_file(state_bucket, lock_path, credentials)
                 await session.execute(
                     text("""
@@ -1221,12 +1220,12 @@ class TerraformExecutor:
         if run.status not in abandonable:
             raise StateError(f"Run {run_id} in status '{run.status}' cannot be abandoned")
 
-        config = await TerraformExecutor._read_gcp_config(session)
+        cloud, config = await TerraformExecutor._resolve_cloud_and_config(session)
         state_bucket = config.get("terraform_state_bucket", "")
         module_name = run.module_name or "foundation"
-        lock_path = f"{module_name}/default.tflock"
+        lock_path = cloud.lock_object_path(module_name)
 
-        if state_bucket:
+        if state_bucket and lock_path:
             credentials = await TerraformExecutor._load_gcs_credentials(session)
             await TerraformExecutor._delete_gcs_lock_file(state_bucket, lock_path, credentials)
 

@@ -96,6 +96,21 @@ class TestAwsTerraformCloud:
         # no credential temp files to clean up (instance profile / IMDS)
         assert await cleanup() is None
 
+    def test_is_configured_requires_account_id(self):
+        # AWS is "configured" when the account identity is set (the bootstrap
+        # gate's AWS analog of GCP's gcp_credentials_configured flag).
+        assert self.cloud.is_configured({"aws_account_id": "123456789012"}) is True
+        assert self.cloud.is_configured({}) is False
+        assert self.cloud.is_configured({"aws_account_id": ""}) is False
+
+    def test_not_configured_message_mentions_aws(self):
+        assert "AWS" in self.cloud.not_configured_message()
+
+    def test_lock_object_path_is_deferred_none(self):
+        # S3 native (use_lockfile) lock deletion is a deferred follow-up, so there
+        # is no executor-deletable lock object yet and lock cleanup no-ops on AWS.
+        assert self.cloud.lock_object_path("storage") is None
+
 
 # --- GCP column (behavior-preserving) ---------------------------------------
 
@@ -126,3 +141,18 @@ class TestGcpTerraformCloud:
             {"gcp_credential_source": "vm_default", "gcp_service_account_email": "sa@x.iam"}
         )
         assert cfg["gcp_bootstrap_sa_email"] == "sa@x.iam"
+
+    def test_is_configured_reads_gcp_flag(self):
+        # Behavior-preserving: the same predicate the executor used inline.
+        assert self.cloud.is_configured({"gcp_credentials_configured": "true"}) is True
+        assert self.cloud.is_configured({"gcp_credentials_configured": "false"}) is False
+        assert self.cloud.is_configured({}) is False
+
+    def test_not_configured_message_mentions_gcp(self):
+        assert "GCP" in self.cloud.not_configured_message()
+
+    def test_lock_object_path_is_gcs_default_tflock(self):
+        # The GCS lock object the executor deletes after a failed/abandoned run,
+        # unchanged from the previous hardcoded "{module}/default.tflock".
+        assert self.cloud.lock_object_path("compute") == "compute/default.tflock"
+        assert self.cloud.lock_object_path(None) is None

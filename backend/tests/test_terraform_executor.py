@@ -22,6 +22,7 @@ from sqlalchemy import text
 
 from app.exceptions import ConflictError, NotFoundError, StateError, ValidationError
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
+from app.services.terraform_cloud import GcpTerraformCloud
 from app.services.bootstrap_roles import seed_builtin_roles
 
 
@@ -961,6 +962,7 @@ async def test_run_init_passes_backend_config_bucket():
             work_dir=Path("/tmp/fake"),
             env={},
             config=config,
+            cloud=GcpTerraformCloud(),
             local_backend=False,
         )
 
@@ -988,6 +990,7 @@ async def test_run_init_local_backend_skips_bucket_config():
             work_dir=Path("/tmp/fake"),
             env={},
             config=config,
+            cloud=GcpTerraformCloud(),
             local_backend=True,
         )
 
@@ -1015,6 +1018,7 @@ async def test_run_init_no_bucket_in_config_skips_backend_config():
             work_dir=Path("/tmp/fake"),
             env={},
             config=config,
+            cloud=GcpTerraformCloud(),
             local_backend=False,
         )
 
@@ -1041,6 +1045,7 @@ async def test_run_init_passes_prefix_for_module_name():
             work_dir=Path("/tmp/fake"),
             env={},
             config=config,
+            cloud=GcpTerraformCloud(),
             module_name="storage",
         )
 
@@ -1068,9 +1073,45 @@ async def test_run_init_no_prefix_without_module_name():
             work_dir=Path("/tmp/fake"),
             env={},
             config=config,
+            cloud=GcpTerraformCloud(),
         )
 
     assert captured_cmd is not None
+    assert not any("prefix" in c for c in captured_cmd)
+
+
+@pytest.mark.asyncio
+async def test_run_init_delegates_backend_args_to_cloud_seam():
+    """_run_init takes its backend-config flags from the cloud seam. An AWS cloud
+    yields S3 bucket/key/region/native-lock flags, not the GCS bucket/prefix pair
+    (the GCP column is covered by the tests above), proving the executor is
+    cloud-blind here and GCP stays on the prefix shape it always used."""
+    from app.services.terraform_cloud import AwsTerraformCloud
+
+    config = {"terraform_state_bucket": "bioaf-state", "aws_region": "us-west-1"}
+    captured_cmd = None
+
+    def _fake_run(cmd, **kwargs):
+        nonlocal captured_cmd
+        captured_cmd = cmd
+        result = MagicMock()
+        result.returncode = 0
+        result.stderr = ""
+        return result
+
+    with patch("app.services.terraform_executor.subprocess.run", side_effect=_fake_run):
+        await TerraformExecutor._run_init(
+            work_dir=Path("/tmp/fake"),
+            env={},
+            config=config,
+            cloud=AwsTerraformCloud(),
+            module_name="storage",
+        )
+
+    assert captured_cmd is not None
+    assert "-backend-config=bucket=bioaf-state" in captured_cmd
+    assert "-backend-config=key=storage/terraform.tfstate" in captured_cmd
+    assert "-backend-config=use_lockfile=true" in captured_cmd
     assert not any("prefix" in c for c in captured_cmd)
 
 
@@ -1489,13 +1530,14 @@ async def test_recover_stale_runs_skips_live_process(session):
 
 
 # ---------------------------------------------------------------------------
-# SA hardening: _read_gcp_config returns gcp_bootstrap_sa_email
+# SA hardening: the cloud/config resolver returns gcp_bootstrap_sa_email
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_read_gcp_config_includes_bootstrap_sa_email(session):
-    """_read_gcp_config selects the new gcp_bootstrap_sa_email key."""
+async def test_resolve_cloud_and_config_includes_bootstrap_sa_email(session):
+    """On a GCP install (no cloud_provider row), the resolver picks the GCP cloud
+    and reads its key set, including the gcp_bootstrap_sa_email key."""
     await session.execute(
         text(
             "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
@@ -1507,7 +1549,8 @@ async def test_read_gcp_config_includes_bootstrap_sa_email(session):
     )
     await session.commit()
 
-    config = await TerraformExecutor._read_gcp_config(session)
+    cloud, config = await TerraformExecutor._resolve_cloud_and_config(session)
+    assert isinstance(cloud, GcpTerraformCloud)
     assert config.get("gcp_bootstrap_sa_email") == "bioaf-bootstrap@my-project.iam.gserviceaccount.com"
 
 
@@ -1551,7 +1594,7 @@ async def test_run_plan_passes_bootstrap_sa_email_to_build_env(session):
     with (
         patch("app.services.terraform_executor.subprocess.run", side_effect=mock_run),
         patch(
-            "app.services.terraform_executor.GCPCredentialInjector.build_env",
+            "app.adapters.credentials.credential_injector.GCPCredentialInjector.build_env",
             side_effect=spy_build_env,
         ),
         _patch_work_dir(),
