@@ -16,11 +16,14 @@ later 6a sub-blocks alongside their tests.
 
 from __future__ import annotations
 
+import io
+from unittest.mock import MagicMock
+
 import pytest
 
 from app.exceptions import ValidationError
 
-from app.adapters.models import StorageStore
+from app.adapters.models import StorageObjectNotFound, StorageStore
 from app.adapters.storage.s3 import S3StorageProvider
 
 
@@ -31,6 +34,18 @@ def local_adapter(monkeypatch, tmp_path):
 
     monkeypatch.setattr(s3, "LOCAL_DATA_ROOT", str(tmp_path))
     return S3StorageProvider(org_slug="testorg")
+
+
+@pytest.fixture
+def s3_adapter(monkeypatch):
+    """An S3-mode adapter whose boto3 client is a MagicMock (no real AWS),
+    mirroring how the GCS tests patch ``_get_gcs_client``."""
+    monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
+    adapter = S3StorageProvider(org_slug="testorg")
+    adapter._region = "us-east-1"
+    client = MagicMock()
+    monkeypatch.setattr(adapter, "_get_s3_client", lambda credentials=None: client)
+    return adapter, client
 
 
 # --- URI / scheme methods (s3://) -------------------------------------------
@@ -132,3 +147,130 @@ class TestRegistryWiring:
 
         adapter = _create_storage_adapter("s3")
         assert isinstance(adapter, S3StorageProvider)
+
+
+# --- 6a.2 core object ops: local-mode round-trips (real behavior, no boto3) --
+
+
+class TestLocalObjectOps:
+    @pytest.mark.asyncio
+    async def test_write_then_read_bytes(self, local_adapter):
+        uri = local_adapter.build_uri("bioaf-raw-testorg", "a/b.bin")
+        await local_adapter.write_bytes(uri, b"hello")
+        assert await local_adapter.read_bytes(uri) == b"hello"
+
+    @pytest.mark.asyncio
+    async def test_write_then_read_text_roundtrips_unicode(self, local_adapter):
+        uri = local_adapter.build_uri("b", "t.txt")
+        await local_adapter.write_text(uri, "héllo")
+        assert await local_adapter.read_text(uri) == "héllo"
+
+    @pytest.mark.asyncio
+    async def test_read_missing_raises_not_found(self, local_adapter):
+        with pytest.raises(StorageObjectNotFound):
+            await local_adapter.read_bytes(local_adapter.build_uri("b", "missing"))
+
+    @pytest.mark.asyncio
+    async def test_exists_reflects_presence(self, local_adapter):
+        uri = local_adapter.build_uri("b", "e.txt")
+        assert await local_adapter.exists(uri) is False
+        await local_adapter.write_bytes(uri, b"x")
+        assert await local_adapter.exists(uri) is True
+
+    @pytest.mark.asyncio
+    async def test_delete_is_idempotent_and_removes(self, local_adapter):
+        uri = local_adapter.build_uri("b", "d.txt")
+        await local_adapter.delete(uri)  # missing object is not an error
+        await local_adapter.write_bytes(uri, b"x")
+        await local_adapter.delete(uri)
+        assert await local_adapter.exists(uri) is False
+
+    @pytest.mark.asyncio
+    async def test_upload_then_download_filename(self, local_adapter, tmp_path):
+        src = tmp_path / "src.txt"
+        src.write_bytes(b"payload")
+        uri = local_adapter.build_uri("b", "up.txt")
+        await local_adapter.upload_filename(uri, str(src))
+        dest = tmp_path / "nested" / "out.txt"
+        await local_adapter.download_to_filename(uri, str(dest))
+        assert dest.read_bytes() == b"payload"
+
+    @pytest.mark.asyncio
+    async def test_upload_then_download_fileobj(self, local_adapter):
+        uri = local_adapter.build_uri("b", "fo.bin")
+        await local_adapter.upload_file(uri, io.BytesIO(b"streamed"))
+        buf = io.BytesIO()
+        await local_adapter.download_to_file(uri, buf)
+        assert buf.getvalue() == b"streamed"
+
+    @pytest.mark.asyncio
+    async def test_traversal_key_rejected(self, local_adapter):
+        with pytest.raises(ValidationError):
+            await local_adapter.read_bytes("s3://b/../escape")
+
+
+# --- 6a.2 core object ops: S3 mode against a mocked boto3 client --------------
+
+
+class TestS3ModeObjectOps:
+    @pytest.mark.asyncio
+    async def test_write_bytes_calls_put_object(self, s3_adapter):
+        adapter, client = s3_adapter
+        await adapter.write_bytes("s3://bk/a/b.bin", b"data", content_type="text/plain")
+        client.put_object.assert_called_once_with(Bucket="bk", Key="a/b.bin", Body=b"data", ContentType="text/plain")
+
+    @pytest.mark.asyncio
+    async def test_read_bytes_calls_get_object(self, s3_adapter):
+        adapter, client = s3_adapter
+        client.get_object.return_value = {"Body": io.BytesIO(b"payload")}
+        assert await adapter.read_bytes("s3://bk/k") == b"payload"
+        client.get_object.assert_called_once_with(Bucket="bk", Key="k")
+
+    @pytest.mark.asyncio
+    async def test_read_bytes_missing_maps_to_not_found(self, s3_adapter):
+        from botocore.exceptions import ClientError
+
+        adapter, client = s3_adapter
+        client.get_object.side_effect = ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+        with pytest.raises(StorageObjectNotFound):
+            await adapter.read_bytes("s3://bk/missing")
+
+    @pytest.mark.asyncio
+    async def test_exists_true_then_false_on_404(self, s3_adapter):
+        from botocore.exceptions import ClientError
+
+        adapter, client = s3_adapter
+        assert await adapter.exists("s3://bk/here") is True
+        client.head_object.side_effect = ClientError(
+            {"Error": {"Code": "404"}, "ResponseMetadata": {"HTTPStatusCode": 404}}, "HeadObject"
+        )
+        assert await adapter.exists("s3://bk/gone") is False
+
+    @pytest.mark.asyncio
+    async def test_delete_calls_delete_object(self, s3_adapter):
+        adapter, client = s3_adapter
+        await adapter.delete("s3://bk/k")
+        client.delete_object.assert_called_once_with(Bucket="bk", Key="k")
+
+    @pytest.mark.asyncio
+    async def test_delete_with_generation_is_not_supported_yet(self, s3_adapter):
+        adapter, _ = s3_adapter
+        with pytest.raises(NotImplementedError):
+            await adapter.delete("s3://bk/k", generation=123)
+
+    @pytest.mark.asyncio
+    async def test_upload_filename_passes_content_type(self, s3_adapter, tmp_path):
+        adapter, client = s3_adapter
+        src = tmp_path / "f.txt"
+        src.write_text("x")
+        await adapter.upload_filename("s3://bk/up.txt", str(src), content_type="text/plain")
+        client.upload_file.assert_called_once_with(str(src), "bk", "up.txt", ExtraArgs={"ContentType": "text/plain"})
+
+    @pytest.mark.asyncio
+    async def test_download_to_filename_missing_maps_to_not_found(self, s3_adapter, tmp_path):
+        from botocore.exceptions import ClientError
+
+        adapter, client = s3_adapter
+        client.download_file.side_effect = ClientError({"Error": {"Code": "404"}}, "HeadObject")
+        with pytest.raises(StorageObjectNotFound):
+            await adapter.download_to_filename("s3://bk/missing", str(tmp_path / "x"))

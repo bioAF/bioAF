@@ -17,19 +17,73 @@ incomplete S3 provider is unreachable on a GCP install (POLICY never resolves
 ``s3`` there) and cannot regress the live product.
 """
 
+import asyncio
+import logging
 import os
+import shutil
+from typing import BinaryIO
 from urllib.parse import urlparse
 
 from app.adapters.base import StorageProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.exceptions import ValidationError
-from app.adapters.models import StorageStore
+from app.adapters.models import StorageObjectNotFound, StorageStore
+
+logger = logging.getLogger("bioaf.adapters.storage.s3")
 
 # Local mode emulates the object store on the filesystem, exactly like the GCS
 # adapter (``s3://<bucket>/<key>`` maps to LOCAL_DATA_ROOT/_objects/<bucket>/<key>),
 # so the same LOCAL_DATA_ROOT layout serves both backends in dev/CI.
 LOCAL_DATA_ROOT = os.environ.get("BIOAF_LOCAL_DATA_ROOT", "/tmp/bioaf-data")
 _LOCAL_OBJECTS_DIR = "_objects"
+
+
+# -- Local-mode filesystem helpers (the s3:// emulation; parity with gcs.py) ---
+
+
+def _read_file_bytes(path: str) -> bytes:
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def _write_file_bytes(path: str, data: bytes) -> None:
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+def _write_file_stream(path: str, file_obj) -> None:
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    if hasattr(file_obj, "seek"):
+        try:
+            file_obj.seek(0)
+        except (OSError, ValueError):
+            pass
+    with open(path, "wb") as f:
+        shutil.copyfileobj(file_obj, f)
+
+
+def _stream_file_into(path: str, file_obj) -> None:
+    with open(path, "rb") as f:
+        shutil.copyfileobj(f, file_obj)
+
+
+def _copy_file(src: str, dest: str) -> None:
+    os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+    shutil.copy2(src, dest)
+
+
+def _is_not_found(error) -> bool:
+    """True if a botocore ClientError is an object-absent error.
+
+    Normalizes S3's several not-found shapes: ``NoSuchKey`` (get_object),
+    ``404``/``NotFound`` (head_object), so callers map any of them onto
+    ``StorageObjectNotFound`` without importing botocore.
+    """
+    err = getattr(error, "response", {}) or {}
+    code = err.get("Error", {}).get("Code", "")
+    status = err.get("ResponseMetadata", {}).get("HTTPStatusCode")
+    return code in {"NoSuchKey", "NotFound", "404"} or status == 404
 
 
 class S3StorageProvider(StorageProvider):
@@ -177,4 +231,197 @@ class S3StorageProvider(StorageProvider):
         return "amazon/aws-cli"
 
     def image_storage_pip_packages(self) -> str:
-        return "boto3==1.35.99 awscli==1.41.13"
+        # Baked into built pipeline/notebook images so user code can read/write S3
+        # (boto3) and shell out to the CLI (awscli). Bounded to the 1.x majors.
+        return "boto3>=1.43,<2 awscli>=1.40,<2"
+
+    # -- Credentials + client factory (real S3 mode) --------------------------
+
+    async def _get_credentials(self):
+        """Resolve and cache AWS credentials for the boto3 client.
+
+        Stage 6c (the AWS Credentials provider: STS / assume-role / instance
+        profile) will supply explicit credentials here, mirroring how the GCS
+        adapter resolves impersonation / SA-key creds. Until 6c lands this returns
+        ``None`` so boto3 uses its ambient credential chain (env vars, shared
+        config, the instance-profile / IRSA role on a real EC2/EKS host), which is
+        the standard AWS pattern.
+        """
+        if not self._credentials_loaded:
+            self._credentials = None
+            self._credentials_loaded = True
+        return self._credentials
+
+    def _get_s3_client(self, credentials=None):
+        """Construct the boto3 S3 client. boto3 is imported lazily and only here,
+        so the SDK stays inside ``adapters/`` and local mode never imports it."""
+        import boto3
+
+        kwargs: dict = {}
+        if self._region:
+            kwargs["region_name"] = self._region
+        if credentials:
+            # 6c hands back an explicit-credentials kwargs dict (access key / secret
+            # / session token); the ambient chain (None) is the default until then.
+            kwargs.update(credentials)
+        return boto3.client("s3", **kwargs)
+
+    # -- Object-store interface (Phase 3): core read/write/delete (6a.2) -------
+    #
+    # URI-first: every op takes an ``s3://bucket/key`` URI. In local mode the URI
+    # maps onto LOCAL_DATA_ROOT/_objects/<bucket>/<key>; in S3 mode it goes through
+    # the boto3 client off the event loop via ``asyncio.to_thread`` (parity with
+    # the GCS adapter's ``_gcs_*`` helpers).
+
+    async def read_text(self, uri: str, *, encoding: str = "utf-8") -> str:
+        return (await self.read_bytes(uri)).decode(encoding)
+
+    async def read_bytes(self, uri: str) -> bytes:
+        if self.is_local:
+            path = self._local_path(uri)
+            if not os.path.exists(path):
+                raise StorageObjectNotFound(uri)
+            return await asyncio.to_thread(_read_file_bytes, path)
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._s3_read_bytes, uri, creds)
+
+    async def write_text(self, uri: str, text: str, *, content_type: str = "text/plain") -> None:
+        await self.write_bytes(uri, text.encode("utf-8"), content_type=content_type)
+
+    async def write_bytes(self, uri: str, data: bytes, *, content_type: str = "application/octet-stream") -> None:
+        if self.is_local:
+            await asyncio.to_thread(_write_file_bytes, self._local_path(uri), data)
+            return
+        creds = await self._get_credentials()
+        await asyncio.to_thread(self._s3_write_bytes, uri, data, content_type, creds)
+
+    async def upload_file(self, uri: str, file_obj: BinaryIO, *, content_type: str | None = None) -> None:
+        if self.is_local:
+            await asyncio.to_thread(_write_file_stream, self._local_path(uri), file_obj)
+            return
+        creds = await self._get_credentials()
+        await asyncio.to_thread(self._s3_upload_file, uri, file_obj, content_type, creds)
+
+    async def upload_filename(self, uri: str, local_path: str, *, content_type: str | None = None) -> None:
+        if self.is_local:
+            await asyncio.to_thread(_copy_file, local_path, self._local_path(uri))
+            return
+        creds = await self._get_credentials()
+        await asyncio.to_thread(self._s3_upload_filename, uri, local_path, content_type, creds)
+
+    async def download_to_file(self, uri: str, file_obj: BinaryIO) -> None:
+        if self.is_local:
+            path = self._local_path(uri)
+            if not os.path.exists(path):
+                raise StorageObjectNotFound(uri)
+            await asyncio.to_thread(_stream_file_into, path, file_obj)
+            return
+        creds = await self._get_credentials()
+        await asyncio.to_thread(self._s3_download_to_file, uri, file_obj, creds)
+
+    async def download_to_filename(self, uri: str, local_path: str) -> None:
+        if self.is_local:
+            src = self._local_path(uri)
+            if not os.path.exists(src):
+                raise StorageObjectNotFound(uri)
+            await asyncio.to_thread(_copy_file, src, local_path)
+            return
+        creds = await self._get_credentials()
+        await asyncio.to_thread(self._s3_download_to_filename, uri, local_path, creds)
+
+    async def delete(self, uri: str, *, generation: int | None = None) -> None:
+        if self.is_local:
+            path = self._local_path(uri)
+            if os.path.exists(path):
+                await asyncio.to_thread(os.remove, path)
+            return
+        creds = await self._get_credentials()
+        await asyncio.to_thread(self._s3_delete, uri, generation, creds)
+
+    async def exists(self, uri: str) -> bool:
+        if self.is_local:
+            return os.path.exists(self._local_path(uri))
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._s3_exists, uri, creds)
+
+    # -- boto3-backed helpers (run in a thread; real S3 only) -----------------
+
+    def _s3_read_bytes(self, uri: str, creds) -> bytes:
+        from botocore.exceptions import ClientError
+
+        bucket, key = self._parse_uri(uri)
+        try:
+            resp = self._get_s3_client(creds).get_object(Bucket=bucket, Key=key)
+        except ClientError as e:
+            if _is_not_found(e):
+                raise StorageObjectNotFound(uri) from e
+            raise
+        return resp["Body"].read()
+
+    def _s3_write_bytes(self, uri: str, data: bytes, content_type: str, creds) -> None:
+        bucket, key = self._parse_uri(uri)
+        self._get_s3_client(creds).put_object(Bucket=bucket, Key=key, Body=data, ContentType=content_type)
+
+    def _s3_upload_file(self, uri: str, file_obj, content_type, creds) -> None:
+        bucket, key = self._parse_uri(uri)
+        if hasattr(file_obj, "seek"):
+            try:
+                file_obj.seek(0)
+            except (OSError, ValueError):
+                pass
+        extra = {"ContentType": content_type} if content_type else None
+        self._get_s3_client(creds).upload_fileobj(file_obj, bucket, key, ExtraArgs=extra)
+
+    def _s3_upload_filename(self, uri: str, local_path: str, content_type, creds) -> None:
+        bucket, key = self._parse_uri(uri)
+        extra = {"ContentType": content_type} if content_type else None
+        self._get_s3_client(creds).upload_file(local_path, bucket, key, ExtraArgs=extra)
+
+    def _s3_download_to_file(self, uri: str, file_obj, creds) -> None:
+        from botocore.exceptions import ClientError
+
+        bucket, key = self._parse_uri(uri)
+        try:
+            self._get_s3_client(creds).download_fileobj(bucket, key, file_obj)
+        except ClientError as e:
+            if _is_not_found(e):
+                raise StorageObjectNotFound(uri) from e
+            raise
+
+    def _s3_download_to_filename(self, uri: str, local_path: str, creds) -> None:
+        from botocore.exceptions import ClientError
+
+        bucket, key = self._parse_uri(uri)
+        os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
+        try:
+            self._get_s3_client(creds).download_file(bucket, key, local_path)
+        except ClientError as e:
+            if _is_not_found(e):
+                raise StorageObjectNotFound(uri) from e
+            raise
+
+    def _s3_delete(self, uri: str, generation, creds) -> None:
+        bucket, key = self._parse_uri(uri)
+        if generation is not None:
+            # GCS targets a specific object version by int ``generation``; S3 uses a
+            # string ``VersionId``. Bridging the two (for noncurrent-version wipes in
+            # orphaned-resource cleanup) needs the seam generalized to an opaque
+            # version token, deferred with the AWS orphan-cleanup work (6b).
+            raise NotImplementedError(
+                "S3 version-targeted delete is deferred to AWS orphaned-resource "
+                "cleanup; S3 uses a string VersionId, not an int generation"
+            )
+        # delete_object is idempotent: deleting a missing key is not an error.
+        self._get_s3_client(creds).delete_object(Bucket=bucket, Key=key)
+
+    def _s3_exists(self, uri: str, creds) -> bool:
+        from botocore.exceptions import ClientError
+
+        bucket, key = self._parse_uri(uri)
+        try:
+            self._get_s3_client(creds).head_object(Bucket=bucket, Key=key)
+            return True
+        except ClientError as e:
+            if _is_not_found(e):
+                return False
+            raise
