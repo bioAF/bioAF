@@ -21,6 +21,7 @@ import asyncio
 import logging
 import os
 import shutil
+import uuid
 from typing import BinaryIO
 from urllib.parse import urlparse
 
@@ -165,16 +166,46 @@ class S3StorageProvider(StorageProvider):
         return f"s3://{self.results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}/{filename}"
 
     async def stage_inputs(self, file_records: list[dict], working_dir: str) -> list[str]:
-        # Pipeline staging (local + real-S3) lands in sub-block 6a.5.
-        raise NotImplementedError("S3 stage_inputs is implemented in Stage 6a.5")
+        if self.is_local:
+            return await self._local_stage_inputs(file_records, working_dir)
+        # Real S3: staging runs in an init container via the CLI, so (like the GCS
+        # adapter) return the command strings the init container executes.
+        return self.generate_stage_commands(file_records, working_dir)
 
-    async def collect_outputs(self, working_dir: str, pipeline_run: dict):
-        # Pipeline staging (local + real-S3) lands in sub-block 6a.5.
-        raise NotImplementedError("S3 collect_outputs is implemented in Stage 6a.5")
+    async def collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[StoredObject]:
+        if self.is_local:
+            items = await self._local_collect_outputs(working_dir, pipeline_run)
+            return [
+                StoredObject(filename=d["filename"], storage_uri=d["storage_uri"], size_bytes=d.get("size_bytes"))
+                for d in items
+            ]
+        run_id = pipeline_run.get("id", "unknown")
+        experiment_id = pipeline_run.get("experiment_id", "unknown")
+        if working_dir.startswith("s3://"):
+            prefix_uri = working_dir if working_dir.endswith("/") else working_dir + "/"
+        else:
+            prefix_uri = f"s3://{self.results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}/"
+        objs = await self.list_objects(prefix_uri)
+        return [o for o in objs if o.filename]
 
     async def get_storage_metrics(self):
-        # Storage metrics (local + real-S3) lands in sub-block 6a.5.
-        raise NotImplementedError("S3 get_storage_metrics is implemented in Stage 6a.5")
+        # Storage metrics (local + real-S3) lands in sub-block 6a.5b.
+        raise NotImplementedError("S3 get_storage_metrics is implemented in Stage 6a.5b")
+
+    def generate_stage_commands(self, file_records: list[dict], working_dir: str) -> list[str]:
+        """Generate ``aws s3 cp`` commands for an init container to stage inputs.
+
+        The S3 counterpart of the GCS adapter's gsutil staging commands; reuses the
+        ``cli_copy_in`` seam token so the CLI string lives in exactly one place.
+        Reads ``storage_uri`` (the neutral field), falling back to the retained
+        ``gcs_uri`` mirror for records that predate the rename.
+        """
+        commands = []
+        for record in file_records:
+            uri = record.get("storage_uri") or record.get("gcs_uri", "")
+            filename = record.get("filename", "unknown")
+            commands.append(self.cli_copy_in(uri, f"{working_dir}/{filename}"))
+        return commands
 
     # -- URI / scheme (the s3:// counterpart of the GCS gs:// methods) ---------
 
@@ -489,6 +520,44 @@ class S3StorageProvider(StorageProvider):
     def _local_move(self, source_uri: str, dest_uri: str) -> None:
         self._local_copy(source_uri, dest_uri)
         os.remove(self._local_path(source_uri))
+
+    # -- Local-mode pipeline staging (parity with the GCS adapter) ------------
+
+    async def _local_stage_inputs(self, file_records: list[dict], working_dir: str) -> list[str]:
+        os.makedirs(working_dir, exist_ok=True)
+        staged_paths = []
+        for record in file_records:
+            filename = record.get("filename", f"file-{uuid.uuid4().hex[:8]}")
+            src = record.get("local_path") or record.get("storage_uri") or record.get("gcs_uri", "")
+            dest = os.path.join(working_dir, filename)
+            if src and os.path.exists(src):
+                shutil.copy2(src, dest)
+            else:
+                with open(dest, "w") as f:
+                    f.write(f"# placeholder for {filename}\n")
+            staged_paths.append(dest)
+        return staged_paths
+
+    async def _local_collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[dict]:
+        run_id = pipeline_run.get("id", "unknown")
+        experiment_id = pipeline_run.get("experiment_id", "unknown")
+        results_dir = f"{LOCAL_DATA_ROOT}/results/experiments/{experiment_id}/pipeline-runs/{run_id}"
+        os.makedirs(results_dir, exist_ok=True)
+        collected = []
+        if os.path.isdir(working_dir):
+            for fname in os.listdir(working_dir):
+                src = os.path.join(working_dir, fname)
+                if os.path.isfile(src):
+                    dest = os.path.join(results_dir, fname)
+                    shutil.copy2(src, dest)
+                    collected.append(
+                        {
+                            "filename": fname,
+                            "storage_uri": f"s3://{self.results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}/{fname}",
+                            "size_bytes": os.path.getsize(dest),
+                        }
+                    )
+        return collected
 
     # -- boto3-backed helpers (run in a thread; real S3 only) -----------------
 

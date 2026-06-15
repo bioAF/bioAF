@@ -482,3 +482,67 @@ class TestS3SignedUrls:
             Params={"Bucket": "bk", "Key": "big.fastq", "ContentType": "application/octet-stream"},
             ExpiresIn=3600,
         )
+
+
+# --- 6a.5a pipeline staging: stage_inputs + collect_outputs ------------------
+
+
+class TestStageInputs:
+    def test_generate_stage_commands_uses_aws_cp(self):
+        adapter = S3StorageProvider(org_slug="testorg")
+        cmds = adapter.generate_stage_commands([{"storage_uri": "s3://b/in.fastq", "filename": "in.fastq"}], "/work")
+        assert cmds == ["aws s3 cp s3://b/in.fastq /work/in.fastq"]
+
+    def test_generate_stage_commands_falls_back_to_gcs_uri_mirror(self):
+        adapter = S3StorageProvider()
+        cmds = adapter.generate_stage_commands([{"gcs_uri": "s3://b/legacy.txt", "filename": "legacy.txt"}], "/w")
+        assert cmds == ["aws s3 cp s3://b/legacy.txt /w/legacy.txt"]
+
+    @pytest.mark.asyncio
+    async def test_real_stage_inputs_returns_cli_commands(self, s3_adapter):
+        adapter, _ = s3_adapter
+        cmds = await adapter.stage_inputs([{"storage_uri": "s3://b/in.fastq", "filename": "in.fastq"}], "/work")
+        assert cmds == ["aws s3 cp s3://b/in.fastq /work/in.fastq"]
+
+    @pytest.mark.asyncio
+    async def test_local_stage_inputs_copies_and_placeholders(self, local_adapter, tmp_path):
+        existing = tmp_path / "exists.fastq"
+        existing.write_text("data")
+        work = str(tmp_path / "work")
+        records = [
+            {"filename": "exists.fastq", "local_path": str(existing)},
+            {"filename": "missing.fastq"},
+        ]
+        paths = await local_adapter.stage_inputs(records, work)
+        assert len(paths) == 2
+        with open(paths[0]) as f:
+            assert f.read() == "data"
+        with open(paths[1]) as f:
+            assert "placeholder" in f.read()
+
+
+class TestCollectOutputs:
+    @pytest.mark.asyncio
+    async def test_local_collect_outputs_returns_stored_objects(self, local_adapter, tmp_path):
+        work = tmp_path / "work"
+        work.mkdir()
+        (work / "result.txt").write_text("out")
+        objs = await local_adapter.collect_outputs(str(work), {"id": "r1", "experiment_id": "e1"})
+        assert len(objs) == 1
+        assert objs[0].filename == "result.txt"
+        assert objs[0].storage_uri == "s3://bioaf-results-testorg/experiments/e1/pipeline-runs/r1/result.txt"
+        assert objs[0].size_bytes == 3
+
+    @pytest.mark.asyncio
+    async def test_real_collect_outputs_lists_results_prefix(self, s3_adapter):
+        adapter, client = s3_adapter
+        page = {
+            "Contents": [
+                {"Key": "experiments/e1/pipeline-runs/r1/out.txt", "Size": 4, "ETag": '"x"'},
+            ]
+        }
+        client.get_paginator.return_value.paginate.return_value = [page]
+        objs = await adapter.collect_outputs("/ignored", {"id": "r1", "experiment_id": "e1"})
+        assert len(objs) == 1
+        assert objs[0].filename == "out.txt"
+        assert objs[0].storage_uri == "s3://bioaf-results-testorg/experiments/e1/pipeline-runs/r1/out.txt"
