@@ -101,6 +101,16 @@ def _etag_to_md5(etag: str | None) -> str | None:
     return None if "-" in etag else etag
 
 
+# Map the neutral signed-URL ``method`` onto the boto3 client operation that
+# generate_presigned_url signs for.
+_S3_PRESIGN_METHODS = {
+    "GET": "get_object",
+    "PUT": "put_object",
+    "DELETE": "delete_object",
+    "HEAD": "head_object",
+}
+
+
 class S3StorageProvider(StorageProvider):
     """S3 storage backend with local mode for development."""
 
@@ -409,6 +419,41 @@ class S3StorageProvider(StorageProvider):
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._s3_get_bucket_info, uri, creds)
 
+    # -- Object-store interface (Phase 3): signed URLs + resumable (6a.4) ------
+    #
+    # No is_local branch (parity with the GCS adapter): signed URLs are a real-
+    # cloud feature, so local/dev mode does not mint them.
+
+    async def generate_signed_url(
+        self,
+        uri: str,
+        *,
+        method: str = "GET",
+        expiry_seconds: int = 3600,
+        content_type: str | None = None,
+    ) -> str:
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._s3_generate_signed_url, uri, method, expiry_seconds, content_type, creds)
+
+    async def create_resumable_upload_url(
+        self,
+        uri: str,
+        *,
+        content_type: str = "application/octet-stream",
+        size_bytes: int | None = None,
+        origin: str | None = None,
+    ) -> str:
+        # S3 has no direct analog to a GCS resumable upload session. A presigned PUT
+        # satisfies the single-URL seam contract for client-direct uploads up to the
+        # 5 GiB single-PUT limit. True >5 GiB resumable parity needs the seam
+        # generalized to a multipart protocol (initiate -> presigned part URLs ->
+        # complete); tracked as a residual and validated against the live account.
+        # ``size_bytes``/``origin`` are GCS-session knobs with no presigned-PUT
+        # analog (S3 cross-origin uploads rely on bucket CORS, a 7a substrate item),
+        # so they are accepted and ignored here.
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._s3_create_presigned_put, uri, content_type, creds)
+
     # -- Local-mode object-store helpers (s3:// emulation) --------------------
 
     def _local_list_objects(self, uri_prefix: str, max_results: int | None) -> list[StoredObject]:
@@ -609,3 +654,21 @@ class S3StorageProvider(StorageProvider):
         bucket_name, _ = self._parse_uri(uri)
         resp = self._get_s3_client(creds).get_bucket_versioning(Bucket=bucket_name)
         return {"versioning_enabled": resp.get("Status") == "Enabled"}
+
+    def _s3_generate_signed_url(self, uri: str, method: str, expiry_seconds: int, content_type, creds) -> str:
+        bucket, key = self._parse_uri(uri)
+        client_method = _S3_PRESIGN_METHODS.get(method.upper())
+        if client_method is None:
+            raise ValidationError(f"Unsupported signed-URL method: {method!r}")
+        params: dict = {"Bucket": bucket, "Key": key}
+        if content_type is not None:
+            params["ContentType"] = content_type
+        return self._get_s3_client(creds).generate_presigned_url(client_method, Params=params, ExpiresIn=expiry_seconds)
+
+    def _s3_create_presigned_put(self, uri: str, content_type: str, creds) -> str:
+        bucket, key = self._parse_uri(uri)
+        return self._get_s3_client(creds).generate_presigned_url(
+            "put_object",
+            Params={"Bucket": bucket, "Key": key, "ContentType": content_type},
+            ExpiresIn=3600,
+        )

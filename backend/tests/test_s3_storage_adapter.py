@@ -439,3 +439,46 @@ class TestS3ModeListCopyMove:
         assert (await adapter.get_bucket_info("s3://bk/k"))["versioning_enabled"] is True
         client.get_bucket_versioning.return_value = {}
         assert (await adapter.get_bucket_info("s3://bk/k"))["versioning_enabled"] is False
+
+
+# --- 6a.4 signed URLs + resumable upload (presigned, S3 mode only) -----------
+
+
+class TestS3SignedUrls:
+    @pytest.mark.asyncio
+    async def test_signed_get_url_presigns_get_object(self, s3_adapter):
+        adapter, client = s3_adapter
+        client.generate_presigned_url.return_value = "https://signed/get"
+        url = await adapter.generate_signed_url("s3://bk/k", method="GET", expiry_seconds=120)
+        assert url == "https://signed/get"
+        client.generate_presigned_url.assert_called_once_with(
+            "get_object", Params={"Bucket": "bk", "Key": "k"}, ExpiresIn=120
+        )
+
+    @pytest.mark.asyncio
+    async def test_signed_put_url_includes_content_type(self, s3_adapter):
+        adapter, client = s3_adapter
+        await adapter.generate_signed_url("s3://bk/k", method="PUT", content_type="text/csv")
+        client.generate_presigned_url.assert_called_once_with(
+            "put_object",
+            Params={"Bucket": "bk", "Key": "k", "ContentType": "text/csv"},
+            ExpiresIn=3600,
+        )
+
+    @pytest.mark.asyncio
+    async def test_unsupported_method_raises(self, s3_adapter):
+        adapter, _ = s3_adapter
+        with pytest.raises(ValidationError):
+            await adapter.generate_signed_url("s3://bk/k", method="PATCH")
+
+    @pytest.mark.asyncio
+    async def test_resumable_upload_url_presigns_put(self, s3_adapter):
+        adapter, client = s3_adapter
+        client.generate_presigned_url.return_value = "https://signed/put"
+        url = await adapter.create_resumable_upload_url("s3://bk/big.fastq", content_type="application/octet-stream")
+        assert url == "https://signed/put"
+        client.generate_presigned_url.assert_called_once_with(
+            "put_object",
+            Params={"Bucket": "bk", "Key": "big.fastq", "ContentType": "application/octet-stream"},
+            ExpiresIn=3600,
+        )
