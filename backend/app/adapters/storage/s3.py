@@ -27,7 +27,12 @@ from urllib.parse import urlparse
 from app.adapters.base import StorageProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.exceptions import ValidationError
-from app.adapters.models import StorageObjectNotFound, StorageStore
+from app.adapters.models import (
+    ObjectMetadata,
+    StorageObjectNotFound,
+    StorageStore,
+    StoredObject,
+)
 
 logger = logging.getLogger("bioaf.adapters.storage.s3")
 
@@ -84,6 +89,16 @@ def _is_not_found(error) -> bool:
     code = err.get("Error", {}).get("Code", "")
     status = err.get("ResponseMetadata", {}).get("HTTPStatusCode")
     return code in {"NoSuchKey", "NotFound", "404"} or status == 404
+
+
+def _etag_to_md5(etag: str | None) -> str | None:
+    """An S3 ETag is the object's MD5 only for a single-part upload; a multipart
+    ETag is ``<hash>-<partcount>`` and is not a usable checksum. Return the hex MD5
+    when single-part, else None (the raw ETag is kept in provider_details)."""
+    if not etag:
+        return None
+    etag = etag.strip('"')
+    return None if "-" in etag else etag
 
 
 class S3StorageProvider(StorageProvider):
@@ -344,6 +359,92 @@ class S3StorageProvider(StorageProvider):
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._s3_exists, uri, creds)
 
+    # -- Object-store interface (Phase 3): list/copy/move/metadata (6a.3) ------
+
+    async def list_objects(
+        self,
+        uri_prefix: str,
+        *,
+        recursive: bool = True,
+        include_versions: bool = False,
+        max_results: int | None = None,
+    ) -> list[StoredObject]:
+        if self.is_local:
+            return await asyncio.to_thread(self._local_list_objects, uri_prefix, max_results)
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(
+            self._s3_list_objects, uri_prefix, recursive, include_versions, max_results, creds
+        )
+
+    async def copy(self, source_uri: str, dest_uri: str) -> str:
+        if self.is_local:
+            await asyncio.to_thread(self._local_copy, source_uri, dest_uri)
+            return dest_uri
+        creds = await self._get_credentials()
+        await asyncio.to_thread(self._s3_copy, source_uri, dest_uri, creds)
+        return dest_uri
+
+    async def move(self, source_uri: str, dest_uri: str) -> str:
+        if self.is_local:
+            await asyncio.to_thread(self._local_move, source_uri, dest_uri)
+            return dest_uri
+        creds = await self._get_credentials()
+        await asyncio.to_thread(self._s3_move, source_uri, dest_uri, creds)
+        return dest_uri
+
+    async def get_object_metadata(self, uri: str) -> ObjectMetadata:
+        if self.is_local:
+            path = self._local_path(uri)
+            if not os.path.exists(path):
+                raise StorageObjectNotFound(uri)
+            size = await asyncio.to_thread(os.path.getsize, path)
+            return ObjectMetadata(uri=uri, size_bytes=size)
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._s3_get_object_metadata, uri, creds)
+
+    async def get_bucket_info(self, uri: str) -> dict:
+        if self.is_local:
+            # The local filesystem store has no object versioning.
+            return {"versioning_enabled": False}
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._s3_get_bucket_info, uri, creds)
+
+    # -- Local-mode object-store helpers (s3:// emulation) --------------------
+
+    def _local_list_objects(self, uri_prefix: str, max_results: int | None) -> list[StoredObject]:
+        bucket, key_prefix = self._parse_uri(uri_prefix)
+        bucket_root = os.path.join(LOCAL_DATA_ROOT, _LOCAL_OBJECTS_DIR, bucket)
+        results: list[StoredObject] = []
+        if not os.path.isdir(bucket_root):
+            return results
+        for dirpath, _dirs, files in os.walk(bucket_root):
+            for fname in files:
+                full = os.path.join(dirpath, fname)
+                rel = os.path.relpath(full, bucket_root)
+                if key_prefix and not rel.startswith(key_prefix):
+                    continue
+                results.append(
+                    StoredObject(
+                        filename=fname,
+                        storage_uri=f"s3://{bucket}/{rel}",
+                        size_bytes=os.path.getsize(full),
+                    )
+                )
+                if max_results is not None and len(results) >= max_results:
+                    return results
+        return results
+
+    def _local_copy(self, source_uri: str, dest_uri: str) -> None:
+        src = self._local_path(source_uri)
+        if not os.path.exists(src):
+            raise StorageObjectNotFound(source_uri)
+        dest = self._local_path(dest_uri)
+        _copy_file(src, dest)
+
+    def _local_move(self, source_uri: str, dest_uri: str) -> None:
+        self._local_copy(source_uri, dest_uri)
+        os.remove(self._local_path(source_uri))
+
     # -- boto3-backed helpers (run in a thread; real S3 only) -----------------
 
     def _s3_read_bytes(self, uri: str, creds) -> bytes:
@@ -425,3 +526,86 @@ class S3StorageProvider(StorageProvider):
             if _is_not_found(e):
                 return False
             raise
+
+    @staticmethod
+    def _stored_object_from_listing(bucket: str, obj: dict, *, version: bool) -> StoredObject:
+        key = obj["Key"]
+        details: dict = {
+            "last_modified": str(obj["LastModified"]) if obj.get("LastModified") else None,
+            "etag": obj.get("ETag"),
+            "storage_class": obj.get("StorageClass"),
+        }
+        if version:
+            details["version_id"] = obj.get("VersionId")
+            details["is_latest"] = obj.get("IsLatest")
+        return StoredObject(
+            filename=key.split("/")[-1],
+            storage_uri=f"s3://{bucket}/{key}",
+            size_bytes=obj.get("Size"),
+            md5_hash=_etag_to_md5(obj.get("ETag")),
+            provider_details=details,
+        )
+
+    def _s3_list_objects(
+        self, uri_prefix: str, recursive: bool, include_versions: bool, max_results: int | None, creds
+    ) -> list[StoredObject]:
+        bucket, key_prefix = self._parse_uri(uri_prefix)
+        client = self._get_s3_client(creds)
+        page_kwargs: dict = {"Bucket": bucket, "Prefix": key_prefix}
+        if not recursive:
+            page_kwargs["Delimiter"] = "/"
+        op = "list_object_versions" if include_versions else "list_objects_v2"
+        listing_key = "Versions" if include_versions else "Contents"
+        results: list[StoredObject] = []
+        for page in client.get_paginator(op).paginate(**page_kwargs):
+            for obj in page.get(listing_key, []):
+                results.append(self._stored_object_from_listing(bucket, obj, version=include_versions))
+                if max_results is not None and len(results) >= max_results:
+                    return results
+        return results
+
+    def _s3_copy(self, source_uri: str, dest_uri: str, creds) -> None:
+        src_bucket, src_key = self._parse_uri(source_uri)
+        dst_bucket, dst_key = self._parse_uri(dest_uri)
+        # client.copy() (managed) auto-uses multipart for objects >5 GiB (genomics-scale).
+        self._get_s3_client(creds).copy({"Bucket": src_bucket, "Key": src_key}, dst_bucket, dst_key)
+
+    def _s3_move(self, source_uri: str, dest_uri: str, creds) -> None:
+        from botocore.exceptions import ClientError
+
+        src_bucket, src_key = self._parse_uri(source_uri)
+        dst_bucket, dst_key = self._parse_uri(dest_uri)
+        client = self._get_s3_client(creds)
+        # Fail-safe: copy, verify the destination exists, then delete the source
+        # (parity with the GCS adapter's move ordering: never lose the source on a
+        # failed/unverified copy).
+        client.copy({"Bucket": src_bucket, "Key": src_key}, dst_bucket, dst_key)
+        try:
+            client.head_object(Bucket=dst_bucket, Key=dst_key)
+        except ClientError as e:
+            raise RuntimeError(f"Copy verification failed: {dest_uri} does not exist after copy") from e
+        client.delete_object(Bucket=src_bucket, Key=src_key)
+
+    def _s3_get_object_metadata(self, uri: str, creds) -> ObjectMetadata:
+        from botocore.exceptions import ClientError
+
+        bucket, key = self._parse_uri(uri)
+        try:
+            resp = self._get_s3_client(creds).head_object(Bucket=bucket, Key=key)
+        except ClientError as e:
+            if _is_not_found(e):
+                raise StorageObjectNotFound(uri) from e
+            raise
+        return ObjectMetadata(
+            uri=uri,
+            size_bytes=resp.get("ContentLength"),
+            md5_hash=_etag_to_md5(resp.get("ETag")),
+            content_type=resp.get("ContentType"),
+            storage_class=resp.get("StorageClass", "STANDARD"),
+            updated=str(resp["LastModified"]) if resp.get("LastModified") else None,
+        )
+
+    def _s3_get_bucket_info(self, uri: str, creds) -> dict:
+        bucket_name, _ = self._parse_uri(uri)
+        resp = self._get_s3_client(creds).get_bucket_versioning(Bucket=bucket_name)
+        return {"versioning_enabled": resp.get("Status") == "Enabled"}

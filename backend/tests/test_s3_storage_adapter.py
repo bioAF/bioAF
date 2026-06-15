@@ -274,3 +274,168 @@ class TestS3ModeObjectOps:
         client.download_file.side_effect = ClientError({"Error": {"Code": "404"}}, "HeadObject")
         with pytest.raises(StorageObjectNotFound):
             await adapter.download_to_filename("s3://bk/missing", str(tmp_path / "x"))
+
+
+# --- 6a.3 list / copy / move / metadata: local-mode round-trips --------------
+
+
+class TestLocalListCopyMove:
+    @pytest.mark.asyncio
+    async def test_list_objects_under_prefix(self, local_adapter):
+        for k in ["p/a.txt", "p/sub/b.txt", "other/c.txt"]:
+            await local_adapter.write_bytes(local_adapter.build_uri("bk", k), b"x")
+        objs = await local_adapter.list_objects("s3://bk/p/")
+        assert sorted(o.storage_uri for o in objs) == ["s3://bk/p/a.txt", "s3://bk/p/sub/b.txt"]
+        assert all(o.size_bytes == 1 for o in objs)
+
+    @pytest.mark.asyncio
+    async def test_list_empty_bucket_is_empty(self, local_adapter):
+        assert await local_adapter.list_objects("s3://bk/none/") == []
+
+    @pytest.mark.asyncio
+    async def test_list_respects_max_results(self, local_adapter):
+        for i in range(4):
+            await local_adapter.write_bytes(local_adapter.build_uri("bk", f"p/{i}.txt"), b"x")
+        assert len(await local_adapter.list_objects("s3://bk/p/", max_results=2)) == 2
+
+    @pytest.mark.asyncio
+    async def test_copy_leaves_source_and_duplicates(self, local_adapter):
+        src = local_adapter.build_uri("bk", "a.txt")
+        dst = local_adapter.build_uri("bk", "b.txt")
+        await local_adapter.write_bytes(src, b"data")
+        assert await local_adapter.copy(src, dst) == dst
+        assert await local_adapter.read_bytes(dst) == b"data"
+        assert await local_adapter.exists(src) is True
+
+    @pytest.mark.asyncio
+    async def test_move_removes_source(self, local_adapter):
+        src = local_adapter.build_uri("bk", "a.txt")
+        dst = local_adapter.build_uri("bk", "b.txt")
+        await local_adapter.write_bytes(src, b"data")
+        assert await local_adapter.move(src, dst) == dst
+        assert await local_adapter.read_bytes(dst) == b"data"
+        assert await local_adapter.exists(src) is False
+
+    @pytest.mark.asyncio
+    async def test_copy_missing_source_raises(self, local_adapter):
+        with pytest.raises(StorageObjectNotFound):
+            await local_adapter.copy(local_adapter.build_uri("bk", "nope"), local_adapter.build_uri("bk", "x"))
+
+    @pytest.mark.asyncio
+    async def test_metadata_size_and_missing(self, local_adapter):
+        uri = local_adapter.build_uri("bk", "m.txt")
+        await local_adapter.write_bytes(uri, b"12345")
+        md = await local_adapter.get_object_metadata(uri)
+        assert md.size_bytes == 5
+        assert md.uri == uri
+        with pytest.raises(StorageObjectNotFound):
+            await local_adapter.get_object_metadata(local_adapter.build_uri("bk", "gone"))
+
+    @pytest.mark.asyncio
+    async def test_local_bucket_info_no_versioning(self, local_adapter):
+        assert (await local_adapter.get_bucket_info("s3://bk/k"))["versioning_enabled"] is False
+
+
+# --- 6a.3 list / copy / move / metadata: S3 mode against a mocked client ------
+
+
+class TestS3ModeListCopyMove:
+    @pytest.mark.asyncio
+    async def test_list_objects_maps_contents(self, s3_adapter):
+        import datetime
+
+        adapter, client = s3_adapter
+        page = {
+            "Contents": [
+                {
+                    "Key": "a/b.txt",
+                    "Size": 3,
+                    "ETag": '"abc123"',
+                    "LastModified": datetime.datetime(2026, 1, 1),
+                    "StorageClass": "STANDARD",
+                },
+                {"Key": "a/c.txt", "Size": 5, "ETag": '"def456-2"'},
+            ]
+        }
+        client.get_paginator.return_value.paginate.return_value = [page]
+        objs = await adapter.list_objects("s3://bk/a/")
+        assert [o.filename for o in objs] == ["b.txt", "c.txt"]
+        assert objs[0].storage_uri == "s3://bk/a/b.txt"
+        assert objs[0].size_bytes == 3
+        assert objs[0].md5_hash == "abc123"
+        assert objs[1].md5_hash is None  # multipart ETag is not an MD5
+        client.get_paginator.assert_called_with("list_objects_v2")
+
+    @pytest.mark.asyncio
+    async def test_list_objects_max_results_stops_early(self, s3_adapter):
+        adapter, client = s3_adapter
+        page = {"Contents": [{"Key": f"k{i}", "Size": 1, "ETag": '"x"'} for i in range(5)]}
+        client.get_paginator.return_value.paginate.return_value = [page]
+        assert len(await adapter.list_objects("s3://bk/", max_results=2)) == 2
+
+    @pytest.mark.asyncio
+    async def test_list_versions_uses_versions_paginator(self, s3_adapter):
+        adapter, client = s3_adapter
+        page = {"Versions": [{"Key": "k", "Size": 1, "ETag": '"x"', "VersionId": "v1", "IsLatest": True}]}
+        client.get_paginator.return_value.paginate.return_value = [page]
+        objs = await adapter.list_objects("s3://bk/", include_versions=True)
+        assert objs[0].provider_details["version_id"] == "v1"
+        client.get_paginator.assert_called_with("list_object_versions")
+
+    @pytest.mark.asyncio
+    async def test_copy_calls_managed_copy(self, s3_adapter):
+        adapter, client = s3_adapter
+        assert await adapter.copy("s3://src/a.txt", "s3://dst/b.txt") == "s3://dst/b.txt"
+        client.copy.assert_called_once_with({"Bucket": "src", "Key": "a.txt"}, "dst", "b.txt")
+
+    @pytest.mark.asyncio
+    async def test_move_copies_verifies_then_deletes(self, s3_adapter):
+        adapter, client = s3_adapter
+        await adapter.move("s3://src/a.txt", "s3://dst/b.txt")
+        client.copy.assert_called_once_with({"Bucket": "src", "Key": "a.txt"}, "dst", "b.txt")
+        client.head_object.assert_called_once_with(Bucket="dst", Key="b.txt")
+        client.delete_object.assert_called_once_with(Bucket="src", Key="a.txt")
+
+    @pytest.mark.asyncio
+    async def test_move_aborts_and_keeps_source_if_verify_fails(self, s3_adapter):
+        from botocore.exceptions import ClientError
+
+        adapter, client = s3_adapter
+        client.head_object.side_effect = ClientError({"Error": {"Code": "404"}}, "HeadObject")
+        with pytest.raises(RuntimeError):
+            await adapter.move("s3://src/a.txt", "s3://dst/b.txt")
+        client.delete_object.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_object_metadata_maps_head(self, s3_adapter):
+        import datetime
+
+        adapter, client = s3_adapter
+        client.head_object.return_value = {
+            "ContentLength": 7,
+            "ETag": '"deadbeef"',
+            "ContentType": "text/plain",
+            "StorageClass": "STANDARD",
+            "LastModified": datetime.datetime(2026, 1, 1),
+        }
+        md = await adapter.get_object_metadata("s3://bk/k")
+        assert md.size_bytes == 7
+        assert md.md5_hash == "deadbeef"
+        assert md.content_type == "text/plain"
+
+    @pytest.mark.asyncio
+    async def test_get_object_metadata_missing_raises(self, s3_adapter):
+        from botocore.exceptions import ClientError
+
+        adapter, client = s3_adapter
+        client.head_object.side_effect = ClientError({"Error": {"Code": "404"}}, "HeadObject")
+        with pytest.raises(StorageObjectNotFound):
+            await adapter.get_object_metadata("s3://bk/missing")
+
+    @pytest.mark.asyncio
+    async def test_get_bucket_info_versioning(self, s3_adapter):
+        adapter, client = s3_adapter
+        client.get_bucket_versioning.return_value = {"Status": "Enabled"}
+        assert (await adapter.get_bucket_info("s3://bk/k"))["versioning_enabled"] is True
+        client.get_bucket_versioning.return_value = {}
+        assert (await adapter.get_bucket_info("s3://bk/k"))["versioning_enabled"] is False
