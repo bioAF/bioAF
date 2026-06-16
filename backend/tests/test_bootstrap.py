@@ -23,6 +23,32 @@ async def test_bootstrap_status_no_org(client: AsyncClient):
     assert response.json()["setup_complete"] is False
 
 
+@pytest.mark.asyncio
+async def test_bootstrap_status_exposes_cloud_provider(client: AsyncClient):
+    """status returns cloud_provider unauthenticated so the setup wizard can
+    render the right credentials step before an admin exists (defaults to gcp)."""
+    response = await client.get("/api/bootstrap/status")
+    assert response.status_code == 200
+    body = response.json()
+    assert "cloud_provider" in body
+    assert body["cloud_provider"] == "gcp"  # default when unset
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_status_reflects_aws_cloud_provider(client: AsyncClient, session):
+    """When cloud_provider=aws is persisted, status reports aws (the AWS-install path)."""
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES ('cloud_provider', 'aws') "
+            "ON CONFLICT (key) DO UPDATE SET value = 'aws'"
+        )
+    )
+    await session.commit()
+    response = await client.get("/api/bootstrap/status")
+    assert response.status_code == 200
+    assert response.json()["cloud_provider"] == "aws"
+
+
 async def test_create_admin(client: AsyncClient):
     setup_token = await _get_setup_token(client)
     response = await client.post(

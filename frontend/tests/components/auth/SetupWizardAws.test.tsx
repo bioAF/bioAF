@@ -75,6 +75,11 @@ beforeEach(() => {
   mockApiPut.mockResolvedValue({});
   mockApiGet.mockImplementation((url: string) => {
     if (typeof url === "string") {
+      // The wizard reads the install's cloud from bootstrap/status (not the
+      // authenticated stack-options endpoint, which is unavailable during setup).
+      if (url.includes("/api/bootstrap/status")) {
+        return Promise.resolve({ setup_complete: false, has_admin: false, cloud_provider: "aws" });
+      }
       if (url.includes("/infrastructure/stack-options")) return Promise.resolve(AWS_STACK_OPTIONS);
       if (url.includes("/api/v1/settings/aws")) return Promise.resolve(AWS_SETTINGS);
     }

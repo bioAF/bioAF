@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { setToken } from "@/lib/auth";
 import { ComponentPicker, type PickerComponent } from "@/components/components/ComponentPicker";
-import { useStackOptions } from "@/hooks/useStackOptions";
 import { AWS_REGIONS, DEFAULT_AWS_REGION } from "@/lib/aws-regions";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -99,17 +98,23 @@ interface SetupWizardProps {
 export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [step, setStep] = useState(0);
   const [error, setError] = useState("");
-  // Provider-appropriate stack labels (GCP -> GKE+GCS, AWS -> EKS+S3). Fails safe
-  // to GCP defaults pre-auth / on error, so a GCP setup renders unchanged.
-  const { kubernetesOption, cloudProvider } = useStackOptions();
-  const k8sStackLabel = kubernetesOption?.label ?? "Kubernetes + GCS";
+  // The install's cloud (gcp | aws), read from /api/bootstrap/status. We do NOT
+  // use useStackOptions here: that endpoint needs an authenticated, permissioned
+  // session and only fetches once at mount, but during first-run setup there is
+  // no admin yet. bootstrap/status is the unauthenticated gate the /setup page
+  // already hits, so it is available before the wizard creates an admin. Fails
+  // safe to "gcp", so a GCP install renders exactly as before.
+  const [cloudProvider, setCloudProvider] = useState("gcp");
   // The credentials step (index 3) is the only cloud-specific step; everything
-  // else is shared. cloudProvider fails safe to "gcp", so a GCP install is
-  // byte-identical to before this branch.
+  // else is shared.
   const isAws = cloudProvider === "aws";
   const cloudLabel = isAws ? "AWS" : "GCP";
   const credentialsStepLabel = `${cloudLabel} Credentials`;
   const displaySteps = STEPS.map((label, i) => (i === 3 ? credentialsStepLabel : label));
+  // Provider-appropriate stack labels (GCP -> GKE+GCS, AWS -> EKS+S3).
+  const k8sStackLabel = isAws ? "Kubernetes + S3" : "Kubernetes + GCS";
+  const k8sComputeLabel = isAws ? "Kubernetes (EKS)" : "Kubernetes (GKE)";
+  const k8sStorageLabel = isAws ? "S3" : "GCS";
 
   // Steps the user has already moved past at least once. Used to render a
   // Forward affordance and to short-circuit the per-step submit if the user
@@ -231,6 +236,24 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [deployStatus, setDeployStatus] = useState<
     { key: string; name: string; status: string }[]
   >([]);
+
+  // Learn the install's cloud as early as possible (pre-auth) so the
+  // credentials step + stack labels match. bootstrap/status is the
+  // unauthenticated gate the /setup page already hits.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = await api.get<{ cloud_provider?: string }>("/api/bootstrap/status");
+        if (!cancelled && status?.cloud_provider) setCloudProvider(status.cloud_provider);
+      } catch {
+        // Unreachable pre-backend -- keep the gcp default.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Pre-populate GCP fields from platform_config once the user has
   // authenticated (we have a token after step 1). install-gcp.sh's prefill
@@ -1212,8 +1235,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               </div>
               <p className="text-sm text-gray-600">
                 Cloud-native autoscaling with managed{" "}
-                {kubernetesOption?.compute_label ?? "Kubernetes (GKE)"} and{" "}
-                {kubernetesOption?.storage_label ?? "GCS"} object storage.
+                {k8sComputeLabel} and {k8sStorageLabel} object storage.
               </p>
             </div>
 
