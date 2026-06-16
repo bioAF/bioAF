@@ -17,7 +17,7 @@ later 6a sub-blocks alongside their tests.
 from __future__ import annotations
 
 import io
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -46,6 +46,53 @@ def s3_adapter(monkeypatch):
     client = MagicMock()
     monkeypatch.setattr(adapter, "_get_s3_client", lambda credentials=None: client)
     return adapter, client
+
+
+class _FakeSession:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_region_resolved_from_platform_config_when_env_unset(monkeypatch):
+    """_get_credentials backfills the boto3 client region from platform_config
+    (aws_region) when the AWS env vars are unset, so presigned URLs sign with the
+    install's real region instead of boto3's us-east-1 default."""
+    monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
+    monkeypatch.delenv("AWS_REGION", raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    adapter = S3StorageProvider(org_slug="testorg")
+    assert adapter._region is None
+
+    with (
+        patch("app.database.async_session_factory", lambda: _FakeSession()),
+        patch(
+            "app.platform.platform_config_service.PlatformConfigService.get_many",
+            new=AsyncMock(return_value={"aws_region": "us-west-1"}),
+        ),
+    ):
+        await adapter._get_credentials()
+
+    assert adapter._region == "us-west-1"
+
+
+@pytest.mark.asyncio
+async def test_region_from_env_skips_platform_config(monkeypatch):
+    """When the env supplies a region, _get_credentials must not read config."""
+    monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
+    monkeypatch.setenv("AWS_REGION", "eu-west-1")
+    adapter = S3StorageProvider(org_slug="testorg")
+    assert adapter._region == "eu-west-1"
+
+    get_many = AsyncMock(return_value={"aws_region": "us-west-1"})
+    with patch("app.platform.platform_config_service.PlatformConfigService.get_many", new=get_many):
+        await adapter._get_credentials()
+
+    assert adapter._region == "eu-west-1"
+    get_many.assert_not_called()
 
 
 # --- URI / scheme methods (s3://) -------------------------------------------

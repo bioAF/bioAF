@@ -347,6 +347,23 @@ class S3StorageProvider(StorageProvider):
         """
         if not self._credentials_loaded:
             self._credentials = None
+            # Resolve the boto3 client region from platform_config when the AWS env
+            # vars did not supply one. Object ops -- especially presigned-URL
+            # signing, which embeds the region in the SigV4 signature -- must
+            # target the install's actual region; otherwise boto3 defaults to
+            # us-east-1 and a presigned URL for a non-us-east-1 bucket is rejected.
+            # Best-effort: if the config is unreachable (tests / pre-DB), fall back
+            # to boto3's own region resolution.
+            if not self._region and not self.is_local:
+                try:
+                    from app.database import async_session_factory
+                    from app.platform.platform_config_service import PlatformConfigService
+
+                    async with async_session_factory() as session:
+                        cfg = await PlatformConfigService.get_many(session, ["aws_region"])
+                    self._region = cfg.get("aws_region") or None
+                except Exception:  # pragma: no cover - defensive fallback
+                    pass
             self._credentials_loaded = True
         return self._credentials
 
