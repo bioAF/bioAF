@@ -174,6 +174,53 @@ async def test_deploy_stack_deploys_storage_then_compute(session):
 
     assert modules_run == ["storage", "compute"]
     assert any(e.event_type == "stack_complete" for e in events)
+    # GCP must NOT pin compute_stack_uid: it intentionally regenerates the suffix
+    # each deploy (soft-delete name-collision avoidance). Only AWS pins it.
+    assert await _get_config(session, "compute_stack_uid") is None
+
+
+@pytest.mark.asyncio
+async def test_deploy_stack_pins_compute_stack_uid_on_aws(session):
+    """On AWS, deploy_stack pins compute_stack_uid so a retry resumes, not churns."""
+    from app.services.stack_deployment import deploy_stack
+
+    _, user_id = await _seed_org_and_user(session)
+    await _set_config(session, "cloud_provider", "aws")
+    await _set_config(session, "aws_account_id", "043671579834")
+    await _set_config(session, "terraform_initialized", "true")
+    await _set_config(session, "compute_deployed", "false")
+    await _set_config(session, "storage_deployed", "true")  # skip storage
+    await session.commit()
+
+    async def mock_run_module(sess, uid, module_name):
+        yield _make_progress_event(
+            "apply_complete",
+            f"{module_name} done",
+            extra={
+                "outputs": {
+                    "cluster_name": {"value": "bioaf-bioaf-x"},
+                    "cluster_endpoint": {"value": "https://eks"},
+                    "cluster_ca_cert": {"value": "Y2E="},
+                }
+            }
+            if module_name == "compute"
+            else {},
+        )
+
+    with patch("app.services.stack_deployment._run_module", side_effect=mock_run_module):
+        async for _ in deploy_stack(session, "kubernetes", user_id=user_id):
+            pass
+
+    pinned = await _get_config(session, "compute_stack_uid")
+    assert pinned and pinned != "null"
+
+    # A second deploy (e.g. a retry) REUSES the pinned uid instead of churning.
+    await _set_config(session, "compute_deployed", "false")
+    await session.commit()
+    with patch("app.services.stack_deployment._run_module", side_effect=mock_run_module):
+        async for _ in deploy_stack(session, "kubernetes", user_id=user_id):
+            pass
+    assert await _get_config(session, "compute_stack_uid") == pinned
 
 
 @pytest.mark.asyncio

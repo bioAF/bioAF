@@ -435,7 +435,22 @@ async def deploy_stack(
             original_zone = await _read_config(session, "gcp_zone")
             await _set_config(session, "gcp_zone", compute_zone)
 
-    await _set_config(session, "deploy_suffix", secrets.token_hex(3))
+    new_suffix = secrets.token_hex(3)
+    await _set_config(session, "deploy_suffix", new_suffix)
+    # On AWS, pin a stable compute_stack_uid so a retry after a failed deploy
+    # RESUMES the same-named resources instead of destroying + recreating them
+    # under a fresh suffix (which is what bit a failed EKS deploy: the retry's new
+    # suffix made terraform plan a full destroy of the half-built cluster). The
+    # storage path already pins storage_stack_uid for the same reason. This is an
+    # AWS-only divergence on purpose: GCP intentionally regenerates the suffix each
+    # deploy to dodge soft-deleted-resource name collisions on redeploy (GCS/IAM
+    # soft-delete for ~30d), whereas AWS names are immediately reusable, so pinning
+    # is both safe and correct there. GCP is untouched (it never sets
+    # compute_stack_uid, so it keeps falling back to the regenerated deploy_suffix).
+    if cloud_provider == "aws":
+        existing_compute_uid = await _read_config(session, "compute_stack_uid")
+        if not existing_compute_uid or existing_compute_uid == "null":
+            await _set_config(session, "compute_stack_uid", new_suffix)
     await session.flush()
 
     # Pre-flight: probe regional zones for e2-medium capacity. The GKE
