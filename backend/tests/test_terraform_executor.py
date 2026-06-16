@@ -34,6 +34,23 @@ def _patch_work_dir():
         yield tmp
 
 
+def test_prepare_work_dir_raises_when_module_missing():
+    """A module that does not exist for the cloud fails closed (no silent no-op)."""
+    modules_dir = Path(tempfile.mkdtemp(prefix="tf_modules_"))
+    with pytest.raises(FileNotFoundError, match="not available for this cloud"):
+        TerraformExecutor._prepare_work_dir("compute", modules_dir)
+
+
+def test_prepare_work_dir_copies_existing_module():
+    """An existing module is copied into a fresh work dir."""
+    modules_dir = Path(tempfile.mkdtemp(prefix="tf_modules_"))
+    (modules_dir / "storage").mkdir()
+    (modules_dir / "storage" / "main.tf").write_text("# module\n")
+    work_dir = TerraformExecutor._prepare_work_dir("storage", modules_dir)
+    assert (work_dir / "main.tf").read_text() == "# module\n"
+    assert work_dir != modules_dir / "storage"
+
+
 def _mock_async_process(stdout: str, returncode: int = 0, stderr: str = ""):
     """Create a mock async subprocess process for asyncio.create_subprocess_exec."""
     lines = (stdout + "\n").encode().splitlines(keepends=True) if stdout else [b""]

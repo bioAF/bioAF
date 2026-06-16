@@ -130,6 +130,19 @@ class AwsTerraformCloud(TerraformCloud):
             tfvars["org_slug"] = org_slug
             if storage_suffix:
                 tfvars["stack_uid"] = storage_suffix
+        elif module_name == "compute":
+            # EKS cluster + node groups + IRSA runner roles. The cluster name uses
+            # the compute stack uid (its own suffix, like GKE), and the bioaf-app
+            # role ARN is granted an EKS access entry so the backend can drive the
+            # cluster out-of-cluster (the ClusterAuth seam).
+            tfvars["org_slug"] = org_slug
+            compute_suffix = config.get("compute_stack_uid") or deploy_suffix
+            if compute_suffix:
+                tfvars["stack_uid"] = compute_suffix
+            tfvars["account_id"] = config.get("aws_account_id") or ""
+            app_role_arn = config.get("aws_app_role_arn")
+            if app_role_arn:
+                tfvars["app_role_arn"] = app_role_arn
 
         tfvars_path = work_dir / "terraform.tfvars.json"
         tfvars_path.write_text(json.dumps(tfvars, indent=2))

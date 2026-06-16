@@ -906,11 +906,25 @@ class TerraformExecutor:
 
         ``modules_dir`` is the cloud's modules root (the seam's ``modules_dir()``):
         GCP modules at /app/terraform/modules, AWS at /app/terraform/aws/modules.
+
+        Fails closed when the module does not exist for this cloud. A missing
+        module dir used to yield an EMPTY work dir, so ``terraform apply`` ran
+        against no config, reported "no changes", and the deploy flow then marked
+        the stack deployed without creating anything (e.g. a compute deploy on a
+        cloud with no compute module silently no-opped, and no provisioning banner
+        appeared). Raising instead surfaces a clear, visible failure. Every GCP
+        module exists, so the GCP path never hits this; it only guards a cloud
+        whose module set is incomplete.
         """
         src = modules_dir / module_name
+        if not src.exists():
+            raise FileNotFoundError(
+                f"Terraform module '{module_name}' is not available for this cloud "
+                f"(expected at {src}). This deploy step is not supported on the "
+                f"install's cloud provider yet."
+            )
         tmp = Path(tempfile.mkdtemp(prefix=f"bioaf_tf_{module_name}_"))
-        if src.exists():
-            shutil.copytree(str(src), str(tmp), dirs_exist_ok=True)
+        shutil.copytree(str(src), str(tmp), dirs_exist_ok=True)
         return tmp
 
     @staticmethod

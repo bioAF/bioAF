@@ -74,6 +74,34 @@ class TestAwsTerraformCloud:
         tf = self.cloud.write_tfvars(tmp_path, "storage", {"aws_region": "us-west-1", "org_slug": "acme"})
         assert "stack_uid" not in tf  # omitted so destroy uses the state value
 
+    def test_write_tfvars_compute(self, tmp_path):
+        tf = self.cloud.write_tfvars(
+            tmp_path,
+            "compute",
+            {
+                "aws_region": "us-west-1",
+                "org_slug": "acme",
+                "compute_stack_uid": "c0ffee",
+                "aws_account_id": "123456789012",
+                "aws_app_role_arn": "arn:aws:iam::123456789012:role/bioaf-app",
+            },
+        )
+        assert tf == {
+            "region": "us-west-1",
+            "org_slug": "acme",
+            "stack_uid": "c0ffee",
+            "account_id": "123456789012",
+            "app_role_arn": "arn:aws:iam::123456789012:role/bioaf-app",
+        }
+
+    def test_write_tfvars_compute_omits_optional_when_absent(self, tmp_path):
+        # No app role / account / suffix -> the module's own defaults apply, and
+        # stack_uid is omitted so a destroy uses the value already in state.
+        tf = self.cloud.write_tfvars(tmp_path, "compute", {"aws_region": "us-west-1", "org_slug": "acme"})
+        assert tf == {"region": "us-west-1", "org_slug": "acme", "account_id": ""}
+        assert "app_role_arn" not in tf
+        assert "stack_uid" not in tf
+
     def test_backend_args_local(self):
         assert self.cloud.backend_init_args({}, "storage", local_backend=True) == ["-backend=false"]
 
