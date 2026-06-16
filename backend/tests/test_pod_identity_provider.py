@@ -59,4 +59,21 @@ def test_unknown_backend_raises():
     from app.exceptions import ValidationError
 
     with pytest.raises(ValidationError):
-        create_pod_identity_provider("eks")  # no EKS impl until Stage 6e
+        create_pod_identity_provider("k3s")  # not a supported managed-k8s backend
+
+
+def test_eks_irsa_provider_annotates_role_arn():
+    from app.adapters.pod_identity.aws import (
+        IRSA_ROLE_ANNOTATION,
+        EksIrsaPodIdentityProvider,
+    )
+
+    assert "eks" in VALID_POD_IDENTITY_BACKENDS
+    p = create_pod_identity_provider("eks")
+    assert isinstance(p, EksIrsaPodIdentityProvider)
+    arn = "arn:aws:iam::123456789012:role/bioaf-notebook-runner-abc"
+    assert p.pod_identity_annotations(arn) == {IRSA_ROLE_ANNOTATION: arn}
+    # No identity -> no binding (matches the GKE "only annotate when set" behavior).
+    assert p.pod_identity_annotations("") == {}
+    # IRSA is annotation-based, so associate is a no-op.
+    assert p.associate(arn, "bioaf-notebooks", "bioaf-notebook-runner") is None

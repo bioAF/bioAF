@@ -186,6 +186,10 @@ class KubernetesComputeProvider(ComputeProvider):
         "gke_cluster_name",
         "gcp_project_id",
         "gcp_region",
+        # aws_region lets the EKS ClusterAuth provider mint a region-correct STS
+        # token; additive and ignored on GCP (the EKS endpoint/CA reuse the
+        # gke_cluster_* keys above).
+        "aws_region",
         "raw_bucket_name",
         "results_bucket_name",
         "k8s_pipeline_machine_type",
