@@ -311,7 +311,10 @@ fi
 # services are left at "*" because most do not support resource-level scoping
 # cleanly and this is a starter. (This is the AWS analog of bioaf-app holding
 # container.admin + service-account create on GCP, where the GKE module likewise
-# creates the runner service accounts.)
+# creates the runner service accounts.) iam:GetRole is granted on "*" (read-only)
+# because EKS CreateNodegroup validates the AWSServiceRoleForAmazonEKSNodegroup /
+# AWSServiceRoleForAutoScaling service-linked roles by GetRole on the caller's
+# behalf, and those SLR ARNs are not under bioaf-*.
 POLICY_DOC="$(mktemp -t bioaf-policy-XXXXXX.json)"
 cat >"$POLICY_DOC" <<'JSON'
 {
@@ -388,7 +391,8 @@ cat >"$POLICY_DOC" <<'JSON'
         "iam:GetOpenIDConnectProvider",
         "iam:TagOpenIDConnectProvider",
         "iam:ListOpenIDConnectProviders",
-        "iam:CreateServiceLinkedRole"
+        "iam:CreateServiceLinkedRole",
+        "iam:GetRole"
       ],
       "Resource": "*"
     }
