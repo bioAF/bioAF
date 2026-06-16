@@ -303,11 +303,15 @@ else
             --description "bioAF application role (EC2 instance profile)"
 fi
 
-# Starter inline policy. Intentionally broad enough to bring the app up and let
-# the S3StorageProvider reach bioaf-* buckets via the instance profile; TIGHTEN
-# in Stage 7 (least-privilege per seam). S3 is scoped to bioaf-* names; the
-# control-plane services are left at "*" because most do not support
-# resource-level scoping cleanly and this is a starter.
+# Starter inline policy. Intentionally broad enough to bring the app up, let the
+# S3StorageProvider reach bioaf-* buckets, AND let the app's TerraformExecutor
+# provision the EKS compute stack (VPC + EKS + the cluster/node/IRSA IAM roles)
+# via the instance profile; TIGHTEN in Stage 7 (least-privilege per seam). S3 and
+# the created IAM roles are scoped to bioaf-* names; the EC2/EKS control-plane
+# services are left at "*" because most do not support resource-level scoping
+# cleanly and this is a starter. (This is the AWS analog of bioaf-app holding
+# container.admin + service-account create on GCP, where the GKE module likewise
+# creates the runner service accounts.)
 POLICY_DOC="$(mktemp -t bioaf-policy-XXXXXX.json)"
 cat >"$POLICY_DOC" <<'JSON'
 {
@@ -335,6 +339,56 @@ cat >"$POLICY_DOC" <<'JSON'
         "logs:CreateLogStream",
         "logs:PutLogEvents",
         "ce:GetCostAndUsage"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "BioafEksCompute",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:*",
+        "eks:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "BioafEksIamRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:ListAttachedRolePolicies",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:GetRolePolicy",
+        "iam:ListRolePolicies",
+        "iam:CreateInstanceProfile",
+        "iam:DeleteInstanceProfile",
+        "iam:GetInstanceProfile",
+        "iam:AddRoleToInstanceProfile",
+        "iam:RemoveRoleFromInstanceProfile",
+        "iam:PassRole"
+      ],
+      "Resource": [
+        "arn:aws:iam::*:role/bioaf-*",
+        "arn:aws:iam::*:instance-profile/bioaf-*"
+      ]
+    },
+    {
+      "Sid": "BioafEksIamGlobal",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateOpenIDConnectProvider",
+        "iam:DeleteOpenIDConnectProvider",
+        "iam:GetOpenIDConnectProvider",
+        "iam:TagOpenIDConnectProvider",
+        "iam:ListOpenIDConnectProviders",
+        "iam:CreateServiceLinkedRole"
       ],
       "Resource": "*"
     }
