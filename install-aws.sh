@@ -434,6 +434,10 @@ mkdir -p /var/www/letsencrypt
 chmod 755 /var/www /var/www/letsencrypt
 BIOAF_USERDATA_EOF
 
+        # IMDSv2 is required (HttpTokens=required). HopLimit=2 (not the default 1)
+        # so the app's Docker containers -- one network hop past the host -- can
+        # reach IMDS to resolve the bioaf-app instance-profile credentials; the
+        # S3 provider and AWS validation authenticate through that path.
         INSTANCE_ID="$(aws ec2 run-instances \
             --image-id "$AMI_ID" \
             --instance-type "$INSTANCE_TYPE" \
@@ -442,7 +446,7 @@ BIOAF_USERDATA_EOF
             --subnet-id "$SUBNET_ID" \
             --associate-public-ip-address \
             --iam-instance-profile "Name=${APP_ROLE_NAME}" \
-            --metadata-options "HttpTokens=required,HttpEndpoint=enabled" \
+            --metadata-options "HttpTokens=required,HttpEndpoint=enabled,HttpPutResponseHopLimit=2" \
             --block-device-mappings "DeviceName=/dev/sda1,Ebs={VolumeSize=${BOOT_DISK_GB},VolumeType=gp3}" \
             --user-data "file://${USERDATA_TMP}" \
             --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${VM_NAME}},{Key=bioaf_cloud_provider,Value=aws}]" \
