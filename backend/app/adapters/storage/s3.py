@@ -371,8 +371,15 @@ class S3StorageProvider(StorageProvider):
         """Construct the boto3 S3 client. boto3 is imported lazily and only here,
         so the SDK stays inside ``adapters/`` and local mode never imports it."""
         import boto3
+        from botocore.config import Config
 
-        kwargs: dict = {}
+        # Virtual-hosted addressing + SigV4: without addressing_style="virtual",
+        # boto3 emits presigned URLs against the GLOBAL host (bucket.s3.amazonaws.com,
+        # which routes to us-east-1), so a presigned PUT/GET for a bucket in another
+        # region is answered with a 307 redirect that browsers do not follow on an
+        # upload -- breaking client-direct file upload/download. "virtual" pins the
+        # presigned host to the bucket's regional endpoint (bucket.s3.<region>.amazonaws.com).
+        kwargs: dict = {"config": Config(signature_version="s3v4", s3={"addressing_style": "virtual"})}
         if self._region:
             kwargs["region_name"] = self._region
         if credentials:
