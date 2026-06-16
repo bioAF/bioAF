@@ -26,6 +26,13 @@ jest.mock("@/hooks/usePermissions", () => ({
   clearPermissionsCache: jest.fn(),
 }));
 
+// These tests cover the GCP install path; pin cloudProvider so the banner reads
+// the GCP settings endpoint (the AWS path has its own coverage in
+// src/app/dashboard/page.test.tsx).
+jest.mock("@/hooks/useStackOptions", () => ({
+  useStackOptions: () => ({ cloudProvider: "gcp", options: [], kubernetesOption: null, loading: false }),
+}));
+
 jest.mock("@/hooks/useComponents", () => ({
   useComponents: () => ({ components: [], loading: false, refetch: jest.fn() }),
 }));
@@ -57,9 +64,9 @@ describe("Dashboard GCP banner", () => {
     render(<DashboardPage />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("gcp-setup-banner")).toBeInTheDocument();
+      expect(screen.getByTestId("cloud-setup-banner")).toBeInTheDocument();
     });
-    expect(screen.getByTestId("gcp-setup-banner")).toHaveTextContent(/GCP/i);
+    expect(screen.getByTestId("cloud-setup-banner")).toHaveTextContent(/GCP/i);
   });
 
   // Test 25: Banner does not show when gcp_credentials_configured is true
@@ -73,7 +80,7 @@ describe("Dashboard GCP banner", () => {
       expect(screen.getByTestId("dashboard")).toBeInTheDocument();
     });
 
-    expect(screen.queryByTestId("gcp-setup-banner")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cloud-setup-banner")).not.toBeInTheDocument();
   });
 
   it("banner links to /settings/gcp", async () => {
@@ -82,7 +89,7 @@ describe("Dashboard GCP banner", () => {
     render(<DashboardPage />);
 
     await waitFor(() => {
-      const banner = screen.getByTestId("gcp-setup-banner");
+      const banner = screen.getByTestId("cloud-setup-banner");
       const link = banner.querySelector("a");
       expect(link).toHaveAttribute("href", "/settings/gcp");
     });
@@ -93,11 +100,11 @@ describe("Dashboard GCP banner", () => {
 
     render(<DashboardPage />);
 
-    await waitFor(() => screen.getByTestId("gcp-setup-banner"));
+    await waitFor(() => screen.getByTestId("cloud-setup-banner"));
 
-    const dismissBtn = screen.getByTestId("gcp-banner-dismiss");
+    const dismissBtn = screen.getByTestId("cloud-banner-dismiss");
     fireEvent.click(dismissBtn);
 
-    expect(screen.queryByTestId("gcp-setup-banner")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cloud-setup-banner")).not.toBeInTheDocument();
   });
 });
