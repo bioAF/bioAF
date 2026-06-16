@@ -4,14 +4,19 @@ import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { GcpSettingsContent } from "@/components/settings/GcpSettingsContent";
+import { AwsSettingsContent } from "@/components/settings/AwsSettingsContent";
 import { SmtpSettingsContent } from "@/components/settings/SmtpSettingsContent";
 import { SlackSettingsContent } from "@/components/settings/SlackSettingsContent";
 import { LlmSettingsContent } from "@/components/settings/LlmSettingsContent";
+import { useStackOptions } from "@/hooks/useStackOptions";
 
-type Tab = "gcp" | "smtp" | "slack" | "seqera" | "llms";
+type Tab = "gcp" | "aws" | "smtp" | "slack" | "seqera" | "llms";
 
-const tabs: { key: Tab; label: string }[] = [
-  { key: "gcp", label: "GCP" },
+// The cloud integration tab is provider-specific: a GCP install shows the GCP
+// panel, an AWS install shows the AWS panel. The non-cloud tabs are identical on
+// both. cloudProvider comes from the backend POLICY (useStackOptions); it falls
+// safe to "gcp" pre-auth/on error, so a GCP install is byte-identical.
+const NON_CLOUD_TABS: { key: Tab; label: string }[] = [
   { key: "smtp", label: "SMTP" },
   { key: "slack", label: "Slack" },
   { key: "seqera", label: "Seqera" },
@@ -19,7 +24,21 @@ const tabs: { key: Tab; label: string }[] = [
 ];
 
 export default function IntegrationsPage() {
-  const [activeTab, setActiveTab] = useState<Tab>("gcp");
+  const { cloudProvider } = useStackOptions();
+  const isAws = cloudProvider === "aws";
+  const cloudTab: { key: Tab; label: string } = isAws
+    ? { key: "aws", label: "AWS" }
+    : { key: "gcp", label: "GCP" };
+  const tabs = [cloudTab, ...NON_CLOUD_TABS];
+
+  const [activeTab, setActiveTab] = useState<Tab>(cloudTab.key);
+
+  // Keep the active tab valid when cloudProvider resolves after mount (the hook
+  // starts on the GCP default, then may flip to "aws"): if we are still on the
+  // cloud tab, follow it so an AWS install does not strand on a hidden "gcp" tab.
+  useEffect(() => {
+    setActiveTab((prev) => (prev === "gcp" || prev === "aws" ? cloudTab.key : prev));
+  }, [cloudTab.key]);
 
   // Honor ?tab= so deep links (and the Slack OAuth return) open the right tab.
   useEffect(() => {
@@ -27,7 +46,8 @@ export default function IntegrationsPage() {
     if (tab && tabs.some((t) => t.key === tab)) {
       setActiveTab(tab as Tab);
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudTab.key]);
 
   return (
     <div className="flex h-screen">
@@ -56,6 +76,7 @@ export default function IntegrationsPage() {
           </div>
 
           {activeTab === "gcp" && <GcpSettingsContent />}
+          {activeTab === "aws" && <AwsSettingsContent />}
           {activeTab === "smtp" && <SmtpSettingsContent />}
           {activeTab === "slack" && <SlackSettingsContent />}
           {activeTab === "seqera" && (
