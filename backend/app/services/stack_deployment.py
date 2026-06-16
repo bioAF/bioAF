@@ -293,10 +293,16 @@ async def deploy_stack(
     module uses those values instead of the defaults from platform_config.
     Storage always uses the default region.
     """
-    # Validate pre-conditions
-    gcp_configured = await _read_config(session, "gcp_credentials_configured")
-    if gcp_configured != "true":
-        raise ValidationError("GCP credentials are not configured")
+    # Validate pre-conditions (cloud-aware: GCP credentials flag vs AWS account
+    # identity, resolved through the TerraformCloud seam).
+    from app.platform.cloud_provider import get_cloud_provider
+    from app.platform.platform_config_service import PlatformConfigService
+    from app.services.terraform_cloud import get_terraform_cloud
+
+    cloud = get_terraform_cloud(await get_cloud_provider(session))
+    cloud_config = await PlatformConfigService.get_many(session, cloud.config_keys())
+    if not cloud.is_configured(cloud_config):
+        raise ValidationError(cloud.not_configured_message())
 
     tf_initialized = await _read_config(session, "terraform_initialized")
     if tf_initialized != "true":
