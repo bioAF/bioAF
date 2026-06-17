@@ -37,7 +37,7 @@ A turnkey computational biology platform for small biotech companies (5-50 resea
 
 A computational biologist registers an experiment, links FASTQ files (uploaded or auto-ingested from a sequencer drop), selects a pipeline from the catalog (nf-core/scrnaseq, rnaseq, or custom), and launches a run. The **BioAF Adapter Layer** handles everything below that: staging inputs from GCS, submitting Kubernetes Jobs to GKE Autopilot, monitoring execution via Nextflow trace parsing, collecting outputs back to GCS, and transitioning the experiment through its status lifecycle (`registered` -> `library_prep` -> `sequencing` -> `fastq_uploaded` -> `processing` -> `pipeline_complete` -> [`reviewed` ->] `analysis` -> `complete`). Pipeline completion triggers event-driven notifications (in-app, email, Slack), and results are browsable through the plot archive, cellxgene viewer, and GEO export tools. Jupyter and RStudio sessions run as Kubernetes Pods with GCS-backed home directories, while SSH Work Nodes run as standalone GCE VMs ([ADR-043](decisions/ADR-043-work-nodes-gce-migration.md)) for interactive shell work outside the cluster. RStudio sessions use per-user PAM authentication ([ADR-030](decisions/ADR-030-session-credentials-pam-auth.md)), and notebook container images are managed as versioned environments ([ADR-033](decisions/ADR-033-versioned-compute-environments.md)), built automatically via Cloud Build ([ADR-031](decisions/ADR-031-notebook-image-build-pipeline.md)).
 
-The adapter layer ([ADR-020](decisions/ADR-020-bioaf-adapter-layer.md), recontracted in [ADR-065](decisions/ADR-065-bal-normalized-contract.md)) abstracts five runtime provider categories (compute, storage, notebook, work-node, cellxgene) plus five platform-service categories (secrets, messaging, observability, IAM, billing) behind clean interfaces. Every method returns a typed, backend-neutral normalized model, and each backend declares a `ProviderCapabilities` set that gates optional UI and is enforced server-side. The category (the "what") is separated from the backend (the "how"): a committed import guardrail (`backend/tests/test_bal_layering.py`) fails the build if any module outside `adapters/` imports a cloud or Kubernetes SDK, or if an adapter imports back up into the service layer. Today every category is implemented for GKE + GCS + the surrounding GCP platform services ([ADR-021](decisions/ADR-021-kubernetes-compute-backend.md), [ADR-022](decisions/ADR-022-gcs-storage-backend.md)); a real NFS storage backend also exists, and the remaining backend slots (SLURM, AWS, on-premise) are seams without shipped implementations.
+The adapter layer ([ADR-020](decisions/ADR-020-bioaf-adapter-layer.md), recontracted in [ADR-065](decisions/ADR-065-bal-normalized-contract.md)) abstracts five runtime provider categories (compute, storage, notebook, work-node, cellxgene) plus five platform-service categories (secrets, messaging, observability, IAM, billing) behind clean interfaces. Every method returns a typed, backend-neutral normalized model, and each backend declares a `ProviderCapabilities` set that gates optional UI and is enforced server-side. The category (the "what") is separated from the backend (the "how"): a committed import guardrail (`backend/tests/test_bal_layering.py`) fails the build if any module outside `adapters/` imports a cloud or Kubernetes SDK, or if an adapter imports back up into the service layer. GKE + GCS + the surrounding GCP platform services are the complete reference implementation ([ADR-021](decisions/ADR-021-kubernetes-compute-backend.md), [ADR-022](decisions/ADR-022-gcs-storage-backend.md)), and a real NFS storage backend also exists. **AWS is now supported alongside GCP, with some components still being completed.** A single authoritative `cloud_provider` install setting (`gcp` or `aws`) selects the cloud identity and drives backend selection; on AWS, S3 storage and EKS Kubernetes compute are implemented (cluster authentication via IRSA, node autoscaling via the Cluster Autoscaler), while a few categories (container image builds, the cellxgene/notebook viewers, and SSH work nodes) are still being brought to parity. GCP installs are unaffected: the `cloud_provider` default is `gcp` and every seam resolves to its existing GCP backend. The remaining backend slots (SLURM, on-premise) are seams without shipped implementations.
 
 Infrastructure is provisioned through UI-driven Terraform ([ADR-007](decisions/ADR-007-ui-driven-terraform.md)) -- researchers never touch HCL. All secrets live in Secret Manager ([ADR-008](decisions/ADR-008-secret-manager.md)), all actions are recorded in an immutable audit log ([ADR-009](decisions/ADR-009-immutable-audit-log.md)), and data portability is guaranteed ([ADR-012](decisions/ADR-012-data-portability.md)).
 
@@ -67,6 +67,27 @@ git clone https://github.com/bioAF/bioAF.git
 cd bioAF
 ./bioaf setup
 ```
+
+### Deploy on AWS (one command)
+
+To run bioAF on AWS instead, use the sibling installer. Run it on your local
+machine (it needs the AWS CLI, which it can install for you):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bioAF/bioAF/main/install-aws.sh | bash
+```
+
+The script verifies your AWS credentials, creates an SSH key pair, a security
+group, and the `bioaf-app` IAM role + instance profile, then launches an
+Ubuntu 22.04 EC2 VM (the VM authenticates via its instance profile, so no
+long-lived keys are stored) stamped `cloud_provider: aws`. It then offers to
+finish setup on the VM for you, or prints a worksheet so you can SSH in and run
+`./bioaf setup` yourself. For options (region, SSH source CIDR), clone the repo
+and run `./install-aws.sh --help`.
+
+> AWS support is being completed: storage (S3) and Kubernetes compute (EKS) are
+> ready, while a few components are still being brought to parity. See the
+> architecture note above for current status.
 
 ### Deploy on an existing server
 
@@ -214,6 +235,7 @@ bioAF/
   bioaf              Management script (entry point)
   install.sh         First-time installer (prereq checks + env generation)
   install-gcp.sh     One-command GCP provisioning script
+  install-aws.sh     One-command AWS provisioning script
 ```
 
 ## Contributing

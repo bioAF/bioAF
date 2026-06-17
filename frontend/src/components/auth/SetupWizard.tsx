@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { setToken } from "@/lib/auth";
 import { ComponentPicker, type PickerComponent } from "@/components/components/ComponentPicker";
-import { useStackOptions } from "@/hooks/useStackOptions";
+import { AWS_REGIONS, DEFAULT_AWS_REGION } from "@/lib/aws-regions";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -98,10 +98,23 @@ interface SetupWizardProps {
 export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [step, setStep] = useState(0);
   const [error, setError] = useState("");
-  // Provider-appropriate stack labels (GCP -> GKE+GCS, AWS -> EKS+S3). Fails safe
-  // to GCP defaults pre-auth / on error, so a GCP setup renders unchanged.
-  const { kubernetesOption } = useStackOptions();
-  const k8sStackLabel = kubernetesOption?.label ?? "Kubernetes + GCS";
+  // The install's cloud (gcp | aws), read from /api/bootstrap/status. We do NOT
+  // use useStackOptions here: that endpoint needs an authenticated, permissioned
+  // session and only fetches once at mount, but during first-run setup there is
+  // no admin yet. bootstrap/status is the unauthenticated gate the /setup page
+  // already hits, so it is available before the wizard creates an admin. Fails
+  // safe to "gcp", so a GCP install renders exactly as before.
+  const [cloudProvider, setCloudProvider] = useState("gcp");
+  // The credentials step (index 3) is the only cloud-specific step; everything
+  // else is shared.
+  const isAws = cloudProvider === "aws";
+  const cloudLabel = isAws ? "AWS" : "GCP";
+  const credentialsStepLabel = `${cloudLabel} Credentials`;
+  const displaySteps = STEPS.map((label, i) => (i === 3 ? credentialsStepLabel : label));
+  // Provider-appropriate stack labels (GCP -> GKE+GCS, AWS -> EKS+S3).
+  const k8sStackLabel = isAws ? "Kubernetes + S3" : "Kubernetes + GCS";
+  const k8sComputeLabel = isAws ? "Kubernetes (EKS)" : "Kubernetes (GKE)";
+  const k8sStorageLabel = isAws ? "S3" : "GCS";
 
   // Steps the user has already moved past at least once. Used to render a
   // Forward affordance and to short-circuit the per-step submit if the user
@@ -178,6 +191,25 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     } | null;
   } | null>(null);
 
+  // Step 3 (AWS variant): the app authenticates through the EC2 instance profile,
+  // so there is no key to enter; we confirm/adjust the account / region / role /
+  // org_slug the installer persisted and validate that the ambient credentials
+  // resolve (STS). Mirrors the GCP step's save+validate gate for the deploy step.
+  const [awsAccountId, setAwsAccountId] = useState("");
+  const [awsRegion, setAwsRegion] = useState(DEFAULT_AWS_REGION);
+  const [awsAppRoleArn, setAwsAppRoleArn] = useState("");
+  const [awsBootstrapRoleArn, setAwsBootstrapRoleArn] = useState("");
+  const [awsOrgSlug, setAwsOrgSlug] = useState("");
+  const [awsCredentialSource, setAwsCredentialSource] = useState("instance_profile");
+  const [awsPrefilled, setAwsPrefilled] = useState(false);
+  const [awsSaving, setAwsSaving] = useState(false);
+  const [awsConfigured, setAwsConfigured] = useState(false);
+  const [awsValidation, setAwsValidation] = useState<{
+    passed: boolean;
+    checks: { name: string; passed: boolean; message: string; status: string }[];
+    account_id: string | null;
+  } | null>(null);
+
   // Step 4: SMTP
   const [smtpHost, setSmtpHost] = useState("");
   const [smtpPort, setSmtpPort] = useState("587");
@@ -205,6 +237,24 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     { key: string; name: string; status: string }[]
   >([]);
 
+  // Learn the install's cloud as early as possible (pre-auth) so the
+  // credentials step + stack labels match. bootstrap/status is the
+  // unauthenticated gate the /setup page already hits.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = await api.get<{ cloud_provider?: string }>("/api/bootstrap/status");
+        if (!cancelled && status?.cloud_provider) setCloudProvider(status.cloud_provider);
+      } catch {
+        // Unreachable pre-backend -- keep the gcp default.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Pre-populate GCP fields from platform_config once the user has
   // authenticated (we have a token after step 1). install-gcp.sh's prefill
   // path writes project/region/zone/credential-source/bootstrap-email to
@@ -213,7 +263,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   // what the system already knows so the user doesn't re-type values.
   useEffect(() => {
     let cancelled = false;
-    if (step < 3) return;
+    if (step < 3 || isAws) return;
     (async () => {
       try {
         const cfg = await api.get<{
@@ -256,7 +306,55 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step]);
+  }, [step, isAws]);
+
+  // AWS analog of the GCP prefill: mirror what install-aws.sh persisted (account
+  // / region / role ARNs / org_slug) so the user confirms rather than retypes.
+  useEffect(() => {
+    let cancelled = false;
+    if (step < 3 || !isAws) return;
+    (async () => {
+      try {
+        const cfg = await api.get<{
+          aws_account_id: string | null;
+          aws_region: string | null;
+          aws_app_role_arn: string | null;
+          aws_bootstrap_role_arn: string | null;
+          org_slug: string | null;
+          aws_credential_source: string;
+        }>("/api/v1/settings/aws");
+        if (cancelled) return;
+        let prefilled = false;
+        if (cfg.aws_account_id && !awsAccountId) {
+          setAwsAccountId(cfg.aws_account_id);
+          prefilled = true;
+        }
+        if (cfg.aws_region) {
+          setAwsRegion(cfg.aws_region);
+        }
+        if (cfg.aws_app_role_arn && !awsAppRoleArn) {
+          setAwsAppRoleArn(cfg.aws_app_role_arn);
+          prefilled = true;
+        }
+        if (cfg.aws_bootstrap_role_arn && !awsBootstrapRoleArn) {
+          setAwsBootstrapRoleArn(cfg.aws_bootstrap_role_arn);
+        }
+        if (cfg.org_slug && !awsOrgSlug) {
+          setAwsOrgSlug(cfg.org_slug);
+        }
+        if (cfg.aws_credential_source) {
+          setAwsCredentialSource(cfg.aws_credential_source);
+        }
+        if (prefilled) setAwsPrefilled(true);
+      } catch {
+        // Endpoint isn't reachable yet (e.g. first render before auth) -- ignore.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, isAws]);
 
   // --- Handlers ---
 
@@ -390,6 +488,34 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       setError(e instanceof Error ? e.message : "Failed to save GCP configuration");
     } finally {
       setGcpSaving(false);
+    }
+  };
+
+  const handleSaveAws = async () => {
+    setError("");
+    setAwsValidation(null);
+    setAwsSaving(true);
+    try {
+      await api.put("/api/v1/settings/aws", {
+        aws_account_id: awsAccountId || undefined,
+        aws_region: awsRegion,
+        aws_app_role_arn: awsAppRoleArn || undefined,
+        aws_bootstrap_role_arn: awsBootstrapRoleArn || undefined,
+        org_slug: awsOrgSlug || undefined,
+      });
+      const result = await api.post<typeof awsValidation>("/api/v1/settings/aws/validate");
+      setAwsValidation(result);
+      if (result?.passed) {
+        setAwsConfigured(true);
+        markStepCompleted(3, { awsAccountId, awsRegion, awsOrgSlug });
+        setStep(4);
+      } else {
+        setError("Validation failed. Fix the issues below and try again.");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save AWS configuration");
+    } finally {
+      setAwsSaving(false);
     }
   };
 
@@ -559,7 +685,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     <div className="bg-white shadow rounded-lg p-8">
       {/* Step indicator */}
       <div className="flex items-center justify-between mb-8">
-        {STEPS.map((label, i) => (
+        {displaySteps.map((label, i) => (
           <div key={label} className="flex items-center">
             <div
               className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
@@ -579,7 +705,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         ))}
       </div>
 
-      <h2 className="text-xl font-semibold mb-4">{STEPS[step]}</h2>
+      <h2 className="text-xl font-semibold mb-4">{displaySteps[step]}</h2>
 
       {/* Back / Forward: allowed only on steps 1-6 (everything before TF deploy
           fires). Once Select Stack -> Continue triggers terraform/init and
@@ -690,8 +816,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         </div>
       )}
 
-      {/* Step 3: GCP Credentials */}
-      {step === 3 && (
+      {/* Step 3: GCP Credentials (rendered on a GCP install) */}
+      {step === 3 && !isAws && (
         <div className="space-y-4">
           <p className="text-sm text-gray-600 mb-2">
             Configure your Google Cloud Platform project. Credentials are required before
@@ -928,6 +1054,98 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         </div>
       )}
 
+      {/* Step 3: AWS Credentials (rendered on an AWS install) */}
+      {step === 3 && isAws && (
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600 mb-2">
+            Confirm the AWS account this install runs on. The app authenticates through
+            the EC2 instance profile, so there is nothing to paste here: we validate that
+            the ambient credentials resolve before deploying a compute stack.
+          </p>
+
+          {awsPrefilled && (
+            <div className="bg-blue-50 border border-blue-200 rounded p-3 text-xs text-blue-900">
+              <p className="font-medium mb-1">Pre-populated from install-aws.sh</p>
+              <p>
+                We&apos;ve filled in the account, region, and role from the AWS installer
+                you just ran. You can change anything here, but the defaults match what
+                we just created.
+              </p>
+            </div>
+          )}
+
+          <div>
+            <label htmlFor="aws-account-id" className="block text-sm font-medium text-gray-700 mb-1">AWS Account ID</label>
+            <input id="aws-account-id" type="text" value={awsAccountId}
+              onChange={(e) => setAwsAccountId(e.target.value)} placeholder="123456789012"
+              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
+          </div>
+
+          <div>
+            <label htmlFor="aws-region" className="block text-sm font-medium text-gray-700 mb-1">Region</label>
+            <select id="aws-region" value={awsRegion} onChange={(e) => setAwsRegion(e.target.value)}
+              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500">
+              {AWS_REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="aws-org-slug" className="block text-sm font-medium text-gray-700 mb-1">
+              Organization Slug
+              <span className="ml-1 text-gray-400 font-normal text-xs">(3-30 chars, lowercase, hyphens allowed)</span>
+            </label>
+            <input id="aws-org-slug" type="text" value={awsOrgSlug} onChange={(e) => setAwsOrgSlug(e.target.value)}
+              placeholder="my-bioaf-org" className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
+          </div>
+
+          <div>
+            <label htmlFor="aws-app-role-arn" className="block text-sm font-medium text-gray-700 mb-1">
+              App Role ARN
+              <span className="ml-1 text-gray-400 font-normal text-xs">(runtime / EC2 instance profile)</span>
+            </label>
+            <input id="aws-app-role-arn" type="text" value={awsAppRoleArn}
+              onChange={(e) => setAwsAppRoleArn(e.target.value)}
+              placeholder="arn:aws:iam::123456789012:role/bioaf-app"
+              className="w-full px-3 py-2 border rounded font-mono text-xs focus:ring-2 focus:ring-bioaf-500" />
+          </div>
+
+          <div className="bg-gray-50 border rounded p-3 text-xs text-gray-600">
+            Authentication: <code className="bg-white px-1 rounded">{awsCredentialSource}</code>. The app reads the
+            EC2 instance profile via IMDS; no access key is stored. install-aws.sh provisioned the role.
+          </div>
+
+          <button onClick={handleSaveAws} disabled={awsSaving}
+            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50">
+            {awsSaving ? "Validating..." : "Save & Validate"}
+          </button>
+
+          {awsValidation && !awsValidation.passed && (
+            <div className="border rounded divide-y text-sm">
+              <div className="p-3 bg-red-50">
+                <h4 className="font-semibold text-red-800">Validation Failed</h4>
+              </div>
+              <div className="p-3 space-y-1.5">
+                {awsValidation.checks.map((c) => (
+                  <div key={c.name} className="flex items-start gap-2 text-xs">
+                    <span className={c.passed ? "text-green-600" : "text-red-600"}>
+                      {c.passed ? "✓" : "✗"}
+                    </span>
+                    <span>
+                      <span className="font-medium">{c.name}</span>{" "}
+                      <span className="text-gray-500">{c.message}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <button onClick={() => setStep(4)} className="w-full text-gray-500 text-sm hover:text-gray-700">
+            Do this later
+          </button>
+        </div>
+      )}
+
       {/* Step 4: SMTP Settings */}
       {step === 4 && (
         <div className="space-y-4">
@@ -972,17 +1190,17 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         <div className="space-y-4">
           <p className="text-sm text-gray-600">
             Would you like to set up cloud infrastructure now? This deploys a Kubernetes
-            cluster, storage buckets, and supporting resources on GCP.
+            cluster, storage buckets, and supporting resources on {cloudLabel}.
           </p>
-          {!gcpConfigured && (
+          {!(isAws ? awsConfigured : gcpConfigured) && (
             <p className="text-sm text-amber-600">
-              GCP credentials are required to set up infrastructure. You can configure them
+              {cloudLabel} credentials are required to set up infrastructure. You can configure them
               later in Settings.
             </p>
           )}
           <button
             onClick={handleSetupInfrastructure}
-            disabled={!gcpConfigured}
+            disabled={!(isAws ? awsConfigured : gcpConfigured)}
             className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
           >
             Set up infrastructure
@@ -1017,8 +1235,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               </div>
               <p className="text-sm text-gray-600">
                 Cloud-native autoscaling with managed{" "}
-                {kubernetesOption?.compute_label ?? "Kubernetes (GKE)"} and{" "}
-                {kubernetesOption?.storage_label ?? "GCS"} object storage.
+                {k8sComputeLabel} and {k8sStorageLabel} object storage.
               </p>
             </div>
 

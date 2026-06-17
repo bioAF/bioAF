@@ -28,6 +28,7 @@ from app.adapters.registry import (
 )
 from app.adapters.storage.gcs import GcsStorageProvider
 from app.adapters.storage.nfs import NfsStorageProvider
+from app.adapters.storage.s3 import S3StorageProvider
 from app.adapters.work_nodes.gce import GCEWorkNodeProvider
 from app.platform import cloud_provider as cp
 from app.platform.platform_config_service import PlatformConfigService
@@ -62,11 +63,9 @@ def test_storage_backend_factory_resolves_nfs():
     assert isinstance(_create_storage_adapter("nfs"), NfsStorageProvider)
 
 
-def test_storage_backend_factory_s3_not_yet_implemented():
-    # s3 is a recognized backend (POLICY aws -> s3), but the S3StorageProvider is
-    # Stage 6a; selecting it must fail clearly, not silently fall back to GCS.
-    with pytest.raises(ValidationError):
-        _create_storage_adapter("s3")
+def test_storage_backend_factory_resolves_s3():
+    # s3 (POLICY aws -> s3) is the S3StorageProvider, implemented in Stage 6a.
+    assert isinstance(_create_storage_adapter("s3"), S3StorageProvider)
 
 
 def test_unknown_storage_backend_raises():

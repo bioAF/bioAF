@@ -52,8 +52,13 @@ services:
         condition: service_healthy
     deploy:
       resources:
+        # 1.5 GiB (not 512 MiB): the backend runs `terraform apply` as a
+        # subprocess in this container, and the large cloud providers (esp. the
+        # AWS provider) plus uvicorn exceed 512 MiB during a deploy, OOM-killing
+        # the process. Fits comfortably on the 4 GiB app VMs (GCP e2-medium /
+        # AWS t3.medium) alongside the db/frontend/nginx limits.
         limits:
-          memory: 512M
+          memory: 1536M
     restart: unless-stopped
 
   frontend:

@@ -150,4 +150,13 @@ async def seed_builtin_roles(session: AsyncSession, org_id: int) -> dict[str, in
                 session.add(RolePermission(role_id=role.id, resource=resource, action=action))
 
     await session.flush()
+
+    # Drop any cached permission sets so the new grants are visible immediately.
+    # A permission check that ran before these roles existed (e.g. a stale token
+    # hitting a permissioned route during first-run setup) would otherwise have
+    # cached an EMPTY set under the same role id for the 60s TTL, denying the
+    # freshly-created admin until it expired.
+    from app.services.role_service import invalidate_cache
+
+    invalidate_cache()
     return role_map

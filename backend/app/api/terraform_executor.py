@@ -25,7 +25,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import require_permission
 from app.database import get_session
 from app.models.component import TerraformRun
+from app.platform.cloud_provider import get_cloud_provider
 from app.platform.platform_config_service import PlatformConfigService
+from app.services.terraform_cloud import get_terraform_cloud
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
 
 logger = logging.getLogger("bioaf.terraform_api")
@@ -121,11 +123,14 @@ async def bootstrap_foundation(
     user_id = int(current_user["sub"])
     org_id = int(current_user["org_id"])
 
-    # Eagerly check preconditions before opening the stream so we can return 409
-    config = await PlatformConfigService.get_many(session, ["gcp_credentials_configured", "terraform_initialized"])
+    # Eagerly check preconditions before opening the stream so we can return 409.
+    # Resolve the cloud so the "configured" gate is the right one per cloud (GCP
+    # checks gcp_credentials_configured; AWS checks the account identity).
+    cloud = get_terraform_cloud(await get_cloud_provider(session))
+    config = await PlatformConfigService.get_many(session, [*cloud.config_keys(), "terraform_initialized"])
 
-    if config.get("gcp_credentials_configured", "false") != "true":
-        raise HTTPException(status_code=409, detail="GCP credentials are not configured")
+    if not cloud.is_configured(config):
+        raise HTTPException(status_code=409, detail=cloud.not_configured_message())
     if config.get("terraform_initialized", "false") == "true":
         raise HTTPException(status_code=409, detail="Infrastructure is already initialized")
 
@@ -165,11 +170,13 @@ async def terraform_init(
     user_id = int(current_user["sub"])
     org_id = int(current_user["org_id"])
 
-    # Pre-flight checks
-    config = await PlatformConfigService.get_many(session, ["gcp_credentials_configured", "terraform_initialized"])
+    # Pre-flight checks (cloud-aware: AWS authenticates via the ambient instance
+    # profile, so its "configured" gate is the account identity, not the GCP flag)
+    cloud = get_terraform_cloud(await get_cloud_provider(session))
+    config = await PlatformConfigService.get_many(session, [*cloud.config_keys(), "terraform_initialized"])
 
-    if config.get("gcp_credentials_configured", "false") != "true":
-        raise HTTPException(status_code=400, detail="GCP credentials are not configured")
+    if not cloud.is_configured(config):
+        raise HTTPException(status_code=400, detail=cloud.not_configured_message())
     if config.get("terraform_initialized", "false") == "true":
         return {"message": "Terraform already initialized"}
 

@@ -560,6 +560,66 @@ async def test_gcs_status_old_backup_shows_warning():
 
 
 @pytest.mark.asyncio
+async def test_gcs_status_versioning_label_is_cloud_neutral():
+    """The versioning tier name follows the object_label (GCS / S3), not a hardcode."""
+    from app.services.backup_service import BackupService
+
+    adapter = _mock_status_adapter([], versioning=True)
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=adapter),
+        patch("app.services.backup_service.settings") as mock_settings,
+    ):
+        mock_settings.backup_postgres_interval_hours = 24
+        mock_settings.backup_postgres_retention_days = 14
+        mock_settings.backup_config_retention_days = 30
+
+        gcs_tiers = await BackupService._gcs_status("test-bucket", object_label="GCS")
+        s3_tiers = await BackupService._gcs_status("test-bucket", object_label="S3")
+
+    assert next(t for t in gcs_tiers if t["tier"] == "gcs")["name"] == "GCS Object Versioning"
+    assert next(t for t in s3_tiers if t["tier"] == "gcs")["name"] == "S3 Object Versioning"
+    # The fallback path (object store unavailable) is cloud-neutral too.
+    assert next(t for t in BackupService._fallback_status("S3") if t["tier"] == "gcs")["name"] == (
+        "S3 Object Versioning"
+    )
+
+
+@pytest.mark.asyncio
+async def test_gcs_status_terraform_state_real_versioning_check():
+    """Terraform State tier reflects the real state-bucket versioning, not a hardcode."""
+    from app.services.backup_service import BackupService
+
+    # Versioning disabled on the state bucket -> warning (was always healthy/true).
+    adapter = _mock_status_adapter([], versioning=False)
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=adapter),
+        patch("app.services.backup_service.settings") as mock_settings,
+    ):
+        mock_settings.backup_postgres_interval_hours = 24
+        mock_settings.backup_postgres_retention_days = 14
+        mock_settings.backup_config_retention_days = 30
+
+        tiers = await BackupService._gcs_status("test-bucket", object_label="S3", tfstate_bucket="tfstate-bucket")
+
+    tf = next(t for t in tiers if t["tier"] == "terraform_state")
+    assert tf["status"] == "warning"
+    assert tf["versioning_enabled"] is False
+
+    # With no state bucket known, it falls back to the prior healthy/true display.
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=adapter),
+        patch("app.services.backup_service.settings") as mock_settings,
+    ):
+        mock_settings.backup_postgres_interval_hours = 24
+        mock_settings.backup_postgres_retention_days = 14
+        mock_settings.backup_config_retention_days = 30
+        tiers_no_tf = await BackupService._gcs_status("test-bucket", object_label="GCS")
+    tf_default = next(t for t in tiers_no_tf if t["tier"] == "terraform_state")
+    assert tf_default["status"] == "healthy"
+    assert tf_default["versioning_enabled"] is True
+
+
+@pytest.mark.asyncio
 async def test_run_postgres_backup_uploads_to_gcs():
     """pg_dump runs, uploads to GCS, and cleans up the temp file."""
     from app.services.backup_service import BackupService

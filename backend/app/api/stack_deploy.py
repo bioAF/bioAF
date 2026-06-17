@@ -25,8 +25,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import require_permission
 from app.database import async_session_factory, get_session
 from app.exceptions import DomainError
+from app.platform.cloud_provider import get_cloud_provider
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.audit_service import log_action
+from app.services.terraform_cloud import AwsTerraformCloud, GcpTerraformCloud, get_terraform_cloud
 from app.services.notebook_image_service import build_notebook_image, cancel_build
 from app.services import infra_update_service
 from app.services.stack_deployment import (
@@ -52,7 +54,10 @@ logger = logging.getLogger("bioaf.stack_deploy_api")
 # sees a generic message instead of the raw exception text.
 _KNOWN_STACK_ERROR_MESSAGES = frozenset(
     {
-        "GCP credentials are not configured",
+        # The cloud-specific "not configured" message (GCP credentials flag /
+        # AWS account identity), kept in sync with the TerraformCloud seam.
+        GcpTerraformCloud().not_configured_message(),
+        AwsTerraformCloud().not_configured_message(),
         "Terraform has not been initialized",
         "Compute stack is already deployed. Teardown first.",
         "Compute stack is not deployed",
@@ -286,9 +291,12 @@ async def stack_deploy_background_endpoint(
     compute_zone = body.compute_zone if body else None
 
     # Validate preconditions synchronously so we can return a clear error.
-    gcp_val = await PlatformConfigService.get(session, "gcp_credentials_configured")
-    if gcp_val != "true":
-        raise HTTPException(status_code=400, detail="GCP credentials are not configured")
+    # Cloud-aware: the "configured" gate differs per cloud (GCP credentials flag
+    # vs AWS account identity), resolved through the TerraformCloud seam.
+    cloud = get_terraform_cloud(await get_cloud_provider(session))
+    cloud_config = await PlatformConfigService.get_many(session, cloud.config_keys())
+    if not cloud.is_configured(cloud_config):
+        raise HTTPException(status_code=400, detail=cloud.not_configured_message())
 
     tf_val = await PlatformConfigService.get(session, "terraform_initialized")
     if tf_val != "true":

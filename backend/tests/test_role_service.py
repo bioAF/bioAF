@@ -7,6 +7,35 @@ from app.services import role_service
 
 
 @pytest.mark.asyncio
+async def test_seed_builtin_roles_invalidates_permission_cache(session):
+    """Regression: seeding roles must clear the permission cache.
+
+    During first-run setup a permission check can run (e.g. a stale token hitting
+    a permissioned route) before the roles exist, caching an EMPTY permission set
+    under a role id for the 60s TTL. If seed_builtin_roles did not invalidate the
+    cache, the freshly-created admin would be denied (403) until the entry
+    expired. Pre-poison the cache, seed, and assert it was cleared.
+    """
+    import time
+
+    from app.models.organization import Organization
+    from app.services.bootstrap_roles import seed_builtin_roles
+
+    org = Organization(name="cache-regression-org", setup_complete=False, smtp_configured=False)
+    session.add(org)
+    await session.flush()
+
+    # Simulate the poisoned entry (empty perms cached, not yet expired).
+    role_service._permission_cache[999999] = (time.monotonic() + 60, frozenset())
+
+    role_map = await seed_builtin_roles(session, org.id)
+
+    assert role_service._permission_cache == {}, "seed_builtin_roles must invalidate the permission cache"
+    # And the freshly-seeded admin role resolves its real permissions immediately.
+    assert await role_service.has_permission(session, role_map["admin"], "infrastructure", "configure")
+
+
+@pytest.mark.asyncio
 async def test_seed_builtin_roles_creates_four_roles(session, admin_user):
     """seed_builtin_roles creates admin, comp_bio, bench, viewer for an org."""
     role_map = admin_user._test_role_map

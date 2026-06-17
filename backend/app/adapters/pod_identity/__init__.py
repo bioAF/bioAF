@@ -13,7 +13,7 @@ from __future__ import annotations
 from app.adapters.pod_identity.base import PodIdentityProvider
 from app.exceptions import ValidationError
 
-VALID_POD_IDENTITY_BACKENDS = ("gke",)
+VALID_POD_IDENTITY_BACKENDS = ("gke", "eks")
 DEFAULT_POD_IDENTITY_BACKEND = "gke"
 
 
@@ -21,6 +21,10 @@ def create_pod_identity_provider(backend: str = DEFAULT_POD_IDENTITY_BACKEND) ->
     """Instantiate the pod-identity provider for ``backend`` (default GKE)."""
     if backend not in VALID_POD_IDENTITY_BACKENDS:
         raise ValidationError(f"Unknown pod_identity backend '{backend}'. Valid options: {VALID_POD_IDENTITY_BACKENDS}")
+    if backend == "eks":
+        from app.adapters.pod_identity.aws import EksIrsaPodIdentityProvider
+
+        return EksIrsaPodIdentityProvider()
     from app.adapters.pod_identity.gcp import GkePodIdentityProvider
 
     return GkePodIdentityProvider()

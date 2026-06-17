@@ -57,14 +57,29 @@ slugify() {
 
 get_access_url() {
     # Try to detect the best URL for accessing the web UI.
-    # On GCE, the external IP is NAT'd and not visible to the OS,
-    # so we query the metadata server for it.
+    # On a cloud VM the external IP is NAT'd and not visible to the OS, so we
+    # query the cloud's metadata server for it (GCE first, then EC2). Falling
+    # back to hostname -I would return the private IP, which is unroutable from
+    # the operator's browser.
     local host=""
 
     if is_gce; then
         host=$(curl -sf -m 2 -H "Metadata-Flavor: Google" \
             "http://169.254.169.254/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip" \
             2>/dev/null) || true
+    fi
+
+    # On EC2 the public IP is likewise not on the OS interface; read it from
+    # IMDSv2 (a session-token PUT first, then the public-ipv4 metadata key).
+    if [ -z "$host" ] && is_ec2; then
+        local imds_token
+        imds_token=$(curl -sf -m 2 -X PUT \
+            -H "X-aws-ec2-metadata-token-ttl-seconds: 60" \
+            "http://169.254.169.254/latest/api/token" 2>/dev/null) || true
+        if [ -n "$imds_token" ]; then
+            host=$(curl -sf -m 2 -H "X-aws-ec2-metadata-token: ${imds_token}" \
+                "http://169.254.169.254/latest/meta-data/public-ipv4" 2>/dev/null) || true
+        fi
     fi
 
     if [ -z "$host" ]; then
@@ -80,6 +95,14 @@ get_access_url() {
 is_gce() {
     curl -sf -m 1 -H "Metadata-Flavor: Google" \
         "http://169.254.169.254/computeMetadata/v1/project/project-id" \
+        >/dev/null 2>&1
+}
+
+is_ec2() {
+    # The IMDSv2 token PUT succeeds only on EC2; -m 1 keeps non-cloud hosts fast.
+    curl -sf -m 1 -X PUT \
+        -H "X-aws-ec2-metadata-token-ttl-seconds: 60" \
+        "http://169.254.169.254/latest/api/token" \
         >/dev/null 2>&1
 }
 

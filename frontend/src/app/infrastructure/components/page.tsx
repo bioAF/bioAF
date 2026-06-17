@@ -122,7 +122,8 @@ export default function InfraComponentsPage() {
   const { has } = useCapabilities();
   // Provider-appropriate stack labels (GCP -> GKE+GCS, AWS -> EKS+S3); fails safe
   // to GCP defaults so a GCP install renders unchanged.
-  const { kubernetesOption } = useStackOptions();
+  const { kubernetesOption, cloudProvider } = useStackOptions();
+  const isAws = cloudProvider === "aws";
   const k8sStackLabel = kubernetesOption?.label ?? "Kubernetes + GCS";
   const storageLabel = storageDisplay(kubernetesOption?.storage_backend).label;
   const [loading, setLoading] = useState(true);
@@ -196,17 +197,22 @@ export default function InfraComponentsPage() {
       return;
     }
     loadData();
-  }, [router, refreshKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router, refreshKey, isAws]);
 
   async function loadData() {
+    // The compute region comes from the install's cloud settings: gcp_region on
+    // GCP, aws_region on AWS. EKS is regional (it spans AZs automatically), so an
+    // AWS install has no zone concept; only GCP reads gcp_zone.
+    const cloudSettingsPath = isAws ? "/api/v1/settings/aws" : "/api/v1/settings/gcp";
     // Fetch all data in parallel so the page renders once with complete state
-    const [tfResult, runsResult, ssResult, cdResult, ccResult, gcpResult] = await Promise.allSettled([
+    const [tfResult, runsResult, ssResult, cdResult, ccResult, cloudResult] = await Promise.allSettled([
       api.get<TerraformStatus>("/api/v1/infrastructure/terraform/status"),
       api.get<{ runs: TerraformRun[] }>("/api/v1/infrastructure/terraform/runs"),
       api.get<StackStatus>("/api/v1/infrastructure/stack/status"),
       api.get<ComponentsData>("/api/v1/infrastructure/stack/components"),
       api.get<ClusterConfig>("/api/v1/infrastructure/cluster/config"),
-      api.get<{ gcp_region?: string; gcp_zone?: string }>("/api/v1/settings/gcp"),
+      api.get<{ gcp_region?: string; gcp_zone?: string; aws_region?: string }>(cloudSettingsPath),
     ]);
 
     if (tfResult.status === "fulfilled") setTfStatus(tfResult.value);
@@ -214,15 +220,16 @@ export default function InfraComponentsPage() {
     if (ssResult.status === "fulfilled") setStackStatus(ssResult.value);
     if (cdResult.status === "fulfilled") setComponentsData(cdResult.value);
     if (ccResult.status === "fulfilled") setClusterConfig(ccResult.value);
-    if (gcpResult.status === "fulfilled") {
-      const gcp = gcpResult.value;
-      if (gcp.gcp_region) {
-        setDefaultRegion(gcp.gcp_region);
-        setDeployRegion(gcp.gcp_region);
+    if (cloudResult.status === "fulfilled") {
+      const cfg = cloudResult.value;
+      const region = isAws ? cfg.aws_region : cfg.gcp_region;
+      if (region) {
+        setDefaultRegion(region);
+        setDeployRegion(region);
       }
-      if (gcp.gcp_zone) {
-        setDefaultZone(gcp.gcp_zone);
-        setDeployZone(gcp.gcp_zone);
+      if (!isAws && cfg.gcp_zone) {
+        setDefaultZone(cfg.gcp_zone);
+        setDeployZone(cfg.gcp_zone);
       }
     }
     setLoading(false);
@@ -326,10 +333,12 @@ export default function InfraComponentsPage() {
     setDeployLoading(true);
     try {
       const body: Record<string, string> = { stack_type: "kubernetes" };
-      if (deployRegion !== defaultRegion) {
+      // The compute region/zone override is GCP-only (the EKS deploy uses the
+      // install's aws_region and spans AZs automatically), so AWS sends neither.
+      if (!isAws && deployRegion !== defaultRegion) {
         body.compute_region = deployRegion;
       }
-      if (useSpecificZone && deployZone) {
+      if (!isAws && useSpecificZone && deployZone) {
         body.compute_zone = deployZone;
       }
       await api.post("/api/v1/infrastructure/stack/deploy-background", body);
@@ -1158,66 +1167,87 @@ export default function InfraComponentsPage() {
           <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
             <h2 className="text-lg font-semibold mb-4">Deploy Compute Infrastructure</h2>
 
-            {/* Region */}
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Region</label>
-              <select
-                value={deployRegion}
-                onChange={(e) => {
-                  setDeployRegion(e.target.value);
-                  setDeployZone(zonesForRegion(e.target.value)[0]);
-                }}
-                className="w-full px-3 py-2 border rounded text-sm"
-              >
-                {GCP_REGIONS.map((r) => (
-                  <option key={r} value={r}>
-                    {r}{r === defaultRegion ? " (default)" : ""}
-                  </option>
-                ))}
-              </select>
-              {deployRegion !== defaultRegion && (
-                <p className="text-xs text-amber-600 mt-1 flex items-start gap-1">
-                  <span className="mt-0.5">&#9888;</span>
-                  Your storage is in {defaultRegion}. Deploying compute in {deployRegion} may
-                  incur cross-region network costs in GCP.
-                </p>
-              )}
-            </div>
-
-            {/* Zone toggle */}
-            <div className="mb-4">
-              <label className="flex items-center gap-2 cursor-pointer">
+            {isAws ? (
+              /* AWS (EKS): regional cluster, no per-deploy region/zone choice.
+                 EKS spans availability zones automatically, so there is no GKE-
+                 style zone selector or cross-region GCP cost warning. */
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Region</label>
                 <input
-                  type="checkbox"
-                  checked={useSpecificZone}
-                  onChange={(e) => setUseSpecificZone(e.target.checked)}
+                  type="text"
+                  value={deployRegion}
+                  readOnly
+                  className="w-full px-3 py-2 border rounded text-sm bg-gray-50 text-gray-600"
                 />
-                <span className="text-sm text-gray-700">Deploy to a specific zone</span>
-                <span
-                  className="text-gray-400 cursor-help"
-                  title="Without a specific zone, GKE creates a multi-zonal cluster with nodes distributed across availability zones. This provides better resilience but may cost slightly more."
-                >
-                  &#9432;
-                </span>
-              </label>
-              {useSpecificZone && (
-                <select
-                  value={deployZone}
-                  onChange={(e) => setDeployZone(e.target.value)}
-                  className="w-full px-3 py-2 border rounded text-sm mt-2"
-                >
-                  {zonesForRegion(deployRegion).map((z) => (
-                    <option key={z} value={z}>{z}</option>
-                  ))}
-                </select>
-              )}
-              {!useSpecificZone && (
                 <p className="text-xs text-gray-400 mt-1">
-                  Multi-zonal deployment across {deployRegion}. Greater flexibility,
-                  slightly higher GCP cost.
+                  The cluster deploys in your install region and spans multiple availability
+                  zones for resilience.
                 </p>
-              )}
-            </div>
+              </div>
+            ) : (
+              <>
+                {/* Region (GCP) */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Region</label>
+                  <select
+                    value={deployRegion}
+                    onChange={(e) => {
+                      setDeployRegion(e.target.value);
+                      setDeployZone(zonesForRegion(e.target.value)[0]);
+                    }}
+                    className="w-full px-3 py-2 border rounded text-sm"
+                  >
+                    {GCP_REGIONS.map((r) => (
+                      <option key={r} value={r}>
+                        {r}{r === defaultRegion ? " (default)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                  {deployRegion !== defaultRegion && (
+                    <p className="text-xs text-amber-600 mt-1 flex items-start gap-1">
+                      <span className="mt-0.5">&#9888;</span>
+                      Your storage is in {defaultRegion}. Deploying compute in {deployRegion} may
+                      incur cross-region network costs in GCP.
+                    </p>
+                  )}
+                </div>
+
+                {/* Zone toggle (GCP) */}
+                <div className="mb-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={useSpecificZone}
+                      onChange={(e) => setUseSpecificZone(e.target.checked)}
+                    />
+                    <span className="text-sm text-gray-700">Deploy to a specific zone</span>
+                    <span
+                      className="text-gray-400 cursor-help"
+                      title="Without a specific zone, GKE creates a multi-zonal cluster with nodes distributed across availability zones. This provides better resilience but may cost slightly more."
+                    >
+                      &#9432;
+                    </span>
+                  </label>
+                  {useSpecificZone && (
+                    <select
+                      value={deployZone}
+                      onChange={(e) => setDeployZone(e.target.value)}
+                      className="w-full px-3 py-2 border rounded text-sm mt-2"
+                    >
+                      {zonesForRegion(deployRegion).map((z) => (
+                        <option key={z} value={z}>{z}</option>
+                      ))}
+                    </select>
+                  )}
+                  {!useSpecificZone && (
+                    <p className="text-xs text-gray-400 mt-1">
+                      Multi-zonal deployment across {deployRegion}. Greater flexibility,
+                      slightly higher GCP cost.
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
 
             <div className="flex justify-end gap-2">
               <button
