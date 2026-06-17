@@ -40,6 +40,37 @@ cd bioAF
 Open the printed URL in your browser, enter the setup code, and follow the
 wizard to create your admin account and configure the platform.
 
+## One-Command AWS Setup
+
+To deploy on AWS instead of GCP, use the sibling installer. Run it on your
+local machine (macOS or Linux):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bioAF/bioAF/main/install-aws.sh | bash
+```
+
+The script walks you through:
+
+1. Installing the AWS CLI v2 (if not present)
+2. Verifying your AWS credentials (`aws sts get-caller-identity`)
+3. Selecting a region
+4. Creating an EC2 key pair for SSH (private key saved locally)
+5. Creating a security group (ports 80 and 443 from anywhere, port 22 from you)
+6. Creating the `bioaf-app` IAM role + instance profile (starter policy)
+7. Launching an Ubuntu 22.04 EC2 VM (IMDSv2-only) with the profile attached
+8. Stamping the install as `cloud_provider: aws`
+
+The VM authenticates to AWS through its instance profile (the analog of the GCP
+VM's attached service account), so no long-lived credentials are stored. The
+script then offers to finish setup on the VM for you, or prints a worksheet so
+you can SSH in and run `./bioaf setup` yourself.
+
+Pass options with the cloned form, e.g. `./install-aws.sh --region us-east-1`
+or `./install-aws.sh --help`. From there, deployment is identical to GCP: open
+the printed URL, enter the setup code, and follow the wizard. Storage (S3) and
+Kubernetes compute (EKS) are provisioned from the Infrastructure page once you
+are in; a few components are still being brought to parity with GCP.
+
 ## Quick Deploy (Existing Server)
 
 If you already have a Linux server with Docker installed:

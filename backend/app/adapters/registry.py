@@ -28,7 +28,7 @@ DEFAULT_WORK_NODE_BACKEND = "gce"
 DEFAULT_CELLXGENE_BACKEND = "kubernetes"
 # Storage is decoupled from compute_stack (Stage 2): it follows cloud_provider
 # (gcs on GCP, s3 on AWS) except SLURM, which stages on NFS regardless of cloud.
-# s3 is recognized but unimplemented until Stage 6a (S3StorageProvider).
+# s3 (AWS) resolves to the S3StorageProvider (Stage 6a).
 VALID_STORAGE_BACKENDS = ("gcs", "nfs", "s3")
 
 # Serializes initialize_adapters so a concurrent or repeated startup call cannot
