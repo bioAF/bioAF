@@ -832,11 +832,21 @@ class KubernetesComputeProvider(ComputeProvider):
         job_spec: dict,
         report_gcs_path: str = "",
         trace_gcs_path: str = "",
+        igenomes_ignore: bool = False,
     ) -> list[str]:
         """Build a Nextflow run command from the job spec.
 
         Translates pipeline_source, pipeline_version, parameters, and
         sample_sheet into a shell command that nextflow can execute.
+
+        When ``igenomes_ignore`` is set (AWS runs), append ``--igenomes_ignore
+        true`` unless the run already sets it. nf-core pipelines default
+        ``igenomes_base`` to ``s3://ngi-igenomes/igenomes/`` (a public AWS bucket),
+        and schema validation reads that path. On AWS the pipeline pod's IRSA
+        creds are scoped to ``bioaf-*``, so the SIGNED read of ngi-igenomes 403s;
+        on GCP the same read goes out anonymous and succeeds. Defaulting igenomes
+        off on AWS avoids the 403 for pipelines that do not need iGenomes (bioAF
+        manages references via its own bucket). GCP passes ``False`` -> unchanged.
         """
         pipeline_source = job_spec.get("pipeline_source", "")
         pipeline_version = job_spec.get("pipeline_version", "")
@@ -867,6 +877,12 @@ class KubernetesComputeProvider(ComputeProvider):
         # outdir is guaranteed durable by _ensure_outdir before this runs (a gs://
         # results path, or the launch already failed closed), so it is never
         # defaulted to a pod-local path that pod cleanup would destroy.
+
+        # Default iGenomes off on AWS (signed IRSA reads 403 on the public
+        # ngi-igenomes bucket). Skip when the run sets igenomes_ignore explicitly
+        # so an operator override below still wins.
+        if igenomes_ignore and "igenomes_ignore" not in parameters:
+            parts.extend(["--igenomes_ignore", "true"])
 
         # Strip bioAF-internal config knobs that are not Nextflow parameters
         internal_keys = {"fusion_enabled"}
@@ -1181,6 +1197,10 @@ class KubernetesComputeProvider(ComputeProvider):
                 job_spec,
                 report_gcs_path=report_gcs_path,
                 trace_gcs_path=trace_gcs_path,
+                # AWS runs carry an IRSA runner role; default iGenomes off there
+                # so schema validation does not 403 on the public ngi-igenomes
+                # bucket. GCP has no runner role arn -> False -> unchanged.
+                igenomes_ignore=bool(runner_role_arn and runner_role_arn != "null"),
             )
 
         # Build init containers for input staging. The stage container runs the

@@ -7,6 +7,28 @@ logger = logging.getLogger("bioaf.sample_sheet")
 
 _ILLUMINA_READ_RE = re.compile(r"_(R[12]|I[12])_")
 
+# A sample name that is purely numeric (int or float). nf-core/nf-schema infers a
+# CSV column's type from its values, so such a name is typed as integer/number and
+# rejected against the schema's string 'sample' field ("Value is [integer] but
+# should be [string]"). We prefix these so the value is unambiguously a string.
+_NUMERIC_NAME_RE = re.compile(r"-?\d+(?:\.\d+)?")
+
+
+def _safe_sample_name(sample) -> str:
+    """Resolve a sample's 'sample' column value, guaranteed to be string-typed.
+
+    Uses the sample's ``external_id`` (falling back to ``sample_<id>`` when it is
+    empty), then prefixes any purely numeric name so nf-schema does not coerce it
+    to an integer and reject it. Non-numeric names and the fallback pass through
+    unchanged, so this only changes names that nf-core would reject anyway.
+    """
+    name = (getattr(sample, "external_id", None) or "").strip()
+    if not name:
+        return f"sample_{sample.id}"
+    if _NUMERIC_NAME_RE.fullmatch(name):
+        return f"sample_{name}"
+    return name
+
 
 def _get_read_type(f) -> str | None:
     """Return read type (R1, R2, I1, I2) from tags_json or filename pattern."""
@@ -106,7 +128,7 @@ class SampleSheetService:
         input_paths = parameters.get("input_paths", {})
 
         for sample in samples:
-            sample_name = sample.external_id or f"sample_{sample.id}"
+            sample_name = _safe_sample_name(sample)
             paths = input_paths.get(str(sample.id), [])
             expected_cells = parameters.get("expected_cells", 10000)
             if paths:
@@ -129,7 +151,7 @@ class SampleSheetService:
         input_paths = parameters.get("input_paths", {})
 
         for sample in samples:
-            sample_name = sample.external_id or f"sample_{sample.id}"
+            sample_name = _safe_sample_name(sample)
             paths = input_paths.get(str(sample.id), [])
             strandedness = parameters.get("strandedness", "auto")
             if paths:
@@ -152,7 +174,7 @@ class SampleSheetService:
         input_paths = parameters.get("input_paths", {})
 
         for sample in samples:
-            sample_name = sample.external_id or f"sample_{sample.id}"
+            sample_name = _safe_sample_name(sample)
             paths = input_paths.get(str(sample.id), [])
             if paths:
                 fastq_1 = paths[0] if len(paths) > 0 else ""
