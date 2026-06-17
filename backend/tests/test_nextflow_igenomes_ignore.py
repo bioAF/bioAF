@@ -31,3 +31,27 @@ def test_explicit_igenomes_param_is_not_duplicated():
     # The operator's explicit value wins; the auto default does not double-emit.
     assert cmd.count("--igenomes_ignore") == 1
     assert "--igenomes_ignore false" in cmd
+
+
+# --- nextflow.config: skip nf-schema validation of igenomes_base on AWS --------
+# nf-schema's directory-path format check does a live S3 read of the public
+# igenomes_base default, which IRSA-signed creds 403 on. ignoreParams skips it.
+
+
+def test_config_ignores_igenomes_base_on_aws():
+    config = KubernetesComputeProvider._build_nextflow_k8s_config(
+        namespace="bioaf-pipelines",
+        has_gcs_secret=False,
+        gcs_work_dir="s3://bioaf-raw-x/nextflow-work",
+        ignore_igenomes_base=True,
+    )
+    assert "validation.ignoreParams = ['igenomes_base']" in config
+
+
+def test_config_does_not_ignore_igenomes_base_on_gcp():
+    config = KubernetesComputeProvider._build_nextflow_k8s_config(
+        namespace="bioaf-pipelines",
+        has_gcs_secret=True,
+        gcs_work_dir="gs://bioaf-raw-x/nextflow-work",
+    )
+    assert "ignoreParams" not in config

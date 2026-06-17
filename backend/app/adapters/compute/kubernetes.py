@@ -947,6 +947,7 @@ class KubernetesComputeProvider(ComputeProvider):
         has_gcs_secret: bool,
         gcs_work_dir: str | None = None,
         pipeline_machine_type: str | None = None,
+        ignore_igenomes_base: bool = False,
     ) -> str:
         """Build a nextflow.config for K8s executor mode.
 
@@ -954,12 +955,27 @@ class KubernetesComputeProvider(ComputeProvider):
         pods use the right service account, have GCS credentials when
         available, and share a GCS-backed work directory so the head pod
         and process pods can exchange command scripts and data.
+
+        When ``ignore_igenomes_base`` is set (AWS runs), tell nf-schema to skip
+        validating the ``igenomes_base`` parameter. nf-core defaults it to the
+        public ``s3://ngi-igenomes/igenomes/`` bucket and nf-schema's
+        ``directory-path`` format check does a live S3 access to validate it; on
+        AWS the pipeline pod's IRSA creds (scoped to ``bioaf-*``) sign that read
+        and get 403, so validation fails before the pipeline starts. (On GCP the
+        same read is anonymous and succeeds, so GCP omits this.) ``ignoreParams``
+        is the nf-schema 2.x user list and merges with the pipeline's
+        ``defaultIgnoreParams``, so it does not clobber the pipeline's own.
         """
         lines = [
             "process.executor = 'k8s'",
             f"k8s.namespace = '{namespace}'",
             "k8s.serviceAccount = 'bioaf-pipeline-runner'",
         ]
+
+        # Skip nf-schema's live S3 validation of the public igenomes_base default
+        # (IRSA-signed reads 403 on ngi-igenomes). AWS-gated; GCP never sets this.
+        if ignore_igenomes_base:
+            lines.append("validation.ignoreParams = ['igenomes_base']")
 
         # Scratch workDir so head and process pods share files. The storage
         # backend supplies its Nextflow workDir directives (ScratchWorkDir seam):
@@ -1248,7 +1264,15 @@ class KubernetesComputeProvider(ComputeProvider):
             # storage seam, instead of a hardcoded gs:// literal.
             scratch_work_dir = get_storage_adapter().build_uri(raw_bucket, "nextflow-work") if raw_bucket else None
             pipeline_machine = nf_cfg.get("k8s_pipeline_machine_type")
-            nf_config = self._build_nextflow_k8s_config(namespace, has_gcs_secret, scratch_work_dir, pipeline_machine)
+            # AWS runs use IRSA creds scoped to bioaf-*, so skip nf-schema's live
+            # validation of the public igenomes_base default (it 403s). GCP omits.
+            nf_config = self._build_nextflow_k8s_config(
+                namespace,
+                has_gcs_secret,
+                scratch_work_dir,
+                pipeline_machine,
+                ignore_igenomes_base=bool(runner_role_arn and runner_role_arn != "null"),
+            )
             # Use heredoc to avoid shell escaping issues with single quotes
             # in Nextflow config values (e.g., 'k8s', 'bioaf-pipelines')
             init_containers.append(
