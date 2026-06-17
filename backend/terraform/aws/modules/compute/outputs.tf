@@ -51,6 +51,11 @@ output "oidc_provider_arn" {
   description = "ARN of the cluster IRSA OIDC provider."
 }
 
+output "cluster_autoscaler_role_arn" {
+  value       = aws_iam_role.cluster_autoscaler.arn
+  description = "IRSA role ARN for the in-cluster Cluster Autoscaler (the kube-system cluster-autoscaler SA is annotated with this so the CA can call the EC2/ASG/EKS APIs)."
+}
+
 output "oidc_provider_url" {
   value       = aws_eks_cluster.this.identity[0].oidc[0].issuer
   description = "OIDC issuer URL of the cluster (for IRSA trust policies)."

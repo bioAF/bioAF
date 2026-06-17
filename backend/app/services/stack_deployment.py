@@ -535,11 +535,15 @@ async def deploy_stack(
                 pipeline_runner_arn = outputs.get("pipeline_runner_role_arn", {}).get("value", "")
                 oidc_provider_arn = outputs.get("oidc_provider_arn", {}).get("value", "")
                 oidc_provider_url = outputs.get("oidc_provider_url", {}).get("value", "")
+                cluster_autoscaler_arn = outputs.get("cluster_autoscaler_role_arn", {}).get("value", "")
                 await _set_config(session, "pipeline_runner_role_arn", pipeline_runner_arn or "null")
                 await _set_config(session, "notebook_runner_role_arn", notebook_runner_sa or "null")
                 await _set_config(session, "cellxgene_runner_role_arn", cellxgene_runner_sa or "null")
                 await _set_config(session, "eks_oidc_provider_arn", oidc_provider_arn or "null")
                 await _set_config(session, "eks_oidc_provider_url", oidc_provider_url or "null")
+                # IRSA role for the in-cluster Cluster Autoscaler; the CA workload
+                # is installed below (post-compute) using this ARN.
+                await _set_config(session, "cluster_autoscaler_role_arn", cluster_autoscaler_arn or "null")
 
             # Update kubernetes_cluster component state
             await session.execute(
@@ -638,12 +642,75 @@ async def deploy_stack(
         )
         return
 
+    # AWS post-compute: install the in-cluster Cluster Autoscaler. EKS managed
+    # node groups do NOT pod-autoscale natively (GKE's control plane does), so
+    # without this a launched pipeline/notebook pod that targets a scaled-to-zero
+    # pool sits Pending forever and nothing scales a node up. Best-effort: the
+    # cluster IS deployed at this point, so a CA hiccup must not roll it back --
+    # surface a clear warning and leave it retryable (the install is idempotent).
+    # GCP autoscales node pools natively, so this is skipped there entirely.
+    if cloud_provider == "aws":
+        yield TerraformProgressEvent(
+            event_type="progress",
+            message="Installing cluster autoscaler...",
+        )
+        try:
+            ca_status = await _ensure_aws_cluster_autoscaler(session)
+            await session.flush()
+            yield TerraformProgressEvent(
+                event_type="progress",
+                message=f"Cluster autoscaler {ca_status}.",
+            )
+        except Exception as exc:
+            logger.exception("Cluster autoscaler install failed")
+            yield TerraformProgressEvent(
+                event_type="progress",
+                message=(
+                    f"Warning: cluster autoscaler install failed ({exc}). The cluster is "
+                    "deployed, but pipelines and notebooks cannot scale nodes until it is "
+                    "installed; re-running the compute deploy will retry it (idempotent)."
+                ),
+            )
+
     yield TerraformProgressEvent(
         event_type="stack_complete",
         message="Stack deployment complete",
         resources_completed=storage_completed + compute_completed,
         resources_total=storage_planned + compute_planned,
     )
+
+
+async def _ensure_aws_cluster_autoscaler(session: AsyncSession) -> str:
+    """Install/refresh the EKS in-cluster Cluster Autoscaler from platform_config.
+
+    Reads the CA's IRSA role ARN (terraform output, captured at compute apply),
+    the cluster name, and the region, then delegates the actual kube-system apply
+    to the compute adapter (which owns the cluster connection + the k8s SDK).
+    Returns a short status word for the progress message. Raises on a real apply
+    failure so the caller can surface it; returns ``skipped`` when the role ARN is
+    absent (e.g. a cluster deployed before this feature -- nothing to install).
+    """
+    from app.adapters.registry import get_compute_adapter
+    from app.platform.platform_config_service import PlatformConfigService
+
+    cfg = await PlatformConfigService.get_many(
+        session,
+        ["cluster_autoscaler_role_arn", "gke_cluster_name", "aws_region", "cluster_autoscaler_image"],
+    )
+    role_arn = cfg.get("cluster_autoscaler_role_arn")
+    if not role_arn or role_arn == "null":
+        logger.warning("No cluster_autoscaler_role_arn in platform_config; skipping CA install")
+        return "skipped (no role ARN output)"
+
+    region = cfg.get("aws_region")
+    image = cfg.get("cluster_autoscaler_image")
+    await get_compute_adapter().ensure_cluster_autoscaler(
+        role_arn=role_arn,
+        cluster_name=(cfg.get("gke_cluster_name") or ""),
+        region=(region if region and region != "null" else ""),
+        image=(image if image and image != "null" else None),
+    )
+    return "installed"
 
 
 async def teardown_stack(

@@ -19,6 +19,7 @@ from kubernetes import client
 
 from app.adapters.base import ComputeProvider
 from app.adapters.capabilities import ProviderCapabilities
+from app.adapters.compute.cluster_autoscaler import build_cluster_autoscaler_manifests
 from app.adapters.kubernetes.connection import GkeConnection
 from app.adapters.models import (
     ClusterDetail,
@@ -567,6 +568,98 @@ class KubernetesComputeProvider(ComputeProvider):
     def _get_k8s_rbac_client(self):
         """Get a Kubernetes RbacAuthorizationV1Api client. Tests mock this method."""
         return self._gke.rbac_v1()
+
+    def _get_k8s_apps_client(self):
+        """Get a Kubernetes AppsV1Api client. Tests mock this method."""
+        return self._gke.apps_v1()
+
+    async def ensure_cluster_autoscaler(
+        self,
+        *,
+        role_arn: str,
+        cluster_name: str,
+        region: str,
+        image: str | None = None,
+    ) -> None:
+        """Install/refresh the in-cluster Cluster Autoscaler (EKS only).
+
+        EKS managed node groups do not pod-autoscale natively (GKE does), so on
+        AWS a launched pipeline/notebook pod that targets a scaled-to-zero pool
+        sits Pending forever. This deploys the CA workload (kube-system SA + RBAC
+        + Deployment) through the cluster connection -- the same way
+        ``ensure_pipeline_namespace`` creates the pipeline namespace/SA -- so it
+        is fully code-driven, no manual kubectl. The SA is annotated via the
+        PodIdentity seam with the IRSA ``role_arn`` the terraform module created;
+        the Deployment's auto-discovery flag matches the ASG tags that module
+        stamps. Idempotent: re-running create-or-patches each object, so a
+        redeploy or a repair pass converges.
+
+        This is never called on GCP (the deploy flow gates it on cloud_provider);
+        it lives on the shared K8s provider only because it needs the cluster
+        connection. ``role_arn``/``cluster_name``/``region`` come from
+        platform_config (written by the compute deploy).
+        """
+        from kubernetes.client.rest import ApiException
+
+        # The cluster was (re)deployed moments ago; force a fresh read of the
+        # endpoint/CA/token from platform_config before building the client (the
+        # cached config from startup predates this cluster). invalidate_client_on
+        # _force=True drops any stale client so it rebuilds against the new cfg.
+        await self._gke.load_cluster_config(force=True)
+
+        sa_annotations = self._pod_identity.pod_identity_annotations(role_arn)
+        m = build_cluster_autoscaler_manifests(
+            role_arn=role_arn,
+            cluster_name=cluster_name,
+            region=region,
+            sa_annotations=sa_annotations,
+            image=image,
+        )
+
+        core_v1 = self._get_k8s_core_client()
+        rbac_v1 = self._get_k8s_rbac_client()
+        apps_v1 = self._get_k8s_apps_client()
+        ns = "kube-system"
+
+        def _apply(create, kind: str, replace=None) -> None:
+            try:
+                create()
+                logger.info("Created cluster-autoscaler %s", kind)
+            except ApiException as e:
+                if e.status == 409:
+                    # Already present (redeploy / repair). Update the mutable
+                    # objects (SA annotation, Deployment image/args/role) so the
+                    # refresh actually takes; leave the static RBAC as-is.
+                    if replace is not None:
+                        replace()
+                        logger.info("Updated cluster-autoscaler %s", kind)
+                    else:
+                        logger.info("cluster-autoscaler %s already exists", kind)
+                else:
+                    raise
+
+        _apply(
+            lambda: core_v1.create_namespaced_service_account(namespace=ns, body=m["service_account"]),
+            "service account",
+            replace=lambda: core_v1.patch_namespaced_service_account(
+                name="cluster-autoscaler", namespace=ns, body=m["service_account"]
+            ),
+        )
+        _apply(lambda: rbac_v1.create_cluster_role(body=m["cluster_role"]), "cluster role")
+        _apply(lambda: rbac_v1.create_cluster_role_binding(body=m["cluster_role_binding"]), "cluster role binding")
+        _apply(lambda: rbac_v1.create_namespaced_role(namespace=ns, body=m["role"]), "role")
+        _apply(
+            lambda: rbac_v1.create_namespaced_role_binding(namespace=ns, body=m["role_binding"]),
+            "role binding",
+        )
+        _apply(
+            lambda: apps_v1.create_namespaced_deployment(namespace=ns, body=m["deployment"]),
+            "deployment",
+            replace=lambda: apps_v1.patch_namespaced_deployment(
+                name="cluster-autoscaler", namespace=ns, body=m["deployment"]
+            ),
+        )
+        logger.info("Cluster autoscaler ensured for cluster %s", cluster_name)
 
     _namespace_ready = False
 

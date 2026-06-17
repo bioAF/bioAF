@@ -527,3 +527,117 @@ resource "aws_eks_access_policy_association" "app_admin" {
   }
   depends_on = [aws_eks_access_entry.app]
 }
+
+# --- Cluster Autoscaler: IRSA role + ASG discovery tags (Stage 6e increment 3) -
+#
+# EKS managed node groups do NOT pod-autoscale natively (GKE's control plane
+# does). The in-cluster Cluster Autoscaler scales each node group's underlying
+# ASG 0<->N as pods go Pending/idle. Terraform provisions the two AWS-side
+# prerequisites: (1) an IRSA role the CA assumes to call the EC2/ASG/EKS APIs,
+# and (2) discovery + scale-from-zero hint tags on each managed node group's ASG.
+# The CA workload itself (Deployment/RBAC/SA in kube-system) is installed
+# app-side at compute-deploy through the cluster connection -- mirroring how the
+# app already creates the pipeline namespace/SA/Job -- so it is deliberately NOT
+# a terraform helm_release here (keeps the proven compute apply free of an
+# in-cluster helm/kube provider and its exec-auth blast radius).
+
+data "aws_iam_policy_document" "cluster_autoscaler_trust" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    effect  = "Allow"
+    principals {
+      type        = "Federated"
+      identifiers = [local.oidc_provider_arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${local.oidc_host}:sub"
+      values   = ["system:serviceaccount:kube-system:cluster-autoscaler"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${local.oidc_host}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "cluster_autoscaler" {
+  name               = "${local.cluster_name}-cluster-autoscaler"
+  assume_role_policy = data.aws_iam_policy_document.cluster_autoscaler_trust.json
+  tags               = local.tags
+}
+
+# The canonical Cluster Autoscaler permission set. STARTER scope (Resource "*"),
+# consistent with the install-aws.sh starter policy; TIGHTEN in Stage 7 (scope
+# the mutating actions to this cluster's ASGs via an autoscaling:ResourceTag
+# condition on k8s.io/cluster-autoscaler/${cluster_name}).
+data "aws_iam_policy_document" "cluster_autoscaler" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "autoscaling:DescribeAutoScalingGroups",
+      "autoscaling:DescribeAutoScalingInstances",
+      "autoscaling:DescribeLaunchConfigurations",
+      "autoscaling:DescribeScalingActivities",
+      "autoscaling:DescribeTags",
+      "autoscaling:SetDesiredCapacity",
+      "autoscaling:TerminateInstanceInAutoScalingGroup",
+      "ec2:DescribeImages",
+      "ec2:DescribeInstanceTypes",
+      "ec2:DescribeLaunchTemplateVersions",
+      "ec2:GetInstanceTypesFromInstanceRequirements",
+      "eks:DescribeNodegroup",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "cluster_autoscaler" {
+  name   = "bioaf-cluster-autoscaler"
+  role   = aws_iam_role.cluster_autoscaler.id
+  policy = data.aws_iam_policy_document.cluster_autoscaler.json
+}
+
+# Discovery + scale-from-zero tags on each scalable node group's ASG. EKS does
+# NOT propagate managed-node-group tags down to the ASG, so we tag the ASG
+# directly. The CA discovers ASGs by the enabled/<cluster> tags; the
+# node-template/label + node-template/taint tags let it determine that scaling a
+# 0-sized group WOULD satisfy a Pending pod's nodeSelector/toleration
+# (scale-from-zero needs the would-be node's labels/taints, which it cannot read
+# from a group that has no nodes yet). The always-on system group is left
+# unmanaged (min 1, hosts the CA + addons).
+locals {
+  autoscaled_node_groups = {
+    pipelines     = { asg = aws_eks_node_group.pipelines.resources[0].autoscaling_groups[0].name, pool = "pipelines", taint = "" }
+    interactive   = { asg = aws_eks_node_group.interactive.resources[0].autoscaling_groups[0].name, pool = "interactive", taint = "interactive" }
+    pipeline_head = { asg = aws_eks_node_group.pipeline_head.resources[0].autoscaling_groups[0].name, pool = "pipeline-head", taint = "pipeline-head" }
+  }
+
+  # Flatten {node_group -> {tags}} into a single map keyed by "<group>/<tag>" so
+  # aws_autoscaling_group_tag (one resource per tag) can for_each over it. Keys
+  # are static (known at plan); only the ASG-name values are computed.
+  ca_asg_tags = merge([
+    for ng_key, ng in local.autoscaled_node_groups : merge(
+      {
+        "${ng_key}/enabled" = { asg = ng.asg, key = "k8s.io/cluster-autoscaler/enabled", value = "true" }
+        "${ng_key}/owned"   = { asg = ng.asg, key = "k8s.io/cluster-autoscaler/${local.cluster_name}", value = "owned" }
+        "${ng_key}/label"   = { asg = ng.asg, key = "k8s.io/cluster-autoscaler/node-template/label/bioaf.io/pool", value = ng.pool }
+      },
+      ng.taint == "" ? {} : {
+        "${ng_key}/taint" = { asg = ng.asg, key = "k8s.io/cluster-autoscaler/node-template/taint/bioaf.io/pool", value = "${ng.taint}:NoSchedule" }
+      }
+    )
+  ]...)
+}
+
+resource "aws_autoscaling_group_tag" "ca" {
+  for_each               = local.ca_asg_tags
+  autoscaling_group_name = each.value.asg
+
+  tag {
+    key                 = each.value.key
+    value               = each.value.value
+    propagate_at_launch = false
+  }
+}
