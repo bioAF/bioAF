@@ -355,6 +355,17 @@ cat >"$POLICY_DOC" <<'JSON'
       "Resource": "*"
     },
     {
+      "Sid": "BioafEksAutoscalingTags",
+      "Effect": "Allow",
+      "Action": [
+        "autoscaling:CreateOrUpdateTags",
+        "autoscaling:DeleteTags",
+        "autoscaling:DescribeTags",
+        "autoscaling:DescribeAutoScalingGroups"
+      ],
+      "Resource": "*"
+    },
+    {
       "Sid": "BioafEksIamRoles",
       "Effect": "Allow",
       "Action": [
