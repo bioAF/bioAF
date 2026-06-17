@@ -174,6 +174,15 @@ class TestCliStaging:
     def test_pip_packages_include_boto3(self):
         assert "boto3" in S3StorageProvider().image_storage_pip_packages()
 
+    def test_nextflow_scratch_directives_use_s3_workdir_with_fusion(self):
+        # The pipeline-launch blocker: S3 must implement this seam (was inheriting
+        # the base bare NotImplementedError). Mirrors GCS (Fusion+Wave) but with the
+        # s3:// workDir passed through.
+        directives = S3StorageProvider().nextflow_scratch_directives("s3://bioaf-raw-x/nextflow-work")
+        assert "workDir = 's3://bioaf-raw-x/nextflow-work'" in directives
+        assert "fusion.enabled = true" in directives
+        assert "wave.enabled = true" in directives
+
 
 # --- Capabilities ------------------------------------------------------------
 

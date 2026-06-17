@@ -188,8 +188,11 @@ class KubernetesComputeProvider(ComputeProvider):
         "gcp_region",
         # aws_region lets the EKS ClusterAuth provider mint a region-correct STS
         # token; additive and ignored on GCP (the EKS endpoint/CA reuse the
-        # gke_cluster_* keys above).
+        # gke_cluster_* keys above). pipeline_runner_role_arn is the AWS IRSA
+        # identity the pipeline KSA is annotated with (GCP derives a GSA email
+        # from project_id instead).
         "aws_region",
+        "pipeline_runner_role_arn",
         "raw_bucket_name",
         "results_bucket_name",
         "k8s_pipeline_machine_type",
@@ -765,7 +768,11 @@ class KubernetesComputeProvider(ComputeProvider):
             )
         experiment_id = job_spec.get("experiment_id", "unknown")
         run_id = job_spec.get("run_id", 0)
-        outdir = f"gs://{results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}"
+        # Backend-neutral outdir URI (gs:// on GCS, s3:// on S3) via the storage
+        # seam, instead of a hardcoded gs:// literal.
+        from app.adapters.registry import get_storage_adapter
+
+        outdir = get_storage_adapter().build_uri(results_bucket, f"experiments/{experiment_id}/pipeline-runs/{run_id}")
         return {**job_spec, "parameters": {**params, "outdir": outdir}}
 
     # Allocatable resources per GCP machine type (after system reservations).
@@ -975,13 +982,21 @@ class KubernetesComputeProvider(ComputeProvider):
         sample_sheet = job_spec.get("sample_sheet", "")
 
         # Ensure namespace, service account, and role binding exist on first use.
-        # Pass the bioaf-pipeline-runner GSA email so the KSA gets the
-        # iam.gke.io/gcp-service-account annotation for Workload Identity.
+        # Pass the pipeline-runner cloud identity so the KSA gets the right
+        # pod-identity annotation (the PodIdentity seam maps it): on GCP the
+        # bioaf-pipeline-runner GSA email -> iam.gke.io/gcp-service-account; on AWS
+        # the IRSA role ARN -> eks.amazonaws.com/role-arn.
         cfg = self._cluster_config or {}
         project_id = cfg.get("gcp_project_id", "")
-        pipeline_runner_sa_email = f"bioaf-pipeline-runner@{project_id}.iam.gserviceaccount.com" if project_id else ""
+        runner_role_arn = cfg.get("pipeline_runner_role_arn", "")
+        if runner_role_arn and runner_role_arn != "null":
+            pipeline_runner_identity = runner_role_arn
+        elif project_id:
+            pipeline_runner_identity = f"bioaf-pipeline-runner@{project_id}.iam.gserviceaccount.com"
+        else:
+            pipeline_runner_identity = ""
         if not self._namespace_ready:
-            await self.ensure_pipeline_namespace(namespace, gcp_sa_email=pipeline_runner_sa_email)
+            await self.ensure_pipeline_namespace(namespace, gcp_sa_email=pipeline_runner_identity)
 
         # Ensure GCS credentials secret exists for bucket access. Read the
         # SA key fresh from platform_config so a key saved or rotated through
@@ -1001,13 +1016,21 @@ class KubernetesComputeProvider(ComputeProvider):
         if pipeline_source and not command:
             container_image = self.NEXTFLOW_IMAGE
 
+            from app.adapters.registry import get_storage_adapter
+
             nf_cfg = self._cluster_config or {}
             raw_bucket = nf_cfg.get("raw_bucket_name", "")
 
-            # Write the Nextflow HTML report and execution trace directly to
-            # GCS so they persist after the head pod is cleaned up.
-            report_gcs_path = f"gs://{raw_bucket}/nextflow-reports/{job_name}/report.html" if raw_bucket else ""
-            trace_gcs_path = f"gs://{raw_bucket}/nextflow-traces/{job_name}/trace.tsv" if raw_bucket else ""
+            # Write the Nextflow HTML report and execution trace directly to the
+            # object store (gs:// on GCS, s3:// on S3, via the storage seam) so they
+            # persist after the head pod is cleaned up.
+            _adapter = get_storage_adapter()
+            report_gcs_path = (
+                _adapter.build_uri(raw_bucket, f"nextflow-reports/{job_name}/report.html") if raw_bucket else ""
+            )
+            trace_gcs_path = (
+                _adapter.build_uri(raw_bucket, f"nextflow-traces/{job_name}/trace.tsv") if raw_bucket else ""
+            )
 
             # Set --outdir to a durable results-bucket path so pipeline outputs
             # persist after pod cleanup. The path mirrors the prefix that
@@ -1059,11 +1082,15 @@ class KubernetesComputeProvider(ComputeProvider):
 
         # Write nextflow.config with K8s executor settings for Nextflow pipelines
         if pipeline_source and not job_spec.get("command"):
+            from app.adapters.registry import get_storage_adapter
+
             nf_cfg = self._cluster_config or {}
             raw_bucket = nf_cfg.get("raw_bucket_name", "")
-            gcs_work_dir = f"gs://{raw_bucket}/nextflow-work" if raw_bucket else None
+            # Backend-neutral workDir URI (gs:// on GCS, s3:// on S3) via the
+            # storage seam, instead of a hardcoded gs:// literal.
+            scratch_work_dir = get_storage_adapter().build_uri(raw_bucket, "nextflow-work") if raw_bucket else None
             pipeline_machine = nf_cfg.get("k8s_pipeline_machine_type")
-            nf_config = self._build_nextflow_k8s_config(namespace, has_gcs_secret, gcs_work_dir, pipeline_machine)
+            nf_config = self._build_nextflow_k8s_config(namespace, has_gcs_secret, scratch_work_dir, pipeline_machine)
             # Use heredoc to avoid shell escaping issues with single quotes
             # in Nextflow config values (e.g., 'k8s', 'bioaf-pipelines')
             init_containers.append(

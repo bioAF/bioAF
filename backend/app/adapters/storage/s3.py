@@ -328,6 +328,19 @@ class S3StorageProvider(StorageProvider):
         # amazon/aws-cli ships the `aws s3` CLI for stage in/out.
         return "amazon/aws-cli"
 
+    def nextflow_scratch_directives(self, work_dir: str) -> list[str]:
+        # The S3 analog of the GCS ScratchWorkDir: Wave + Fusion mount the s3://
+        # workDir as a local POSIX filesystem inside each task pod (Fusion supports
+        # S3 natively), so head and process pods exchange .command.run scripts over
+        # the object store without a shared RWX PVC. Pods authenticate to S3 via
+        # IRSA, and fusion.exportStorageCredentials forwards those creds to Fusion.
+        return [
+            f"workDir = '{work_dir}'",
+            "wave.enabled = true",
+            "fusion.enabled = true",
+            "fusion.exportStorageCredentials = true",
+        ]
+
     def image_storage_pip_packages(self) -> str:
         # Baked into built pipeline/notebook images so user code can read/write S3
         # (boto3) and shell out to the CLI (awscli). Bounded to the 1.x majors.
