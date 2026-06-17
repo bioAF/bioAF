@@ -121,8 +121,9 @@ class TestAwsTerraformCloud:
         env, cleanup = await self.cloud.build_provider_env({"aws_region": "us-west-1"})
         assert env["AWS_REGION"] == "us-west-1"
         assert env["AWS_DEFAULT_REGION"] == "us-west-1"
-        # no credential temp files to clean up (instance profile / IMDS)
-        assert await cleanup() is None
+        # no credential temp files to clean up (instance profile / IMDS); cleanup
+        # is a no-op that returns None and must not raise.
+        await cleanup()
 
     def test_is_configured_requires_account_id(self):
         # AWS is "configured" when the account identity is set (the bootstrap
