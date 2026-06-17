@@ -13,7 +13,7 @@ from __future__ import annotations
 from app.adapters.cluster_auth.base import ClusterAuthProvider
 from app.exceptions import ValidationError
 
-VALID_CLUSTER_AUTH_BACKENDS = ("gke",)
+VALID_CLUSTER_AUTH_BACKENDS = ("gke", "eks")
 DEFAULT_CLUSTER_AUTH_BACKEND = "gke"
 
 
@@ -21,6 +21,10 @@ def create_cluster_auth_provider(backend: str = DEFAULT_CLUSTER_AUTH_BACKEND) ->
     """Instantiate the cluster-auth provider for ``backend`` (default GKE)."""
     if backend not in VALID_CLUSTER_AUTH_BACKENDS:
         raise ValidationError(f"Unknown cluster_auth backend '{backend}'. Valid options: {VALID_CLUSTER_AUTH_BACKENDS}")
+    if backend == "eks":
+        from app.adapters.cluster_auth.aws import EksClusterAuthProvider
+
+        return EksClusterAuthProvider()
     from app.adapters.cluster_auth.gcp import GkeClusterAuthProvider
 
     return GkeClusterAuthProvider()

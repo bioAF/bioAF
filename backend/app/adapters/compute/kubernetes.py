@@ -19,6 +19,7 @@ from kubernetes import client
 
 from app.adapters.base import ComputeProvider
 from app.adapters.capabilities import ProviderCapabilities
+from app.adapters.compute.cluster_autoscaler import build_cluster_autoscaler_manifests
 from app.adapters.kubernetes.connection import GkeConnection
 from app.adapters.models import (
     ClusterDetail,
@@ -186,6 +187,18 @@ class KubernetesComputeProvider(ComputeProvider):
         "gke_cluster_name",
         "gcp_project_id",
         "gcp_region",
+        # aws_region lets the EKS ClusterAuth provider mint a region-correct STS
+        # token; additive and ignored on GCP (the EKS endpoint/CA reuse the
+        # gke_cluster_* keys above). pipeline_runner_role_arn is the AWS IRSA
+        # identity the pipeline KSA is annotated with (GCP derives a GSA email
+        # from project_id instead).
+        "aws_region",
+        "pipeline_runner_role_arn",
+        # The in-cluster Cluster Autoscaler's IRSA role + optional image override.
+        # AWS-only: absent on GCP (GKE autoscales node pools natively), so the
+        # lazy ensure below is naturally gated by this key's presence.
+        "cluster_autoscaler_role_arn",
+        "cluster_autoscaler_image",
         "raw_bucket_name",
         "results_bucket_name",
         "k8s_pipeline_machine_type",
@@ -561,6 +574,133 @@ class KubernetesComputeProvider(ComputeProvider):
         """Get a Kubernetes RbacAuthorizationV1Api client. Tests mock this method."""
         return self._gke.rbac_v1()
 
+    def _get_k8s_apps_client(self):
+        """Get a Kubernetes AppsV1Api client. Tests mock this method."""
+        return self._gke.apps_v1()
+
+    async def ensure_cluster_autoscaler(
+        self,
+        *,
+        role_arn: str,
+        cluster_name: str,
+        region: str,
+        image: str | None = None,
+    ) -> None:
+        """Install/refresh the in-cluster Cluster Autoscaler (EKS only).
+
+        EKS managed node groups do not pod-autoscale natively (GKE does), so on
+        AWS a launched pipeline/notebook pod that targets a scaled-to-zero pool
+        sits Pending forever. This deploys the CA workload (kube-system SA + RBAC
+        + Deployment) through the cluster connection -- the same way
+        ``ensure_pipeline_namespace`` creates the pipeline namespace/SA -- so it
+        is fully code-driven, no manual kubectl. The SA is annotated via the
+        PodIdentity seam with the IRSA ``role_arn`` the terraform module created;
+        the Deployment's auto-discovery flag matches the ASG tags that module
+        stamps. Idempotent: re-running create-or-patches each object, so a
+        redeploy or a repair pass converges.
+
+        This is never called on GCP (the deploy flow gates it on cloud_provider);
+        it lives on the shared K8s provider only because it needs the cluster
+        connection. ``role_arn``/``cluster_name``/``region`` come from
+        platform_config (written by the compute deploy).
+        """
+        from kubernetes.client.rest import ApiException
+
+        # The cluster was (re)deployed moments ago; force a fresh read of the
+        # endpoint/CA/token from platform_config before building the client (the
+        # cached config from startup predates this cluster). invalidate_client_on
+        # _force=True drops any stale client so it rebuilds against the new cfg.
+        await self._gke.load_cluster_config(force=True)
+
+        sa_annotations = self._pod_identity.pod_identity_annotations(role_arn)
+        m = build_cluster_autoscaler_manifests(
+            role_arn=role_arn,
+            cluster_name=cluster_name,
+            region=region,
+            sa_annotations=sa_annotations,
+            image=image,
+        )
+
+        core_v1 = self._get_k8s_core_client()
+        rbac_v1 = self._get_k8s_rbac_client()
+        apps_v1 = self._get_k8s_apps_client()
+        ns = "kube-system"
+
+        def _apply(create, kind: str, replace=None) -> None:
+            try:
+                create()
+                logger.info("Created cluster-autoscaler %s", kind)
+            except ApiException as e:
+                if e.status == 409:
+                    # Already present (redeploy / repair). Update the mutable
+                    # objects (SA annotation, Deployment image/args/role) so the
+                    # refresh actually takes; leave the static RBAC as-is.
+                    if replace is not None:
+                        replace()
+                        logger.info("Updated cluster-autoscaler %s", kind)
+                    else:
+                        logger.info("cluster-autoscaler %s already exists", kind)
+                else:
+                    raise
+
+        _apply(
+            lambda: core_v1.create_namespaced_service_account(namespace=ns, body=m["service_account"]),
+            "service account",
+            replace=lambda: core_v1.patch_namespaced_service_account(
+                name="cluster-autoscaler", namespace=ns, body=m["service_account"]
+            ),
+        )
+        _apply(lambda: rbac_v1.create_cluster_role(body=m["cluster_role"]), "cluster role")
+        _apply(lambda: rbac_v1.create_cluster_role_binding(body=m["cluster_role_binding"]), "cluster role binding")
+        _apply(lambda: rbac_v1.create_namespaced_role(namespace=ns, body=m["role"]), "role")
+        _apply(
+            lambda: rbac_v1.create_namespaced_role_binding(namespace=ns, body=m["role_binding"]),
+            "role binding",
+        )
+        _apply(
+            lambda: apps_v1.create_namespaced_deployment(namespace=ns, body=m["deployment"]),
+            "deployment",
+            replace=lambda: apps_v1.patch_namespaced_deployment(
+                name="cluster-autoscaler", namespace=ns, body=m["deployment"]
+            ),
+        )
+        logger.info("Cluster autoscaler ensured for cluster %s", cluster_name)
+
+    _autoscaler_ready = False
+
+    async def _ensure_autoscaler_if_aws(self) -> None:
+        """Lazily install the Cluster Autoscaler on first pipeline launch (EKS).
+
+        Self-healing entry point: an EKS cluster deployed before this feature (or
+        one whose deploy-time install failed) gets the CA the next time a pipeline
+        runs, with no teardown/redeploy or manual kubectl. Gated by the presence
+        of ``cluster_autoscaler_role_arn`` in cluster config, which only AWS sets
+        (GKE autoscales natively), so this is a no-op on GCP. Cached per process
+        via ``_autoscaler_ready`` and idempotent regardless. Best-effort: a
+        failure must not block the job submit (the pod would just stay Pending, as
+        it does today), so it is logged, not raised; a retry happens on the next
+        launch since the ready flag is only set on success.
+        """
+        if self._autoscaler_ready:
+            return
+        cfg = self._cluster_config or {}
+        role_arn = cfg.get("cluster_autoscaler_role_arn")
+        if not role_arn or role_arn == "null":
+            return  # GCP / not an autoscaler-capable install: nothing to do.
+
+        region = cfg.get("aws_region")
+        image = cfg.get("cluster_autoscaler_image")
+        try:
+            await self.ensure_cluster_autoscaler(
+                role_arn=role_arn,
+                cluster_name=(cfg.get("gke_cluster_name") or ""),
+                region=(region if region and region != "null" else ""),
+                image=(image if image and image != "null" else None),
+            )
+            self._autoscaler_ready = True
+        except Exception:
+            logger.exception("Lazy cluster-autoscaler install failed; pipeline pods may stay Pending")
+
     _namespace_ready = False
 
     async def ensure_pipeline_namespace(self, namespace: str = "bioaf-pipelines", gcp_sa_email: str = "") -> None:
@@ -692,11 +832,21 @@ class KubernetesComputeProvider(ComputeProvider):
         job_spec: dict,
         report_gcs_path: str = "",
         trace_gcs_path: str = "",
+        igenomes_ignore: bool = False,
     ) -> list[str]:
         """Build a Nextflow run command from the job spec.
 
         Translates pipeline_source, pipeline_version, parameters, and
         sample_sheet into a shell command that nextflow can execute.
+
+        When ``igenomes_ignore`` is set (AWS runs), append ``--igenomes_ignore
+        true`` unless the run already sets it. nf-core pipelines default
+        ``igenomes_base`` to ``s3://ngi-igenomes/igenomes/`` (a public AWS bucket),
+        and schema validation reads that path. On AWS the pipeline pod's IRSA
+        creds are scoped to ``bioaf-*``, so the SIGNED read of ngi-igenomes 403s;
+        on GCP the same read goes out anonymous and succeeds. Defaulting igenomes
+        off on AWS avoids the 403 for pipelines that do not need iGenomes (bioAF
+        manages references via its own bucket). GCP passes ``False`` -> unchanged.
         """
         pipeline_source = job_spec.get("pipeline_source", "")
         pipeline_version = job_spec.get("pipeline_version", "")
@@ -727,6 +877,12 @@ class KubernetesComputeProvider(ComputeProvider):
         # outdir is guaranteed durable by _ensure_outdir before this runs (a gs://
         # results path, or the launch already failed closed), so it is never
         # defaulted to a pod-local path that pod cleanup would destroy.
+
+        # Default iGenomes off on AWS (signed IRSA reads 403 on the public
+        # ngi-igenomes bucket). Skip when the run sets igenomes_ignore explicitly
+        # so an operator override below still wins.
+        if igenomes_ignore and "igenomes_ignore" not in parameters:
+            parts.extend(["--igenomes_ignore", "true"])
 
         # Strip bioAF-internal config knobs that are not Nextflow parameters
         internal_keys = {"fusion_enabled"}
@@ -761,7 +917,11 @@ class KubernetesComputeProvider(ComputeProvider):
             )
         experiment_id = job_spec.get("experiment_id", "unknown")
         run_id = job_spec.get("run_id", 0)
-        outdir = f"gs://{results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}"
+        # Backend-neutral outdir URI (gs:// on GCS, s3:// on S3) via the storage
+        # seam, instead of a hardcoded gs:// literal.
+        from app.adapters.registry import get_storage_adapter
+
+        outdir = get_storage_adapter().build_uri(results_bucket, f"experiments/{experiment_id}/pipeline-runs/{run_id}")
         return {**job_spec, "parameters": {**params, "outdir": outdir}}
 
     # Allocatable resources per GCP machine type (after system reservations).
@@ -787,6 +947,7 @@ class KubernetesComputeProvider(ComputeProvider):
         has_gcs_secret: bool,
         gcs_work_dir: str | None = None,
         pipeline_machine_type: str | None = None,
+        ignore_igenomes_base: bool = False,
     ) -> str:
         """Build a nextflow.config for K8s executor mode.
 
@@ -794,12 +955,27 @@ class KubernetesComputeProvider(ComputeProvider):
         pods use the right service account, have GCS credentials when
         available, and share a GCS-backed work directory so the head pod
         and process pods can exchange command scripts and data.
+
+        When ``ignore_igenomes_base`` is set (AWS runs), tell nf-schema to skip
+        validating the ``igenomes_base`` parameter. nf-core defaults it to the
+        public ``s3://ngi-igenomes/igenomes/`` bucket and nf-schema's
+        ``directory-path`` format check does a live S3 access to validate it; on
+        AWS the pipeline pod's IRSA creds (scoped to ``bioaf-*``) sign that read
+        and get 403, so validation fails before the pipeline starts. (On GCP the
+        same read is anonymous and succeeds, so GCP omits this.) ``ignoreParams``
+        is the nf-schema 2.x user list and merges with the pipeline's
+        ``defaultIgnoreParams``, so it does not clobber the pipeline's own.
         """
         lines = [
             "process.executor = 'k8s'",
             f"k8s.namespace = '{namespace}'",
             "k8s.serviceAccount = 'bioaf-pipeline-runner'",
         ]
+
+        # Skip nf-schema's live S3 validation of the public igenomes_base default
+        # (IRSA-signed reads 403 on ngi-igenomes). AWS-gated; GCP never sets this.
+        if ignore_igenomes_base:
+            lines.append("validation.ignoreParams = ['igenomes_base']")
 
         # Scratch workDir so head and process pods share files. The storage
         # backend supplies its Nextflow workDir directives (ScratchWorkDir seam):
@@ -971,13 +1147,26 @@ class KubernetesComputeProvider(ComputeProvider):
         sample_sheet = job_spec.get("sample_sheet", "")
 
         # Ensure namespace, service account, and role binding exist on first use.
-        # Pass the bioaf-pipeline-runner GSA email so the KSA gets the
-        # iam.gke.io/gcp-service-account annotation for Workload Identity.
+        # Pass the pipeline-runner cloud identity so the KSA gets the right
+        # pod-identity annotation (the PodIdentity seam maps it): on GCP the
+        # bioaf-pipeline-runner GSA email -> iam.gke.io/gcp-service-account; on AWS
+        # the IRSA role ARN -> eks.amazonaws.com/role-arn.
         cfg = self._cluster_config or {}
         project_id = cfg.get("gcp_project_id", "")
-        pipeline_runner_sa_email = f"bioaf-pipeline-runner@{project_id}.iam.gserviceaccount.com" if project_id else ""
+        runner_role_arn = cfg.get("pipeline_runner_role_arn", "")
+        if runner_role_arn and runner_role_arn != "null":
+            pipeline_runner_identity = runner_role_arn
+        elif project_id:
+            pipeline_runner_identity = f"bioaf-pipeline-runner@{project_id}.iam.gserviceaccount.com"
+        else:
+            pipeline_runner_identity = ""
         if not self._namespace_ready:
-            await self.ensure_pipeline_namespace(namespace, gcp_sa_email=pipeline_runner_sa_email)
+            await self.ensure_pipeline_namespace(namespace, gcp_sa_email=pipeline_runner_identity)
+
+        # On EKS, make sure the Cluster Autoscaler is running before the head pod
+        # goes Pending -- otherwise its scale-to-zero pool never gets a node and
+        # the run hangs with empty logs. No-op on GCP (native autoscaling).
+        await self._ensure_autoscaler_if_aws()
 
         # Ensure GCS credentials secret exists for bucket access. Read the
         # SA key fresh from platform_config so a key saved or rotated through
@@ -997,13 +1186,21 @@ class KubernetesComputeProvider(ComputeProvider):
         if pipeline_source and not command:
             container_image = self.NEXTFLOW_IMAGE
 
+            from app.adapters.registry import get_storage_adapter
+
             nf_cfg = self._cluster_config or {}
             raw_bucket = nf_cfg.get("raw_bucket_name", "")
 
-            # Write the Nextflow HTML report and execution trace directly to
-            # GCS so they persist after the head pod is cleaned up.
-            report_gcs_path = f"gs://{raw_bucket}/nextflow-reports/{job_name}/report.html" if raw_bucket else ""
-            trace_gcs_path = f"gs://{raw_bucket}/nextflow-traces/{job_name}/trace.tsv" if raw_bucket else ""
+            # Write the Nextflow HTML report and execution trace directly to the
+            # object store (gs:// on GCS, s3:// on S3, via the storage seam) so they
+            # persist after the head pod is cleaned up.
+            _adapter = get_storage_adapter()
+            report_gcs_path = (
+                _adapter.build_uri(raw_bucket, f"nextflow-reports/{job_name}/report.html") if raw_bucket else ""
+            )
+            trace_gcs_path = (
+                _adapter.build_uri(raw_bucket, f"nextflow-traces/{job_name}/trace.tsv") if raw_bucket else ""
+            )
 
             # Set --outdir to a durable results-bucket path so pipeline outputs
             # persist after pod cleanup. The path mirrors the prefix that
@@ -1016,6 +1213,10 @@ class KubernetesComputeProvider(ComputeProvider):
                 job_spec,
                 report_gcs_path=report_gcs_path,
                 trace_gcs_path=trace_gcs_path,
+                # AWS runs carry an IRSA runner role; default iGenomes off there
+                # so schema validation does not 403 on the public ngi-igenomes
+                # bucket. GCP has no runner role arn -> False -> unchanged.
+                igenomes_ignore=bool(runner_role_arn and runner_role_arn != "null"),
             )
 
         # Build init containers for input staging. The stage container runs the
@@ -1055,11 +1256,23 @@ class KubernetesComputeProvider(ComputeProvider):
 
         # Write nextflow.config with K8s executor settings for Nextflow pipelines
         if pipeline_source and not job_spec.get("command"):
+            from app.adapters.registry import get_storage_adapter
+
             nf_cfg = self._cluster_config or {}
             raw_bucket = nf_cfg.get("raw_bucket_name", "")
-            gcs_work_dir = f"gs://{raw_bucket}/nextflow-work" if raw_bucket else None
+            # Backend-neutral workDir URI (gs:// on GCS, s3:// on S3) via the
+            # storage seam, instead of a hardcoded gs:// literal.
+            scratch_work_dir = get_storage_adapter().build_uri(raw_bucket, "nextflow-work") if raw_bucket else None
             pipeline_machine = nf_cfg.get("k8s_pipeline_machine_type")
-            nf_config = self._build_nextflow_k8s_config(namespace, has_gcs_secret, gcs_work_dir, pipeline_machine)
+            # AWS runs use IRSA creds scoped to bioaf-*, so skip nf-schema's live
+            # validation of the public igenomes_base default (it 403s). GCP omits.
+            nf_config = self._build_nextflow_k8s_config(
+                namespace,
+                has_gcs_secret,
+                scratch_work_dir,
+                pipeline_machine,
+                ignore_igenomes_base=bool(runner_role_arn and runner_role_arn != "null"),
+            )
             # Use heredoc to avoid shell escaping issues with single quotes
             # in Nextflow config values (e.g., 'k8s', 'bioaf-pipelines')
             init_containers.append(

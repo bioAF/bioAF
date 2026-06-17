@@ -1,8 +1,9 @@
-"""Backup service with GCS-based storage.
+"""Backup service backed by the install's object store (GCS on GCP, S3 on AWS).
 
-All backups (pg_dump, config snapshots) go to GCS. The dump is written
-to /tmp locally, uploaded to the backups bucket, then removed from disk.
-Status checks query GCS blob metadata.
+All backups (pg_dump, config snapshots) go to the backups bucket through the
+storage adapter. The dump is written to /tmp locally, uploaded to the bucket,
+then removed from disk. Status checks query object metadata via the adapter, so
+the same code path serves either cloud; only user-facing labels differ.
 """
 
 import asyncio
@@ -39,6 +40,17 @@ def _parse_timestamp_from_name(name: str, pattern: re.Pattern) -> datetime | Non
         return datetime.strptime(m.group(1), _TIMESTAMP_FMT).replace(tzinfo=timezone.utc)
     except ValueError:
         return None
+
+
+# Display label for the object-store versioning tier, keyed on the resolved
+# storage backend. The check itself is cloud-neutral (the adapter reports real
+# versioning on GCS and S3 alike); only the user-facing name differs per cloud.
+_OBJECT_STORE_LABELS = {"gcs": "GCS", "s3": "S3"}
+
+
+def _object_store_label(storage_backend: str) -> str:
+    """Human label for the object store backing backups (GCS / S3 / Object)."""
+    return _OBJECT_STORE_LABELS.get(storage_backend, "Object")
 
 
 def _tier_status_from_age(last_backup: datetime | None, interval_hours: int) -> str:
@@ -127,18 +139,29 @@ async def _rotate_gcs_blobs(bucket_name: str, prefix: str, pattern: re.Pattern, 
 class BackupService:
     @staticmethod
     async def get_backup_status(session: AsyncSession, org_id: int) -> dict:
-        """Get backup status for each tier by querying GCS."""
+        """Get backup status for each tier by querying the object store."""
+        from app.platform.cloud_provider import resolve_backend
+
         bucket_name = await _get_backups_bucket(session)
+        # Cloud-neutral label for the versioning tier (GCS on a GCP install, S3 on
+        # an AWS install); the check is identical, only the name differs.
+        storage_backend = await resolve_backend(session, "storage")
+        object_label = _object_store_label(storage_backend)
+        tfstate_bucket = await PlatformConfigService.get(session, "terraform_state_bucket") or ""
         tiers = []
 
         if bucket_name:
             try:
-                tiers.extend(await BackupService._gcs_status(bucket_name))
+                tiers.extend(
+                    await BackupService._gcs_status(
+                        bucket_name, object_label=object_label, tfstate_bucket=tfstate_bucket
+                    )
+                )
             except Exception as e:
-                logger.warning("Failed to check GCS backup status: %s", e)
-                tiers.extend(BackupService._fallback_status())
+                logger.warning("Failed to check object-store backup status: %s", e)
+                tiers.extend(BackupService._fallback_status(object_label=object_label))
         else:
-            tiers.extend(BackupService._fallback_status())
+            tiers.extend(BackupService._fallback_status(object_label=object_label))
 
         all_healthy = all(t["status"] == "healthy" for t in tiers)
         any_error = any(t["status"] == "error" for t in tiers)
@@ -152,8 +175,12 @@ class BackupService:
         return {"tiers": tiers, "overall_status": overall}
 
     @staticmethod
-    async def _gcs_status(bucket_name: str) -> list[dict]:
-        """Build tier status by scanning storage objects."""
+    async def _gcs_status(bucket_name: str, *, object_label: str = "Object", tfstate_bucket: str = "") -> list[dict]:
+        """Build tier status by scanning storage objects.
+
+        ``object_label`` names the object store in the versioning tier (GCS / S3 /
+        Object); ``tfstate_bucket`` (when known) is checked for real versioning.
+        """
         from app.adapters.registry import get_storage_adapter
 
         tiers = []
@@ -178,7 +205,10 @@ class BackupService:
             }
         )
 
-        # GCS Object Versioning (check the backups bucket itself)
+        # Object-store versioning on the backups bucket itself. The check is
+        # cloud-neutral (the adapter reports real GCS / S3 versioning); the tile
+        # name is provider-specific so an AWS install reads "S3 Object Versioning".
+        versioning_name = f"{object_label} Object Versioning"
         try:
             adapter = get_storage_adapter()
             info = await adapter.get_bucket_info(adapter.build_uri(bucket_name, ""))
@@ -186,7 +216,7 @@ class BackupService:
             tiers.append(
                 {
                     "tier": "gcs",
-                    "name": "GCS Object Versioning",
+                    "name": versioning_name,
                     "last_backup": None,
                     "size_bytes": None,
                     "next_scheduled": None,
@@ -200,7 +230,7 @@ class BackupService:
             tiers.append(
                 {
                     "tier": "gcs",
-                    "name": "GCS Object Versioning",
+                    "name": versioning_name,
                     "last_backup": None,
                     "size_bytes": None,
                     "next_scheduled": None,
@@ -230,7 +260,20 @@ class BackupService:
             }
         )
 
-        # Terraform State (check if tfstate bucket has versioning)
+        # Terraform State: a real versioning check on the state bucket (created by
+        # the foundation module with versioning enabled on both GCP and AWS, so the
+        # happy path reports healthy/true exactly as before). Falls back to the
+        # prior hardcoded healthy/true only when the bucket is not yet known (e.g.
+        # foundation not deployed), so a GCP install's display is unchanged.
+        tf_status, tf_versioning = "healthy", True
+        if tfstate_bucket:
+            try:
+                adapter = get_storage_adapter()
+                tf_info = await adapter.get_bucket_info(adapter.build_uri(tfstate_bucket, ""))
+                tf_versioning = bool(tf_info.get("versioning_enabled"))
+                tf_status = "healthy" if tf_versioning else "warning"
+            except Exception:
+                tf_status, tf_versioning = "unknown", None
         tiers.append(
             {
                 "tier": "terraform_state",
@@ -239,8 +282,8 @@ class BackupService:
                 "size_bytes": None,
                 "next_scheduled": None,
                 "retention_days": None,
-                "status": "healthy",
-                "versioning_enabled": True,
+                "status": tf_status,
+                "versioning_enabled": tf_versioning,
                 "backup_count": None,
             }
         )
@@ -248,8 +291,8 @@ class BackupService:
         return tiers
 
     @staticmethod
-    def _fallback_status() -> list[dict]:
-        """Return unknown status for all tiers when GCS is unavailable."""
+    def _fallback_status(object_label: str = "Object") -> list[dict]:
+        """Return unknown status for all tiers when the object store is unavailable."""
         return [
             {
                 "tier": "postgres",
@@ -264,7 +307,7 @@ class BackupService:
             },
             {
                 "tier": "gcs",
-                "name": "GCS Object Versioning",
+                "name": f"{object_label} Object Versioning",
                 "last_backup": None,
                 "size_bytes": None,
                 "next_scheduled": None,

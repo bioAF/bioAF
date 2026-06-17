@@ -59,6 +59,38 @@ class TestStackDeployBackground:
         assert data["message"] == "Deployment started"
 
     @pytest.mark.asyncio
+    async def test_aws_install_passes_precondition_without_gcp_flag(self, client, admin_token, session):
+        """On an AWS install the gate is the account identity, not the GCP flag.
+
+        Regression: the deploy-path precondition used to hardcode
+        gcp_credentials_configured, which is always false on AWS, so it wrongly
+        returned 'GCP credentials are not configured'. With the cloud seam it must
+        pass when cloud_provider=aws and aws_account_id is set (no GCP flag).
+        """
+        await _set_config(session, "cloud_provider", "aws")
+        await _set_config(session, "aws_account_id", "043671579834")
+        await _set_config(session, "aws_region", "us-west-1")
+        await _set_config(session, "terraform_initialized", "true")
+        await _set_config(session, "compute_deployed", "false")
+        await _set_config(session, "storage_deployed", "true")
+        await session.commit()
+
+        from app.services.terraform_executor import TerraformProgressEvent
+
+        async def mock_deploy(sess, stack_type, user_id, org_id=None):
+            yield TerraformProgressEvent(event_type="stack_complete", message="done")
+
+        with patch("app.api.stack_deploy.deploy_stack", side_effect=mock_deploy):
+            response = await client.post(
+                "/api/v1/infrastructure/stack/deploy-background",
+                json={"stack_type": "kubernetes"},
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["message"] == "Deployment started"
+
+    @pytest.mark.asyncio
     async def test_rejects_without_gcp_credentials(self, client, admin_token, session):
         """Background deploy fails if GCP credentials are not configured."""
         await _set_config(session, "gcp_credentials_configured", "false")

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_session
+from app.platform.cloud_provider import get_cloud_provider
 from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.bootstrap import (
@@ -95,6 +96,11 @@ async def get_bootstrap_status(request: Request, session: AsyncSession = Depends
         "has_setup_code": has_code,
         "has_admin": has_admin_user,
         "has_in_flight_components": in_flight_row is not None,
+        # The install's cloud identity (gcp | aws). Surfaced unauthenticated so
+        # the first-run setup wizard can render the right credentials step before
+        # an admin (and thus an authenticated, permissioned session) exists. Not
+        # sensitive: it is just which cloud this deployment targets.
+        "cloud_provider": await get_cloud_provider(session),
     }
 
     # Only include smtp_configured for authenticated callers to avoid
@@ -278,7 +284,7 @@ async def create_admin(body: CreateAdminRequest, request: Request, session: Asyn
 async def configure_org(body: ConfigureOrgRequest, request: Request, session: AsyncSession = Depends(get_session)):
     current_user = request.state.current_user
     if not await role_service.has_permission(session, int(current_user["role_id"]), "infrastructure", "configure"):
-        raise HTTPException(status_code=403, detail="Admin only")
+        raise HTTPException(status_code=403, detail="You do not have permission to perform this action")
 
     org = await _get_org(session)
     if not org:
@@ -306,7 +312,7 @@ async def configure_org(body: ConfigureOrgRequest, request: Request, session: As
 async def get_smtp_settings(request: Request, session: AsyncSession = Depends(get_session)):
     current_user = request.state.current_user
     if not await role_service.has_permission(session, int(current_user["role_id"]), "infrastructure", "configure"):
-        raise HTTPException(status_code=403, detail="Admin only")
+        raise HTTPException(status_code=403, detail="You do not have permission to perform this action")
 
     org = await _get_org(session)
     if not org:
@@ -342,7 +348,7 @@ async def get_smtp_settings(request: Request, session: AsyncSession = Depends(ge
 async def configure_smtp(body: ConfigureSmtpRequest, request: Request, session: AsyncSession = Depends(get_session)):
     current_user = request.state.current_user
     if not await role_service.has_permission(session, int(current_user["role_id"]), "infrastructure", "configure"):
-        raise HTTPException(status_code=403, detail="Admin only")
+        raise HTTPException(status_code=403, detail="You do not have permission to perform this action")
 
     org = await _get_org(session)
     if not org:
@@ -392,7 +398,7 @@ async def configure_smtp(body: ConfigureSmtpRequest, request: Request, session: 
 async def test_smtp(body: TestSmtpRequest, request: Request, session: AsyncSession = Depends(get_session)):
     current_user = request.state.current_user
     if not await role_service.has_permission(session, int(current_user["role_id"]), "infrastructure", "configure"):
-        raise HTTPException(status_code=403, detail="Admin only")
+        raise HTTPException(status_code=403, detail="You do not have permission to perform this action")
 
     if not EmailService.is_configured():
         return TestSmtpResponse(status="failed", to=body.to, detail="SMTP not configured")
@@ -487,7 +493,7 @@ async def test_smtp(body: TestSmtpRequest, request: Request, session: AsyncSessi
 async def complete_setup(request: Request, session: AsyncSession = Depends(get_session)):
     current_user = request.state.current_user
     if not await role_service.has_permission(session, int(current_user["role_id"]), "infrastructure", "configure"):
-        raise HTTPException(status_code=403, detail="Admin only")
+        raise HTTPException(status_code=403, detail="You do not have permission to perform this action")
 
     org = await _get_org(session)
     if not org:
