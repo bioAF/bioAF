@@ -101,3 +101,48 @@ async def test_ensure_propagates_non_conflict_errors(adapter):
 
     with pytest.raises(ApiException):
         await _ensure(adapter)
+
+
+# --- Lazy self-healing install on pipeline launch ----------------------------
+
+
+@pytest.mark.asyncio
+async def test_lazy_ensure_installs_on_aws_and_caches(adapter):
+    """On AWS (CA role arn present), first launch installs the CA, then caches."""
+    adapter._cluster_config = {
+        "cluster_autoscaler_role_arn": ROLE_ARN,
+        "gke_cluster_name": "bioaf-bioaf-8ec3ba",
+        "aws_region": "us-west-1",
+    }
+    adapter.ensure_cluster_autoscaler = AsyncMock()
+
+    await adapter._ensure_autoscaler_if_aws()
+    await adapter._ensure_autoscaler_if_aws()  # cached: should not call again
+
+    adapter.ensure_cluster_autoscaler.assert_awaited_once()
+    assert adapter.ensure_cluster_autoscaler.await_args.kwargs["role_arn"] == ROLE_ARN
+    assert adapter._autoscaler_ready is True
+
+
+@pytest.mark.asyncio
+async def test_lazy_ensure_noop_on_gcp(adapter):
+    """No cluster_autoscaler_role_arn (GCP) -> never installs, never caches ready."""
+    adapter._cluster_config = {"gke_cluster_name": "bioaf-test", "gcp_project_id": "p"}
+    adapter.ensure_cluster_autoscaler = AsyncMock()
+
+    await adapter._ensure_autoscaler_if_aws()
+
+    adapter.ensure_cluster_autoscaler.assert_not_called()
+    assert adapter._autoscaler_ready is False
+
+
+@pytest.mark.asyncio
+async def test_lazy_ensure_swallows_failure_and_retries_next_launch(adapter):
+    """A failed install must not block the submit, and must retry next time."""
+    adapter._cluster_config = {"cluster_autoscaler_role_arn": ROLE_ARN, "aws_region": "us-west-1"}
+    adapter.ensure_cluster_autoscaler = AsyncMock(side_effect=RuntimeError("connect failed"))
+
+    await adapter._ensure_autoscaler_if_aws()  # must not raise
+
+    assert adapter._autoscaler_ready is False  # not cached -> retried next launch
+    adapter.ensure_cluster_autoscaler.assert_awaited_once()

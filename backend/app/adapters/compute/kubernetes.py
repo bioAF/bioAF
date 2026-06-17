@@ -194,6 +194,11 @@ class KubernetesComputeProvider(ComputeProvider):
         # from project_id instead).
         "aws_region",
         "pipeline_runner_role_arn",
+        # The in-cluster Cluster Autoscaler's IRSA role + optional image override.
+        # AWS-only: absent on GCP (GKE autoscales node pools natively), so the
+        # lazy ensure below is naturally gated by this key's presence.
+        "cluster_autoscaler_role_arn",
+        "cluster_autoscaler_image",
         "raw_bucket_name",
         "results_bucket_name",
         "k8s_pipeline_machine_type",
@@ -661,6 +666,41 @@ class KubernetesComputeProvider(ComputeProvider):
         )
         logger.info("Cluster autoscaler ensured for cluster %s", cluster_name)
 
+    _autoscaler_ready = False
+
+    async def _ensure_autoscaler_if_aws(self) -> None:
+        """Lazily install the Cluster Autoscaler on first pipeline launch (EKS).
+
+        Self-healing entry point: an EKS cluster deployed before this feature (or
+        one whose deploy-time install failed) gets the CA the next time a pipeline
+        runs, with no teardown/redeploy or manual kubectl. Gated by the presence
+        of ``cluster_autoscaler_role_arn`` in cluster config, which only AWS sets
+        (GKE autoscales natively), so this is a no-op on GCP. Cached per process
+        via ``_autoscaler_ready`` and idempotent regardless. Best-effort: a
+        failure must not block the job submit (the pod would just stay Pending, as
+        it does today), so it is logged, not raised; a retry happens on the next
+        launch since the ready flag is only set on success.
+        """
+        if self._autoscaler_ready:
+            return
+        cfg = self._cluster_config or {}
+        role_arn = cfg.get("cluster_autoscaler_role_arn")
+        if not role_arn or role_arn == "null":
+            return  # GCP / not an autoscaler-capable install: nothing to do.
+
+        region = cfg.get("aws_region")
+        image = cfg.get("cluster_autoscaler_image")
+        try:
+            await self.ensure_cluster_autoscaler(
+                role_arn=role_arn,
+                cluster_name=(cfg.get("gke_cluster_name") or ""),
+                region=(region if region and region != "null" else ""),
+                image=(image if image and image != "null" else None),
+            )
+            self._autoscaler_ready = True
+        except Exception:
+            logger.exception("Lazy cluster-autoscaler install failed; pipeline pods may stay Pending")
+
     _namespace_ready = False
 
     async def ensure_pipeline_namespace(self, namespace: str = "bioaf-pipelines", gcp_sa_email: str = "") -> None:
@@ -1090,6 +1130,11 @@ class KubernetesComputeProvider(ComputeProvider):
             pipeline_runner_identity = ""
         if not self._namespace_ready:
             await self.ensure_pipeline_namespace(namespace, gcp_sa_email=pipeline_runner_identity)
+
+        # On EKS, make sure the Cluster Autoscaler is running before the head pod
+        # goes Pending -- otherwise its scale-to-zero pool never gets a node and
+        # the run hangs with empty logs. No-op on GCP (native autoscaling).
+        await self._ensure_autoscaler_if_aws()
 
         # Ensure GCS credentials secret exists for bucket access. Read the
         # SA key fresh from platform_config so a key saved or rotated through
