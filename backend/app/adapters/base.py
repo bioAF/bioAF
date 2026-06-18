@@ -616,11 +616,12 @@ class CellxgeneProvider(ABC):
         return None
 
     @abstractmethod
-    async def deploy(self, publication_id: int, gcs_uri: str, dataset_name: str) -> CellxgeneInstance:
-        """Deploy a cellxgene instance for an h5ad dataset.
+    async def deploy(self, publication_id: int, storage_uri: str, dataset_name: str) -> CellxgeneInstance:
+        """Deploy a cellxgene instance for an h5ad dataset at ``storage_uri``.
 
-        Returns a CellxgeneInstance; backend specifics (pod name, namespace)
-        live in its provider_details.
+        ``storage_uri`` is the dataset's neutral storage URI (``gs://`` on GCP,
+        ``s3://`` on AWS). Returns a CellxgeneInstance; backend specifics (pod
+        name, namespace) live in its provider_details.
         """
 
     @abstractmethod
