@@ -19,7 +19,7 @@ from app.adapters.image_build import get_image_build_provider
 from app.adapters.image_registry import get_image_registry_provider
 from app.exceptions import ValidationError
 from app.platform.platform_config_service import PlatformConfigService
-from app.services.notebook_image_service import _get_credentials
+from app.services.image_build_platform import ImagePlatform, resolve_image_credentials, resolve_image_platform
 
 logger = logging.getLogger("bioaf.cellxgene_image")
 
@@ -37,9 +37,22 @@ ENTRYPOINT ["cellxgene"]
 """
 
 
-def get_image_uri(project_id: str, region: str) -> str:
-    """Construct the full image URI via the cloud-selected image registry."""
-    return get_image_registry_provider().image_uri({"project_id": project_id, "region": region}, IMAGE_NAME, IMAGE_TAG)
+def get_image_uri(config: dict) -> str:
+    """Construct the full image URI via the cloud-selected image registry.
+
+    ``config`` is the cloud-resolved provider config (``ImagePlatform.config``).
+    """
+    return get_image_registry_provider().image_uri(config, IMAGE_NAME, IMAGE_TAG)
+
+
+async def ensure_image_repository(session: AsyncSession, platform: ImagePlatform) -> str:
+    """Create the cellxgene image repository if absent (idempotent).
+
+    Uses the cellxgene ``IMAGE_NAME`` so AWS ensures the ``bioaf-cellxgene`` ECR
+    repo (ECR is per-image); on GCP this is the shared Artifact Registry repo.
+    """
+    credentials = await resolve_image_credentials(session, platform)
+    return get_image_registry_provider().ensure_repository(credentials, platform.config, IMAGE_NAME)
 
 
 async def _read_config(session: AsyncSession, key: str) -> str:
@@ -51,7 +64,7 @@ async def _set_config(session: AsyncSession, key: str, value: str) -> None:
     await PlatformConfigService.set(session, key, value)
 
 
-async def _upload_build_context(session: AsyncSession, project_id: str, working_bucket: str) -> str:
+async def _upload_build_context(session: AsyncSession, working_bucket: str) -> str:
     """Create a tar.gz with the Dockerfile and upload to storage."""
     from app.adapters.registry import get_storage_adapter
 
@@ -72,30 +85,30 @@ async def _upload_build_context(session: AsyncSession, project_id: str, working_
     return object_path
 
 
-async def submit_image_build(session: AsyncSession, project_id: str, region: str) -> str:
-    """Submit a Cloud Build job for the cellxgene image. Returns the build ID."""
+async def submit_image_build(session: AsyncSession, platform: ImagePlatform) -> str:
+    """Submit a build job for the cellxgene image. Returns the build ID."""
     working_bucket = await _read_config(session, "working_bucket_name")
     if not working_bucket or working_bucket == "null":
         raise ValidationError("Working bucket not configured. Deploy storage first.")
 
     from app.adapters.registry import get_storage_adapter
 
-    object_path = await _upload_build_context(session, project_id, working_bucket)
+    object_path = await _upload_build_context(session, working_bucket)
     context_uri = get_storage_adapter().build_uri(working_bucket, object_path)
 
-    image_uri = get_image_uri(project_id, region)
-    credentials = await _get_credentials(session)
+    image_uri = get_image_uri(platform.config)
+    credentials = await resolve_image_credentials(session, platform)
 
-    sa_email = await _read_config(session, "gcp_service_account_email")
-    if not sa_email or sa_email == "null":
-        sa_email = getattr(credentials, "service_account_email", None)
+    build_sa = platform.build_sa
+    if platform.cloud_provider != "aws" and not build_sa:
+        build_sa = getattr(credentials, "service_account_email", None)
 
     build_id = get_image_build_provider().submit_build(
         credentials,
-        {"project_id": project_id, "region": region},
+        platform.config,
         context_object_uri=context_uri,
         image_uri=image_uri,
-        build_sa=sa_email,
+        build_sa=build_sa,
         timeout="3600s",
     )
 
@@ -105,36 +118,32 @@ async def submit_image_build(session: AsyncSession, project_id: str, region: str
     return build_id
 
 
-async def check_build_status(session: AsyncSession, project_id: str, build_id: str) -> str:
+async def check_build_status(session: AsyncSession, build_id: str) -> str:
     """Check the status of the image build via the image-build provider."""
-    credentials = await _get_credentials(session)
-    return get_image_build_provider().check_build_status(credentials, {"project_id": project_id}, build_id)
+    platform = await resolve_image_platform(session)
+    credentials = await resolve_image_credentials(session, platform)
+    return get_image_build_provider().check_build_status(credentials, platform.config, build_id)
 
 
 async def build_cellxgene_image(session: AsyncSession) -> str:
-    """Full flow: ensure AR repo exists, submit build, return build ID.
+    """Full flow: ensure the image repo exists, submit build, return build ID.
 
     Called when the cellxgene component is enabled. The image URI is NOT
     written until the build succeeds (via poll_image_build).
     """
-    from app.services.notebook_image_service import ensure_artifact_registry
-
-    project_id = await _read_config(session, "gcp_project_id")
-    region = await _read_config(session, "gcp_region")
-
-    if not project_id or project_id == "null":
-        raise ValidationError("GCP project not configured")
-    if not region or region == "null":
-        raise ValidationError("GCP region not configured")
+    platform = await resolve_image_platform(session)
+    platform.require_target()
+    platform.require_build_service()
 
     await _set_config(session, "cellxgene_image", "null")
     await _set_config(session, "cellxgene_image_build_status", "null")
     await _set_config(session, "cellxgene_image_build_id", "null")
 
-    # Reuse the shared AR repo
-    await ensure_artifact_registry(session, project_id, region)
+    # Ensure the cellxgene image repository (shared AR repo on GCP; the
+    # bioaf-cellxgene ECR repo on AWS).
+    await ensure_image_repository(session, platform)
 
-    build_id = await submit_image_build(session, project_id, region)
+    build_id = await submit_image_build(session, platform)
     return build_id
 
 
@@ -152,17 +161,16 @@ async def poll_image_build(session: AsyncSession) -> str | None:
     if current_status in ("SUCCESS", "FAILURE", "CANCELLED", "TIMEOUT"):
         return current_status
 
-    project_id = await _read_config(session, "gcp_project_id")
-    if not project_id or project_id == "null":
+    platform = await resolve_image_platform(session)
+    if not platform.has_target:
         return None
 
-    status = await check_build_status(session, project_id, build_id)
+    status = await check_build_status(session, build_id)
     await _set_config(session, "cellxgene_image_build_status", status)
 
     if status == "SUCCESS":
         logger.info("Cellxgene image build %s completed successfully", build_id)
-        region = await _read_config(session, "gcp_region")
-        image_uri = get_image_uri(project_id, region)
+        image_uri = get_image_uri(platform.config)
         await _set_config(session, "cellxgene_image", image_uri)
         # Drain the wizard queue: a queued cellxgene now has its image.
         # Local import to avoid the cycle through component_queue.
