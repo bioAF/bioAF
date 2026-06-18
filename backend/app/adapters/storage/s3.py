@@ -344,7 +344,12 @@ class S3StorageProvider(StorageProvider):
     def image_storage_pip_packages(self) -> str:
         # Baked into built pipeline/notebook images so user code can read/write S3
         # (boto3) and shell out to the CLI (awscli). Bounded to the 1.x majors.
-        return "boto3>=1.43,<2 awscli>=1.40,<2"
+        # Each spec is single-quoted because this string is substituted into a
+        # Dockerfile `RUN pip install ...` shell line: an UNQUOTED upper bound like
+        # `<2` is parsed by the shell as an input redirection ("2: No such file or
+        # directory"), failing the image build. (GCS uses `==` pins, which have no
+        # shell-metacharacters, so it needs no quoting.)
+        return "'boto3>=1.43,<2' 'awscli>=1.40,<2'"
 
     # -- Credentials + client factory (real S3 mode) --------------------------
 

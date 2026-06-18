@@ -174,6 +174,19 @@ class TestCliStaging:
     def test_pip_packages_include_boto3(self):
         assert "boto3" in S3StorageProvider().image_storage_pip_packages()
 
+    def test_pip_packages_are_shell_safe_in_dockerfile_run(self):
+        # These specs are substituted into a Dockerfile `RUN pip install ...` shell
+        # line; an unquoted `<2` upper bound is parsed as a shell redirection and
+        # fails the image build. shlex.split must yield exactly the version specs
+        # (the quotes absorbed), not stray redirection tokens like `<` or `2`.
+        import shlex
+
+        pkgs = S3StorageProvider().image_storage_pip_packages()
+        tokens = shlex.split(pkgs)
+        assert tokens == ["boto3>=1.43,<2", "awscli>=1.40,<2"]
+        # no bare shell-redirection metacharacters survive tokenization
+        assert "<" not in tokens and ">" not in tokens and "2" not in tokens
+
     def test_nextflow_scratch_directives_use_s3_workdir_with_fusion(self):
         # The pipeline-launch blocker: S3 must implement this seam (was inheriting
         # the base bare NotImplementedError). Mirrors GCS (Fusion+Wave) but with the
