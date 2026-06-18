@@ -11,6 +11,38 @@
 > changelog section. Sections below v0.15.1 remain in their original SemVer
 > format.
 
+## v2026.6.18
+
+### Cloud platforms
+
+- bioAF can now run on **Amazon Web Services (AWS)**, alongside the existing
+  Google Cloud option. A new one-command installer (`install-aws.sh`) sets up
+  your AWS account and a server for you, the same way the Google Cloud installer
+  does. File storage and pipeline runs work on AWS today; a few features (the
+  single-cell dataset viewer, interactive notebooks, and SSH work nodes) are
+  still being finished and will arrive in upcoming releases. Existing Google
+  Cloud installs are unaffected.
+
+### Fixes
+
+- Pipeline run logs no longer display as a raw escaped blob (`b"...\n..."`) on
+  in-progress runs. Logs now render as clean, line-wrapped output regardless of the
+  Kubernetes client version in use.
+
+### Behind the scenes
+
+- Structural, behavior-preserving changes to how bioAF integrates with its cloud
+  provider (storage, Kubernetes, container image builds, and credentials). These
+  changes are invisible to end users and do not alter current behavior. They improve
+  reliability and prepare bioAF for upcoming AWS-based deployment options alongside GCP.
+
+### Security
+
+- Refreshed several of the behind-the-scenes software libraries bioAF depends on
+  to their latest secure versions, clearing a batch of security advisories raised
+  by automated dependency scanning. This is routine security upkeep: how bioAF
+  looks and works for you is unchanged.
+
 ## v2026.6.17
 
 ### Internal
