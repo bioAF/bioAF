@@ -126,6 +126,12 @@ class AwsTerraformCloud(TerraformCloud):
         if module_name == "foundation":
             tfvars["state_bucket_name"] = self._state_bucket(config)
             tfvars["account_id"] = config.get("aws_account_id") or ""
+        elif module_name == "image_build":
+            # CodeBuild project + its IAM service role (the AWS analog of Cloud
+            # Build, which is serverless and needs no module). Install-level/stable
+            # names, so no stack_uid; account_id scopes the ECR repo ARNs.
+            tfvars["account_id"] = config.get("aws_account_id") or ""
+            tfvars["org_slug"] = org_slug
         elif module_name == "storage":
             tfvars["org_slug"] = org_slug
             if storage_suffix:
