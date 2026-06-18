@@ -423,7 +423,11 @@ cat >"$POLICY_DOC" <<'JSON'
         "codebuild:BatchGetProjects",
         "codebuild:StartBuild",
         "codebuild:BatchGetBuilds",
-        "codebuild:StopBuild"
+        "codebuild:StopBuild",
+        "logs:GetLogEvents",
+        "logs:FilterLogEvents",
+        "logs:DescribeLogStreams",
+        "logs:DescribeLogGroups"
       ],
       "Resource": "*"
     }
