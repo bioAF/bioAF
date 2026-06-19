@@ -38,6 +38,12 @@ variable "vpc_cidr" {
   description = "CIDR for the dedicated VPC the cluster runs in."
 }
 
+variable "work_node_ssh_cidr" {
+  type        = string
+  default     = "0.0.0.0/0"
+  description = "CIDR allowed to SSH to work-node EC2 instances (MVP default open; tighten in Stage 7)."
+}
+
 # --- Node group sizing (the AWS analogs of the GCP k8s_* machine types) ---
 #
 # GCP -> AWS instance mapping keeps vCPU/RAM close so behavior matches:

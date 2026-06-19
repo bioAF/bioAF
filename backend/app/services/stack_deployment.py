@@ -592,6 +592,14 @@ async def deploy_stack(
                 # IRSA role for the in-cluster Cluster Autoscaler; the CA workload
                 # is installed below (post-compute) using this ARN.
                 await _set_config(session, "cluster_autoscaler_role_arn", cluster_autoscaler_arn or "null")
+                # Work-node (EC2) networking + instance profile the EC2 work-node
+                # provider launches into (cleanup item 8b). Additive; GCP unaffected.
+                work_node_subnet = outputs.get("work_node_subnet_id", {}).get("value", "")
+                work_node_sg = outputs.get("work_node_security_group_id", {}).get("value", "")
+                work_node_profile = outputs.get("work_node_instance_profile", {}).get("value", "")
+                await _set_config(session, "aws_work_node_subnet_id", work_node_subnet or "null")
+                await _set_config(session, "aws_work_node_security_group_id", work_node_sg or "null")
+                await _set_config(session, "aws_work_node_instance_profile", work_node_profile or "null")
 
             # Update kubernetes_cluster component state
             await session.execute(

@@ -22,7 +22,7 @@ VALID_COMPUTE_STACKS = ("kubernetes", "slurm")
 # compute stack can still run GCE work nodes / K8s cellxgene). Only one
 # implementation of each exists today; the config seam lets EC2 / others slot in
 # later. Defaults preserve today's choice when the config key is absent.
-VALID_WORK_NODE_BACKENDS = ("gce",)
+VALID_WORK_NODE_BACKENDS = ("gce", "ec2")
 VALID_CELLXGENE_BACKENDS = ("kubernetes",)
 DEFAULT_WORK_NODE_BACKEND = "gce"
 DEFAULT_CELLXGENE_BACKEND = "kubernetes"
@@ -110,9 +110,13 @@ def _resolve_storage_backend(compute_stack: str) -> str:
 
 
 def _create_work_node_adapter(backend: str, session_factory=None) -> WorkNodeProvider:
-    """Instantiate the work-node adapter for ``backend`` (default GCE)."""
+    """Instantiate the work-node adapter for ``backend`` (gce | ec2)."""
     if backend not in VALID_WORK_NODE_BACKENDS:
         raise ValidationError(f"Unknown work_node_backend '{backend}'. Valid options: {VALID_WORK_NODE_BACKENDS}")
+    if backend == "ec2":
+        from app.adapters.work_nodes.ec2 import Ec2WorkNodeProvider
+
+        return Ec2WorkNodeProvider(session_factory=session_factory)
     from app.adapters.work_nodes.gce import GCEWorkNodeProvider
 
     return GCEWorkNodeProvider(session_factory=session_factory)
@@ -169,7 +173,7 @@ async def initialize_adapters(session: AsyncSession, session_factory=None) -> No
         await _compute_adapter.load_cluster_config()
         await _notebook_adapter.load_cluster_config()
         await _cellxgene_adapter.load_cluster_config()
-        await _work_node_adapter.load_gcp_config()
+        await _work_node_adapter.load_config()
 
         _initialized = True
 

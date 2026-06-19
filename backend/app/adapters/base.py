@@ -545,6 +545,15 @@ class VmInstance(ABC):
     service layer uses. Selected per-cloud (POLICY ``work_node``: gce | ec2).
     """
 
+    async def load_config(self, force: bool = False) -> dict:
+        """Eagerly load + cache this backend's platform_config (called at registry init).
+
+        The cloud-neutral name the registry calls on whichever VM backend is
+        active (GCE reads its ``gcp_*`` config, EC2 its ``aws_*`` config). Default
+        no-op so a backend that needs no startup config is safe.
+        """
+        return {}
+
     @abstractmethod
     async def provision(self, vm_spec: dict) -> VmInfo:
         """Create and start a VM. Returns a VmInfo."""

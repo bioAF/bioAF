@@ -202,6 +202,7 @@ class WorkNodeService:
                 "user_id": user_id,
                 "machine_type": machine_type,
                 "gce_machine_type": mt.get("gce_machine_type", machine_type),
+                "ec2_instance_type": mt.get("ec2_instance_type", machine_type),
                 "image_uri": env_version.image_uri,
                 "input_files": input_files_spec,
                 "heartbeat_token": heartbeat_token,
