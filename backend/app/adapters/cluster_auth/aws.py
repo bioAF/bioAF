@@ -61,6 +61,13 @@ class EksClusterAuthProvider(ClusterAuthProvider):
 
     token_ttl_seconds = 840  # 14 min; under the ~15-min EKS STS token life
 
+    # Lowercase so the kubernetes-python websocket-exec client forwards the
+    # bearer token (its create_websocket matches the header case-sensitively).
+    # Without this, pod-exec on EKS goes out as system:anonymous -> 403, which
+    # silently breaks the notebook shutdown sync (git commit + /outputs + home
+    # sync to S3). REST stays unaffected (HTTP headers are case-insensitive).
+    auth_header_name = "authorization"
+
     def cluster_endpoint(self, cluster_config: dict) -> str:
         # Reuses the gke_cluster_* keys; the deploy stores the EKS endpoint there.
         return cluster_config.get("gke_cluster_endpoint", "") or ""

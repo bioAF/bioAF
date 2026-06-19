@@ -19,7 +19,7 @@ from kubernetes import client
 
 from app.adapters.base import NotebookProvider
 from app.adapters.capabilities import ProviderCapabilities
-from app.adapters.kubernetes.connection import GkeConnection
+from app.adapters.kubernetes.connection import GkeConnection, api_client_auth_header
 from app.exceptions import ValidationError
 from app.adapters.models import (
     SessionInfo,
@@ -872,7 +872,7 @@ class KubernetesNotebookProvider(NotebookProvider):
             # Keep the auth pre-check here so a misconfigured client fails the
             # background task loudly rather than silently spinning.
             api_client = self._get_api_client()
-            if not api_client.default_headers.get("Authorization"):
+            if not api_client_auth_header(api_client):
                 raise RuntimeError(
                     "K8s ApiClient has no Authorization header; _build_out_of_cluster_client did not set one."
                 )
@@ -1257,7 +1257,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         try:
             api_client = self._get_api_client()
             config = api_client.configuration
-            auth = api_client.default_headers.get("Authorization")
+            auth = api_client_auth_header(api_client)
             if not auth:
                 return None
             svc_url = f"{config.host}/api/v1/namespaces/{namespace}/services/{service_name}"

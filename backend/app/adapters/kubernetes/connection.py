@@ -140,8 +140,11 @@ class GkeConnection:
         # K8s OpenAPI spec the library ships with does not declare one for the
         # simple bearer-token case, so api_key is a silent no-op and every
         # request goes out anonymously, yielding 401 Unauthorized. Set the
-        # header on the client directly instead.
-        api_client.set_default_header("Authorization", f"Bearer {token}")
+        # header on the client directly instead. The header KEY comes from the
+        # ClusterAuthProvider: GKE uses the canonical ``Authorization``; EKS uses
+        # the lowercase ``authorization`` the websocket-exec client forwards
+        # (read sites use ``api_client_auth_header`` to stay casing-agnostic).
+        api_client.set_default_header(self._cluster_auth.auth_header_name, f"Bearer {token}")
 
         self._client_created_at = time.monotonic()
         return api_client
@@ -276,3 +279,17 @@ class GkeConnection:
     def apps_v1(self):
         """AppsV1Api bound to the shared API client."""
         return client.AppsV1Api(api_client=self.get_api_client())
+
+
+def api_client_auth_header(api_client) -> str | None:
+    """The bearer auth header value on ``api_client``, read case-insensitively.
+
+    ``build_out_of_cluster_client`` installs the token under the key the active
+    ClusterAuthProvider names - ``Authorization`` on GKE, the lowercase
+    ``authorization`` on EKS (the casing the kubernetes websocket-exec client
+    forwards). Read sites that re-use the token for a raw httpx call must accept
+    either casing; on GKE the capital lookup hits first, so behavior is
+    unchanged there.
+    """
+    headers = api_client.default_headers
+    return headers.get("Authorization") or headers.get("authorization")

@@ -14,7 +14,7 @@ from kubernetes import client
 
 from app.adapters.base import CellxgeneProvider
 from app.adapters.capabilities import ProviderCapabilities
-from app.adapters.kubernetes.connection import GkeConnection
+from app.adapters.kubernetes.connection import GkeConnection, api_client_auth_header
 from app.adapters.models import CellxgeneInstance, ServiceState
 
 logger = logging.getLogger("bioaf.adapters.cellxgene.k8s")
@@ -493,7 +493,7 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
             api_client = self._get_api_client()
             k8s_config = api_client.configuration
             svc_url = f"{k8s_config.host}/api/v1/namespaces/{namespace}/services/{name}"
-            auth = api_client.default_headers.get("Authorization")
+            auth = api_client_auth_header(api_client)
             if not auth:
                 raise RuntimeError(
                     "K8s ApiClient has no Authorization header; _build_out_of_cluster_client did not set one."

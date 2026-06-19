@@ -27,6 +27,15 @@ class ClusterAuthProvider(ABC):
     # GCP OAuth tokens last ~3600s (refresh at 2700s); EKS STS tokens ~900s.
     token_ttl_seconds: int = 2700
 
+    # HTTP header key the connection installs the bearer token under. REST calls
+    # are case-insensitive, but the kubernetes-python websocket-exec client
+    # (``kubernetes.stream``) only forwards the token when the header is keyed
+    # lowercase ``authorization`` (its ``create_websocket`` does an exact-case
+    # lookup). GKE keeps the canonical ``Authorization`` (its current, working
+    # value); EKS overrides to ``authorization`` so pod-exec (notebook output
+    # sync at shutdown, etc.) authenticates instead of going out anonymous.
+    auth_header_name: str = "Authorization"
+
     @abstractmethod
     def cluster_endpoint(self, cluster_config: dict) -> str:
         """Raw control-plane endpoint from cluster_config ("" if unset)."""
