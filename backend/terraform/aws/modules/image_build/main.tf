@@ -95,6 +95,55 @@ data "aws_iam_policy_document" "codebuild" {
     ]
     resources = ["*"]
   }
+
+  # Packer (amazon-ebs) work-node AMI builds: Packer launches a transient builder
+  # EC2 instance in the default VPC, provisions it, then registers an AMI and
+  # tears the instance down. This is HashiCorp's documented minimal EC2 set for
+  # amazon-ebs. Most EC2 actions cannot be resource-scoped (they act on
+  # not-yet-created instances/images), so this is a STARTER statement (Resource
+  # "*"); tighten in Stage 7. Present so the same CodeBuild role can build both
+  # container images (ECR) and work-node AMIs.
+  statement {
+    sid = "PackerAmiBuild"
+    actions = [
+      "ec2:AttachVolume",
+      "ec2:AuthorizeSecurityGroupIngress",
+      "ec2:CopyImage",
+      "ec2:CreateImage",
+      "ec2:CreateKeypair",
+      "ec2:CreateSecurityGroup",
+      "ec2:CreateSnapshot",
+      "ec2:CreateTags",
+      "ec2:CreateVolume",
+      "ec2:DeleteKeyPair",
+      "ec2:DeleteSecurityGroup",
+      "ec2:DeleteSnapshot",
+      "ec2:DeleteVolume",
+      "ec2:DeregisterImage",
+      "ec2:DescribeImageAttribute",
+      "ec2:DescribeImages",
+      "ec2:DescribeInstances",
+      "ec2:DescribeInstanceStatus",
+      "ec2:DescribeRegions",
+      "ec2:DescribeSecurityGroups",
+      "ec2:DescribeSnapshots",
+      "ec2:DescribeSubnets",
+      "ec2:DescribeTags",
+      "ec2:DescribeVolumes",
+      "ec2:DescribeVpcs",
+      "ec2:DescribeAvailabilityZones",
+      "ec2:DetachVolume",
+      "ec2:GetPasswordData",
+      "ec2:ModifyImageAttribute",
+      "ec2:ModifyInstanceAttribute",
+      "ec2:ModifySnapshotAttribute",
+      "ec2:RegisterImage",
+      "ec2:RunInstances",
+      "ec2:StopInstances",
+      "ec2:TerminateInstances",
+    ]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_role_policy" "codebuild" {

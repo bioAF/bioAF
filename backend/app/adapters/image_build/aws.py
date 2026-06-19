@@ -69,6 +69,33 @@ phases:
 """
 
 
+# The inline buildspec for a Packer AMI build (work-node environments). Unlike the
+# container buildspec it does not docker-build / push to ECR; it pulls the build
+# context (a tar.gz with the Packer template + environment.yml the service uploaded
+# to S3), installs Packer, and runs ``packer build``. The amazon-ebs source creates
+# the AMI; Packer reads its input variables from the ``PKR_VAR_*`` env overrides the
+# provider sets per-build. The Packer builder instance launches in the account's
+# default VPC (no compute dependency) and needs no IAM (the environment.yml is
+# shipped to it via a Packer ``file`` provisioner, not pulled from S3 on the box).
+_PACKER_VERSION = "1.11.2"
+_PACKER_BUILDSPEC = f"""\
+version: 0.2
+phases:
+  pre_build:
+    commands:
+      - aws s3 cp "$CONTEXT_URI" /tmp/context.tar.gz
+      - mkdir -p /tmp/ctx && tar xzf /tmp/context.tar.gz -C /tmp/ctx
+      - curl -fsSL -o /tmp/packer.zip "https://releases.hashicorp.com/packer/{_PACKER_VERSION}/packer_{_PACKER_VERSION}_linux_amd64.zip"
+      - unzip -o /tmp/packer.zip -d /usr/local/bin
+      - packer version
+  build:
+    commands:
+      - cd /tmp/ctx
+      - packer init work_node.pkr.hcl
+      - packer build work_node.pkr.hcl
+"""
+
+
 def _timeout_minutes(timeout: str) -> int:
     """Parse the service's ``"<seconds>s"`` timeout into CodeBuild minutes."""
     try:
@@ -118,6 +145,42 @@ class CodeBuildImageBuildProvider(ImageBuildProvider):
         )
         build_id = result.get("build", {}).get("id", "")
         logger.info("Started CodeBuild %s for image %s (compute %s)", build_id, image_uri, compute)
+        return build_id
+
+    def submit_vm_image_build(
+        self,
+        credentials: Any,
+        config: dict,
+        *,
+        context_object_uri: str,
+        image_name: str,
+        build_vars: dict[str, str],
+        timeout: str,
+    ) -> str:
+        region = config["region"]
+        project = config["codebuild_project"]
+        minutes = _timeout_minutes(timeout)
+
+        # Packer reads PKR_VAR_<name> from the environment, so each build var is
+        # passed as a CodeBuild env override rather than a -var flag.
+        env_overrides = [
+            {"name": "CONTEXT_URI", "value": context_object_uri, "type": "PLAINTEXT"},
+            {"name": "AWS_DEFAULT_REGION", "value": region, "type": "PLAINTEXT"},
+        ]
+        env_overrides += [{"name": f"PKR_VAR_{k}", "value": v, "type": "PLAINTEXT"} for k, v in build_vars.items()]
+
+        cb = self._client(region)
+        result = cb.start_build(
+            projectName=project,
+            buildspecOverride=_PACKER_BUILDSPEC,
+            # Packer drives a separate builder EC2 instance, so the CodeBuild
+            # container itself stays MEDIUM (it only runs the packer CLI).
+            computeTypeOverride="BUILD_GENERAL1_MEDIUM",
+            timeoutInMinutesOverride=minutes,
+            environmentVariablesOverride=env_overrides,
+        )
+        build_id = result.get("build", {}).get("id", "")
+        logger.info("Started CodeBuild Packer AMI build %s for image %s", build_id, image_name)
         return build_id
 
     def check_build_status(self, credentials: Any, config: dict, build_id: str) -> str:

@@ -24,6 +24,7 @@ from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import ENVIRONMENT_BUILD_COMPLETED
 from app.adapters.image_build.gcp import authorized_request as _authorized_request
+from app.platform.cloud_provider import get_cloud_provider
 from app.services.image_build_platform import resolve_image_credentials, resolve_image_platform
 from app.services.notebook_image_service import (
     _get_credentials,
@@ -161,6 +162,135 @@ build {
 """
 
 
+# Packer template for building EC2 AMIs with conda environments (AWS analog of
+# PACKER_VM_TEMPLATE; the work-node VM image on AWS, cleanup item 8b). Differences
+# from the GCE template that are faithful per-cloud mechanics, not regressions:
+#   - amazon-ebs source (vs googlecompute); region var (vs project/zone).
+#   - The builder launches in the account's default VPC (no compute dependency).
+#   - environment.yml is shipped to the builder via a Packer ``file`` provisioner
+#     (from the CodeBuild workspace), so the builder needs NO S3/IAM access.
+#   - awscli + S3 output sync replace the GCS staging tooling (the runtime sync
+#     runs from the work-node startup script in the EC2 launch provider, 8b-launch).
+#   - force_deregister/force_delete_snapshot so a rebuild can reuse the AMI name.
+# Packer reads its inputs from PKR_VAR_* env vars the CodeBuild build sets.
+PACKER_VM_TEMPLATE_AWS = """\
+packer {
+  required_plugins {
+    amazon = {
+      version = ">= 1.3.0"
+      source  = "github.com/hashicorp/amazon"
+    }
+  }
+}
+
+variable "region" {
+  type = string
+}
+
+variable "image_name" {
+  type = string
+}
+
+variable "conda_env_name" {
+  type    = string
+  default = "bioaf"
+}
+
+source "amazon-ebs" "work_node" {
+  region        = var.region
+  instance_type = "t3.large"
+
+  source_ami_filter {
+    filters = {
+      name                = "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"
+      root-device-type    = "ebs"
+      virtualization-type = "hvm"
+    }
+    owners      = ["099720109477"]
+    most_recent = true
+  }
+
+  ssh_username    = "ubuntu"
+  ami_name        = var.image_name
+  ami_description = "bioAF work node environment"
+
+  # A rebuild reuses the deterministic AMI name, so deregister the prior one.
+  force_deregister      = true
+  force_delete_snapshot = true
+
+  # The build instance is transient (Packer creates it, provisions, destroys it).
+  launch_block_device_mappings {
+    device_name           = "/dev/sda1"
+    volume_size           = 50
+    volume_type           = "gp3"
+    delete_on_termination = true
+  }
+
+  tags = {
+    bioaf-managed = "true"
+  }
+}
+
+build {
+  sources = ["source.amazon-ebs.work_node"]
+
+  # System packages
+  provisioner "shell" {
+    inline = [
+      "sudo add-apt-repository -y universe",
+      "sudo apt-get update",
+      "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server git tmux htop curl unzip fail2ban awscli",
+      "sudo systemctl enable ssh",
+      "sudo sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config",
+      "echo 'PasswordAuthentication yes' | sudo tee /etc/ssh/sshd_config.d/99-bioaf-password-auth.conf",
+    ]
+  }
+
+  # Install miniforge (conda-forge only, no Anaconda TOS)
+  provisioner "shell" {
+    inline = [
+      "wget -q https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O /tmp/miniforge.sh",
+      "sudo bash /tmp/miniforge.sh -b -p /opt/conda",
+      "sudo chmod -R a+rx /opt/conda",
+      "rm /tmp/miniforge.sh",
+      "echo 'export PATH=/opt/conda/bin:$PATH' | sudo tee /etc/profile.d/conda.sh",
+    ]
+  }
+
+  # Ship environment.yml from the build workspace (no S3 access on the builder),
+  # then create the conda env.
+  provisioner "file" {
+    source      = "environment.yml"
+    destination = "/tmp/environment.yml"
+  }
+
+  provisioner "shell" {
+    inline = [
+      "export PATH=/opt/conda/bin:$PATH",
+      "conda env create -f /tmp/environment.yml",
+      "conda clean -afy",
+      "rm /tmp/environment.yml",
+    ]
+  }
+
+  # bioaf directories
+  provisioner "shell" {
+    inline = [
+      "sudo mkdir -p /etc/bioaf /outputs /scratch",
+    ]
+  }
+
+  # Cleanup
+  provisioner "shell" {
+    inline = [
+      "sudo apt-get clean",
+      "sudo rm -rf /var/lib/apt/lists/*",
+    ]
+  }
+}
+"""
+
+
 def _get_vm_image_name(env_name: str, version_number: int, build_number: int) -> str:
     """Construct GCE image name for a work node environment."""
     safe_name = env_name.lower().replace(" ", "-").replace("_", "-")
@@ -275,6 +405,42 @@ async def _upload_version_build_context(
     context_uri = adapter.build_uri(working_bucket, object_path)
     await adapter.upload_file(context_uri, buf, content_type="application/gzip")
     logger.info("Uploaded build context to %s", context_uri)
+
+    return object_path
+
+
+async def _upload_vm_build_context(
+    working_bucket: str,
+    version: EnvironmentVersion,
+    env_name: str,
+) -> str:
+    """Create a tar.gz with the AWS Packer template + environment.yml and upload it.
+
+    The CodeBuild Packer build pulls and extracts this context, then ``packer
+    build`` ships ``environment.yml`` to the builder via a ``file`` provisioner.
+    Returns the storage object path (bucket-relative).
+    """
+    from app.adapters.registry import get_storage_adapter
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        for name, content in (
+            ("work_node.pkr.hcl", PACKER_VM_TEMPLATE_AWS),
+            ("environment.yml", version.definition_content),
+        ):
+            data = content.encode()
+            info = tarfile.TarInfo(name=name)
+            info.size = len(data)
+            info.mtime = int(time.time())
+            tar.addfile(info, io.BytesIO(data))
+
+    buf.seek(0)
+    safe_name = _safe_image_name(env_name)
+    object_path = f"builds/{safe_name}/v{version.version_number}/work_node_ami.tar.gz"
+    adapter = get_storage_adapter()
+    context_uri = adapter.build_uri(working_bucket, object_path)
+    await adapter.upload_file(context_uri, buf, content_type="application/gzip")
+    logger.info("Uploaded AMI build context to %s", context_uri)
 
     return object_path
 
@@ -416,7 +582,18 @@ class EnvironmentBuildService:
         user_id: int,
         environment_id: int,
     ) -> str:
-        """Build a GCE VM image via Cloud Build + Packer (work node environments, ADR-043)."""
+        """Build a work-node VM image via Packer (ADR-043).
+
+        GCP builds a GCE image via Cloud Build (unchanged, byte-identical below).
+        AWS builds an EC2 AMI via CodeBuild (cleanup item 8b); the single
+        ``cloud_provider`` branch delegates to ``_build_vm_image_aws`` so the GCP
+        path stays exactly as it was.
+        """
+        if await get_cloud_provider(session) == "aws":
+            return await EnvironmentBuildService._build_vm_image_aws(
+                session, env, version, org_id, user_id, environment_id
+            )
+
         import yaml
 
         if version.definition_format != "conda":
@@ -529,6 +706,91 @@ class EnvironmentBuildService:
 
         logger.info(
             "Submitted Packer VM build %s for %s v%d",
+            build_id,
+            env.name,
+            version.version_number,
+        )
+        return build_id
+
+    @staticmethod
+    async def _build_vm_image_aws(
+        session: AsyncSession,
+        env: Environment,
+        version: EnvironmentVersion,
+        org_id: int,
+        user_id: int,
+        environment_id: int,
+    ) -> str:
+        """Build an EC2 AMI via CodeBuild + Packer (work node environments on AWS).
+
+        The AWS analog of the GCE-image build: routes the Packer build through the
+        ImageBuild seam's ``submit_vm_image_build`` (CodeBuild StartBuild of a
+        ``amazon-ebs`` template). The work-node ``image_uri`` is the deterministic
+        AMI *name* (the EC2 launch provider resolves name -> AMI id at launch),
+        mirroring how the GCP path stores a deterministic image self-link.
+        """
+        import yaml
+
+        if version.definition_format != "conda":
+            raise ValidationError("Work node environments only support conda definition format")
+
+        platform = await resolve_image_platform(session)
+        platform.require_target()
+        platform.require_build_service()
+
+        working_bucket = await _read_config(session, "working_bucket_name")
+        if not working_bucket or working_bucket == "null":
+            raise ValidationError("Working bucket not configured")
+
+        data = yaml.safe_load(version.definition_content)
+        conda_env_name = data.get("name", "bioaf") if data else "bioaf"
+
+        # Deterministic AMI name (same naming as the GCE image); the launch
+        # provider resolves it to an AMI id via a name filter at launch time.
+        image_name = _get_vm_image_name(env.name, version.version_number, version.build_number)
+
+        # Upload the build context (Packer template + environment.yml) as a tar.gz.
+        from app.adapters.registry import get_storage_adapter
+
+        adapter = get_storage_adapter()
+        object_path = await _upload_vm_build_context(working_bucket, version, env.name)
+        context_uri = adapter.build_uri(working_bucket, object_path)
+
+        credentials = await resolve_image_credentials(session, platform)  # None on AWS (ambient creds)
+        build_id = get_image_build_provider().submit_vm_image_build(
+            credentials,
+            platform.config,
+            context_object_uri=context_uri,
+            image_name=image_name,
+            build_vars={
+                "region": platform.config["region"],
+                "image_name": image_name,
+                "conda_env_name": conda_env_name,
+            },
+            timeout="3600s",
+        )
+
+        version.status = "building"
+        version.build_id = build_id
+        version.image_uri = image_name
+        await session.flush()
+
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="environment_version",
+            entity_id=version.id,
+            action="build_vm_image",
+            details={
+                "environment_id": environment_id,
+                "version_number": version.version_number,
+                "build_id": build_id,
+                "image_name": image_name,
+            },
+        )
+
+        logger.info(
+            "Submitted CodeBuild AMI build %s for %s v%d",
             build_id,
             env.name,
             version.version_number,

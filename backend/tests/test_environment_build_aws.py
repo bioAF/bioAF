@@ -238,3 +238,122 @@ async def test_poll_in_progress_builds_noop_without_cloud_target(session, admin_
     assert changed == 0
     await session.refresh(version)
     assert version.status == "building"
+
+
+# --- 8b: work-node AMI build (Packer via CodeBuild) ---------------------------
+
+
+async def _make_draft_conda_worknode_env(session, admin_user, name: str) -> tuple[Environment, EnvironmentVersion]:
+    """Create a work_node environment + a draft conda version."""
+    env = Environment(
+        name=name,
+        organization_id=admin_user.organization_id,
+        created_by_user_id=admin_user.id,
+        environment_type="work_node",
+        visibility="team",
+    )
+    session.add(env)
+    await session.flush()
+    version = EnvironmentVersion(
+        environment_id=env.id,
+        version_number=1,
+        build_number=1,
+        status="draft",
+        definition_format="conda",
+        definition_content="name: bioaf-work\nchannels: [conda-forge]\ndependencies: [python=3.11]\n",
+        created_by_user_id=admin_user.id,
+    )
+    session.add(version)
+    await session.flush()
+    return env, version
+
+
+@pytest.mark.asyncio
+async def test_build_version_work_node_on_aws_submits_codebuild_packer(session, admin_user, aws_install):
+    """A work-node env build on AWS StartBuilds a Packer AMI build; image_uri is the AMI name."""
+    from app.adapters.image_build.aws import CodeBuildImageBuildProvider
+
+    env, version = await _make_draft_conda_worknode_env(session, admin_user, "Bench Env")
+
+    storage = MagicMock()
+    storage.build_uri.side_effect = lambda b, k: f"s3://{b}/{k}"
+    storage.upload_file = AsyncMock()
+
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=storage),
+        patch.object(CodeBuildImageBuildProvider, "_client") as cb_mk,
+    ):
+        cb_mk.return_value.start_build.return_value = {"build": {"id": "bioaf-image-build:ami-run-1"}}
+        build_id = await EnvironmentBuildService.build_version(
+            session, admin_user.organization_id, admin_user.id, env.id, version.id
+        )
+
+    assert build_id == "bioaf-image-build:ami-run-1"
+    kwargs = cb_mk.return_value.start_build.call_args.kwargs
+    assert kwargs["projectName"] == "bioaf-image-build"
+    # The Packer buildspec (not the docker one) drives the build.
+    assert "packer build" in kwargs["buildspecOverride"]
+    # Packer inputs are passed as PKR_VAR_* env overrides.
+    env_vars = {e["name"]: e["value"] for e in kwargs["environmentVariablesOverride"]}
+    assert env_vars["PKR_VAR_image_name"] == "bioaf-worknode-bench-env-v1-1"
+    assert env_vars["PKR_VAR_region"] == "us-west-1"
+    assert env_vars["PKR_VAR_conda_env_name"] == "bioaf-work"
+    # The work-node image_uri is the deterministic AMI name (launch resolves name->id).
+    await session.refresh(version)
+    assert version.status == "building"
+    assert version.build_id == "bioaf-image-build:ami-run-1"
+    assert version.image_uri == "bioaf-worknode-bench-env-v1-1"
+
+
+@pytest.mark.asyncio
+async def test_build_version_work_node_on_aws_requires_conda(session, admin_user, aws_install):
+    """Work-node envs only support conda definitions (same rule as GCP)."""
+    env = Environment(
+        name="Dockerfile Worknode",
+        organization_id=admin_user.organization_id,
+        created_by_user_id=admin_user.id,
+        environment_type="work_node",
+        visibility="team",
+    )
+    session.add(env)
+    await session.flush()
+    version = EnvironmentVersion(
+        environment_id=env.id,
+        version_number=1,
+        build_number=1,
+        status="draft",
+        definition_format="dockerfile",
+        definition_content="FROM ubuntu:22.04",
+        created_by_user_id=admin_user.id,
+    )
+    session.add(version)
+    await session.flush()
+
+    from app.exceptions import ValidationError
+
+    with pytest.raises(ValidationError, match="only support conda"):
+        await EnvironmentBuildService.build_version(
+            session, admin_user.organization_id, admin_user.id, env.id, version.id
+        )
+
+
+def test_cloud_build_provider_cannot_build_vm_images():
+    """The Cloud Build (GCP) provider has no VM-image build; it keeps the inline path."""
+    from app.adapters.image_build.gcp import GcpCloudBuildProvider
+
+    with pytest.raises(NotImplementedError):
+        GcpCloudBuildProvider().submit_vm_image_build(
+            None, {"project_id": "p"}, context_object_uri="gs://b/o", image_name="img", build_vars={}, timeout="1s"
+        )
+
+
+def test_aws_packer_template_is_amazon_ebs_with_force_deregister():
+    """The AWS work-node Packer template builds an amazon-ebs AMI and is rebuild-safe."""
+    from app.services.environment_build_service import PACKER_VM_TEMPLATE_AWS
+
+    assert 'source "amazon-ebs"' in PACKER_VM_TEMPLATE_AWS
+    # Rebuilds reuse the deterministic AMI name, so a prior AMI must be deregistered.
+    assert "force_deregister      = true" in PACKER_VM_TEMPLATE_AWS
+    # environment.yml is shipped to the builder (no S3/IAM needed on the build box).
+    assert 'provisioner "file"' in PACKER_VM_TEMPLATE_AWS
+    assert "amazon/aws-cli" not in PACKER_VM_TEMPLATE_AWS  # builder uses OS awscli, not a container

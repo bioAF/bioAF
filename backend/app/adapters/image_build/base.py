@@ -51,6 +51,32 @@ class ImageBuildProvider(ABC):
         Returns the backend build id.
         """
 
+    def submit_vm_image_build(
+        self,
+        credentials: Any,
+        config: dict,
+        *,
+        context_object_uri: str,
+        image_name: str,
+        build_vars: dict[str, str],
+        timeout: str,
+    ) -> str:
+        """Submit a Packer build that produces a VM image (a GCE image / EC2 AMI).
+
+        The build context (a Packer template + ``environment.yml``) is the tar.gz
+        at ``context_object_uri`` (a storage URI). ``image_name`` is the
+        deterministic output-image name Packer creates (the work-node launch
+        provider resolves it). ``build_vars`` are the Packer input variables
+        (passed as ``PKR_VAR_*``); ``timeout`` is the cloud's timeout string.
+        Returns the backend build id (polled via :meth:`check_build_status`).
+
+        VM-image builds are distinct from container builds (:meth:`submit_build`):
+        the artifact is a machine image, not a registry image. A backend that
+        cannot build VM images raises (Cloud Build keeps an inline path in the
+        service today; CodeBuild implements this for AMIs in Stage 6e).
+        """
+        raise NotImplementedError("This image-build backend cannot build VM images")
+
     @abstractmethod
     def check_build_status(self, credentials: Any, config: dict, build_id: str) -> str:
         """Return the neutral status for ``build_id`` (``UNKNOWN`` if unreadable)."""
