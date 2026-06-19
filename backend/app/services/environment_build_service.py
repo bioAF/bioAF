@@ -335,6 +335,36 @@ WORKDIR /home
 """
 
 
+def _parse_work_node_conda_name(content: str) -> str:
+    """Parse a work-node conda definition and return its env name.
+
+    Raises a clear ValidationError when the content is not valid conda YAML (e.g.
+    a Dockerfile pasted into a work-node environment), instead of letting the raw
+    YAML parser error surface as "Build failed to start: expected '<document
+    start>' ...". Work-node images are built from this via Packer ``conda env
+    create``, so a Dockerfile cannot be used here.
+    """
+    import yaml
+
+    try:
+        data = yaml.safe_load(content)
+    except yaml.YAMLError as exc:
+        first_line = str(exc).splitlines()[0] if str(exc) else "invalid YAML"
+        raise ValidationError(
+            "Work node environment definition must be a valid conda environment.yml "
+            f"(not a Dockerfile). Edit the environment definition and rebuild. "
+            f"YAML parse error: {first_line}"
+        ) from exc
+    # A Dockerfile can also fold into a YAML scalar/string (no parse error); reject
+    # anything that is not a conda environment mapping.
+    if not isinstance(data, dict) or not ({"dependencies", "name", "channels"} & set(data)):
+        raise ValidationError(
+            "Work node environment definition must be a valid conda environment.yml "
+            "(not a Dockerfile). Edit the environment definition and rebuild."
+        )
+    return data.get("name", "bioaf")
+
+
 def _safe_image_name(env_name: str) -> str:
     """Sanitize an environment name for use as an image / repository name.
 
@@ -602,8 +632,6 @@ class EnvironmentBuildService:
                 session, env, version, org_id, user_id, environment_id
             )
 
-        import yaml
-
         if version.definition_format != "conda":
             raise ValidationError("Work node environments only support conda definition format")
 
@@ -626,8 +654,7 @@ class EnvironmentBuildService:
         build_zone = f"{region}-{zone_suffix}"
 
         # Extract conda env name from the YAML
-        data = yaml.safe_load(version.definition_content)
-        conda_env_name = data.get("name", "bioaf") if data else "bioaf"
+        conda_env_name = _parse_work_node_conda_name(version.definition_content)
 
         # Upload environment.yml + Packer template to storage
         from app.adapters.registry import get_storage_adapter
@@ -737,8 +764,6 @@ class EnvironmentBuildService:
         AMI *name* (the EC2 launch provider resolves name -> AMI id at launch),
         mirroring how the GCP path stores a deterministic image self-link.
         """
-        import yaml
-
         if version.definition_format != "conda":
             raise ValidationError("Work node environments only support conda definition format")
 
@@ -750,8 +775,7 @@ class EnvironmentBuildService:
         if not working_bucket or working_bucket == "null":
             raise ValidationError("Working bucket not configured")
 
-        data = yaml.safe_load(version.definition_content)
-        conda_env_name = data.get("name", "bioaf") if data else "bioaf"
+        conda_env_name = _parse_work_node_conda_name(version.definition_content)
 
         # Deterministic AMI name (same naming as the GCE image); the launch
         # provider resolves it to an AMI id via a name filter at launch time.

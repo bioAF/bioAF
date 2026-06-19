@@ -825,3 +825,33 @@ async def test_poll_in_progress_builds_calls_check_build_status_with_two_args(se
     assert changed == 1
     await session.refresh(ver)
     assert ver.status == "ready"
+
+
+# --- Conda definition validation (reject a Dockerfile pasted into a conda env) ---
+
+
+def test_validate_conda_definition_accepts_real_env_and_rejects_dockerfile():
+    """A work-node/pipeline conda env must be a real environment.yml; a Dockerfile
+    pasted in (a common mix-up) is rejected at creation with a clear message
+    instead of a cryptic YAML parser error at build time."""
+    from app.exceptions import ValidationError
+    from app.services.environment_service import _validate_conda_definition
+
+    _validate_conda_definition("name: x\ndependencies:\n  - python=3.11\n")  # ok
+    dockerfile = "# Pinned\nFROM jupyter/scipy-notebook@sha256:abc\n\nUSER root\nARG R_VERSION=4.4.3\n"
+    with pytest.raises(ValidationError, match="conda environment.yml"):
+        _validate_conda_definition(dockerfile)
+
+
+def test_parse_work_node_conda_name_rejects_dockerfile():
+    """The work-node build parses the conda env name; a Dockerfile (raising OR
+    folding into a scalar) is rejected with an actionable error, not a raw YAML
+    traceback surfaced as 'Build failed to start: expected <document start>'."""
+    from app.exceptions import ValidationError
+    from app.services.environment_build_service import _parse_work_node_conda_name
+
+    assert _parse_work_node_conda_name("name: bench\ndependencies:\n  - python=3.11\n") == "bench"
+    with pytest.raises(ValidationError, match="conda environment.yml"):
+        _parse_work_node_conda_name("# c\nFROM jupyter/scipy-notebook@sha256:abc\n\nUSER root\nARG R_VERSION=4.4.3\n")
+    with pytest.raises(ValidationError, match="conda environment.yml"):
+        _parse_work_node_conda_name("FROM python:3.11 single scalar line")
