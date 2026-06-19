@@ -516,19 +516,27 @@ class EnvironmentBuildService:
         # The per-environment image name + version.build tag. On AWS this is the
         # ECR repository (one repo per image); on GCP it is the image within the
         # shared Artifact Registry repo.
+        #
+        # AWS namespacing: the CodeBuild role's ECR push is scoped to bioaf-*
+        # repositories (the system bioaf-scrna / bioaf-cellxgene images match; a
+        # bare custom-env name like "default-notebook" does NOT, so the push 403s in
+        # POST_BUILD). So env images live under the bioaf-env- namespace on AWS. GCP
+        # uses a single shared Artifact Registry repo with no per-repo IAM scoping,
+        # so it keeps the bare name (byte-identical to the pre-seam path).
         safe_name = _safe_image_name(env.name)
+        image_name = f"bioaf-env-{safe_name}" if platform.cloud_provider == "aws" else safe_name
         tag = _image_tag(version.version_number, version.build_number)
 
         # Ensure the destination repository exists (idempotent). GCP ignores the
         # name (shared AR repo); ECR creates the per-image repo.
         credentials = await resolve_image_credentials(session, platform)
-        get_image_registry_provider().ensure_repository(credentials, platform.config, safe_name)
+        get_image_registry_provider().ensure_repository(credentials, platform.config, image_name)
 
         # Upload build context (cloud-neutral: build_uri + upload_file)
         object_path = await _upload_version_build_context(session, working_bucket, version, env.name)
         context_uri = get_storage_adapter().build_uri(working_bucket, object_path)
 
-        image_uri = get_image_registry_provider().image_uri(platform.config, safe_name, tag)
+        image_uri = get_image_registry_provider().image_uri(platform.config, image_name, tag)
 
         # On GCP, fall back to the credentials' own SA when no explicit build SA is
         # configured (matches the pre-seam behavior). AWS has no build SA (the

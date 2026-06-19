@@ -106,18 +106,19 @@ async def test_build_version_docker_on_aws_routes_through_ecr_codebuild(session,
         )
 
     assert build_id == "bioaf-image-build:run-7"
-    # ECR is one repo per image: the per-environment repo (safe name) is ensured.
-    ecr_mk.return_value.create_repository.assert_called_once_with(repositoryName="custom-env")
+    # ECR is one repo per image: the per-environment repo is ensured under the
+    # bioaf-env- namespace so it matches the CodeBuild role's bioaf-* push scope.
+    ecr_mk.return_value.create_repository.assert_called_once_with(repositoryName="bioaf-env-custom-env")
     # CodeBuild targets the project with the ECR image URI, tagged v<version>.<build>.
     kwargs = cb_mk.return_value.start_build.call_args.kwargs
     assert kwargs["projectName"] == "bioaf-image-build"
     env_vars = {e["name"]: e["value"] for e in kwargs["environmentVariablesOverride"]}
-    assert env_vars["IMAGE_URI"] == "043671579834.dkr.ecr.us-west-1.amazonaws.com/custom-env:v1.1"
+    assert env_vars["IMAGE_URI"] == "043671579834.dkr.ecr.us-west-1.amazonaws.com/bioaf-env-custom-env:v1.1"
     # The version record reflects the build.
     await session.refresh(version)
     assert version.status == "building"
     assert version.build_id == "bioaf-image-build:run-7"
-    assert version.image_uri == "043671579834.dkr.ecr.us-west-1.amazonaws.com/custom-env:v1.1"
+    assert version.image_uri == "043671579834.dkr.ecr.us-west-1.amazonaws.com/bioaf-env-custom-env:v1.1"
 
 
 @pytest.mark.asyncio
