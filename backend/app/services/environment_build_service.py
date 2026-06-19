@@ -421,8 +421,19 @@ async def _upload_version_build_context(
             info2.mtime = int(time.time())
             tar.addfile(info2, io.BytesIO(yml_bytes))
         else:
-            # Dockerfile format -- definition_content IS the Dockerfile
-            df_bytes = version.definition_content.encode()
+            # Dockerfile format -- definition_content IS the Dockerfile. Substitute
+            # the storage-pip-packages placeholder if present: a custom Dockerfile
+            # based on the system notebook template carries __STORAGE_PIP_PACKAGES__,
+            # which only the system image build (notebook_image_service._render_
+            # dockerfile) fills in. Left verbatim it reaches `docker build` and fails
+            # ("ERROR: Invalid requirement: '__STORAGE_PIP_PACKAGES__'"). Fill it with
+            # the cloud-selected storage client libs, exactly as the system build does.
+            dockerfile = version.definition_content
+            if "__STORAGE_PIP_PACKAGES__" in dockerfile:
+                dockerfile = dockerfile.replace(
+                    "__STORAGE_PIP_PACKAGES__", get_storage_adapter().image_storage_pip_packages()
+                )
+            df_bytes = dockerfile.encode()
             info = tarfile.TarInfo(name="Dockerfile")
             info.size = len(df_bytes)
             info.mtime = int(time.time())

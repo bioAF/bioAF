@@ -358,3 +358,37 @@ def test_aws_packer_template_is_amazon_ebs_with_force_deregister():
     # environment.yml is shipped to the builder (no S3/IAM needed on the build box).
     assert 'provisioner "file"' in PACKER_VM_TEMPLATE_AWS
     assert "amazon/aws-cli" not in PACKER_VM_TEMPLATE_AWS  # builder uses OS awscli, not a container
+
+
+@pytest.mark.asyncio
+async def test_dockerfile_build_context_substitutes_storage_placeholder():
+    """A custom Dockerfile carrying the system template's __STORAGE_PIP_PACKAGES__
+    placeholder (a common copy-from-template mistake) is filled in at build-context
+    upload, so `docker build` does not fail with 'Invalid requirement'."""
+    import io as _io
+    import tarfile as _tarfile
+
+    from app.services.environment_build_service import _upload_version_build_context
+
+    version = MagicMock()
+    version.definition_format = "dockerfile"
+    version.definition_content = "FROM python:3.11\nRUN pip install scanpy __STORAGE_PIP_PACKAGES__\n"
+    version.version_number = 1
+
+    captured: dict = {}
+    storage = MagicMock()
+    storage.build_uri.side_effect = lambda b, k: f"s3://{b}/{k}"
+    storage.image_storage_pip_packages.return_value = "'boto3>=1.43,<2' 'awscli>=1.40,<2'"
+
+    async def _capture(uri, buf, content_type=None):
+        captured["data"] = buf.getvalue()
+
+    storage.upload_file = AsyncMock(side_effect=_capture)
+
+    with patch("app.adapters.registry.get_storage_adapter", return_value=storage):
+        await _upload_version_build_context(None, "bioaf-working", version, "My Env")
+
+    tf = _tarfile.open(fileobj=_io.BytesIO(captured["data"]), mode="r:gz")
+    dockerfile = tf.extractfile("Dockerfile").read().decode()
+    assert "__STORAGE_PIP_PACKAGES__" not in dockerfile
+    assert "boto3" in dockerfile
