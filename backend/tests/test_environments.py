@@ -767,3 +767,59 @@ def test_default_notebook_conda_yml_has_bioconductor_stack():
     }
     missing = required_bioc - deps
     assert not missing, f"Bioconductor packages missing from default notebook env: {sorted(missing)}"
+
+
+@pytest.mark.asyncio
+async def test_poll_in_progress_builds_calls_check_build_status_with_two_args(session, admin_user):
+    """Regression: poll_in_progress_builds must call check_build_status(session, build_id).
+
+    A stale 3-arg call (session, project_id, build_id) - left when check_build_status
+    dropped its project_id parameter - raised TypeError and broke environment-build
+    status transitions on every cloud. This pins the 2-arg signature end-to-end.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from sqlalchemy import text
+
+    from app.models.environment import Environment
+    from app.models.environment_version import EnvironmentVersion
+    from app.services.environment_build_service import EnvironmentBuildService
+
+    # poll gates on gcp_project_id; set it so the poll proceeds to the status check.
+    await session.execute(
+        text(
+            "INSERT INTO platform_config (key, value) VALUES ('gcp_project_id', 'test-project') "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
+    )
+    env = Environment(
+        name="custom env",
+        organization_id=admin_user.organization_id,
+        created_by_user_id=admin_user.id,
+        visibility="team",
+    )
+    session.add(env)
+    await session.flush()
+    ver = EnvironmentVersion(
+        environment_id=env.id,
+        version_number=1,
+        status="building",
+        definition_format="dockerfile",
+        definition_content="FROM python:3.11-slim",
+        build_id="build-xyz",
+        created_by_user_id=admin_user.id,
+    )
+    session.add(ver)
+    await session.flush()
+
+    with patch(
+        "app.services.notebook_image_service.check_build_status",
+        new=AsyncMock(return_value="SUCCESS"),
+    ) as mock_cbs:
+        changed = await EnvironmentBuildService.poll_in_progress_builds(session)
+
+    # The crux: two positional args (session, build_id), not three.
+    mock_cbs.assert_awaited_once_with(session, "build-xyz")
+    assert changed == 1
+    await session.refresh(ver)
+    assert ver.status == "ready"

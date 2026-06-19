@@ -555,7 +555,7 @@ class EnvironmentBuildService:
             if not version.build_id:
                 continue
 
-            status = await check_build_status(session, project_id, version.build_id)
+            status = await check_build_status(session, version.build_id)
 
             if status == "SUCCESS":
                 version.status = "ready"
