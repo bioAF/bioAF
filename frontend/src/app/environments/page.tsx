@@ -393,7 +393,7 @@ export default function EnvironmentsPage() {
                               rel="noopener noreferrer"
                               className="text-bioaf-600 hover:underline"
                             >
-                              View build logs in Cloud Console
+                              View build logs
                             </a>
                           </p>
                         )}
