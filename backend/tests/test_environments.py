@@ -785,13 +785,15 @@ async def test_poll_in_progress_builds_calls_check_build_status_with_two_args(se
     from app.models.environment_version import EnvironmentVersion
     from app.services.environment_build_service import EnvironmentBuildService
 
-    # poll gates on gcp_project_id; set it so the poll proceeds to the status check.
-    await session.execute(
-        text(
-            "INSERT INTO platform_config (key, value) VALUES ('gcp_project_id', 'test-project') "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+    # poll gates on the cloud image target (project+region); set both so the poll
+    # proceeds to the status check.
+    for k, v in (("gcp_project_id", "test-project"), ("gcp_region", "us-central1")):
+        await session.execute(
+            text(
+                "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+            ).bindparams(k=k, v=v)
         )
-    )
     env = Environment(
         name="custom env",
         organization_id=admin_user.organization_id,

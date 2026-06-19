@@ -15,6 +15,8 @@ import time
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapters.image_build import get_image_build_provider
+from app.adapters.image_registry import get_image_registry_provider
 from app.exceptions import NotFoundError, StateError, ValidationError
 from app.models.environment import Environment
 from app.models.environment_version import EnvironmentVersion
@@ -22,11 +24,10 @@ from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import ENVIRONMENT_BUILD_COMPLETED
 from app.adapters.image_build.gcp import authorized_request as _authorized_request
-from app.adapters.image_registry.gcp import AR_REPO_ID
+from app.services.image_build_platform import resolve_image_credentials, resolve_image_platform
 from app.services.notebook_image_service import (
     _get_credentials,
     _read_config,
-    ensure_artifact_registry,
 )
 
 logger = logging.getLogger("bioaf.environment_build")
@@ -204,12 +205,18 @@ WORKDIR /home
 """
 
 
-def _get_image_uri(project_id: str, region: str, env_name: str, version_number: int, build_number: int = 1) -> str:
-    """Construct Artifact Registry image URI with version.build tag."""
-    # Sanitize env_name for use in image tag (lowercase, hyphens only)
-    safe_name = env_name.lower().replace(" ", "-").replace("_", "-")
-    tag = f"v{version_number}.{build_number}"
-    return f"{region}-docker.pkg.dev/{project_id}/{AR_REPO_ID}/{safe_name}:{tag}"
+def _safe_image_name(env_name: str) -> str:
+    """Sanitize an environment name for use as an image / repository name.
+
+    Lowercase, spaces and underscores to hyphens. Valid as both an Artifact
+    Registry image name (GCP) and an ECR repository name (AWS).
+    """
+    return env_name.lower().replace(" ", "-").replace("_", "-")
+
+
+def _image_tag(version_number: int, build_number: int = 1) -> str:
+    """The ``v<version>.<build>`` tag used for an environment image."""
+    return f"v{version_number}.{build_number}"
 
 
 def _build_conda_dockerfile(definition_content: str, env_name: str) -> tuple[str, str]:
@@ -229,7 +236,6 @@ def _build_conda_dockerfile(definition_content: str, env_name: str) -> tuple[str
 
 async def _upload_version_build_context(
     session: AsyncSession,
-    project_id: str,
     working_bucket: str,
     version: EnvironmentVersion,
     env_name: str,
@@ -263,7 +269,7 @@ async def _upload_version_build_context(
             tar.addfile(info, io.BytesIO(df_bytes))
 
     buf.seek(0)
-    safe_name = env_name.lower().replace(" ", "-").replace("_", "-")
+    safe_name = _safe_image_name(env_name)
     object_path = f"builds/{safe_name}/v{version.version_number}/source.tar.gz"
     adapter = get_storage_adapter()
     context_uri = adapter.build_uri(working_bucket, object_path)
@@ -323,58 +329,56 @@ class EnvironmentBuildService:
         user_id: int,
         environment_id: int,
     ) -> str:
-        """Build a Docker container image via Cloud Build (notebook environments)."""
-        project_id = await _read_config(session, "gcp_project_id")
-        region = await _read_config(session, "gcp_region")
-        working_bucket = await _read_config(session, "working_bucket_name")
+        """Build a Docker container image (notebook / pipeline environments).
 
-        if not project_id or project_id == "null":
-            raise ValidationError("GCP project not configured")
-        if not region or region == "null":
-            raise ValidationError("GCP region not configured")
+        Cloud-neutral: routes through the ImageRegistry + ImageBuild seams via
+        ``resolve_image_platform`` (Cloud Build -> Artifact Registry on GCP;
+        CodeBuild -> ECR on AWS), exactly like ``notebook_image_service``. GCP is
+        byte-identical to the pre-seam path (same AR image URI, same Cloud Build
+        body, same bootstrap-impersonation credentials).
+        """
+        from app.adapters.registry import get_storage_adapter
+
+        platform = await resolve_image_platform(session)
+        platform.require_target()
+        platform.require_build_service()
+
+        working_bucket = await _read_config(session, "working_bucket_name")
         if not working_bucket or working_bucket == "null":
             raise ValidationError("Working bucket not configured")
 
-        # Ensure Artifact Registry repo exists
-        await ensure_artifact_registry(session, project_id, region)
+        # The per-environment image name + version.build tag. On AWS this is the
+        # ECR repository (one repo per image); on GCP it is the image within the
+        # shared Artifact Registry repo.
+        safe_name = _safe_image_name(env.name)
+        tag = _image_tag(version.version_number, version.build_number)
 
-        # Upload build context
-        object_path = await _upload_version_build_context(session, project_id, working_bucket, version, env.name)
+        # Ensure the destination repository exists (idempotent). GCP ignores the
+        # name (shared AR repo); ECR creates the per-image repo.
+        credentials = await resolve_image_credentials(session, platform)
+        get_image_registry_provider().ensure_repository(credentials, platform.config, safe_name)
 
-        # Build image URI
-        image_uri = _get_image_uri(project_id, region, env.name, version.version_number, version.build_number)
+        # Upload build context (cloud-neutral: build_uri + upload_file)
+        object_path = await _upload_version_build_context(session, working_bucket, version, env.name)
+        context_uri = get_storage_adapter().build_uri(working_bucket, object_path)
 
-        # Submit Cloud Build
-        credentials = await _get_credentials(session)
+        image_uri = get_image_registry_provider().image_uri(platform.config, safe_name, tag)
 
-        sa_email = await _read_config(session, "gcp_service_account_email")
-        if not sa_email or sa_email == "null":
-            sa_email = getattr(credentials, "service_account_email", None)
+        # On GCP, fall back to the credentials' own SA when no explicit build SA is
+        # configured (matches the pre-seam behavior). AWS has no build SA (the
+        # CodeBuild project runs as its own Terraform-provisioned role).
+        build_sa = platform.build_sa
+        if platform.cloud_provider != "aws" and not build_sa:
+            build_sa = getattr(credentials, "service_account_email", None)
 
-        build_url = f"https://cloudbuild.googleapis.com/v1/projects/{project_id}/builds"
-        build_body: dict = {
-            "source": {
-                "storageSource": {
-                    "bucket": working_bucket,
-                    "object": object_path,
-                }
-            },
-            "steps": [
-                {
-                    "name": "gcr.io/cloud-builders/docker",
-                    "args": ["build", "-t", image_uri, "-f", "Dockerfile", "."],
-                }
-            ],
-            "images": [image_uri],
-            "options": {"machineType": "E2_HIGHCPU_8"},
-            "timeout": "7200s",
-        }
-        if sa_email and sa_email != "null":
-            build_body["serviceAccount"] = f"projects/{project_id}/serviceAccounts/{sa_email}"
-            build_body["options"]["defaultLogsBucketBehavior"] = "REGIONAL_USER_OWNED_BUCKET"
-
-        result = _authorized_request(credentials, "POST", build_url, build_body)
-        build_id = result.get("metadata", {}).get("build", {}).get("id", "")
+        build_id = get_image_build_provider().submit_build(
+            credentials,
+            platform.config,
+            context_object_uri=context_uri,
+            image_uri=image_uri,
+            build_sa=build_sa,
+            timeout="7200s",
+        )
 
         # Update version record
         version.status = "building"
@@ -545,8 +549,12 @@ class EnvironmentBuildService:
         if not building_versions:
             return 0
 
-        project_id = await _read_config(session, "gcp_project_id")
-        if not project_id or project_id == "null":
+        # No-op until the cloud's image target is configured (GCP project+region;
+        # AWS account+region). Cloud-neutral gate, matching the notebook/cellxgene
+        # image pollers; on GCP this is satisfied exactly when an install is
+        # deployed, so behavior is preserved.
+        platform = await resolve_image_platform(session)
+        if not platform.has_target:
             return 0
 
         changed = 0
@@ -620,8 +628,19 @@ class EnvironmentBuildService:
         return changed
 
     @staticmethod
-    async def get_build_logs_url(session: AsyncSession, project_id: str, build_id: str) -> str | None:
-        """Get the Cloud Build logs URL for a build."""
+    async def get_build_logs_url(session: AsyncSession, build_id: str) -> str | None:
+        """Get the cloud build-logs console URL for a build (cloud-aware).
+
+        GCP returns the Cloud Build console link (byte-identical to before); AWS
+        returns the CodeBuild console deep-link for the build. Resolves the cloud
+        from ``resolve_image_platform`` so the API layer no longer reads
+        ``gcp_project_id`` directly.
+        """
         if not build_id:
             return None
+        platform = await resolve_image_platform(session)
+        if platform.cloud_provider == "aws":
+            region = platform.config.get("region", "")
+            return f"https://{region}.console.aws.amazon.com/codesuite/codebuild/builds/{build_id}?region={region}"
+        project_id = platform.config.get("project_id", "")
         return f"https://console.cloud.google.com/cloud-build/builds/{build_id}?project={project_id}"

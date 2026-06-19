@@ -292,10 +292,8 @@ async def get_build_logs(
         raise HTTPException(404, "Version not found")
 
     from app.services.environment_build_service import EnvironmentBuildService
-    from app.services.notebook_image_service import _read_config
 
-    project_id = await _read_config(session, "gcp_project_id")
-    logs_url = await EnvironmentBuildService.get_build_logs_url(session, project_id, version.build_id)
+    logs_url = await EnvironmentBuildService.get_build_logs_url(session, version.build_id)
 
     return BuildLogsResponse(
         build_id=version.build_id,
