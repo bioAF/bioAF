@@ -394,7 +394,15 @@ class KubernetesNotebookProvider(NotebookProvider):
 
         pod_name = f"bioaf-notebook-{session_id}"
         working_bucket = session_spec.get("working_bucket", "bioaf-working")
-        gcs_home_prefix = f"gs://{working_bucket}/notebooks/{user_id}/"
+        # Stage data through the cloud-selected storage adapter so the staged URIs
+        # and copy commands match the backend (gs:// + gcloud on GCS; s3:// + aws on
+        # S3). The init/sidecar containers run the adapter's staging_image, so a
+        # hardcoded gs:// / gsutil here would break a non-GCS install (e.g. on AWS
+        # the amazon/aws-cli staging image has no gsutil and cannot read gs://).
+        from app.adapters.registry import get_storage_adapter
+
+        storage_adapter = get_storage_adapter()
+        gcs_home_prefix = storage_adapter.build_uri(working_bucket, f"notebooks/{user_id}/")
 
         # Determine container command based on session type
         if session_type == "jupyter":
@@ -507,16 +515,14 @@ class KubernetesNotebookProvider(NotebookProvider):
             session_creds = session_spec.get("session_credentials", {})
             cred_username = session_creds.get("username", "bioaf")
             home_dir = f"/home/{cred_username}"
-            gcs_home_prefix = f"gs://{working_bucket}/home/{user_id}/"
+            gcs_home_prefix = storage_adapter.build_uri(working_bucket, f"home/{user_id}/")
         else:
             home_dir = HOME_DIR
 
         # The init/sidecar containers that stage data run the storage backend's
-        # CLI image (CopyStager seam); GCS -> google/cloud-sdk:slim. The same
-        # adapter supplies read-only input mounts (ReadOnlyInputMount seam).
-        from app.adapters.registry import get_storage_adapter
-
-        storage_adapter = get_storage_adapter()
+        # CLI image (CopyStager seam); GCS -> google/cloud-sdk:slim, S3 ->
+        # amazon/aws-cli. The same adapter supplies read-only input mounts
+        # (ReadOnlyInputMount seam).
         staging_image = storage_adapter.staging_image()
 
         # Build the home stage-in init container (CopyStager sync seam)
@@ -543,7 +549,7 @@ class KubernetesNotebookProvider(NotebookProvider):
             for f in input_files:
                 dest_path = f"/data/{f['relative_path']}"
                 dest_dir = "/".join(dest_path.split("/")[:-1])
-                copy_cmds.append(f"mkdir -p {dest_dir} && gsutil cp {f['gcs_uri']} {dest_path}")
+                copy_cmds.append(f"mkdir -p {dest_dir} && {storage_adapter.cli_copy_in(f['gcs_uri'], dest_path)}")
             # Generate FILE_INVENTORY.md using a heredoc to avoid backtick
             # interpretation by the shell (backticks in markdown trigger
             # command substitution inside double-quoted printf)

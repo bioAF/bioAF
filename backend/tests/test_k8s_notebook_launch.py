@@ -154,6 +154,37 @@ class TestLaunchSession:
         assert "gsutil" in init_cmd
         assert "rsync" in init_cmd
 
+    def test_pod_manifest_stages_via_s3_on_aws(self, adapter):
+        """The data-staging containers must use the cloud-selected storage CLI: an
+        S3 install stages inputs/home with `aws s3` + s3:// instead of gsutil +
+        gs://. (The notebook pod previously hardcoded a gs:// home prefix and
+        `gsutil cp` for inputs, so on AWS the gcs-data-sync init container ran
+        gsutil under amazon/aws-cli, exited non-zero, and the pod entered Failed.)"""
+        s3 = MagicMock()
+        s3.build_uri.side_effect = lambda b, k: f"s3://{b}/{k}"
+        s3.staging_image.return_value = "amazon/aws-cli"
+        s3.sync_in_command.side_effect = lambda prefix, d: ["/bin/sh", "-c", f"aws s3 sync {prefix} {d} || true"]
+        s3.cli_copy_in.side_effect = lambda uri, dest: f"aws s3 cp {uri} {dest}"
+
+        spec = _session_spec("jupyter")
+        spec["working_bucket"] = "bioaf-working-5f6286"
+        spec["input_files"] = [{"relative_path": "a.fastq.gz", "gcs_uri": "s3://bioaf-raw-5f6286/a.fastq.gz"}]
+
+        with patch("app.adapters.registry.get_storage_adapter", return_value=s3):
+            manifest = adapter._build_pod_manifest(spec, has_gcs_secret=False)
+
+        init_containers = manifest["spec"]["initContainers"]
+        all_cmds = " ".join(" ".join(ic.get("command", [])) for ic in init_containers)
+        assert "aws s3" in all_cmds
+        assert "gsutil" not in all_cmds
+        assert "gs://" not in all_cmds
+        # The input-staging container is present and runs the S3 CLI image.
+        staging = {ic["name"]: ic for ic in init_containers if ic["name"] in ("gcs-sync-in", "gcs-data-sync")}
+        assert "gcs-data-sync" in staging
+        assert all(ic["image"] == "amazon/aws-cli" for ic in staging.values())
+        # The staged home prefix is an s3:// URI.
+        assert manifest["_gcs_home_prefix"].startswith("s3://")
+
 
 class TestTerminateSession:
     @pytest.mark.asyncio
