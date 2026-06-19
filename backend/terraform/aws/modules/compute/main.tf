@@ -576,7 +576,11 @@ resource "aws_iam_role_policy" "work_node_s3" {
 resource "aws_iam_instance_profile" "work_node" {
   name = "bioaf-work-node-${var.stack_uid}"
   role = aws_iam_role.work_node.name
-  tags = merge(local.tags, { purpose = "work-node" })
+  # Intentionally NOT tagged: tagging an instance profile requires the separate
+  # iam:TagInstanceProfile permission (CreateInstanceProfile-with-tags fails 403
+  # without it), which the bioaf-app starter role does not grant. The profile is
+  # identified by its stable name and its (tagged) IAM role, so tags add nothing
+  # here; omitting them keeps the compute deploy free of an extra IAM grant.
 }
 
 # --- Cluster access for the bioaf-app role (out-of-cluster control) -----------

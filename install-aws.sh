@@ -388,8 +388,6 @@ cat >"$POLICY_DOC" <<'JSON'
         "iam:CreateInstanceProfile",
         "iam:DeleteInstanceProfile",
         "iam:GetInstanceProfile",
-        "iam:TagInstanceProfile",
-        "iam:UntagInstanceProfile",
         "iam:AddRoleToInstanceProfile",
         "iam:RemoveRoleFromInstanceProfile",
         "iam:PassRole"
