@@ -241,6 +241,15 @@ class StorageProvider(ABC):
         """Shell command to recursively copy ``local_path`` to a bucket ``uri`` in a container."""
         raise NotImplementedError
 
+    def cli_copy_out_file(self, local_path: str, uri: str) -> str:
+        """Shell command to copy a SINGLE local file ``local_path`` to object ``uri``.
+
+        The single-file counterpart of ``cli_copy_in`` (and the non-recursive
+        sibling of ``cli_copy_out``). GCS -> ``gcloud storage cp``; S3 -> ``aws s3
+        cp``. Used to capture individual session script/output files.
+        """
+        raise NotImplementedError
+
     def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
         """Shell command (argv) to recursively sync ``remote_prefix`` -> ``local_dir``.
 

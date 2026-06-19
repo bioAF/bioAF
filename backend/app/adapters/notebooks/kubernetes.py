@@ -28,7 +28,6 @@ from app.adapters.models import (
     TerminationResult,
     to_service_state,
 )
-from app.adapters.notebooks.gcs_sync import parse_gsutil_ls_output
 
 logger = logging.getLogger("bioaf.adapters.notebooks.k8s")
 
@@ -1072,17 +1071,25 @@ class KubernetesNotebookProvider(NotebookProvider):
             except Exception as e:
                 logger.warning("GCS sync-out failed for pod %s: %s", pod_name, e)
 
-        # Sync /outputs/ and capture scripts to GCS via the gcs-sync sidecar (ADR-040).
-        # The sidecar has google/cloud-sdk:slim with gsutil; the main container may not.
+        # Sync /outputs/ and capture scripts to the working bucket via the gcs-sync
+        # sidecar (ADR-040). The sidecar runs the storage backend's staging_image
+        # (google/cloud-sdk on GCS, amazon/aws-cli on S3), so the COMMANDS come from
+        # the storage adapter, not hardcoded gsutil: a non-GCS install (e.g. AWS)
+        # would otherwise run gsutil under amazon/aws-cli and silently lose outputs.
+        # Auth is ambient on S3 (IRSA) -> empty; an explicit SA activation on GCS.
+        from app.adapters.registry import get_storage_adapter
+
+        storage_adapter = get_storage_adapter()
         _SYNC_CONTAINER = "gcs-sync"
         _GCS_KEY = "/secrets/gcp/key.json"
-        _AUTH_CMD = f"gcloud auth activate-service-account --key-file={_GCS_KEY} 2>/dev/null; "
+        _auth = storage_adapter.cli_auth_command(_GCS_KEY)
+        _auth_prefix = f"{_auth}; " if _auth else ""
 
         output_files: list[dict] = []
         gcs_output_prefix = ""
         if working_bucket and pod_name:
-            gcs_output_prefix = f"gs://{working_bucket}/sessions/{session_id}/outputs/"
-            gcs_scripts_prefix = f"gs://{working_bucket}/sessions/{session_id}/scripts/"
+            gcs_output_prefix = storage_adapter.build_uri(working_bucket, f"sessions/{session_id}/outputs/")
+            gcs_scripts_prefix = storage_adapter.build_uri(working_bucket, f"sessions/{session_id}/scripts/")
 
             # Determine home directory based on session type
             if session_type == "ssh":
@@ -1090,13 +1097,12 @@ class KubernetesNotebookProvider(NotebookProvider):
             else:
                 exec_home = HOME_DIR
 
-            # 1. Sync /outputs/ to working bucket
+            # 1. Sync /outputs/ to the working bucket (CopyStager sync seam).
             try:
-                outputs_shell = (
-                    f"{_AUTH_CMD}"
-                    f'if [ -d /outputs ] && [ "$(ls -A /outputs)" ]; then '
-                    f"gsutil -m rsync -r /outputs {gcs_output_prefix}; fi"
-                )
+                # sync_out_command returns ["/bin/sh", "-c", "<cli> sync ..."]; reuse
+                # its inner command inside the empty-dir guard + auth prefix.
+                sync_inner = storage_adapter.sync_out_command("/outputs", gcs_output_prefix)[-1]
+                outputs_shell = f'{_auth_prefix}if [ -d /outputs ] && [ "$(ls -A /outputs)" ]; then {sync_inner}; fi'
                 stream(
                     core_client.connect_get_namespaced_pod_exec,
                     name=pod_name,
@@ -1113,14 +1119,15 @@ class KubernetesNotebookProvider(NotebookProvider):
             except Exception as e:
                 logger.warning("Outputs sync failed for pod %s: %s", pod_name, e)
 
-            # 2. Capture notebook/script files
+            # 2. Capture notebook/script files (flat) into the scripts prefix.
             try:
+                copy_one = storage_adapter.cli_copy_out_file('"$f"', f'{gcs_scripts_prefix}"$(basename "$f")"')
                 scripts_shell = (
-                    f"{_AUTH_CMD}"
+                    f"{_auth_prefix}"
                     f"find {exec_home} -maxdepth 3 "
                     r"\( -name '*.ipynb' -o -name '*.Rmd' -o -name '*.R' -o -name '*.py' \) "
                     "-type f "
-                    f'| while read f; do gsutil cp "$f" {gcs_scripts_prefix}"$(basename "$f")"; done'
+                    f"| while read f; do {copy_one}; done"
                 )
                 stream(
                     core_client.connect_get_namespaced_pod_exec,
@@ -1138,25 +1145,22 @@ class KubernetesNotebookProvider(NotebookProvider):
             except Exception as e:
                 logger.warning("Script capture failed for pod %s: %s", pod_name, e)
 
-            # 3. List all output files for registration
+            # 3. List all output files for registration via the cloud-neutral storage
+            #    adapter (replaces an in-pod `gsutil ls` + GCS-specific parser).
             try:
-                list_prefix = f"gs://{working_bucket}/sessions/{session_id}/"
-                list_shell = f"{_AUTH_CMD}gsutil ls -l -r {list_prefix}** 2>/dev/null || true"
-                raw_output = stream(
-                    core_client.connect_get_namespaced_pod_exec,
-                    name=pod_name,
-                    namespace=namespace,
-                    container=_SYNC_CONTAINER,
-                    command=["/bin/sh", "-c", list_shell],
-                    stderr=True,
-                    stdin=False,
-                    stdout=True,
-                    tty=False,
-                    _request_timeout=60,
-                )
-                if raw_output:
-                    output_files = parse_gsutil_ls_output(str(raw_output))
-                    logger.info("Found %d output files for compute session", len(output_files))
+                from app.adapters.notebooks.gcs_sync import _EXCLUDED_FILENAMES, _EXCLUDED_PREFIXES
+
+                list_prefix = storage_adapter.build_uri(working_bucket, f"sessions/{session_id}/")
+                for obj in await storage_adapter.list_objects(list_prefix):
+                    filename = obj.storage_uri.rsplit("/", 1)[-1] if "/" in obj.storage_uri else obj.storage_uri
+                    if not filename or filename in _EXCLUDED_FILENAMES:
+                        continue
+                    if any(filename.startswith(p.rstrip("/")) for p in _EXCLUDED_PREFIXES):
+                        continue
+                    output_files.append(
+                        {"gcs_uri": obj.storage_uri, "size_bytes": obj.size_bytes or 0, "filename": filename}
+                    )
+                logger.info("Found %d output files for compute session", len(output_files))
             except Exception as e:
                 logger.warning("Output file listing failed for pod %s: %s", pod_name, e)
 

@@ -207,6 +207,41 @@ class TestTerminateSession:
         assert "gsutil" in str(mock_stream.call_args_list[-1])
 
     @pytest.mark.asyncio
+    async def test_terminate_syncs_via_s3_on_aws(self, adapter, mock_k8s_clients):
+        """On AWS the stop-path output persistence runs aws s3 (not gsutil) in the
+        gcs-sync sidecar, and the output listing is done cloud-neutrally via the
+        storage adapter (not an in-pod gsutil ls). Previously outputs silently did
+        not persist on AWS (the sidecar's amazon/aws-cli image has no gsutil)."""
+        mock_core, _ = mock_k8s_clients
+        adapter._get_k8s_core_client = MagicMock(return_value=mock_core)
+
+        s3 = MagicMock()
+        s3.cli_auth_command.return_value = ""  # ambient (IRSA) on S3
+        s3.build_uri.side_effect = lambda b, k: f"s3://{b}/{k}"
+        s3.sync_out_command.side_effect = lambda d, prefix: ["/bin/sh", "-c", f"aws s3 sync {d} {prefix}"]
+        s3.cli_copy_out_file.side_effect = lambda local, uri: f"aws s3 cp {local} {uri}"
+        s3.list_objects = AsyncMock(return_value=[])
+
+        with (
+            patch("app.adapters.registry.get_storage_adapter", return_value=s3),
+            patch("kubernetes.stream.stream") as mock_stream,
+        ):
+            await adapter._k8s_terminate_session(
+                session_id=42,
+                pod_name="bioaf-notebook-42",
+                namespace="bioaf-notebooks",
+                working_bucket="bioaf-working-5f6286",
+                gcs_home_prefix="s3://bioaf-working-5f6286/notebooks/7/",
+            )
+
+        all_calls = str(mock_stream.call_args_list)
+        assert "aws s3" in all_calls
+        assert "gsutil" not in all_calls
+        assert "gs://" not in all_calls
+        # Output listing is cloud-neutral (storage adapter), not an in-pod gsutil ls.
+        s3.list_objects.assert_awaited()
+
+    @pytest.mark.asyncio
     async def test_terminate_deletes_pod(self, adapter, mock_k8s_clients):
         """Test 8: terminate deletes Pod and Service."""
         mock_core, _ = mock_k8s_clients

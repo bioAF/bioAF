@@ -316,6 +316,9 @@ class S3StorageProvider(StorageProvider):
     def cli_copy_out(self, local_path: str, uri: str) -> str:
         return f"aws s3 cp --recursive {local_path} {uri}"
 
+    def cli_copy_out_file(self, local_path: str, uri: str) -> str:
+        return f"aws s3 cp {local_path} {uri}"
+
     def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
         # `|| true` so a missing/empty prefix does not fail the stage-in init
         # container, matching the GCS adapter's tolerant rsync.
