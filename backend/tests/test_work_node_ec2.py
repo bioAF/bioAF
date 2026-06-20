@@ -145,6 +145,18 @@ def test_ec2_startup_script_uses_aws_s3_not_gsutil():
     assert "useradd -m -d /home/scientist" in script
 
 
+def test_ec2_startup_script_enables_password_auth():
+    """Work nodes are reached via PAM/password SSH (session credentials). AWS Ubuntu
+    AMIs default to PasswordAuthentication no (in the cloudimg drop-in, which wins),
+    so the startup script must flip it and restart sshd or login is publickey-only."""
+    script = _build_ec2_startup_script(_vm_spec())
+    # Neutralizes the cloudimg drop-in that wins on first match...
+    assert "/etc/ssh/sshd_config.d/*.conf" in script
+    assert "PasswordAuthentication yes" in script
+    # ...and reloads sshd so the change takes effect at boot.
+    assert "restart ssh" in script
+
+
 @pytest.mark.asyncio
 async def test_ec2_terminate_terminates_instance():
     p = _aws_provider()

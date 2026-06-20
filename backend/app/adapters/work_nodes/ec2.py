@@ -89,6 +89,21 @@ def _build_ec2_startup_script(vm_spec: dict) -> str:
     else:
         lines.append(f"echo '{username}:{password_hash}' | chpasswd")
 
+    # 1b. Enable SSH password auth so the PAM session credentials actually work.
+    # AWS Ubuntu AMIs ship PasswordAuthentication no in
+    # /etc/ssh/sshd_config.d/60-cloudimg-settings.conf, which sshd reads BEFORE our
+    # 99-bioaf drop-in and wins (first match). Flip the cloudimg setting, the main
+    # config, and add our own drop-in, then restart sshd. Done at boot (not just in
+    # the Packer image) so an already-built AMI works without a rebuild.
+    lines += [
+        "",
+        "# 1b. Enable SSH password authentication for PAM session credentials",
+        "sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config.d/*.conf 2>/dev/null || true",
+        "sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config",
+        "printf 'PasswordAuthentication yes\\n' > /etc/ssh/sshd_config.d/99-bioaf-password-auth.conf",
+        "systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true",
+    ]
+
     # 2. SSH keys for GitHub
     if ssh_private_key:
         escaped_key = ssh_private_key.replace("'", "'\\''")

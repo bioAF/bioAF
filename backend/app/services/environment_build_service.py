@@ -242,6 +242,10 @@ build {
       "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server git tmux htop curl unzip fail2ban awscli",
       "sudo systemctl enable ssh",
       "sudo sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config",
+      # Ubuntu cloud images ship /etc/ssh/sshd_config.d/60-cloudimg-settings.conf with
+      # PasswordAuthentication no, which is read BEFORE 99-bioaf-* and wins (sshd uses
+      # the first match). Flip it so password auth (PAM session creds) actually works.
+      "sudo sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config.d/*.conf 2>/dev/null || true",
       "echo 'PasswordAuthentication yes' | sudo tee /etc/ssh/sshd_config.d/99-bioaf-password-auth.conf",
     ]
   }
