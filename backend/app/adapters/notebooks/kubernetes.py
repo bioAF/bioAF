@@ -543,12 +543,20 @@ class KubernetesNotebookProvider(NotebookProvider):
         # Input file data sync init container
         input_files = session_spec.get("input_files", [])
         if input_files:
-            # Create subdirectories and copy files preserving hierarchy
+            # Create subdirectories and copy files preserving hierarchy. GCS keeps the
+            # original `gsutil cp` (legacy GCP behavior, byte-identical to pre-drain);
+            # other backends use the storage adapter's copy command (S3 -> `aws s3 cp`).
+            from app.adapters.storage.gcs import GcsStorageProvider
+
+            legacy_gcs = isinstance(storage_adapter, GcsStorageProvider)
             copy_cmds: list[str] = []
             for f in input_files:
                 dest_path = f"/data/{f['relative_path']}"
                 dest_dir = "/".join(dest_path.split("/")[:-1])
-                copy_cmds.append(f"mkdir -p {dest_dir} && {storage_adapter.cli_copy_in(f['gcs_uri'], dest_path)}")
+                if legacy_gcs:
+                    copy_cmds.append(f"mkdir -p {dest_dir} && gsutil cp {f['gcs_uri']} {dest_path}")
+                else:
+                    copy_cmds.append(f"mkdir -p {dest_dir} && {storage_adapter.cli_copy_in(f['gcs_uri'], dest_path)}")
             # Generate FILE_INVENTORY.md using a heredoc to avoid backtick
             # interpretation by the shell (backticks in markdown trigger
             # command substitution inside double-quoted printf)
@@ -1082,8 +1090,18 @@ class KubernetesNotebookProvider(NotebookProvider):
         storage_adapter = get_storage_adapter()
         _SYNC_CONTAINER = "gcs-sync"
         _GCS_KEY = "/secrets/gcp/key.json"
-        _auth = storage_adapter.cli_auth_command(_GCS_KEY)
-        _auth_prefix = f"{_auth}; " if _auth else ""
+        # GCS keeps the original gsutil-based stop-path commands (legacy GCP behavior,
+        # byte-identical to pre-drain); other backends (S3) use the storage adapter.
+        # Reverting the GCS path here, rather than contorting the adapter, keeps GCP
+        # exactly as it was while AWS uses the cloud-neutral path.
+        from app.adapters.storage.gcs import GcsStorageProvider
+
+        legacy_gcs = isinstance(storage_adapter, GcsStorageProvider)
+        if legacy_gcs:
+            _auth_prefix = f"gcloud auth activate-service-account --key-file={_GCS_KEY} 2>/dev/null; "
+        else:
+            _auth = storage_adapter.cli_auth_command(_GCS_KEY)
+            _auth_prefix = f"{_auth}; " if _auth else ""
 
         output_files: list[dict] = []
         gcs_output_prefix = ""
@@ -1121,7 +1139,10 @@ class KubernetesNotebookProvider(NotebookProvider):
 
             # 2. Capture notebook/script files (flat) into the scripts prefix.
             try:
-                copy_one = storage_adapter.cli_copy_out_file('"$f"', f'{gcs_scripts_prefix}"$(basename "$f")"')
+                if legacy_gcs:
+                    copy_one = f'gsutil cp "$f" {gcs_scripts_prefix}"$(basename "$f")"'
+                else:
+                    copy_one = storage_adapter.cli_copy_out_file('"$f"', f'{gcs_scripts_prefix}"$(basename "$f")"')
                 scripts_shell = (
                     f"{_auth_prefix}"
                     f"find {exec_home} -maxdepth 3 "
@@ -1145,21 +1166,41 @@ class KubernetesNotebookProvider(NotebookProvider):
             except Exception as e:
                 logger.warning("Script capture failed for pod %s: %s", pod_name, e)
 
-            # 3. List all output files for registration via the cloud-neutral storage
-            #    adapter (replaces an in-pod `gsutil ls` + GCS-specific parser).
+            # 3. List all output files for registration. GCS uses the original
+            #    in-pod `gsutil ls` + parser (legacy GCP behavior, byte-identical to
+            #    pre-drain); other backends list host-side via the storage adapter.
             try:
-                from app.adapters.notebooks.gcs_sync import _EXCLUDED_FILENAMES, _EXCLUDED_PREFIXES
-
                 list_prefix = storage_adapter.build_uri(working_bucket, f"sessions/{session_id}/")
-                for obj in await storage_adapter.list_objects(list_prefix):
-                    filename = obj.storage_uri.rsplit("/", 1)[-1] if "/" in obj.storage_uri else obj.storage_uri
-                    if not filename or filename in _EXCLUDED_FILENAMES:
-                        continue
-                    if any(filename.startswith(p.rstrip("/")) for p in _EXCLUDED_PREFIXES):
-                        continue
-                    output_files.append(
-                        {"gcs_uri": obj.storage_uri, "size_bytes": obj.size_bytes or 0, "filename": filename}
+                if legacy_gcs:
+                    from app.adapters.notebooks.gcs_sync import parse_gsutil_ls_output
+
+                    list_shell = f"{_auth_prefix}gsutil ls -l -r {list_prefix}** 2>/dev/null || true"
+                    raw_output = stream(
+                        core_client.connect_get_namespaced_pod_exec,
+                        name=pod_name,
+                        namespace=namespace,
+                        container=_SYNC_CONTAINER,
+                        command=["/bin/sh", "-c", list_shell],
+                        stderr=True,
+                        stdin=False,
+                        stdout=True,
+                        tty=False,
+                        _request_timeout=60,
                     )
+                    if raw_output:
+                        output_files = parse_gsutil_ls_output(str(raw_output))
+                else:
+                    from app.adapters.notebooks.gcs_sync import _EXCLUDED_FILENAMES, _EXCLUDED_PREFIXES
+
+                    for obj in await storage_adapter.list_objects(list_prefix):
+                        filename = obj.storage_uri.rsplit("/", 1)[-1] if "/" in obj.storage_uri else obj.storage_uri
+                        if not filename or filename in _EXCLUDED_FILENAMES:
+                            continue
+                        if any(filename.startswith(p.rstrip("/")) for p in _EXCLUDED_PREFIXES):
+                            continue
+                        output_files.append(
+                            {"gcs_uri": obj.storage_uri, "size_bytes": obj.size_bytes or 0, "filename": filename}
+                        )
                 logger.info("Found %d output files for compute session", len(output_files))
             except Exception as e:
                 logger.warning("Output file listing failed for pod %s: %s", pod_name, e)

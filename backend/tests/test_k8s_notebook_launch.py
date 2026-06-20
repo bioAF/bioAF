@@ -242,6 +242,32 @@ class TestTerminateSession:
         s3.list_objects.assert_awaited()
 
     @pytest.mark.asyncio
+    async def test_terminate_lists_via_gsutil_on_gcs(self, adapter, mock_k8s_clients):
+        """On GCS the stop-path keeps the original in-pod `gsutil ls` listing and
+        `gsutil cp`/rsync (the legacy GCP behavior, byte-identical to pre-drain);
+        the host-side storage-adapter listing is AWS-only. Regression guard: routing
+        the GCS listing through the adapter broke output persistence on GCP."""
+        mock_core, _ = mock_k8s_clients
+        adapter._get_k8s_core_client = MagicMock(return_value=mock_core)
+
+        with patch("kubernetes.stream.stream") as mock_stream:
+            mock_stream.return_value = ""  # empty gsutil ls output
+            await adapter._k8s_terminate_session(
+                session_id=42,
+                pod_name="bioaf-notebook-42",
+                namespace="bioaf-notebooks",
+                working_bucket="bioaf-working",
+                gcs_home_prefix="gs://bioaf-working/notebooks/7/",
+            )
+
+        all_calls = str(mock_stream.call_args_list)
+        # The output listing is the in-pod gsutil ls over the session prefix...
+        assert "gsutil ls -l -r gs://bioaf-working/sessions/42/" in all_calls
+        # ...and script capture uses gsutil cp, not gcloud storage / aws s3.
+        assert "gsutil cp" in all_calls
+        assert "aws s3" not in all_calls
+
+    @pytest.mark.asyncio
     async def test_terminate_deletes_pod(self, adapter, mock_k8s_clients):
         """Test 8: terminate deletes Pod and Service."""
         mock_core, _ = mock_k8s_clients
