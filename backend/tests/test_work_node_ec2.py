@@ -95,6 +95,7 @@ async def test_ec2_launch_runs_instance_with_resolved_ami_and_networking():
 @pytest.mark.asyncio
 async def test_ec2_launch_requires_networking():
     p = _aws_provider()
+    assert p._aws_config is not None
     p._aws_config["aws_work_node_subnet_id"] = ""
     with patch.object(p, "_client", return_value=MagicMock()):
         with pytest.raises(ValidationError, match="networking is not deployed"):

@@ -63,6 +63,7 @@ def _validate_conda_definition(content: str) -> None:
             "like a conda environment file."
         )
 
+
 # Default conda environment.yml for pipeline environments.  Provides a
 # practical starting point for Nextflow/nf-core wrapper code.
 DEFAULT_PIPELINE_CONDA_YML = """\
