@@ -140,9 +140,8 @@ async def initialize_adapters(session: AsyncSession, session_factory=None) -> No
     global _compute_adapter, _storage_adapter, _notebook_adapter, _cellxgene_adapter, _work_node_adapter, _initialized
 
     async with _init_lock:
-        cfg = await PlatformConfigService.get_many(session, ["compute_stack", "work_node_backend", "cellxgene_backend"])
+        cfg = await PlatformConfigService.get_many(session, ["compute_stack", "cellxgene_backend"])
         compute_stack = cfg.get("compute_stack") or "kubernetes"
-        work_node_backend = cfg.get("work_node_backend") or DEFAULT_WORK_NODE_BACKEND
         cellxgene_backend = cfg.get("cellxgene_backend") or DEFAULT_CELLXGENE_BACKEND
 
         # Resolve every cloud_provider-driven seam's backend once and cache it, so
@@ -151,6 +150,11 @@ async def initialize_adapters(session: AsyncSession, session_factory=None) -> No
         # here on an invalid (cloud, seam, backend) override.
         await load_resolved_backends(session)
         storage_backend = _resolve_storage_backend(compute_stack)
+        # work_node resolves from cloud_provider (gce on gcp, ec2 on aws), like
+        # storage, rather than a standalone key: an AWS install launches EC2 work
+        # nodes without needing work_node_backend set. Honors a work_node_backend
+        # override when present (via the resolved-backend cache above).
+        work_node_backend = backend_for("work_node")
 
         logger.info(
             "Initializing BAL adapters (compute_stack=%s storage_backend=%s work_node_backend=%s cellxgene_backend=%s)",
