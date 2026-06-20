@@ -42,11 +42,12 @@ class WorkNodeService:
         session: AsyncSession,
         user_id: int,
         org_id: int,
-        project_id: int,
-        environment_version_id: int,
-        machine_type: str,
+        project_id: int | None = None,
+        environment_version_id: int = 0,
+        machine_type: str = "",
         input_file_ids: list[int] | None = None,
         github_repo_ids: list[int] | None = None,
+        experiment_id: int | None = None,
     ) -> ComputeSession:
         # Validate machine type
         mt = get_machine_type(machine_type)
@@ -152,6 +153,7 @@ class WorkNodeService:
             organization_id=org_id,
             session_type="ssh",
             project_id=project_id,
+            experiment_id=experiment_id,
             environment_version_id=environment_version_id,
             machine_type=machine_type,
             data_mount_paths=input_file_ids or [],
