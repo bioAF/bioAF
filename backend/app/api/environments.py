@@ -345,3 +345,30 @@ async def get_template_dockerfile(
     from app.services.notebook_image_service import DOCKERFILE_CONTENT
 
     return {"definition_content": DOCKERFILE_CONTENT, "definition_format": "dockerfile"}
+
+
+@router.get("/template/conda")
+async def get_template_conda(
+    environment_type: str = "work_node",
+    current_user: dict = require_permission("environments", "view"),
+):
+    """Return the default conda environment.yml template for an environment type.
+
+    Work-node and pipeline environments are conda-only (built into an AMI / wrapper
+    image via ``conda env create``), so the UI's "rebuild from latest template" must
+    serve a conda env file for them, not the Dockerfile template. Mirrors
+    ``/template/dockerfile`` so the rebuild flow can request the right format per type.
+    """
+    from app.services.environment_service import (
+        DEFAULT_NOTEBOOK_CONDA_YML,
+        DEFAULT_PIPELINE_CONDA_YML,
+        DEFAULT_WORK_NODE_CONDA_YML,
+    )
+
+    templates = {
+        "work_node": DEFAULT_WORK_NODE_CONDA_YML,
+        "pipeline": DEFAULT_PIPELINE_CONDA_YML,
+        "notebook": DEFAULT_NOTEBOOK_CONDA_YML,
+    }
+    content = templates.get(environment_type, DEFAULT_WORK_NODE_CONDA_YML)
+    return {"definition_content": content, "definition_format": "conda"}

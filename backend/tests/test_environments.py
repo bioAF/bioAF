@@ -855,3 +855,45 @@ def test_parse_work_node_conda_name_rejects_dockerfile():
         _parse_work_node_conda_name("# c\nFROM jupyter/scipy-notebook@sha256:abc\n\nUSER root\nARG R_VERSION=4.4.3\n")
     with pytest.raises(ValidationError, match="conda environment.yml"):
         _parse_work_node_conda_name("FROM python:3.11 single scalar line")
+
+
+# --- Rebuild-from-template: the conda template must be a buildable conda env ---
+
+
+def test_default_conda_templates_pass_conda_validation():
+    """The 'Rebuild from Latest Template' button on a work-node (conda) env must
+    serve content the create-version validation accepts. Regression guard for the
+    bug where the rebuild modal fetched the Dockerfile template and submitted it
+    as definition_format='conda', failing with 'must be a valid conda
+    environment.yml'. Each default conda template must round-trip the validator.
+    """
+    from app.services.environment_service import (
+        DEFAULT_NOTEBOOK_CONDA_YML,
+        DEFAULT_PIPELINE_CONDA_YML,
+        DEFAULT_WORK_NODE_CONDA_YML,
+        _validate_conda_definition,
+    )
+
+    for tmpl in (DEFAULT_WORK_NODE_CONDA_YML, DEFAULT_PIPELINE_CONDA_YML, DEFAULT_NOTEBOOK_CONDA_YML):
+        _validate_conda_definition(tmpl)  # must not raise
+
+
+@pytest.mark.asyncio
+async def test_get_conda_template_for_work_node(client, admin_token):
+    """The conda template endpoint returns a conda env.yml for work-node envs so
+    the rebuild flow can serve the right format (mirrors /template/dockerfile)."""
+    resp = await client.get(
+        "/api/v1/environments/template/conda?environment_type=work_node",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["definition_format"] == "conda"
+    assert "dependencies:" in body["definition_content"]
+    # Defaults to the work-node template when the type is unknown/absent.
+    resp2 = await client.get(
+        "/api/v1/environments/template/conda",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp2.status_code == 200
+    assert resp2.json()["definition_format"] == "conda"
