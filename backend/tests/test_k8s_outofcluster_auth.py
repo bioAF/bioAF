@@ -67,13 +67,15 @@ class TestOutOfClusterAuth:
     @pytest.mark.asyncio
     async def test_out_of_cluster_client_uses_endpoint_and_ca(self, adapter_k8s_mode, platform_config):
         """_build_out_of_cluster_client configures ApiClient with endpoint + CA
-        and installs the bearer token via set_default_header.
+        and installs the bearer token via set_default_header under the lowercase
+        ``authorization`` key (GKE).
 
-        Note: the bearer token must be set via ApiClient.set_default_header,
-        not Configuration.api_key. The kubernetes-python client we ship does
-        not route api_key into request headers unless an OpenAPI security
-        scheme references it, so api_key is a silent no-op and the cluster
-        sees anonymous requests -> 401.
+        Two reasons for this exact mechanism: (1) the token must go via
+        set_default_header, not Configuration.api_key (the kubernetes-python
+        client does not route api_key into headers without an OpenAPI security
+        scheme, so it is a silent no-op -> anonymous -> 401); (2) the key must be
+        lowercase ``authorization`` so the websocket-exec client forwards it
+        (capital ``Authorization`` is dropped on the exec handshake -> anonymous).
         """
         adapter_k8s_mode._cluster_config = platform_config
 
@@ -96,7 +98,7 @@ class TestOutOfClusterAuth:
 
                 mock_config_cls.assert_called_once()
                 assert mock_config.host == "https://10.0.0.1"
-                mock_apiclient.set_default_header.assert_called_once_with("Authorization", "Bearer fake-token")
+                mock_apiclient.set_default_header.assert_called_once_with("authorization", "Bearer fake-token")
 
     @pytest.mark.asyncio
     async def test_eks_client_installs_lowercase_authorization_header(self, adapter_k8s_mode, platform_config):

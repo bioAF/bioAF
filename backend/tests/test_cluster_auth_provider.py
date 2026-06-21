@@ -101,17 +101,16 @@ def test_eks_provider_requires_cluster_name():
         EksClusterAuthProvider().bearer_token({"aws_region": "us-west-1"})
 
 
-def test_gke_auth_header_name_is_canonical():
-    # GKE keeps the canonical capitalized header; the GCP path is byte-identical
-    # to before the EKS websocket-exec fix.
-    assert GkeClusterAuthProvider().auth_header_name == "Authorization"
+def test_gke_auth_header_name_is_lowercase_for_websocket_exec():
+    # GKE runs out-of-cluster too, so it needs the lowercase header the websocket
+    # exec client forwards; capital 'Authorization' went out anonymous -> 401 and
+    # silently broke notebook output sync on GCP. REST is case-insensitive.
+    assert GkeClusterAuthProvider().auth_header_name == "authorization"
 
 
 def test_eks_auth_header_name_is_lowercase_for_websocket_exec():
-    # The kubernetes-python websocket-exec client (kubernetes.stream) forwards
-    # the bearer token only when the header is keyed lowercase 'authorization';
-    # capital 'Authorization' goes out anonymous -> 403, silently breaking the
-    # notebook shutdown sync on EKS. REST is case-insensitive, so this is safe.
+    # Same requirement on EKS (capital -> 403 anonymous). Inherits the lowercase
+    # base default; no per-cloud override needed.
     from app.adapters.cluster_auth.aws import EksClusterAuthProvider
 
     assert EksClusterAuthProvider().auth_header_name == "authorization"

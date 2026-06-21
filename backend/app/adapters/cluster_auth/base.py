@@ -31,10 +31,12 @@ class ClusterAuthProvider(ABC):
     # are case-insensitive, but the kubernetes-python websocket-exec client
     # (``kubernetes.stream``) only forwards the token when the header is keyed
     # lowercase ``authorization`` (its ``create_websocket`` does an exact-case
-    # lookup). GKE keeps the canonical ``Authorization`` (its current, working
-    # value); EKS overrides to ``authorization`` so pod-exec (notebook output
-    # sync at shutdown, etc.) authenticates instead of going out anonymous.
-    auth_header_name: str = "Authorization"
+    # lookup). Both GKE and EKS run out-of-cluster here, so a capital
+    # ``Authorization`` makes pod-exec go out anonymous -> 401/403, silently
+    # breaking the notebook shutdown sync (git commit + /outputs + home) on BOTH
+    # clouds. Lowercase fixes exec everywhere; REST is unaffected. (Verified live
+    # on GKE -> 401 and EKS -> 403 with capital, both OK with lowercase.)
+    auth_header_name: str = "authorization"
 
     @abstractmethod
     def cluster_endpoint(self, cluster_config: dict) -> str:

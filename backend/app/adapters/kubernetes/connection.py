@@ -141,9 +141,10 @@ class GkeConnection:
         # simple bearer-token case, so api_key is a silent no-op and every
         # request goes out anonymously, yielding 401 Unauthorized. Set the
         # header on the client directly instead. The header KEY comes from the
-        # ClusterAuthProvider: GKE uses the canonical ``Authorization``; EKS uses
-        # the lowercase ``authorization`` the websocket-exec client forwards
-        # (read sites use ``api_client_auth_header`` to stay casing-agnostic).
+        # ClusterAuthProvider: both GKE and EKS use the lowercase ``authorization``
+        # the kubernetes websocket-exec client forwards (a capital ``Authorization``
+        # makes pod-exec go out anonymous -> 401/403). Read sites use
+        # ``api_client_auth_header`` to stay casing-agnostic.
         api_client.set_default_header(self._cluster_auth.auth_header_name, f"Bearer {token}")
 
         self._client_created_at = time.monotonic()
