@@ -145,10 +145,13 @@ export default function DataUploadPage() {
         dateStr,
       };
 
-      // First pass: generate suggested names
+      // First pass: generate suggested names. Reset the accept/dismiss decision
+      // only when the suggestion actually changes, so a late association reload
+      // that produces the same name does not wipe the user's choice.
       const updated = prev.map((item) => {
         if (item.status !== "queued") return item;
         const suggested = suggestFilename(item.file.name, suggestOpts);
+        if (suggested === item.suggestedName) return item;
         return { ...item, suggestedName: suggested, nameAccepted: null };
       });
 
@@ -233,6 +236,21 @@ export default function DataUploadPage() {
   const acceptRename = (idx: number) => setItemState(idx, { nameAccepted: true });
   const rejectRename = (idx: number) => setItemState(idx, { nameAccepted: false });
 
+  const setAllRenames = (accepted: boolean) =>
+    setItems((prev) =>
+      prev.map((item) =>
+        item.status === "queued" && item.suggestedName
+          ? { ...item, nameAccepted: accepted }
+          : item,
+      ),
+    );
+  const acceptAllRenames = () => setAllRenames(true);
+  const dismissAllRenames = () => setAllRenames(false);
+
+  const suggestionCount = items.filter(
+    (i) => i.status === "queued" && i.suggestedName,
+  ).length;
+
   const uploadAll = async () => {
     setUploading(true);
     const opts = {
@@ -248,11 +266,10 @@ export default function DataUploadPage() {
       setItemState(i, { status: "uploading", progress: 0 });
 
       const item = items[i];
-      // Use accepted suggested name; if undecided with a suggestion, accept by default
+      // Keep the original name by default; only rename when the suggestion was
+      // explicitly accepted. Undecided suggestions are dismissed on upload.
       const useFilename =
-        item.nameAccepted === false
-          ? undefined // keep original (don't pass override)
-          : item.suggestedName ?? undefined;
+        item.nameAccepted === true ? item.suggestedName ?? undefined : undefined;
 
       // Signed direct-to-storage upload when the backend supports it; otherwise
       // the server-proxied path (e.g. NFS, signed_url_upload=False).
@@ -433,7 +450,32 @@ export default function DataUploadPage() {
             {/* File list */}
             {items.length > 0 && (
               <div className="bg-white rounded-lg shadow p-4">
-                <h3 className="font-medium mb-3">Files ({items.length})</h3>
+                <div className="flex items-center justify-between mb-3 gap-3">
+                  <h3 className="font-medium">Files ({items.length})</h3>
+                  {suggestionCount > 0 && (
+                    <div className="flex gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={acceptAllRenames}
+                        className="px-2 py-0.5 text-xs bg-amber-600 text-white rounded hover:bg-amber-700"
+                      >
+                        Accept all
+                      </button>
+                      <button
+                        type="button"
+                        onClick={dismissAllRenames}
+                        className="px-2 py-0.5 text-xs border border-gray-300 text-gray-600 rounded hover:bg-gray-100"
+                      >
+                        Dismiss all
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {suggestionCount > 0 && (
+                  <p className="text-xs text-gray-500 mb-3">
+                    Original filenames are kept unless you accept a suggestion.
+                  </p>
+                )}
                 <ul className="space-y-4">
                   {items.map((item, idx) => (
                     <li key={`${item.file.name}-${idx}`} className="text-sm border-b last:border-0 pb-3 last:pb-0">
