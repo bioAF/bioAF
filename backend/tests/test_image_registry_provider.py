@@ -73,4 +73,69 @@ def test_unknown_backend_raises():
     from app.exceptions import ValidationError
 
     with pytest.raises(ValidationError):
-        create_image_registry_provider("ecr")  # no ECR impl until Stage 6e
+        create_image_registry_provider("quay")  # not a supported registry backend
+
+
+# --- ECR (Stage 6e AWS realization) -------------------------------------------
+
+AWS_CONFIG = {"account_id": "043671579834", "region": "us-west-1"}
+
+
+def test_ecr_image_uri_is_one_repo_per_image():
+    from app.adapters.image_registry.aws import EcrImageRegistryProvider
+
+    p = EcrImageRegistryProvider()
+    # ECR: repo == image name (one repo per image), account+region host.
+    assert p.image_uri(AWS_CONFIG, "bioaf-cellxgene", "latest") == (
+        "043671579834.dkr.ecr.us-west-1.amazonaws.com/bioaf-cellxgene:latest"
+    )
+
+
+def test_ecr_ensure_repository_creates_when_absent():
+    from app.adapters.image_registry.aws import EcrImageRegistryProvider
+
+    p = EcrImageRegistryProvider()
+    with patch.object(EcrImageRegistryProvider, "_client") as mk:
+        ecr = mk.return_value
+        repo = p.ensure_repository(None, AWS_CONFIG, "bioaf-cellxgene")
+    assert repo == "bioaf-cellxgene"
+    ecr.create_repository.assert_called_once_with(repositoryName="bioaf-cellxgene")
+
+
+def test_ecr_ensure_repository_idempotent_when_already_exists():
+    from botocore.exceptions import ClientError
+
+    from app.adapters.image_registry.aws import EcrImageRegistryProvider
+
+    p = EcrImageRegistryProvider()
+    err = ClientError(
+        {"Error": {"Code": "RepositoryAlreadyExistsException", "Message": "exists"}},
+        "CreateRepository",
+    )
+    with patch.object(EcrImageRegistryProvider, "_client") as mk:
+        mk.return_value.create_repository.side_effect = err
+        repo = p.ensure_repository(None, AWS_CONFIG, "bioaf-cellxgene")  # must not raise
+    assert repo == "bioaf-cellxgene"
+
+
+def test_ecr_ensure_repository_propagates_other_errors():
+    from botocore.exceptions import ClientError
+
+    from app.adapters.image_registry.aws import EcrImageRegistryProvider
+
+    p = EcrImageRegistryProvider()
+    err = ClientError(
+        {"Error": {"Code": "AccessDeniedException", "Message": "nope"}},
+        "CreateRepository",
+    )
+    with patch.object(EcrImageRegistryProvider, "_client") as mk:
+        mk.return_value.create_repository.side_effect = err
+        with pytest.raises(ClientError):
+            p.ensure_repository(None, AWS_CONFIG, "bioaf-cellxgene")
+
+
+def test_factory_builds_ecr_when_selected():
+    from app.adapters.image_registry.aws import EcrImageRegistryProvider
+
+    assert "ecr" in VALID_IMAGE_REGISTRY_BACKENDS
+    assert isinstance(create_image_registry_provider("ecr"), EcrImageRegistryProvider)

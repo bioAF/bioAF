@@ -189,7 +189,14 @@ export default function EnvironmentsPage() {
     setShowRebuildModal(true);
     setRebuildAction("new");
     try {
-      const template = await api.get<{ definition_content: string }>("/api/v1/environments/template/dockerfile");
+      // Work-node environments are conda-only; serve the conda env.yml template,
+      // not the Dockerfile template (handleRebuild submits it as definition_format
+      // "conda", so a Dockerfile here is rejected as invalid conda content).
+      const templateUrl =
+        selectedEnv.environment_type === "work_node"
+          ? `/api/v1/environments/template/conda?environment_type=${selectedEnv.environment_type}`
+          : "/api/v1/environments/template/dockerfile";
+      const template = await api.get<{ definition_content: string }>(templateUrl);
       setRebuildTemplateContent(template.definition_content);
 
       // Compare with latest version
@@ -393,7 +400,7 @@ export default function EnvironmentsPage() {
                               rel="noopener noreferrer"
                               className="text-bioaf-600 hover:underline"
                             >
-                              View build logs in Cloud Console
+                              View build logs
                             </a>
                           </p>
                         )}

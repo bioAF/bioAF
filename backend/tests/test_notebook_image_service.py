@@ -15,7 +15,7 @@ from app.services.notebook_image_service import (
 
 def test_get_image_uri():
     """Image URI follows Artifact Registry convention."""
-    uri = get_image_uri("my-project", "us-central1")
+    uri = get_image_uri({"project_id": "my-project", "region": "us-central1"})
     assert uri == "us-central1-docker.pkg.dev/my-project/bioaf-images/bioaf-scrna:latest"
 
 
@@ -205,7 +205,7 @@ async def test_build_notebook_image_clears_stale_uri(session, seed_build_config)
 
     with (
         patch(
-            "app.services.notebook_image_service.ensure_artifact_registry",
+            "app.services.notebook_image_service.ensure_image_repository",
             return_value="projects/test-project/locations/us-central1/repositories/bioaf-images",
         ),
         patch(
@@ -228,7 +228,7 @@ async def test_build_notebook_image_does_not_write_image_uri(session, seed_build
     """build_notebook_image must NOT write the final image URI; only poll does that."""
     with (
         patch(
-            "app.services.notebook_image_service.ensure_artifact_registry",
+            "app.services.notebook_image_service.ensure_image_repository",
             return_value="projects/test-project/locations/us-central1/repositories/bioaf-images",
         ),
         patch(

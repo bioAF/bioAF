@@ -74,6 +74,17 @@ class TestAwsTerraformCloud:
         tf = self.cloud.write_tfvars(tmp_path, "storage", {"aws_region": "us-west-1", "org_slug": "acme"})
         assert "stack_uid" not in tf  # omitted so destroy uses the state value
 
+    def test_write_tfvars_image_build(self, tmp_path):
+        # The CodeBuild project + IAM role module: region + account_id (ECR ARN
+        # scope) + org_slug; install-level/stable names, so no stack_uid.
+        tf = self.cloud.write_tfvars(
+            tmp_path,
+            "image_build",
+            {"aws_region": "us-west-1", "org_slug": "acme", "aws_account_id": "123456789012"},
+        )
+        assert tf == {"region": "us-west-1", "account_id": "123456789012", "org_slug": "acme"}
+        assert "stack_uid" not in tf
+
     def test_write_tfvars_compute(self, tmp_path):
         tf = self.cloud.write_tfvars(
             tmp_path,

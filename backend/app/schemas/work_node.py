@@ -22,7 +22,12 @@ class ProjectSummary(BaseModel):
 
 
 class WorkNodeLaunchRequest(BaseModel):
-    project_id: int
+    # Both scopes are optional, matching notebooks: a work node can be scoped to a
+    # project, to a standalone experiment (which may have no project), or neither.
+    # project_id is metadata on the session; experiment_id ties outputs to the
+    # experiment in the same way notebook sessions do.
+    project_id: int | None = None
+    experiment_id: int | None = None
     environment_version_id: int
     machine_type: str
     input_file_ids: list[int] | None = None

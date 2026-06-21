@@ -14,7 +14,7 @@ from kubernetes import client
 
 from app.adapters.base import CellxgeneProvider
 from app.adapters.capabilities import ProviderCapabilities
-from app.adapters.kubernetes.connection import GkeConnection
+from app.adapters.kubernetes.connection import GkeConnection, api_client_auth_header
 from app.adapters.models import CellxgeneInstance, ServiceState
 
 logger = logging.getLogger("bioaf.adapters.cellxgene.k8s")
@@ -142,19 +142,20 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
                 raise
         return True
 
-    async def deploy(self, publication_id: int, gcs_uri: str, dataset_name: str) -> dict:  # type: ignore[override]
+    async def deploy(self, publication_id: int, storage_uri: str, dataset_name: str) -> dict:  # type: ignore[override]
         await self._get_api_client_async()
         image = await self._resolve_image()
 
         namespace = DEFAULT_CELLXGENE_NAMESPACE
-        # Bind the runner KSA to the dedicated cellxgene_runner GCP SA (created by
-        # the compute Terraform module with a Workload Identity binding + bucket
-        # read). The generic app SA has no WI binding for this KSA, so gsutil in
-        # the init container would 403 on the dataset bucket.
-        gcp_sa_email = (self._cluster_config or {}).get("cellxgene_runner_sa_email", "") or ""
-        if gcp_sa_email == "null":
-            gcp_sa_email = ""
-        await self.ensure_cellxgene_namespace(namespace, gcp_sa_email=gcp_sa_email)
+        # Bind the runner KSA to the dedicated cellxgene-runner cloud identity
+        # (created by the compute Terraform module: a Workload Identity binding +
+        # bucket read on GCP; an IRSA role on AWS). The generic app identity has no
+        # such binding for this KSA, so the init container's copy would 403 on the
+        # dataset bucket without it.
+        runner_identity = (self._cluster_config or {}).get("cellxgene_runner_sa_email", "") or ""
+        if runner_identity == "null":
+            runner_identity = ""
+        await self.ensure_cellxgene_namespace(namespace, gcp_sa_email=runner_identity)
         has_gcs_key = await self._ensure_gcp_secret(namespace)
 
         name = f"cellxgene-{publication_id}"
@@ -162,15 +163,18 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         apps_v1 = self._get_k8s_apps_client()
         core_v1 = self._get_k8s_core_client()
 
-        # The data-download init container runs the storage backend's CLI image
-        # (CopyStager seam); GCS -> google/cloud-sdk:slim.
+        # The data-download init container runs the storage backend's CLI image and
+        # copy command (CopyStager seam): GCS -> google/cloud-sdk:slim + gcloud
+        # storage; S3 -> amazon/aws-cli + aws s3 cp.
         from app.adapters.registry import get_storage_adapter
 
-        staging_image = get_storage_adapter().staging_image()
+        storage = get_storage_adapter()
+        staging_image = storage.staging_image()
+        copy_cmd = storage.cli_copy_in(storage_uri, local_path)
 
-        # GCS download auth: in service_account_key mode activate the mounted key;
-        # in vm_default mode rely on Workload Identity (the runner SA's metadata
-        # credentials), and do NOT mount the gcp-sa-key secret (it doesn't exist).
+        # Download auth: GCS service_account_key mode activates the mounted key
+        # (cli_auth_command); GCS vm_default + AWS IRSA authenticate ambiently
+        # (cli_auth_command == "") and do NOT mount the gcp-sa-key secret.
         data_mount = client.V1VolumeMount(name="data", mount_path="/data")
         volumes = [
             client.V1Volume(
@@ -179,9 +183,8 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
             )
         ]
         if has_gcs_key:
-            download_cmd = (
-                f"gcloud auth activate-service-account --key-file=/gcp/key.json && gsutil cp '{gcs_uri}' {local_path}"
-            )
+            auth_cmd = storage.cli_auth_command("/gcp/key.json")
+            download_cmd = f"{auth_cmd} && {copy_cmd}"
             init_volume_mounts = [data_mount, client.V1VolumeMount(name="gcp-sa", mount_path="/gcp", read_only=True)]
             volumes.append(
                 client.V1Volume(
@@ -190,7 +193,7 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
                 )
             )
         else:
-            download_cmd = f"gsutil cp '{gcs_uri}' {local_path}"
+            download_cmd = copy_cmd
             init_volume_mounts = [data_mount]
 
         deployment = client.V1Deployment(
@@ -490,7 +493,7 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
             api_client = self._get_api_client()
             k8s_config = api_client.configuration
             svc_url = f"{k8s_config.host}/api/v1/namespaces/{namespace}/services/{name}"
-            auth = api_client.default_headers.get("Authorization")
+            auth = api_client_auth_header(api_client)
             if not auth:
                 raise RuntimeError(
                     "K8s ApiClient has no Authorization header; _build_out_of_cluster_client did not set one."

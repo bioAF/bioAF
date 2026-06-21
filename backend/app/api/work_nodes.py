@@ -148,6 +148,7 @@ async def launch_work_node(
         user_id=user_id,
         org_id=org_id,
         project_id=body.project_id,
+        experiment_id=body.experiment_id,
         environment_version_id=body.environment_version_id,
         machine_type=body.machine_type,
         input_file_ids=body.input_file_ids,

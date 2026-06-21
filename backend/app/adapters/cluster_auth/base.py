@@ -27,6 +27,17 @@ class ClusterAuthProvider(ABC):
     # GCP OAuth tokens last ~3600s (refresh at 2700s); EKS STS tokens ~900s.
     token_ttl_seconds: int = 2700
 
+    # HTTP header key the connection installs the bearer token under. REST calls
+    # are case-insensitive, but the kubernetes-python websocket-exec client
+    # (``kubernetes.stream``) only forwards the token when the header is keyed
+    # lowercase ``authorization`` (its ``create_websocket`` does an exact-case
+    # lookup). Both GKE and EKS run out-of-cluster here, so a capital
+    # ``Authorization`` makes pod-exec go out anonymous -> 401/403, silently
+    # breaking the notebook shutdown sync (git commit + /outputs + home) on BOTH
+    # clouds. Lowercase fixes exec everywhere; REST is unaffected. (Verified live
+    # on GKE -> 401 and EKS -> 403 with capital, both OK with lowercase.)
+    auth_header_name: str = "authorization"
+
     @abstractmethod
     def cluster_endpoint(self, cluster_config: dict) -> str:
         """Raw control-plane endpoint from cluster_config ("" if unset)."""

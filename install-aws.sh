@@ -304,9 +304,12 @@ else
 fi
 
 # Starter inline policy. Intentionally broad enough to bring the app up, let the
-# S3StorageProvider reach bioaf-* buckets, AND let the app's TerraformExecutor
+# S3StorageProvider reach bioaf-* buckets, let the app's TerraformExecutor
 # provision the EKS compute stack (VPC + EKS + the cluster/node/IRSA IAM roles)
-# via the instance profile; TIGHTEN in Stage 7 (least-privilege per seam). S3 and
+# via the instance profile, AND let it build container images (the image_build
+# Terraform module's CodeBuild project + its bioaf-* service role via the existing
+# bioaf-* IAM create/PassRole grant; ECR repo ensure + CodeBuild StartBuild/poll
+# via the BioafImageBuild statement); TIGHTEN in Stage 7 (least-privilege per seam). S3 and
 # the created IAM roles are scoped to bioaf-* names; the EC2/EKS control-plane
 # services are left at "*" because most do not support resource-level scoping
 # cleanly and this is a starter. (This is the AWS analog of bioaf-app holding
@@ -405,6 +408,26 @@ cat >"$POLICY_DOC" <<'JSON'
         "iam:ListOpenIDConnectProviders",
         "iam:CreateServiceLinkedRole",
         "iam:GetRole"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "BioafImageBuild",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:CreateRepository",
+        "ecr:DescribeRepositories",
+        "codebuild:CreateProject",
+        "codebuild:UpdateProject",
+        "codebuild:DeleteProject",
+        "codebuild:BatchGetProjects",
+        "codebuild:StartBuild",
+        "codebuild:BatchGetBuilds",
+        "codebuild:StopBuild",
+        "logs:GetLogEvents",
+        "logs:FilterLogEvents",
+        "logs:DescribeLogStreams",
+        "logs:DescribeLogGroups"
       ],
       "Resource": "*"
     }

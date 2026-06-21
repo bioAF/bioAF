@@ -400,12 +400,13 @@ async def test_event_emitted_when_build_transitions_to_ready(session, admin_user
     session.add(version)
     await session.flush()
 
-    await session.execute(
-        text(
-            "INSERT INTO platform_config (key, value) VALUES ('gcp_project_id', 'test-project') "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+    for _k, _v in (("gcp_project_id", "test-project"), ("gcp_region", "us-central1")):
+        await session.execute(
+            text(
+                "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+            ).bindparams(k=_k, v=_v)
         )
-    )
     await session.commit()
 
     received: list[dict] = []
@@ -455,12 +456,13 @@ async def test_event_not_emitted_on_build_failure(session, admin_user):
     session.add(version)
     await session.flush()
 
-    await session.execute(
-        text(
-            "INSERT INTO platform_config (key, value) VALUES ('gcp_project_id', 'test-project') "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+    for _k, _v in (("gcp_project_id", "test-project"), ("gcp_region", "us-central1")):
+        await session.execute(
+            text(
+                "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+            ).bindparams(k=_k, v=_v)
         )
-    )
     await session.commit()
 
     received: list[dict] = []

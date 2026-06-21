@@ -89,7 +89,7 @@ class TestCellxgeneDeploy:
         init_containers = dep_body.spec.template.spec.init_containers
         assert len(init_containers) == 1
         assert init_containers[0].name == "gcs-download"
-        assert "gsutil cp" in init_containers[0].command[2]
+        assert "gcloud storage cp" in init_containers[0].command[2]
 
     @pytest.mark.asyncio
     async def test_deploy_cellxgene_serves_local_path(self, adapter, mock_k8s):
@@ -353,7 +353,7 @@ class TestCellxgeneVmDefaultDeploy:
         )
         init_cmd = spec.init_containers[0].command[2]
         assert "--key-file" not in init_cmd, "vm_default must not reference a key file that doesn't exist"
-        assert "gsutil cp" in init_cmd
+        assert "gcloud storage cp" in init_cmd
 
     @pytest.mark.asyncio
     async def test_service_account_key_mode_mounts_secret(self, adapter):
@@ -362,7 +362,47 @@ class TestCellxgeneVmDefaultDeploy:
         assert "gcp-sa" in vol_names
         init_cmd = spec.init_containers[0].command[2]
         assert "--key-file=/gcp/key.json" in init_cmd
-        assert "gsutil cp" in init_cmd
+        assert "gcloud storage cp" in init_cmd
+
+
+class TestCellxgeneAwsDeploy:
+    """On AWS the download init container drives the S3 CopyStager seam: the
+    amazon/aws-cli staging image + `aws s3 cp` from the s3:// dataset URI,
+    authenticating ambiently via the cellxgene-runner IRSA role (no key, no
+    gcp-sa-key secret volume)."""
+
+    async def _deploy_pod_spec(self, adapter):
+        from app.adapters.storage.s3 import S3StorageProvider
+
+        mock_apps = MagicMock()
+        with (
+            patch.object(adapter, "_get_api_client_async", new_callable=AsyncMock),
+            patch.object(adapter, "_resolve_image", new_callable=AsyncMock, return_value="img:latest"),
+            # AWS install: no gcp_service_account_key, so _ensure_gcp_secret is False.
+            patch.object(adapter, "_ensure_gcp_secret", new_callable=AsyncMock, return_value=False),
+            patch.object(adapter, "_get_k8s_apps_client", return_value=mock_apps),
+            patch.object(adapter, "_get_k8s_core_client", return_value=MagicMock()),
+            patch.object(adapter, "_get_k8s_rbac_client", return_value=MagicMock()),
+            patch("app.adapters.registry.get_storage_adapter", return_value=S3StorageProvider()),
+            patch("asyncio.create_task"),
+        ):
+            adapter._namespace_ready = True
+            await adapter.deploy(1, "s3://bucket/data.h5ad", "Dataset")
+        dep_body = mock_apps.create_namespaced_deployment.call_args[1]["body"]
+        return dep_body.spec.template.spec
+
+    @pytest.mark.asyncio
+    async def test_aws_uses_s3_cli_and_no_key_volume(self, adapter):
+        spec = await self._deploy_pod_spec(adapter)
+        # No GCP key secret mounted (IRSA is ambient).
+        vol_names = [v.name for v in (spec.volumes or [])]
+        assert "gcp-sa" not in vol_names
+        init = spec.init_containers[0]
+        assert init.image == "amazon/aws-cli"  # S3 staging image
+        init_cmd = init.command[2]
+        assert "aws s3 cp s3://bucket/data.h5ad /data/dataset.h5ad" in init_cmd
+        assert "--key-file" not in init_cmd
+        assert "gsutil" not in init_cmd and "gcloud" not in init_cmd
 
 
 class TestCellxgeneNamespaceWorkloadIdentity:

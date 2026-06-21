@@ -38,13 +38,40 @@ def test_work_node_backend_factory_resolves_gce():
     assert isinstance(_create_work_node_adapter("gce"), GCEWorkNodeProvider)
 
 
+def test_work_node_backend_factory_resolves_ec2():
+    # ec2 (POLICY aws -> ec2) is the Ec2WorkNodeProvider, implemented in Stage 6e.
+    from app.adapters.work_nodes.ec2 import Ec2WorkNodeProvider
+
+    assert isinstance(_create_work_node_adapter("ec2"), Ec2WorkNodeProvider)
+
+
 def test_cellxgene_backend_factory_resolves_kubernetes():
     assert isinstance(_create_cellxgene_adapter("kubernetes"), KubernetesCellxgeneProvider)
 
 
 def test_unknown_work_node_backend_raises():
     with pytest.raises(ValidationError):
-        _create_work_node_adapter("ec2")
+        _create_work_node_adapter("fargate")
+
+
+def test_work_node_backend_follows_cloud_provider_gcp_is_gce():
+    cp.reset_resolved_backends()  # unloaded cache -> gcp policy default (gce)
+    assert cp.backend_for("work_node") == "gce"
+
+
+@pytest.mark.asyncio
+async def test_work_node_backend_follows_cloud_provider_aws_is_ec2(monkeypatch):
+    # The registry resolves the work-node backend from cloud_provider (like
+    # storage), so an AWS install launches EC2 work nodes without work_node_backend
+    # being set. Regression guard: an unset key previously defaulted to gce -> the
+    # GCE provider raised "GCP project or zone not configured" on AWS.
+    async def fake_get_many(session, keys):
+        return {"cloud_provider": "aws"}
+
+    monkeypatch.setattr(PlatformConfigService, "get_many", fake_get_many)
+    await cp.load_resolved_backends(object())
+    assert cp.backend_for("work_node") == "ec2"
+    cp.reset_resolved_backends()
 
 
 def test_unknown_cellxgene_backend_raises():

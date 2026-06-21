@@ -6,12 +6,12 @@ gcp_bootstrap_sa_email impersonation is honored. Cloud Build and Artifact
 Registry require permissions only bioaf-bootstrap holds.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import text
 
-from app.services import cellxgene_image_service, notebook_image_service
+from app.services import notebook_image_service
 
 
 async def _seed(session, **kv: str) -> None:
@@ -67,10 +67,21 @@ async def test_notebook_image_get_credentials_passes_legacy_fallback(session):
 
 
 @pytest.mark.asyncio
-async def test_cellxgene_image_uses_notebook_image_credentials(session):
-    """cellxgene_image_service reuses the notebook helper rather than duplicating it."""
-    # The function should be the same object (re-exported import)
-    assert cellxgene_image_service._get_credentials is notebook_image_service._get_credentials
+async def test_cellxgene_image_resolves_credentials_via_shared_helper(session):
+    """cellxgene resolves credentials through the shared image-platform resolver,
+    which on GCP delegates to the notebook bootstrap-impersonation helper rather
+    than duplicating it (the cellxgene/notebook build paths both reach it)."""
+    from app.services.image_build_platform import ImagePlatform, resolve_image_credentials
+
+    sentinel = MagicMock(name="impersonated_creds")
+    gcp = ImagePlatform("gcp", {"project_id": "p", "region": "r"}, None)
+    with patch(
+        "app.services.notebook_image_service._get_credentials",
+        AsyncMock(return_value=sentinel),
+    ) as mock_helper:
+        result = await resolve_image_credentials(session, gcp)
+    assert result is sentinel
+    mock_helper.assert_awaited_once()
 
 
 @pytest.mark.asyncio

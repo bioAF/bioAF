@@ -374,3 +374,35 @@ async def test_check_requires_something_deployed(session, admin_user):
     await _seed(session, terraform_initialized="true")
     with pytest.raises(StateError):
         await infra_update_service.check_for_updates(session, admin_user.id)
+
+
+@pytest.mark.asyncio
+async def test_deployed_modules_includes_image_build_on_aws(session):
+    """On AWS the image_build module (marker = the CodeBuild project name, not a
+    'true' flag) is a candidate, so its updates (e.g. the CodeBuild role's Packer
+    EC2 perms) can be applied via the update flow instead of a compute teardown."""
+    await _seed(
+        session,
+        terraform_initialized="true",
+        storage_deployed="true",
+        compute_deployed="true",
+        aws_codebuild_project="bioaf-image-build",
+    )
+    modules = await infra_update_service._deployed_modules(session)
+    # image_build sits between storage and compute (its apply order).
+    assert modules == ["storage", "image_build", "compute"]
+
+
+@pytest.mark.asyncio
+async def test_deployed_modules_excludes_image_build_on_gcp(session):
+    """GCP never sets aws_codebuild_project (no image_build module), so the
+    candidate set is unchanged there -- byte-identical to before."""
+    await _seed(
+        session,
+        terraform_initialized="true",
+        storage_deployed="true",
+        compute_deployed="true",
+    )
+    modules = await infra_update_service._deployed_modules(session)
+    assert modules == ["storage", "compute"]
+    assert "image_build" not in modules

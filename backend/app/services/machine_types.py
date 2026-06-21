@@ -1,7 +1,11 @@
 """Curated machine type catalog for work nodes (ADR-034, ADR-043).
 
-Machine type names map directly to GCE machine types for non-GPU entries.
-GPU entries include accelerator metadata for the GCE API.
+Machine type names map directly to GCE machine types for non-GPU entries (and via
+``gce_machine_type`` for GPU entries). ``ec2_instance_type`` carries the AWS
+equivalent the EC2 work-node provider launches (CPU/memory matched; the GPU rows
+map to the nearest single-accelerator EC2 family). GPU entries include accelerator
+metadata for the GCE API; on AWS the GPU ships with the instance type, so the
+accelerator fields are GCE-only.
 """
 
 MACHINE_TYPES: list[dict] = [
@@ -11,6 +15,7 @@ MACHINE_TYPES: list[dict] = [
         "cpu": 4,
         "memory_gb": 16,
         "gpu": None,
+        "ec2_instance_type": "m5.xlarge",
         "description": "Light analysis, data wrangling (high availability)",
     },
     {
@@ -19,6 +24,7 @@ MACHINE_TYPES: list[dict] = [
         "cpu": 8,
         "memory_gb": 32,
         "gpu": None,
+        "ec2_instance_type": "m5.2xlarge",
         "description": "General-purpose analysis (high availability)",
     },
     {
@@ -27,6 +33,7 @@ MACHINE_TYPES: list[dict] = [
         "cpu": 4,
         "memory_gb": 16,
         "gpu": None,
+        "ec2_instance_type": "m5.xlarge",
         "description": "Light analysis, data wrangling",
     },
     {
@@ -35,6 +42,7 @@ MACHINE_TYPES: list[dict] = [
         "cpu": 8,
         "memory_gb": 32,
         "gpu": None,
+        "ec2_instance_type": "m5.2xlarge",
         "description": "General-purpose analysis",
     },
     {
@@ -43,6 +51,7 @@ MACHINE_TYPES: list[dict] = [
         "cpu": 8,
         "memory_gb": 64,
         "gpu": None,
+        "ec2_instance_type": "r5.2xlarge",
         "description": "Large datasets, Seurat integration (high availability)",
     },
     {
@@ -51,6 +60,7 @@ MACHINE_TYPES: list[dict] = [
         "cpu": 8,
         "memory_gb": 64,
         "gpu": None,
+        "ec2_instance_type": "r5.2xlarge",
         "description": "Large datasets, Seurat integration",
     },
     {
@@ -59,6 +69,7 @@ MACHINE_TYPES: list[dict] = [
         "cpu": 16,
         "memory_gb": 128,
         "gpu": None,
+        "ec2_instance_type": "r5.4xlarge",
         "description": "Very large datasets, multi-sample integration",
     },
     {
@@ -67,6 +78,7 @@ MACHINE_TYPES: list[dict] = [
         "cpu": 32,
         "memory_gb": 256,
         "gpu": None,
+        "ec2_instance_type": "r5.8xlarge",
         "description": "Extreme memory workloads",
     },
     {
@@ -78,6 +90,7 @@ MACHINE_TYPES: list[dict] = [
         "gce_machine_type": "n1-standard-8",
         "accelerator_type": "nvidia-tesla-t4",
         "accelerator_count": 1,
+        "ec2_instance_type": "g4dn.2xlarge",
         "description": "scVI, rapids-singlecell, light deep learning",
     },
     {
@@ -89,6 +102,7 @@ MACHINE_TYPES: list[dict] = [
         "gce_machine_type": "n1-standard-16",
         "accelerator_type": "nvidia-tesla-v100",
         "accelerator_count": 1,
+        "ec2_instance_type": "p3.2xlarge",
         "description": "Heavy deep learning, large-scale model training",
     },
 ]

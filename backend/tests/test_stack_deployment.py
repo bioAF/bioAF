@@ -223,6 +223,106 @@ async def test_deploy_stack_pins_compute_stack_uid_on_aws(session):
     assert await _get_config(session, "compute_stack_uid") == pinned
 
 
+def _image_build_mock_run_module(called: list):
+    async def mock_run_module(sess, uid, module_name):
+        called.append(module_name)
+        if module_name == "image_build":
+            extra = {"outputs": {"codebuild_project_name": {"value": "bioaf-image-build"}}}
+        elif module_name == "compute":
+            extra = {
+                "outputs": {
+                    "cluster_name": {"value": "bioaf-bioaf-x"},
+                    "cluster_endpoint": {"value": "https://eks"},
+                    "cluster_ca_cert": {"value": "Y2E="},
+                }
+            }
+        else:
+            extra = {}
+        yield _make_progress_event("apply_complete", f"{module_name} done", extra=extra)
+
+    return mock_run_module
+
+
+@pytest.mark.asyncio
+async def test_deploy_stack_deploys_image_build_before_compute_on_aws(session):
+    """On AWS, deploy_stack deploys the image_build module before compute and
+    records the CodeBuild project name the image services submit builds to."""
+    from unittest.mock import AsyncMock
+
+    from app.services.stack_deployment import deploy_stack
+
+    _, user_id = await _seed_org_and_user(session)
+    await _set_config(session, "cloud_provider", "aws")
+    await _set_config(session, "aws_account_id", "043671579834")
+    await _set_config(session, "aws_region", "us-west-1")
+    await _set_config(session, "terraform_initialized", "true")
+    await _set_config(session, "compute_deployed", "false")
+    await _set_config(session, "storage_deployed", "true")  # skip storage
+    await session.commit()
+
+    called: list[str] = []
+    with (
+        patch("app.services.stack_deployment._run_module", side_effect=_image_build_mock_run_module(called)),
+        patch("app.adapters.registry.get_compute_adapter", return_value=AsyncMock()),
+    ):
+        async for _ in deploy_stack(session, "kubernetes", user_id=user_id):
+            pass
+
+    assert "image_build" in called
+    assert called.index("image_build") < called.index("compute")
+    assert await _get_config(session, "aws_codebuild_project") == "bioaf-image-build"
+    assert await _get_config(session, "aws_image_build_deployed") == "true"
+
+
+@pytest.mark.asyncio
+async def test_deploy_stack_skips_image_build_when_already_deployed(session):
+    """A compute redeploy does not re-run image_build once it is recorded."""
+    from unittest.mock import AsyncMock
+
+    from app.services.stack_deployment import deploy_stack
+
+    _, user_id = await _seed_org_and_user(session)
+    await _set_config(session, "cloud_provider", "aws")
+    await _set_config(session, "aws_account_id", "043671579834")
+    await _set_config(session, "aws_region", "us-west-1")
+    await _set_config(session, "terraform_initialized", "true")
+    await _set_config(session, "compute_deployed", "false")
+    await _set_config(session, "storage_deployed", "true")
+    await _set_config(session, "aws_codebuild_project", "bioaf-image-build")  # already deployed
+    await session.commit()
+
+    called: list[str] = []
+    with (
+        patch("app.services.stack_deployment._run_module", side_effect=_image_build_mock_run_module(called)),
+        patch("app.adapters.registry.get_compute_adapter", return_value=AsyncMock()),
+    ):
+        async for _ in deploy_stack(session, "kubernetes", user_id=user_id):
+            pass
+
+    assert "image_build" not in called  # skipped; only compute runs
+
+
+@pytest.mark.asyncio
+async def test_deploy_stack_never_deploys_image_build_on_gcp(session):
+    """GCP has no image_build module (Cloud Build is serverless); byte-identical."""
+    from app.services.stack_deployment import deploy_stack
+
+    _, user_id = await _seed_org_and_user(session)
+    await _set_config(session, "gcp_credentials_configured", "true")
+    await _set_config(session, "terraform_initialized", "true")
+    await _set_config(session, "compute_deployed", "false")
+    await _set_config(session, "storage_deployed", "false")
+    await session.commit()
+
+    called: list[str] = []
+    with patch("app.services.stack_deployment._run_module", side_effect=_image_build_mock_run_module(called)):
+        async for _ in deploy_stack(session, "kubernetes", user_id=user_id):
+            pass
+
+    assert "image_build" not in called
+    assert called == ["storage", "compute"]
+
+
 @pytest.mark.asyncio
 async def test_deploy_stack_installs_cluster_autoscaler_on_aws(session):
     """On AWS, deploy_stack captures the CA role ARN and installs the autoscaler."""

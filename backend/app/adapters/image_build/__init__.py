@@ -24,7 +24,7 @@ __all__ = [
     "get_image_build_provider",
 ]
 
-VALID_IMAGE_BUILD_BACKENDS = ("cloud_build",)
+VALID_IMAGE_BUILD_BACKENDS = ("cloud_build", "codebuild")
 DEFAULT_IMAGE_BUILD_BACKEND = "cloud_build"
 
 
@@ -32,6 +32,10 @@ def create_image_build_provider(backend: str = DEFAULT_IMAGE_BUILD_BACKEND) -> I
     """Instantiate the image-build provider for ``backend`` (default Cloud Build)."""
     if backend not in VALID_IMAGE_BUILD_BACKENDS:
         raise ValidationError(f"Unknown image_build backend '{backend}'. Valid options: {VALID_IMAGE_BUILD_BACKENDS}")
+    if backend == "codebuild":
+        from app.adapters.image_build.aws import CodeBuildImageBuildProvider
+
+        return CodeBuildImageBuildProvider()
     from app.adapters.image_build.gcp import GcpCloudBuildProvider
 
     return GcpCloudBuildProvider()

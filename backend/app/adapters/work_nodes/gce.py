@@ -301,6 +301,10 @@ class GceVmInstance(VmInstance):
     def is_local(self) -> bool:
         return self._mode == "local"
 
+    async def load_config(self, force: bool = False) -> dict:
+        """Neutral entrypoint (registry init): delegates to ``load_gcp_config``."""
+        return await self.load_gcp_config(force=force)
+
     async def load_gcp_config(self, force: bool = False) -> dict:
         """Read GCP config from platform_config. Caches the result."""
         if self._gcp_config is not None and not force:

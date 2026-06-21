@@ -12,7 +12,7 @@ from __future__ import annotations
 from app.adapters.image_registry.base import ImageRegistryProvider
 from app.exceptions import ValidationError
 
-VALID_IMAGE_REGISTRY_BACKENDS = ("artifact_registry",)
+VALID_IMAGE_REGISTRY_BACKENDS = ("artifact_registry", "ecr")
 DEFAULT_IMAGE_REGISTRY_BACKEND = "artifact_registry"
 
 
@@ -22,6 +22,10 @@ def create_image_registry_provider(backend: str = DEFAULT_IMAGE_REGISTRY_BACKEND
         raise ValidationError(
             f"Unknown image_registry backend '{backend}'. Valid options: {VALID_IMAGE_REGISTRY_BACKENDS}"
         )
+    if backend == "ecr":
+        from app.adapters.image_registry.aws import EcrImageRegistryProvider
+
+        return EcrImageRegistryProvider()
     from app.adapters.image_registry.gcp import GcpArtifactRegistryProvider
 
     return GcpArtifactRegistryProvider()

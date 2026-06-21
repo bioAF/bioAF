@@ -414,6 +414,54 @@ async def deploy_stack(
             )
             return
 
+    # Step 1b (AWS only): deploy the image-build infrastructure (CodeBuild project
+    # + its IAM service role). Cloud Build is serverless on GCP, so GCP has no
+    # analog and this step never runs there (it is byte-identical on GCP). It needs
+    # only storage (deployed above), and unblocks the notebook + cellxgene image
+    # builds. Idempotent: skipped once aws_codebuild_project is recorded (cleared on
+    # teardown), so a compute redeploy does not re-run it.
+    if cloud_provider == "aws":
+        already = await _read_config(session, "aws_codebuild_project")
+        if not already or already == "null":
+            image_build_failed = False
+            yield TerraformProgressEvent(
+                event_type="progress",
+                message="Deploying image build infrastructure...",
+            )
+            async for event in _run_module(session, user_id, "image_build"):
+                if event.event_type == "apply_error":
+                    image_build_failed = True
+                    yield event
+                elif event.event_type == "apply_complete":
+                    outputs = event.extra.get("outputs", {})
+                    project = outputs.get("codebuild_project_name", {}).get("value", "")
+                    await _set_config(session, "aws_codebuild_project", project or "null")
+                    await _set_config(session, "aws_image_build_deployed", "true")
+                    await log_action(
+                        session,
+                        user_id=user_id,
+                        entity_type="infrastructure",
+                        entity_id=0,
+                        action="deploy_image_build",
+                        details={"module": "image_build", "status": "completed"},
+                    )
+                    await session.flush()
+                    yield TerraformProgressEvent(
+                        event_type="phase_complete",
+                        message="Image build infrastructure deployed",
+                        resources_completed=event.resources_completed,
+                        resources_total=event.resources_total,
+                    )
+                else:
+                    yield event
+
+            if image_build_failed:
+                yield TerraformProgressEvent(
+                    event_type="stack_error",
+                    message="Stack deployment failed during image build module",
+                )
+                return
+
     # Step 2: Deploy compute
     # If the user chose a different region/zone for compute, temporarily
     # override the config so _write_tfvars picks up the override values.
@@ -544,6 +592,14 @@ async def deploy_stack(
                 # IRSA role for the in-cluster Cluster Autoscaler; the CA workload
                 # is installed below (post-compute) using this ARN.
                 await _set_config(session, "cluster_autoscaler_role_arn", cluster_autoscaler_arn or "null")
+                # Work-node (EC2) networking + instance profile the EC2 work-node
+                # provider launches into (cleanup item 8b). Additive; GCP unaffected.
+                work_node_subnet = outputs.get("work_node_subnet_id", {}).get("value", "")
+                work_node_sg = outputs.get("work_node_security_group_id", {}).get("value", "")
+                work_node_profile = outputs.get("work_node_instance_profile", {}).get("value", "")
+                await _set_config(session, "aws_work_node_subnet_id", work_node_subnet or "null")
+                await _set_config(session, "aws_work_node_security_group_id", work_node_sg or "null")
+                await _set_config(session, "aws_work_node_instance_profile", work_node_profile or "null")
 
             # Update kubernetes_cluster component state
             await session.execute(
@@ -891,6 +947,34 @@ async def destroy_storage(
     await session.flush()
     if marked_count:
         logger.info("Marked %d file(s) as storage_deleted", marked_count)
+
+    # Step 2b (AWS only): destroy the image-build infrastructure (CodeBuild project
+    # + IAM role) before storage. It is install-level like storage, so a compute
+    # teardown intentionally leaves it intact (the operator's teardown/redeploy
+    # cycle is compute-only); it is removed only on this full storage teardown. GCP
+    # has no such module, so this is skipped there.
+    from app.platform.cloud_provider import get_cloud_provider
+
+    cloud_provider = await get_cloud_provider(session)
+    if cloud_provider == "aws" and await _read_config(session, "aws_image_build_deployed") == "true":
+        yield TerraformProgressEvent(
+            event_type="progress",
+            message="Destroying image build infrastructure...",
+        )
+        ib_destroy_failed = False
+        async for event in _run_destroy(session, user_id, "image_build"):
+            yield event
+            if event.event_type == "apply_error":
+                ib_destroy_failed = True
+        if ib_destroy_failed:
+            yield TerraformProgressEvent(
+                event_type="stack_error",
+                message="Image build destroy failed",
+            )
+            return
+        await _set_config(session, "aws_codebuild_project", "null")
+        await _set_config(session, "aws_image_build_deployed", "false")
+        await session.flush()
 
     # Step 3: Run terraform destroy on the now-empty buckets
     yield TerraformProgressEvent(
