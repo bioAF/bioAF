@@ -197,7 +197,12 @@ class TestOutOfClusterClientAuthHeader:
         ):
             api_client = provider_with_cfg._build_out_of_cluster_client()
 
-        auth = api_client.default_headers.get("Authorization")
+        # The httpx reader path reads the token via api_client_auth_header (the
+        # header is keyed lowercase 'authorization' so the websocket-exec client
+        # forwards it; this accessor is casing-agnostic).
+        from app.adapters.kubernetes.connection import api_client_auth_header
+
+        auth = api_client_auth_header(api_client)
         assert auth is not None
         assert auth.startswith("Bearer ")
         assert "test-token-xyz" in auth
