@@ -64,11 +64,23 @@ ADDITIVE_ACTIONS = frozenset({"create", "update"})
 _BENIGN_APPLY_DIAGNOSTICS: tuple[str, ...] = ("Must specify a field to update",)
 
 # Modules the check covers, in apply order. Storage first so data buckets
-# (e.g. the Literature bucket) land before compute changes.
+# (e.g. the Literature bucket) land before compute changes. image_build sits
+# between them (it is the AWS analog of Cloud Build infra and is deployed after
+# storage, before compute); its marker is the CodeBuild project NAME rather than a
+# "true" flag, and it is set only on AWS, so image_build is never a candidate on
+# GCP (which has no image_build module). Including it lets a newly added resource
+# on that module -- e.g. the CodeBuild role's Packer EC2 permissions for work-node
+# AMI builds -- land via this flow instead of a full compute teardown + redeploy.
 _CANDIDATE_MODULES: tuple[tuple[str, str], ...] = (
     ("storage", "storage_deployed"),
+    ("image_build", "aws_codebuild_project"),
     ("compute", "compute_deployed"),
 )
+
+# A module marker counts as "deployed" when it is set to a real value: the
+# storage/compute markers are "true"/"false"; the image_build marker is a project
+# name. These values mean NOT deployed.
+_UNSET_MARKERS = frozenset({None, "", "null", "false"})
 
 # Terraform-generated stack uid is secrets.token_hex(3): six lowercase hex.
 _STACK_UID_RE = re.compile(r"^[0-9a-f]{6}$")
@@ -191,11 +203,11 @@ async def realign_storage_naming(session: AsyncSession) -> dict | None:
 async def _deployed_modules(session: AsyncSession) -> list[str]:
     cfg = await PlatformConfigService.get_many(
         session,
-        ["terraform_initialized", "storage_deployed", "compute_deployed"],
+        ["terraform_initialized"] + [flag for _module, flag in _CANDIDATE_MODULES],
     )
     if cfg.get("terraform_initialized") != "true":
         raise StateError("Terraform has not been initialized")
-    modules = [module for module, flag in _CANDIDATE_MODULES if cfg.get(flag) == "true"]
+    modules = [module for module, flag in _CANDIDATE_MODULES if cfg.get(flag) not in _UNSET_MARKERS]
     if not modules:
         raise StateError("No infrastructure is deployed")
     return modules

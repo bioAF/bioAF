@@ -502,6 +502,87 @@ resource "aws_iam_role_policy" "runner_s3" {
   policy   = data.aws_iam_policy_document.runner_s3[each.key].json
 }
 
+# --- Work-node (EC2) networking + instance profile (cleanup item 8b) ----------
+#
+# Standalone EC2 work nodes (SSH-accessible analysis VMs, the AWS analog of the
+# GCE work nodes) launch into this VPC's public subnet. They need a security group
+# (SSH ingress) and an IAM instance profile granting S3 access so the box can
+# stage inputs / sync outputs with `aws s3` (the analog of the GCE work node's
+# notebook_runner SA). The app's EC2 work-node provider reads these from the
+# compute outputs (subnet / SG / instance profile) at launch.
+
+resource "aws_security_group" "work_node" {
+  name        = "${local.cluster_name}-work-node"
+  description = "bioAF work node (SSH-accessible analysis VM)"
+  vpc_id      = aws_vpc.this.id
+
+  ingress {
+    description = "SSH"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.work_node_ssh_cidr]
+  }
+
+  egress {
+    description = "All egress (S3, GitHub, package mirrors)"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.tags, { Name = "${local.cluster_name}-work-node" })
+}
+
+data "aws_iam_policy_document" "work_node_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    effect  = "Allow"
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "work_node" {
+  name               = "bioaf-work-node-${var.stack_uid}"
+  assume_role_policy = data.aws_iam_policy_document.work_node_assume.json
+  tags               = merge(local.tags, { purpose = "work-node" })
+}
+
+# S3 read/write to bioaf-* buckets (inputs in, outputs/scripts out), mirroring the
+# non-readonly runner_s3 policy.
+data "aws_iam_policy_document" "work_node_s3" {
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    resources = local.s3_object_arns
+  }
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:ListBucket", "s3:GetBucketLocation"]
+    resources = local.s3_bucket_arns
+  }
+}
+
+resource "aws_iam_role_policy" "work_node_s3" {
+  name   = "bioaf-work-node-s3"
+  role   = aws_iam_role.work_node.id
+  policy = data.aws_iam_policy_document.work_node_s3.json
+}
+
+resource "aws_iam_instance_profile" "work_node" {
+  name = "bioaf-work-node-${var.stack_uid}"
+  role = aws_iam_role.work_node.name
+  # Intentionally NOT tagged: tagging an instance profile requires the separate
+  # iam:TagInstanceProfile permission (CreateInstanceProfile-with-tags fails 403
+  # without it), which the bioaf-app starter role does not grant. The profile is
+  # identified by its stable name and its (tagged) IAM role, so tags add nothing
+  # here; omitting them keeps the compute deploy free of an extra IAM grant.
+}
+
 # --- Cluster access for the bioaf-app role (out-of-cluster control) -----------
 #
 # The EKS Access Entry + cluster-admin association that lets the backend (running

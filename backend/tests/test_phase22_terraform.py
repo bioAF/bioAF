@@ -34,4 +34,4 @@ def test_artifact_registry_repo_recorded_in_config():
     ensures the repo exists before building."""
     src = inspect.getsource(nis.build_notebook_image)
     assert "artifact_registry_repo" in src
-    assert "ensure_artifact_registry" in src
+    assert "ensure_image_repository" in src

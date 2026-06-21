@@ -241,6 +241,15 @@ class StorageProvider(ABC):
         """Shell command to recursively copy ``local_path`` to a bucket ``uri`` in a container."""
         raise NotImplementedError
 
+    def cli_copy_out_file(self, local_path: str, uri: str) -> str:
+        """Shell command to copy a SINGLE local file ``local_path`` to object ``uri``.
+
+        The single-file counterpart of ``cli_copy_in`` (and the non-recursive
+        sibling of ``cli_copy_out``). GCS -> ``gcloud storage cp``; S3 -> ``aws s3
+        cp``. Used to capture individual session script/output files.
+        """
+        raise NotImplementedError
+
     def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
         """Shell command (argv) to recursively sync ``remote_prefix`` -> ``local_dir``.
 
@@ -545,6 +554,15 @@ class VmInstance(ABC):
     service layer uses. Selected per-cloud (POLICY ``work_node``: gce | ec2).
     """
 
+    async def load_config(self, force: bool = False) -> dict:
+        """Eagerly load + cache this backend's platform_config (called at registry init).
+
+        The cloud-neutral name the registry calls on whichever VM backend is
+        active (GCE reads its ``gcp_*`` config, EC2 its ``aws_*`` config). Default
+        no-op so a backend that needs no startup config is safe.
+        """
+        return {}
+
     @abstractmethod
     async def provision(self, vm_spec: dict) -> VmInfo:
         """Create and start a VM. Returns a VmInfo."""
@@ -616,11 +634,12 @@ class CellxgeneProvider(ABC):
         return None
 
     @abstractmethod
-    async def deploy(self, publication_id: int, gcs_uri: str, dataset_name: str) -> CellxgeneInstance:
-        """Deploy a cellxgene instance for an h5ad dataset.
+    async def deploy(self, publication_id: int, storage_uri: str, dataset_name: str) -> CellxgeneInstance:
+        """Deploy a cellxgene instance for an h5ad dataset at ``storage_uri``.
 
-        Returns a CellxgeneInstance; backend specifics (pod name, namespace)
-        live in its provider_details.
+        ``storage_uri`` is the dataset's neutral storage URI (``gs://`` on GCP,
+        ``s3://`` on AWS). Returns a CellxgeneInstance; backend specifics (pod
+        name, namespace) live in its provider_details.
         """
 
     @abstractmethod

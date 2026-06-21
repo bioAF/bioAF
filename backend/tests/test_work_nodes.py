@@ -231,6 +231,49 @@ async def test_launch_work_node_success(
 
 
 @pytest.mark.asyncio
+async def test_launch_work_node_experiment_scope_without_project(
+    client,
+    session,
+    comp_bio_token,
+    comp_bio_user,
+    seed_environment,
+    seed_session_credentials,
+    seed_platform_config,
+):
+    """A work node can be launched scoped to a standalone experiment with no
+    project, matching notebooks. project_id is optional; experiment_id ties the
+    node (and its outputs) to the experiment."""
+    from app.models.experiment import Experiment
+
+    exp = Experiment(name="Standalone", organization_id=comp_bio_user.organization_id)
+    session.add(exp)
+    await session.flush()
+    await session.commit()
+
+    response = await client.post(
+        "/api/v1/work-nodes/sessions",
+        json={
+            "experiment_id": exp.id,
+            "environment_version_id": seed_environment["ready_version"].id,
+            "machine_type": "n2-standard-4",
+        },
+        headers={"Authorization": f"Bearer {comp_bio_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["session_type"] == "ssh"
+
+    result = await session.execute(
+        text("SELECT project_id, experiment_id FROM compute_sessions WHERE id = :id"),
+        {"id": data["id"]},
+    )
+    row = result.first()
+    assert row is not None
+    assert row[0] is None  # launched without a project
+    assert row[1] == exp.id  # scoped to the standalone experiment
+
+
+@pytest.mark.asyncio
 async def test_launch_passes_configured_boot_disk_to_vm_spec(
     client,
     session,

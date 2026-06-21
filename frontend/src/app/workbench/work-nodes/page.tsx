@@ -296,8 +296,13 @@ export default function WorkNodesPage() {
     );
   }
 
+  // A work node needs an image + size and a scope selection appropriate to the
+  // chosen scope: an experiment (which may have no project) or a project. Matches
+  // notebooks, which don't require a project.
+  const scopeSelected = scopeType === "experiment" ? !!selectedExperimentId : !!selectedProjectId;
+
   function handleLaunch() {
-    if (!selectedProjectId || !selectedVersionId || !selectedMachineType) return;
+    if (!scopeSelected || !selectedVersionId || !selectedMachineType) return;
     const missingFiles = selectedFileIds.length === 0;
     const missingRepos = repos.length > 0 && selectedRepoIds.length === 0;
     if (missingFiles || missingRepos) {
@@ -308,12 +313,15 @@ export default function WorkNodesPage() {
   }
 
   async function performLaunch() {
-    if (!selectedProjectId || !selectedVersionId || !selectedMachineType) return;
+    if (!scopeSelected || !selectedVersionId || !selectedMachineType) return;
     setShowConfirmLaunch(false);
     setLaunching(true);
     setLaunchError(null);
     const req: WorkNodeLaunchRequest = {
-      project_id: selectedProjectId,
+      // project_id may be null for a standalone experiment; experiment_id ties
+      // the node (and its outputs) to the experiment, like notebook sessions.
+      project_id: selectedProjectId ?? undefined,
+      experiment_id: scopeType === "experiment" ? (selectedExperimentId ?? undefined) : undefined,
       environment_version_id: selectedVersionId,
       machine_type: selectedMachineType,
       input_file_ids: selectedFileIds.length > 0 ? selectedFileIds : undefined,
@@ -1081,8 +1089,12 @@ export default function WorkNodesPage() {
                       <h3 className="text-sm font-medium text-gray-700 mb-3">Review</h3>
                       <div className="space-y-2 text-sm bg-gray-50 rounded-lg p-4">
                         <div className="flex justify-between">
-                          <span className="text-gray-500">Project</span>
-                          <span>{projects.find((p) => p.id === selectedProjectId)?.name}</span>
+                          <span className="text-gray-500">{scopeType === "experiment" ? "Experiment" : "Project"}</span>
+                          <span>
+                            {scopeType === "experiment"
+                              ? experiments.find((e) => e.id === selectedExperimentId)?.name
+                              : projects.find((p) => p.id === selectedProjectId)?.name}
+                          </span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-500">Input Files</span>
@@ -1126,7 +1138,7 @@ export default function WorkNodesPage() {
                     <button
                       type="button"
                       onClick={() => setLaunchStep(2)}
-                      disabled={!selectedProjectId || !selectedVersionId || !selectedMachineType}
+                      disabled={!scopeSelected || !selectedVersionId || !selectedMachineType}
                       className="flex-1 bg-indigo-600 text-white px-6 py-2.5 rounded-md text-sm hover:bg-indigo-700 disabled:opacity-50"
                     >
                       Next: Review

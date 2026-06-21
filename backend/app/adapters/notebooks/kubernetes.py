@@ -19,7 +19,7 @@ from kubernetes import client
 
 from app.adapters.base import NotebookProvider
 from app.adapters.capabilities import ProviderCapabilities
-from app.adapters.kubernetes.connection import GkeConnection
+from app.adapters.kubernetes.connection import GkeConnection, api_client_auth_header
 from app.exceptions import ValidationError
 from app.adapters.models import (
     SessionInfo,
@@ -28,7 +28,6 @@ from app.adapters.models import (
     TerminationResult,
     to_service_state,
 )
-from app.adapters.notebooks.gcs_sync import parse_gsutil_ls_output
 
 logger = logging.getLogger("bioaf.adapters.notebooks.k8s")
 
@@ -394,7 +393,15 @@ class KubernetesNotebookProvider(NotebookProvider):
 
         pod_name = f"bioaf-notebook-{session_id}"
         working_bucket = session_spec.get("working_bucket", "bioaf-working")
-        gcs_home_prefix = f"gs://{working_bucket}/notebooks/{user_id}/"
+        # Stage data through the cloud-selected storage adapter so the staged URIs
+        # and copy commands match the backend (gs:// + gcloud on GCS; s3:// + aws on
+        # S3). The init/sidecar containers run the adapter's staging_image, so a
+        # hardcoded gs:// / gsutil here would break a non-GCS install (e.g. on AWS
+        # the amazon/aws-cli staging image has no gsutil and cannot read gs://).
+        from app.adapters.registry import get_storage_adapter
+
+        storage_adapter = get_storage_adapter()
+        gcs_home_prefix = storage_adapter.build_uri(working_bucket, f"notebooks/{user_id}/")
 
         # Determine container command based on session type
         if session_type == "jupyter":
@@ -507,16 +514,14 @@ class KubernetesNotebookProvider(NotebookProvider):
             session_creds = session_spec.get("session_credentials", {})
             cred_username = session_creds.get("username", "bioaf")
             home_dir = f"/home/{cred_username}"
-            gcs_home_prefix = f"gs://{working_bucket}/home/{user_id}/"
+            gcs_home_prefix = storage_adapter.build_uri(working_bucket, f"home/{user_id}/")
         else:
             home_dir = HOME_DIR
 
         # The init/sidecar containers that stage data run the storage backend's
-        # CLI image (CopyStager seam); GCS -> google/cloud-sdk:slim. The same
-        # adapter supplies read-only input mounts (ReadOnlyInputMount seam).
-        from app.adapters.registry import get_storage_adapter
-
-        storage_adapter = get_storage_adapter()
+        # CLI image (CopyStager seam); GCS -> google/cloud-sdk:slim, S3 ->
+        # amazon/aws-cli. The same adapter supplies read-only input mounts
+        # (ReadOnlyInputMount seam).
         staging_image = storage_adapter.staging_image()
 
         # Build the home stage-in init container (CopyStager sync seam)
@@ -538,12 +543,20 @@ class KubernetesNotebookProvider(NotebookProvider):
         # Input file data sync init container
         input_files = session_spec.get("input_files", [])
         if input_files:
-            # Create subdirectories and copy files preserving hierarchy
+            # Create subdirectories and copy files preserving hierarchy. GCS keeps the
+            # original `gsutil cp` (legacy GCP behavior, byte-identical to pre-drain);
+            # other backends use the storage adapter's copy command (S3 -> `aws s3 cp`).
+            from app.adapters.storage.gcs import GcsStorageProvider
+
+            legacy_gcs = isinstance(storage_adapter, GcsStorageProvider)
             copy_cmds: list[str] = []
             for f in input_files:
                 dest_path = f"/data/{f['relative_path']}"
                 dest_dir = "/".join(dest_path.split("/")[:-1])
-                copy_cmds.append(f"mkdir -p {dest_dir} && gsutil cp {f['gcs_uri']} {dest_path}")
+                if legacy_gcs:
+                    copy_cmds.append(f"mkdir -p {dest_dir} && gsutil cp {f['gcs_uri']} {dest_path}")
+                else:
+                    copy_cmds.append(f"mkdir -p {dest_dir} && {storage_adapter.cli_copy_in(f['gcs_uri'], dest_path)}")
             # Generate FILE_INVENTORY.md using a heredoc to avoid backtick
             # interpretation by the shell (backticks in markdown trigger
             # command substitution inside double-quoted printf)
@@ -867,7 +880,7 @@ class KubernetesNotebookProvider(NotebookProvider):
             # Keep the auth pre-check here so a misconfigured client fails the
             # background task loudly rather than silently spinning.
             api_client = self._get_api_client()
-            if not api_client.default_headers.get("Authorization"):
+            if not api_client_auth_header(api_client):
                 raise RuntimeError(
                     "K8s ApiClient has no Authorization header; _build_out_of_cluster_client did not set one."
                 )
@@ -1066,17 +1079,35 @@ class KubernetesNotebookProvider(NotebookProvider):
             except Exception as e:
                 logger.warning("GCS sync-out failed for pod %s: %s", pod_name, e)
 
-        # Sync /outputs/ and capture scripts to GCS via the gcs-sync sidecar (ADR-040).
-        # The sidecar has google/cloud-sdk:slim with gsutil; the main container may not.
+        # Sync /outputs/ and capture scripts to the working bucket via the gcs-sync
+        # sidecar (ADR-040). The sidecar runs the storage backend's staging_image
+        # (google/cloud-sdk on GCS, amazon/aws-cli on S3), so the COMMANDS come from
+        # the storage adapter, not hardcoded gsutil: a non-GCS install (e.g. AWS)
+        # would otherwise run gsutil under amazon/aws-cli and silently lose outputs.
+        # Auth is ambient on S3 (IRSA) -> empty; an explicit SA activation on GCS.
+        from app.adapters.registry import get_storage_adapter
+
+        storage_adapter = get_storage_adapter()
         _SYNC_CONTAINER = "gcs-sync"
         _GCS_KEY = "/secrets/gcp/key.json"
-        _AUTH_CMD = f"gcloud auth activate-service-account --key-file={_GCS_KEY} 2>/dev/null; "
+        # GCS keeps the original gsutil-based stop-path commands (legacy GCP behavior,
+        # byte-identical to pre-drain); other backends (S3) use the storage adapter.
+        # Reverting the GCS path here, rather than contorting the adapter, keeps GCP
+        # exactly as it was while AWS uses the cloud-neutral path.
+        from app.adapters.storage.gcs import GcsStorageProvider
+
+        legacy_gcs = isinstance(storage_adapter, GcsStorageProvider)
+        if legacy_gcs:
+            _auth_prefix = f"gcloud auth activate-service-account --key-file={_GCS_KEY} 2>/dev/null; "
+        else:
+            _auth = storage_adapter.cli_auth_command(_GCS_KEY)
+            _auth_prefix = f"{_auth}; " if _auth else ""
 
         output_files: list[dict] = []
         gcs_output_prefix = ""
         if working_bucket and pod_name:
-            gcs_output_prefix = f"gs://{working_bucket}/sessions/{session_id}/outputs/"
-            gcs_scripts_prefix = f"gs://{working_bucket}/sessions/{session_id}/scripts/"
+            gcs_output_prefix = storage_adapter.build_uri(working_bucket, f"sessions/{session_id}/outputs/")
+            gcs_scripts_prefix = storage_adapter.build_uri(working_bucket, f"sessions/{session_id}/scripts/")
 
             # Determine home directory based on session type
             if session_type == "ssh":
@@ -1084,13 +1115,12 @@ class KubernetesNotebookProvider(NotebookProvider):
             else:
                 exec_home = HOME_DIR
 
-            # 1. Sync /outputs/ to working bucket
+            # 1. Sync /outputs/ to the working bucket (CopyStager sync seam).
             try:
-                outputs_shell = (
-                    f"{_AUTH_CMD}"
-                    f'if [ -d /outputs ] && [ "$(ls -A /outputs)" ]; then '
-                    f"gsutil -m rsync -r /outputs {gcs_output_prefix}; fi"
-                )
+                # sync_out_command returns ["/bin/sh", "-c", "<cli> sync ..."]; reuse
+                # its inner command inside the empty-dir guard + auth prefix.
+                sync_inner = storage_adapter.sync_out_command("/outputs", gcs_output_prefix)[-1]
+                outputs_shell = f'{_auth_prefix}if [ -d /outputs ] && [ "$(ls -A /outputs)" ]; then {sync_inner}; fi'
                 stream(
                     core_client.connect_get_namespaced_pod_exec,
                     name=pod_name,
@@ -1107,14 +1137,18 @@ class KubernetesNotebookProvider(NotebookProvider):
             except Exception as e:
                 logger.warning("Outputs sync failed for pod %s: %s", pod_name, e)
 
-            # 2. Capture notebook/script files
+            # 2. Capture notebook/script files (flat) into the scripts prefix.
             try:
+                if legacy_gcs:
+                    copy_one = f'gsutil cp "$f" {gcs_scripts_prefix}"$(basename "$f")"'
+                else:
+                    copy_one = storage_adapter.cli_copy_out_file('"$f"', f'{gcs_scripts_prefix}"$(basename "$f")"')
                 scripts_shell = (
-                    f"{_AUTH_CMD}"
+                    f"{_auth_prefix}"
                     f"find {exec_home} -maxdepth 3 "
                     r"\( -name '*.ipynb' -o -name '*.Rmd' -o -name '*.R' -o -name '*.py' \) "
                     "-type f "
-                    f'| while read f; do gsutil cp "$f" {gcs_scripts_prefix}"$(basename "$f")"; done'
+                    f"| while read f; do {copy_one}; done"
                 )
                 stream(
                     core_client.connect_get_namespaced_pod_exec,
@@ -1132,25 +1166,42 @@ class KubernetesNotebookProvider(NotebookProvider):
             except Exception as e:
                 logger.warning("Script capture failed for pod %s: %s", pod_name, e)
 
-            # 3. List all output files for registration
+            # 3. List all output files for registration. GCS uses the original
+            #    in-pod `gsutil ls` + parser (legacy GCP behavior, byte-identical to
+            #    pre-drain); other backends list host-side via the storage adapter.
             try:
-                list_prefix = f"gs://{working_bucket}/sessions/{session_id}/"
-                list_shell = f"{_AUTH_CMD}gsutil ls -l -r {list_prefix}** 2>/dev/null || true"
-                raw_output = stream(
-                    core_client.connect_get_namespaced_pod_exec,
-                    name=pod_name,
-                    namespace=namespace,
-                    container=_SYNC_CONTAINER,
-                    command=["/bin/sh", "-c", list_shell],
-                    stderr=True,
-                    stdin=False,
-                    stdout=True,
-                    tty=False,
-                    _request_timeout=60,
-                )
-                if raw_output:
-                    output_files = parse_gsutil_ls_output(str(raw_output))
-                    logger.info("Found %d output files for compute session", len(output_files))
+                list_prefix = storage_adapter.build_uri(working_bucket, f"sessions/{session_id}/")
+                if legacy_gcs:
+                    from app.adapters.notebooks.gcs_sync import parse_gsutil_ls_output
+
+                    list_shell = f"{_auth_prefix}gsutil ls -l -r {list_prefix}** 2>/dev/null || true"
+                    raw_output = stream(
+                        core_client.connect_get_namespaced_pod_exec,
+                        name=pod_name,
+                        namespace=namespace,
+                        container=_SYNC_CONTAINER,
+                        command=["/bin/sh", "-c", list_shell],
+                        stderr=True,
+                        stdin=False,
+                        stdout=True,
+                        tty=False,
+                        _request_timeout=60,
+                    )
+                    if raw_output:
+                        output_files = parse_gsutil_ls_output(str(raw_output))
+                else:
+                    from app.adapters.notebooks.gcs_sync import _EXCLUDED_FILENAMES, _EXCLUDED_PREFIXES
+
+                    for obj in await storage_adapter.list_objects(list_prefix):
+                        filename = obj.storage_uri.rsplit("/", 1)[-1] if "/" in obj.storage_uri else obj.storage_uri
+                        if not filename or filename in _EXCLUDED_FILENAMES:
+                            continue
+                        if any(filename.startswith(p.rstrip("/")) for p in _EXCLUDED_PREFIXES):
+                            continue
+                        output_files.append(
+                            {"gcs_uri": obj.storage_uri, "size_bytes": obj.size_bytes or 0, "filename": filename}
+                        )
+                logger.info("Found %d output files for compute session", len(output_files))
             except Exception as e:
                 logger.warning("Output file listing failed for pod %s: %s", pod_name, e)
 
@@ -1247,7 +1298,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         try:
             api_client = self._get_api_client()
             config = api_client.configuration
-            auth = api_client.default_headers.get("Authorization")
+            auth = api_client_auth_header(api_client)
             if not auth:
                 return None
             svc_url = f"{config.host}/api/v1/namespaces/{namespace}/services/{service_name}"

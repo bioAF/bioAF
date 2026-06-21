@@ -20,6 +20,7 @@ from app.adapters.image_build import get_image_build_provider
 from app.adapters.image_registry import get_image_registry_provider
 from app.adapters.image_registry.gcp import AR_REPO_ID
 from app.exceptions import StateError, ValidationError
+from app.services.image_build_platform import ImagePlatform, resolve_image_credentials, resolve_image_platform
 
 logger = logging.getLogger("bioaf.notebook_image")
 
@@ -136,9 +137,13 @@ def _render_dockerfile() -> str:
     return DOCKERFILE_CONTENT.replace("__STORAGE_PIP_PACKAGES__", get_storage_adapter().image_storage_pip_packages())
 
 
-def get_image_uri(project_id: str, region: str) -> str:
-    """Construct the full image URI via the cloud-selected image registry."""
-    return get_image_registry_provider().image_uri({"project_id": project_id, "region": region}, IMAGE_NAME, IMAGE_TAG)
+def get_image_uri(config: dict) -> str:
+    """Construct the full image URI via the cloud-selected image registry.
+
+    ``config`` is the cloud-resolved provider config (``ImagePlatform.config``):
+    project_id+region on GCP, account_id+region on AWS.
+    """
+    return get_image_registry_provider().image_uri(config, IMAGE_NAME, IMAGE_TAG)
 
 
 async def _get_credentials(session: AsyncSession):
@@ -187,11 +192,23 @@ async def _set_config(session: AsyncSession, key: str, value: str) -> None:
     await PlatformConfigService.set(session, key, value)
 
 
-async def ensure_artifact_registry(session: AsyncSession, project_id: str, region: str) -> str:
+async def ensure_image_repository(session: AsyncSession, platform: ImagePlatform) -> str:
     """Create the image repository if it does not exist (idempotent).
 
-    Returns the full repository resource name. Delegates the cloud-specific
-    repo-ensure to the image-registry provider.
+    Returns the repository resource name. Delegates the cloud-specific repo-ensure
+    to the image-registry provider (GCP: a shared Artifact Registry repo; AWS: a
+    per-image ECR repository named ``bioaf-scrna``).
+    """
+    credentials = await resolve_image_credentials(session, platform)
+    return get_image_registry_provider().ensure_repository(credentials, platform.config, IMAGE_NAME)
+
+
+async def ensure_artifact_registry(session: AsyncSession, project_id: str, region: str) -> str:
+    """Ensure the shared Artifact Registry repo (GCP-only; environment builds).
+
+    Retained for ``environment_build_service`` (the work-node / conda Packer image
+    build, a GCP-only residual island whose AWS analog is an AMI). The cloud-neutral
+    notebook/cellxgene path uses :func:`ensure_image_repository` instead.
     """
     credentials = await _get_credentials(session)
     return get_image_registry_provider().ensure_repository(
@@ -199,10 +216,10 @@ async def ensure_artifact_registry(session: AsyncSession, project_id: str, regio
     )
 
 
-async def _upload_build_context(session: AsyncSession, project_id: str, working_bucket: str) -> str:
-    """Create a tar.gz with the Dockerfile and upload to GCS.
+async def _upload_build_context(session: AsyncSession, working_bucket: str) -> str:
+    """Create a tar.gz with the Dockerfile and upload to the working bucket.
 
-    Returns the GCS object path (bucket-relative).
+    Returns the storage object path (bucket-relative).
     """
     from app.adapters.registry import get_storage_adapter
 
@@ -224,10 +241,10 @@ async def _upload_build_context(session: AsyncSession, project_id: str, working_
     return object_path
 
 
-async def submit_image_build(session: AsyncSession, project_id: str, region: str) -> str:
-    """Submit a Cloud Build job to build and push the bioaf-scrna image.
+async def submit_image_build(session: AsyncSession, platform: ImagePlatform) -> str:
+    """Submit a build job to build and push the bioaf-scrna image.
 
-    Returns the Cloud Build operation/build ID.
+    Returns the backend build ID (Cloud Build id on GCP, CodeBuild id on AWS).
     """
     working_bucket = await _read_config(session, "working_bucket_name")
     if not working_bucket or working_bucket == "null":
@@ -236,25 +253,25 @@ async def submit_image_build(session: AsyncSession, project_id: str, region: str
     # Upload Dockerfile as build context
     from app.adapters.registry import get_storage_adapter
 
-    object_path = await _upload_build_context(session, project_id, working_bucket)
+    object_path = await _upload_build_context(session, working_bucket)
     context_uri = get_storage_adapter().build_uri(working_bucket, object_path)
 
-    image_uri = get_image_uri(project_id, region)
-    credentials = await _get_credentials(session)
+    image_uri = get_image_uri(platform.config)
+    credentials = await resolve_image_credentials(session, platform)
 
-    # Resolve the platform SA email for the build to run as.
-    # Priority: gcp_service_account_email from config, then credentials object.
-    sa_email = await _read_config(session, "gcp_service_account_email")
-    if not sa_email or sa_email == "null":
-        sa_email = getattr(credentials, "service_account_email", None)
+    # On GCP, fall back to the credentials' own SA when no explicit build SA is
+    # configured (matches the pre-6e behavior). AWS has no build SA.
+    build_sa = platform.build_sa
+    if platform.cloud_provider != "aws" and not build_sa:
+        build_sa = getattr(credentials, "service_account_email", None)
 
     # Submit the build via the cloud-selected image-build provider.
     build_id = get_image_build_provider().submit_build(
         credentials,
-        {"project_id": project_id, "region": region},
+        platform.config,
         context_object_uri=context_uri,
         image_uri=image_uri,
-        build_sa=sa_email,
+        build_sa=build_sa,
         timeout="7200s",
     )
 
@@ -265,14 +282,15 @@ async def submit_image_build(session: AsyncSession, project_id: str, region: str
     return build_id
 
 
-async def check_build_status(session: AsyncSession, project_id: str, build_id: str) -> str:
+async def check_build_status(session: AsyncSession, build_id: str) -> str:
     """Check the status of an image build.
 
     Returns one of: QUEUED, WORKING, SUCCESS, FAILURE, CANCELLED, TIMEOUT (or
     UNKNOWN). Delegates the cloud-specific status read to the image-build provider.
     """
-    credentials = await _get_credentials(session)
-    return get_image_build_provider().check_build_status(credentials, {"project_id": project_id}, build_id)
+    platform = await resolve_image_platform(session)
+    credentials = await resolve_image_credentials(session, platform)
+    return get_image_build_provider().check_build_status(credentials, platform.config, build_id)
 
 
 async def cancel_build(session: AsyncSession) -> str:
@@ -289,12 +307,10 @@ async def cancel_build(session: AsyncSession) -> str:
     if current_status in ("SUCCESS", "FAILURE", "CANCELLED", "TIMEOUT"):
         raise StateError(f"Build already finished with status {current_status}.")
 
-    project_id = await _read_config(session, "gcp_project_id")
-    if not project_id or project_id == "null":
-        raise ValidationError("GCP project not configured.")
-
-    credentials = await _get_credentials(session)
-    get_image_build_provider().cancel_build(credentials, {"project_id": project_id}, build_id)
+    platform = await resolve_image_platform(session)
+    platform.require_target()
+    credentials = await resolve_image_credentials(session, platform)
+    get_image_build_provider().cancel_build(credentials, platform.config, build_id)
 
     await _set_config(session, "notebook_image_build_status", "CANCELLED")
     # Mark notebook components back to build_failed so user can retry
@@ -311,34 +327,35 @@ async def cancel_build(session: AsyncSession) -> str:
 
 
 async def build_notebook_image(session: AsyncSession) -> str:
-    """Full flow: ensure AR repo, submit build, store image URI on success.
+    """Full flow: ensure the image repo, submit build, store image URI on success.
 
     Called when a notebook component (rstudio/jupyterhub) is enabled.
     The image URI is NOT written until the build succeeds (via poll_image_build).
     Returns the build ID.
     """
-    project_id = await _read_config(session, "gcp_project_id")
-    region = await _read_config(session, "gcp_region")
-
-    if not project_id or project_id == "null":
-        raise ValidationError("GCP project not configured")
-    if not region or region == "null":
-        raise ValidationError("GCP region not configured")
+    platform = await resolve_image_platform(session)
+    platform.require_target()
+    platform.require_build_service()
 
     # Clear any stale image URI from a previous failed build attempt
     await _set_config(session, "bioaf_scrna_image", "null")
     # Reset build tracking so poll_image_build picks up the new build
     await _set_config(session, "notebook_image_build_status", "null")
     await _set_config(session, "notebook_image_build_id", "null")
-    # Store the AR repo path (but NOT the image URI -- that is set by
-    # poll_image_build only after the build succeeds)
-    await _set_config(session, "artifact_registry_repo", f"{region}-docker.pkg.dev/{project_id}/{AR_REPO_ID}")
+    # Store the AR repo path (GCP-only; the ECR URI is derived per-image). Nothing
+    # in the backend reads this key, but it is kept for GCP byte-identity.
+    if platform.cloud_provider != "aws":
+        await _set_config(
+            session,
+            "artifact_registry_repo",
+            f"{platform.config['region']}-docker.pkg.dev/{platform.config['project_id']}/{AR_REPO_ID}",
+        )
 
-    # Create AR repo (idempotent)
-    await ensure_artifact_registry(session, project_id, region)
+    # Create the image repository (idempotent)
+    await ensure_image_repository(session, platform)
 
     # Submit build
-    build_id = await submit_image_build(session, project_id, region)
+    build_id = await submit_image_build(session, platform)
 
     return build_id
 
@@ -424,18 +441,17 @@ async def poll_image_build(session: AsyncSession) -> str | None:
     if current_status in ("SUCCESS", "FAILURE", "CANCELLED", "TIMEOUT"):
         return current_status
 
-    project_id = await _read_config(session, "gcp_project_id")
-    if not project_id or project_id == "null":
+    platform = await resolve_image_platform(session)
+    if not platform.has_target:
         return None
 
-    status = await check_build_status(session, project_id, build_id)
+    status = await check_build_status(session, build_id)
     await _set_config(session, "notebook_image_build_status", status)
 
     if status == "SUCCESS":
         logger.info("Notebook image build %s completed successfully", build_id)
         # Now that the build succeeded, write the image URI
-        region = await _read_config(session, "gcp_region")
-        image_uri = get_image_uri(project_id, region)
+        image_uri = get_image_uri(platform.config)
         await _set_config(session, "bioaf_scrna_image", image_uri)
         # Drain the wizard's queue: any rstudio/jupyterhub queued before the
         # image existed can now flip to enabled (or stay provisioning if

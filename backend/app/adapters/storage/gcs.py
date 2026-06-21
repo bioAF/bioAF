@@ -270,6 +270,9 @@ class GcsStorageProvider(StorageProvider):
     def cli_copy_out(self, local_path: str, uri: str) -> str:
         return f"gcloud storage cp -r {local_path} {uri}"
 
+    def cli_copy_out_file(self, local_path: str, uri: str) -> str:
+        return f"gcloud storage cp {local_path} {uri}"
+
     def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
         # `|| true` so a missing/empty prefix does not fail the init container.
         return ["/bin/sh", "-c", f"gsutil -m rsync -r {remote_prefix} {local_dir} || true"]

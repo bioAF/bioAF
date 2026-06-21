@@ -60,6 +60,8 @@ class EksClusterAuthProvider(ClusterAuthProvider):
     """EKS control-plane auth: STS presigned-URL token + the cluster endpoint/CA."""
 
     token_ttl_seconds = 840  # 14 min; under the ~15-min EKS STS token life
+    # auth_header_name (lowercase ``authorization``, for websocket-exec) is the
+    # base default now that GKE needs it too; no per-cloud override required.
 
     def cluster_endpoint(self, cluster_config: dict) -> str:
         # Reuses the gke_cluster_* keys; the deploy stores the EKS endpoint there.

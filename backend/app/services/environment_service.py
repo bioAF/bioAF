@@ -34,6 +34,36 @@ VALID_VISIBILITIES = ("team", "organization")
 VALID_DEFINITION_FORMATS = ("dockerfile", "conda")
 VALID_ENVIRONMENT_TYPES = ("notebook", "work_node", "pipeline")
 
+# Keys that mark a YAML document as a conda environment.yml.
+_CONDA_ENV_KEYS = frozenset({"dependencies", "name", "channels"})
+
+
+def _validate_conda_definition(content: str) -> None:
+    """Reject a conda definition that is not a real environment.yml.
+
+    A common mix-up is pasting a Dockerfile into a conda environment (work-node
+    and pipeline envs are conda-only). The Dockerfile then fails much later with a
+    cryptic YAML parser error at build time (work nodes ``conda env create`` from
+    it via Packer). Catch it at creation with an actionable message instead.
+    """
+    import yaml
+
+    try:
+        data = yaml.safe_load(content)
+    except yaml.YAMLError as exc:
+        first_line = str(exc).splitlines()[0] if str(exc) else "invalid YAML"
+        raise ValidationError(
+            "Conda environment definition must be a valid conda environment.yml, "
+            f"not a Dockerfile or other content. YAML parse error: {first_line}"
+        ) from exc
+    if not isinstance(data, dict) or not (_CONDA_ENV_KEYS & set(data)):
+        raise ValidationError(
+            "Conda environment definition must be a conda environment.yml with at "
+            "least a 'dependencies' (or 'name'/'channels') key. This does not look "
+            "like a conda environment file."
+        )
+
+
 # Default conda environment.yml for pipeline environments.  Provides a
 # practical starting point for Nextflow/nf-core wrapper code.
 DEFAULT_PIPELINE_CONDA_YML = """\
@@ -307,6 +337,14 @@ class EnvironmentService:
         # Pipeline environments only support conda (ADR-045)
         if env.environment_type == "pipeline" and definition_format != "conda":
             raise ValidationError("Pipeline environments only support conda definition format")
+
+        # A conda definition must be a real environment.yml: work-node images are
+        # built from it via Packer (conda env create) and pipeline/notebook conda
+        # envs are wrapped into a Dockerfile, so a Dockerfile pasted into a conda
+        # env (a common mix-up) only fails later with a cryptic YAML parser error.
+        # Reject it up front with an actionable message.
+        if definition_format == "conda":
+            _validate_conda_definition(definition_content)
 
         # Auto-increment version number
         result = await session.execute(

@@ -767,3 +767,133 @@ def test_default_notebook_conda_yml_has_bioconductor_stack():
     }
     missing = required_bioc - deps
     assert not missing, f"Bioconductor packages missing from default notebook env: {sorted(missing)}"
+
+
+@pytest.mark.asyncio
+async def test_poll_in_progress_builds_calls_check_build_status_with_two_args(session, admin_user):
+    """Regression: poll_in_progress_builds must call check_build_status(session, build_id).
+
+    A stale 3-arg call (session, project_id, build_id) - left when check_build_status
+    dropped its project_id parameter - raised TypeError and broke environment-build
+    status transitions on every cloud. This pins the 2-arg signature end-to-end.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from sqlalchemy import text
+
+    from app.models.environment import Environment
+    from app.models.environment_version import EnvironmentVersion
+    from app.services.environment_build_service import EnvironmentBuildService
+
+    # poll gates on the cloud image target (project+region); set both so the poll
+    # proceeds to the status check.
+    for k, v in (("gcp_project_id", "test-project"), ("gcp_region", "us-central1")):
+        await session.execute(
+            text(
+                "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+            ).bindparams(k=k, v=v)
+        )
+    env = Environment(
+        name="custom env",
+        organization_id=admin_user.organization_id,
+        created_by_user_id=admin_user.id,
+        visibility="team",
+    )
+    session.add(env)
+    await session.flush()
+    ver = EnvironmentVersion(
+        environment_id=env.id,
+        version_number=1,
+        status="building",
+        definition_format="dockerfile",
+        definition_content="FROM python:3.11-slim",
+        build_id="build-xyz",
+        created_by_user_id=admin_user.id,
+    )
+    session.add(ver)
+    await session.flush()
+
+    with patch(
+        "app.services.notebook_image_service.check_build_status",
+        new=AsyncMock(return_value="SUCCESS"),
+    ) as mock_cbs:
+        changed = await EnvironmentBuildService.poll_in_progress_builds(session)
+
+    # The crux: two positional args (session, build_id), not three.
+    mock_cbs.assert_awaited_once_with(session, "build-xyz")
+    assert changed == 1
+    await session.refresh(ver)
+    assert ver.status == "ready"
+
+
+# --- Conda definition validation (reject a Dockerfile pasted into a conda env) ---
+
+
+def test_validate_conda_definition_accepts_real_env_and_rejects_dockerfile():
+    """A work-node/pipeline conda env must be a real environment.yml; a Dockerfile
+    pasted in (a common mix-up) is rejected at creation with a clear message
+    instead of a cryptic YAML parser error at build time."""
+    from app.exceptions import ValidationError
+    from app.services.environment_service import _validate_conda_definition
+
+    _validate_conda_definition("name: x\ndependencies:\n  - python=3.11\n")  # ok
+    dockerfile = "# Pinned\nFROM jupyter/scipy-notebook@sha256:abc\n\nUSER root\nARG R_VERSION=4.4.3\n"
+    with pytest.raises(ValidationError, match="conda environment.yml"):
+        _validate_conda_definition(dockerfile)
+
+
+def test_parse_work_node_conda_name_rejects_dockerfile():
+    """The work-node build parses the conda env name; a Dockerfile (raising OR
+    folding into a scalar) is rejected with an actionable error, not a raw YAML
+    traceback surfaced as 'Build failed to start: expected <document start>'."""
+    from app.exceptions import ValidationError
+    from app.services.environment_build_service import _parse_work_node_conda_name
+
+    assert _parse_work_node_conda_name("name: bench\ndependencies:\n  - python=3.11\n") == "bench"
+    with pytest.raises(ValidationError, match="conda environment.yml"):
+        _parse_work_node_conda_name("# c\nFROM jupyter/scipy-notebook@sha256:abc\n\nUSER root\nARG R_VERSION=4.4.3\n")
+    with pytest.raises(ValidationError, match="conda environment.yml"):
+        _parse_work_node_conda_name("FROM python:3.11 single scalar line")
+
+
+# --- Rebuild-from-template: the conda template must be a buildable conda env ---
+
+
+def test_default_conda_templates_pass_conda_validation():
+    """The 'Rebuild from Latest Template' button on a work-node (conda) env must
+    serve content the create-version validation accepts. Regression guard for the
+    bug where the rebuild modal fetched the Dockerfile template and submitted it
+    as definition_format='conda', failing with 'must be a valid conda
+    environment.yml'. Each default conda template must round-trip the validator.
+    """
+    from app.services.environment_service import (
+        DEFAULT_NOTEBOOK_CONDA_YML,
+        DEFAULT_PIPELINE_CONDA_YML,
+        DEFAULT_WORK_NODE_CONDA_YML,
+        _validate_conda_definition,
+    )
+
+    for tmpl in (DEFAULT_WORK_NODE_CONDA_YML, DEFAULT_PIPELINE_CONDA_YML, DEFAULT_NOTEBOOK_CONDA_YML):
+        _validate_conda_definition(tmpl)  # must not raise
+
+
+@pytest.mark.asyncio
+async def test_get_conda_template_for_work_node(client, admin_token):
+    """The conda template endpoint returns a conda env.yml for work-node envs so
+    the rebuild flow can serve the right format (mirrors /template/dockerfile)."""
+    resp = await client.get(
+        "/api/v1/environments/template/conda?environment_type=work_node",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["definition_format"] == "conda"
+    assert "dependencies:" in body["definition_content"]
+    # Defaults to the work-node template when the type is unknown/absent.
+    resp2 = await client.get(
+        "/api/v1/environments/template/conda",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp2.status_code == 200
+    assert resp2.json()["definition_format"] == "conda"

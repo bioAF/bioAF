@@ -70,3 +70,23 @@ output "vpc_id" {
   value       = aws_vpc.this.id
   description = "VPC the cluster runs in."
 }
+
+# --- Work-node (EC2) wiring (cleanup item 8b) ---------------------------------
+# The app's EC2 work-node provider reads these to launch standalone analysis VMs
+# into the cluster VPC. read_module_outputs maps them to the aws_work_node_*
+# platform_config keys the provider's load_config reads.
+
+output "work_node_subnet_id" {
+  value       = aws_subnet.public[0].id
+  description = "Public subnet work-node EC2 instances launch into."
+}
+
+output "work_node_security_group_id" {
+  value       = aws_security_group.work_node.id
+  description = "Security group for work-node EC2 instances (SSH ingress)."
+}
+
+output "work_node_instance_profile" {
+  value       = aws_iam_instance_profile.work_node.name
+  description = "IAM instance profile (S3 access) attached to work-node EC2 instances."
+}

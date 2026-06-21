@@ -101,6 +101,39 @@ def test_eks_provider_requires_cluster_name():
         EksClusterAuthProvider().bearer_token({"aws_region": "us-west-1"})
 
 
+def test_gke_auth_header_name_is_lowercase_for_websocket_exec():
+    # GKE runs out-of-cluster too, so it needs the lowercase header the websocket
+    # exec client forwards; capital 'Authorization' went out anonymous -> 401 and
+    # silently broke notebook output sync on GCP. REST is case-insensitive.
+    assert GkeClusterAuthProvider().auth_header_name == "authorization"
+
+
+def test_eks_auth_header_name_is_lowercase_for_websocket_exec():
+    # Same requirement on EKS (capital -> 403 anonymous). Inherits the lowercase
+    # base default; no per-cloud override needed.
+    from app.adapters.cluster_auth.aws import EksClusterAuthProvider
+
+    assert EksClusterAuthProvider().auth_header_name == "authorization"
+
+
+def test_api_client_auth_header_reads_either_casing():
+    from unittest.mock import MagicMock
+
+    from app.adapters.kubernetes.connection import api_client_auth_header
+
+    gke_client = MagicMock()
+    gke_client.default_headers = {"Authorization": "Bearer cap"}
+    assert api_client_auth_header(gke_client) == "Bearer cap"
+
+    eks_client = MagicMock()
+    eks_client.default_headers = {"authorization": "Bearer low"}
+    assert api_client_auth_header(eks_client) == "Bearer low"
+
+    missing = MagicMock()
+    missing.default_headers = {"User-Agent": "x"}
+    assert api_client_auth_header(missing) is None
+
+
 def test_eks_token_format_and_cluster_header():
     """The token is k8s-aws-v1.<base64url presigned URL> and binds x-k8s-aws-id."""
     import base64

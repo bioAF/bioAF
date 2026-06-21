@@ -316,6 +316,9 @@ class S3StorageProvider(StorageProvider):
     def cli_copy_out(self, local_path: str, uri: str) -> str:
         return f"aws s3 cp --recursive {local_path} {uri}"
 
+    def cli_copy_out_file(self, local_path: str, uri: str) -> str:
+        return f"aws s3 cp {local_path} {uri}"
+
     def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
         # `|| true` so a missing/empty prefix does not fail the stage-in init
         # container, matching the GCS adapter's tolerant rsync.
@@ -344,7 +347,12 @@ class S3StorageProvider(StorageProvider):
     def image_storage_pip_packages(self) -> str:
         # Baked into built pipeline/notebook images so user code can read/write S3
         # (boto3) and shell out to the CLI (awscli). Bounded to the 1.x majors.
-        return "boto3>=1.43,<2 awscli>=1.40,<2"
+        # Each spec is single-quoted because this string is substituted into a
+        # Dockerfile `RUN pip install ...` shell line: an UNQUOTED upper bound like
+        # `<2` is parsed by the shell as an input redirection ("2: No such file or
+        # directory"), failing the image build. (GCS uses `==` pins, which have no
+        # shell-metacharacters, so it needs no quoting.)
+        return "'boto3>=1.43,<2' 'awscli>=1.40,<2'"
 
     # -- Credentials + client factory (real S3 mode) --------------------------
 

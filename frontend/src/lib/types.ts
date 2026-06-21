@@ -1856,7 +1856,8 @@ export interface WorkNodeListResponse {
 }
 
 export interface WorkNodeLaunchRequest {
-  project_id: number;
+  project_id?: number;
+  experiment_id?: number;
   environment_version_id: number;
   machine_type: string;
   input_file_ids?: number[];
