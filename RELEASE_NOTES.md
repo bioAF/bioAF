@@ -11,6 +11,15 @@
 > changelog section. Sections below v0.15.1 remain in their original SemVer
 > format.
 
+## v2026.6.20
+
+### File upload
+
+- Suggested filenames are now opt-in. When you upload files, bioAF still
+  recommends names based on your naming profile, but your original filenames are
+  kept unless you choose to accept a suggestion. Accept them one at a time, or
+  use "Accept all" / "Dismiss all" to handle the whole batch at once.
+
 ## v2026.6.19
 
 ### Run bioAF on AWS
