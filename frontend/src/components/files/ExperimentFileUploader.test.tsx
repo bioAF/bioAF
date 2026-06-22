@@ -158,6 +158,108 @@ test("uploadAll passes experimentId and optional sampleId", async () => {
   expect(onUploaded).toHaveBeenCalled();
 });
 
+test("keeps the original filename by default when a suggestion is not accepted", async () => {
+  const user = userEvent.setup();
+  mockUploadSigned.mockResolvedValue({ id: 99 });
+  render(
+    <ExperimentFileUploader
+      experimentId={42}
+      samples={SAMPLES}
+      onUploaded={() => {}}
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: /^upload$/i }));
+
+  const input = screen.getByTestId("upload-file-input") as HTMLInputElement;
+  await user.upload(input, new File(["x"], "reads.fastq.gz", { type: "" }));
+
+  // A suggestion is offered, but the default is to keep the original name.
+  await screen.findByText(/suggested name/i);
+
+  await user.click(screen.getByRole("button", { name: /upload 1 file/i }));
+
+  await waitFor(() => expect(mockUploadSigned).toHaveBeenCalledTimes(1));
+  const [, opts] = mockUploadSigned.mock.calls[0];
+  expect(opts.filename).toBeUndefined();
+});
+
+test("accepting a single suggestion uploads under the suggested name", async () => {
+  const user = userEvent.setup();
+  mockUploadSigned.mockResolvedValue({ id: 99 });
+  render(
+    <ExperimentFileUploader
+      experimentId={42}
+      samples={SAMPLES}
+      onUploaded={() => {}}
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: /^upload$/i }));
+
+  const input = screen.getByTestId("upload-file-input") as HTMLInputElement;
+  await user.upload(input, new File(["x"], "reads.fastq.gz", { type: "" }));
+
+  await user.click(await screen.findByRole("button", { name: /^accept$/i }));
+  await user.click(screen.getByRole("button", { name: /upload 1 file/i }));
+
+  await waitFor(() => expect(mockUploadSigned).toHaveBeenCalledTimes(1));
+  const [, opts] = mockUploadSigned.mock.calls[0];
+  expect(opts.filename).toMatch(/^P7_EXP-A_.*\.fastq\.gz$/);
+});
+
+test("Accept all applies the suggested name to every queued file", async () => {
+  const user = userEvent.setup();
+  mockUploadSigned.mockResolvedValue({ id: 99 });
+  render(
+    <ExperimentFileUploader
+      experimentId={42}
+      samples={SAMPLES}
+      onUploaded={() => {}}
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: /^upload$/i }));
+
+  const input = screen.getByTestId("upload-file-input") as HTMLInputElement;
+  await user.upload(input, [
+    new File(["x"], "reads_R1.fastq.gz", { type: "" }),
+    new File(["y"], "reads_R2.fastq.gz", { type: "" }),
+  ]);
+
+  await user.click(await screen.findByRole("button", { name: /accept all/i }));
+  await user.click(screen.getByRole("button", { name: /upload 2 files/i }));
+
+  await waitFor(() => expect(mockUploadSigned).toHaveBeenCalledTimes(2));
+  for (const call of mockUploadSigned.mock.calls) {
+    expect(call[1].filename).toMatch(/^P7_EXP-A_.*\.fastq\.gz$/);
+  }
+});
+
+test("Dismiss all keeps the original name for every queued file", async () => {
+  const user = userEvent.setup();
+  mockUploadSigned.mockResolvedValue({ id: 99 });
+  render(
+    <ExperimentFileUploader
+      experimentId={42}
+      samples={SAMPLES}
+      onUploaded={() => {}}
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: /^upload$/i }));
+
+  const input = screen.getByTestId("upload-file-input") as HTMLInputElement;
+  await user.upload(input, [
+    new File(["x"], "reads_R1.fastq.gz", { type: "" }),
+    new File(["y"], "reads_R2.fastq.gz", { type: "" }),
+  ]);
+
+  await user.click(await screen.findByRole("button", { name: /dismiss all/i }));
+  await user.click(screen.getByRole("button", { name: /upload 2 files/i }));
+
+  await waitFor(() => expect(mockUploadSigned).toHaveBeenCalledTimes(2));
+  for (const call of mockUploadSigned.mock.calls) {
+    expect(call[1].filename).toBeUndefined();
+  }
+});
+
 test("uploads with no sample associate to the experiment only", async () => {
   const user = userEvent.setup();
   mockUploadSigned.mockResolvedValue({ id: 99 });
