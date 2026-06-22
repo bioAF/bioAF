@@ -85,6 +85,8 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
       const updated = prev.map((item) => {
         if (item.status !== "queued") return item;
         const suggested = suggestFilename(item.file.name, suggestOpts);
+        // Preserve the accept/dismiss decision when the suggestion is unchanged.
+        if (suggested === item.suggestedName) return item;
         return { ...item, suggestedName: suggested, nameAccepted: null };
       });
       return dedupeNames(updated);
@@ -133,6 +135,21 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
   const acceptRename = (idx: number) => setItemState(idx, { nameAccepted: true });
   const rejectRename = (idx: number) => setItemState(idx, { nameAccepted: false });
 
+  const setAllRenames = (accepted: boolean) =>
+    setItems((prev) =>
+      prev.map((item) =>
+        item.status === "queued" && item.suggestedName
+          ? { ...item, nameAccepted: accepted }
+          : item,
+      ),
+    );
+  const acceptAllRenames = () => setAllRenames(true);
+  const dismissAllRenames = () => setAllRenames(false);
+
+  const suggestionCount = items.filter(
+    (i) => i.status === "queued" && i.suggestedName,
+  ).length;
+
   const uploadAll = async () => {
     setUploading(true);
     const opts = {
@@ -145,8 +162,10 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
       if (items[i].status === "complete") continue;
       setItemState(i, { status: "uploading", progress: 0 });
       const item = items[i];
+      // Keep the original name by default; only rename when the suggestion was
+      // explicitly accepted. Undecided suggestions are dismissed on upload.
       const useFilename =
-        item.nameAccepted === false ? undefined : item.suggestedName ?? undefined;
+        item.nameAccepted === true ? item.suggestedName ?? undefined : undefined;
       // Signed direct-to-storage upload when the backend supports it; otherwise
       // the server-proxied path (e.g. NFS, signed_url_upload=False).
       const upload = has("signed_url_upload") ? api.uploadSigned : api.uploadProxied;
@@ -237,7 +256,32 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
 
           {items.length > 0 && (
             <div>
-              <h3 className="font-medium mb-2 text-sm">Files ({items.length})</h3>
+              <div className="flex items-center justify-between mb-2 gap-3">
+                <h3 className="font-medium text-sm">Files ({items.length})</h3>
+                {suggestionCount > 0 && (
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={acceptAllRenames}
+                      className="px-2 py-0.5 text-xs bg-amber-600 text-white rounded hover:bg-amber-700"
+                    >
+                      Accept all
+                    </button>
+                    <button
+                      type="button"
+                      onClick={dismissAllRenames}
+                      className="px-2 py-0.5 text-xs border border-gray-300 text-gray-600 rounded hover:bg-gray-100"
+                    >
+                      Dismiss all
+                    </button>
+                  </div>
+                )}
+              </div>
+              {suggestionCount > 0 && (
+                <p className="text-xs text-gray-500 mb-2">
+                  Original filenames are kept unless you accept a suggestion.
+                </p>
+              )}
               <ul className="space-y-3">
                 {items.map((item, idx) => (
                   <li

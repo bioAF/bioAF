@@ -142,6 +142,59 @@ describe("DataUploadPage", () => {
     expect(calledOptions.experimentId).toBe(10);
   });
 
+  const withExperimentCode = (path: string) => {
+    if (path.startsWith("/api/projects")) return Promise.resolve(projectsResponse);
+    if (path.startsWith("/api/experiments"))
+      return Promise.resolve({
+        experiments: [{ id: 10, name: "RNA-seq Batch A", code: "EXP-A", status: "registered" }],
+        total: 1,
+        page: 1,
+        page_size: 100,
+      });
+    return Promise.resolve([]);
+  };
+
+  it("keeps the original filename by default when a suggestion is not accepted", async () => {
+    mockGet.mockImplementation(withExperimentCode);
+    render(<DataUploadPage />);
+
+    await waitFor(() => screen.getByRole("combobox", { name: /experiment/i }));
+    fireEvent.change(screen.getByRole("combobox", { name: /experiment/i }), {
+      target: { value: "10" },
+    });
+
+    const file = new File(["data"], "reads.fastq.gz", { type: "application/gzip" });
+    const input = document.querySelector("input[type='file']") as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+
+    // A suggestion is offered, but the default is to keep the original name.
+    await screen.findByText(/suggested name/i);
+    fireEvent.click(screen.getByText(/Upload 1 file/));
+
+    await waitFor(() => expect(mockUploadSigned).toHaveBeenCalledTimes(1));
+    expect(mockUploadSigned.mock.calls[0][1].filename).toBeUndefined();
+  });
+
+  it("applies the suggested name to every file via Accept all", async () => {
+    mockGet.mockImplementation(withExperimentCode);
+    render(<DataUploadPage />);
+
+    await waitFor(() => screen.getByRole("combobox", { name: /experiment/i }));
+    fireEvent.change(screen.getByRole("combobox", { name: /experiment/i }), {
+      target: { value: "10" },
+    });
+
+    const file = new File(["data"], "reads.fastq.gz", { type: "application/gzip" });
+    const input = document.querySelector("input[type='file']") as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+
+    fireEvent.click(await screen.findByRole("button", { name: /accept all/i }));
+    fireEvent.click(screen.getByText(/Upload 1 file/));
+
+    await waitFor(() => expect(mockUploadSigned).toHaveBeenCalledTimes(1));
+    expect(mockUploadSigned.mock.calls[0][1].filename).toMatch(/^EXP-A_.*\.fastq\.gz$/);
+  });
+
   it("shows empty state when no experiments exist", async () => {
     mockGet.mockImplementation((path: string) => {
       if (path.startsWith("/api/projects")) return Promise.resolve({ projects: [], total: 0 });
