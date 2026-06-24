@@ -7,6 +7,7 @@ import logging
 import httpx
 
 from app.services.llm_provider_clients import ProviderError
+from app.services.llm_provider_clients.tool_use import ToolCall, ToolUseResult, object_schema
 
 logger = logging.getLogger("bioaf.llm.anthropic")
 
@@ -104,3 +105,65 @@ async def submit(
         return "".join(p.get("text", "") for p in parts if p.get("type") == "text")
     except (ValueError, KeyError, TypeError) as exc:
         raise ProviderError(f"Anthropic message response not parseable: {exc}", error_class="parse") from exc
+
+
+def _tools_to_anthropic(tools: list[dict]) -> list[dict]:
+    return [
+        {"name": t["name"], "description": t["description"], "input_schema": object_schema(t["args_schema"])}
+        for t in tools
+    ]
+
+
+def _messages_to_anthropic(messages: list[dict]) -> list[dict]:
+    """Translate the loop's provider-agnostic messages into Anthropic messages. Prior tool
+    exchanges are encoded as plain text (not native tool_use/tool_result blocks) to sidestep
+    tool_use_id and role-alternation constraints; the model's NEW decision still comes back as
+    a native tool_use block, which we parse. v1 best-effort (see LEARNINGS)."""
+    out: list[dict] = []
+    for m in messages:
+        role = m.get("role")
+        if role == "tool":
+            out.append({"role": "user", "content": f"[tool result] {m.get('content') or ''}"})
+            continue
+        text = m.get("content") or ""
+        if role == "assistant" and m.get("tool_calls"):
+            calls = ", ".join(f"{c['tool']}({c['args']})" for c in m["tool_calls"])
+            text = f"{text}\n[called tools: {calls}]".strip()
+        out.append({"role": "assistant" if role == "assistant" else "user", "content": text or "(no content)"})
+    return out
+
+
+def _parse_anthropic_tool_use(data: dict) -> ToolUseResult:
+    parts = data.get("content", [])
+    text = "".join(p.get("text", "") for p in parts if p.get("type") == "text") or None
+    tool_calls = [
+        ToolCall(tool=p["name"], args=p.get("input", {}) or {}, id=p.get("id"))
+        for p in parts
+        if p.get("type") == "tool_use"
+    ]
+    return ToolUseResult(text=text, tool_calls=tool_calls)
+
+
+async def submit_with_tools(
+    *, messages: list[dict], tools: list[dict], model: str, api_key: str | None
+) -> ToolUseResult:
+    if not api_key:
+        raise ProviderError("Anthropic requires an API key", error_class="auth")
+    body = {
+        "model": model,
+        "max_tokens": 4096,
+        "tools": _tools_to_anthropic(tools),
+        "messages": _messages_to_anthropic(messages),
+    }
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.post(f"{_BASE_URL}/messages", headers=_headers(api_key), json=body)
+    except httpx.HTTPError as exc:
+        detail = _transport_detail(exc)
+        logger.warning("anthropic submit_with_tools transport failure: %s", detail)
+        raise ProviderError(detail, error_class="transport") from exc
+    _raise_for_status(resp)
+    try:
+        return _parse_anthropic_tool_use(resp.json())
+    except (ValueError, KeyError, TypeError) as exc:
+        raise ProviderError(f"Anthropic tool-use response not parseable: {exc}", error_class="parse") from exc

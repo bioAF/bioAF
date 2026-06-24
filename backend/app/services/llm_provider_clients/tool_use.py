@@ -24,3 +24,13 @@ class ToolUseResult:
     def is_final(self) -> bool:
         """A turn with no tool calls is the model's final answer."""
         return not self.tool_calls
+
+
+def object_schema(args_schema: dict) -> dict:
+    """Wrap a tool's minimal args schema ({"required": [...], "properties": {...}}) into the
+    JSON-Schema object form every provider's tool/function declaration expects."""
+    return {
+        "type": "object",
+        "properties": args_schema.get("properties", {}),
+        "required": args_schema.get("required", []),
+    }
