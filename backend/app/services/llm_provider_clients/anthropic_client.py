@@ -10,6 +10,9 @@ from app.services.llm_provider_clients import ProviderError
 
 logger = logging.getLogger("bioaf.llm.anthropic")
 
+# Native tool/function calling is available on this provider (assistant, L4).
+SUPPORTS_TOOLS = True
+
 _BASE_URL = "https://api.anthropic.com/v1"
 # 300s read budget covers large prompts on Claude. The default httpx 60s
 # routinely timed out experiment-scope reviews. Connect stays at 10s.

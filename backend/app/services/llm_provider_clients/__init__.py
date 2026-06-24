@@ -47,3 +47,12 @@ def get_client(provider: str):
     if provider not in CLIENTS:
         raise ValidationError(f"unknown provider: {provider}")
     return CLIENTS[provider]
+
+
+def supports_tools(provider: str) -> bool:
+    """Whether a provider exposes native tool/function calling (the assistant, L4).
+
+    Unknown providers default to False so the assistant fails closed (unavailable) rather
+    than attempting a tool-calling request a client cannot make."""
+    client = CLIENTS.get(provider)
+    return bool(getattr(client, "SUPPORTS_TOOLS", False))

@@ -16,6 +16,10 @@ from __future__ import annotations
 from app.services.llm_provider_clients import ProviderError
 from app.services.llm_provider_models import FALLBACK_MODELS
 
+# Gemma has no native tool/function-calling path in v1, so the assistant gates it off
+# (a JSON-protocol fallback loop is a later enhancement).
+SUPPORTS_TOOLS = False
+
 
 async def list_models(api_key: str | None) -> list[str]:
     return list(FALLBACK_MODELS["gemma"])
