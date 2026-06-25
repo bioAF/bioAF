@@ -67,8 +67,14 @@ Every tool declares a consequence class:
 | Class | Examples | Behavior in the wrapper |
 |---|---|---|
 | read_only | recommend_pipeline, list_* | execute and return |
-| mutating | install pipeline, create entities | execute; confirm if non-trivial (rule TBD when these land) |
-| spend | launch_run | NEVER execute on the model's say-so: create an ActionPlan and wait for explicit confirmation |
+| mutating | install pipeline, import_by_accession | NEVER execute on the model's say-so: create an ActionPlan and wait for confirmation (same gate as spend). On confirm the action runs. |
+| spend | launch_run | NEVER execute on the model's say-so: create an ActionPlan and wait for explicit confirmation. On confirm, v1 builds the launch request but does not POST it. |
+
+**Mutating gate (resolved 2026-06-24):** every mutating action gets the SAME plan-then-confirm gate
+as spend (owner decision). The agent cannot install a pipeline or import data without the user
+confirming the proposed plan; the difference from spend is only at confirm time, where a mutating
+action actually runs while a spend action stops at the built request (v1). The wrapper treats
+`consequence_class in (spend, mutating)` identically at the gate.
 
 For spend (and other consequential actions), the agent assembles a plan, the user confirms,
 and only then does it execute. **v1 stops at the confirmed plan**: it produces a fully-formed

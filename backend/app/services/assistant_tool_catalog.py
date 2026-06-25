@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from app.services.experiment_service import ExperimentService
+from app.services.nf_core_registry_service import NfCoreRegistryService
 from app.services.pipeline_catalog_service import PipelineCatalogService
 from app.services.pipeline_run_service import PipelineRunService
 from app.services.recommend_pipeline_service import PipelineRecommendation, RecommendPipelineService
@@ -119,6 +120,26 @@ async def _check_status_handler(session, *, org_id, user_id, arguments):
     }
 
 
+async def _install_handler(session, *, org_id, user_id, arguments):
+    """Install an nf-core pipeline into the org's catalog. Mutating: only runs after confirmation.
+    Accepts a bare name ('scrnaseq') or a pipeline_key ('nf-core/scrnaseq'); defaults to the latest
+    available version. Idempotent: a pipeline already installed returns its key, not an error."""
+    name = arguments["name"]
+    if name.startswith("nf-core/"):
+        name = name[len("nf-core/") :]
+    version = arguments.get("version")
+    if not version:
+        versions = await NfCoreRegistryService.get_pipeline_versions(session, name)
+        if not versions:
+            raise ValueError(f"No versions found for nf-core/{name}; check the name or refresh the registry.")
+        version = versions[0].get("tag_name")
+    try:
+        entry = await NfCoreRegistryService.install_pipeline(session, org_id, user_id, name, version)
+    except NfCoreRegistryService.PipelineAlreadyInstalledError:
+        return {"pipeline_key": f"nf-core/{name}", "already_installed": True}
+    return {"pipeline_key": entry.pipeline_key, "name": entry.name, "version": entry.version}
+
+
 async def _recommend_pipeline_handler(session, *, org_id, user_id, arguments):
     rec: PipelineRecommendation = await RecommendPipelineService.recommend(
         session, org_id=org_id, experiment_id=arguments["experiment_id"]
@@ -195,6 +216,23 @@ TOOL_CATALOG: dict[str, ToolDescriptor] = {
         permission=("experiments", "view"),
         args_schema={"required": ["experiment_id"], "properties": {"experiment_id": {"type": "integer"}}},
         handler=_recommend_pipeline_handler,
+    ),
+    "install": ToolDescriptor(
+        name="install",
+        description=(
+            "Install an nf-core pipeline into the organization's catalog so it can be run. Pass the "
+            "pipeline name (e.g. 'scrnaseq' or 'nf-core/scrnaseq'); the latest version is used unless "
+            "one is given. Mutating: changes the catalog, so it is never executed without an explicit "
+            "user confirmation of the proposed plan."
+        ),
+        consequence_class="mutating",
+        # Mirrors the real POST /api/pipelines/registry/{name}/install guard.
+        permission=("pipelines", "create"),
+        args_schema={
+            "required": ["name"],
+            "properties": {"name": {"type": "string"}, "version": {"type": "string"}},
+        },
+        handler=_install_handler,
     ),
     "launch_run": ToolDescriptor(
         name="launch_run",

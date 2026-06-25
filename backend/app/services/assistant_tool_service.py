@@ -155,8 +155,9 @@ class AssistantToolService:
                 error=f"invalid arguments: {validation_error}",
             )
 
-        # Spend gate (G1): do NOT execute. Create a plan and wait for confirmation.
-        if tool.consequence_class == "spend":
+        # Consequence gate (G1): spend AND mutating actions do NOT execute on the model's say-so.
+        # Both create a plan and wait for explicit confirmation (owner rule: confirm all mutating).
+        if tool.consequence_class in ("spend", "mutating"):
             invocation = _new_invocation(
                 conversation,
                 message_id,

@@ -7,12 +7,15 @@ created. Confirm re-checks the underlying tool permission, so a bench user (can 
 assistant, cannot launch) is denied.
 """
 
+from unittest.mock import AsyncMock, patch
+
 import httpx
 import pytest
 import respx
 
 from app.models.assistant import AssistantActionPlan, AssistantConversation
 from app.models.experiment import Experiment
+from app.models.nf_core_registry_pipeline import NfCoreRegistryPipeline
 from app.models.pipeline_run import PipelineRun
 from app.models.sample import Sample
 from app.models.pipeline_catalog_entry import PipelineCatalogEntry
@@ -153,7 +156,8 @@ async def test_message_reaches_plan_then_confirm_builds_launch_request(client, s
     assert confirm.status_code == 200
     cbody = confirm.json()
     assert cbody["status"] == "approved"
-    assert cbody["launch_request"]["pipeline_key"] == "nf-core/rnaseq"
+    assert cbody["executed"] is False  # spend: built, not executed in v1
+    assert cbody["result"]["pipeline_key"] == "nf-core/rnaseq"
     # The load-bearing constraint: confirm builds the request but does NOT launch in v1.
     assert await _run_count(session) == 0
 
@@ -168,6 +172,55 @@ async def test_message_forbidden_for_viewer(client, viewer_token, session, admin
         f"/api/assistant/conversations/{conv.id}/messages", json={"text": "hi"}, headers=_auth(viewer_token)
     )
     assert resp.status_code == 403
+
+
+async def test_confirm_install_plan_executes_the_install(client, session, admin_user, admin_token):
+    """A mutating action (install) actually RUNS on confirm, unlike a v1 spend action which only
+    builds. Confirming an install plan installs the pipeline into the org catalog and reports
+    executed=True."""
+    session.add(
+        NfCoreRegistryPipeline(
+            name="scrnaseq",
+            full_name="nf-core/scrnaseq",
+            description="single-cell RNA-seq",
+            releases_json=[{"tag_name": "4.1.0", "published_at": "2024-01-01", "has_schema": True}],
+            default_branch="master",
+        )
+    )
+    conv = AssistantConversation(organization_id=admin_user.organization_id, user_id=admin_user.id, status="active")
+    session.add(conv)
+    await session.flush()
+    plan = AssistantActionPlan(
+        conversation_id=conv.id,
+        steps_json=[{"tool": "install", "args": {"name": "scrnaseq"}}],
+        status="proposed",
+    )
+    session.add(plan)
+    await session.flush()
+    await session.commit()
+
+    # Stub the network schema fetch so install stays hermetic.
+    with patch(
+        "app.services.pipeline_catalog_service.PipelineCatalogService.fetch_pipeline_schema",
+        new=AsyncMock(return_value={}),
+    ):
+        resp = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(admin_token))
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["executed"] is True
+    assert body["result"]["pipeline_key"] == "nf-core/scrnaseq"
+    count = (
+        await session.execute(
+            select(func.count())
+            .select_from(PipelineCatalogEntry)
+            .where(
+                PipelineCatalogEntry.organization_id == admin_user.organization_id,
+                PipelineCatalogEntry.pipeline_key == "nf-core/scrnaseq",
+            )
+        )
+    ).scalar_one()
+    assert count == 1
 
 
 async def test_confirm_denied_without_launch_permission(client, session, admin_user):

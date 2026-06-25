@@ -325,6 +325,45 @@ async def test_check_status_rejects_run_outside_org(session, admin_user):
     assert result.status == "failed"
 
 
+# ---- Mutating tools follow the same confirm gate as spend (owner rule) ----
+
+
+async def test_install_catalog_descriptor():
+    tool = get_tool("install")
+    assert tool is not None
+    assert tool.consequence_class == "mutating"
+    # Mirrors the real POST /api/pipelines/registry/{name}/install guard.
+    assert tool.permission == ("pipelines", "create")
+
+
+async def test_install_is_mutating_and_stops_at_plan_without_executing(session, admin_user):
+    """A mutating tool gets the SAME plan-then-confirm gate as spend: invoking it creates a plan and
+    does NOT run the handler, so nothing is installed until the user confirms."""
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="install",
+        arguments={"name": "scrnaseq"},
+    )
+
+    assert result.status == "awaiting_confirmation"
+    assert result.tool_invocation.consequence_class == "mutating"
+    assert result.tool_invocation.requires_confirmation is True
+    assert result.action_plan is not None
+    # Nothing was installed at invoke time: no catalog entry for nf-core/scrnaseq exists.
+    count = (
+        await session.execute(
+            select(func.count())
+            .select_from(PipelineCatalogEntry)
+            .where(PipelineCatalogEntry.pipeline_key == "nf-core/scrnaseq")
+        )
+    ).scalar_one()
+    assert count == 0
+
+
 async def test_launch_run_denied_when_caller_lacks_permission(session, admin_user, viewer_user):
     # viewer's role lacks pipelines:launch (the realistic persona is bench, which can use the
     # assistant but cannot launch; viewer exercises the same gate with an existing fixture).

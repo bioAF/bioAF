@@ -58,7 +58,11 @@ class MessageResponse(BaseModel):
 class ConfirmResponse(BaseModel):
     status: str
     plan_id: int
-    launch_request: dict | None = None
+    # True if the confirmed action actually ran (mutating tools like install/import). False for a
+    # spend action (launch_run): v1 builds the fully-formed launch request but does not execute it.
+    executed: bool = False
+    # The action result, OR (for a spend step) the built launch request.
+    result: dict | None = None
 
 
 @router.get("/availability", response_model=AvailabilityResponse)
@@ -155,11 +159,12 @@ async def confirm_action_plan(
     role_id = int(current_user["role_id"])
     user_id = int(current_user["sub"])
 
-    # Re-check the underlying permission for every step server-side, then build each request.
-    # The agent acts as the user: a user who cannot launch cannot confirm a launch.
+    # Re-check the underlying permission for every step server-side, then run it. The agent acts
+    # as the user: a user who cannot launch cannot confirm a launch.
     steps = plan.steps_json or []
     new_steps: list[dict] = []
-    launch_request: dict | None = None
+    result: dict | None = None
+    executed = False
     for step in steps:
         tool = get_tool(step["tool"])
         if tool is None:
@@ -167,11 +172,20 @@ async def confirm_action_plan(
         resource, action = tool.permission
         if not await role_service.has_permission(session, role_id, resource, action):
             raise HTTPException(403, f"permission denied for {resource}:{action}")
-        built = await tool.handler(
-            session, org_id=conversation.organization_id, user_id=user_id, arguments=step["args"]
-        )
-        launch_request = built
-        new_steps.append({**step, "launch_request": built})
+        # A spend handler only BUILDS the request (v1 never POSTs a run); a mutating handler runs
+        # the real action (install, import) now that the user has confirmed.
+        try:
+            output = await tool.handler(
+                session, org_id=conversation.organization_id, user_id=user_id, arguments=step["args"]
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:  # surface a failed action as a 400, not a 500
+            raise HTTPException(400, f"action '{step['tool']}' failed: {exc}") from exc
+        if tool.consequence_class != "spend":
+            executed = True
+        result = output
+        new_steps.append({**step, "result": output})
 
     now = datetime.now(timezone.utc)
     plan.steps_json = new_steps
@@ -200,9 +214,9 @@ async def confirm_action_plan(
         "assistant_action_plan",
         plan.id,
         "assistant.plan.confirm",
-        details={"via_assistant": True, "conversation_id": conversation.id, "executed": False},
+        details={"via_assistant": True, "conversation_id": conversation.id, "executed": executed},
     )
     await session.commit()
 
-    # v1 records the confirmed, fully-formed launch request and STOPS (does not POST a run).
-    return ConfirmResponse(status="approved", plan_id=plan.id, launch_request=launch_request)
+    # Mutating actions have now run; a spend action (launch_run) is built but NOT executed in v1.
+    return ConfirmResponse(status="approved", plan_id=plan.id, executed=executed, result=result)

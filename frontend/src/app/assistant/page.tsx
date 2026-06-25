@@ -153,10 +153,14 @@ export default function AssistantPage() {
         `/api/assistant/action-plans/${planId}/confirm`,
       );
       resolvePlan(planId, "approved");
-      const lr = resp.launch_request;
-      const summary = lr
-        ? `Plan approved. In this preview build the run is not executed yet. Prepared launch request: ${JSON.stringify(lr)}`
-        : "Plan approved.";
+      let summary: string;
+      if (resp.executed) {
+        summary = `Done.${resp.result ? ` ${JSON.stringify(resp.result)}` : ""}`;
+      } else if (resp.result) {
+        summary = `Plan approved. In this preview build the run is not executed yet. Prepared launch request: ${JSON.stringify(resp.result)}`;
+      } else {
+        summary = "Plan approved.";
+      }
       appendEntry({ id: makeId(), kind: "system", text: summary });
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Could not confirm the plan.";

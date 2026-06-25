@@ -87,7 +87,8 @@ describe("AssistantPage", () => {
       .mockResolvedValueOnce({
         status: "approved",
         plan_id: 7,
-        launch_request: { pipeline_key: "nf-core/rnaseq", experiment_id: 3 },
+        executed: false,
+        result: { pipeline_key: "nf-core/rnaseq", experiment_id: 3 },
       });
 
     render(<AssistantPage />);

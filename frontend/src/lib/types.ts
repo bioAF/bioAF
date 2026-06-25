@@ -1953,5 +1953,6 @@ export interface AssistantMessageResponse {
 export interface AssistantConfirmResponse {
   status: string;
   plan_id: number;
-  launch_request: Record<string, unknown> | null;
+  executed: boolean;
+  result: Record<string, unknown> | null;
 }
