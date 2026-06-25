@@ -115,21 +115,62 @@ def _tools_to_anthropic(tools: list[dict]) -> list[dict]:
 
 
 def _messages_to_anthropic(messages: list[dict]) -> list[dict]:
-    """Translate the loop's provider-agnostic messages into Anthropic messages. Prior tool
-    exchanges are encoded as plain text (not native tool_use/tool_result blocks) to sidestep
-    tool_use_id and role-alternation constraints; the model's NEW decision still comes back as
-    a native tool_use block, which we parse. v1 best-effort (see LEARNINGS)."""
+    """Translate the loop's provider-agnostic messages into native Anthropic messages.
+
+    Prior tool exchanges are threaded as native blocks: an assistant turn that called tools
+    becomes a content list with `tool_use` blocks (each given a stable id), and the tool results
+    that follow it become a single `user` message of `tool_result` blocks referencing those ids.
+    Batching the results into one user message keeps the required user/assistant alternation.
+
+    The loop persists results in call order immediately after the assistant message, so results
+    are paired positionally. If a `tool_use` has no following result (a spend stop halts the loop
+    for confirmation, leaving the call unanswered), a placeholder `tool_result` is synthesized so
+    the request stays valid: Anthropic rejects any `tool_use` that is not answered.
+    """
     out: list[dict] = []
-    for m in messages:
+    counter = 0
+    i = 0
+    n = len(messages)
+    while i < n:
+        m = messages[i]
         role = m.get("role")
-        if role == "tool":
-            out.append({"role": "user", "content": f"[tool result] {m.get('content') or ''}"})
-            continue
-        text = m.get("content") or ""
-        if role == "assistant" and m.get("tool_calls"):
-            calls = ", ".join(f"{c['tool']}({c['args']})" for c in m["tool_calls"])
-            text = f"{text}\n[called tools: {calls}]".strip()
-        out.append({"role": "assistant" if role == "assistant" else "user", "content": text or "(no content)"})
+        if role == "user":
+            out.append({"role": "user", "content": m.get("content") or "(no content)"})
+            i += 1
+        elif role == "assistant":
+            blocks: list[dict] = []
+            if m.get("content"):
+                blocks.append({"type": "text", "text": m["content"]})
+            call_ids: list[str] = []
+            for call in m.get("tool_calls") or []:
+                counter += 1
+                tool_use_id = f"toolu_hist_{counter}"
+                blocks.append(
+                    {"type": "tool_use", "id": tool_use_id, "name": call["tool"], "input": call.get("args") or {}}
+                )
+                call_ids.append(tool_use_id)
+            if not blocks:
+                blocks.append({"type": "text", "text": "(no content)"})
+            out.append({"role": "assistant", "content": blocks})
+            i += 1
+            # Pair each tool_use with the following tool result message, in order.
+            if call_ids:
+                result_blocks: list[dict] = []
+                for tool_use_id in call_ids:
+                    if i < n and messages[i].get("role") == "tool":
+                        content = messages[i].get("content") or ""
+                        i += 1
+                    else:
+                        content = "(awaiting confirmation; not yet executed)"
+                    result_blocks.append({"type": "tool_result", "tool_use_id": tool_use_id, "content": content})
+                out.append({"role": "user", "content": result_blocks})
+        elif role == "tool":
+            # A tool result with no preceding assistant tool_use (should not happen given loop
+            # ordering). Fall back to plain text so the request stays well-formed.
+            out.append({"role": "user", "content": m.get("content") or "(no content)"})
+            i += 1
+        else:
+            i += 1
     return out
 
 

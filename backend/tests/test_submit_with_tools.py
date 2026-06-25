@@ -4,10 +4,13 @@ Each hosted client (anthropic / openai / google) translates the loop's provider-
 messages + tools into its native tool-calling request, POSTs it, and parses the response back
 into the normalized ToolUseResult (a final text answer OR a list of tool calls). The crux is
 the response parsing, which differs per provider; these tests pin both paths for all three,
-using respx to mock the HTTP so no real provider is contacted. Multi-turn tool-history
-translation fidelity is a v1 best-effort (see LEARNINGS); these tests cover the single-turn
-request and the parse.
+using respx to mock the HTTP so no real provider is contacted. Anthropic now threads prior tool
+exchanges as native tool_use / tool_result blocks (the live-test fix); OpenAI and Google still
+encode prior tool history as plain text (a known follow-up). These tests cover the parse for all
+three plus Anthropic's native multi-turn request.
 """
+
+import json
 
 import httpx
 import pytest
@@ -66,6 +69,89 @@ async def test_anthropic_parses_final_text():
         )
     assert result.is_final is True
     assert "rnaseq" in result.text
+
+
+# ---- Anthropic native multi-turn tool history (the live-test fix) ----
+
+
+async def test_anthropic_threads_prior_tools_as_native_blocks():
+    """Prior tool exchanges must be sent as native tool_use / tool_result blocks, not plain text.
+    The plain-text encoding made the model parrot '[called tools: ...]' as text instead of issuing
+    a real tool call, so a multi-step conversation stalled. The request must carry native blocks
+    with matching ids and no plain-text leakage."""
+    history = [
+        {"role": "user", "content": "list samples for experiment 3", "tool_calls": None, "tool_invocation_id": None},
+        {
+            "role": "assistant",
+            "content": "Let me check the samples.",
+            "tool_calls": [{"tool": "list_samples", "args": {"experiment_id": 3}}],
+            "tool_invocation_id": None,
+        },
+        {
+            "role": "tool",
+            "content": '{"status": "succeeded", "result": {"samples": [{"id": 1}]}}',
+            "tool_calls": None,
+            "tool_invocation_id": 11,
+        },
+    ]
+    raw = {"content": [{"type": "text", "text": "Here is the recommendation."}], "stop_reason": "end_turn"}
+    with respx.mock(base_url="https://api.anthropic.com/v1") as r:
+        route = r.post("/messages").mock(return_value=_resp(raw))
+        await anthropic_client.submit_with_tools(messages=history, tools=_TOOLS, model="claude-x", api_key="sk-ant")
+
+    body = json.loads(route.calls.last.request.content)
+    msgs = body["messages"]
+
+    assistant_msg = next(m for m in msgs if m["role"] == "assistant")
+    blocks = assistant_msg["content"]
+    assert isinstance(blocks, list)
+    tool_use = next(b for b in blocks if isinstance(b, dict) and b.get("type") == "tool_use")
+    assert tool_use["name"] == "list_samples"
+    assert tool_use["input"] == {"experiment_id": 3}
+
+    # The result is a native tool_result in a user message, referencing the same id.
+    tool_result = None
+    for m in msgs:
+        if m["role"] == "user" and isinstance(m["content"], list):
+            for b in m["content"]:
+                if isinstance(b, dict) and b.get("type") == "tool_result":
+                    tool_result = b
+    assert tool_result is not None
+    assert tool_result["tool_use_id"] == tool_use["id"]
+
+    raw_text = route.calls.last.request.content.decode()
+    assert "[called tools:" not in raw_text
+    assert "[tool result]" not in raw_text
+
+
+async def test_anthropic_synthesizes_result_for_unanswered_tool_use():
+    """A spend stop leaves an assistant tool_use with no persisted result (the loop halts for
+    confirmation). On a later turn that dangling tool_use must still get a tool_result, or Anthropic
+    rejects the request. The translator synthesizes a placeholder result."""
+    history = [
+        {"role": "user", "content": "run it", "tool_calls": None, "tool_invocation_id": None},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{"tool": "launch_run", "args": {"experiment_id": 3, "pipeline_key": "nf-core/rnaseq"}}],
+            "tool_invocation_id": None,
+        },
+        {"role": "user", "content": "actually wait", "tool_calls": None, "tool_invocation_id": None},
+    ]
+    raw = {"content": [{"type": "text", "text": "Okay."}], "stop_reason": "end_turn"}
+    with respx.mock(base_url="https://api.anthropic.com/v1") as r:
+        route = r.post("/messages").mock(return_value=_resp(raw))
+        await anthropic_client.submit_with_tools(messages=history, tools=_TOOLS, model="claude-x", api_key="sk-ant")
+
+    body = json.loads(route.calls.last.request.content)
+    msgs = body["messages"]
+    tool_use = next(
+        b for m in msgs if isinstance(m["content"], list) for b in m["content"] if b.get("type") == "tool_use"
+    )
+    results = [
+        b for m in msgs if isinstance(m["content"], list) for b in m["content"] if b.get("type") == "tool_result"
+    ]
+    assert any(b["tool_use_id"] == tool_use["id"] for b in results)
 
 
 # ---- OpenAI ----
