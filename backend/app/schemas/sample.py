@@ -30,6 +30,14 @@ class SampleCustomFieldResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+def _validate_assay(v: str | None) -> str | None:
+    from app.models.sample import SAMPLE_ASSAYS
+
+    if v is not None and v not in SAMPLE_ASSAYS:
+        raise ValueError(f"assay must be one of: {', '.join(SAMPLE_ASSAYS)}")
+    return v
+
+
 class SampleCreate(BaseModel):
     external_id: str | None = None
     organism: str | None = None
@@ -46,6 +54,7 @@ class SampleCreate(BaseModel):
     molecule_type: str | None = None
     library_prep_method: str | None = None
     library_layout: str | None = None
+    assay: str | None = None
     qc_status: str | None = None
     qc_notes: str | None = None
     parent_sample_id: int | None = None
@@ -67,6 +76,11 @@ class SampleCreate(BaseModel):
             raise ValueError("qc_status must be 'pass', 'warning', or 'fail'")
         return v
 
+    @field_validator("assay")
+    @classmethod
+    def validate_assay(cls, v: str | None) -> str | None:
+        return _validate_assay(v)
+
 
 class SampleUpdate(BaseModel):
     external_id: str | None = None
@@ -84,6 +98,7 @@ class SampleUpdate(BaseModel):
     molecule_type: str | None = None
     library_prep_method: str | None = None
     library_layout: str | None = None
+    assay: str | None = None
     parent_sample_id: int | None = None
     collection_timestamp: datetime | None = None
     collection_method: str | None = None
@@ -95,6 +110,11 @@ class SampleUpdate(BaseModel):
         if v is not None and (v < 0 or v > 100):
             raise ValueError("viability_pct must be between 0 and 100")
         return v
+
+    @field_validator("assay")
+    @classmethod
+    def validate_assay(cls, v: str | None) -> str | None:
+        return _validate_assay(v)
 
 
 class SampleBulkCreate(BaseModel):
@@ -148,6 +168,7 @@ class SampleResponse(BaseModel):
     molecule_type: str | None = None
     library_prep_method: str | None = None
     library_layout: str | None = None
+    assay: str | None = None
     qc_status: str | None
     qc_notes: str | None
     parent_sample_id: int | None = None

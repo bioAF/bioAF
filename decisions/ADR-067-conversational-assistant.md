@@ -144,9 +144,11 @@ turn as the runaway backstop. v1 is backend + tests only; the chat UI is a later
 - Tool results (and any paper/file/dataset the agent reads) are untrusted input and must not be
   able to escalate permissions or be followed as instructions; prompt-injection defense on ingested
   data is required as the catalog grows.
-- There is no first-class assay field; recommend_pipeline infers assay from free-text sample
-  columns (tracked in `local/ai_pipeline_run/TODOS.md`). Misclassification is caught by the confirm
-  gate, but an explicit field would be more robust.
+- recommend_pipeline prefers an optional, first-class `Sample.assay` field and falls back to
+  inferring the assay from free-text sample columns when it is unset. It returns a confidence
+  ("high" for the explicit field, "medium"/"low" for inference) and the signals it used, so the
+  agent can flag a low-confidence guess. Misclassification on un-set samples is still caught by the
+  confirm gate.
 
 ---
 

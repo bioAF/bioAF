@@ -43,6 +43,11 @@ SAMPLE_STATUSES = [
 
 QC_STATUSES = ["pass", "warning", "fail"]
 
+# Controlled vocabulary for the optional, first-class assay field. Kept deliberately small
+# (matching what recommend_pipeline maps in v1) and extended additively as pipelines are added.
+# "other" records an assay that has no v1 pipeline mapping; a null assay means "infer it".
+SAMPLE_ASSAYS = ["bulk_rna", "scrna", "other"]
+
 
 class Sample(Base):
     __tablename__ = "samples"
@@ -66,6 +71,10 @@ class Sample(Base):
     prep_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     molecule_type: Mapped[str | None] = mapped_column(String(100), server_default="total RNA", nullable=True)
     library_prep_method: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Optional, first-class assay (controlled vocab: SAMPLE_ASSAYS). When set it is the
+    # authoritative signal for recommend_pipeline; when null, the assay is inferred from
+    # molecule_type / chemistry_version / library_prep_method.
+    assay: Mapped[str | None] = mapped_column(String(50), nullable=True)
     library_layout: Mapped[str | None] = mapped_column(String(50), nullable=True)
     qc_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     qc_notes: Mapped[str | None] = mapped_column(Text, nullable=True)

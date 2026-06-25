@@ -178,3 +178,90 @@ async def test_unmapped_organism_recommends_pipeline_without_reference(session, 
 async def test_raises_for_unknown_experiment(session, admin_user):
     with pytest.raises(LookupError):
         await RecommendPipelineService.recommend(session, org_id=admin_user.organization_id, experiment_id=999999)
+
+
+# ---- Hybrid assay field: explicit field beats heuristic; result carries confidence + signals ----
+
+
+async def test_explicit_assay_overrides_heuristic(session, admin_user):
+    """An explicit assay value wins over what the free-text heuristic would infer. The sample's
+    molecule/prep fields look like bulk RNA, but assay='scrna' steers to scrnaseq with high
+    confidence."""
+    exp = await _make_experiment(session, admin_user, name="Explicit scRNA")
+    await _add_sample(
+        session,
+        exp,
+        external_id="EXPLICIT_SC",
+        organism="Homo sapiens",
+        molecule_type="total RNA",  # heuristic alone -> bulk
+        library_prep_method="TruSeq",  # heuristic alone -> bulk
+        assay="scrna",  # explicit field -> single cell
+    )
+
+    rec = await RecommendPipelineService.recommend(session, org_id=admin_user.organization_id, experiment_id=exp.id)
+
+    assert rec.recommended is True
+    assert rec.pipeline_key == "nf-core/scrnaseq"
+    assert rec.confidence == "high"
+    assert any("assay" in s.lower() for s in rec.signals)
+
+
+async def test_blank_assay_falls_back_to_heuristic(session, admin_user):
+    """With no explicit assay, recommendation falls back to the free-text heuristic and reports
+    medium confidence when a positive signal (single-cell prep) is present."""
+    exp = await _make_experiment(session, admin_user, name="Heuristic scRNA")
+    await _add_sample(
+        session,
+        exp,
+        external_id="HEUR_SC",
+        organism="Homo sapiens",
+        molecule_type="total RNA",
+        library_prep_method="10x Chromium 3' v3",
+        chemistry_version="v3",
+        assay=None,
+    )
+
+    rec = await RecommendPipelineService.recommend(session, org_id=admin_user.organization_id, experiment_id=exp.id)
+
+    assert rec.recommended is True
+    assert rec.pipeline_key == "nf-core/scrnaseq"
+    assert rec.confidence == "medium"
+    assert rec.signals  # the heuristic signals it used
+
+
+async def test_explicit_bulk_assay_is_high_confidence_with_signals(session, admin_user):
+    exp = await _make_experiment(session, admin_user, name="Explicit bulk")
+    await _add_sample(
+        session,
+        exp,
+        external_id="EXPLICIT_BULK",
+        organism="Mus musculus",
+        molecule_type="total RNA",
+        assay="bulk_rna",
+    )
+
+    rec = await RecommendPipelineService.recommend(session, org_id=admin_user.organization_id, experiment_id=exp.id)
+
+    assert rec.recommended is True
+    assert rec.pipeline_key == "nf-core/rnaseq"
+    assert rec.confidence == "high"
+    assert rec.signals
+
+
+async def test_default_only_bulk_is_low_confidence(session, admin_user):
+    """When nothing but the default molecule type points to bulk RNA (no explicit assay, no prep
+    method, no single-cell signal), the recommendation is made but flagged low confidence."""
+    exp = await _make_experiment(session, admin_user, name="Default bulk")
+    await _add_sample(
+        session,
+        exp,
+        external_id="DEFAULT_BULK",
+        organism="Mus musculus",
+        molecule_type="total RNA",  # the server default; nothing else to go on
+    )
+
+    rec = await RecommendPipelineService.recommend(session, org_id=admin_user.organization_id, experiment_id=exp.id)
+
+    assert rec.recommended is True
+    assert rec.pipeline_key == "nf-core/rnaseq"
+    assert rec.confidence == "low"
