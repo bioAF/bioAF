@@ -198,6 +198,133 @@ async def test_launch_run_stops_at_plan_and_does_not_execute(session, admin_user
     assert run_count == 0
 
 
+# ---- Read-only discovery tools (list_experiments, list_samples, list_pipelines, check_status) ----
+
+
+async def test_catalog_describes_read_only_discovery_tools():
+    for name, permission in (
+        ("list_experiments", ("experiments", "view")),
+        ("list_samples", ("samples", "view")),
+        ("list_pipelines", ("pipelines", "view")),
+        ("check_status", ("pipelines", "view")),
+    ):
+        tool = get_tool(name)
+        assert tool is not None, f"{name} not registered"
+        assert tool.consequence_class == "read_only"
+        assert tool.permission == permission
+
+
+async def test_list_experiments_returns_org_experiments(session, admin_user):
+    exp = await _bulk_mouse_experiment(session, admin_user)
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="list_experiments",
+        arguments={},
+    )
+
+    assert result.status == "succeeded"
+    ids = [e["id"] for e in result.result["experiments"]]
+    assert exp.id in ids
+    assert result.tool_invocation.consequence_class == "read_only"
+    assert await _audit_rows_for(session, result.tool_invocation.id) == 1
+
+
+async def test_list_samples_returns_experiment_samples_with_assay(session, admin_user):
+    exp = await _bulk_mouse_experiment(session, admin_user)
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="list_samples",
+        arguments={"experiment_id": exp.id},
+    )
+
+    assert result.status == "succeeded"
+    samples = result.result["samples"]
+    assert any(s["external_id"] == "B1" for s in samples)
+    # The hybrid-assay fields the agent uses to reason are surfaced.
+    assert all("assay" in s and "organism" in s for s in samples)
+
+
+async def test_list_samples_rejects_experiment_outside_org(session, admin_user):
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="list_samples",
+        arguments={"experiment_id": 999999},  # not in this org
+    )
+
+    assert result.status == "failed"
+    assert result.tool_invocation.status == "failed"
+
+
+async def test_list_pipelines_returns_catalog(session, admin_user):
+    await _bulk_mouse_experiment(session, admin_user)  # installs nf-core/rnaseq
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="list_pipelines",
+        arguments={},
+    )
+
+    assert result.status == "succeeded"
+    keys = [p["pipeline_key"] for p in result.result["pipelines"]]
+    assert "nf-core/rnaseq" in keys
+
+
+async def test_check_status_returns_run_status(session, admin_user):
+    exp = await _bulk_mouse_experiment(session, admin_user)
+    run = PipelineRun(
+        organization_id=admin_user.organization_id,
+        experiment_id=exp.id,
+        pipeline_name="nf-core/rnaseq",
+        pipeline_version="3.14.0",
+        status="running",
+    )
+    session.add(run)
+    await session.flush()
+    await session.commit()
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="check_status",
+        arguments={"run_id": run.id},
+    )
+
+    assert result.status == "succeeded"
+    assert result.result["status"] == "running"
+    assert result.result["id"] == run.id
+
+
+async def test_check_status_rejects_run_outside_org(session, admin_user):
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="check_status",
+        arguments={"run_id": 999999},
+    )
+
+    assert result.status == "failed"
+
+
 async def test_launch_run_denied_when_caller_lacks_permission(session, admin_user, viewer_user):
     # viewer's role lacks pipelines:launch (the realistic persona is bench, which can use the
     # assistant but cannot launch; viewer exercises the same gate with an existing fixture).
