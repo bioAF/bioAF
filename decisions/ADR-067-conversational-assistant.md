@@ -51,6 +51,15 @@ RBAC role. Two gates apply:
   requires `pipelines:launch`, mirroring the real `POST /api/pipeline-runs` guard). The model's
   claims about what it may do are never trusted.
 
+**Launch persona (by design).** Because the agent acts as the user and never escalates, a user
+can only launch through the assistant if their own role holds `pipelines:launch`. Today that is
+admin and comp_bio. The built-in `bench` role has `assistant:use` but not `pipelines:launch`, so
+a bench user can hold a conversation and get a pipeline recommendation, but `launch_run` is
+declined at the wrapper. This is deliberate, not a gap: the assistant's launch capability is for
+launch-capable roles, while `bench` gets read-only assistance (recommend, and later summarize /
+explain). The fix is never to have the agent grant itself rights; if the launch persona must
+change, that is a role-design decision made outside the assistant.
+
 ### Consequence classes and plan-then-confirm
 
 Every tool declares a consequence class:
