@@ -325,6 +325,26 @@ async def test_check_status_rejects_run_outside_org(session, admin_user):
     assert result.status == "failed"
 
 
+async def test_launch_run_handler_folds_accessions_into_parameters():
+    """Importing by accession is a fetchngs LAUNCH, not a separate import: the accessions ride in
+    parameters so the built request stays a valid PipelineRunCreate (no top-level accessions field)."""
+    from app.services.assistant_tool_catalog import _launch_run_handler
+
+    out = await _launch_run_handler(
+        None,
+        org_id=1,
+        user_id=1,
+        arguments={
+            "experiment_id": 5,
+            "pipeline_key": "nf-core/fetchngs",
+            "accessions": ["GSE123456", "SRR9999999"],
+        },
+    )
+    assert out["experiment_id"] == 5
+    assert out["pipeline_key"] == "nf-core/fetchngs"
+    assert out["parameters"]["accessions"] == ["GSE123456", "SRR9999999"]
+
+
 # ---- Mutating tools follow the same confirm gate as spend (owner rule) ----
 
 

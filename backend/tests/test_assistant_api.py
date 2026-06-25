@@ -223,6 +223,39 @@ async def test_confirm_install_plan_executes_the_install(client, session, admin_
     assert count == 1
 
 
+async def test_confirm_fetchngs_launch_builds_request_with_accessions(client, session, admin_user, admin_token):
+    """'Import by accession' is a fetchngs LAUNCH (spend). Confirm builds the launch request carrying
+    the accessions in parameters; v1 does NOT execute it (no PipelineRun created)."""
+    conv = AssistantConversation(organization_id=admin_user.organization_id, user_id=admin_user.id, status="active")
+    session.add(conv)
+    await session.flush()
+    plan = AssistantActionPlan(
+        conversation_id=conv.id,
+        steps_json=[
+            {
+                "tool": "launch_run",
+                "args": {
+                    "experiment_id": 1,
+                    "pipeline_key": "nf-core/fetchngs",
+                    "accessions": ["GSE1", "SRR2"],
+                },
+            }
+        ],
+        status="proposed",
+    )
+    session.add(plan)
+    await session.flush()
+    await session.commit()
+
+    resp = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(admin_token))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["executed"] is False  # spend: built, not run in v1
+    assert body["result"]["pipeline_key"] == "nf-core/fetchngs"
+    assert body["result"]["parameters"]["accessions"] == ["GSE1", "SRR2"]
+    assert await _run_count(session) == 0
+
+
 async def test_confirm_denied_without_launch_permission(client, session, admin_user):
     bench, bench_token = await _bench_user_token(session, admin_user)
     conv = AssistantConversation(organization_id=bench.organization_id, user_id=bench.id, status="active")

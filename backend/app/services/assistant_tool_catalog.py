@@ -148,13 +148,18 @@ async def _recommend_pipeline_handler(session, *, org_id, user_id, arguments):
 
 
 async def _launch_run_handler(session, *, org_id, user_id, arguments):
-    """Build the fully-formed launch request. v1 never executes a launch: the spend gate stops
-    at the confirmed plan, so the wrapper does not call this on the spend path. It is here so the
-    later confirm step has one place that assembles the request."""
+    """Build the fully-formed launch request (a valid PipelineRunCreate). v1 stops at the confirmed
+    plan and never POSTs a run. For a fetch-style pipeline (nf-core/fetchngs), the data is pulled
+    from accessions rather than per-sample files, so an optional ``accessions`` list is folded into
+    ``parameters`` (bioAF has no top-level accessions field; parameters is the carrier)."""
+    parameters = dict(arguments.get("parameters") or {})
+    accessions = arguments.get("accessions")
+    if accessions:
+        parameters["accessions"] = accessions
     return {
         "experiment_id": arguments["experiment_id"],
         "pipeline_key": arguments["pipeline_key"],
-        "parameters": arguments.get("parameters", {}),
+        "parameters": parameters,
         "reference_genome": arguments.get("reference_genome"),
     }
 
@@ -238,7 +243,9 @@ TOOL_CATALOG: dict[str, ToolDescriptor] = {
         name="launch_run",
         description=(
             "Launch a pipeline run against an experiment. Spends compute, so it is never executed "
-            "without an explicit user confirmation of the proposed plan."
+            "without an explicit user confirmation of the proposed plan. To import data by accession, "
+            "launch nf-core/fetchngs with the 'accessions' list (e.g. GEO/SRA/ENA ids); fetchngs pulls "
+            "the data itself, so per-sample files are not required."
         ),
         consequence_class="spend",
         # Mirrors the real POST /api/pipeline-runs guard: require_permission("pipelines", "launch").
@@ -250,6 +257,7 @@ TOOL_CATALOG: dict[str, ToolDescriptor] = {
                 "pipeline_key": {"type": "string"},
                 "parameters": {"type": "object"},
                 "reference_genome": {"type": "string"},
+                "accessions": {"type": "array"},
             },
         },
         handler=_launch_run_handler,
