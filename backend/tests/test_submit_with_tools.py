@@ -4,10 +4,11 @@ Each hosted client (anthropic / openai / google) translates the loop's provider-
 messages + tools into its native tool-calling request, POSTs it, and parses the response back
 into the normalized ToolUseResult (a final text answer OR a list of tool calls). The crux is
 the response parsing, which differs per provider; these tests pin both paths for all three,
-using respx to mock the HTTP so no real provider is contacted. Anthropic now threads prior tool
-exchanges as native tool_use / tool_result blocks (the live-test fix); OpenAI and Google still
-encode prior tool history as plain text (a known follow-up). These tests cover the parse for all
-three plus Anthropic's native multi-turn request.
+using respx to mock the HTTP so no real provider is contacted. All three providers now thread
+prior tool exchanges as native blocks (Anthropic tool_use/tool_result; OpenAI tool_calls +
+tool-role messages with tool_call_id; Google functionCall/functionResponse). These tests cover
+the response parse for all three plus, per provider, the native multi-turn request and the
+synthesized result for a tool call left unanswered by a spend stop.
 """
 
 import json
@@ -197,6 +198,64 @@ async def test_openai_parses_final_text():
     assert "rnaseq" in result.text
 
 
+# ---- OpenAI native multi-turn tool history (parity) ----
+
+
+async def test_openai_threads_prior_tools_as_native_messages():
+    history = [
+        {"role": "user", "content": "list samples for experiment 3", "tool_calls": None, "tool_invocation_id": None},
+        {
+            "role": "assistant",
+            "content": "Let me check.",
+            "tool_calls": [{"tool": "list_samples", "args": {"experiment_id": 3}}],
+            "tool_invocation_id": None,
+        },
+        {
+            "role": "tool",
+            "content": '{"status": "succeeded", "result": {"samples": [{"id": 1}]}}',
+            "tool_calls": None,
+            "tool_invocation_id": 11,
+        },
+    ]
+    raw = {"choices": [{"message": {"content": "ok", "tool_calls": None}, "finish_reason": "stop"}]}
+    with respx.mock(base_url="https://api.openai.com/v1") as r:
+        route = r.post("/chat/completions").mock(return_value=_resp(raw))
+        await openai_client.submit_with_tools(messages=history, tools=_TOOLS, model="gpt-x", api_key="sk")
+
+    body = json.loads(route.calls.last.request.content)
+    msgs = body["messages"]
+    assistant_msg = next(m for m in msgs if m["role"] == "assistant" and m.get("tool_calls"))
+    call = assistant_msg["tool_calls"][0]
+    assert call["function"]["name"] == "list_samples"
+    assert json.loads(call["function"]["arguments"]) == {"experiment_id": 3}
+    tool_msg = next(m for m in msgs if m["role"] == "tool")
+    assert tool_msg["tool_call_id"] == call["id"]
+    raw_text = route.calls.last.request.content.decode()
+    assert "[called tools:" not in raw_text and "[tool result]" not in raw_text
+
+
+async def test_openai_synthesizes_tool_message_for_unanswered_call():
+    history = [
+        {"role": "user", "content": "run it", "tool_calls": None, "tool_invocation_id": None},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{"tool": "launch_run", "args": {"experiment_id": 3, "pipeline_key": "nf-core/rnaseq"}}],
+            "tool_invocation_id": None,
+        },
+        {"role": "user", "content": "actually wait", "tool_calls": None, "tool_invocation_id": None},
+    ]
+    raw = {"choices": [{"message": {"content": "ok", "tool_calls": None}, "finish_reason": "stop"}]}
+    with respx.mock(base_url="https://api.openai.com/v1") as r:
+        route = r.post("/chat/completions").mock(return_value=_resp(raw))
+        await openai_client.submit_with_tools(messages=history, tools=_TOOLS, model="gpt-x", api_key="sk")
+
+    body = json.loads(route.calls.last.request.content)
+    msgs = body["messages"]
+    call = next(m for m in msgs if m.get("tool_calls"))["tool_calls"][0]
+    assert any(m["role"] == "tool" and m["tool_call_id"] == call["id"] for m in msgs)
+
+
 # ---- Google ----
 
 
@@ -222,3 +281,63 @@ async def test_google_parses_final_text():
         result = await google_client.submit_with_tools(messages=_MESSAGES, tools=_TOOLS, model="gemini-x", api_key="g")
     assert result.is_final is True
     assert "rnaseq" in result.text
+
+
+# ---- Google native multi-turn tool history (parity) ----
+
+
+async def test_google_threads_prior_tools_as_native_parts():
+    history = [
+        {"role": "user", "content": "list samples for experiment 3", "tool_calls": None, "tool_invocation_id": None},
+        {
+            "role": "assistant",
+            "content": "Let me check.",
+            "tool_calls": [{"tool": "list_samples", "args": {"experiment_id": 3}}],
+            "tool_invocation_id": None,
+        },
+        {
+            "role": "tool",
+            "content": '{"status": "succeeded", "result": {"samples": [{"id": 1}]}}',
+            "tool_calls": None,
+            "tool_invocation_id": 11,
+        },
+    ]
+    raw = {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+    with respx.mock(base_url="https://generativelanguage.googleapis.com/v1beta") as r:
+        route = r.post("/models/gemini-x:generateContent").mock(return_value=_resp(raw))
+        await google_client.submit_with_tools(messages=history, tools=_TOOLS, model="gemini-x", api_key="g")
+
+    body = json.loads(route.calls.last.request.content)
+    contents = body["contents"]
+    model_turn = next(c for c in contents if c["role"] == "model")
+    fc = next(p["functionCall"] for p in model_turn["parts"] if "functionCall" in p)
+    assert fc["name"] == "list_samples"
+    assert fc["args"] == {"experiment_id": 3}
+    # The result is a native functionResponse part (an object response), keyed by the function name.
+    fr = next(p["functionResponse"] for c in contents for p in c["parts"] if "functionResponse" in p)
+    assert fr["name"] == "list_samples"
+    assert isinstance(fr["response"], dict)
+    raw_text = route.calls.last.request.content.decode()
+    assert "[called tools:" not in raw_text and "[tool result]" not in raw_text
+
+
+async def test_google_synthesizes_response_for_unanswered_call():
+    history = [
+        {"role": "user", "content": "run it", "tool_calls": None, "tool_invocation_id": None},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{"tool": "launch_run", "args": {"experiment_id": 3, "pipeline_key": "nf-core/rnaseq"}}],
+            "tool_invocation_id": None,
+        },
+        {"role": "user", "content": "actually wait", "tool_calls": None, "tool_invocation_id": None},
+    ]
+    raw = {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+    with respx.mock(base_url="https://generativelanguage.googleapis.com/v1beta") as r:
+        route = r.post("/models/gemini-x:generateContent").mock(return_value=_resp(raw))
+        await google_client.submit_with_tools(messages=history, tools=_TOOLS, model="gemini-x", api_key="g")
+
+    body = json.loads(route.calls.last.request.content)
+    contents = body["contents"]
+    names = [p["functionResponse"]["name"] for c in contents for p in c["parts"] if "functionResponse" in p]
+    assert "launch_run" in names

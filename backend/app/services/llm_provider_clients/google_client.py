@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 import httpx
@@ -114,21 +115,63 @@ def _tools_to_google(tools: list[dict]) -> list[dict]:
     ]
 
 
+def _as_response_object(content: str) -> dict:
+    """Gemini's functionResponse.response must be a JSON object. The loop's tool content is a JSON
+    string; use it directly when it parses to an object, else wrap it."""
+    try:
+        parsed = json.loads(content)
+    except (ValueError, TypeError):
+        parsed = None
+    return parsed if isinstance(parsed, dict) else {"content": content}
+
+
 def _messages_to_google(messages: list[dict]) -> list[dict]:
-    """Translate the loop's messages into Gemini contents. Prior tool exchanges are encoded as
-    plain text rather than native functionCall/functionResponse parts; the model's NEW decision
-    still returns a native functionCall part we parse. v1 best-effort (see LEARNINGS)."""
+    """Translate the loop's messages into native Gemini contents.
+
+    An assistant turn that called tools becomes a `model` content with `functionCall` parts; the
+    results that follow become one `user` content of `functionResponse` parts (batched to keep the
+    user/model alternation). Gemini matches a response to its call by function NAME, paired
+    positionally with the calls (the loop persists results in call order). An unanswered call (a
+    spend stop halts the loop) gets a synthesized placeholder response."""
     out: list[dict] = []
-    for m in messages:
+    i = 0
+    n = len(messages)
+    while i < n:
+        m = messages[i]
         role = m.get("role")
-        if role == "tool":
-            out.append({"role": "user", "parts": [{"text": f"[tool result] {m.get('content') or ''}"}]})
-            continue
-        text = m.get("content") or ""
-        if role == "assistant" and m.get("tool_calls"):
-            calls = ", ".join(f"{c['tool']}({c['args']})" for c in m["tool_calls"])
-            text = f"{text}\n[called tools: {calls}]".strip()
-        out.append({"role": "model" if role == "assistant" else "user", "parts": [{"text": text or "(no content)"}]})
+        if role == "user":
+            out.append({"role": "user", "parts": [{"text": m.get("content") or "(no content)"}]})
+            i += 1
+        elif role == "assistant":
+            parts: list[dict] = []
+            if m.get("content"):
+                parts.append({"text": m["content"]})
+            names: list[str] = []
+            for call in m.get("tool_calls") or []:
+                parts.append({"functionCall": {"name": call["tool"], "args": call.get("args") or {}}})
+                names.append(call["tool"])
+            if not parts:
+                parts.append({"text": "(no content)"})
+            out.append({"role": "model", "parts": parts})
+            i += 1
+            if names:
+                response_parts: list[dict] = []
+                for name in names:
+                    if i < n and messages[i].get("role") == "tool":
+                        content = messages[i].get("content") or ""
+                        i += 1
+                    else:
+                        content = '{"status": "awaiting_confirmation"}'
+                    response_parts.append(
+                        {"functionResponse": {"name": name, "response": _as_response_object(content)}}
+                    )
+                out.append({"role": "user", "parts": response_parts})
+        elif role == "tool":
+            # Orphan tool result with no preceding functionCall (should not happen). Text fallback.
+            out.append({"role": "user", "parts": [{"text": m.get("content") or "(no content)"}]})
+            i += 1
+        else:
+            i += 1
     return out
 
 

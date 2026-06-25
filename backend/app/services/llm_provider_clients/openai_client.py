@@ -146,21 +146,59 @@ def _tools_to_openai(tools: list[dict]) -> list[dict]:
 
 
 def _messages_to_openai(messages: list[dict]) -> list[dict]:
-    """Translate the loop's messages into OpenAI chat messages. Prior tool exchanges are encoded
-    as plain text rather than native tool_calls/tool role messages (which require matching
-    tool_call_id threading); the model's NEW decision still returns native tool_calls we parse.
-    v1 best-effort (see LEARNINGS)."""
+    """Translate the loop's messages into native OpenAI chat messages.
+
+    An assistant turn that called tools becomes an assistant message with a `tool_calls` array
+    (each call given a stable id and JSON-string arguments); the results that follow become
+    `tool`-role messages carrying the matching `tool_call_id`. OpenAI does not require role
+    alternation for tool messages, so each result is its own message. Every assistant tool_call
+    must be answered, so an unanswered call (a spend stop halts the loop) gets a synthesized
+    placeholder tool message. Results are paired to calls positionally (the loop persists them in
+    call order right after the assistant message)."""
     out: list[dict] = []
-    for m in messages:
+    counter = 0
+    i = 0
+    n = len(messages)
+    while i < n:
+        m = messages[i]
         role = m.get("role")
-        if role == "tool":
-            out.append({"role": "user", "content": f"[tool result] {m.get('content') or ''}"})
-            continue
-        text = m.get("content") or ""
-        if role == "assistant" and m.get("tool_calls"):
-            calls = ", ".join(f"{c['tool']}({c['args']})" for c in m["tool_calls"])
-            text = f"{text}\n[called tools: {calls}]".strip()
-        out.append({"role": "assistant" if role == "assistant" else "user", "content": text or "(no content)"})
+        if role == "user":
+            out.append({"role": "user", "content": m.get("content") or "(no content)"})
+            i += 1
+        elif role == "assistant":
+            tool_calls = m.get("tool_calls") or []
+            if not tool_calls:
+                out.append({"role": "assistant", "content": m.get("content") or "(no content)"})
+                i += 1
+                continue
+            call_ids: list[str] = []
+            native_calls: list[dict] = []
+            for call in tool_calls:
+                counter += 1
+                call_id = f"call_hist_{counter}"
+                call_ids.append(call_id)
+                native_calls.append(
+                    {
+                        "id": call_id,
+                        "type": "function",
+                        "function": {"name": call["tool"], "arguments": json.dumps(call.get("args") or {})},
+                    }
+                )
+            out.append({"role": "assistant", "content": m.get("content"), "tool_calls": native_calls})
+            i += 1
+            for call_id in call_ids:
+                if i < n and messages[i].get("role") == "tool":
+                    content = messages[i].get("content") or ""
+                    i += 1
+                else:
+                    content = "(awaiting confirmation; not yet executed)"
+                out.append({"role": "tool", "tool_call_id": call_id, "content": content})
+        elif role == "tool":
+            # Orphan tool result with no preceding tool_call (should not happen). Plain-text fallback.
+            out.append({"role": "user", "content": m.get("content") or "(no content)"})
+            i += 1
+        else:
+            i += 1
     return out
 
 
