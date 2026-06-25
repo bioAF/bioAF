@@ -142,6 +142,11 @@ async def test_message_reaches_plan_then_confirm_builds_launch_request(client, s
     assert body["status"] == "awaiting_confirmation"
     plan_id = body["action_plan_id"]
     assert plan_id is not None
+    # The proposed plan is surfaced so the confirm UI can show WHAT is being confirmed before
+    # the user clicks (spec-03 / ADR-067: catch "not that sample" before spend).
+    assert body["plan_steps"]
+    assert body["plan_steps"][0]["tool"] == "launch_run"
+    assert body["plan_steps"][0]["args"]["pipeline_key"] == "nf-core/rnaseq"
     assert await _run_count(session) == 0  # nothing launched
 
     confirm = await client.post(f"/api/assistant/action-plans/{plan_id}/confirm", headers=_auth(admin_token))

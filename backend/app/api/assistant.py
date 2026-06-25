@@ -49,6 +49,9 @@ class MessageResponse(BaseModel):
     status: str  # answered | awaiting_confirmation | step_cap_exceeded | unavailable
     text: str | None = None
     action_plan_id: int | None = None
+    # The proposed steps ([{tool, args}]) when status is awaiting_confirmation, so the client can
+    # render exactly what it is about to confirm (resolved entity, pipeline, params) before spend.
+    plan_steps: list[dict] | None = None
     reason: str | None = None
 
 
@@ -129,6 +132,7 @@ async def send_message(
         status=result.status,
         text=result.text,
         action_plan_id=result.action_plan.id if result.action_plan else None,
+        plan_steps=result.action_plan.steps_json if result.action_plan else None,
         reason=result.reason,
     )
 
