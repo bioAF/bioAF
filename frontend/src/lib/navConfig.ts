@@ -37,6 +37,7 @@ export interface NavSection {
 
 export const navConfig: NavSection[] = [
   { label: "Dashboard", path: "/dashboard", icon: "home" },
+  { label: "Assistant", path: "/assistant", icon: "sparkles", permission: { resource: "assistant", action: "use" } },
   {
     label: "Experiments",
     icon: "folder",

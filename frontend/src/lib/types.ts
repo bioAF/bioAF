@@ -1916,3 +1916,42 @@ export interface ReaderSACreateResponse {
   message: string;
   warning: string | null;
 }
+
+// ---- Assistant (ai_pipeline_run) ----
+
+export interface AssistantAvailability {
+  enabled: boolean;
+  reason?: string | null;
+}
+
+export interface AssistantConversationResponse {
+  id: number;
+  status: string;
+  provider: string | null;
+  model: string | null;
+}
+
+export interface AssistantPlanStep {
+  tool: string;
+  args: Record<string, unknown>;
+}
+
+export type AssistantTurnStatus =
+  | "answered"
+  | "awaiting_confirmation"
+  | "step_cap_exceeded"
+  | "unavailable";
+
+export interface AssistantMessageResponse {
+  status: AssistantTurnStatus;
+  text: string | null;
+  action_plan_id: number | null;
+  plan_steps: AssistantPlanStep[] | null;
+  reason: string | null;
+}
+
+export interface AssistantConfirmResponse {
+  status: string;
+  plan_id: number;
+  launch_request: Record<string, unknown> | null;
+}
