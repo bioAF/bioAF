@@ -108,6 +108,17 @@ export type ExperimentStatus =
 
 export type QCStatus = "pass" | "warning" | "fail";
 
+// Optional, first-class assay (controlled system vocabulary; mirrors the backend
+// SAMPLE_ASSAYS in app/models/sample.py). When set it is the authoritative signal for
+// pipeline recommendation; when null, the assay is inferred from the free-text fields.
+export type AssayValue = "bulk_rna" | "scrna" | "other";
+
+export const SAMPLE_ASSAY_OPTIONS: { value: AssayValue; label: string }[] = [
+  { value: "bulk_rna", label: "Bulk RNA-seq" },
+  { value: "scrna", label: "Single-cell RNA-seq" },
+  { value: "other", label: "Other" },
+];
+
 export type SampleStatus =
   | "registered"
   | "library_prepped"
@@ -339,6 +350,7 @@ export interface Sample {
   molecule_type: string | null;
   library_prep_method: string | null;
   library_layout: string | null;
+  assay: string | null;
   qc_status: QCStatus | null;
   qc_notes: string | null;
   file_count: number;
@@ -457,6 +469,7 @@ export interface SampleCreateRequest {
   molecule_type?: string | null;
   library_prep_method?: string | null;
   library_layout?: string | null;
+  assay?: string | null;
   qc_status?: string | null;
   qc_notes?: string | null;
   custom_fields?: SampleCustomFieldValue[];
@@ -477,6 +490,7 @@ export interface SampleUpdateRequest {
   molecule_type?: string | null;
   library_prep_method?: string | null;
   library_layout?: string | null;
+  assay?: string | null;
   custom_fields?: SampleCustomFieldValue[];
 }
 

@@ -16,6 +16,7 @@ import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportP
 import { FileBrowser } from "@/components/files/FileBrowser";
 import { LiteratureTabPanel } from "@/components/literature/LiteratureTabPanel";
 import { VocabularySelect } from "@/components/shared/VocabularySelect";
+import { AssaySelect } from "@/components/shared/AssaySelect";
 import { CsvUploadModal } from "@/components/experiments/CsvUploadModal";
 import { AutoRunConfigSection } from "@/components/experiments/AutoRunConfigSection";
 import { ExtensibleVocabularySelect } from "@/components/shared/ExtensibleVocabularySelect";
@@ -31,6 +32,7 @@ import { QCDashboardListItem } from "@/components/qc/QCDashboardListItem";
 import { PlotThumbnail, StorageDeletedPlaceholder } from "@/components/plots/PlotThumbnail";
 import { ExperimentTabKey, resolveExperimentTab } from "@/lib/experimentTabs";
 import { statusBadgeClass } from "@/lib/statusStyles";
+import { SAMPLE_ASSAY_OPTIONS } from "@/lib/types";
 import type {
   ExperimentDetail,
   ExperimentUpdateRequest,
@@ -331,6 +333,7 @@ function ExperimentDetailPageInner() {
       molecule_type: sample.molecule_type,
       library_prep_method: sample.library_prep_method,
       library_layout: sample.library_layout,
+      assay: sample.assay,
       sample_batch_code: sample.sample_batch?.name ?? null,
       sequencing_batch_code: sample.sequencing_batch?.code ?? null,
     });
@@ -834,6 +837,7 @@ function ExperimentDetailPageInner() {
                     <VocabularySelect fieldName="molecule_type" value={sampleForm.molecule_type} onChange={(v) => setSampleForm({ ...sampleForm, molecule_type: v })} placeholder="Molecule Type..." />
                     <VocabularySelect fieldName="library_prep_method" value={sampleForm.library_prep_method} onChange={(v) => setSampleForm({ ...sampleForm, library_prep_method: v })} placeholder="Library Prep Method..." />
                     <VocabularySelect fieldName="library_layout" value={sampleForm.library_layout} onChange={(v) => setSampleForm({ ...sampleForm, library_layout: v })} placeholder="Library Layout..." />
+                    <AssaySelect value={sampleForm.assay} onChange={(v) => setSampleForm({ ...sampleForm, assay: v })} />
                     <input placeholder="Sample Batch" value={sampleForm.sample_batch_code ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, sample_batch_code: e.target.value || null })} className="border rounded px-3 py-2 text-sm" />
                     <input placeholder="Sequencing Batch" value={sampleForm.sequencing_batch_code ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, sequencing_batch_code: e.target.value || null })} className="border rounded px-3 py-2 text-sm" />
                     {experiment?.custom_fields.map((cf) => (
@@ -869,6 +873,7 @@ function ExperimentDetailPageInner() {
                     <VocabularySelect fieldName="molecule_type" value={bulkEditForm.molecule_type} onChange={(v) => setBulkEditForm({ ...bulkEditForm, molecule_type: v || undefined })} placeholder="Molecule Type..." />
                     <VocabularySelect fieldName="library_prep_method" value={bulkEditForm.library_prep_method} onChange={(v) => setBulkEditForm({ ...bulkEditForm, library_prep_method: v || undefined })} placeholder="Library Prep Method..." />
                     <VocabularySelect fieldName="library_layout" value={bulkEditForm.library_layout} onChange={(v) => setBulkEditForm({ ...bulkEditForm, library_layout: v || undefined })} placeholder="Library Layout..." />
+                    <AssaySelect value={bulkEditForm.assay} onChange={(v) => setBulkEditForm({ ...bulkEditForm, assay: v || undefined })} />
                   </div>
                   {bulkEditError && (
                     <p className="text-red-600 text-sm mt-2">{bulkEditError}</p>
@@ -966,6 +971,7 @@ function ExperimentDetailPageInner() {
                     { label: "Organism", value: viewingSample.organism },
                     { label: "Tissue Type", value: viewingSample.tissue_type },
                     { label: "Molecule Type", value: viewingSample.molecule_type },
+                    { label: "Assay", value: viewingSample.assay ? (SAMPLE_ASSAY_OPTIONS.find((o) => o.value === viewingSample.assay)?.label ?? viewingSample.assay) : null },
                     { label: "Treatment", value: viewingSample.treatment_condition },
                     { label: "Library Prep", value: viewingSample.library_prep_method },
                     { label: "Library Layout", value: viewingSample.library_layout },
@@ -1050,6 +1056,10 @@ function ExperimentDetailPageInner() {
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Library Layout</label>
                         <VocabularySelect fieldName="library_layout" value={editSampleForm.library_layout} onChange={(v) => setEditSampleForm({ ...editSampleForm, library_layout: v })} placeholder="Library Layout..." />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Assay</label>
+                        <AssaySelect value={editSampleForm.assay} onChange={(v) => setEditSampleForm({ ...editSampleForm, assay: v })} className="border rounded px-3 py-2 text-sm w-full" />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Sample Batch</label>
