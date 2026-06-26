@@ -80,6 +80,7 @@ describe("top-level nav order", () => {
   it("lists sections in the intended order", () => {
     expect(navConfig.map((s) => s.label)).toEqual([
       "Dashboard",
+      "Assistant",
       "Experiments",
       "Pipelines",
       "Results",
