@@ -187,11 +187,27 @@ class SampleSheetService:
         return output.getvalue()
 
     @staticmethod
+    def generate_fetchngs_ids(parameters: dict) -> str:
+        """Build nf-core/fetchngs's --input ids file: one database accession per line, no header.
+
+        fetchngs pulls FASTQ + metadata from these accessions itself (no per-sample files). bioAF
+        carries them in parameters["accessions"] (a list, or a comma/space/newline-separated string);
+        the run path feeds this file in via --input.
+        """
+        raw = parameters.get("accessions") or []
+        if isinstance(raw, str):
+            raw = re.split(r"[,\s]+", raw)
+        ids = [str(a).strip() for a in raw if str(a).strip()]
+        return "\n".join(ids) + ("\n" if ids else "")
+
+    @staticmethod
     def generate_sheet(pipeline_key: str, samples: list, parameters: dict) -> str:
         """Route to the correct sheet generator based on pipeline type."""
         if "scrnaseq" in pipeline_key:
             return SampleSheetService.generate_scrnaseq_sheet(samples, parameters)
         elif "rnaseq" in pipeline_key:
             return SampleSheetService.generate_rnaseq_sheet(samples, parameters)
+        elif "fetchngs" in pipeline_key:
+            return SampleSheetService.generate_fetchngs_ids(parameters)
         else:
             return SampleSheetService.generate_generic_sheet(samples, parameters)
