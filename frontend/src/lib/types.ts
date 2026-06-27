@@ -1969,4 +1969,11 @@ export interface AssistantConfirmResponse {
   plan_id: number;
   executed: boolean;
   result: Record<string, unknown> | null;
+  // Set when a confirmed launch actually started a run (org launch toggle on); else null.
+  run_id?: number | null;
+}
+
+export interface AssistantSettings {
+  // When true, the org has opted in to the assistant launching runs for real on confirm.
+  launch_enabled: boolean;
 }

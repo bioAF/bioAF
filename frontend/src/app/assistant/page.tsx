@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { PlanConfirmCard } from "@/components/assistant/PlanConfirmCard";
+import { AssistantLaunchToggle } from "@/components/assistant/AssistantLaunchToggle";
 import { isAuthenticated } from "@/lib/auth";
 import { api, ApiError } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -15,6 +16,7 @@ import type {
   AssistantConversationResponse,
   AssistantMessageResponse,
   AssistantPlanStep,
+  AssistantSettings,
 } from "@/lib/types";
 
 type ChatEntry =
@@ -45,9 +47,12 @@ export default function AssistantPage() {
   const router = useRouter();
   const { canAccess, loading: permLoading } = usePermissions();
   const canUse = canAccess("assistant", "use");
+  const canConfigure = canAccess("settings", "configure");
 
   const [enabled, setEnabled] = useState<boolean | undefined>(undefined);
   const [availabilityReason, setAvailabilityReason] = useState<string | null>(null);
+  const [launchEnabled, setLaunchEnabled] = useState<boolean>(false);
+  const [launchSaving, setLaunchSaving] = useState<boolean>(false);
   const [entries, setEntries] = useState<ChatEntry[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -84,6 +89,15 @@ export default function AssistantPage() {
         setEnabled(false);
         setAvailabilityReason(err instanceof Error ? err.message : "Could not check availability.");
       });
+  }, [permLoading, canUse]);
+
+  useEffect(() => {
+    if (permLoading || !canUse) return;
+    // Non-fatal: if the settings read fails, leave the toggle showing its default (off).
+    api
+      .get<AssistantSettings>("/api/assistant/settings")
+      .then((s) => setLaunchEnabled(s.launch_enabled))
+      .catch(() => {});
   }, [permLoading, canUse]);
 
   useEffect(() => {
@@ -146,6 +160,19 @@ export default function AssistantPage() {
     );
   }
 
+  async function handleToggleLaunch(next: boolean) {
+    setLaunchSaving(true);
+    try {
+      const s = await api.put<AssistantSettings>("/api/assistant/settings", { launch_enabled: next });
+      setLaunchEnabled(s.launch_enabled);
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "Could not update the launch setting.";
+      appendEntry({ id: makeId(), kind: "system", text: message });
+    } finally {
+      setLaunchSaving(false);
+    }
+  }
+
   async function handleConfirm(planId: number) {
     setConfirmingPlanId(planId);
     try {
@@ -154,10 +181,12 @@ export default function AssistantPage() {
       );
       resolvePlan(planId, "approved");
       let summary: string;
-      if (resp.executed) {
+      if (resp.run_id) {
+        summary = `Run #${resp.run_id} started.`;
+      } else if (resp.executed) {
         summary = `Done.${resp.result ? ` ${JSON.stringify(resp.result)}` : ""}`;
       } else if (resp.result) {
-        summary = `Plan approved. In this preview build the run is not executed yet. Prepared launch request: ${JSON.stringify(resp.result)}`;
+        summary = `Plan approved. Live launch is off, so the run was not started. Prepared launch request: ${JSON.stringify(resp.result)}`;
       } else {
         summary = "Plan approved.";
       }
@@ -225,12 +254,20 @@ export default function AssistantPage() {
   return (
     <Shell>
       <main className="flex-1 flex flex-col overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200 bg-white">
-          <h1 className="text-xl font-semibold">Assistant</h1>
-          <p className="text-sm text-gray-500">
-            Describe what you have and what you want. The assistant proposes a pipeline and asks you
-            to confirm before anything runs.
-          </p>
+        <div className="px-6 py-4 border-b border-gray-200 bg-white flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-semibold">Assistant</h1>
+            <p className="text-sm text-gray-500">
+              Describe what you have and what you want. The assistant proposes a pipeline and asks
+              you to confirm before anything runs.
+            </p>
+          </div>
+          <AssistantLaunchToggle
+            enabled={launchEnabled}
+            canConfigure={canConfigure}
+            saving={launchSaving}
+            onChange={handleToggleLaunch}
+          />
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-4" data-testid="assistant-transcript">
