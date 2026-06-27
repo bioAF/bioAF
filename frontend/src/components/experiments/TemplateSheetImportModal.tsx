@@ -17,6 +17,7 @@ const ALL_SAMPLE_FIELDS = [
   { value: "molecule_type", label: "Molecule Type" },
   { value: "library_prep_method", label: "Library Prep Method" },
   { value: "library_layout", label: "Library Layout" },
+  { value: "assay", label: "Assay" },
   { value: "qc_status", label: "QC Status" },
   { value: "qc_notes", label: "QC Notes" },
   { value: "sample_batch_code", label: "Sample Batch" },
