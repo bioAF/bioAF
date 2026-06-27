@@ -336,6 +336,32 @@ async def test_confirm_fetchngs_launch_builds_request_with_accessions(client, se
     assert await _run_count(session) == 0
 
 
+# ---- Assistant settings (per-org launch toggle) ----
+
+
+async def test_get_assistant_settings_defaults_false(client, admin_token):
+    resp = await client.get("/api/assistant/settings", headers=_auth(admin_token))
+    assert resp.status_code == 200
+    assert resp.json()["launch_enabled"] is False
+
+
+async def test_put_assistant_settings_enables_launch(client, admin_token):
+    resp = await client.put("/api/assistant/settings", json={"launch_enabled": True}, headers=_auth(admin_token))
+    assert resp.status_code == 200
+    assert resp.json()["launch_enabled"] is True
+    # Persisted: a fresh GET reflects it.
+    get = await client.get("/api/assistant/settings", headers=_auth(admin_token))
+    assert get.json()["launch_enabled"] is True
+
+
+async def test_put_assistant_settings_forbidden_without_settings_configure(client, session, admin_user):
+    bench, bench_token = await _bench_user_token(session, admin_user)
+    # Bench can SEE the setting (assistant:use) but cannot change it (no settings:configure).
+    assert (await client.get("/api/assistant/settings", headers=_auth(bench_token))).status_code == 200
+    resp = await client.put("/api/assistant/settings", json={"launch_enabled": True}, headers=_auth(bench_token))
+    assert resp.status_code == 403
+
+
 async def test_confirm_launches_real_run_when_org_launch_enabled(client, session, admin_user, admin_token):
     """With the per-org assistant_launch_enabled toggle ON, confirming a launch plan ACTUALLY
     creates a PipelineRun via the normal launch path (executed=True, run_id surfaced) instead of

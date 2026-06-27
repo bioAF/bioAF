@@ -72,6 +72,15 @@ class ConfirmResponse(BaseModel):
     run_id: int | None = None
 
 
+class AssistantSettingsResponse(BaseModel):
+    # Whether the org has opted in to letting the assistant actually launch runs on confirm.
+    launch_enabled: bool
+
+
+class AssistantSettingsUpdateRequest(BaseModel):
+    launch_enabled: bool
+
+
 @router.get("/availability", response_model=AvailabilityResponse)
 async def get_availability(
     current_user: dict = require_permission("assistant", "use"),
@@ -80,6 +89,45 @@ async def get_availability(
     org_id = int(current_user["org_id"])
     availability = await AssistantAvailabilityService.get_availability(session, org_id)
     return AvailabilityResponse(enabled=availability.enabled, reason=availability.reason)
+
+
+@router.get("/settings", response_model=AssistantSettingsResponse)
+async def get_assistant_settings(
+    current_user: dict = require_permission("assistant", "use"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Read the org's assistant settings. Anyone who can use the assistant may see whether confirmed
+    launches actually start runs (so the UI can show the mode)."""
+    org_id = int(current_user["org_id"])
+    org = (await session.execute(select(Organization).where(Organization.id == org_id))).scalar_one()
+    return AssistantSettingsResponse(launch_enabled=bool(org.assistant_launch_enabled))
+
+
+@router.put("/settings", response_model=AssistantSettingsResponse)
+async def update_assistant_settings(
+    data: AssistantSettingsUpdateRequest,
+    current_user: dict = require_permission("settings", "configure"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Toggle whether the assistant launches for real on confirm (admin-only org setting). Enabling
+    this lets confirmed plans spend compute through the agent, so it is gated on settings:configure."""
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    org = (await session.execute(select(Organization).where(Organization.id == org_id))).scalar_one()
+    previous = {"launch_enabled": bool(org.assistant_launch_enabled)}
+    org.assistant_launch_enabled = data.launch_enabled
+    await session.flush()
+    await audit_service.log_action(
+        session,
+        user_id,
+        "organization",
+        org_id,
+        "assistant.settings.update",
+        details={"launch_enabled": data.launch_enabled},
+        previous_value=previous,
+    )
+    await session.commit()
+    return AssistantSettingsResponse(launch_enabled=bool(org.assistant_launch_enabled))
 
 
 @router.post("/conversations", response_model=ConversationResponse)
