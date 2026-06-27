@@ -146,6 +146,12 @@ class AssistantLoopService:
                 tool_calls_json=[{"tool": c.tool, "args": c.args} for c in turn.tool_calls],
             )
 
+            # Collect every consequential (spend/mutating) call from THIS turn into one plan (L3),
+            # rather than stopping at the first. Read calls execute and feed their result back as
+            # before. After the turn, if any consequential step was collected, stop for a single
+            # confirmation of the whole plan; otherwise continue the reason-act loop.
+            plan: AssistantActionPlan | None = None
+            last_pending: AssistantToolInvocation | None = None
             for call in turn.tool_calls:
                 result = await AssistantToolService.invoke(
                     session,
@@ -154,22 +160,28 @@ class AssistantLoopService:
                     tool_name=call.tool,
                     arguments=call.args,
                     message_id=assistant_message.id,
+                    plan=plan,
                 )
-                # A spend action stops the loop for human confirmation; there is no result yet.
                 if result.status == "awaiting_confirmation":
-                    return LoopResult(
-                        status="awaiting_confirmation",
-                        action_plan=result.action_plan,
-                        tool_invocation=result.tool_invocation,
-                        steps=steps,
-                    )
-                # Feed the tool result back so the model can continue.
+                    # No result yet; batch it into the shared plan and keep collecting this turn.
+                    plan = result.action_plan
+                    last_pending = result.tool_invocation
+                    continue
+                # Read (or rejected) call: feed the result back so the model can continue / revise.
                 await _persist_message(
                     session,
                     conversation.id,
                     "tool",
                     content=json.dumps(_tool_message_content(result)),
                     tool_invocation_id=result.tool_invocation.id if result.tool_invocation else None,
+                )
+
+            if plan is not None:
+                return LoopResult(
+                    status="awaiting_confirmation",
+                    action_plan=plan,
+                    tool_invocation=last_pending,
+                    steps=steps,
                 )
 
         return LoopResult(status="step_cap_exceeded", steps=steps)

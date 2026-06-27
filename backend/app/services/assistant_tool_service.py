@@ -117,6 +117,7 @@ class AssistantToolService:
         tool_name: str,
         arguments: dict,
         message_id: int | None = None,
+        plan: AssistantActionPlan | None = None,
     ) -> ToolExecutionResult:
         tool = get_tool(tool_name)
         if tool is None:
@@ -157,6 +158,8 @@ class AssistantToolService:
 
         # Consequence gate (G1): spend AND mutating actions do NOT execute on the model's say-so.
         # Both create a plan and wait for explicit confirmation (owner rule: confirm all mutating).
+        # An existing `plan` is appended to so the loop can batch several consequential steps from
+        # one turn into a SINGLE confirmable plan (L3); with no plan a fresh one-step plan is made.
         if tool.consequence_class in ("spend", "mutating"):
             invocation = _new_invocation(
                 conversation,
@@ -168,12 +171,17 @@ class AssistantToolService:
             )
             session.add(invocation)
             await session.flush()
-            plan = AssistantActionPlan(
-                conversation_id=conversation.id,
-                steps_json=[{"tool": tool.name, "args": arguments}],
-                status="proposed",
-            )
-            session.add(plan)
+            step = {"tool": tool.name, "args": arguments}
+            if plan is None:
+                plan = AssistantActionPlan(
+                    conversation_id=conversation.id,
+                    steps_json=[step],
+                    status="proposed",
+                )
+                session.add(plan)
+            else:
+                # Reassign (not append in place) so SQLAlchemy flags the JSONB column dirty.
+                plan.steps_json = [*(plan.steps_json or []), step]
             await session.flush()
             await _audit(session, user_id, invocation, tool, conversation, outcome="awaiting_confirmation")
             await session.commit()

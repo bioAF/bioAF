@@ -100,6 +100,12 @@ def _anthropic_tool_use(name, args):
     )
 
 
+def _anthropic_tool_uses(*calls):
+    """A single Anthropic response carrying SEVERAL parallel tool_use blocks (name, args)."""
+    content = [{"type": "tool_use", "id": f"tu{i}", "name": name, "input": args} for i, (name, args) in enumerate(calls)]
+    return httpx.Response(200, json={"content": content, "stop_reason": "tool_use"})
+
+
 # ---- Conversations ----
 
 
@@ -221,6 +227,80 @@ async def test_confirm_install_plan_executes_the_install(client, session, admin_
         )
     ).scalar_one()
     assert count == 1
+
+
+async def test_multi_step_plan_confirms_and_runs_install_then_launch(client, session, admin_user, admin_token):
+    """L3 capstone: the agent proposes install AND launch in ONE turn; that becomes a single
+    two-step plan; one confirmation runs the install (mutating) and builds the launch (spend),
+    in order, still creating NO PipelineRun in v1."""
+    await _configure_anthropic(session, admin_user.organization_id, admin_user.id)
+    exp = await _bulk_mouse_experiment(session, admin_user)  # seeds nf-core/rnaseq, NOT scrnaseq
+    session.add(
+        NfCoreRegistryPipeline(
+            name="scrnaseq",
+            full_name="nf-core/scrnaseq",
+            description="single-cell RNA-seq",
+            releases_json=[{"tag_name": "4.1.0", "published_at": "2024-01-01", "has_schema": True}],
+            default_branch="master",
+        )
+    )
+    await session.flush()
+    await session.commit()
+
+    async def _scrnaseq_installed():
+        return (
+            await session.execute(
+                select(func.count())
+                .select_from(PipelineCatalogEntry)
+                .where(
+                    PipelineCatalogEntry.organization_id == admin_user.organization_id,
+                    PipelineCatalogEntry.pipeline_key == "nf-core/scrnaseq",
+                )
+            )
+        ).scalar_one()
+
+    assert await _scrnaseq_installed() == 0  # not installed yet
+
+    create = await client.post("/api/assistant/conversations", json={}, headers=_auth(admin_token))
+    conv_id = create.json()["id"]
+
+    with respx.mock(base_url="https://api.anthropic.com/v1") as r:
+        r.post("/messages").mock(
+            side_effect=[
+                _anthropic_tool_uses(
+                    ("install", {"name": "scrnaseq"}),
+                    ("launch_run", {"experiment_id": exp.id, "pipeline_key": "nf-core/scrnaseq"}),
+                ),
+            ]
+        )
+        msg = await client.post(
+            f"/api/assistant/conversations/{conv_id}/messages",
+            json={"text": "install nf-core/scrnaseq and run it on experiment 7"},
+            headers=_auth(admin_token),
+        )
+
+    assert msg.status_code == 200
+    body = msg.json()
+    assert body["status"] == "awaiting_confirmation"
+    # ONE plan spanning both steps, in order, surfaced for pre-confirm review.
+    assert [s["tool"] for s in body["plan_steps"]] == ["install", "launch_run"]
+    plan_id = body["action_plan_id"]
+    assert await _scrnaseq_installed() == 0  # still nothing executed at plan time
+    assert await _run_count(session) == 0
+
+    with patch(
+        "app.services.pipeline_catalog_service.PipelineCatalogService.fetch_pipeline_schema",
+        new=AsyncMock(return_value={}),
+    ):
+        confirm = await client.post(f"/api/assistant/action-plans/{plan_id}/confirm", headers=_auth(admin_token))
+
+    assert confirm.status_code == 200
+    cbody = confirm.json()
+    assert cbody["status"] == "approved"
+    assert cbody["executed"] is True  # the install (mutating) ran
+    # The install actually installed nf-core/scrnaseq, and the launch only built its request: no run.
+    assert await _scrnaseq_installed() == 1
+    assert await _run_count(session) == 0
 
 
 async def test_confirm_fetchngs_launch_builds_request_with_accessions(client, session, admin_user, admin_token):

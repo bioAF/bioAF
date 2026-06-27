@@ -10,7 +10,7 @@ real provider is contacted, exactly like the agent_reviews tests.
 import pytest
 from sqlalchemy import func, select
 
-from app.models.assistant import AssistantConversation, AssistantMessage
+from app.models.assistant import AssistantActionPlan, AssistantConversation, AssistantMessage
 from app.models.experiment import Experiment
 from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.models.pipeline_run import PipelineRun
@@ -165,6 +165,54 @@ async def test_loop_stops_at_spend_confirmation_without_executing(session, admin
     assert result.action_plan is not None
     assert result.action_plan.status == "proposed"
     # Load-bearing: nothing executed.
+    run_count = (await session.execute(select(func.count()).select_from(PipelineRun))).scalar_one()
+    assert run_count == 0
+
+
+async def test_loop_batches_parallel_consequential_calls_into_one_plan(session, admin_user):
+    # L3: when the model proposes several consequential actions in one turn (install THEN launch),
+    # the loop collects them into a SINGLE plan spanning both steps, rather than stopping at the
+    # first. Nothing executes until the user confirms the whole plan.
+    exp = await _bulk_mouse_experiment(session, admin_user)
+    conv = await _conversation(session, admin_user)
+
+    override = _scripted(
+        ToolUseResult(
+            tool_calls=[
+                ToolCall(tool="install", args={"name": "rnaseq"}),
+                ToolCall(
+                    tool="launch_run",
+                    args={
+                        "experiment_id": exp.id,
+                        "pipeline_key": "nf-core/rnaseq",
+                        "parameters": {"aligner": "star_salmon"},
+                    },
+                ),
+            ]
+        ),
+    )
+
+    result = await AssistantLoopService.run_turn(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        user_text="install nf-core/rnaseq and launch it on experiment 7",
+        submit_override=override,
+    )
+
+    assert result.status == "awaiting_confirmation"
+    assert result.action_plan is not None
+    assert result.action_plan.status == "proposed"
+    # One plan spanning BOTH steps, in the order proposed.
+    assert [s["tool"] for s in result.action_plan.steps_json] == ["install", "launch_run"]
+    # Exactly ONE plan for the conversation (not one per consequential call).
+    plan_count = (
+        await session.execute(
+            select(func.count()).select_from(AssistantActionPlan).where(AssistantActionPlan.conversation_id == conv.id)
+        )
+    ).scalar_one()
+    assert plan_count == 1
+    # Load-bearing: nothing executed (no run created at plan time).
     run_count = (await session.execute(select(func.count()).select_from(PipelineRun))).scalar_one()
     assert run_count == 0
 
