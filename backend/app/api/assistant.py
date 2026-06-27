@@ -17,10 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import require_permission
 from app.database import get_session
 from app.models.assistant import AssistantActionPlan, AssistantConversation, AssistantToolInvocation
+from app.models.organization import Organization
+from app.schemas.pipeline_run import PipelineRunLaunchRequest
 from app.services import audit_service, llm_provider_config_service, role_service
 from app.services.assistant_availability_service import AssistantAvailabilityService
 from app.services.assistant_loop_service import AssistantLoopService
 from app.services.assistant_tool_catalog import get_tool
+from app.services.pipeline_run_service import PipelineRunService
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 
@@ -58,11 +61,15 @@ class MessageResponse(BaseModel):
 class ConfirmResponse(BaseModel):
     status: str
     plan_id: int
-    # True if the confirmed action actually ran (mutating tools like install/import). False for a
-    # spend action (launch_run): v1 builds the fully-formed launch request but does not execute it.
+    # True if the confirmed action actually ran. Mutating tools (install/import) always run on
+    # confirm. A spend action (launch_run) runs only when the org's assistant_launch_enabled toggle
+    # is ON; otherwise it stays build-only (the fully-formed request is returned but no run starts).
     executed: bool = False
-    # The action result, OR (for a spend step) the built launch request.
+    # The action result: the launched-run summary, the built launch request (toggle off), or the
+    # mutating tool's output.
     result: dict | None = None
+    # The id of the PipelineRun created when a spend step actually launched (toggle on); else None.
+    run_id: int | None = None
 
 
 @router.get("/availability", response_model=AvailabilityResponse)
@@ -158,6 +165,13 @@ async def confirm_action_plan(
 
     role_id = int(current_user["role_id"])
     user_id = int(current_user["sub"])
+    org_id = conversation.organization_id
+
+    # Whether this org has opted in to letting the assistant actually launch (admin-only toggle). When
+    # OFF (default), a spend step stays build-only: the fully-formed request is returned but no run
+    # starts. When ON, a spend step launches for real via the normal PipelineRunService.launch_run.
+    org = (await session.execute(select(Organization).where(Organization.id == org_id))).scalar_one()
+    launch_enabled = bool(org.assistant_launch_enabled)
 
     # Re-check the underlying permission for every step server-side, then run it. The agent acts
     # as the user: a user who cannot launch cannot confirm a launch.
@@ -165,6 +179,7 @@ async def confirm_action_plan(
     new_steps: list[dict] = []
     result: dict | None = None
     executed = False
+    run_id: int | None = None
     for step in steps:
         tool = get_tool(step["tool"])
         if tool is None:
@@ -172,18 +187,42 @@ async def confirm_action_plan(
         resource, action = tool.permission
         if not await role_service.has_permission(session, role_id, resource, action):
             raise HTTPException(403, f"permission denied for {resource}:{action}")
-        # A spend handler only BUILDS the request (v1 never POSTs a run); a mutating handler runs
-        # the real action (install, import) now that the user has confirmed.
+        # A mutating handler runs the real action (install, import) now that the user has confirmed.
+        # A spend step (launch_run) launches for real when the org toggle is ON; otherwise the handler
+        # only BUILDS the request (no run starts).
         try:
-            output = await tool.handler(
-                session, org_id=conversation.organization_id, user_id=user_id, arguments=step["args"]
-            )
+            if tool.consequence_class == "spend" and launch_enabled:
+                # Build the request shape (folds accessions into parameters), then launch it for real
+                # through the canonical launch path, exactly as the UI's POST /api/pipeline-runs does.
+                built = await tool.handler(session, org_id=org_id, user_id=user_id, arguments=step["args"])
+                run = await PipelineRunService.launch_run(
+                    session,
+                    org_id,
+                    user_id,
+                    PipelineRunLaunchRequest(
+                        pipeline_key=built["pipeline_key"],
+                        experiment_id=built["experiment_id"],
+                        parameters=built.get("parameters") or {},
+                        reference_genome=built.get("reference_genome"),
+                    ),
+                )
+                output = {
+                    "launched": True,
+                    "run_id": run.id,
+                    "status": run.status,
+                    "pipeline_key": built["pipeline_key"],
+                    "experiment_id": built["experiment_id"],
+                }
+                executed = True
+                run_id = run.id
+            else:
+                output = await tool.handler(session, org_id=org_id, user_id=user_id, arguments=step["args"])
+                if tool.consequence_class != "spend":
+                    executed = True
         except HTTPException:
             raise
         except Exception as exc:  # surface a failed action as a 400, not a 500
             raise HTTPException(400, f"action '{step['tool']}' failed: {exc}") from exc
-        if tool.consequence_class != "spend":
-            executed = True
         result = output
         new_steps.append({**step, "result": output})
 
@@ -214,9 +253,15 @@ async def confirm_action_plan(
         "assistant_action_plan",
         plan.id,
         "assistant.plan.confirm",
-        details={"via_assistant": True, "conversation_id": conversation.id, "executed": executed},
+        details={
+            "via_assistant": True,
+            "conversation_id": conversation.id,
+            "executed": executed,
+            "run_id": run_id,
+        },
     )
     await session.commit()
 
-    # Mutating actions have now run; a spend action (launch_run) is built but NOT executed in v1.
-    return ConfirmResponse(status="approved", plan_id=plan.id, executed=executed, result=result)
+    # Mutating actions have run. A spend action (launch_run) launched a real run when the org toggle
+    # is ON (run_id set); otherwise it was built but not started.
+    return ConfirmResponse(status="approved", plan_id=plan.id, executed=executed, result=result, run_id=run_id)

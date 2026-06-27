@@ -336,6 +336,59 @@ async def test_confirm_fetchngs_launch_builds_request_with_accessions(client, se
     assert await _run_count(session) == 0
 
 
+async def test_confirm_launches_real_run_when_org_launch_enabled(client, session, admin_user, admin_token):
+    """With the per-org assistant_launch_enabled toggle ON, confirming a launch plan ACTUALLY
+    creates a PipelineRun via the normal launch path (executed=True, run_id surfaced) instead of
+    only building the request. Uses a fetchngs launch so no per-sample files are required; conftest
+    pins BIOAF_COMPUTE_MODE=local, so the compute adapter is the in-memory stub (no real spend)."""
+    from app.models.organization import Organization
+
+    org = await session.get(Organization, admin_user.organization_id)
+    org.assistant_launch_enabled = True  # opt this org in to real launches
+    exp = Experiment(
+        organization_id=admin_user.organization_id, name="Import", owner_user_id=admin_user.id, status="registered"
+    )
+    session.add(exp)
+    session.add(
+        PipelineCatalogEntry(
+            organization_id=admin_user.organization_id,
+            pipeline_key="nf-core/fetchngs",
+            name="nf-core/fetchngs",
+            source_type="nf-core",
+            version="1.12.0",
+            default_params_json={},
+            enabled=True,
+        )
+    )
+    await session.flush()
+    conv = AssistantConversation(organization_id=admin_user.organization_id, user_id=admin_user.id, status="active")
+    session.add(conv)
+    await session.flush()
+    plan = AssistantActionPlan(
+        conversation_id=conv.id,
+        steps_json=[
+            {
+                "tool": "launch_run",
+                "args": {"experiment_id": exp.id, "pipeline_key": "nf-core/fetchngs", "accessions": ["SRR1"]},
+            }
+        ],
+        status="proposed",
+    )
+    session.add(plan)
+    await session.flush()
+    await session.commit()
+
+    assert await _run_count(session) == 0
+    resp = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(admin_token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "approved"
+    assert body["executed"] is True  # spend actually ran now (toggle ON)
+    assert body["result"]["launched"] is True
+    assert body["run_id"]  # a real run id is surfaced
+    assert await _run_count(session) == 1  # a PipelineRun was created
+
+
 async def test_confirm_denied_without_launch_permission(client, session, admin_user):
     bench, bench_token = await _bench_user_token(session, admin_user)
     conv = AssistantConversation(organization_id=bench.organization_id, user_id=bench.id, status="active")
