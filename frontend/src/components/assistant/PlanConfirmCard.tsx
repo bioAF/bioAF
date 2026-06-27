@@ -2,14 +2,25 @@
 
 import type { AssistantPlanStep } from "@/lib/types";
 
+// Human titles for the consequential tools a plan can contain. A plan may span several steps
+// (e.g. install THEN launch confirmed together), so each step is titled and, when there is more
+// than one, numbered.
+const STEP_TITLES: Record<string, string> = {
+  install: "Install pipeline",
+  launch_run: "Launch pipeline run",
+};
+
 // Render one proposed step's arguments as readable rows. launch_run is the v1 spend action;
 // its args are shown explicitly so the user can catch a wrong entity before confirming.
 function StepArgs({ args }: { args: Record<string, unknown> }) {
   const labels: Record<string, string> = {
     experiment_id: "Experiment",
     pipeline_key: "Pipeline",
+    name: "Pipeline",
+    version: "Version",
     reference_genome: "Reference genome",
     parameters: "Parameters",
+    accessions: "Accessions",
   };
   const entries = Object.entries(args).filter(([, v]) => v !== null && v !== undefined);
   if (entries.length === 0) {
@@ -55,15 +66,17 @@ export function PlanConfirmCard({
         Confirm before this runs
       </p>
       <p className="text-xs text-amber-800 mb-3">
-        The assistant has prepared the action below. Review it and confirm to proceed. Nothing
-        runs until you confirm.
+        The assistant has prepared the {steps.length > 1 ? `${steps.length} steps` : "action"} below.
+        Review {steps.length > 1 ? "them" : "it"} and confirm to proceed. Nothing runs until you
+        confirm.
       </p>
 
       <div className="space-y-3">
         {steps.map((step, i) => (
           <div key={i} className="bg-white rounded border border-amber-200 p-3">
             <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">
-              {step.tool === "launch_run" ? "Launch pipeline run" : step.tool}
+              {steps.length > 1 && <span className="text-amber-700">{`Step ${i + 1}: `}</span>}
+              {STEP_TITLES[step.tool] ?? step.tool}
             </p>
             <StepArgs args={step.args} />
           </div>
