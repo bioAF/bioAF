@@ -341,3 +341,39 @@ async def test_google_synthesizes_response_for_unanswered_call():
     contents = body["contents"]
     names = [p["functionResponse"]["name"] for c in contents for p in c["parts"] if "functionResponse" in p]
     assert "launch_run" in names
+
+
+# ---- System prompt threading (each provider puts it in its native place) ----
+
+
+async def test_anthropic_includes_system_prompt():
+    raw = {"content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn"}
+    with respx.mock(base_url="https://api.anthropic.com/v1") as r:
+        route = r.post("/messages").mock(return_value=_resp(raw))
+        await anthropic_client.submit_with_tools(
+            messages=_MESSAGES, tools=_TOOLS, model="claude-x", api_key="sk-ant", system="GUIDE ME"
+        )
+    body = json.loads(route.calls.last.request.content)
+    assert body["system"] == "GUIDE ME"
+
+
+async def test_openai_prepends_system_message():
+    raw = {"choices": [{"message": {"content": "ok"}}]}
+    with respx.mock(base_url="https://api.openai.com/v1") as r:
+        route = r.post("/chat/completions").mock(return_value=_resp(raw))
+        await openai_client.submit_with_tools(
+            messages=_MESSAGES, tools=_TOOLS, model="gpt-x", api_key="sk", system="GUIDE ME"
+        )
+    body = json.loads(route.calls.last.request.content)
+    assert body["messages"][0] == {"role": "system", "content": "GUIDE ME"}
+
+
+async def test_google_sets_system_instruction():
+    raw = {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+    with respx.mock(base_url="https://generativelanguage.googleapis.com/v1beta") as r:
+        route = r.post("/models/gemini-x:generateContent").mock(return_value=_resp(raw))
+        await google_client.submit_with_tools(
+            messages=_MESSAGES, tools=_TOOLS, model="gemini-x", api_key="g", system="GUIDE ME"
+        )
+    body = json.loads(route.calls.last.request.content)
+    assert body["systemInstruction"]["parts"][0]["text"] == "GUIDE ME"

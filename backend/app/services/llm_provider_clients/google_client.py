@@ -187,14 +187,16 @@ def _parse_google_tool_use(data: dict) -> ToolUseResult:
 
 
 async def submit_with_tools(
-    *, messages: list[dict], tools: list[dict], model: str, api_key: str | None
+    *, messages: list[dict], tools: list[dict], model: str, api_key: str | None, system: str | None = None
 ) -> ToolUseResult:
     if not api_key:
         raise ProviderError("Google requires an API key", error_class="auth")
-    body = {
+    body: dict = {
         "contents": _messages_to_google(messages),
         "tools": _tools_to_google(tools),
     }
+    if system:
+        body["systemInstruction"] = {"parts": [{"text": system}]}
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.post(

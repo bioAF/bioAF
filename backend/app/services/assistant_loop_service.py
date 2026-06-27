@@ -30,6 +30,22 @@ from app.services.llm_provider_clients.tool_use import ToolUseResult
 
 SubmitFn = Callable[[list, list], Awaitable[ToolUseResult]]
 
+# Behavioral guidance for the agent. The enforcement wrapper is the real guarantee (tools enforce);
+# this only shapes how the model proposes. It tells the model that consequential actions are gated
+# behind confirmation, that it should batch dependent consequential steps into one plan (so install +
+# launch confirm together, per L3), and that in v1 a launch is BUILT but not executed.
+ASSISTANT_SYSTEM_PROMPT = (
+    "You are the bioAF assistant. You help a lab scientist discover their data and set up and run "
+    "bioinformatics pipelines by calling the provided tools. Use read-only tools (list_experiments, "
+    "list_samples, list_pipelines, check_status, recommend_pipeline) freely to resolve exactly which "
+    "experiment, sample, or pipeline the user means before acting. Consequential tools (install, "
+    "launch_run) are never executed on your say-so: they create a proposed plan that the user must "
+    "explicitly confirm, so do not claim an action is done before it is confirmed. When the user wants "
+    "to install a pipeline and then run it, propose BOTH the install and the launch_run in the SAME "
+    "turn so they are confirmed together as one plan. In this version a confirmed launch is prepared "
+    "but not actually started, so describe it as a prepared run request, not a started run. Be concise."
+)
+
 
 @dataclass
 class LoopResult:
@@ -120,7 +136,11 @@ class AssistantLoopService:
 
             async def _provider_submit(messages: list, tools: list) -> ToolUseResult:
                 return await client.submit_with_tools(
-                    messages=messages, tools=tools, model=active.model, api_key=active.api_key
+                    messages=messages,
+                    tools=tools,
+                    model=active.model,
+                    api_key=active.api_key,
+                    system=ASSISTANT_SYSTEM_PROMPT,
                 )
 
             submit_fn = _provider_submit

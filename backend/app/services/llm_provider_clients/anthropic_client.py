@@ -186,16 +186,18 @@ def _parse_anthropic_tool_use(data: dict) -> ToolUseResult:
 
 
 async def submit_with_tools(
-    *, messages: list[dict], tools: list[dict], model: str, api_key: str | None
+    *, messages: list[dict], tools: list[dict], model: str, api_key: str | None, system: str | None = None
 ) -> ToolUseResult:
     if not api_key:
         raise ProviderError("Anthropic requires an API key", error_class="auth")
-    body = {
+    body: dict = {
         "model": model,
         "max_tokens": 4096,
         "tools": _tools_to_anthropic(tools),
         "messages": _messages_to_anthropic(messages),
     }
+    if system:
+        body["system"] = system
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.post(f"{_BASE_URL}/messages", headers=_headers(api_key), json=body)

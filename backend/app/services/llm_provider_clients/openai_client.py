@@ -218,13 +218,16 @@ def _parse_openai_tool_use(data: dict) -> ToolUseResult:
 
 
 async def submit_with_tools(
-    *, messages: list[dict], tools: list[dict], model: str, api_key: str | None
+    *, messages: list[dict], tools: list[dict], model: str, api_key: str | None, system: str | None = None
 ) -> ToolUseResult:
     if not api_key:
         raise ProviderError("OpenAI requires an API key", error_class="auth")
+    openai_messages = _messages_to_openai(messages)
+    if system:
+        openai_messages = [{"role": "system", "content": system}, *openai_messages]
     body = {
         "model": model,
-        "messages": _messages_to_openai(messages),
+        "messages": openai_messages,
         "tools": _tools_to_openai(tools),
     }
     try:
