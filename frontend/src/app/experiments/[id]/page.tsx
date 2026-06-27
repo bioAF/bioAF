@@ -131,6 +131,7 @@ function ExperimentDetailPageInner() {
     { name: "molecule_type", label: "Molecule Type", type: "vocabulary" as const },
     { name: "library_prep_method", label: "Library Prep Method", type: "vocabulary" as const },
     { name: "library_layout", label: "Library Layout", type: "vocabulary" as const },
+    { name: "assay", label: "Assay", type: "assay" as const },
   ];
 
   useEffect(() => {
@@ -605,7 +606,13 @@ function ExperimentDetailPageInner() {
                           return (
                             <div key={field.name} className="grid grid-cols-3 gap-2 items-center">
                               <span className="text-xs text-gray-600">{field.label}</span>
-                              {field.type === "vocabulary" ? (
+                              {field.type === "assay" ? (
+                                <AssaySelect
+                                  value={current?.default_value ?? null}
+                                  onChange={(v) => updateEditFieldDefault(field.name, v, current?.is_required ?? null)}
+                                  placeholder="Default..."
+                                />
+                              ) : field.type === "vocabulary" ? (
                                 <VocabularySelect
                                   fieldName={field.name}
                                   value={current?.default_value ?? null}

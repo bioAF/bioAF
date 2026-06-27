@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from app.models.experiment import EXPERIMENT_STATUSES
 
@@ -33,6 +33,19 @@ class FieldDefaultValue(BaseModel):
         if v not in DEFAULTABLE_SAMPLE_FIELDS:
             raise ValueError(f"Invalid field '{v}'. Must be one of: {', '.join(DEFAULTABLE_SAMPLE_FIELDS)}")
         return v
+
+    @model_validator(mode="after")
+    def validate_controlled_vocab_default(self) -> "FieldDefaultValue":
+        # Controlled-vocabulary fields must hold a default within their vocabulary.
+        # Defaults are applied to samples via model_copy (see SampleService._apply_defaults),
+        # which bypasses field validators, so the vocabulary must be enforced here at set
+        # time or a bad default would reach the sample unchecked.
+        if self.field_name == "assay" and self.default_value:
+            from app.models.sample import SAMPLE_ASSAYS
+
+            if self.default_value not in SAMPLE_ASSAYS:
+                raise ValueError(f"assay default must be one of: {', '.join(SAMPLE_ASSAYS)}")
+        return self
 
 
 class FieldDefaultResponse(BaseModel):

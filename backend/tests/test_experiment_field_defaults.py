@@ -252,3 +252,56 @@ async def test_detail_response_includes_empty_field_defaults(client, admin_token
     )
     assert detail.status_code == 200
     assert detail.json()["field_defaults"] == []
+
+
+@pytest.mark.asyncio
+async def test_assay_is_a_valid_field_default_and_is_inherited(client, admin_token, session):
+    # assay is a first-class controlled-vocab field; it must be settable as an
+    # experiment-level default and inherited by samples that do not set it.
+    resp = await client.post(
+        "/api/experiments",
+        json={
+            "name": "Assay Default Exp",
+            "field_defaults": [
+                {"field_name": "assay", "default_value": "scrna"},
+            ],
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    exp_id = resp.json()["id"]
+
+    # The default round-trips on the detail endpoint.
+    detail = await client.get(
+        f"/api/experiments/{exp_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    defaults = {d["field_name"]: d for d in detail.json()["field_defaults"]}
+    assert defaults["assay"]["default_value"] == "scrna"
+
+    # A sample created without an assay inherits the experiment default.
+    sample = await client.post(
+        f"/api/experiments/{exp_id}/samples",
+        json={"external_id": "S-ASSAY-1"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert sample.status_code == 200
+    assert sample.json()["assay"] == "scrna"
+
+
+@pytest.mark.asyncio
+async def test_assay_field_default_rejects_a_value_outside_the_vocabulary(client, admin_token):
+    # Field defaults are applied to samples via model_copy, which bypasses field
+    # validators, so a bad assay default would otherwise reach the DB unchecked.
+    # Validate it at set time.
+    resp = await client.post(
+        "/api/experiments",
+        json={
+            "name": "Bad Assay Default Exp",
+            "field_defaults": [
+                {"field_name": "assay", "default_value": "not_a_real_assay"},
+            ],
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 422

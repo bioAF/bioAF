@@ -19,7 +19,7 @@ const ALL_SAMPLE_FIELDS = [
   { value: "molecule_type", label: "Molecule Type", defaultable: true },
   { value: "library_prep_method", label: "Library Prep Method", defaultable: true },
   { value: "library_layout", label: "Library Layout", defaultable: true },
-  { value: "assay", label: "Assay", defaultable: false },
+  { value: "assay", label: "Assay", defaultable: true },
   { value: "qc_status", label: "QC Status", defaultable: false },
   { value: "qc_notes", label: "QC Notes", defaultable: false },
   { value: "collection_timestamp", label: "Collection Timestamp", defaultable: false },
