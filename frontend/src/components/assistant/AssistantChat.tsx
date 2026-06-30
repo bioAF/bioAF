@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { PlanConfirmCard } from "@/components/assistant/PlanConfirmCard";
 import { AssistantLaunchToggle } from "@/components/assistant/AssistantLaunchToggle";
@@ -15,10 +16,13 @@ import type {
   AssistantSettings,
 } from "@/lib/types";
 
+type EntityLink = { label: string; href: string };
+
 type ChatEntry =
   | { id: string; kind: "user"; text: string }
   | { id: string; kind: "assistant"; text: string }
   | { id: string; kind: "system"; text: string }
+  | { id: string; kind: "result"; text: string; links: EntityLink[] }
   | {
       id: string;
       kind: "plan";
@@ -26,6 +30,41 @@ type ChatEntry =
       steps: AssistantPlanStep[];
       resolved?: "approved" | "cancelled";
     };
+
+/**
+ * Turn a confirm result into clickable links to what the assistant just created or touched, so the
+ * user is handed straight to the experiment/run instead of being left to find it. Uses the same
+ * detail routes the rest of the app navigates to. (Rendered with next/link so following one is a
+ * client navigation that keeps the floating bubble - and the conversation - mounted.)
+ */
+function entityLinks(resp: AssistantConfirmResponse): EntityLink[] {
+  const r = resp.result ?? {};
+  const links: EntityLink[] = [];
+  const runId = resp.run_id ?? (typeof r.run_id === "number" ? r.run_id : null);
+  if (typeof runId === "number") links.push({ label: `View run #${runId}`, href: `/pipelines/runs/${runId}` });
+  if (typeof r.experiment_id === "number") {
+    links.push({ label: "Open experiment", href: `/experiments/${r.experiment_id}` });
+  }
+  return links;
+}
+
+/** A plain-language summary of a confirmed action, derived from the recognizable result fields. */
+function summarizeResult(resp: AssistantConfirmResponse): string {
+  const r = resp.result ?? {};
+  if (resp.run_id) return `Run #${resp.run_id} started.`;
+  if (typeof r.code === "string" && typeof r.name === "string") {
+    return `Created experiment "${r.name}" (${r.code}).`;
+  }
+  if (typeof r.sample_id === "number") {
+    return `Added sample ${typeof r.external_id === "string" ? r.external_id : `#${r.sample_id}`}.`;
+  }
+  if (typeof r.pipeline_key === "string" && typeof r.version === "string") {
+    return `Installed ${r.pipeline_key} (${r.version}).`;
+  }
+  if (resp.executed) return "Done.";
+  if (resp.result) return "Plan approved. Live launch is off, so the run was not started.";
+  return "Plan approved.";
+}
 
 /**
  * The assistant conversation surface: transcript, composer, and plan-confirm cards, plus the
@@ -164,17 +203,12 @@ export function AssistantChat() {
         `/api/assistant/action-plans/${planId}/confirm`,
       );
       resolvePlan(planId, "approved");
-      let summary: string;
-      if (resp.run_id) {
-        summary = `Run #${resp.run_id} started.`;
-      } else if (resp.executed) {
-        summary = `Done.${resp.result ? ` ${JSON.stringify(resp.result)}` : ""}`;
-      } else if (resp.result) {
-        summary = `Plan approved. Live launch is off, so the run was not started. Prepared launch request: ${JSON.stringify(resp.result)}`;
-      } else {
-        summary = "Plan approved.";
-      }
-      appendEntry({ id: makeId(), kind: "system", text: summary });
+      appendEntry({
+        id: makeId(),
+        kind: "result",
+        text: summarizeResult(resp),
+        links: entityLinks(resp),
+      });
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Could not confirm the plan.";
       appendEntry({ id: makeId(), kind: "system", text: message });
@@ -266,6 +300,28 @@ export function AssistantChat() {
               <div key={entry.id} className="flex justify-center">
                 <div className="bg-gray-100 text-gray-600 rounded px-3 py-1.5 text-xs max-w-[90%] whitespace-pre-wrap break-words">
                   {entry.text}
+                </div>
+              </div>
+            );
+          }
+          if (entry.kind === "result") {
+            return (
+              <div key={entry.id} className="flex justify-center">
+                <div className="bg-gray-100 text-gray-700 rounded px-3 py-2 text-xs max-w-[90%] text-center space-y-1.5">
+                  <div className="whitespace-pre-wrap break-words">{entry.text}</div>
+                  {entry.links.length > 0 && (
+                    <div className="flex flex-wrap gap-3 justify-center">
+                      {entry.links.map((l) => (
+                        <Link
+                          key={l.href}
+                          href={l.href}
+                          className="text-bioaf-700 hover:text-bioaf-800 underline font-medium"
+                        >
+                          {l.label}
+                        </Link>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             );
