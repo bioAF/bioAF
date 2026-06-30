@@ -16,6 +16,7 @@ from app.models.audit_log import AuditLog
 from app.models.experiment import Experiment
 from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.models.pipeline_run import PipelineRun
+from app.models.qc_dashboard import QCDashboard
 from app.models.sample import Sample
 from app.services.assistant_tool_catalog import get_tool
 from app.services.assistant_tool_service import AssistantToolService
@@ -319,6 +320,167 @@ async def test_check_status_rejects_run_outside_org(session, admin_user):
         conversation=conv,
         role_id=admin_user.role_id,
         tool_name="check_status",
+        arguments={"run_id": 999999},
+    )
+
+    assert result.status == "failed"
+
+
+# ---- Results tools (get_metrics, explain_results): read-only, U3 results-in-chat ----
+
+
+async def _completed_run(session, admin_user, *, status="succeeded"):
+    """A pipeline run on a bulk-mouse experiment, in the given terminal status."""
+    exp = await _bulk_mouse_experiment(session, admin_user)
+    run = PipelineRun(
+        organization_id=admin_user.organization_id,
+        experiment_id=exp.id,
+        pipeline_name="nf-core/rnaseq",
+        pipeline_version="3.14.0",
+        status=status,
+        parameters_json={"aligner": "star_salmon"},
+        output_files_json={"multiqc": "gs://results/multiqc.html"},
+    )
+    session.add(run)
+    await session.flush()
+    await session.commit()
+    return exp, run
+
+
+async def _add_qc_dashboard(session, admin_user, run, *, status="ready", metrics=None, summary="QC looks healthy."):
+    dashboard = QCDashboard(
+        organization_id=admin_user.organization_id,
+        pipeline_run_id=run.id,
+        experiment_id=run.experiment_id,
+        metrics_json=metrics if metrics is not None else {"cell_count": 5000, "quality_rating": "pass"},
+        summary_text=summary,
+        status=status,
+    )
+    session.add(dashboard)
+    await session.flush()
+    await session.commit()
+    return dashboard
+
+
+async def test_catalog_describes_results_tools():
+    for name in ("get_metrics", "explain_results"):
+        tool = get_tool(name)
+        assert tool is not None, f"{name} not registered"
+        assert tool.consequence_class == "read_only"
+        # Results reading is gated by experiments:view (a RESULTS_VIEW_PERMISSIONS member the
+        # bench persona holds), so a non-computational user can ask about their own results.
+        assert tool.permission == ("experiments", "view")
+
+
+async def test_get_metrics_returns_qc_metrics_when_dashboard_ready(session, admin_user):
+    _, run = await _completed_run(session, admin_user)
+    await _add_qc_dashboard(
+        session, admin_user, run, metrics={"cell_count": 4823, "median_genes_per_cell": 1200, "quality_rating": "pass"}
+    )
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="get_metrics",
+        arguments={"run_id": run.id},
+    )
+
+    assert result.status == "succeeded"
+    assert result.result["metrics_available"] is True
+    assert result.result["run_id"] == run.id
+    assert result.result["quality_rating"] == "pass"
+    assert result.result["metrics"]["cell_count"] == 4823
+    assert await _audit_rows_for(session, result.tool_invocation.id) == 1
+
+
+async def test_get_metrics_reports_not_available_when_no_dashboard(session, admin_user):
+    """A run with no QC dashboard yet does not error: the tool reports metrics_available=False with a
+    reason so the agent can tell the user QC has not been generated, rather than crashing the turn."""
+    _, run = await _completed_run(session, admin_user, status="running")
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="get_metrics",
+        arguments={"run_id": run.id},
+    )
+
+    assert result.status == "succeeded"
+    assert result.result["metrics_available"] is False
+    assert result.result["run_status"] == "running"
+    assert result.result["reason"]
+
+
+async def test_get_metrics_rejects_run_outside_org(session, admin_user):
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="get_metrics",
+        arguments={"run_id": 999999},
+    )
+
+    assert result.status == "failed"
+
+
+async def test_explain_results_returns_interpretation_context(session, admin_user):
+    """explain_results assembles the agent-review-style results context (run + params + samples + QC)
+    so the assistant's own loop LLM can narrate it conversationally. The tool itself makes no LLM call."""
+    _, run = await _completed_run(session, admin_user)
+    await _add_qc_dashboard(session, admin_user, run, summary="High mapping rate; 4823 cells recovered.")
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="explain_results",
+        arguments={"run_id": run.id},
+    )
+
+    assert result.status == "succeeded"
+    assert result.result["run_id"] == run.id
+    assert result.result["run_status"] == "succeeded"
+    assert result.result["quality_rating"] == "pass"
+    md = result.result["results_markdown"]
+    assert "Pipeline Run Review Input" in md
+    assert "High mapping rate" in md  # the QC summary is folded into the interpretation context
+
+
+async def test_explain_results_handles_run_without_dashboard(session, admin_user):
+    """When QC has not been generated, explain_results still returns the run context (status, params,
+    samples) so the assistant can explain where the run stands instead of failing."""
+    _, run = await _completed_run(session, admin_user, status="failed")
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="explain_results",
+        arguments={"run_id": run.id},
+    )
+
+    assert result.status == "succeeded"
+    assert result.result["run_status"] == "failed"
+    assert result.result["quality_rating"] is None
+    assert "Pipeline Run Review Input" in result.result["results_markdown"]
+
+
+async def test_explain_results_rejects_run_outside_org(session, admin_user):
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="explain_results",
         arguments={"run_id": 999999},
     )
 

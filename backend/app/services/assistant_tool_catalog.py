@@ -17,10 +17,16 @@ from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from app.services.agent_review_artifact_builder import (
+    _load_qc_dashboard_text,
+    _load_samples_for_run,
+    render_run_markdown,
+)
 from app.services.experiment_service import ExperimentService
 from app.services.nf_core_registry_service import NfCoreRegistryService
 from app.services.pipeline_catalog_service import PipelineCatalogService
 from app.services.pipeline_run_service import PipelineRunService
+from app.services.qc_dashboard_service import QCDashboardService
 from app.services.recommend_pipeline_service import PipelineRecommendation, RecommendPipelineService
 from app.services.sample_service import SampleService
 
@@ -120,6 +126,64 @@ async def _check_status_handler(session, *, org_id, user_id, arguments):
     }
 
 
+async def _get_metrics_handler(session, *, org_id, user_id, arguments):
+    """Return the QC metrics for a pipeline run (org-scoped, read-only). Reads the already-generated
+    QC dashboard rather than computing one (generation reads the run's output files and is a separate,
+    heavier action). When no ready dashboard exists, reports metrics_available=False with a reason so
+    the agent can tell the user QC is not ready yet instead of failing the turn."""
+    run_id = arguments["run_id"]
+    run = await PipelineRunService.get_run(session, run_id, org_id)
+    if run is None:
+        raise LookupError(f"pipeline run {run_id} not found in org {org_id}")
+    dashboard = await QCDashboardService.get_dashboard_by_run(session, org_id, run_id)
+    if dashboard is None or dashboard.status != "ready":
+        return {
+            "run_id": run_id,
+            "run_status": run.status,
+            "metrics_available": False,
+            "reason": (
+                "No QC dashboard has been generated for this run yet; QC is produced as a separate "
+                "step after the pipeline completes."
+                if dashboard is None
+                else f"The QC dashboard for this run is not ready (status: {dashboard.status})."
+            ),
+        }
+    metrics = dashboard.metrics_json or {}
+    return {
+        "run_id": run_id,
+        "run_status": run.status,
+        "metrics_available": True,
+        "quality_rating": metrics.get("quality_rating"),
+        "summary": dashboard.summary_text,
+        "metrics": metrics,
+    }
+
+
+async def _explain_results_handler(session, *, org_id, user_id, arguments):
+    """Assemble the interpretation-ready results context for a run (org-scoped, read-only) so the
+    assistant can narrate it in plain language. Reuses the agent-review artifact assembly (U3): run
+    metadata + parameters + samples + QC dashboard text + errors, rendered as Markdown. The tool itself
+    makes NO LLM call; the assistant's own loop model turns this context into the conversational
+    explanation. Robust to run state: a still-running, failed, or QC-less run still returns its
+    context rather than erroring."""
+    run_id = arguments["run_id"]
+    run = await PipelineRunService.get_run(session, run_id, org_id)
+    if run is None:
+        raise LookupError(f"pipeline run {run_id} not found in org {org_id}")
+    dashboard = await QCDashboardService.get_dashboard_by_run(session, org_id, run_id)
+    qc_text = await _load_qc_dashboard_text(session, run_id)
+    samples = await _load_samples_for_run(session, run_id)
+    markdown = render_run_markdown(run=run, samples=samples, qc_report_content=qc_text)
+    quality_rating = (dashboard.metrics_json or {}).get("quality_rating") if dashboard else None
+    return {
+        "run_id": run_id,
+        "run_status": run.status,
+        "quality_rating": quality_rating,
+        "qc_available": dashboard is not None and dashboard.status == "ready",
+        "results_markdown": markdown,
+    }
+
+
 async def _install_handler(session, *, org_id, user_id, arguments):
     """Install an nf-core pipeline into the org's catalog. Mutating: only runs after confirmation.
     Accepts a bare name ('scrnaseq') or a pipeline_key ('nf-core/scrnaseq'); defaults to the latest
@@ -210,6 +274,33 @@ TOOL_CATALOG: dict[str, ToolDescriptor] = {
         permission=("pipelines", "view"),
         args_schema={"required": ["run_id"], "properties": {"run_id": {"type": "integer"}}},
         handler=_check_status_handler,
+    ),
+    "get_metrics": ToolDescriptor(
+        name="get_metrics",
+        description=(
+            "Get the QC metrics for a completed pipeline run by id (e.g. cell count, mapping rate, "
+            "quality rating). Reads the run's QC dashboard; if QC has not been generated yet it says "
+            "so. Read-only."
+        ),
+        consequence_class="read_only",
+        # Results reading: experiments:view is a RESULTS_VIEW_PERMISSIONS member, so the same users
+        # who can see a run's Results tab (incl. the bench persona) can ask the assistant about it.
+        permission=("experiments", "view"),
+        args_schema={"required": ["run_id"], "properties": {"run_id": {"type": "integer"}}},
+        handler=_get_metrics_handler,
+    ),
+    "explain_results": ToolDescriptor(
+        name="explain_results",
+        description=(
+            "Get the full results context for a pipeline run by id (status, parameters, samples, QC "
+            "report, and any errors) so you can explain in plain language what the run produced and "
+            "what its QC means. Use this when the user asks what their results mean or how a run went. "
+            "Read-only."
+        ),
+        consequence_class="read_only",
+        permission=("experiments", "view"),
+        args_schema={"required": ["run_id"], "properties": {"run_id": {"type": "integer"}}},
+        handler=_explain_results_handler,
     ),
     "recommend_pipeline": ToolDescriptor(
         name="recommend_pipeline",
