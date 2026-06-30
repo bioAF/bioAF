@@ -22,6 +22,7 @@ const BASE_LABELS: Record<string, string> = {
   reference_genome: "Reference genome",
   parameters: "Parameters",
   accessions: "Accessions",
+  sample_ids: "Samples",
   external_id: "Sample ID",
   organism: "Organism",
   assay: "Assay",

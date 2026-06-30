@@ -53,6 +53,24 @@ describe("PlanConfirmCard", () => {
     expect(screen.getByText("scrna")).toBeInTheDocument();
   });
 
+  it("labels launch sample scoping so the user sees which samples will run", () => {
+    render(
+      <PlanConfirmCard
+        steps={[
+          {
+            tool: "launch_run",
+            args: { experiment_id: 3, pipeline_key: "nf-core/scrnaseq", sample_ids: [1] },
+          },
+        ]}
+        busy={false}
+        onConfirm={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    expect(screen.getByText("Samples")).toBeInTheDocument();
+    expect(screen.getByText("[1]")).toBeInTheDocument();
+  });
+
   it("titles a single-step plan without step numbering", () => {
     render(
       <PlanConfirmCard

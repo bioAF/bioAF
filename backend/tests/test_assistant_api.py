@@ -498,3 +498,89 @@ async def test_confirm_denied_without_launch_permission(client, session, admin_u
     resp = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(bench_token))
     assert resp.status_code == 403
     assert await _run_count(session) == 0
+
+
+async def test_confirm_launch_scopes_to_requested_sample_ids(client, session, admin_user, admin_token):
+    """Reproduces the live-test failure: a user asks to run on ONE sample, but a launch with no
+    sample_ids defaults to EVERY sample in the experiment and fails the per-sample-FASTQ check when a
+    sibling sample has no files ('Some selected samples have no linked input files'). With sample_ids
+    threaded through confirm, the launch is scoped to just the requested sample (which HAS files) and
+    succeeds, and the run is linked to exactly that sample."""
+    from app.models.file import File
+    from app.models.organization import Organization
+    from app.models.pipeline_run import PipelineRunSample
+    from app.models.sample import sample_files
+
+    org = await session.get(Organization, admin_user.organization_id)
+    org.assistant_launch_enabled = True
+    exp = Experiment(
+        organization_id=admin_user.organization_id,
+        name="scRNA mixed",
+        owner_user_id=admin_user.id,
+        status="fastq_uploaded",
+    )
+    session.add(exp)
+    session.add(
+        PipelineCatalogEntry(
+            organization_id=admin_user.organization_id,
+            pipeline_key="nf-core/scrnaseq",
+            name="nf-core/scrnaseq",
+            source_type="nf-core",
+            version="4.1.0",
+            default_params_json={},
+            enabled=True,
+        )
+    )
+    await session.flush()
+
+    # Sample WITH linked FASTQ (the one the user named) and a sibling WITHOUT files.
+    sample_with_files = Sample(experiment_id=exp.id, external_id="101", organism="Homo sapiens")
+    sample_no_files = Sample(experiment_id=exp.id, external_id="102", organism="Homo sapiens")
+    session.add_all([sample_with_files, sample_no_files])
+    await session.flush()
+    for read in ("R1", "R2"):
+        f = File(
+            organization_id=exp.organization_id,
+            experiment_id=exp.id,
+            gcs_uri=f"gs://bucket/101_{read}.fastq.gz",
+            filename=f"101_{read}.fastq.gz",
+            file_type="fastq",
+        )
+        session.add(f)
+        await session.flush()
+        await session.execute(sample_files.insert().values(sample_id=sample_with_files.id, file_id=f.id))
+
+    conv = AssistantConversation(organization_id=admin_user.organization_id, user_id=admin_user.id, status="active")
+    session.add(conv)
+    await session.flush()
+    plan = AssistantActionPlan(
+        conversation_id=conv.id,
+        steps_json=[
+            {
+                "tool": "launch_run",
+                "args": {
+                    "experiment_id": exp.id,
+                    "pipeline_key": "nf-core/scrnaseq",
+                    "sample_ids": [sample_with_files.id],
+                    "reference_genome": "GRCh38",
+                },
+            }
+        ],
+        status="proposed",
+    )
+    session.add(plan)
+    await session.flush()
+    await session.commit()
+
+    resp = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(admin_token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["executed"] is True
+    assert body["run_id"]  # the scoped launch succeeded despite sibling 102 having no files
+    # The run is linked to exactly the requested sample, not the whole experiment.
+    linked = (
+        await session.execute(
+            select(PipelineRunSample.sample_id).where(PipelineRunSample.pipeline_run_id == body["run_id"])
+        )
+    ).scalars()
+    assert set(linked) == {sample_with_files.id}

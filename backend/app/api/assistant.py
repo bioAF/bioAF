@@ -250,6 +250,9 @@ async def confirm_action_plan(
                     PipelineRunLaunchRequest(
                         pipeline_key=built["pipeline_key"],
                         experiment_id=built["experiment_id"],
+                        # Scope to the samples the agent selected; without this the launch path runs
+                        # against EVERY sample in the experiment and fails when any lack linked files.
+                        sample_ids=built.get("sample_ids"),
                         parameters=built.get("parameters") or {},
                         reference_genome=built.get("reference_genome"),
                     ),

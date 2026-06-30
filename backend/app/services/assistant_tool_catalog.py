@@ -258,10 +258,12 @@ async def _recommend_pipeline_handler(session, *, org_id, user_id, arguments):
 
 
 async def _launch_run_handler(session, *, org_id, user_id, arguments):
-    """Build the fully-formed launch request (a valid PipelineRunCreate). v1 stops at the confirmed
-    plan and never POSTs a run. For a fetch-style pipeline (nf-core/fetchngs), the data is pulled
-    from accessions rather than per-sample files, so an optional ``accessions`` list is folded into
-    ``parameters`` (bioAF has no top-level accessions field; parameters is the carrier)."""
+    """Build the fully-formed launch request (a valid PipelineRunLaunchRequest payload). ``sample_ids``
+    (the database ids from list_samples) scope the run to specific samples; when omitted, the real
+    launch path runs against EVERY sample in the experiment, which fails if any of them lack linked
+    files. For a fetch-style pipeline (nf-core/fetchngs) the data is pulled from accessions rather than
+    per-sample files, so an optional ``accessions`` list is folded into ``parameters`` (bioAF has no
+    top-level accessions field; parameters is the carrier)."""
     parameters = dict(arguments.get("parameters") or {})
     accessions = arguments.get("accessions")
     if accessions:
@@ -269,6 +271,7 @@ async def _launch_run_handler(session, *, org_id, user_id, arguments):
     return {
         "experiment_id": arguments["experiment_id"],
         "pipeline_key": arguments["pipeline_key"],
+        "sample_ids": arguments.get("sample_ids"),
         "parameters": parameters,
         "reference_genome": arguments.get("reference_genome"),
     }
@@ -428,9 +431,13 @@ TOOL_CATALOG: dict[str, ToolDescriptor] = {
         name="launch_run",
         description=(
             "Launch a pipeline run against an experiment. Spends compute, so it is never executed "
-            "without an explicit user confirmation of the proposed plan. To import data by accession, "
-            "launch nf-core/fetchngs with the 'accessions' list (e.g. GEO/SRA/ENA ids); fetchngs pulls "
-            "the data itself, so per-sample files are not required."
+            "without an explicit user confirmation of the proposed plan. To run on specific samples, "
+            "pass 'sample_ids': the sample database ids (the 'id' field from list_samples, NOT the "
+            "external_id). If the user names particular samples, you MUST scope to them with "
+            "sample_ids; do not put sample selection in 'parameters'. When sample_ids is omitted the "
+            "run uses every sample in the experiment, which fails if any of them lack uploaded files. "
+            "To import data by accession, launch nf-core/fetchngs with the 'accessions' list (e.g. "
+            "GEO/SRA/ENA ids); fetchngs pulls the data itself, so per-sample files are not required."
         ),
         consequence_class="spend",
         # Mirrors the real POST /api/pipeline-runs guard: require_permission("pipelines", "launch").
@@ -440,6 +447,7 @@ TOOL_CATALOG: dict[str, ToolDescriptor] = {
             "properties": {
                 "experiment_id": {"type": "integer"},
                 "pipeline_key": {"type": "string"},
+                "sample_ids": {"type": "array"},
                 "parameters": {"type": "object"},
                 "reference_genome": {"type": "string"},
                 "accessions": {"type": "array"},

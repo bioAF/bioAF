@@ -102,6 +102,9 @@ async def test_catalog_describes_recommend_pipeline_and_launch_run():
     assert launch.consequence_class == "spend"
     # Mirrors the real POST /api/pipeline-runs guard, require_permission("pipelines", "launch").
     assert launch.permission == ("pipelines", "launch")
+    # The agent can scope a launch to specific samples; without sample_ids the backend defaults to
+    # the whole experiment, which fails if any sample lacks linked files.
+    assert "sample_ids" in launch.args_schema["properties"]
 
 
 # ---- Wrapper (T2) ----
@@ -505,6 +508,22 @@ async def test_launch_run_handler_folds_accessions_into_parameters():
     assert out["experiment_id"] == 5
     assert out["pipeline_key"] == "nf-core/fetchngs"
     assert out["parameters"]["accessions"] == ["GSE123456", "SRR9999999"]
+
+
+async def test_launch_run_handler_carries_sample_ids():
+    """The agent must be able to scope a launch to specific samples (the database ids from
+    list_samples). Without this the launch defaults to EVERY sample in the experiment, which fails
+    when any of them lack linked files. The built request carries sample_ids through verbatim."""
+    from app.services.assistant_tool_catalog import _launch_run_handler
+
+    out = await _launch_run_handler(
+        None,
+        org_id=1,
+        user_id=1,
+        arguments={"experiment_id": 3, "pipeline_key": "nf-core/scrnaseq", "sample_ids": [1]},
+    )
+    assert out["experiment_id"] == 3
+    assert out["sample_ids"] == [1]
 
 
 # ---- Mutating tools follow the same confirm gate as spend (owner rule) ----

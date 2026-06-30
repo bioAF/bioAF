@@ -61,8 +61,14 @@ ASSISTANT_SYSTEM_PROMPT = (
     "install runs before the launch_run). You do NOT need to wait for the install to finish before "
     "proposing the launch_run for that same pipeline; just reference the pipeline you are installing in "
     "the launch_run call. Batching them lets the user confirm the whole plan in one step.\n\n"
-    "In this version a confirmed launch is prepared but not actually started, so describe it as a "
-    "prepared run request, not a started run. Be concise."
+    "Scoping a launch to samples: when the user names specific samples (or one experiment's subset), "
+    "pass launch_run's 'sample_ids' with those samples' database ids (the 'id' field from "
+    "list_samples, not the external_id). Do NOT put samples inside 'parameters'. If you omit "
+    "sample_ids the run uses every sample in the experiment, which fails when any of them have no "
+    "uploaded files, so prefer to scope explicitly to the samples the user means.\n\n"
+    "When a confirmed launch actually runs, describe it as a started run; when the org has not enabled "
+    "live launches it is prepared but not started, so describe it as a prepared run request. Be "
+    "concise."
 )
 
 
