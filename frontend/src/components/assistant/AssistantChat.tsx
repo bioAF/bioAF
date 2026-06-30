@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { PlanConfirmCard } from "@/components/assistant/PlanConfirmCard";
-import { AssistantLaunchToggle } from "@/components/assistant/AssistantLaunchToggle";
 import { api, ApiError } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
 import type {
@@ -16,7 +15,6 @@ import type {
   AssistantConversationTranscript,
   AssistantMessageResponse,
   AssistantPlanStep,
-  AssistantSettings,
 } from "@/lib/types";
 
 type EntityLink = { label: string; href: string };
@@ -79,12 +77,9 @@ function summarizeResult(resp: AssistantConfirmResponse): string {
 export function AssistantChat() {
   const { canAccess, loading: permLoading } = usePermissions();
   const canUse = canAccess("assistant", "use");
-  const canConfigure = canAccess("settings", "configure");
 
   const [enabled, setEnabled] = useState<boolean | undefined>(undefined);
   const [availabilityReason, setAvailabilityReason] = useState<string | null>(null);
-  const [launchEnabled, setLaunchEnabled] = useState<boolean>(false);
-  const [launchSaving, setLaunchSaving] = useState<boolean>(false);
   const [entries, setEntries] = useState<ChatEntry[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -118,15 +113,6 @@ export function AssistantChat() {
         setEnabled(false);
         setAvailabilityReason(err instanceof Error ? err.message : "Could not check availability.");
       });
-  }, [permLoading, canUse]);
-
-  useEffect(() => {
-    if (permLoading || !canUse) return;
-    // Non-fatal: if the settings read fails, leave the toggle showing its default (off).
-    api
-      .get<AssistantSettings>("/api/assistant/settings")
-      .then((s) => setLaunchEnabled(s.launch_enabled))
-      .catch(() => {});
   }, [permLoading, canUse]);
 
   useEffect(() => {
@@ -187,19 +173,6 @@ export function AssistantChat() {
     setEntries((prev) =>
       prev.map((e) => (e.kind === "plan" && e.planId === planId ? { ...e, resolved } : e)),
     );
-  }
-
-  async function handleToggleLaunch(next: boolean) {
-    setLaunchSaving(true);
-    try {
-      const s = await api.put<AssistantSettings>("/api/assistant/settings", { launch_enabled: next });
-      setLaunchEnabled(s.launch_enabled);
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Could not update the launch setting.";
-      appendEntry({ id: makeId(), kind: "system", text: message });
-    } finally {
-      setLaunchSaving(false);
-    }
   }
 
   async function handleConfirm(planId: number) {
@@ -457,15 +430,6 @@ export function AssistantChat() {
         >
           New chat
         </button>
-        <div className="flex-1" />
-        {canConfigure && (
-          <AssistantLaunchToggle
-            enabled={launchEnabled}
-            canConfigure={canConfigure}
-            saving={launchSaving}
-            onChange={handleToggleLaunch}
-          />
-        )}
       </div>
 
       {showHistory ? (

@@ -1,9 +1,9 @@
-"""Tests for the Assistant HTTP API: conversations, messages (runs the loop), confirm.
+"""Tests for the Assistant HTTP API: conversations, messages (runs the loop), confirm, history.
 
-This is the Phase 1 capstone: it exercises the whole spine through HTTP. The headline test
-goes intent -> recommend_pipeline -> proposed plan -> confirm -> fully-formed launch request,
-entirely through the tool layer, with the provider mocked via respx and NO PipelineRun ever
-created. Confirm re-checks the underlying tool permission, so a bench user (can use the
+It exercises the whole spine through HTTP. The headline test goes intent -> recommend_pipeline ->
+proposed plan -> confirm -> a real PipelineRun, entirely through the tool layer, with the provider
+mocked via respx. Nothing launches until confirm (the plan-then-confirm gate); confirm then runs the
+action for real. Confirm re-checks the underlying tool permission, so a bench user (can use the
 assistant, cannot launch) is denied.
 """
 
@@ -73,6 +73,25 @@ async def _bulk_mouse_experiment(session, user):
     return exp
 
 
+async def _give_fastq(session, *, experiment_id, org_id, sample_id):
+    """Link R1/R2 FASTQ files to a sample so a per-sample-FASTQ pipeline can actually launch."""
+    from app.models.file import File
+    from app.models.sample import sample_files
+
+    for read in ("R1", "R2"):
+        f = File(
+            organization_id=org_id,
+            experiment_id=experiment_id,
+            gcs_uri=f"gs://bucket/{sample_id}_{read}.fastq.gz",
+            filename=f"{sample_id}_{read}.fastq.gz",
+            file_type="fastq",
+        )
+        session.add(f)
+        await session.flush()
+        await session.execute(sample_files.insert().values(sample_id=sample_id, file_id=f.id))
+    await session.flush()
+
+
 async def _bench_user_token(session, admin_user):
     role_map = admin_user._test_role_map
     user = User(
@@ -128,9 +147,14 @@ async def test_create_conversation_forbidden_for_viewer(client, viewer_token):
 # ---- Messages (runs the loop) + confirm ----
 
 
-async def test_message_reaches_plan_then_confirm_builds_launch_request(client, session, admin_user, admin_token):
+async def test_message_reaches_plan_then_confirm_launches_the_run(client, session, admin_user, admin_token):
+    """The spine: intent -> recommend_pipeline -> proposed plan -> confirm -> a real PipelineRun.
+    Nothing launches until confirm (the plan-then-confirm gate); confirm then actually launches."""
     await _configure_anthropic(session, admin_user.organization_id, admin_user.id)
     exp = await _bulk_mouse_experiment(session, admin_user)
+    b1 = (await session.execute(select(Sample).where(Sample.experiment_id == exp.id))).scalars().first()
+    await _give_fastq(session, experiment_id=exp.id, org_id=admin_user.organization_id, sample_id=b1.id)
+    await session.commit()
 
     create = await client.post("/api/assistant/conversations", json={}, headers=_auth(admin_token))
     conv_id = create.json()["id"]
@@ -153,21 +177,21 @@ async def test_message_reaches_plan_then_confirm_builds_launch_request(client, s
     assert body["status"] == "awaiting_confirmation"
     plan_id = body["action_plan_id"]
     assert plan_id is not None
-    # The proposed plan is surfaced so the confirm UI can show WHAT is being confirmed before
-    # the user clicks (spec-03 / ADR-067: catch "not that sample" before spend).
+    # The proposed plan is surfaced so the confirm UI can show WHAT is being confirmed (and warn that
+    # it will spend) before the user clicks (spec-03 / ADR-067: catch "not that sample" before spend).
     assert body["plan_steps"]
     assert body["plan_steps"][0]["tool"] == "launch_run"
     assert body["plan_steps"][0]["args"]["pipeline_key"] == "nf-core/rnaseq"
-    assert await _run_count(session) == 0  # nothing launched
+    assert body["plan_steps"][0]["consequence_class"] == "spend"  # drives the cost warning
+    assert await _run_count(session) == 0  # nothing launched until confirm
 
     confirm = await client.post(f"/api/assistant/action-plans/{plan_id}/confirm", headers=_auth(admin_token))
-    assert confirm.status_code == 200
+    assert confirm.status_code == 200, confirm.text
     cbody = confirm.json()
     assert cbody["status"] == "approved"
-    assert cbody["executed"] is False  # spend: built, not executed in v1
-    assert cbody["result"]["pipeline_key"] == "nf-core/rnaseq"
-    # The load-bearing constraint: confirm builds the request but does NOT launch in v1.
-    assert await _run_count(session) == 0
+    assert cbody["executed"] is True  # confirm launches for real now
+    assert cbody["run_id"]
+    assert await _run_count(session) == 1
 
 
 # ---- Conversation history (list + transcript) ----
@@ -184,7 +208,9 @@ async def _conversation_with_messages(session, *, org_id, user_id, first_user_te
     return conv
 
 
-async def test_list_conversations_returns_the_users_conversations_with_preview(client, session, admin_user, admin_token):
+async def test_list_conversations_returns_the_users_conversations_with_preview(
+    client, session, admin_user, admin_token
+):
     await _conversation_with_messages(
         session, org_id=admin_user.organization_id, user_id=admin_user.id, first_user_text="analyze experiment 1"
     )
@@ -401,10 +427,12 @@ async def test_confirm_create_sample_plan_creates_the_sample(client, session, ad
 
 async def test_multi_step_plan_confirms_and_runs_install_then_launch(client, session, admin_user, admin_token):
     """L3 capstone: the agent proposes install AND launch in ONE turn; that becomes a single
-    two-step plan; one confirmation runs the install (mutating) and builds the launch (spend),
-    in order, still creating NO PipelineRun in v1."""
+    two-step plan; one confirmation runs the install (mutating) and then launches the run (spend),
+    in order."""
     await _configure_anthropic(session, admin_user.organization_id, admin_user.id)
     exp = await _bulk_mouse_experiment(session, admin_user)  # seeds nf-core/rnaseq, NOT scrnaseq
+    b1 = (await session.execute(select(Sample).where(Sample.experiment_id == exp.id))).scalars().first()
+    await _give_fastq(session, experiment_id=exp.id, org_id=admin_user.organization_id, sample_id=b1.id)
     session.add(
         NfCoreRegistryPipeline(
             name="scrnaseq",
@@ -464,83 +492,20 @@ async def test_multi_step_plan_confirms_and_runs_install_then_launch(client, ses
     ):
         confirm = await client.post(f"/api/assistant/action-plans/{plan_id}/confirm", headers=_auth(admin_token))
 
-    assert confirm.status_code == 200
+    assert confirm.status_code == 200, confirm.text
     cbody = confirm.json()
     assert cbody["status"] == "approved"
-    assert cbody["executed"] is True  # the install (mutating) ran
-    # The install actually installed nf-core/scrnaseq, and the launch only built its request: no run.
+    assert cbody["executed"] is True
+    # The install actually installed nf-core/scrnaseq, then the launch ran it: one PipelineRun.
     assert await _scrnaseq_installed() == 1
-    assert await _run_count(session) == 0
+    assert await _run_count(session) == 1
 
 
-async def test_confirm_fetchngs_launch_builds_request_with_accessions(client, session, admin_user, admin_token):
-    """'Import by accession' is a fetchngs LAUNCH (spend). Confirm builds the launch request carrying
-    the accessions in parameters; v1 does NOT execute it (no PipelineRun created)."""
-    conv = AssistantConversation(organization_id=admin_user.organization_id, user_id=admin_user.id, status="active")
-    session.add(conv)
-    await session.flush()
-    plan = AssistantActionPlan(
-        conversation_id=conv.id,
-        steps_json=[
-            {
-                "tool": "launch_run",
-                "args": {
-                    "experiment_id": 1,
-                    "pipeline_key": "nf-core/fetchngs",
-                    "accessions": ["GSE1", "SRR2"],
-                },
-            }
-        ],
-        status="proposed",
-    )
-    session.add(plan)
-    await session.flush()
-    await session.commit()
-
-    resp = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(admin_token))
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["executed"] is False  # spend: built, not run in v1
-    assert body["result"]["pipeline_key"] == "nf-core/fetchngs"
-    assert body["result"]["parameters"]["accessions"] == ["GSE1", "SRR2"]
-    assert await _run_count(session) == 0
-
-
-# ---- Assistant settings (per-org launch toggle) ----
-
-
-async def test_get_assistant_settings_defaults_false(client, admin_token):
-    resp = await client.get("/api/assistant/settings", headers=_auth(admin_token))
-    assert resp.status_code == 200
-    assert resp.json()["launch_enabled"] is False
-
-
-async def test_put_assistant_settings_enables_launch(client, admin_token):
-    resp = await client.put("/api/assistant/settings", json={"launch_enabled": True}, headers=_auth(admin_token))
-    assert resp.status_code == 200
-    assert resp.json()["launch_enabled"] is True
-    # Persisted: a fresh GET reflects it.
-    get = await client.get("/api/assistant/settings", headers=_auth(admin_token))
-    assert get.json()["launch_enabled"] is True
-
-
-async def test_put_assistant_settings_forbidden_without_settings_configure(client, session, admin_user):
-    bench, bench_token = await _bench_user_token(session, admin_user)
-    # Bench can SEE the setting (assistant:use) but cannot change it (no settings:configure).
-    assert (await client.get("/api/assistant/settings", headers=_auth(bench_token))).status_code == 200
-    resp = await client.put("/api/assistant/settings", json={"launch_enabled": True}, headers=_auth(bench_token))
-    assert resp.status_code == 403
-
-
-async def test_confirm_launches_real_run_when_org_launch_enabled(client, session, admin_user, admin_token):
-    """With the per-org assistant_launch_enabled toggle ON, confirming a launch plan ACTUALLY
-    creates a PipelineRun via the normal launch path (executed=True, run_id surfaced) instead of
-    only building the request. Uses a fetchngs launch so no per-sample files are required; conftest
-    pins BIOAF_COMPUTE_MODE=local, so the compute adapter is the in-memory stub (no real spend)."""
-    from app.models.organization import Organization
-
-    org = await session.get(Organization, admin_user.organization_id)
-    org.assistant_launch_enabled = True  # opt this org in to real launches
+async def test_confirm_launches_a_real_run(client, session, admin_user, admin_token):
+    """Confirming a spend plan launches a real PipelineRun: the plan-then-confirm gate is the safety
+    boundary, so there is no separate opt-in. Uses a fetchngs launch so no per-sample files are
+    required; conftest pins BIOAF_COMPUTE_MODE=local, so the compute adapter is the in-memory stub (no
+    real spend). The accessions ride through into the launched run's parameters."""
     exp = Experiment(
         organization_id=admin_user.organization_id, name="Import", owner_user_id=admin_user.id, status="registered"
     )
@@ -579,10 +544,12 @@ async def test_confirm_launches_real_run_when_org_launch_enabled(client, session
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["status"] == "approved"
-    assert body["executed"] is True  # spend actually ran now (toggle ON)
+    assert body["executed"] is True
     assert body["result"]["launched"] is True
-    assert body["run_id"]  # a real run id is surfaced
-    assert await _run_count(session) == 1  # a PipelineRun was created
+    assert body["run_id"]
+    assert await _run_count(session) == 1
+    run = (await session.execute(select(PipelineRun).where(PipelineRun.id == body["run_id"]))).scalar_one()
+    assert (run.parameters_json or {}).get("accessions") == ["SRR1"]
 
 
 async def test_confirm_denied_without_launch_permission(client, session, admin_user):
@@ -611,12 +578,9 @@ async def test_confirm_launch_scopes_to_requested_sample_ids(client, session, ad
     threaded through confirm, the launch is scoped to just the requested sample (which HAS files) and
     succeeds, and the run is linked to exactly that sample."""
     from app.models.file import File
-    from app.models.organization import Organization
     from app.models.pipeline_run import PipelineRunSample
     from app.models.sample import sample_files
 
-    org = await session.get(Organization, admin_user.organization_id)
-    org.assistant_launch_enabled = True
     exp = Experiment(
         organization_id=admin_user.organization_id,
         name="scRNA mixed",

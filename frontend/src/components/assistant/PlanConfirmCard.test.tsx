@@ -71,6 +71,30 @@ describe("PlanConfirmCard", () => {
     expect(screen.getByText("[1]")).toBeInTheDocument();
   });
 
+  it("warns about cost when a step will spend compute, and not otherwise", () => {
+    const { rerender } = render(
+      <PlanConfirmCard
+        steps={[{ tool: "launch_run", args: { experiment_id: 3 }, consequence_class: "spend" }]}
+        busy={false}
+        onConfirm={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("plan-cost-warning")).toBeInTheDocument();
+    expect(screen.getByText(/spend compute/i)).toBeInTheDocument();
+
+    // A purely mutating plan (create experiment) does not warn about cost.
+    rerender(
+      <PlanConfirmCard
+        steps={[{ tool: "create_experiment", args: { name: "X" }, consequence_class: "mutating" }]}
+        busy={false}
+        onConfirm={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId("plan-cost-warning")).not.toBeInTheDocument();
+  });
+
   it("titles a single-step plan without step numbering", () => {
     render(
       <PlanConfirmCard

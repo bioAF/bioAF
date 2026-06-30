@@ -136,7 +136,6 @@ describe("AssistantChat", () => {
     mockUsePermissions.mockReturnValue({ canAccess: () => true, loading: false });
     mockGet.mockImplementation((url: string) => {
       if (url === "/api/assistant/availability") return Promise.resolve({ enabled: true, reason: null });
-      if (url === "/api/assistant/settings") return Promise.resolve({ launch_enabled: false });
       if (url === "/api/assistant/conversations") {
         return Promise.resolve({
           total: 1,

@@ -1948,6 +1948,8 @@ export interface AssistantConversationResponse {
 export interface AssistantPlanStep {
   tool: string;
   args: Record<string, unknown>;
+  // read_only | mutating | spend - drives the cost warning on the confirm card.
+  consequence_class?: string;
 }
 
 export type AssistantTurnStatus =
@@ -1971,11 +1973,6 @@ export interface AssistantConfirmResponse {
   result: Record<string, unknown> | null;
   // Set when a confirmed launch actually started a run (org launch toggle on); else null.
   run_id?: number | null;
-}
-
-export interface AssistantSettings {
-  // When true, the org has opted in to the assistant launching runs for real on confirm.
-  launch_enabled: boolean;
 }
 
 export interface AssistantConversationSummary {

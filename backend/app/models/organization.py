@@ -41,10 +41,4 @@ class Organization(Base):
         String(16), nullable=False, default="weekly", server_default="weekly"
     )
     lit_review_max_runs_per_tick: Mapped[int] = mapped_column(Integer, nullable=False, default=5, server_default="5")
-    # When enabled (admin-only org setting), the conversational assistant's confirm step actually
-    # launches a PipelineRun via the normal launch path instead of only building the request. Default
-    # OFF so letting the agent spend compute is an explicit per-org opt-in (ai_pipeline_run).
-    assistant_launch_enabled: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="false"
-    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

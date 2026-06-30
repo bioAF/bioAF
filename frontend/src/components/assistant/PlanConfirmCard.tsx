@@ -81,6 +81,8 @@ export function PlanConfirmCard({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  // A spend step (e.g. launching a pipeline run) will incur compute cost, so warn before confirm.
+  const willSpend = steps.some((s) => s.consequence_class === "spend");
   return (
     <div
       className="bg-amber-50 border border-amber-200 rounded-lg p-4"
@@ -94,6 +96,26 @@ export function PlanConfirmCard({
         Review {steps.length > 1 ? "them" : "it"} and confirm to proceed. Nothing runs until you
         confirm.
       </p>
+
+      {willSpend && (
+        <div
+          className="flex items-start gap-2 bg-red-50 border border-red-200 rounded p-2 mb-3"
+          data-testid="plan-cost-warning"
+        >
+          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" className="mt-0.5 shrink-0" aria-hidden="true">
+            <path
+              d="M10 6.5v4M10 13.5h.01M8.6 3.2L2.3 14a1.6 1.6 0 001.4 2.4h12.6a1.6 1.6 0 001.4-2.4L11.4 3.2a1.6 1.6 0 00-2.8 0z"
+              stroke="#dc2626"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <p className="text-xs text-red-700">
+            This will spend compute. Confirming starts a real run that may incur cost.
+          </p>
+        </div>
+      )}
 
       <div className="space-y-3">
         {steps.map((step, i) => (

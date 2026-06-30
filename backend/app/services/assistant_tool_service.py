@@ -171,7 +171,9 @@ class AssistantToolService:
             )
             session.add(invocation)
             await session.flush()
-            step = {"tool": tool.name, "args": arguments}
+            # consequence_class travels with the step so the confirm UI can warn before a spend action
+            # (e.g. launch_run) without re-deriving cost from the tool name.
+            step = {"tool": tool.name, "args": arguments, "consequence_class": tool.consequence_class}
             if plan is None:
                 plan = AssistantActionPlan(
                     conversation_id=conversation.id,
