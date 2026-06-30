@@ -264,6 +264,34 @@ async def test_confirm_create_experiment_plan_creates_the_experiment(client, ses
     assert count == 1
 
 
+async def test_assistant_created_experiment_appears_in_the_experiments_list(client, session, admin_user, admin_token):
+    """Reproduces the live report: the assistant says it created the experiment, but the user does not
+    see it in their Experiments list. Create via the assistant confirm path, then read the SAME endpoint
+    the UI uses (GET /api/experiments) and assert the new experiment is present."""
+    conv = AssistantConversation(organization_id=admin_user.organization_id, user_id=admin_user.id, status="active")
+    session.add(conv)
+    await session.flush()
+    plan = AssistantActionPlan(
+        conversation_id=conv.id,
+        steps_json=[{"tool": "create_experiment", "args": {"name": "Mouse Gut Serotonin Investigation"}}],
+        status="proposed",
+    )
+    session.add(plan)
+    await session.flush()
+    await session.commit()
+
+    confirm = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(admin_token))
+    assert confirm.status_code == 200, confirm.text
+    new_id = confirm.json()["result"]["experiment_id"]
+
+    listing = await client.get("/api/experiments", headers=_auth(admin_token))
+    assert listing.status_code == 200, listing.text
+    names = [e["name"] for e in listing.json()["experiments"]]
+    ids = [e["id"] for e in listing.json()["experiments"]]
+    assert new_id in ids, f"created experiment {new_id} missing from the list (ids={ids})"
+    assert "Mouse Gut Serotonin Investigation" in names
+
+
 async def test_confirm_create_sample_plan_creates_the_sample(client, session, admin_user, admin_token):
     """create_sample is mutating: confirming adds the sample (with its first-class assay) to the
     target experiment."""
