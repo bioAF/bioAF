@@ -37,7 +37,8 @@ export interface NavSection {
 
 export const navConfig: NavSection[] = [
   { label: "Dashboard", path: "/dashboard", icon: "home" },
-  { label: "Assistant", path: "/assistant", icon: "sparkles", permission: { resource: "assistant", action: "use" } },
+  // The assistant is now a global floating bubble (FloatingAssistant), not a nav destination, so it
+  // follows the user across pages instead of being a single full-page surface.
   {
     label: "Experiments",
     icon: "folder",
