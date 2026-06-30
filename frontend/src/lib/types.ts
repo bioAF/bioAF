@@ -1977,3 +1977,40 @@ export interface AssistantSettings {
   // When true, the org has opted in to the assistant launching runs for real on confirm.
   launch_enabled: boolean;
 }
+
+export interface AssistantConversationSummary {
+  id: number;
+  title: string | null;
+  preview: string | null;
+  status: string;
+  message_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssistantConversationListResponse {
+  conversations: AssistantConversationSummary[];
+  total: number;
+}
+
+export interface AssistantTranscriptMessage {
+  id: number;
+  role: string;
+  content: string | null;
+  tool_calls: AssistantPlanStep[] | null;
+  created_at: string;
+}
+
+export interface AssistantTranscriptPlan {
+  id: number;
+  steps: AssistantPlanStep[] | null;
+  status: string;
+  created_at: string;
+}
+
+export interface AssistantConversationTranscript {
+  id: number;
+  title: string | null;
+  messages: AssistantTranscriptMessage[];
+  plans: AssistantTranscriptPlan[];
+}

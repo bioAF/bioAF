@@ -131,4 +131,49 @@ describe("AssistantChat", () => {
     const link = screen.getByRole("link", { name: /open experiment/i });
     expect(link).toHaveAttribute("href", "/experiments/8");
   });
+
+  it("lists past conversations and resumes one into the transcript", async () => {
+    mockUsePermissions.mockReturnValue({ canAccess: () => true, loading: false });
+    mockGet.mockImplementation((url: string) => {
+      if (url === "/api/assistant/availability") return Promise.resolve({ enabled: true, reason: null });
+      if (url === "/api/assistant/settings") return Promise.resolve({ launch_enabled: false });
+      if (url === "/api/assistant/conversations") {
+        return Promise.resolve({
+          total: 1,
+          conversations: [
+            {
+              id: 5,
+              title: null,
+              preview: "analyze experiment 1",
+              status: "active",
+              message_count: 2,
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-01-01T00:00:00Z",
+            },
+          ],
+        });
+      }
+      if (url === "/api/assistant/conversations/5/messages") {
+        return Promise.resolve({
+          id: 5,
+          title: null,
+          messages: [
+            { id: 1, role: "user", content: "analyze experiment 1", tool_calls: null, created_at: "2026-01-01T00:00:00Z" },
+            { id: 2, role: "assistant", content: "Here is the result.", tool_calls: null, created_at: "2026-01-01T00:00:01Z" },
+          ],
+          plans: [],
+        });
+      }
+      return Promise.resolve({});
+    });
+
+    render(<AssistantChat />);
+    // The transcript is empty until a conversation is resumed.
+    fireEvent.click(await screen.findByRole("button", { name: /^history$/i }));
+    const item = await screen.findByRole("button", { name: /analyze experiment 1/i });
+    fireEvent.click(item);
+
+    expect(await screen.findByText("Here is the result.")).toBeInTheDocument();
+    expect(screen.getByText("analyze experiment 1")).toBeInTheDocument();
+  });
 });

@@ -10,7 +10,10 @@ import { usePermissions } from "@/hooks/usePermissions";
 import type {
   AssistantAvailability,
   AssistantConfirmResponse,
+  AssistantConversationListResponse,
   AssistantConversationResponse,
+  AssistantConversationSummary,
+  AssistantConversationTranscript,
   AssistantMessageResponse,
   AssistantPlanStep,
   AssistantSettings,
@@ -67,11 +70,11 @@ function summarizeResult(resp: AssistantConfirmResponse): string {
 }
 
 /**
- * The assistant conversation surface: transcript, composer, and plan-confirm cards, plus the
- * permission/availability gates. Extracted from the former full-page `/assistant` so it can be
- * hosted inside the global FloatingAssistant bubble (and stay mounted across navigation, which is
- * what keeps the session alive as the user moves between pages). It does NOT own the auth redirect
- * or page chrome; the host decides when to render it.
+ * The assistant conversation surface: transcript, composer, plan-confirm cards, and a history
+ * list to revisit/resume past chats, plus the permission/availability gates. Extracted from the
+ * former full-page `/assistant` so it can be hosted inside the global FloatingAssistant bubble (and
+ * stay mounted across navigation, which is what keeps the session alive as the user moves between
+ * pages). It does NOT own the auth redirect or page chrome; the host decides when to render it.
  */
 export function AssistantChat() {
   const { canAccess, loading: permLoading } = usePermissions();
@@ -86,6 +89,9 @@ export function AssistantChat() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [confirmingPlanId, setConfirmingPlanId] = useState<number | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [conversations, setConversations] = useState<AssistantConversationSummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const conversationIdRef = useRef<number | null>(null);
   const idCounter = useRef(0);
@@ -222,6 +228,65 @@ export function AssistantChat() {
     appendEntry({ id: makeId(), kind: "system", text: "Plan cancelled. Nothing was run." });
   }
 
+  function startNewChat() {
+    setEntries([]);
+    conversationIdRef.current = null;
+    setShowHistory(false);
+  }
+
+  async function toggleHistory() {
+    const next = !showHistory;
+    setShowHistory(next);
+    if (!next) return;
+    setHistoryLoading(true);
+    try {
+      const data = await api.get<AssistantConversationListResponse>("/api/assistant/conversations");
+      setConversations(data.conversations);
+    } catch {
+      setConversations([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  async function resumeConversation(id: number) {
+    try {
+      const t = await api.get<AssistantConversationTranscript>(`/api/assistant/conversations/${id}/messages`);
+      // Re-render the transcript by interleaving messages and plan cards in time order. Tool-role
+      // messages and content-less assistant turns are internal (a plan card stands in for them).
+      const items: { ts: string; seq: number; entry: ChatEntry }[] = [];
+      for (const m of t.messages) {
+        if (m.role === "user" && m.content) {
+          items.push({ ts: m.created_at, seq: m.id, entry: { id: makeId(), kind: "user", text: m.content } });
+        } else if (m.role === "assistant" && m.content) {
+          items.push({ ts: m.created_at, seq: m.id, entry: { id: makeId(), kind: "assistant", text: m.content } });
+        }
+      }
+      for (const p of t.plans) {
+        items.push({
+          ts: p.created_at,
+          seq: p.id,
+          // A still-proposed plan stays confirmable on resume; anything else is shown as resolved.
+          entry: {
+            id: makeId(),
+            kind: "plan",
+            planId: p.id,
+            steps: p.steps ?? [],
+            resolved: p.status === "proposed" ? undefined : "approved",
+          },
+        });
+      }
+      items.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : a.seq - b.seq));
+      setEntries(items.map((i) => i.entry));
+      conversationIdRef.current = id;
+      setShowHistory(false);
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "Could not load that conversation.";
+      appendEntry({ id: makeId(), kind: "system", text: message });
+      setShowHistory(false);
+    }
+  }
+
   // ---- Gates ----
 
   if (permLoading || (canUse && enabled === undefined)) {
@@ -255,19 +320,9 @@ export function AssistantChat() {
 
   // ---- Chat ----
 
-  return (
-    <div className="flex flex-col h-full min-h-0">
-      {canConfigure && (
-        <div className="px-4 py-2 border-b border-gray-200 bg-white flex justify-end">
-          <AssistantLaunchToggle
-            enabled={launchEnabled}
-            canConfigure={canConfigure}
-            saving={launchSaving}
-            onChange={handleToggleLaunch}
-          />
-        </div>
-      )}
-
+  // A plain element (not a nested component) so it is not remounted on every keystroke.
+  const chatBody = (
+    <div className="flex-1 flex flex-col min-h-0">
       <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0" data-testid="assistant-transcript">
         {entries.length === 0 && (
           <div className="text-center text-gray-400 mt-6 text-sm">
@@ -378,6 +433,70 @@ export function AssistantChat() {
           </button>
         </form>
       </div>
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col h-full min-h-0">
+      <div className="px-3 py-2 border-b border-gray-200 bg-white flex items-center gap-2">
+        <button
+          type="button"
+          onClick={toggleHistory}
+          className={`text-xs px-2 py-1 rounded border ${
+            showHistory
+              ? "bg-bioaf-50 border-bioaf-300 text-bioaf-700"
+              : "border-gray-200 text-gray-600 hover:bg-gray-50"
+          }`}
+        >
+          History
+        </button>
+        <button
+          type="button"
+          onClick={startNewChat}
+          className="text-xs px-2 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-50"
+        >
+          New chat
+        </button>
+        <div className="flex-1" />
+        {canConfigure && (
+          <AssistantLaunchToggle
+            enabled={launchEnabled}
+            canConfigure={canConfigure}
+            saving={launchSaving}
+            onChange={handleToggleLaunch}
+          />
+        )}
+      </div>
+
+      {showHistory ? (
+        <div className="flex-1 overflow-y-auto p-3 space-y-2 min-h-0" data-testid="assistant-history">
+          {historyLoading && (
+            <div className="flex justify-center pt-6">
+              <LoadingSpinner size="md" />
+            </div>
+          )}
+          {!historyLoading && conversations.length === 0 && (
+            <div className="text-center text-gray-400 text-sm mt-6">No past conversations yet.</div>
+          )}
+          {conversations.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => resumeConversation(c.id)}
+              className="w-full text-left bg-white border border-gray-200 rounded px-3 py-2 hover:bg-gray-50"
+            >
+              <div className="text-sm font-medium text-gray-900 truncate">
+                {c.title ?? c.preview ?? "New conversation"}
+              </div>
+              <div className="text-xs text-gray-400">
+                {c.message_count} message{c.message_count === 1 ? "" : "s"}
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : (
+        chatBody
+      )}
     </div>
   );
 }
