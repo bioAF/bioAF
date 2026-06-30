@@ -27,6 +27,32 @@ describe("PlanConfirmCard", () => {
     expect(screen.getAllByText("nf-core/scrnaseq").length).toBeGreaterThanOrEqual(1);
   });
 
+  it("titles and labels a data-setup plan (create_experiment / create_sample)", () => {
+    render(
+      <PlanConfirmCard
+        steps={[
+          { tool: "create_experiment", args: { name: "Cortex scRNA pilot" } },
+          {
+            tool: "create_sample",
+            args: { experiment_id: 7, external_id: "S1", organism: "Mus musculus", assay: "scrna" },
+          },
+        ]}
+        busy={false}
+        onConfirm={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    expect(screen.getByText(/Create experiment/i)).toBeInTheDocument();
+    expect(screen.getByText(/Create sample/i)).toBeInTheDocument();
+    // The experiment name is labelled "Name", not mislabelled "Pipeline".
+    expect(screen.getByText("Name")).toBeInTheDocument();
+    expect(screen.getByText("Cortex scRNA pilot")).toBeInTheDocument();
+    expect(screen.queryByText("Pipeline")).not.toBeInTheDocument();
+    // The sample's first-class assay is surfaced so a wrong assay is caught before confirm.
+    expect(screen.getByText("Assay")).toBeInTheDocument();
+    expect(screen.getByText("scrna")).toBeInTheDocument();
+  });
+
   it("titles a single-step plan without step numbering", () => {
     render(
       <PlanConfirmCard

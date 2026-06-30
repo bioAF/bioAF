@@ -8,20 +8,43 @@ import type { AssistantPlanStep } from "@/lib/types";
 const STEP_TITLES: Record<string, string> = {
   install: "Install pipeline",
   launch_run: "Launch pipeline run",
+  create_experiment: "Create experiment",
+  create_sample: "Create sample",
 };
 
-// Render one proposed step's arguments as readable rows. launch_run is the v1 spend action;
-// its args are shown explicitly so the user can catch a wrong entity before confirming.
-function StepArgs({ args }: { args: Record<string, unknown> }) {
-  const labels: Record<string, string> = {
-    experiment_id: "Experiment",
-    pipeline_key: "Pipeline",
-    name: "Pipeline",
-    version: "Version",
-    reference_genome: "Reference genome",
-    parameters: "Parameters",
-    accessions: "Accessions",
-  };
+// Shared argument labels. A few keys mean different things per tool (e.g. `name` is the pipeline
+// for install but the experiment name for create_experiment), so TOOL_LABELS overrides win.
+const BASE_LABELS: Record<string, string> = {
+  experiment_id: "Experiment",
+  pipeline_key: "Pipeline",
+  name: "Name",
+  version: "Version",
+  reference_genome: "Reference genome",
+  parameters: "Parameters",
+  accessions: "Accessions",
+  external_id: "Sample ID",
+  organism: "Organism",
+  assay: "Assay",
+  molecule_type: "Molecule type",
+  library_prep_method: "Library prep",
+  chemistry_version: "Chemistry version",
+  tissue_type: "Tissue type",
+  treatment_condition: "Treatment",
+  description: "Description",
+  hypothesis: "Hypothesis",
+};
+
+const TOOL_LABELS: Record<string, Record<string, string>> = {
+  install: { name: "Pipeline" },
+};
+
+function labelFor(tool: string, key: string): string {
+  return TOOL_LABELS[tool]?.[key] ?? BASE_LABELS[key] ?? key;
+}
+
+// Render one proposed step's arguments as readable rows. Consequential steps show their args
+// explicitly so the user can catch a wrong entity (sample, pipeline, assay) before confirming.
+function StepArgs({ tool, args }: { tool: string; args: Record<string, unknown> }) {
   const entries = Object.entries(args).filter(([, v]) => v !== null && v !== undefined);
   if (entries.length === 0) {
     return <p className="text-sm text-gray-500">No parameters.</p>;
@@ -30,7 +53,7 @@ function StepArgs({ args }: { args: Record<string, unknown> }) {
     <dl className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-sm">
       {entries.map(([key, value]) => (
         <div key={key} className="contents">
-          <dt className="text-gray-500">{labels[key] ?? key}</dt>
+          <dt className="text-gray-500">{labelFor(tool, key)}</dt>
           <dd className="text-gray-900 font-medium break-words">
             {typeof value === "object" ? (
               <code className="text-xs">{JSON.stringify(value)}</code>
@@ -78,7 +101,7 @@ export function PlanConfirmCard({
               {steps.length > 1 && <span className="text-amber-700">{`Step ${i + 1}: `}</span>}
               {STEP_TITLES[step.tool] ?? step.tool}
             </p>
-            <StepArgs args={step.args} />
+            <StepArgs tool={step.tool} args={step.args} />
           </div>
         ))}
       </div>
