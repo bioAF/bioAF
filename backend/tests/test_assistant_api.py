@@ -102,7 +102,9 @@ def _anthropic_tool_use(name, args):
 
 def _anthropic_tool_uses(*calls):
     """A single Anthropic response carrying SEVERAL parallel tool_use blocks (name, args)."""
-    content = [{"type": "tool_use", "id": f"tu{i}", "name": name, "input": args} for i, (name, args) in enumerate(calls)]
+    content = [
+        {"type": "tool_use", "id": f"tu{i}", "name": name, "input": args} for i, (name, args) in enumerate(calls)
+    ]
     return httpx.Response(200, json={"content": content, "stop_reason": "tool_use"})
 
 
@@ -227,6 +229,70 @@ async def test_confirm_install_plan_executes_the_install(client, session, admin_
         )
     ).scalar_one()
     assert count == 1
+
+
+async def test_confirm_create_experiment_plan_creates_the_experiment(client, session, admin_user, admin_token):
+    """create_experiment is mutating, so it RUNS on confirm: the experiment is created in the org and
+    executed=True is reported."""
+    conv = AssistantConversation(organization_id=admin_user.organization_id, user_id=admin_user.id, status="active")
+    session.add(conv)
+    await session.flush()
+    plan = AssistantActionPlan(
+        conversation_id=conv.id,
+        steps_json=[{"tool": "create_experiment", "args": {"name": "Cortex E14.5 scRNA"}}],
+        status="proposed",
+    )
+    session.add(plan)
+    await session.flush()
+    await session.commit()
+
+    resp = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(admin_token))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["executed"] is True
+    assert body["result"]["name"] == "Cortex E14.5 scRNA"
+    count = (
+        await session.execute(
+            select(func.count())
+            .select_from(Experiment)
+            .where(
+                Experiment.organization_id == admin_user.organization_id,
+                Experiment.name == "Cortex E14.5 scRNA",
+            )
+        )
+    ).scalar_one()
+    assert count == 1
+
+
+async def test_confirm_create_sample_plan_creates_the_sample(client, session, admin_user, admin_token):
+    """create_sample is mutating: confirming adds the sample (with its first-class assay) to the
+    target experiment."""
+    exp = await _bulk_mouse_experiment(session, admin_user)
+    conv = AssistantConversation(organization_id=admin_user.organization_id, user_id=admin_user.id, status="active")
+    session.add(conv)
+    await session.flush()
+    plan = AssistantActionPlan(
+        conversation_id=conv.id,
+        steps_json=[
+            {
+                "tool": "create_sample",
+                "args": {"experiment_id": exp.id, "external_id": "C1", "organism": "Mus musculus", "assay": "scrna"},
+            }
+        ],
+        status="proposed",
+    )
+    session.add(plan)
+    await session.flush()
+    await session.commit()
+
+    resp = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(admin_token))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["executed"] is True
+    assert body["result"]["assay"] == "scrna"
+    sample = (await session.execute(select(Sample).where(Sample.external_id == "C1"))).scalar_one()
+    assert sample.experiment_id == exp.id
+    assert sample.assay == "scrna"
 
 
 async def test_multi_step_plan_confirms_and_runs_install_then_launch(client, session, admin_user, admin_token):

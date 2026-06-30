@@ -17,6 +17,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from app.schemas.experiment import ExperimentCreate
+from app.schemas.sample import SampleCreate
 from app.services.agent_review_artifact_builder import (
     _load_qc_dashboard_text,
     _load_samples_for_run,
@@ -204,6 +206,50 @@ async def _install_handler(session, *, org_id, user_id, arguments):
     return {"pipeline_key": entry.pipeline_key, "name": entry.name, "version": entry.version}
 
 
+async def _create_experiment_handler(session, *, org_id, user_id, arguments):
+    """Create an experiment in the caller's org. Mutating: only runs after the user confirms the plan.
+    The agent uses this when the user describes data that is not yet in bioAF, before adding samples."""
+    data = ExperimentCreate(
+        name=arguments["name"],
+        description=arguments.get("description"),
+        hypothesis=arguments.get("hypothesis"),
+    )
+    experiment = await ExperimentService.create_experiment(session, org_id, user_id, data)
+    return {
+        "experiment_id": experiment.id,
+        "name": experiment.name,
+        "code": experiment.code,
+        "status": experiment.status,
+    }
+
+
+async def _create_sample_handler(session, *, org_id, user_id, arguments):
+    """Add a sample to an existing org-owned experiment. Mutating: only runs after confirmation. Sets
+    the first-class, controlled-vocab ``assay`` when provided (recommend_pipeline prefers it over the
+    free-text heuristic). Raises LookupError if the experiment is not in the caller's org."""
+    experiment_id = arguments["experiment_id"]
+    experiment = await ExperimentService.get_experiment(session, experiment_id, org_id)
+    if experiment is None:
+        raise LookupError(f"experiment {experiment_id} not found in org {org_id}")
+    data = SampleCreate(
+        external_id=arguments.get("external_id"),
+        organism=arguments.get("organism"),
+        assay=arguments.get("assay"),
+        molecule_type=arguments.get("molecule_type"),
+        library_prep_method=arguments.get("library_prep_method"),
+        chemistry_version=arguments.get("chemistry_version"),
+        tissue_type=arguments.get("tissue_type"),
+        treatment_condition=arguments.get("treatment_condition"),
+    )
+    sample = await SampleService.create_sample(session, experiment_id, user_id, data)
+    return {
+        "sample_id": sample.id,
+        "external_id": sample.external_id,
+        "experiment_id": experiment_id,
+        "assay": sample.assay,
+    }
+
+
 async def _recommend_pipeline_handler(session, *, org_id, user_id, arguments):
     rec: PipelineRecommendation = await RecommendPipelineService.recommend(
         session, org_id=org_id, experiment_id=arguments["experiment_id"]
@@ -329,6 +375,54 @@ TOOL_CATALOG: dict[str, ToolDescriptor] = {
             "properties": {"name": {"type": "string"}, "version": {"type": "string"}},
         },
         handler=_install_handler,
+    ),
+    "create_experiment": ToolDescriptor(
+        name="create_experiment",
+        description=(
+            "Create a new experiment in the organization so the user's data can be set up in bioAF. "
+            "Use this when the user describes work that is not yet recorded as an experiment. Pass a "
+            "name (required) and optionally a description or hypothesis. Mutating: it is never created "
+            "without an explicit user confirmation of the proposed plan."
+        ),
+        consequence_class="mutating",
+        # Mirrors the real POST /api/experiments guard, require_permission("experiments", "create").
+        permission=("experiments", "create"),
+        args_schema={
+            "required": ["name"],
+            "properties": {
+                "name": {"type": "string"},
+                "description": {"type": "string"},
+                "hypothesis": {"type": "string"},
+            },
+        },
+        handler=_create_experiment_handler,
+    ),
+    "create_sample": ToolDescriptor(
+        name="create_sample",
+        description=(
+            "Add a sample to an existing experiment so it can be characterized and run. Pass the "
+            "experiment_id and the sample's attributes; set 'assay' (bulk_rna, scrna, or other) when "
+            "known, since the pipeline recommendation prefers it over inferring from free text. "
+            "Mutating: it is never created without an explicit user confirmation of the proposed plan."
+        ),
+        consequence_class="mutating",
+        # Mirrors the real POST /api/experiments/{id}/samples guard, require_permission("experiments", "create").
+        permission=("experiments", "create"),
+        args_schema={
+            "required": ["experiment_id"],
+            "properties": {
+                "experiment_id": {"type": "integer"},
+                "external_id": {"type": "string"},
+                "organism": {"type": "string"},
+                "assay": {"type": "string"},
+                "molecule_type": {"type": "string"},
+                "library_prep_method": {"type": "string"},
+                "chemistry_version": {"type": "string"},
+                "tissue_type": {"type": "string"},
+                "treatment_condition": {"type": "string"},
+            },
+        },
+        handler=_create_sample_handler,
     ),
     "launch_run": ToolDescriptor(
         name="launch_run",

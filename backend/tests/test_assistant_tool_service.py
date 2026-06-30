@@ -546,6 +546,117 @@ async def test_install_is_mutating_and_stops_at_plan_without_executing(session, 
     assert count == 0
 
 
+# ---- Conversational data-setup tools (create_experiment, create_sample): mutating, confirm-gated ----
+
+
+async def test_catalog_describes_data_setup_tools():
+    for name in ("create_experiment", "create_sample"):
+        tool = get_tool(name)
+        assert tool is not None, f"{name} not registered"
+        assert tool.consequence_class == "mutating"
+        # Mirrors the real create endpoints (POST /experiments and POST /experiments/{id}/samples),
+        # both guarded by experiments:create, which the bench persona holds.
+        assert tool.permission == ("experiments", "create")
+
+
+async def test_create_experiment_is_mutating_and_stops_at_plan_without_executing(session, admin_user):
+    """create_experiment is mutating, so invoking it only PROPOSES a plan: no experiment is created
+    until the user confirms (owner rule: confirm all mutating actions)."""
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="create_experiment",
+        arguments={"name": "Cortex scRNA pilot"},
+    )
+
+    assert result.status == "awaiting_confirmation"
+    assert result.tool_invocation.consequence_class == "mutating"
+    assert result.action_plan is not None
+    # Nothing created at invoke time.
+    count = (
+        await session.execute(
+            select(func.count()).select_from(Experiment).where(Experiment.name == "Cortex scRNA pilot")
+        )
+    ).scalar_one()
+    assert count == 0
+
+
+async def test_create_sample_is_mutating_and_stops_at_plan_without_executing(session, admin_user):
+    exp = await _bulk_mouse_experiment(session, admin_user)
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="create_sample",
+        arguments={"experiment_id": exp.id, "external_id": "NEW1", "organism": "Mus musculus", "assay": "scrna"},
+    )
+
+    assert result.status == "awaiting_confirmation"
+    assert result.tool_invocation.consequence_class == "mutating"
+    assert result.action_plan is not None
+    # Nothing created at invoke time: no sample NEW1 exists.
+    count = (
+        await session.execute(select(func.count()).select_from(Sample).where(Sample.external_id == "NEW1"))
+    ).scalar_one()
+    assert count == 0
+
+
+async def test_create_experiment_handler_creates_experiment(session, admin_user):
+    """The handler (run at confirm time) actually creates the experiment in the caller's org."""
+    from app.services.assistant_tool_catalog import _create_experiment_handler
+
+    out = await _create_experiment_handler(
+        session,
+        org_id=admin_user.organization_id,
+        user_id=admin_user.id,
+        arguments={"name": "Hippocampus bulk RNA", "description": "treated vs control"},
+    )
+    await session.commit()
+
+    assert out["name"] == "Hippocampus bulk RNA"
+    exp = (await session.execute(select(Experiment).where(Experiment.id == out["experiment_id"]))).scalar_one()
+    assert exp.organization_id == admin_user.organization_id
+    assert exp.owner_user_id == admin_user.id
+
+
+async def test_create_sample_handler_creates_sample_with_assay(session, admin_user):
+    """The handler creates a sample under an org-owned experiment, including the first-class assay
+    field that recommend_pipeline prefers."""
+    from app.services.assistant_tool_catalog import _create_sample_handler
+
+    exp = await _bulk_mouse_experiment(session, admin_user)
+    out = await _create_sample_handler(
+        session,
+        org_id=admin_user.organization_id,
+        user_id=admin_user.id,
+        arguments={"experiment_id": exp.id, "external_id": "S-NEW", "organism": "Mus musculus", "assay": "bulk_rna"},
+    )
+    await session.commit()
+
+    sample = (await session.execute(select(Sample).where(Sample.id == out["sample_id"]))).scalar_one()
+    assert sample.external_id == "S-NEW"
+    assert sample.assay == "bulk_rna"
+    assert sample.experiment_id == exp.id
+
+
+async def test_create_sample_handler_rejects_experiment_outside_org(session, admin_user):
+    """A sample cannot be created against an experiment the caller's org does not own."""
+    from app.services.assistant_tool_catalog import _create_sample_handler
+
+    with pytest.raises(LookupError):
+        await _create_sample_handler(
+            session,
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            arguments={"experiment_id": 999999, "external_id": "X"},
+        )
+
+
 async def test_launch_run_denied_when_caller_lacks_permission(session, admin_user, viewer_user):
     # viewer's role lacks pipelines:launch (the realistic persona is bench, which can use the
     # assistant but cannot launch; viewer exercises the same gate with an existing fixture).
