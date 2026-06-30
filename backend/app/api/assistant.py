@@ -11,12 +11,17 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import get_session
-from app.models.assistant import AssistantActionPlan, AssistantConversation, AssistantToolInvocation
+from app.models.assistant import (
+    AssistantActionPlan,
+    AssistantConversation,
+    AssistantMessage,
+    AssistantToolInvocation,
+)
 from app.models.organization import Organization
 from app.schemas.pipeline_run import PipelineRunLaunchRequest
 from app.services import audit_service, llm_provider_config_service, role_service
@@ -70,6 +75,44 @@ class ConfirmResponse(BaseModel):
     result: dict | None = None
     # The id of the PipelineRun created when a spend step actually launched (toggle on); else None.
     run_id: int | None = None
+
+
+class ConversationSummary(BaseModel):
+    id: int
+    title: str | None = None
+    # First user message, truncated: a readable label for the history list when title is unset.
+    preview: str | None = None
+    status: str
+    message_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConversationListResponse(BaseModel):
+    conversations: list[ConversationSummary]
+    total: int
+
+
+class TranscriptMessage(BaseModel):
+    id: int
+    role: str  # user | assistant | tool
+    content: str | None = None
+    tool_calls: list | None = None
+    created_at: datetime
+
+
+class TranscriptPlan(BaseModel):
+    id: int
+    steps: list | None = None
+    status: str  # proposed | approved | declined | executed | failed
+    created_at: datetime
+
+
+class ConversationTranscriptResponse(BaseModel):
+    id: int
+    title: str | None = None
+    messages: list[TranscriptMessage]
+    plans: list[TranscriptPlan]
 
 
 class AssistantSettingsResponse(BaseModel):
@@ -171,6 +214,126 @@ async def _owned_conversation(session: AsyncSession, conversation_id: int, curre
     if conversation is None:
         raise HTTPException(404, "conversation not found")
     return conversation
+
+
+@router.get("/conversations", response_model=ConversationListResponse)
+async def list_conversations(
+    page: int = 1,
+    page_size: int = 50,
+    current_user: dict = require_permission("assistant", "use"),
+    session: AsyncSession = Depends(get_session),
+):
+    """List the current user's conversations (most recently active first) so they can revisit or
+    resume a past chat. Scoped to the caller: a user never sees another user's conversations."""
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    page_size = min(max(page_size, 1), 100)
+
+    # Per-conversation message count + last-activity time, so the list orders by real recency
+    # (the conversation row's updated_at does not change when a message is appended).
+    activity = (
+        select(
+            AssistantMessage.conversation_id.label("cid"),
+            func.max(AssistantMessage.created_at).label("last_at"),
+            func.count().label("cnt"),
+        )
+        .group_by(AssistantMessage.conversation_id)
+        .subquery()
+    )
+    base = (
+        select(AssistantConversation, activity.c.last_at, activity.c.cnt)
+        .outerjoin(activity, activity.c.cid == AssistantConversation.id)
+        .where(
+            AssistantConversation.organization_id == org_id,
+            AssistantConversation.user_id == user_id,
+        )
+    )
+    total = (await session.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+    rows = (
+        await session.execute(
+            base.order_by(func.coalesce(activity.c.last_at, AssistantConversation.created_at).desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).all()
+
+    conv_ids = [conv.id for conv, _last, _cnt in rows]
+    previews: dict[int, str] = {}
+    if conv_ids:
+        msgs = (
+            await session.execute(
+                select(AssistantMessage.conversation_id, AssistantMessage.content)
+                .where(AssistantMessage.conversation_id.in_(conv_ids), AssistantMessage.role == "user")
+                .order_by(AssistantMessage.conversation_id, AssistantMessage.id)
+            )
+        ).all()
+        for cid, content in msgs:
+            if cid not in previews and content:
+                previews[cid] = content[:120]
+
+    return ConversationListResponse(
+        total=total,
+        conversations=[
+            ConversationSummary(
+                id=conv.id,
+                title=conv.title,
+                preview=previews.get(conv.id),
+                status=conv.status,
+                message_count=int(cnt or 0),
+                created_at=conv.created_at,
+                updated_at=conv.updated_at,
+            )
+            for conv, _last, cnt in rows
+        ],
+    )
+
+
+@router.get("/conversations/{conversation_id}/messages", response_model=ConversationTranscriptResponse)
+async def get_conversation_transcript(
+    conversation_id: int,
+    current_user: dict = require_permission("assistant", "use"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Load a past conversation's transcript (its messages and proposed/approved plans) so the UI can
+    re-render it and the user can continue where they left off. Owner-scoped via _owned_conversation."""
+    conversation = await _owned_conversation(session, conversation_id, current_user)
+    messages = (
+        (
+            await session.execute(
+                select(AssistantMessage)
+                .where(AssistantMessage.conversation_id == conversation.id)
+                .order_by(AssistantMessage.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    plans = (
+        (
+            await session.execute(
+                select(AssistantActionPlan)
+                .where(AssistantActionPlan.conversation_id == conversation.id)
+                .order_by(AssistantActionPlan.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return ConversationTranscriptResponse(
+        id=conversation.id,
+        title=conversation.title,
+        messages=[
+            TranscriptMessage(
+                id=m.id,
+                role=m.role,
+                content=m.content,
+                tool_calls=m.tool_calls_json,
+                created_at=m.created_at,
+            )
+            for m in messages
+        ],
+        plans=[TranscriptPlan(id=p.id, steps=p.steps_json, status=p.status, created_at=p.created_at) for p in plans],
+    )
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=MessageResponse)

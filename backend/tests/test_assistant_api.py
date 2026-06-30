@@ -13,7 +13,7 @@ import httpx
 import pytest
 import respx
 
-from app.models.assistant import AssistantActionPlan, AssistantConversation
+from app.models.assistant import AssistantActionPlan, AssistantConversation, AssistantMessage
 from app.models.experiment import Experiment
 from app.models.nf_core_registry_pipeline import NfCoreRegistryPipeline
 from app.models.pipeline_run import PipelineRun
@@ -168,6 +168,82 @@ async def test_message_reaches_plan_then_confirm_builds_launch_request(client, s
     assert cbody["result"]["pipeline_key"] == "nf-core/rnaseq"
     # The load-bearing constraint: confirm builds the request but does NOT launch in v1.
     assert await _run_count(session) == 0
+
+
+# ---- Conversation history (list + transcript) ----
+
+
+async def _conversation_with_messages(session, *, org_id, user_id, first_user_text):
+    conv = AssistantConversation(organization_id=org_id, user_id=user_id, status="active")
+    session.add(conv)
+    await session.flush()
+    session.add(AssistantMessage(conversation_id=conv.id, role="user", content=first_user_text))
+    session.add(AssistantMessage(conversation_id=conv.id, role="assistant", content="Sure, here's what I found."))
+    await session.flush()
+    await session.commit()
+    return conv
+
+
+async def test_list_conversations_returns_the_users_conversations_with_preview(client, session, admin_user, admin_token):
+    await _conversation_with_messages(
+        session, org_id=admin_user.organization_id, user_id=admin_user.id, first_user_text="analyze experiment 1"
+    )
+
+    resp = await client.get("/api/assistant/conversations", headers=_auth(admin_token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] >= 1
+    conv = body["conversations"][0]
+    assert conv["preview"] == "analyze experiment 1"  # first user message, so the list is readable
+    assert conv["message_count"] == 2
+
+
+async def test_list_conversations_is_scoped_to_the_current_user(client, session, admin_user, viewer_user, admin_token):
+    # A conversation owned by a different user (same org) must not show in admin's list.
+    await _conversation_with_messages(
+        session, org_id=admin_user.organization_id, user_id=viewer_user.id, first_user_text="not yours"
+    )
+    mine = await _conversation_with_messages(
+        session, org_id=admin_user.organization_id, user_id=admin_user.id, first_user_text="mine"
+    )
+
+    resp = await client.get("/api/assistant/conversations", headers=_auth(admin_token))
+    ids = [c["id"] for c in resp.json()["conversations"]]
+    assert mine.id in ids
+    previews = [c["preview"] for c in resp.json()["conversations"]]
+    assert "not yours" not in previews
+
+
+async def test_get_transcript_returns_messages_and_plans(client, session, admin_user, admin_token):
+    conv = await _conversation_with_messages(
+        session, org_id=admin_user.organization_id, user_id=admin_user.id, first_user_text="run it on exp 3"
+    )
+    plan = AssistantActionPlan(
+        conversation_id=conv.id,
+        steps_json=[{"tool": "launch_run", "args": {"experiment_id": 3, "pipeline_key": "nf-core/rnaseq"}}],
+        status="approved",
+    )
+    session.add(plan)
+    await session.flush()
+    await session.commit()
+
+    resp = await client.get(f"/api/assistant/conversations/{conv.id}/messages", headers=_auth(admin_token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    roles = [m["role"] for m in body["messages"]]
+    assert roles == ["user", "assistant"]
+    assert body["messages"][0]["content"] == "run it on exp 3"
+    assert len(body["plans"]) == 1
+    assert body["plans"][0]["status"] == "approved"
+    assert body["plans"][0]["steps"][0]["tool"] == "launch_run"
+
+
+async def test_get_transcript_404_for_another_users_conversation(client, session, admin_user, viewer_user, admin_token):
+    other = await _conversation_with_messages(
+        session, org_id=admin_user.organization_id, user_id=viewer_user.id, first_user_text="theirs"
+    )
+    resp = await client.get(f"/api/assistant/conversations/{other.id}/messages", headers=_auth(admin_token))
+    assert resp.status_code == 404
 
 
 async def test_message_forbidden_for_viewer(client, viewer_token, session, admin_user):
