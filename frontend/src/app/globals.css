@@ -1,3 +1,19 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * Assistant bubble clearance.
+ *
+ * The AI Assistant is a fixed circular button pinned to the bottom-right of every page
+ * (see components/assistant/FloatingAssistant). Page content scrolls inside each page's
+ * <main> region, so without clearance the bubble sits on top of whatever is in the
+ * bottom-right corner: a Save bar, the last table row, pagination. Reserve bottom padding
+ * on those scroll regions so content always clears the bubble.
+ *
+ * Deliberately unlayered so it wins over Tailwind's `p-6` (@layer utilities) bottom padding
+ * on <main>. The bubble is ~5rem tall including its 1.5rem offset; 6rem leaves a small gap.
+ */
+main {
+  padding-bottom: 6rem;
+}

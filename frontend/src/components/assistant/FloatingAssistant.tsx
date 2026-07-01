@@ -72,7 +72,7 @@ function FloatingAssistantInner() {
         onClick={toggle}
         aria-label={open ? "Close assistant" : "Open assistant"}
         aria-expanded={open}
-        className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-bioaf-600 text-white shadow-lg hover:bg-bioaf-700 flex items-center justify-center transition-colors"
+        className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-bioaf-600 text-white shadow-xl ring-1 ring-black/5 hover:bg-bioaf-700 hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-bioaf-400 flex items-center justify-center transition-all"
       >
         {open ? (
           <svg width="22" height="22" viewBox="0 0 20 20" fill="none" aria-hidden="true">
