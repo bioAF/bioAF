@@ -23,6 +23,9 @@ ALL_RESOURCES_ACTIONS: dict[str, list[str]] = {
     "settings": ["view", "configure"],
     "references": ["view", "upload"],
     "llm_integration": ["configure", "use"],
+    # Conversational assistant (ai_pipeline_run). assistant:use gates *starting* a
+    # conversation; every tool the agent calls still enforces its own resource permission.
+    "assistant": ["use"],
     "literature": [
         "view",
         "upload",
@@ -68,6 +71,7 @@ BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
             "cost_center": ["view"],
             "references": ["view", "upload"],
             "llm_integration": ["use"],
+            "assistant": ["use"],
             "literature": [
                 "view",
                 "upload",
@@ -98,6 +102,7 @@ BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
             "files": ["view", "upload"],
             "projects": ["view"],
             "references": ["view"],
+            "assistant": ["use"],
             "literature": [
                 "view",
                 "upload",

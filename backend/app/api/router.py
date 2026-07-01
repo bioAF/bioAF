@@ -72,6 +72,7 @@ from app.api.dashboards import router as dashboards_router
 from app.api.lab_documents import router as lab_documents_router
 from app.api.lab_glossary import router as lab_glossary_router
 from app.api.sdr import router as sdr_router
+from app.api.assistant import router as assistant_router
 
 api_router = APIRouter()
 
@@ -142,6 +143,7 @@ api_router.include_router(custom_pipelines_router)
 api_router.include_router(integrations_admin_router)
 api_router.include_router(llm_config_router)
 api_router.include_router(agent_reviews_router)
+api_router.include_router(assistant_router)
 api_router.include_router(literature_router)
 api_router.include_router(dashboards_router)
 api_router.include_router(lab_documents_router)

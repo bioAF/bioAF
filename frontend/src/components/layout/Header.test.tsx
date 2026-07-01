@@ -20,6 +20,9 @@ jest.mock("@/components/layout/GlobalSearch", () => ({
 jest.mock("@/components/layout/QuickCreateMenu", () => ({
   QuickCreateMenu: () => <div data-testid="quick-create" />,
 }));
+jest.mock("@/components/assistant/AssistantLauncher", () => ({
+  AssistantLauncher: () => <div data-testid="assistant-launcher" />,
+}));
 jest.mock("next/link", () => {
   return function MockLink({ children, href }: { children: React.ReactNode; href: string }) {
     return <a href={href}>{children}</a>;
@@ -31,11 +34,12 @@ import { getCurrentUser } from "@/lib/auth";
 
 const mockUser = getCurrentUser as jest.Mock;
 
-test("shows global search and quick-create when a user is logged in", () => {
+test("shows global search, quick-create, and the assistant launcher when a user is logged in", () => {
   mockUser.mockReturnValue({ email: "priya@lab.org", role_name: "comp_bio" });
   render(<Header />);
   expect(screen.getByTestId("global-search")).toBeInTheDocument();
   expect(screen.getByTestId("quick-create")).toBeInTheDocument();
+  expect(screen.getByTestId("assistant-launcher")).toBeInTheDocument();
 });
 
 test("hides global search and quick-create when logged out", () => {

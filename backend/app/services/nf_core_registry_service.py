@@ -213,6 +213,8 @@ class NfCoreRegistryService:
         user_id: int,
         name: str,
         version: str,
+        *,
+        via_assistant: bool = False,
     ) -> PipelineCatalogEntry:
         """Install an nf-core pipeline as a catalog entry for the given org."""
         registry_row = (
@@ -253,17 +255,20 @@ class NfCoreRegistryService:
         session.add(entry)
         await session.flush()
 
+        install_details: dict[str, object] = {
+            "name": name,
+            "version": version,
+            "source_url": source_url,
+            "qc_template": qc_template,
+        }
+        if via_assistant:
+            install_details["via_assistant"] = True
         await log_action(
             session,
             user_id=user_id,
             entity_type="pipeline_catalog",
             entity_id=entry.id,
             action="install_from_nf_core_registry",
-            details={
-                "name": name,
-                "version": version,
-                "source_url": source_url,
-                "qc_template": qc_template,
-            },
+            details=install_details,
         )
         return entry

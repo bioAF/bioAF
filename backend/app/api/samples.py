@@ -33,6 +33,7 @@ def _sample_response(s) -> SampleResponse:
         molecule_type=s.molecule_type,
         library_prep_method=s.library_prep_method,
         library_layout=s.library_layout,
+        assay=s.assay,
         qc_status=s.qc_status,
         qc_notes=s.qc_notes,
         parent_sample_id=s.parent_sample_id,

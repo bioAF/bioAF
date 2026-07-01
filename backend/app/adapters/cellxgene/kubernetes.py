@@ -11,6 +11,7 @@ import logging
 from datetime import datetime, timezone
 
 from kubernetes import client
+from kubernetes.client.rest import ApiException
 
 from app.adapters.base import CellxgeneProvider
 from app.adapters.capabilities import ProviderCapabilities
@@ -110,8 +111,6 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         the ``gcp-sa-key`` secret when this returns False, or the pod will fail
         to start with ``secret "gcp-sa-key" not found``.
         """
-        from kubernetes.client.rest import ApiException
-
         config = await self._read_platform_config("gcp_service_account_key")
         sa_key = config.get("gcp_service_account_key", "")
         if not sa_key or sa_key == "null":
@@ -288,17 +287,33 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         apps_v1 = self._get_k8s_apps_client()
         core_v1 = self._get_k8s_core_client()
 
-        try:
-            apps_v1.delete_namespaced_deployment(name=name, namespace=namespace)
-            logger.info("Deleted cellxgene deployment %s", name)
-        except Exception as e:
-            logger.warning("Failed to delete cellxgene deployment %s: %s", name, e)
+        # Attempt both deletes, treating 404 (already gone) as success. A real
+        # failure (RBAC, transient API error) must surface: previously every error
+        # was swallowed and STOPPED returned anyway, so unpublish_dataset would
+        # mark a publication "unpublished" while its Deployment kept running and
+        # pinning a node - a silent leak. Both deletes are attempted before the
+        # first real error is re-raised, so the LoadBalancer Service is still
+        # cleaned up even when the Deployment delete fails.
+        first_error: Exception | None = None
+        for kind, delete_call in (
+            ("deployment", lambda: apps_v1.delete_namespaced_deployment(name=name, namespace=namespace)),
+            ("service", lambda: core_v1.delete_namespaced_service(name=name, namespace=namespace)),
+        ):
+            try:
+                delete_call()
+                logger.info("Deleted cellxgene %s %s", kind, name)
+            except ApiException as e:
+                if e.status == 404:
+                    logger.info("Cellxgene %s %s already gone (404)", kind, name)
+                    continue
+                logger.warning("Failed to delete cellxgene %s %s: %s", kind, name, e)
+                first_error = first_error or e
+            except Exception as e:  # noqa: BLE001 - re-raised below after both deletes are attempted
+                logger.warning("Failed to delete cellxgene %s %s: %s", kind, name, e)
+                first_error = first_error or e
 
-        try:
-            core_v1.delete_namespaced_service(name=name, namespace=namespace)
-            logger.info("Deleted cellxgene service %s", name)
-        except Exception as e:
-            logger.warning("Failed to delete cellxgene service %s: %s", name, e)
+        if first_error is not None:
+            raise first_error
 
         return CellxgeneInstance(
             publication_id=publication_id,
@@ -370,8 +385,6 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         even on the already-set-up path, since the namespace may have been
         created before Workload Identity was configured.
         """
-        from kubernetes.client.rest import ApiException
-
         if self._namespace_ready:
             if gcp_sa_email:
                 self._patch_sa_annotation(self._get_k8s_core_client(), namespace, gcp_sa_email)
@@ -484,6 +497,11 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
 
             if not deployment_ready:
                 logger.error("Cellxgene deployment %s not ready after 5 min", name)
+                # Tear down the never-ready Deployment/Service. A pod stuck in
+                # ContainerCreating still counts as scheduled and pins the
+                # interactive node, so the pool never scales to zero. Leaving it
+                # running leaks ~$6.57/day indefinitely.
+                await self._teardown_after_failure(publication_id, name)
                 await self._update_publication_in_db(publication_id, "failed", None)
                 return
 
@@ -527,7 +545,23 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
 
         except Exception:
             logger.exception("Background poll failed for cellxgene %s", name)
+            # A publish we have given up on must not leave its Deployment running.
+            await self._teardown_after_failure(publication_id, name)
             await self._update_publication_in_db(publication_id, "failed", None)
+
+    async def _teardown_after_failure(self, publication_id: int, name: str) -> None:
+        """Best-effort teardown for a publish that never became ready.
+
+        The publication is about to be marked "failed" regardless; this deletes
+        the orphaned Deployment/Service so a stuck pod does not pin an interactive
+        node. A teardown failure is logged loudly (the resource may have leaked)
+        but not raised, so the "failed" status is still recorded.
+        """
+        try:
+            await self.teardown(publication_id)
+            logger.info("Tore down never-ready cellxgene %s", name)
+        except Exception:
+            logger.exception("Failed to tear down never-ready cellxgene %s; deployment may be orphaned", name)
 
     async def _update_publication_in_db(self, publication_id: int, status: str, access_url: str | None) -> None:
         if not self._session_factory:

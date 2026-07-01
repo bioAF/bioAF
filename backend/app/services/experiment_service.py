@@ -23,7 +23,9 @@ from app.services.vocabulary_validator import VocabularyValidator
 
 class ExperimentService:
     @staticmethod
-    async def create_experiment(session: AsyncSession, org_id: int, user_id: int, data: ExperimentCreate) -> Experiment:
+    async def create_experiment(
+        session: AsyncSession, org_id: int, user_id: int, data: ExperimentCreate, *, via_assistant: bool = False
+    ) -> Experiment:
         await VocabularyValidator.validate_experiment_fields(session, {"design_type": data.design_type})
         code = await CodeService.next_experiment_code(session, org_id, data.project_id)
         experiment = Experiment(
@@ -71,13 +73,16 @@ class ExperimentService:
         if merged_defaults or merged_customs:
             await session.flush()
 
+        create_details: dict[str, object] = {"name": data.name, "status": "registered"}
+        if via_assistant:
+            create_details["via_assistant"] = True
         await log_action(
             session,
             user_id=user_id,
             entity_type="experiment",
             entity_id=experiment.id,
             action="create",
-            details={"name": data.name, "status": "registered"},
+            details=create_details,
             snapshot=serialize_entity(experiment),
         )
         return experiment

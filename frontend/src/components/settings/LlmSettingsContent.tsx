@@ -15,6 +15,12 @@ const HOSTED: ReadonlyArray<ProviderId> = ["openai", "anthropic", "google"];
 // this hide landed.
 const ALL_PROVIDERS: ReadonlyArray<ProviderId> = ["openai", "anthropic", "google"];
 
+// Providers whose clients support native tool-calling, which the action-taking AI Assistant
+// requires. Mirrors the backend SUPPORTS_TOOLS capability (app/services/llm_provider_clients):
+// Anthropic/OpenAI/Google yes, self-hosted Gemma no. Used to warn an admin whose active provider
+// cannot power the assistant.
+const TOOL_CAPABLE: ReadonlyArray<ProviderId> = ["openai", "anthropic", "google"];
+
 const PROVIDER_LABEL: Record<ProviderId, string> = {
   openai: "OpenAI",
   anthropic: "Anthropic Claude",
@@ -152,10 +158,21 @@ export function LlmSettingsContent() {
   return (
     <div className="space-y-6 max-w-3xl">
       <p className="text-sm text-gray-600">
-        Configure an LLM provider for the Agent Review feature. Exactly one
-        provider is active at a time. Hosted providers transmit pipeline output
+        Configure the LLM provider that powers Agent Review and the AI Assistant.
+        Exactly one provider is active at a time. Hosted providers transmit data
         to a third party.
       </p>
+
+      <div
+        className="bg-blue-50 border border-blue-200 rounded p-3 text-sm text-blue-900"
+        data-testid="assistant-model-guidance"
+      >
+        The AI Assistant can take actions on a user&apos;s behalf and needs
+        reliable tool-calling. Anthropic, OpenAI, and Google support this; the
+        self-hosted model does not. Pick a current flagship model, since smaller
+        or older models may call tools unreliably. The provider and model are set
+        here by an administrator; users cannot change them.
+      </div>
 
       {data?.active_provider && (
         <div className="flex items-center justify-between bg-bioaf-50 border border-bioaf-200 rounded p-3 text-sm">
@@ -169,6 +186,16 @@ export function LlmSettingsContent() {
           >
             Disable LLM
           </button>
+        </div>
+      )}
+
+      {data?.active_provider && !TOOL_CAPABLE.includes(data.active_provider) && (
+        <div
+          className="bg-amber-50 border border-amber-200 rounded p-3 text-sm text-amber-900"
+          data-testid="active-not-tool-capable"
+        >
+          The active provider does not support the AI Assistant. Switch to
+          Anthropic, OpenAI, or Google to enable it. (Agent Review still works.)
         </div>
       )}
 

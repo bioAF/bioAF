@@ -119,6 +119,38 @@ async def test_create_sample_with_qc_metrics(client, admin_token, experiment_id,
 
 
 @pytest.mark.asyncio
+async def test_create_and_update_sample_assay(client, admin_token, experiment_id, session):
+    """The optional controlled-vocabulary assay field round-trips through create, read, and update."""
+    resp = await client.post(
+        f"/api/experiments/{experiment_id}/samples",
+        json={"external_id": "ASSAY_1", "organism": "Homo sapiens", "assay": "scrna"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    sample_id = resp.json()["id"]
+    assert resp.json()["assay"] == "scrna"
+
+    patched = await client.patch(
+        f"/api/samples/{sample_id}",
+        json={"assay": "bulk_rna"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["assay"] == "bulk_rna"
+
+
+@pytest.mark.asyncio
+async def test_invalid_assay_rejected(client, admin_token, experiment_id):
+    """A value outside the controlled vocabulary is rejected by schema validation."""
+    resp = await client.post(
+        f"/api/experiments/{experiment_id}/samples",
+        json={"external_id": "ASSAY_BAD", "assay": "proteomics"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_qc_status_update(client, admin_token, experiment_id, session):
     resp = await client.post(
         f"/api/experiments/{experiment_id}/samples",

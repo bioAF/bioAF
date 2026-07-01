@@ -1,0 +1,847 @@
+"""Tests for the tool catalog (T1) + enforcement wrapper (T2): the ai_pipeline_run keystone.
+
+"Tools enforce, the LLM proposes." Every tool call passes through one wrapper that, before
+anything executes, checks the catalog, the caller's RBAC permission for the underlying
+action (server-side, never the model's word), and the arguments. Read-only tools execute;
+spend tools do NOT execute, they create an ActionPlan and wait for confirmation. Every
+outcome is recorded as an AssistantToolInvocation and audited. These tests pin that
+decision tree, especially the rejection paths.
+"""
+
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from sqlalchemy import func, select
+
+from app.models.agent_review import AgentReview
+from app.models.assistant import AssistantActionPlan, AssistantConversation, AssistantToolInvocation
+from app.models.audit_log import AuditLog
+from app.models.experiment import Experiment
+from app.models.pipeline_catalog_entry import PipelineCatalogEntry
+from app.models.pipeline_run import PipelineRun
+from app.models.qc_dashboard import QCDashboard
+from app.models.sample import Sample
+from app.services import llm_provider_config_service
+from app.services.assistant_tool_catalog import get_tool
+from app.services.assistant_tool_service import AssistantToolService
+
+pytestmark = pytest.mark.asyncio
+
+
+# ---- Helpers ----
+
+
+async def _conversation(session, user):
+    conv = AssistantConversation(
+        organization_id=user.organization_id,
+        user_id=user.id,
+        title="t",
+        provider="anthropic",
+        model="claude-opus-4-8",
+    )
+    session.add(conv)
+    await session.flush()
+    await session.commit()
+    return conv
+
+
+async def _bulk_mouse_experiment(session, user):
+    exp = Experiment(
+        organization_id=user.organization_id,
+        name="Bulk mouse",
+        owner_user_id=user.id,
+        status="fastq_uploaded",
+    )
+    session.add(exp)
+    await session.flush()
+    session.add(
+        Sample(
+            experiment_id=exp.id,
+            external_id="B1",
+            organism="Mus musculus",
+            molecule_type="total RNA",
+            library_prep_method="TruSeq Stranded mRNA",
+        )
+    )
+    session.add(
+        PipelineCatalogEntry(
+            organization_id=user.organization_id,
+            pipeline_key="nf-core/rnaseq",
+            name="nf-core/rnaseq",
+            source_type="github",
+            version="3.14.0",
+            default_params_json={"aligner": "star_salmon"},
+            enabled=True,
+        )
+    )
+    await session.flush()
+    await session.commit()
+    return exp
+
+
+async def _audit_rows_for(session, tool_invocation_id):
+    return (
+        await session.execute(
+            select(func.count())
+            .select_from(AuditLog)
+            .where(
+                AuditLog.entity_type == "assistant_tool_invocation",
+                AuditLog.entity_id == tool_invocation_id,
+            )
+        )
+    ).scalar_one()
+
+
+# ---- Catalog (T1) ----
+
+
+async def test_catalog_describes_recommend_pipeline_and_launch_run():
+    rec = get_tool("recommend_pipeline")
+    assert rec is not None
+    assert rec.consequence_class == "read_only"
+    assert rec.permission == ("experiments", "view")
+
+    launch = get_tool("launch_run")
+    assert launch is not None
+    assert launch.consequence_class == "spend"
+    # Mirrors the real POST /api/pipeline-runs guard, require_permission("pipelines", "launch").
+    assert launch.permission == ("pipelines", "launch")
+    # The agent can scope a launch to specific samples; without sample_ids the backend defaults to
+    # the whole experiment, which fails if any sample lacks linked files.
+    assert "sample_ids" in launch.args_schema["properties"]
+
+
+# ---- Wrapper (T2) ----
+
+
+async def test_recommend_pipeline_executes_and_is_audited(session, admin_user):
+    exp = await _bulk_mouse_experiment(session, admin_user)
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="recommend_pipeline",
+        arguments={"experiment_id": exp.id},
+    )
+
+    assert result.status == "succeeded"
+    assert result.result["pipeline_key"] == "nf-core/rnaseq"
+    assert result.result["reference_genome"] == "GRCm39"
+
+    ti = result.tool_invocation
+    assert ti is not None
+    assert ti.status == "succeeded"
+    assert ti.consequence_class == "read_only"
+    assert await _audit_rows_for(session, ti.id) == 1
+
+
+async def test_catalog_describes_list_session_activity():
+    tool = get_tool("list_session_activity")
+    assert tool is not None
+    assert tool.consequence_class == "read_only"
+    # Self-scoped: the user's own session activity, gated by assistant:use (which bench holds), NOT
+    # audit_log:view (admin/comp_bio only) - so the founder persona can see what it ran.
+    assert tool.permission == ("assistant", "use")
+    assert tool.needs_conversation is True
+
+
+async def test_list_session_activity_returns_scoped_conversation_audit_trail(session, admin_user):
+    # "What did I run this session?" reads the audit log filtered to THIS conversation. Activity from a
+    # sibling conversation must not leak in.
+    exp = await _bulk_mouse_experiment(session, admin_user)
+    conv1 = await _conversation(session, admin_user)
+    conv2 = await _conversation(session, admin_user)
+
+    # Generate a real audited action in each conversation.
+    for conv in (conv1, conv2):
+        await AssistantToolService.invoke(
+            session,
+            conversation=conv,
+            role_id=admin_user.role_id,
+            tool_name="recommend_pipeline",
+            arguments={"experiment_id": exp.id},
+        )
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv1,
+        role_id=admin_user.role_id,
+        tool_name="list_session_activity",
+        arguments={},
+    )
+
+    assert result.status == "succeeded"
+    assert result.result["conversation_id"] == conv1.id
+    activity = result.result["activity"]
+    # Exactly conv1's one prior action (recommend_pipeline); conv2's identical action is NOT included.
+    assert len(activity) == 1
+    assert activity[0]["tool"] == "recommend_pipeline"
+    assert activity[0]["outcome"] == "succeeded"
+
+
+# ---- run_results_review: persists a real agent review, gated on llm_integration:use ----
+
+
+async def _activate_anthropic(session, user):
+    await llm_provider_config_service.upsert(
+        session,
+        org_id=user.organization_id,
+        provider="anthropic",
+        api_key="sk-ant-x",
+        model="claude-x",
+        actor_user_id=user.id,
+    )
+    await llm_provider_config_service.set_active(
+        session, org_id=user.organization_id, provider="anthropic", actor_user_id=user.id
+    )
+    await session.commit()
+
+
+async def test_catalog_describes_run_results_review():
+    tool = get_tool("run_results_review")
+    assert tool is not None
+    assert tool.consequence_class == "read_only"
+    # Mirrors the real POST /api/agent-reviews guard so the assistant can't run a review the user
+    # couldn't run themselves. bench holds assistant:use but NOT llm_integration:use.
+    assert tool.permission == ("llm_integration", "use")
+
+
+async def test_run_results_review_persists_and_returns_verdict(session, admin_user):
+    await _activate_anthropic(session, admin_user)
+    run = PipelineRun(organization_id=admin_user.organization_id, pipeline_name="nf-core/rnaseq", status="completed")
+    session.add(run)
+    await session.flush()
+    await session.commit()
+    conv = await _conversation(session, admin_user)
+
+    # Stand in for the background worker: complete the review the handler created, with a verdict.
+    async def _complete(factory, *, job_id, **kwargs):
+        rev = (await session.execute(select(AgentReview).where(AgentReview.agent_review_job_id == job_id))).scalar_one()
+        rev.status = "succeeded"
+        rev.severity = "warning"
+        rev.headline = "Low mapping rate"
+        rev.flags = [{"label": "mapping_rate"}]
+        rev.body = "Mapping rate is below the expected range."
+        await session.commit()
+
+    with patch("app.services.agent_review_job_service.execute_hosted", new=AsyncMock(side_effect=_complete)):
+        result = await AssistantToolService.invoke(
+            session,
+            conversation=conv,
+            role_id=admin_user.role_id,
+            tool_name="run_results_review",
+            arguments={"run_id": run.id},
+        )
+
+    assert result.status == "succeeded"
+    assert result.result["review_status"] == "succeeded"
+    assert result.result["severity"] == "warning"
+    assert result.result["headline"] == "Low mapping rate"
+    # A real, persisted review now exists for the run (visible in its Agent Review tab).
+    rev = (
+        (
+            await session.execute(
+                select(AgentReview).where(AgentReview.entity_type == "pipeline_run", AgentReview.entity_id == run.id)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    assert rev is not None
+    assert rev.status == "succeeded"
+
+
+async def test_run_results_review_denied_without_ai_review_permission(session, admin_user):
+    # A bench user (assistant:use but NOT llm_integration:use) is declined at the wrapper, and no
+    # review is created - the assistant never runs an action the user's role forbids.
+    run = PipelineRun(organization_id=admin_user.organization_id, pipeline_name="nf-core/rnaseq")
+    session.add(run)
+    await session.flush()
+    await session.commit()
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user._test_role_map["bench"],
+        tool_name="run_results_review",
+        arguments={"run_id": run.id},
+    )
+
+    assert result.status == "declined"
+    count = (await session.execute(select(func.count()).select_from(AgentReview))).scalar_one()
+    assert count == 0
+
+
+async def test_unknown_tool_is_rejected_without_executing(session, admin_user):
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="delete_everything",
+        arguments={},
+    )
+
+    assert result.status == "failed"
+    assert "unknown" in result.error.lower()
+    # No tool invocation is recorded for a tool that does not exist.
+    count = (
+        await session.execute(
+            select(func.count())
+            .select_from(AssistantToolInvocation)
+            .where(AssistantToolInvocation.conversation_id == conv.id)
+        )
+    ).scalar_one()
+    assert count == 0
+
+
+async def test_missing_required_argument_is_rejected(session, admin_user):
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="recommend_pipeline",
+        arguments={},  # experiment_id missing
+    )
+
+    assert result.status == "failed"
+    assert "experiment_id" in (result.error or "")
+    assert result.tool_invocation is not None
+    assert result.tool_invocation.status == "failed"
+
+
+async def test_launch_run_stops_at_plan_and_does_not_execute(session, admin_user):
+    exp = await _bulk_mouse_experiment(session, admin_user)
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="launch_run",
+        arguments={
+            "experiment_id": exp.id,
+            "pipeline_key": "nf-core/rnaseq",
+            "parameters": {"aligner": "star_salmon"},
+            "reference_genome": "GRCm39",
+        },
+    )
+
+    assert result.status == "awaiting_confirmation"
+    assert result.tool_invocation.status == "awaiting_confirmation"
+    assert result.tool_invocation.requires_confirmation is True
+    assert result.action_plan is not None
+    assert result.action_plan.status == "proposed"
+
+    # The load-bearing assertion: nothing executed. No pipeline run was created.
+    run_count = (await session.execute(select(func.count()).select_from(PipelineRun))).scalar_one()
+    assert run_count == 0
+
+
+# ---- Read-only discovery tools (list_experiments, list_samples, list_pipelines, check_status) ----
+
+
+async def test_catalog_describes_read_only_discovery_tools():
+    for name, permission in (
+        ("list_experiments", ("experiments", "view")),
+        ("list_samples", ("samples", "view")),
+        ("list_pipelines", ("pipelines", "view")),
+        ("check_status", ("pipelines", "view")),
+    ):
+        tool = get_tool(name)
+        assert tool is not None, f"{name} not registered"
+        assert tool.consequence_class == "read_only"
+        assert tool.permission == permission
+
+
+async def test_list_experiments_returns_org_experiments(session, admin_user):
+    exp = await _bulk_mouse_experiment(session, admin_user)
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="list_experiments",
+        arguments={},
+    )
+
+    assert result.status == "succeeded"
+    ids = [e["id"] for e in result.result["experiments"]]
+    assert exp.id in ids
+    assert result.tool_invocation.consequence_class == "read_only"
+    assert await _audit_rows_for(session, result.tool_invocation.id) == 1
+
+
+async def test_list_samples_returns_experiment_samples_with_assay(session, admin_user):
+    exp = await _bulk_mouse_experiment(session, admin_user)
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="list_samples",
+        arguments={"experiment_id": exp.id},
+    )
+
+    assert result.status == "succeeded"
+    samples = result.result["samples"]
+    assert any(s["external_id"] == "B1" for s in samples)
+    # The hybrid-assay fields the agent uses to reason are surfaced.
+    assert all("assay" in s and "organism" in s for s in samples)
+
+
+async def test_list_samples_rejects_experiment_outside_org(session, admin_user):
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="list_samples",
+        arguments={"experiment_id": 999999},  # not in this org
+    )
+
+    assert result.status == "failed"
+    assert result.tool_invocation.status == "failed"
+
+
+async def test_list_pipelines_returns_catalog(session, admin_user):
+    await _bulk_mouse_experiment(session, admin_user)  # installs nf-core/rnaseq
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="list_pipelines",
+        arguments={},
+    )
+
+    assert result.status == "succeeded"
+    keys = [p["pipeline_key"] for p in result.result["pipelines"]]
+    assert "nf-core/rnaseq" in keys
+
+
+async def test_check_status_returns_run_status(session, admin_user):
+    exp = await _bulk_mouse_experiment(session, admin_user)
+    run = PipelineRun(
+        organization_id=admin_user.organization_id,
+        experiment_id=exp.id,
+        pipeline_name="nf-core/rnaseq",
+        pipeline_version="3.14.0",
+        status="running",
+    )
+    session.add(run)
+    await session.flush()
+    await session.commit()
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="check_status",
+        arguments={"run_id": run.id},
+    )
+
+    assert result.status == "succeeded"
+    assert result.result["status"] == "running"
+    assert result.result["id"] == run.id
+
+
+async def test_check_status_rejects_run_outside_org(session, admin_user):
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="check_status",
+        arguments={"run_id": 999999},
+    )
+
+    assert result.status == "failed"
+
+
+# ---- Results tools (get_metrics, explain_results): read-only, U3 results-in-chat ----
+
+
+async def _completed_run(session, admin_user, *, status="succeeded"):
+    """A pipeline run on a bulk-mouse experiment, in the given terminal status."""
+    exp = await _bulk_mouse_experiment(session, admin_user)
+    run = PipelineRun(
+        organization_id=admin_user.organization_id,
+        experiment_id=exp.id,
+        pipeline_name="nf-core/rnaseq",
+        pipeline_version="3.14.0",
+        status=status,
+        parameters_json={"aligner": "star_salmon"},
+        output_files_json={"multiqc": "gs://results/multiqc.html"},
+    )
+    session.add(run)
+    await session.flush()
+    await session.commit()
+    return exp, run
+
+
+async def _add_qc_dashboard(session, admin_user, run, *, status="ready", metrics=None, summary="QC looks healthy."):
+    dashboard = QCDashboard(
+        organization_id=admin_user.organization_id,
+        pipeline_run_id=run.id,
+        experiment_id=run.experiment_id,
+        metrics_json=metrics if metrics is not None else {"cell_count": 5000, "quality_rating": "pass"},
+        summary_text=summary,
+        status=status,
+    )
+    session.add(dashboard)
+    await session.flush()
+    await session.commit()
+    return dashboard
+
+
+async def test_catalog_describes_results_tools():
+    for name in ("get_metrics", "explain_results"):
+        tool = get_tool(name)
+        assert tool is not None, f"{name} not registered"
+        assert tool.consequence_class == "read_only"
+        # Results reading is gated by experiments:view (a RESULTS_VIEW_PERMISSIONS member the
+        # bench persona holds), so a non-computational user can ask about their own results.
+        assert tool.permission == ("experiments", "view")
+
+
+async def test_get_metrics_returns_qc_metrics_when_dashboard_ready(session, admin_user):
+    _, run = await _completed_run(session, admin_user)
+    await _add_qc_dashboard(
+        session, admin_user, run, metrics={"cell_count": 4823, "median_genes_per_cell": 1200, "quality_rating": "pass"}
+    )
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="get_metrics",
+        arguments={"run_id": run.id},
+    )
+
+    assert result.status == "succeeded"
+    assert result.result["metrics_available"] is True
+    assert result.result["run_id"] == run.id
+    assert result.result["quality_rating"] == "pass"
+    assert result.result["metrics"]["cell_count"] == 4823
+    assert await _audit_rows_for(session, result.tool_invocation.id) == 1
+
+
+async def test_get_metrics_reports_not_available_when_no_dashboard(session, admin_user):
+    """A run with no QC dashboard yet does not error: the tool reports metrics_available=False with a
+    reason so the agent can tell the user QC has not been generated, rather than crashing the turn."""
+    _, run = await _completed_run(session, admin_user, status="running")
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="get_metrics",
+        arguments={"run_id": run.id},
+    )
+
+    assert result.status == "succeeded"
+    assert result.result["metrics_available"] is False
+    assert result.result["run_status"] == "running"
+    assert result.result["reason"]
+
+
+async def test_get_metrics_rejects_run_outside_org(session, admin_user):
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="get_metrics",
+        arguments={"run_id": 999999},
+    )
+
+    assert result.status == "failed"
+
+
+async def test_explain_results_returns_interpretation_context(session, admin_user):
+    """explain_results assembles the agent-review-style results context (run + params + samples + QC)
+    so the assistant's own loop LLM can narrate it conversationally. The tool itself makes no LLM call."""
+    _, run = await _completed_run(session, admin_user)
+    await _add_qc_dashboard(session, admin_user, run, summary="High mapping rate; 4823 cells recovered.")
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="explain_results",
+        arguments={"run_id": run.id},
+    )
+
+    assert result.status == "succeeded"
+    assert result.result["run_id"] == run.id
+    assert result.result["run_status"] == "succeeded"
+    assert result.result["quality_rating"] == "pass"
+    md = result.result["results_markdown"]
+    assert "Pipeline Run Review Input" in md
+    assert "High mapping rate" in md  # the QC summary is folded into the interpretation context
+
+
+async def test_explain_results_handles_run_without_dashboard(session, admin_user):
+    """When QC has not been generated, explain_results still returns the run context (status, params,
+    samples) so the assistant can explain where the run stands instead of failing."""
+    _, run = await _completed_run(session, admin_user, status="failed")
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="explain_results",
+        arguments={"run_id": run.id},
+    )
+
+    assert result.status == "succeeded"
+    assert result.result["run_status"] == "failed"
+    assert result.result["quality_rating"] is None
+    assert "Pipeline Run Review Input" in result.result["results_markdown"]
+
+
+async def test_explain_results_rejects_run_outside_org(session, admin_user):
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="explain_results",
+        arguments={"run_id": 999999},
+    )
+
+    assert result.status == "failed"
+
+
+async def test_launch_run_handler_folds_accessions_into_parameters():
+    """Importing by accession is a fetchngs LAUNCH, not a separate import: the accessions ride in
+    parameters so the built request stays a valid PipelineRunCreate (no top-level accessions field)."""
+    from app.services.assistant_tool_catalog import _launch_run_handler
+
+    out = await _launch_run_handler(
+        None,
+        org_id=1,
+        user_id=1,
+        arguments={
+            "experiment_id": 5,
+            "pipeline_key": "nf-core/fetchngs",
+            "accessions": ["GSE123456", "SRR9999999"],
+        },
+    )
+    assert out["experiment_id"] == 5
+    assert out["pipeline_key"] == "nf-core/fetchngs"
+    assert out["parameters"]["accessions"] == ["GSE123456", "SRR9999999"]
+
+
+async def test_launch_run_handler_carries_sample_ids():
+    """The agent must be able to scope a launch to specific samples (the database ids from
+    list_samples). Without this the launch defaults to EVERY sample in the experiment, which fails
+    when any of them lack linked files. The built request carries sample_ids through verbatim."""
+    from app.services.assistant_tool_catalog import _launch_run_handler
+
+    out = await _launch_run_handler(
+        None,
+        org_id=1,
+        user_id=1,
+        arguments={"experiment_id": 3, "pipeline_key": "nf-core/scrnaseq", "sample_ids": [1]},
+    )
+    assert out["experiment_id"] == 3
+    assert out["sample_ids"] == [1]
+
+
+# ---- Mutating tools follow the same confirm gate as spend (owner rule) ----
+
+
+async def test_install_catalog_descriptor():
+    tool = get_tool("install")
+    assert tool is not None
+    assert tool.consequence_class == "mutating"
+    # Mirrors the real POST /api/pipelines/registry/{name}/install guard.
+    assert tool.permission == ("pipelines", "create")
+
+
+async def test_install_is_mutating_and_stops_at_plan_without_executing(session, admin_user):
+    """A mutating tool gets the SAME plan-then-confirm gate as spend: invoking it creates a plan and
+    does NOT run the handler, so nothing is installed until the user confirms."""
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="install",
+        arguments={"name": "scrnaseq"},
+    )
+
+    assert result.status == "awaiting_confirmation"
+    assert result.tool_invocation.consequence_class == "mutating"
+    assert result.tool_invocation.requires_confirmation is True
+    assert result.action_plan is not None
+    # Nothing was installed at invoke time: no catalog entry for nf-core/scrnaseq exists.
+    count = (
+        await session.execute(
+            select(func.count())
+            .select_from(PipelineCatalogEntry)
+            .where(PipelineCatalogEntry.pipeline_key == "nf-core/scrnaseq")
+        )
+    ).scalar_one()
+    assert count == 0
+
+
+# ---- Conversational data-setup tools (create_experiment, create_sample): mutating, confirm-gated ----
+
+
+async def test_catalog_describes_data_setup_tools():
+    for name in ("create_experiment", "create_sample"):
+        tool = get_tool(name)
+        assert tool is not None, f"{name} not registered"
+        assert tool.consequence_class == "mutating"
+        # Mirrors the real create endpoints (POST /experiments and POST /experiments/{id}/samples),
+        # both guarded by experiments:create, which the bench persona holds.
+        assert tool.permission == ("experiments", "create")
+
+
+async def test_create_experiment_is_mutating_and_stops_at_plan_without_executing(session, admin_user):
+    """create_experiment is mutating, so invoking it only PROPOSES a plan: no experiment is created
+    until the user confirms (owner rule: confirm all mutating actions)."""
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="create_experiment",
+        arguments={"name": "Cortex scRNA pilot"},
+    )
+
+    assert result.status == "awaiting_confirmation"
+    assert result.tool_invocation.consequence_class == "mutating"
+    assert result.action_plan is not None
+    # Nothing created at invoke time.
+    count = (
+        await session.execute(
+            select(func.count()).select_from(Experiment).where(Experiment.name == "Cortex scRNA pilot")
+        )
+    ).scalar_one()
+    assert count == 0
+
+
+async def test_create_sample_is_mutating_and_stops_at_plan_without_executing(session, admin_user):
+    exp = await _bulk_mouse_experiment(session, admin_user)
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user.role_id,
+        tool_name="create_sample",
+        arguments={"experiment_id": exp.id, "external_id": "NEW1", "organism": "Mus musculus", "assay": "scrna"},
+    )
+
+    assert result.status == "awaiting_confirmation"
+    assert result.tool_invocation.consequence_class == "mutating"
+    assert result.action_plan is not None
+    # Nothing created at invoke time: no sample NEW1 exists.
+    count = (
+        await session.execute(select(func.count()).select_from(Sample).where(Sample.external_id == "NEW1"))
+    ).scalar_one()
+    assert count == 0
+
+
+async def test_create_experiment_handler_creates_experiment(session, admin_user):
+    """The handler (run at confirm time) actually creates the experiment in the caller's org."""
+    from app.services.assistant_tool_catalog import _create_experiment_handler
+
+    out = await _create_experiment_handler(
+        session,
+        org_id=admin_user.organization_id,
+        user_id=admin_user.id,
+        arguments={"name": "Hippocampus bulk RNA", "description": "treated vs control"},
+    )
+    await session.commit()
+
+    assert out["name"] == "Hippocampus bulk RNA"
+    exp = (await session.execute(select(Experiment).where(Experiment.id == out["experiment_id"]))).scalar_one()
+    assert exp.organization_id == admin_user.organization_id
+    assert exp.owner_user_id == admin_user.id
+
+
+async def test_create_sample_handler_creates_sample_with_assay(session, admin_user):
+    """The handler creates a sample under an org-owned experiment, including the first-class assay
+    field that recommend_pipeline prefers."""
+    from app.services.assistant_tool_catalog import _create_sample_handler
+
+    exp = await _bulk_mouse_experiment(session, admin_user)
+    out = await _create_sample_handler(
+        session,
+        org_id=admin_user.organization_id,
+        user_id=admin_user.id,
+        arguments={"experiment_id": exp.id, "external_id": "S-NEW", "organism": "Mus musculus", "assay": "bulk_rna"},
+    )
+    await session.commit()
+
+    sample = (await session.execute(select(Sample).where(Sample.id == out["sample_id"]))).scalar_one()
+    assert sample.external_id == "S-NEW"
+    assert sample.assay == "bulk_rna"
+    assert sample.experiment_id == exp.id
+
+
+async def test_create_sample_handler_rejects_experiment_outside_org(session, admin_user):
+    """A sample cannot be created against an experiment the caller's org does not own."""
+    from app.services.assistant_tool_catalog import _create_sample_handler
+
+    with pytest.raises(LookupError):
+        await _create_sample_handler(
+            session,
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            arguments={"experiment_id": 999999, "external_id": "X"},
+        )
+
+
+async def test_launch_run_denied_when_caller_lacks_permission(session, admin_user, viewer_user):
+    # viewer's role lacks pipelines:launch (the realistic persona is bench, which can use the
+    # assistant but cannot launch; viewer exercises the same gate with an existing fixture).
+    exp = await _bulk_mouse_experiment(session, admin_user)
+    conv = await _conversation(session, viewer_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=viewer_user.role_id,
+        tool_name="launch_run",
+        arguments={"experiment_id": exp.id, "pipeline_key": "nf-core/rnaseq"},
+    )
+
+    assert result.status == "declined"
+    assert "permission" in result.error.lower()
+    assert result.tool_invocation.status == "declined"
+
+    # Denied: no plan, nothing executed.
+    plan_count = (
+        await session.execute(
+            select(func.count()).select_from(AssistantActionPlan).where(AssistantActionPlan.conversation_id == conv.id)
+        )
+    ).scalar_one()
+    assert plan_count == 0
+    run_count = (await session.execute(select(func.count()).select_from(PipelineRun))).scalar_one()
+    assert run_count == 0

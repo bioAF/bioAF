@@ -337,6 +337,80 @@ async def test_k8s_monitor_creates_process_records_on_completion(session, k8s_ru
     assert names == {"STARSOLO", "SAMTOOLS_SORT"}
 
 
+@pytest_asyncio.fixture
+async def k8s_fetchngs_run(session, admin_user):
+    """A running nf-core/fetchngs run (K8s polling path) launched by accession."""
+    from app.models.experiment import Experiment
+    from app.models.pipeline_run import PipelineRun
+    from datetime import datetime, timezone
+
+    exp = Experiment(
+        organization_id=admin_user.organization_id,
+        name="Accession import",
+        owner_user_id=admin_user.id,
+        status="processing",
+    )
+    session.add(exp)
+    await session.flush()
+
+    run = PipelineRun(
+        organization_id=admin_user.organization_id,
+        experiment_id=exp.id,
+        submitted_by_user_id=admin_user.id,
+        pipeline_name="nf-core/fetchngs",
+        pipeline_version="1.12.0",
+        status="running",
+        k8s_job_name="bioaf-pipeline-77",
+        compute_job_ref="bioaf-pipeline-77",
+        k8s_namespace="bioaf-pipelines",
+        parameters_json={"outdir": "gs://bioaf-results/fetchrun", "accessions": ["SRR1", "SRR2"]},
+        started_at=datetime.now(timezone.utc),
+    )
+    session.add(run)
+    await session.flush()
+    await session.commit()
+    return run
+
+
+@pytest.mark.asyncio
+async def test_fetchngs_completion_ingests_fetched_samples(session, k8s_fetchngs_run):
+    """End to end through the monitor: when a fetchngs run completes, the samplesheet it wrote is read
+    and the fetched accessions become Sample rows on the run's experiment (ai_pipeline_run Phase 2)."""
+    samplesheet = (
+        "sample,fastq_1,fastq_2,run_accession,experiment_accession,scientific_name\n"
+        "GSM_A,gs://x/SRR1_1.fastq.gz,gs://x/SRR1_2.fastq.gz,SRR1,SRX1,Mus musculus\n"
+        "GSM_B,gs://x/SRR2.fastq.gz,,SRR2,SRX2,Mus musculus\n"
+    )
+    mock_compute = AsyncMock()
+    mock_compute.get_job_status.return_value = _job_status_from_dict({"status": "completed", "pod_name": "p-1"})
+    mock_compute.get_job_progress.return_value = _job_progress_from_dict({"percent_complete": 100.0, "processes": []})
+
+    mock_storage = AsyncMock()
+    mock_storage.collect_outputs.return_value = []
+    mock_storage.read_text.return_value = samplesheet
+
+    with (
+        patch("app.services.pipeline_monitor_service.get_compute_adapter", return_value=mock_compute),
+        patch("app.services.pipeline_monitor_service.get_storage_adapter", return_value=mock_storage),
+        patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
+    ):
+        await PipelineMonitorService.sync_run_statuses(session)
+
+    from sqlalchemy import select
+    from app.models.sample import Sample
+
+    external_ids = set(
+        (
+            await session.execute(
+                select(Sample.external_id).where(Sample.experiment_id == k8s_fetchngs_run.experiment_id)
+            )
+        ).scalars()
+    )
+    assert external_ids == {"GSM_A", "GSM_B"}
+    # The samplesheet was read from under the run's outdir.
+    mock_storage.read_text.assert_awaited_with("gs://bioaf-results/fetchrun/samplesheet/samplesheet.csv")
+
+
 @pytest.mark.asyncio
 async def test_progress_dedupes_retries_by_name(session, k8s_running_run):
     """A task that fails and is retried by Nextflow appears multiple times in

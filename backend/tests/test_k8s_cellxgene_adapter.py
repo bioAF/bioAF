@@ -124,6 +124,38 @@ class TestCellxgeneTeardown:
         result = await adapter.teardown(999)
         assert result.status == "stopped"
 
+    @pytest.mark.asyncio
+    async def test_teardown_raises_on_real_delete_failure(self, adapter, mock_k8s):
+        """A real (non-404) delete failure must surface, not be swallowed.
+
+        teardown previously logged every delete error and still returned STOPPED,
+        so unpublish_dataset would mark a publication "unpublished" even though the
+        deployment was never deleted - a silent leak. A genuine failure (RBAC,
+        transient API error) must propagate so the caller records "failed".
+        """
+        from kubernetes.client.rest import ApiException
+
+        mock_k8s["apps"].delete_namespaced_deployment.side_effect = ApiException(status=403)
+        with pytest.raises(ApiException):
+            await adapter.teardown(1)
+
+    @pytest.mark.asyncio
+    async def test_teardown_deletes_service_even_if_deployment_delete_fails(self, adapter, mock_k8s):
+        """Both deletes are attempted; a failure on one does not skip the other.
+
+        The Deployment is the costly leak (it pins the node), but a best-effort
+        teardown should still try to remove the LoadBalancer Service before
+        surfacing the error.
+        """
+        from kubernetes.client.rest import ApiException
+
+        mock_k8s["apps"].delete_namespaced_deployment.side_effect = ApiException(status=500)
+        with pytest.raises(ApiException):
+            await adapter.teardown(1)
+        mock_k8s["core"].delete_namespaced_service.assert_called_once_with(
+            name="cellxgene-1", namespace="bioaf-cellxgene"
+        )
+
 
 class TestCellxgeneGetStatus:
     @pytest.mark.asyncio
@@ -149,6 +181,105 @@ class TestCellxgeneGetStatus:
         mock_k8s["apps"].read_namespaced_deployment_status.side_effect = Exception("gone")
         result = await adapter.get_status(999)
         assert result.status == "unknown"
+
+
+class TestCellxgenePollTeardownOnFailure:
+    """A publish that never becomes ready must be torn down, not abandoned.
+
+    The leak: ``_poll_deployment_ready`` set the publication "failed" on the
+    5-minute readiness timeout but left the Deployment + pod running. A pod stuck
+    in ContainerCreating still counts as scheduled and pins the interactive
+    e2-standard-8 node, so the pool never scales to zero (~$6.57/day, forever).
+    The fix is to tear down the orphaned Deployment/Service whenever the poll
+    gives up, on the timeout path and on the unexpected-exception path alike.
+    """
+
+    @pytest.mark.asyncio
+    async def test_readiness_timeout_tears_down_deployment(self, adapter, mock_k8s):
+        never_ready = MagicMock()
+        never_ready.status.ready_replicas = 0
+        mock_k8s["apps"].read_namespaced_deployment_status.return_value = never_ready
+
+        with (
+            patch("app.adapters.cellxgene.kubernetes.asyncio.sleep", new_callable=AsyncMock),
+            patch.object(adapter, "_update_publication_in_db", new_callable=AsyncMock) as upd,
+        ):
+            await adapter._poll_deployment_ready(1, "cellxgene-1", "bioaf-cellxgene")
+
+        mock_k8s["apps"].delete_namespaced_deployment.assert_called_once_with(
+            name="cellxgene-1", namespace="bioaf-cellxgene"
+        )
+        mock_k8s["core"].delete_namespaced_service.assert_called_once_with(
+            name="cellxgene-1", namespace="bioaf-cellxgene"
+        )
+        upd.assert_awaited_with(1, "failed", None)
+
+    @pytest.mark.asyncio
+    async def test_unexpected_exception_tears_down_deployment(self, adapter, mock_k8s):
+        # The deployment becomes ready, then the LB-resolution stage raises
+        # unexpectedly. The outer except must mark failed AND tear down, so a
+        # deployment we have given up on does not leak.
+        ready = MagicMock()
+        ready.status.ready_replicas = 1
+        mock_k8s["apps"].read_namespaced_deployment_status.return_value = ready
+
+        with (
+            patch("app.adapters.cellxgene.kubernetes.asyncio.sleep", new_callable=AsyncMock),
+            patch.object(adapter, "_get_api_client", side_effect=RuntimeError("boom")),
+            patch.object(adapter, "_update_publication_in_db", new_callable=AsyncMock) as upd,
+        ):
+            await adapter._poll_deployment_ready(2, "cellxgene-2", "bioaf-cellxgene")
+
+        mock_k8s["apps"].delete_namespaced_deployment.assert_called_once_with(
+            name="cellxgene-2", namespace="bioaf-cellxgene"
+        )
+        upd.assert_awaited_with(2, "failed", None)
+
+    @pytest.mark.asyncio
+    async def test_teardown_failure_still_records_failed(self, adapter, mock_k8s):
+        """If teardown itself fails on the readiness-failure path, the publication
+        must still be marked "failed" (best-effort cleanup, loud log)."""
+        from kubernetes.client.rest import ApiException
+
+        never_ready = MagicMock()
+        never_ready.status.ready_replicas = 0
+        mock_k8s["apps"].read_namespaced_deployment_status.return_value = never_ready
+        mock_k8s["apps"].delete_namespaced_deployment.side_effect = ApiException(status=500)
+
+        with (
+            patch("app.adapters.cellxgene.kubernetes.asyncio.sleep", new_callable=AsyncMock),
+            patch.object(adapter, "_update_publication_in_db", new_callable=AsyncMock) as upd,
+        ):
+            await adapter._poll_deployment_ready(3, "cellxgene-3", "bioaf-cellxgene")
+
+        upd.assert_awaited_with(3, "failed", None)
+
+    @pytest.mark.asyncio
+    async def test_ready_deployment_is_not_torn_down(self, adapter, mock_k8s):
+        """A healthy publish must NOT be torn down by the poller."""
+        ready = MagicMock()
+        ready.status.ready_replicas = 1
+        mock_k8s["apps"].read_namespaced_deployment_status.return_value = ready
+
+        fake_api_client = MagicMock()
+        fake_api_client.configuration.host = "https://10.0.0.1"
+        fake_api_client.configuration.ssl_ca_cert = None
+
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"status": {"loadBalancer": {"ingress": [{"ip": "1.2.3.4"}]}}}
+
+        with (
+            patch("app.adapters.cellxgene.kubernetes.asyncio.sleep", new_callable=AsyncMock),
+            patch.object(adapter, "_get_api_client", return_value=fake_api_client),
+            patch("app.adapters.cellxgene.kubernetes.api_client_auth_header", return_value="Bearer tok"),
+            patch("httpx.get", return_value=resp),
+            patch.object(adapter, "_update_publication_in_db", new_callable=AsyncMock) as upd,
+        ):
+            await adapter._poll_deployment_ready(4, "cellxgene-4", "bioaf-cellxgene")
+
+        mock_k8s["apps"].delete_namespaced_deployment.assert_not_called()
+        upd.assert_awaited_with(4, "published", "http://1.2.3.4:5005")
 
 
 class TestCellxgeneNamespaceSetup:

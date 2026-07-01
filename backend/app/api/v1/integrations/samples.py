@@ -49,6 +49,7 @@ def _sample_out(sample: Sample) -> SampleOut:
         prep_notes=sample.prep_notes,
         molecule_type=sample.molecule_type,
         library_prep_method=sample.library_prep_method,
+        assay=sample.assay,
         qc_status=sample.qc_status,
         status=sample.status,
         created_at=sample.created_at,
@@ -158,6 +159,7 @@ async def create_sample(
         prep_notes=body.prep_notes,
         molecule_type=body.molecule_type,
         library_prep_method=body.library_prep_method,
+        assay=body.assay,
         status="registered",
     )
     session.add(sample)
@@ -339,6 +341,7 @@ async def patch_sample(
         "prep_notes",
         "molecule_type",
         "library_prep_method",
+        "assay",
     ):
         new_val = getattr(body, field, None)
         if new_val is not None:

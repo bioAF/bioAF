@@ -884,8 +884,10 @@ class KubernetesComputeProvider(ComputeProvider):
         if igenomes_ignore and "igenomes_ignore" not in parameters:
             parts.extend(["--igenomes_ignore", "true"])
 
-        # Strip bioAF-internal config knobs that are not Nextflow parameters
-        internal_keys = {"fusion_enabled"}
+        # Strip bioAF-internal config knobs that are not Nextflow parameters. "accessions" is the
+        # carrier for fetchngs's ids file (materialized into --input via the sample sheet), not a
+        # nextflow flag, so it must never be emitted as a bogus --accessions argument.
+        internal_keys = {"fusion_enabled", "accessions"}
 
         for key, value in sorted(parameters.items()):
             if key in internal_keys:

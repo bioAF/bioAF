@@ -69,6 +69,8 @@ class PipelineRunService:
         org_id: int,
         user_id: int,
         data: PipelineRunLaunchRequest,
+        *,
+        via_assistant: bool = False,
     ) -> PipelineRun:
         """Launch a pipeline run — the core orchestration method."""
         # 1. Load pipeline from catalog
@@ -295,18 +297,21 @@ class PipelineRunService:
             logger.warning("Could not update experiment status: %s", e)
 
         # 12. Write audit log
+        launch_details: dict[str, object] = {
+            "pipeline_key": data.pipeline_key,
+            "experiment_id": data.experiment_id,
+            "sample_count": len(samples),
+            "status": run.status,
+        }
+        if via_assistant:
+            launch_details["via_assistant"] = True
         await log_action(
             session,
             user_id=user_id,
             entity_type="pipeline_run",
             entity_id=run.id,
             action="launch",
-            details={
-                "pipeline_key": data.pipeline_key,
-                "experiment_id": data.experiment_id,
-                "sample_count": len(samples),
-                "status": run.status,
-            },
+            details=launch_details,
         )
 
         # 13. Best-effort reference linkage from parameter paths
