@@ -78,6 +78,12 @@ from app.models.llm_provider_config import LlmProviderConfig
 from app.models.agent_review_job import AgentReviewJob
 from app.models.agent_review import AgentReview
 from app.models.agent_review_prompt import AgentReviewPrompt
+from app.models.assistant import (
+    AssistantActionPlan,
+    AssistantConversation,
+    AssistantMessage,
+    AssistantToolInvocation,
+)
 from app.models.literature import (
     AgentReviewLiteratureConfig,
     LiteratureAssociation,
@@ -200,6 +206,10 @@ __all__ = [
     "AgentReviewJob",
     "AgentReview",
     "AgentReviewPrompt",
+    "AssistantConversation",
+    "AssistantMessage",
+    "AssistantToolInvocation",
+    "AssistantActionPlan",
     "AgentReviewLiteratureConfig",
     "LiteratureAssociation",
     "LiteraturePaper",

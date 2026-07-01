@@ -7,6 +7,7 @@ import { Header } from "@/components/layout/Header";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { VocabularySelect } from "@/components/shared/VocabularySelect";
+import { AssaySelect } from "@/components/shared/AssaySelect";
 import { ExtensibleVocabularySelect } from "@/components/shared/ExtensibleVocabularySelect";
 import { NamingProfileSelect } from "@/components/naming/NamingProfileSelect";
 import { SheetImportModal } from "@/components/experiments/SheetImportModal";
@@ -59,6 +60,7 @@ export default function NewExperimentPage() {
     { name: "molecule_type", label: "Molecule Type", type: "vocabulary" as const },
     { name: "library_prep_method", label: "Library Prep Method", type: "vocabulary" as const },
     { name: "library_layout", label: "Library Layout", type: "vocabulary" as const },
+    { name: "assay", label: "Assay", type: "assay" as const },
   ];
 
   function updateFieldDefault(fieldName: string, value: string | null, isRequired: boolean | null) {
@@ -333,7 +335,14 @@ export default function NewExperimentPage() {
                       <div key={field.name} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto] gap-3 items-center">
                         <label className="text-sm text-gray-700 truncate">{field.label}</label>
                         <div className="min-w-0">
-                          {field.type === "vocabulary" ? (
+                          {field.type === "assay" ? (
+                            <AssaySelect
+                              value={current?.default_value ?? null}
+                              onChange={(v) => updateFieldDefault(field.name, v, current?.is_required ?? null)}
+                              placeholder="Default..."
+                              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                            />
+                          ) : field.type === "vocabulary" ? (
                             <VocabularySelect
                               fieldName={field.name}
                               value={current?.default_value ?? null}

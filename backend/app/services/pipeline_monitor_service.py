@@ -540,6 +540,16 @@ class PipelineMonitorService:
                     logger.info("Registered %d output files for run %d", len(collected), run.id)
                 except Exception as reg_err:
                     logger.warning("Failed to register output files for run %d: %s", run.id, reg_err)
+
+            # Post-fetch ingest (ai_pipeline_run Phase 2): a completed nf-core/fetchngs run has just
+            # written a samplesheet mapping each fetched accession to its metadata, under the same
+            # outdir. Turn those into bioAF samples so the imported data is first-class on the
+            # experiment. The service is best-effort and idempotent (it never raises); the guard keeps
+            # it a cheap no-op for every non-fetchngs run.
+            if run.status == "completed":
+                from app.services.fetchngs_ingest_service import FetchngsIngestService
+
+                await FetchngsIngestService.ingest_for_run(session, run, outdir=outdir, storage_adapter=storage_adapter)
         except Exception as e:
             logger.warning("Failed to collect output files for run %d: %s", run.id, e)
 

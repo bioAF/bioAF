@@ -108,6 +108,17 @@ export type ExperimentStatus =
 
 export type QCStatus = "pass" | "warning" | "fail";
 
+// Optional, first-class assay (controlled system vocabulary; mirrors the backend
+// SAMPLE_ASSAYS in app/models/sample.py). When set it is the authoritative signal for
+// pipeline recommendation; when null, the assay is inferred from the free-text fields.
+export type AssayValue = "bulk_rna" | "scrna" | "other";
+
+export const SAMPLE_ASSAY_OPTIONS: { value: AssayValue; label: string }[] = [
+  { value: "bulk_rna", label: "Bulk RNA-seq" },
+  { value: "scrna", label: "Single-cell RNA-seq" },
+  { value: "other", label: "Other" },
+];
+
 export type SampleStatus =
   | "registered"
   | "library_prepped"
@@ -339,6 +350,7 @@ export interface Sample {
   molecule_type: string | null;
   library_prep_method: string | null;
   library_layout: string | null;
+  assay: string | null;
   qc_status: QCStatus | null;
   qc_notes: string | null;
   file_count: number;
@@ -457,6 +469,7 @@ export interface SampleCreateRequest {
   molecule_type?: string | null;
   library_prep_method?: string | null;
   library_layout?: string | null;
+  assay?: string | null;
   qc_status?: string | null;
   qc_notes?: string | null;
   custom_fields?: SampleCustomFieldValue[];
@@ -477,6 +490,7 @@ export interface SampleUpdateRequest {
   molecule_type?: string | null;
   library_prep_method?: string | null;
   library_layout?: string | null;
+  assay?: string | null;
   custom_fields?: SampleCustomFieldValue[];
 }
 
@@ -1915,4 +1929,85 @@ export interface ReaderSACreateResponse {
   email: string;
   message: string;
   warning: string | null;
+}
+
+// ---- Assistant (ai_pipeline_run) ----
+
+export interface AssistantAvailability {
+  enabled: boolean;
+  reason?: string | null;
+}
+
+export interface AssistantConversationResponse {
+  id: number;
+  status: string;
+  provider: string | null;
+  model: string | null;
+}
+
+export interface AssistantPlanStep {
+  tool: string;
+  args: Record<string, unknown>;
+  // read_only | mutating | spend - drives the cost warning on the confirm card.
+  consequence_class?: string;
+}
+
+export type AssistantTurnStatus =
+  | "answered"
+  | "awaiting_confirmation"
+  | "step_cap_exceeded"
+  | "unavailable";
+
+export interface AssistantMessageResponse {
+  status: AssistantTurnStatus;
+  text: string | null;
+  action_plan_id: number | null;
+  plan_steps: AssistantPlanStep[] | null;
+  reason: string | null;
+}
+
+export interface AssistantConfirmResponse {
+  status: string;
+  plan_id: number;
+  executed: boolean;
+  result: Record<string, unknown> | null;
+  // Set when a confirmed launch actually started a run (org launch toggle on); else null.
+  run_id?: number | null;
+}
+
+export interface AssistantConversationSummary {
+  id: number;
+  title: string | null;
+  preview: string | null;
+  status: string;
+  message_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssistantConversationListResponse {
+  conversations: AssistantConversationSummary[];
+  total: number;
+}
+
+export interface AssistantTranscriptMessage {
+  id: number;
+  role: string;
+  content: string | null;
+  tool_calls: AssistantPlanStep[] | null;
+  created_at: string;
+}
+
+export interface AssistantTranscriptPlan {
+  id: number;
+  steps: AssistantPlanStep[] | null;
+  status: string;
+  created_at: string;
+}
+
+export interface AssistantConversationTranscript {
+  id: number;
+  title: string | null;
+  messages: AssistantTranscriptMessage[];
+  plans: AssistantTranscriptPlan[];
 }

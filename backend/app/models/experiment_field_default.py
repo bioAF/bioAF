@@ -18,6 +18,7 @@ DEFAULTABLE_SAMPLE_FIELDS = [
     "molecule_type",
     "library_prep_method",
     "library_layout",
+    "assay",
 ]
 
 

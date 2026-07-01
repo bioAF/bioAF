@@ -11,6 +11,7 @@ import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { DeploymentBanner } from "@/components/infrastructure/DeploymentBanner";
 import { GlobalSearch } from "@/components/layout/GlobalSearch";
 import { QuickCreateMenu } from "@/components/layout/QuickCreateMenu";
+import { AssistantLauncher } from "@/components/assistant/AssistantLauncher";
 
 export function Header() {
   const router = useRouter();
@@ -48,6 +49,7 @@ export function Header() {
         {user && (
           <>
             <QuickCreateMenu />
+            <AssistantLauncher />
             <NotificationBell />
             <Link
               href="/profile"
