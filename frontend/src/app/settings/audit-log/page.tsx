@@ -102,7 +102,8 @@ export default function AuditLogPage() {
     if (entry.details.description) return String(entry.details.description);
     const parts: string[] = [];
     for (const [k, v] of Object.entries(entry.details)) {
-      if (k === "description" || k === "target_email") continue;
+      // via_assistant is surfaced as a badge next to the user, not repeated in the details text.
+      if (k === "description" || k === "target_email" || k === "via_assistant") continue;
       if (v !== null && v !== undefined) {
         parts.push(`${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`);
       }
@@ -219,6 +220,15 @@ export default function AuditLogPage() {
                       </td>
                       <td className="px-4 py-2.5 text-gray-900 text-xs">
                         {entry.user?.email || "system"}
+                        {entry.details?.via_assistant === true && (
+                          <span
+                            data-testid="via-assistant-badge"
+                            title="This action was taken by the user through the assistant."
+                            className="ml-1.5 inline-block bg-bioaf-50 text-bioaf-700 border border-bioaf-200 rounded px-1.5 py-0.5 text-[10px] font-medium align-middle"
+                          >
+                            via assistant
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-2.5 text-gray-600 text-xs">
                         <span className="bg-gray-100 px-1.5 py-0.5 rounded">{entry.entity_type}</span>
