@@ -120,20 +120,34 @@ class FetchngsIngestService:
             logger.info("fetchngs run %d: samplesheet had no usable rows", run.id)
             return []
 
-        # Idempotency: skip accessions already recorded on this experiment.
+        # Idempotency + within-batch dedupe: skip accessions already on this experiment, AND collapse
+        # rows that repeat an external_id within this one samplesheet. fetchngs emits one row per run,
+        # and sibling runs of the same experiment share the same `sample` id (the experiment
+        # accession), so without the within-batch dedupe we would attempt two inserts with the same
+        # external_id and violate uq_samples_experiment_external_id (spike-02).
         existing = set(
             (
                 await session.execute(select(Sample.external_id).where(Sample.experiment_id == run.experiment_id))
             ).scalars()
         )
-        fresh = [s for s in parsed if s.external_id not in existing]
+        fresh: list[SampleCreate] = []
+        seen: set[str] = set()
+        for candidate in parsed:
+            if candidate.external_id in existing or candidate.external_id in seen:
+                continue
+            seen.add(candidate.external_id)
+            fresh.append(candidate)
         if not fresh:
             return []
 
+        # Create inside a SAVEPOINT so a failure here can never poison the caller's transaction. This
+        # ingest is best-effort and runs inside the shared pipeline-monitor session; an uncontained
+        # failure previously wedged the monitor's flush for ALL active runs, not just this one.
         try:
-            created = await SampleService.bulk_create_samples(
-                session, run.experiment_id, run.submitted_by_user_id, fresh
-            )
+            async with session.begin_nested():
+                created = await SampleService.bulk_create_samples(
+                    session, run.experiment_id, run.submitted_by_user_id, fresh
+                )
         except Exception as exc:
             logger.warning("fetchngs run %d: sample ingest failed: %s", run.id, exc)
             return []
