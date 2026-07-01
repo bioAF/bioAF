@@ -192,6 +192,59 @@ async def _explain_results_handler(session, *, org_id, user_id, arguments):
     }
 
 
+async def _run_results_review_handler(session, *, org_id, user_id, arguments):
+    """Run a FULL agent review of a pipeline run to completion and return its verdict, persisting it
+    to the run's Agent Review tab. This does what the real "Run review" endpoint does, so the catalog
+    gates it on llm_integration:use (admin/comp_bio). It is the heavier counterpart to explain_results
+    (a lightweight narration any results-viewer, including bench, can use): the split lets a permitted
+    user ask the assistant for a formal, saved review without letting the assistant run one on behalf
+    of a user whose role could not. Runs execute_hosted inline (not backgrounded) so the completed
+    verdict can be narrated in the same turn."""
+    # Lazy imports: the agent-review subsystem is heavy and only needed when this tool actually runs.
+    from app.database import async_session_factory
+    from app.services import agent_review_job_service
+    from app.services.agent_review_section_catalog import default_sub_item_ids
+
+    run_id = arguments["run_id"]
+    run = await PipelineRunService.get_run(session, run_id, org_id)
+    if run is None:
+        raise LookupError(f"pipeline run {run_id} not found in org {org_id}")
+    try:
+        job, review = await agent_review_job_service.create(
+            session,
+            org_id=org_id,
+            user_id=user_id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            included_run_ids=[run_id],
+            selected_sub_item_ids=default_sub_item_ids(experiment_scope=False),
+        )
+        await session.commit()
+    except agent_review_job_service.JobAlreadyRunning as exc:
+        # A review for this run is already running (e.g. started from the UI or a prior ask); report it
+        # rather than launching a duplicate.
+        return {
+            "run_id": run_id,
+            "review_status": "in_progress",
+            "agent_review_id": exc.existing_agent_review_id,
+            "message": "An agent review for this run is already in progress; see the run's Agent Review tab.",
+        }
+    # Run to completion synchronously so the verdict is ready to narrate now (and the review persists).
+    await agent_review_job_service.execute_hosted(async_session_factory, job_id=job.id)
+    await session.refresh(review)
+    return {
+        "run_id": run_id,
+        "run_status": run.status,
+        "agent_review_id": review.id,
+        "review_status": review.status,
+        "severity": review.severity,
+        "headline": review.headline,
+        "flags": review.flags,
+        "summary": review.body,
+        "error": review.error_text,
+    }
+
+
 async def _install_handler(session, *, org_id, user_id, arguments):
     """Install an nf-core pipeline into the org's catalog. Mutating: only runs after confirmation.
     Accepts a bare name ('scrnaseq') or a pipeline_key ('nf-core/scrnaseq'); defaults to the latest
@@ -414,6 +467,22 @@ TOOL_CATALOG: dict[str, ToolDescriptor] = {
         args_schema={"required": [], "properties": {}},
         handler=_list_session_activity_handler,
         needs_conversation=True,
+    ),
+    "run_results_review": ToolDescriptor(
+        name="run_results_review",
+        description=(
+            "Run a FULL agent review of a completed pipeline run and return its verdict (severity, "
+            "headline, flags, and a written assessment), saving it to the run's Agent Review tab. Use "
+            "this when the user wants a formal, saved review rather than the quick explanation "
+            "explain_results gives. Requires the AI review permission; if the user lacks it (it will be "
+            "declined), fall back to explain_results. Read-only for the user's data; it produces an "
+            "advisory review."
+        ),
+        consequence_class="read_only",
+        # Mirrors the real POST /api/agent-reviews guard, require_permission("llm_integration", "use").
+        permission=("llm_integration", "use"),
+        args_schema={"required": ["run_id"], "properties": {"run_id": {"type": "integer"}}},
+        handler=_run_results_review_handler,
     ),
     "recommend_pipeline": ToolDescriptor(
         name="recommend_pipeline",

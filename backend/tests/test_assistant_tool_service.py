@@ -8,9 +8,12 @@ outcome is recorded as an AssistantToolInvocation and audited. These tests pin t
 decision tree, especially the rejection paths.
 """
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from sqlalchemy import func, select
 
+from app.models.agent_review import AgentReview
 from app.models.assistant import AssistantActionPlan, AssistantConversation, AssistantToolInvocation
 from app.models.audit_log import AuditLog
 from app.models.experiment import Experiment
@@ -18,6 +21,7 @@ from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.models.pipeline_run import PipelineRun
 from app.models.qc_dashboard import QCDashboard
 from app.models.sample import Sample
+from app.services import llm_provider_config_service
 from app.services.assistant_tool_catalog import get_tool
 from app.services.assistant_tool_service import AssistantToolService
 
@@ -175,6 +179,100 @@ async def test_list_session_activity_returns_scoped_conversation_audit_trail(ses
     assert len(activity) == 1
     assert activity[0]["tool"] == "recommend_pipeline"
     assert activity[0]["outcome"] == "succeeded"
+
+
+# ---- run_results_review: persists a real agent review, gated on llm_integration:use ----
+
+
+async def _activate_anthropic(session, user):
+    await llm_provider_config_service.upsert(
+        session,
+        org_id=user.organization_id,
+        provider="anthropic",
+        api_key="sk-ant-x",
+        model="claude-x",
+        actor_user_id=user.id,
+    )
+    await llm_provider_config_service.set_active(
+        session, org_id=user.organization_id, provider="anthropic", actor_user_id=user.id
+    )
+    await session.commit()
+
+
+async def test_catalog_describes_run_results_review():
+    tool = get_tool("run_results_review")
+    assert tool is not None
+    assert tool.consequence_class == "read_only"
+    # Mirrors the real POST /api/agent-reviews guard so the assistant can't run a review the user
+    # couldn't run themselves. bench holds assistant:use but NOT llm_integration:use.
+    assert tool.permission == ("llm_integration", "use")
+
+
+async def test_run_results_review_persists_and_returns_verdict(session, admin_user):
+    await _activate_anthropic(session, admin_user)
+    run = PipelineRun(organization_id=admin_user.organization_id, pipeline_name="nf-core/rnaseq", status="completed")
+    session.add(run)
+    await session.flush()
+    await session.commit()
+    conv = await _conversation(session, admin_user)
+
+    # Stand in for the background worker: complete the review the handler created, with a verdict.
+    async def _complete(factory, *, job_id, **kwargs):
+        rev = (await session.execute(select(AgentReview).where(AgentReview.agent_review_job_id == job_id))).scalar_one()
+        rev.status = "succeeded"
+        rev.severity = "warning"
+        rev.headline = "Low mapping rate"
+        rev.flags = [{"label": "mapping_rate"}]
+        rev.body = "Mapping rate is below the expected range."
+        await session.commit()
+
+    with patch("app.services.agent_review_job_service.execute_hosted", new=AsyncMock(side_effect=_complete)):
+        result = await AssistantToolService.invoke(
+            session,
+            conversation=conv,
+            role_id=admin_user.role_id,
+            tool_name="run_results_review",
+            arguments={"run_id": run.id},
+        )
+
+    assert result.status == "succeeded"
+    assert result.result["review_status"] == "succeeded"
+    assert result.result["severity"] == "warning"
+    assert result.result["headline"] == "Low mapping rate"
+    # A real, persisted review now exists for the run (visible in its Agent Review tab).
+    rev = (
+        (
+            await session.execute(
+                select(AgentReview).where(AgentReview.entity_type == "pipeline_run", AgentReview.entity_id == run.id)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    assert rev is not None
+    assert rev.status == "succeeded"
+
+
+async def test_run_results_review_denied_without_ai_review_permission(session, admin_user):
+    # A bench user (assistant:use but NOT llm_integration:use) is declined at the wrapper, and no
+    # review is created - the assistant never runs an action the user's role forbids.
+    run = PipelineRun(organization_id=admin_user.organization_id, pipeline_name="nf-core/rnaseq")
+    session.add(run)
+    await session.flush()
+    await session.commit()
+    conv = await _conversation(session, admin_user)
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv,
+        role_id=admin_user._test_role_map["bench"],
+        tool_name="run_results_review",
+        arguments={"run_id": run.id},
+    )
+
+    assert result.status == "declined"
+    count = (await session.execute(select(func.count()).select_from(AgentReview))).scalar_one()
+    assert count == 0
 
 
 async def test_unknown_tool_is_rejected_without_executing(session, admin_user):
