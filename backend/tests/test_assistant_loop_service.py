@@ -167,7 +167,7 @@ async def test_loop_runs_read_tool_then_returns_final_answer(session, admin_user
     )
 
     assert result.status == "answered"
-    assert "rnaseq" in result.text
+    assert "rnaseq" in (result.text or "")
     # The turn is persisted: at least a user message and the final assistant message.
     assert await _message_count(session, conv.id) >= 2
 

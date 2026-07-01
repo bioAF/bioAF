@@ -75,8 +75,8 @@ def test_parse_samplesheet_maps_accession_and_organism():
     assert [s.external_id for s in samples] == ["GSM7777_SRR1", "GSM7777_SRR2"]
     assert all(s.organism == "Mus musculus" for s in samples)
     # Provenance: the source accessions are recorded so the imported sample is traceable.
-    assert "SRR1" in samples[0].prep_notes
-    assert "SRX1" in samples[0].prep_notes
+    assert "SRR1" in (samples[0].prep_notes or "")
+    assert "SRX1" in (samples[0].prep_notes or "")
 
 
 def test_parse_samplesheet_leaves_vocab_fields_unset():

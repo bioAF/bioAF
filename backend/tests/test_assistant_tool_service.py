@@ -311,7 +311,7 @@ async def test_missing_required_argument_is_rejected(session, admin_user):
     )
 
     assert result.status == "failed"
-    assert "experiment_id" in result.error
+    assert "experiment_id" in (result.error or "")
     assert result.tool_invocation is not None
     assert result.tool_invocation.status == "failed"
 

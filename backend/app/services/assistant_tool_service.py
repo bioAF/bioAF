@@ -33,7 +33,9 @@ _TYPE_MAP: dict[str, type | tuple[type, ...]] = {
 class ToolExecutionResult:
     status: str  # succeeded | failed | declined | awaiting_confirmation
     tool_invocation: AssistantToolInvocation | None = None
-    result: Any | None = None
+    # A tool's output (a dict) on success, else None. Typed Any (not Any | None) so callers/tests can
+    # index it after checking status; the None case is already subsumed by Any.
+    result: Any = None
     error: str | None = None
     action_plan: AssistantActionPlan | None = None
 

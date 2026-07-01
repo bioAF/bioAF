@@ -88,7 +88,7 @@ async def test_tool_invocation_state_fields(session, admin_user):
     assert ti.consequence_class == "spend"
     assert ti.status == "awaiting_confirmation"
     assert ti.requires_confirmation is True
-    assert ti.arguments_json["pipeline_key"] == "nf-core/rnaseq"
+    assert (ti.arguments_json or {})["pipeline_key"] == "nf-core/rnaseq"
 
 
 async def test_tool_invocation_defaults(session, admin_user):
@@ -120,5 +120,5 @@ async def test_action_plan_persist(session, admin_user):
     await session.refresh(plan)
 
     assert plan.status == "proposed"
-    assert plan.steps_json[0]["tool"] == "launch_run"
+    assert (plan.steps_json or [])[0]["tool"] == "launch_run"
     assert plan.estimated_cost == Decimal("12.50")

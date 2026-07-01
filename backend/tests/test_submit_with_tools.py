@@ -69,7 +69,7 @@ async def test_anthropic_parses_final_text():
             messages=_MESSAGES, tools=_TOOLS, model="claude-x", api_key="sk-ant"
         )
     assert result.is_final is True
-    assert "rnaseq" in result.text
+    assert "rnaseq" in (result.text or "")
 
 
 # ---- Anthropic native multi-turn tool history (the live-test fix) ----
@@ -195,7 +195,7 @@ async def test_openai_parses_final_text():
         r.post("/chat/completions").mock(return_value=_resp(raw))
         result = await openai_client.submit_with_tools(messages=_MESSAGES, tools=_TOOLS, model="gpt-x", api_key="sk")
     assert result.is_final is True
-    assert "rnaseq" in result.text
+    assert "rnaseq" in (result.text or "")
 
 
 # ---- OpenAI native multi-turn tool history (parity) ----
@@ -280,7 +280,7 @@ async def test_google_parses_final_text():
         r.post("/models/gemini-x:generateContent").mock(return_value=_resp(raw))
         result = await google_client.submit_with_tools(messages=_MESSAGES, tools=_TOOLS, model="gemini-x", api_key="g")
     assert result.is_final is True
-    assert "rnaseq" in result.text
+    assert "rnaseq" in (result.text or "")
 
 
 # ---- Google native multi-turn tool history (parity) ----
