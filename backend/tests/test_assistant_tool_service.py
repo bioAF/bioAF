@@ -133,6 +133,50 @@ async def test_recommend_pipeline_executes_and_is_audited(session, admin_user):
     assert await _audit_rows_for(session, ti.id) == 1
 
 
+async def test_catalog_describes_list_session_activity():
+    tool = get_tool("list_session_activity")
+    assert tool is not None
+    assert tool.consequence_class == "read_only"
+    # Self-scoped: the user's own session activity, gated by assistant:use (which bench holds), NOT
+    # audit_log:view (admin/comp_bio only) - so the founder persona can see what it ran.
+    assert tool.permission == ("assistant", "use")
+    assert tool.needs_conversation is True
+
+
+async def test_list_session_activity_returns_scoped_conversation_audit_trail(session, admin_user):
+    # "What did I run this session?" reads the audit log filtered to THIS conversation. Activity from a
+    # sibling conversation must not leak in.
+    exp = await _bulk_mouse_experiment(session, admin_user)
+    conv1 = await _conversation(session, admin_user)
+    conv2 = await _conversation(session, admin_user)
+
+    # Generate a real audited action in each conversation.
+    for conv in (conv1, conv2):
+        await AssistantToolService.invoke(
+            session,
+            conversation=conv,
+            role_id=admin_user.role_id,
+            tool_name="recommend_pipeline",
+            arguments={"experiment_id": exp.id},
+        )
+
+    result = await AssistantToolService.invoke(
+        session,
+        conversation=conv1,
+        role_id=admin_user.role_id,
+        tool_name="list_session_activity",
+        arguments={},
+    )
+
+    assert result.status == "succeeded"
+    assert result.result["conversation_id"] == conv1.id
+    activity = result.result["activity"]
+    # Exactly conv1's one prior action (recommend_pipeline); conv2's identical action is NOT included.
+    assert len(activity) == 1
+    assert activity[0]["tool"] == "recommend_pipeline"
+    assert activity[0]["outcome"] == "succeeded"
+
+
 async def test_unknown_tool_is_rejected_without_executing(session, admin_user):
     conv = await _conversation(session, admin_user)
 

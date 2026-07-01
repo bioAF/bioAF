@@ -17,6 +17,9 @@ from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from sqlalchemy import select
+
+from app.models.audit_log import AuditLog
 from app.schemas.experiment import ExperimentCreate
 from app.schemas.sample import SampleCreate
 from app.services.agent_review_artifact_builder import (
@@ -43,6 +46,9 @@ class ToolDescriptor:
     permission: tuple[str, str]  # (resource, action), checked server-side before execution
     args_schema: dict  # minimal JSON-schema subset: {"required": [...], "properties": {...}}
     handler: ToolHandler  # async (session, *, org_id, user_id, arguments) -> dict | None
+    # When True, the wrapper also passes the current AssistantConversation to the handler (for tools
+    # that report on the conversation itself, e.g. list_session_activity). Off for every other tool.
+    needs_conversation: bool = False
 
 
 async def _list_experiments_handler(session, *, org_id, user_id, arguments):
@@ -254,6 +260,43 @@ async def _create_sample_handler(session, *, org_id, user_id, arguments):
     }
 
 
+async def _list_session_activity_handler(session, *, org_id, user_id, arguments, conversation):
+    """List the actions taken in THIS conversation, read from the audit log (the system of record) so
+    the user can ask 'what did I run this session?' and get a log. Self-scoped: only this
+    conversation's own audit entries, attributed to the user. The audit log remains the primary,
+    org-wide interface (admin/comp_bio); this is the user's own window into their session."""
+    rows = (
+        (
+            await session.execute(
+                select(AuditLog)
+                .where(
+                    AuditLog.user_id == user_id,
+                    AuditLog.entity_type.in_(["assistant_tool_invocation", "assistant_action_plan"]),
+                    AuditLog.details_json["conversation_id"].astext == str(conversation.id),
+                )
+                .order_by(AuditLog.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    activity = []
+    for row in rows:
+        details = row.details_json or {}
+        activity.append(
+            {
+                "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+                "action": row.action,
+                "tool": details.get("tool"),
+                "consequence_class": details.get("consequence_class"),
+                "outcome": details.get("outcome"),
+                "executed": details.get("executed"),
+                "run_id": details.get("run_id"),
+            }
+        )
+    return {"conversation_id": conversation.id, "activity": activity}
+
+
 async def _recommend_pipeline_handler(session, *, org_id, user_id, arguments):
     rec: PipelineRecommendation = await RecommendPipelineService.recommend(
         session, org_id=org_id, experiment_id=arguments["experiment_id"]
@@ -354,6 +397,23 @@ TOOL_CATALOG: dict[str, ToolDescriptor] = {
         permission=("experiments", "view"),
         args_schema={"required": ["run_id"], "properties": {"run_id": {"type": "integer"}}},
         handler=_explain_results_handler,
+    ),
+    "list_session_activity": ToolDescriptor(
+        name="list_session_activity",
+        description=(
+            "List the actions taken so far in THIS conversation (pipeline launches, experiment and "
+            "sample creation, installs, and other tool calls), read from the audit log. Use this when "
+            "the user asks what they have run or done in this chat session. Read-only; shows only the "
+            "user's own activity in this conversation."
+        ),
+        consequence_class="read_only",
+        # Self-scoped to the user's own conversation, so it is gated by assistant:use (which the bench
+        # persona holds) rather than audit_log:view (admin/comp_bio only). The full, org-wide audit log
+        # stays the primary interface for reviewers.
+        permission=("assistant", "use"),
+        args_schema={"required": [], "properties": {}},
+        handler=_list_session_activity_handler,
+        needs_conversation=True,
     ),
     "recommend_pipeline": ToolDescriptor(
         name="recommend_pipeline",

@@ -189,9 +189,13 @@ class AssistantToolService:
             await session.commit()
             return ToolExecutionResult(status="awaiting_confirmation", tool_invocation=invocation, action_plan=plan)
 
-        # Read / mutating: execute the handler in the user's context.
+        # Read / mutating: execute the handler in the user's context. A few tools report on the
+        # conversation itself (e.g. list_session_activity) and opt into receiving it via the descriptor.
+        handler_kwargs: dict[str, Any] = {"org_id": org_id, "user_id": user_id, "arguments": arguments}
+        if tool.needs_conversation:
+            handler_kwargs["conversation"] = conversation
         try:
-            output = await tool.handler(session, org_id=org_id, user_id=user_id, arguments=arguments)
+            output = await tool.handler(session, **handler_kwargs)
         except Exception as exc:  # surface to the loop, never crash it
             return await _record_terminal(
                 session,
