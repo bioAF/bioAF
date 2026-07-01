@@ -14,6 +14,7 @@ import pytest
 import respx
 
 from app.models.assistant import AssistantActionPlan, AssistantConversation, AssistantMessage
+from app.models.audit_log import AuditLog
 from app.models.experiment import Experiment
 from app.models.nf_core_registry_pipeline import NfCoreRegistryPipeline
 from app.models.pipeline_run import PipelineRun
@@ -550,6 +551,162 @@ async def test_confirm_launches_a_real_run(client, session, admin_user, admin_to
     assert await _run_count(session) == 1
     run = (await session.execute(select(PipelineRun).where(PipelineRun.id == body["run_id"]))).scalar_one()
     assert (run.parameters_json or {}).get("accessions") == ["SRR1"]
+
+
+# ---- Audit: assistant-driven domain actions are attributed to the user AND marked via_assistant ----
+#
+# The action stays the user's (user_id on the audit row); the marker is how the audit log notes the
+# agent was used, so a reviewer can distinguish an assistant-driven launch/create/install from a
+# hand-typed one. The marker rides on the DOMAIN action's own audit entry (launch/create/install), not
+# only on the separate assistant.tool.* / assistant.plan.confirm rows.
+
+
+async def _latest_audit(session, entity_type, action):
+    return (
+        (
+            await session.execute(
+                select(AuditLog)
+                .where(AuditLog.entity_type == entity_type, AuditLog.action == action)
+                .order_by(AuditLog.id.desc())
+            )
+        )
+        .scalars()
+        .first()
+    )
+
+
+async def test_confirm_launch_marks_domain_audit_via_assistant(client, session, admin_user, admin_token):
+    exp = Experiment(
+        organization_id=admin_user.organization_id, name="Import", owner_user_id=admin_user.id, status="registered"
+    )
+    session.add(exp)
+    session.add(
+        PipelineCatalogEntry(
+            organization_id=admin_user.organization_id,
+            pipeline_key="nf-core/fetchngs",
+            name="nf-core/fetchngs",
+            source_type="nf-core",
+            version="1.12.0",
+            default_params_json={},
+            enabled=True,
+        )
+    )
+    await session.flush()
+    conv = AssistantConversation(organization_id=admin_user.organization_id, user_id=admin_user.id, status="active")
+    session.add(conv)
+    await session.flush()
+    plan = AssistantActionPlan(
+        conversation_id=conv.id,
+        steps_json=[{"tool": "launch_run", "args": {"experiment_id": exp.id, "pipeline_key": "nf-core/fetchngs"}}],
+        status="proposed",
+    )
+    session.add(plan)
+    await session.flush()
+    await session.commit()
+
+    resp = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(admin_token))
+    assert resp.status_code == 200, resp.text
+
+    entry = await _latest_audit(session, "pipeline_run", "launch")
+    assert entry is not None
+    assert entry.user_id == admin_user.id  # still attributed to the user
+    assert (entry.details_json or {}).get("via_assistant") is True  # but noted as agent-driven
+
+
+async def test_confirm_create_experiment_marks_domain_audit_via_assistant(client, session, admin_user, admin_token):
+    conv = AssistantConversation(organization_id=admin_user.organization_id, user_id=admin_user.id, status="active")
+    session.add(conv)
+    await session.flush()
+    plan = AssistantActionPlan(
+        conversation_id=conv.id,
+        steps_json=[{"tool": "create_experiment", "args": {"name": "Audited via agent"}}],
+        status="proposed",
+    )
+    session.add(plan)
+    await session.flush()
+    await session.commit()
+
+    resp = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(admin_token))
+    assert resp.status_code == 200, resp.text
+
+    entry = await _latest_audit(session, "experiment", "create")
+    assert entry is not None
+    assert entry.user_id == admin_user.id
+    assert (entry.details_json or {}).get("via_assistant") is True
+
+
+async def test_confirm_create_sample_marks_domain_audit_via_assistant(client, session, admin_user, admin_token):
+    exp = await _bulk_mouse_experiment(session, admin_user)
+    conv = AssistantConversation(organization_id=admin_user.organization_id, user_id=admin_user.id, status="active")
+    session.add(conv)
+    await session.flush()
+    plan = AssistantActionPlan(
+        conversation_id=conv.id,
+        steps_json=[
+            {"tool": "create_sample", "args": {"experiment_id": exp.id, "external_id": "C1", "assay": "scrna"}}
+        ],
+        status="proposed",
+    )
+    session.add(plan)
+    await session.flush()
+    await session.commit()
+
+    resp = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(admin_token))
+    assert resp.status_code == 200, resp.text
+
+    entry = await _latest_audit(session, "sample", "create")
+    assert entry is not None
+    assert (entry.details_json or {}).get("via_assistant") is True
+
+
+async def test_confirm_install_marks_domain_audit_via_assistant(client, session, admin_user, admin_token):
+    session.add(
+        NfCoreRegistryPipeline(
+            name="scrnaseq",
+            full_name="nf-core/scrnaseq",
+            description="single-cell RNA-seq",
+            releases_json=[{"tag_name": "4.1.0", "published_at": "2024-01-01", "has_schema": True}],
+            default_branch="master",
+        )
+    )
+    conv = AssistantConversation(organization_id=admin_user.organization_id, user_id=admin_user.id, status="active")
+    session.add(conv)
+    await session.flush()
+    plan = AssistantActionPlan(
+        conversation_id=conv.id,
+        steps_json=[{"tool": "install", "args": {"name": "scrnaseq"}}],
+        status="proposed",
+    )
+    session.add(plan)
+    await session.flush()
+    await session.commit()
+
+    with patch(
+        "app.services.pipeline_catalog_service.PipelineCatalogService.fetch_pipeline_schema",
+        new=AsyncMock(return_value={}),
+    ):
+        resp = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(admin_token))
+    assert resp.status_code == 200, resp.text
+
+    entry = await _latest_audit(session, "pipeline_catalog", "install_from_nf_core_registry")
+    assert entry is not None
+    assert (entry.details_json or {}).get("via_assistant") is True
+
+
+async def test_direct_service_call_does_not_mark_via_assistant(session, admin_user):
+    # Regression: the shared services are also called by the normal UI/API (not the assistant). Those
+    # entries must NOT carry the marker, so via_assistant truly means "the agent was used."
+    from app.schemas.experiment import ExperimentCreate
+    from app.services.experiment_service import ExperimentService
+
+    await ExperimentService.create_experiment(
+        session, admin_user.organization_id, admin_user.id, ExperimentCreate(name="Typed by hand")
+    )
+    await session.commit()
+
+    entry = await _latest_audit(session, "experiment", "create")
+    assert entry is not None
+    assert "via_assistant" not in (entry.details_json or {})
 
 
 async def test_confirm_denied_without_launch_permission(client, session, admin_user):

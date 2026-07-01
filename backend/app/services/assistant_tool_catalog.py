@@ -200,7 +200,11 @@ async def _install_handler(session, *, org_id, user_id, arguments):
             raise ValueError(f"No versions found for nf-core/{name}; check the name or refresh the registry.")
         version = versions[0].get("tag_name")
     try:
-        entry = await NfCoreRegistryService.install_pipeline(session, org_id, user_id, name, version)
+        # These handlers only ever execute in the assistant confirm path, so mark the domain audit
+        # entry as agent-driven (attribution stays the user; this notes the agent was used).
+        entry = await NfCoreRegistryService.install_pipeline(
+            session, org_id, user_id, name, version, via_assistant=True
+        )
     except NfCoreRegistryService.PipelineAlreadyInstalledError:
         return {"pipeline_key": f"nf-core/{name}", "already_installed": True}
     return {"pipeline_key": entry.pipeline_key, "name": entry.name, "version": entry.version}
@@ -214,7 +218,7 @@ async def _create_experiment_handler(session, *, org_id, user_id, arguments):
         description=arguments.get("description"),
         hypothesis=arguments.get("hypothesis"),
     )
-    experiment = await ExperimentService.create_experiment(session, org_id, user_id, data)
+    experiment = await ExperimentService.create_experiment(session, org_id, user_id, data, via_assistant=True)
     return {
         "experiment_id": experiment.id,
         "name": experiment.name,
@@ -241,7 +245,7 @@ async def _create_sample_handler(session, *, org_id, user_id, arguments):
         tissue_type=arguments.get("tissue_type"),
         treatment_condition=arguments.get("treatment_condition"),
     )
-    sample = await SampleService.create_sample(session, experiment_id, user_id, data)
+    sample = await SampleService.create_sample(session, experiment_id, user_id, data, via_assistant=True)
     return {
         "sample_id": sample.id,
         "external_id": sample.external_id,

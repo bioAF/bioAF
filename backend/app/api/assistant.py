@@ -362,6 +362,8 @@ async def confirm_action_plan(
                         parameters=built.get("parameters") or {},
                         reference_genome=built.get("reference_genome"),
                     ),
+                    # Mark the launch audit entry as agent-driven (attribution stays the user).
+                    via_assistant=True,
                 )
                 output = {
                     "launched": True,

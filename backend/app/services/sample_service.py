@@ -130,7 +130,9 @@ class SampleService:
         return errors
 
     @staticmethod
-    async def create_sample(session: AsyncSession, experiment_id: int, user_id: int, data: SampleCreate) -> Sample:
+    async def create_sample(
+        session: AsyncSession, experiment_id: int, user_id: int, data: SampleCreate, *, via_assistant: bool = False
+    ) -> Sample:
         # Apply experiment-level defaults for any fields not provided
         defaults = await SampleService._get_field_defaults(session, experiment_id)
         data = SampleService._apply_defaults(data, defaults)
@@ -205,16 +207,16 @@ class SampleService:
                 )
             await session.flush()
 
+        create_details: dict[str, object] = {"experiment_id": experiment_id, "external_id": data.external_id}
+        if via_assistant:
+            create_details["via_assistant"] = True
         await log_action(
             session,
             user_id=user_id,
             entity_type="sample",
             entity_id=sample.id,
             action="create",
-            details={
-                "experiment_id": experiment_id,
-                "external_id": data.external_id,
-            },
+            details=create_details,
             snapshot=serialize_entity(sample),
         )
         return sample
