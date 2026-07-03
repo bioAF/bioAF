@@ -40,6 +40,7 @@ from app.api.infrastructure import router as infrastructure_router
 from app.api.naming_profiles import router as naming_profiles_router
 from app.api.ingest import router as ingest_router
 from app.api.ingest import claim_router
+from app.api.validation_studies import router as validation_studies_router
 from app.api.ssh_connect import router as ssh_connect_router
 from app.api.gcp_config import router as gcp_config_router
 from app.api.aws_config import router as aws_config_router
@@ -145,6 +146,7 @@ api_router.include_router(llm_config_router)
 api_router.include_router(agent_reviews_router)
 api_router.include_router(assistant_router)
 api_router.include_router(literature_router)
+api_router.include_router(validation_studies_router)
 api_router.include_router(dashboards_router)
 api_router.include_router(lab_documents_router)
 api_router.include_router(lab_glossary_router)

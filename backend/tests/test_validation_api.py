@@ -1,0 +1,96 @@
+"""HTTP API for the literature-validation flow (lit_validation).
+
+Exercises the spine through HTTP: request -> read (drive to plan_ready) -> approve, plus RBAC
+(a viewer cannot request). The LLM is faked at the extraction service so the read step is
+deterministic.
+"""
+
+from types import SimpleNamespace
+
+import pytest
+
+from app.services import validation_extraction_service as ext
+
+pytestmark = pytest.mark.asyncio
+
+_GOOD = (
+    '```json\n{"accessions": ["GSE52778"], "sample_structure": {"organism": "Homo sapiens"}, '
+    '"method": {"assay": "bulk RNA-seq", "tools": ["TopHat"], "reference_build": "GRCh37"}, '
+    '"claims": [{"metric_key": "alignment_rate", "value": 83.4, "unit": "%", "source_locator": "Results"}], '
+    '"data_availability": "deposited", "blockers": []}\n```'
+)
+
+
+def _auth(token):
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _patch_llm(monkeypatch, response):
+    async def fake_get_active(sess, org_id):
+        return SimpleNamespace(provider="anthropic", model="claude-opus-4-8", api_key=None)
+
+    class _C:
+        async def submit(self, prompt, payload, model, api_key, attachments=None):
+            return response
+
+    monkeypatch.setattr(ext.llm_provider_config_service, "get_active", fake_get_active)
+    monkeypatch.setattr(ext, "get_client", lambda p: _C())
+
+
+async def test_request_read_approve_flow(client, admin_token, monkeypatch):
+    _patch_llm(monkeypatch, _GOOD)
+
+    r = await client.post(
+        "/api/validation-studies", json={"source_accession": "GSE52778"}, headers=_auth(admin_token)
+    )
+    assert r.status_code == 200, r.text
+    study = r.json()
+    assert study["state"] == "requested"
+    sid = study["id"]
+
+    r = await client.post(
+        f"/api/validation-studies/{sid}/read", json={"full_text": "the paper body"}, headers=_auth(admin_token)
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["state"] == "plan_ready"
+    assert body["plan"]["pipeline_key"] == "nf-core/rnaseq"
+    assert body["plan"]["comparison_targets"][0]["metric_key"] == "alignment_rate"
+
+    r = await client.post(f"/api/validation-studies/{sid}/approve", headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    assert r.json()["state"] == "acquiring_data"
+
+    r = await client.get(f"/api/validation-studies/{sid}", headers=_auth(admin_token))
+    assert r.status_code == 200
+    assert r.json()["approved_by_user_id"] is not None
+
+
+async def test_decline_flow(client, admin_token, monkeypatch):
+    _patch_llm(monkeypatch, _GOOD)
+    sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]
+    await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+    r = await client.post(
+        f"/api/validation-studies/{sid}/decline", json={"reason": "wrong accession"}, headers=_auth(admin_token)
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["state"] == "plan_declined"
+    assert r.json()["failure_reason"] == "wrong accession"
+
+
+async def test_viewer_cannot_request(client, viewer_token):
+    r = await client.post("/api/validation-studies", json={}, headers=_auth(viewer_token))
+    assert r.status_code == 403
+
+
+async def test_missing_data_early_exit_via_api(client, admin_token, monkeypatch):
+    no_data = (
+        '```json\n{"accessions": [], "method": {"assay": "bulk RNA-seq"}, "claims": [], '
+        '"data_availability": "none", "blockers": []}\n```'
+    )
+    _patch_llm(monkeypatch, no_data)
+    sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]
+    r = await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    assert r.json()["state"] == "classified"
+    assert r.json()["classification"] == "missing_data"
