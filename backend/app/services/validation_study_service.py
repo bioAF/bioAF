@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.validation_study import (
     VALIDATION_STUDY_CLASSIFICATIONS,
     ValidationStudy,
+    can_transition,
     next_states,
 )
 from app.services.audit_service import log_action
@@ -110,6 +111,74 @@ class ValidationStudyService:
             entity_id=study.id,
             action="state_change",
             details={"state": new_state, "classification": study.classification},
+            previous_value={"state": old_state},
+        )
+        return study
+
+    @staticmethod
+    async def _load(session: AsyncSession, study_id: int, org_id: int) -> ValidationStudy:
+        study = (
+            await session.execute(
+                select(ValidationStudy).where(
+                    ValidationStudy.id == study_id,
+                    ValidationStudy.organization_id == org_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if not study:
+            raise HTTPException(404, "Validation study not found")
+        return study
+
+    @staticmethod
+    async def approve_plan(
+        session: AsyncSession, study_id: int, org_id: int, user_id: int
+    ) -> ValidationStudy:
+        """C1 gate: ratify the plan and advance plan_ready -> acquiring_data, stamping the approver."""
+        study = await ValidationStudyService._load(session, study_id, org_id)
+        if not can_transition(study.state, "acquiring_data"):
+            raise HTTPException(
+                400,
+                f"Cannot approve a plan from '{study.state}'; the study must be in 'plan_ready'.",
+            )
+        study.approved_by_user_id = user_id
+        study.approved_at = datetime.now(timezone.utc)
+        old_state = study.state
+        study.state = "acquiring_data"
+        await session.flush()
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="validation_study",
+            entity_id=study.id,
+            action="plan_approved",
+            details={"state": "acquiring_data"},
+            previous_value={"state": old_state},
+        )
+        return study
+
+    @staticmethod
+    async def decline_plan(
+        session: AsyncSession, study_id: int, org_id: int, user_id: int, reason: str | None = None
+    ) -> ValidationStudy:
+        """C1 gate: reject the plan (terminal plan_declined). ``reason`` is recorded on the study."""
+        study = await ValidationStudyService._load(session, study_id, org_id)
+        if not can_transition(study.state, "plan_declined"):
+            raise HTTPException(
+                400,
+                f"Cannot decline a plan from '{study.state}'; the study must be in 'plan_ready'.",
+            )
+        if reason:
+            study.failure_reason = reason
+        old_state = study.state
+        study.state = "plan_declined"
+        await session.flush()
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="validation_study",
+            entity_id=study.id,
+            action="plan_declined",
+            details={"reason": reason},
             previous_value={"state": old_state},
         )
         return study
