@@ -10,6 +10,16 @@ See ``local/lit_validation/spec-02-data-model.md`` (state machine) and ``spec-03
 (the six buckets).
 """
 
+import uuid as uuid_pkg
+from datetime import datetime
+
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text, func, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.database import Base
+
+
 # Ordered for readability: the happy path top to bottom, terminals last.
 VALIDATION_STUDY_STATES = [
     "requested",
@@ -70,3 +80,55 @@ def can_transition(from_state: str, to_state: str) -> bool:
 def is_terminal(state: str) -> bool:
     """Whether ``state`` is a terminal state (no outbound transitions)."""
     return state in VALIDATION_STUDY_TERMINAL_STATES
+
+
+class ValidationStudy(Base):
+    """One validation attempt for a paper (aggregate root). Org-scoped; writes are audited.
+
+    Fields track provenance (paper/DOI/accession), the C1 approval gate, the linked experiment and
+    reproduction plan, and the assembled evidence bundle. ``state`` is driven through
+    ``VALIDATION_STUDY_TRANSITIONS`` by ``ValidationStudyService``; ``classification`` is null until a
+    terminal ``classified`` state is reached.
+    """
+
+    __tablename__ = "validation_studies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    uuid: Mapped[uuid_pkg.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, server_default=text("gen_random_uuid()"), unique=True
+    )
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=False, index=True
+    )
+
+    # Source provenance. paper_id links the library paper when sourced from it; the DOI/accession are
+    # captured even for ad-hoc papers not in the library.
+    paper_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("literature_papers.id"), nullable=True, index=True
+    )
+    source_doi: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    source_accession: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    requested_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    state: Mapped[str] = mapped_column(String(50), nullable=False, server_default="requested")
+    classification: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    experiment_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("experiments.id"), nullable=True)
+    # FK to reproduction_plans is added when that table lands (component B2/B3); kept as a plain
+    # nullable column for now so the spine can persist without a forward table dependency.
+    reproduction_plan_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    approved_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    evidence_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    organization = relationship("Organization")
