@@ -85,6 +85,50 @@ async def test_read_and_plan_early_exits_not_reproducible(session, admin_user, m
 
 
 @pytest.mark.asyncio
+async def test_read_and_plan_fetches_full_text_when_not_supplied(session, admin_user, monkeypatch):
+    """When no body is pasted in, B1 fetches the full text from the study's DOI before reading."""
+    from app.services.literature.fulltext_service import FullTextFetchService, FullTextResult
+
+    _patch_llm(monkeypatch, _GOOD)
+
+    async def _fake_fetch(*, doi=None, pmid=None, pmcid=None):
+        assert doi == "10.1/abc"
+        return FullTextResult(text="fetched paper body", source="europepmc", external_id="PMC1")
+
+    monkeypatch.setattr(FullTextFetchService, "fetch", _fake_fetch)
+
+    study = await ValidationStudyService.create_study(
+        session, admin_user.organization_id, admin_user.id, source_doi="10.1/abc"
+    )
+    await session.flush()
+    study = await ValidationDriverService.read_and_plan(
+        session, study, None, admin_user.organization_id, admin_user.id
+    )
+    await session.commit()
+    assert study.state == "plan_ready"
+
+
+@pytest.mark.asyncio
+async def test_read_and_plan_errors_and_stays_requested_when_no_text_available(session, admin_user, monkeypatch):
+    """If nothing is pasted and B1 cannot reach full text, the study stays 'requested' (retryable)."""
+    from app.services.literature.fulltext_service import FullTextFetchService
+
+    _patch_llm(monkeypatch, _GOOD)
+
+    async def _no_text(*, doi=None, pmid=None, pmcid=None):
+        return None
+
+    monkeypatch.setattr(FullTextFetchService, "fetch", _no_text)
+
+    study = await _requested(session, admin_user)
+    with pytest.raises(Exception):
+        await ValidationDriverService.read_and_plan(
+            session, study, None, admin_user.organization_id, admin_user.id
+        )
+    assert study.state == "requested"
+
+
+@pytest.mark.asyncio
 async def test_read_and_plan_requires_requested_state(session, admin_user, monkeypatch):
     _patch_llm(monkeypatch, _GOOD)
     study = await _requested(session, admin_user)

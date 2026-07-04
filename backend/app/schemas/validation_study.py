@@ -12,9 +12,10 @@ class ValidationStudyRequest(BaseModel):
 
 
 class ReadRequest(BaseModel):
-    """Full text to read + plan (B1 supplies this; here it can be pasted in)."""
+    """Text to read + plan. Optional: when omitted, B1 fetches the full text from the study's DOI;
+    a pasted-in body overrides the fetch (and is the fallback when the paper is not open access)."""
 
-    full_text: str
+    full_text: str | None = None
 
 
 class DeclineRequest(BaseModel):

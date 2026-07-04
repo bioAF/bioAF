@@ -37,6 +37,7 @@ from app.schemas.experiment import ExperimentCreate
 from app.schemas.pipeline_run import PipelineRunLaunchRequest
 from app.services.experiment_service import ExperimentService
 from app.services.fetchngs_ingest_service import FetchngsIngestService
+from app.services.literature.fulltext_service import FullTextFetchService
 from app.services.qc_dashboard_service import QCDashboardService
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_extraction_service import ValidationExtractionService
@@ -104,18 +105,31 @@ class ValidationDriverService:
     async def read_and_plan(
         session: AsyncSession,
         study: ValidationStudy,
-        full_text: str,
+        full_text: str | None,
         org_id: int,
         user_id: int,
     ) -> ValidationStudy:
-        """Drive a requested study to plan_ready (or an early-exit classification)."""
+        """Drive a requested study to plan_ready (or an early-exit classification).
+
+        ``full_text`` may be pasted in; when it is absent, B1 fetches the paper's full text from its
+        DOI. The fetch happens BEFORE any state change so a failure leaves the study in ``requested``
+        and the caller can retry (e.g. by pasting a body)."""
         if study.state != "requested":
             raise ValidationError(
                 f"read_and_plan can only start from 'requested'; study is in '{study.state}'."
             )
 
-        # B1 full-text acquisition is represented by the acquiring_text stage; the text is supplied
-        # here (a paste-in or an upstream fetch), so we just move through the stage.
+        if not full_text:
+            result = await FullTextFetchService.fetch(doi=study.source_doi)
+            if result is None:
+                raise ValidationError(
+                    "Could not acquire full text for this study. Provide full_text, or set a source "
+                    "DOI that resolves to an open-access Europe PMC article."
+                )
+            full_text = result.text
+
+        # B1 full-text acquisition is the acquiring_text stage; the text is now in hand, so this
+        # stage is a pass-through.
         study = await ValidationStudyService.transition(session, study.id, org_id, user_id, "acquiring_text")
         study = await ValidationStudyService.transition(session, study.id, org_id, user_id, "reading")
 
