@@ -97,11 +97,21 @@ resource "google_container_node_pool" "pipelines" {
       "bioaf.io/pool" = "pipelines"
     }
 
-    # No taint on pipelines pool: Nextflow K8s executor spawns process
-    # pods that cannot carry custom tolerations, so an untainted pool is
-    # required. The label + nodeSelector on the head Job still directs
-    # orchestrator pods here; other pools' taints prevent Nextflow
-    # process pods from landing elsewhere.
+    # Taint the pipelines pool so GKE-managed system addons (kube-dns,
+    # metrics-server, konnectivity, l7-default-backend, ...) can never land
+    # here. Left untainted, a GKE node/upgrade event can schedule those
+    # addons onto an expensive n2-highmem-16 node; because the autoscaler
+    # won't evict kube-system pods, the node then never scales to zero and
+    # leaks ~$0.65/hr indefinitely (observed 2026-07-04: a pipelines node
+    # stuck ~2 days hosting only system pods). Nextflow's task pods carry the
+    # matching toleration + nodeSelector (see _build_nextflow_k8s_config in
+    # app/adapters/compute/kubernetes.py), so pipeline work still schedules
+    # here; the system pool stays the only home for the addons.
+    taint {
+      key    = "bioaf.io/pool"
+      value  = "pipelines"
+      effect = "NO_SCHEDULE"
+    }
   }
 
   # node_locations requests every zone in the region, but a node pool can only
@@ -225,9 +235,9 @@ resource "google_container_node_pool" "interactive" {
 # the entire pipeline duration: Spot preemption mid-run kills the workflow
 # and any in-flight tasks. (cluster-autoscaler.kubernetes.io/safe-to-evict
 # only blocks voluntary scale-down; it does NOT protect against Spot
-# reclamation.) The taint enforces strict isolation so Nextflow's task
-# pods, which cannot carry custom tolerations, can never accidentally
-# land on this pool and burn its capacity.
+# reclamation.) The taint enforces strict isolation: Nextflow's task pods
+# tolerate only the pipelines pool taint (bioaf.io/pool=pipelines), not this
+# one, so they can never land here and burn capacity reserved for the head.
 
 resource "google_container_node_pool" "pipeline_head" {
   name           = "bioaf-pipeline-head"
