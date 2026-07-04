@@ -11,8 +11,10 @@ import pytest
 from sqlalchemy import func, select
 
 from app.models.experiment import Experiment
+from app.models.file import File
 from app.models.pipeline_run import PipelineRun
-from app.models.sample import Sample
+from app.models.sample import Sample, sample_files
+from app.services import sample_sheet_service
 from app.services.fetchngs_ingest_service import FetchngsIngestService
 
 # A representative nf-core/fetchngs samplesheet (subset of the real columns).
@@ -213,6 +215,135 @@ async def test_ingest_dedupes_runs_that_share_a_sample_id(session, admin_user):
         (await session.execute(select(Sample.external_id).where(Sample.experiment_id == exp.id))).scalars()
     )
     assert external_ids == ["SRX079566"]
+
+
+# ---- FASTQ attach (D2): the fetchngs FASTQ -> sample File rows the analysis run consumes ----
+
+
+async def _files_for_sample(session, sample_id) -> list[File]:
+    return list(
+        (
+            await session.execute(
+                select(File)
+                .join(sample_files, File.id == sample_files.c.file_id)
+                .where(sample_files.c.sample_id == sample_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def _sample_by_external(session, exp_id, external_id) -> Sample:
+    return (
+        await session.execute(
+            select(Sample).where(Sample.experiment_id == exp_id, Sample.external_id == external_id)
+        )
+    ).scalar_one()
+
+
+@pytest.mark.asyncio
+async def test_attach_fastq_files_links_reads_to_matching_samples(session, admin_user):
+    """The downstream nf-core/rnaseq|scrnaseq run needs each sample's FASTQ as linked File rows
+    (launch_run's per-sample file gate is strict). attach_fastq_files reads the same samplesheet the
+    ingest reads and registers each row's fastq_1/fastq_2 under the run's durable outdir, tagged R1/R2
+    and linked to the matching sample."""
+    exp = await _experiment(session, admin_user)
+    run = await _fetchngs_run(session, admin_user, exp)
+    storage = _FakeStorage(text=_FETCHNGS_SAMPLESHEET)
+    outdir = run.parameters_json["outdir"]
+
+    await FetchngsIngestService.ingest_for_run(session, run, outdir=outdir, storage_adapter=storage)
+    created = await FetchngsIngestService.attach_fastq_files(session, run, outdir=outdir, storage_adapter=storage)
+    await session.commit()
+
+    assert len(created) == 3  # SRR1 paired (R1+R2), SRR2 single-end (R1)
+    assert all(f.source_type == "pipeline_output" and f.source_pipeline_run_id == run.id for f in created)
+    assert all(f.experiment_id == exp.id and f.file_type == "fastq" for f in created)
+
+    paired = await _files_for_sample(session, (await _sample_by_external(session, exp.id, "GSM7777_SRR1")).id)
+    assert len(paired) == 2
+    # Files land in the run's durable outdir/fastq/, not wherever the sheet pointed.
+    assert {f.storage_uri for f in paired} == {
+        f"{outdir}/fastq/SRR1_1.fastq.gz",
+        f"{outdir}/fastq/SRR1_2.fastq.gz",
+    }
+    reads = {tag for f in paired for tag in f.tags_json if tag.startswith("read:")}
+    assert reads == {"read:R1", "read:R2"}
+
+    single = await _files_for_sample(session, (await _sample_by_external(session, exp.id, "GSM7777_SRR2")).id)
+    assert len(single) == 1
+    assert single[0].tags_json[0] == "read:R1"
+
+
+@pytest.mark.asyncio
+async def test_attach_fastq_files_is_idempotent(session, admin_user):
+    exp = await _experiment(session, admin_user)
+    run = await _fetchngs_run(session, admin_user, exp)
+    storage = _FakeStorage(text=_FETCHNGS_SAMPLESHEET)
+    outdir = run.parameters_json["outdir"]
+    await FetchngsIngestService.ingest_for_run(session, run, outdir=outdir, storage_adapter=storage)
+
+    first = await FetchngsIngestService.attach_fastq_files(session, run, outdir=outdir, storage_adapter=storage)
+    await session.commit()
+    second = await FetchngsIngestService.attach_fastq_files(session, run, outdir=outdir, storage_adapter=storage)
+    await session.commit()
+
+    assert len(first) == 3
+    assert second == []  # files already registered for this run are skipped
+    total = (
+        await session.execute(select(func.count()).select_from(File).where(File.source_pipeline_run_id == run.id))
+    ).scalar_one()
+    assert total == 3
+
+
+@pytest.mark.asyncio
+async def test_attach_fastq_files_multirun_pairs_across_lanes(session, admin_user):
+    """When one accession expands to sibling runs collapsed under one sample (spike-02), each run's
+    FASTQ must become a DISTINCT sample-sheet row (nf-core merges them), not overwrite a single lane.
+    Verify the attached files pair into two lanes end to end via the sample-sheet builder."""
+    exp = await _experiment(session, admin_user)
+    run = await _fetchngs_run(session, admin_user, exp)
+    storage = _FakeStorage(text=_MULTIRUN_SAMPLESHEET)
+    outdir = run.parameters_json["outdir"]
+    await FetchngsIngestService.ingest_for_run(session, run, outdir=outdir, storage_adapter=storage)
+
+    created = await FetchngsIngestService.attach_fastq_files(session, run, outdir=outdir, storage_adapter=storage)
+    await session.commit()
+    assert len(created) == 4  # two paired sibling runs
+
+    sample = await _sample_by_external(session, exp.id, "SRX079566")
+    sample._input_files = await _files_for_sample(session, sample.id)
+    pairs = sample_sheet_service._extract_fastq_lane_pairs(sample)
+    assert len(pairs) == 2
+    assert all(r1 and r2 for r1, r2 in pairs)  # every lane has both mates
+
+
+@pytest.mark.asyncio
+async def test_attach_fastq_files_noop_for_non_fetchngs(session, admin_user):
+    exp = await _experiment(session, admin_user)
+    run = await _fetchngs_run(session, admin_user, exp)
+    run.pipeline_name = "nf-core/rnaseq"
+    await session.flush()
+    storage = _FakeStorage(text=_FETCHNGS_SAMPLESHEET)
+
+    created = await FetchngsIngestService.attach_fastq_files(
+        session, run, outdir=run.parameters_json["outdir"], storage_adapter=storage
+    )
+    assert created == []
+    assert storage.read_uris == []
+
+
+@pytest.mark.asyncio
+async def test_attach_fastq_files_survives_unreadable_samplesheet(session, admin_user):
+    exp = await _experiment(session, admin_user)
+    run = await _fetchngs_run(session, admin_user, exp)
+    storage = _FakeStorage(error=FileNotFoundError("no such object"))
+
+    created = await FetchngsIngestService.attach_fastq_files(
+        session, run, outdir=run.parameters_json["outdir"], storage_adapter=storage
+    )
+    assert created == []
 
 
 @pytest.mark.asyncio

@@ -22,9 +22,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.registry import get_storage_adapter
+from app.models.file import File
 from app.models.pipeline_run import PipelineRun
 from app.models.sample import Sample
 from app.schemas.sample import SampleCreate
+from app.services.file_service import FileService
 from app.services.sample_service import SampleService
 
 logger = logging.getLogger("bioaf.fetchngs_ingest")
@@ -32,10 +34,16 @@ logger = logging.getLogger("bioaf.fetchngs_ingest")
 # nf-core/fetchngs writes its resolved per-run metadata here, relative to the run's outdir.
 _SAMPLESHEET_SUBPATH = "samplesheet/samplesheet.csv"
 
+# The durable FASTQ live flat under this subdir of the run's outdir (spike-02 confirmed the layout:
+# one {accession}_{1,2}.fastq.gz per mate per run).
+_FASTQ_SUBDIR = "fastq"
+
 # Candidate columns (matched case-insensitively) for the sample's external id, best first. fetchngs
 # names each fetched run in the "sample" column; if that is absent we fall back to the accessions.
 _EXTERNAL_ID_COLUMNS = ("sample", "run_accession", "experiment_accession", "sample_accession")
 _ORGANISM_COLUMNS = ("scientific_name", "organism")
+# fetchngs samplesheet FASTQ columns, in read order. fastq_2 is empty for single-end runs.
+_FASTQ_COLUMNS = (("fastq_1", "R1"), ("fastq_2", "R2"))
 
 
 def _is_fetchngs(run: PipelineRun) -> bool:
@@ -55,6 +63,25 @@ def _samplesheet_uri(outdir: str) -> str | None:
     if not outdir:
         return None
     return f"{outdir.rstrip('/')}/{_SAMPLESHEET_SUBPATH}"
+
+
+def _fastq_storage_uri(outdir: str, sheet_value: str) -> str:
+    """The durable object-store URI for one FASTQ, in the run's outdir.
+
+    fetchngs's samplesheet may point fastq_1/fastq_2 at wherever it staged the download (a work dir);
+    the durable copy bioAF keeps lives at ``{outdir}/fastq/{basename}``. We take the basename and
+    re-anchor it there so a downstream run reads the persisted data, not a transient work path."""
+    basename = sheet_value.rsplit("/", 1)[-1]
+    return f"{outdir.rstrip('/')}/{_FASTQ_SUBDIR}/{basename}"
+
+
+def _row_md5(row: dict, mate: str) -> str | None:
+    """Best-effort md5 for a mate ('1'|'2') across the column spellings fetchngs has used."""
+    for column in (f"md5_{mate}", f"fastq_{mate}_md5"):
+        value = (row.get(column) or "").strip()
+        if value:
+            return value
+    return None
 
 
 class FetchngsIngestService:
@@ -158,4 +185,107 @@ class FetchngsIngestService:
             len(created),
             run.experiment_id,
         )
+        return created
+
+    @staticmethod
+    async def attach_fastq_files(
+        session: AsyncSession,
+        run: PipelineRun,
+        *,
+        outdir: str,
+        storage_adapter=None,
+    ) -> list[File]:
+        """Register a completed fetchngs run's downloaded FASTQ as File rows linked to its samples.
+
+        The ingest (``ingest_for_run``) creates the Sample rows but no files; a downstream
+        nf-core/rnaseq|scrnaseq run cannot launch without each sample's input files (the launch path's
+        per-sample FASTQ gate is strict). This closes that gap: it reads the same samplesheet and, per
+        row, registers fastq_1/fastq_2 under the run's durable ``{outdir}/fastq/`` as
+        ``pipeline_output`` files, tagged ``read:R1|R2`` and ``lane:NNN`` (a distinct lane per source
+        run so sibling runs collapsed under one sample become separate, mergeable sample-sheet rows),
+        and links each to the sample whose external_id matches the row.
+
+        Best-effort and idempotent, exactly like ``ingest_for_run``: a non-fetchngs run, a missing
+        experiment, or an unreadable samplesheet is a no-op returning ``[]``; files already registered
+        for this run are skipped; and creation runs inside a SAVEPOINT so a failure can never poison
+        the caller's (pipeline-monitor) transaction."""
+        if not _is_fetchngs(run) or not run.experiment_id:
+            return []
+
+        uri = _samplesheet_uri(outdir)
+        if uri is None:
+            logger.warning("fetchngs run %d has no outdir; cannot attach FASTQ", run.id)
+            return []
+
+        storage_adapter = storage_adapter or get_storage_adapter()
+        try:
+            csv_text = await storage_adapter.read_text(uri)
+        except Exception as exc:
+            logger.warning("fetchngs run %d: could not read samplesheet at %s: %s", run.id, uri, exc)
+            return []
+
+        samples_by_external = {
+            s.external_id: s
+            for s in (
+                await session.execute(select(Sample).where(Sample.experiment_id == run.experiment_id))
+            ).scalars()
+            if s.external_id
+        }
+        if not samples_by_external:
+            return []
+
+        # Idempotency: skip FASTQ already registered for this run (re-runs of the driver tick).
+        already: set[str] = set(
+            (
+                await session.execute(
+                    select(File.storage_uri).where(
+                        File.experiment_id == run.experiment_id,
+                        File.source_pipeline_run_id == run.id,
+                    )
+                )
+            ).scalars()
+        )
+
+        lane_for: dict[str, str] = {}
+        created: list[File] = []
+        try:
+            async with session.begin_nested():
+                for raw_row in csv.DictReader(io.StringIO(csv_text)):
+                    row = {(k or "").strip().lower(): v for k, v in raw_row.items()}
+                    sample = samples_by_external.get(_first(row, _EXTERNAL_ID_COLUMNS))
+                    if sample is None:
+                        continue
+                    # One lane per source run so a sample's sibling runs stay distinct (mergeable) rows.
+                    run_key = (row.get("run_accession") or _first(row, _EXTERNAL_ID_COLUMNS)).strip()
+                    lane = lane_for.setdefault(run_key, f"{len(lane_for) + 1:03d}")
+                    for column, read in _FASTQ_COLUMNS:
+                        value = (row.get(column) or "").strip()
+                        if not value:
+                            continue
+                        storage_uri = _fastq_storage_uri(outdir, value)
+                        if storage_uri in already:
+                            continue
+                        already.add(storage_uri)
+                        f = File(
+                            organization_id=run.organization_id,
+                            storage_uri=storage_uri,
+                            filename=storage_uri.rsplit("/", 1)[-1],
+                            file_type="fastq",
+                            source_type="pipeline_output",
+                            source_pipeline_run_id=run.id,
+                            experiment_id=run.experiment_id,
+                            uploader_user_id=run.submitted_by_user_id,
+                            ingest_source="fetchngs",
+                            tags_json=[f"read:{read}", f"lane:{lane}"],
+                            md5_checksum=_row_md5(row, read[-1]),
+                        )
+                        session.add(f)
+                        await session.flush()
+                        await FileService.link_file_to_sample(session, f.id, sample.id)
+                        created.append(f)
+        except Exception as exc:
+            logger.warning("fetchngs run %d: FASTQ attach failed: %s", run.id, exc)
+            return []
+
+        logger.info("fetchngs run %d: attached %d FASTQ files to samples", run.id, len(created))
         return created
