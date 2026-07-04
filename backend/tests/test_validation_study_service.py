@@ -107,6 +107,20 @@ async def test_transition_to_error_records_failure_reason(session, admin_user):
 
 
 @pytest.mark.asyncio
+async def test_study_persists_linked_pipeline_run_ids(session, admin_user):
+    """A1 spine holds the fetchngs (data) and analysis pipeline-run links the driver sets."""
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    assert study.data_run_id is None
+    assert study.analysis_run_id is None
+    study.data_run_id = 4242
+    study.analysis_run_id = 4343
+    await session.commit()
+    await session.refresh(study)
+    assert study.data_run_id == 4242
+    assert study.analysis_run_id == 4343
+
+
+@pytest.mark.asyncio
 async def test_transition_is_org_scoped(session, admin_user):
     study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
     await session.commit()

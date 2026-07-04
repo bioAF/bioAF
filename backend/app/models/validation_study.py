@@ -120,6 +120,13 @@ class ValidationStudy(Base):
     # nullable column for now so the spine can persist without a forward table dependency.
     reproduction_plan_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # The back-half driver (A2) links the two pipeline runs it launches for this study: the
+    # nf-core/fetchngs data-acquisition run (D1) and the nf-core/rnaseq|scrnaseq analysis run (D3).
+    # Plain nullable columns (like reproduction_plan_id) so the driver can correlate a completed run
+    # to a study + stage without coupling the spine to pipeline_runs ordering in the test schema.
+    data_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    analysis_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     approved_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
