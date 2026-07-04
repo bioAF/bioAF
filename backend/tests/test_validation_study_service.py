@@ -107,6 +107,42 @@ async def test_transition_to_error_records_failure_reason(session, admin_user):
 
 
 @pytest.mark.asyncio
+async def test_classify_by_hand_records_terminal_verdict(session, admin_user):
+    """Phase 1 manual comparison gate: a human classifies from 'comparing'."""
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    study = await _walk(session, study, admin_user.organization_id, admin_user.id, _HAPPY)  # ends at comparing
+    study = await ValidationStudyService.classify_by_hand(
+        session, study.id, admin_user.organization_id, admin_user.id, "not_validated"
+    )
+    await session.commit()
+    assert study.state == "classified"
+    assert study.classification == "not_validated"
+
+
+@pytest.mark.asyncio
+async def test_classify_by_hand_rejects_non_comparing_state(session, admin_user):
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    await session.commit()
+    with pytest.raises(HTTPException) as ei:
+        await ValidationStudyService.classify_by_hand(
+            session, study.id, admin_user.organization_id, admin_user.id, "validated"
+        )
+    assert ei.value.status_code == 400
+    assert "must be in 'comparing'" in ei.value.detail
+
+
+@pytest.mark.asyncio
+async def test_classify_by_hand_rejects_invalid_bucket(session, admin_user):
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    study = await _walk(session, study, admin_user.organization_id, admin_user.id, _HAPPY)
+    with pytest.raises(HTTPException) as ei:
+        await ValidationStudyService.classify_by_hand(
+            session, study.id, admin_user.organization_id, admin_user.id, "great"
+        )
+    assert ei.value.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_study_persists_linked_pipeline_run_ids(session, admin_user):
     """A1 spine holds the fetchngs (data) and analysis pipeline-run links the driver sets."""
     study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)

@@ -21,6 +21,12 @@ class DeclineRequest(BaseModel):
     reason: str | None = None
 
 
+class ClassifyRequest(BaseModel):
+    """A human's by-hand verdict at the ``comparing`` gate (Phase 1 keeps comparison manual)."""
+
+    classification: str
+
+
 class ComparisonTargetResponse(BaseModel):
     metric_key: str
     claimed_value: float | None = None
@@ -58,3 +64,6 @@ class ValidationStudyResponse(BaseModel):
     approved_by_user_id: int | None = None
     failure_reason: str | None = None
     plan: ReproductionPlanResponse | None = None
+    # The assembled evidence bundle (computed QC metrics beside the paper's claimed targets, plus the
+    # linked run ids) the human reads to classify by hand at the comparing gate. Null until extracting.
+    evidence: dict | None = None

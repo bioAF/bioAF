@@ -157,6 +157,39 @@ class ValidationStudyService:
         return study
 
     @staticmethod
+    async def classify_by_hand(
+        session: AsyncSession, study_id: int, org_id: int, user_id: int, classification: str
+    ) -> ValidationStudy:
+        """Manual comparison gate: a human ratifies the computed-vs-claimed evidence and records the
+        terminal classification (comparing -> classified). Phase 1 keeps this comparison manual; the
+        automatic classifier (E4) supersedes it later. The classification must be one of the buckets."""
+        study = await ValidationStudyService._load(session, study_id, org_id)
+        if not can_transition(study.state, "classified"):
+            raise HTTPException(
+                400,
+                f"Cannot classify from '{study.state}'; the study must be in 'comparing'.",
+            )
+        if classification not in VALIDATION_STUDY_CLASSIFICATIONS:
+            raise HTTPException(
+                400,
+                f"Invalid classification {classification!r}. One of: {', '.join(VALIDATION_STUDY_CLASSIFICATIONS)}.",
+            )
+        old_state = study.state
+        study.state = "classified"
+        study.classification = classification
+        await session.flush()
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="validation_study",
+            entity_id=study.id,
+            action="classified_by_hand",
+            details={"classification": classification},
+            previous_value={"state": old_state},
+        )
+        return study
+
+    @staticmethod
     async def decline_plan(
         session: AsyncSession, study_id: int, org_id: int, user_id: int, reason: str | None = None
     ) -> ValidationStudy:

@@ -13,6 +13,7 @@ from app.api.dependencies import require_permission
 from app.database import get_session
 from app.models.validation_study import ValidationStudy
 from app.schemas.validation_study import (
+    ClassifyRequest,
     ComparisonTargetResponse,
     DeclineRequest,
     ReadRequest,
@@ -71,6 +72,7 @@ async def _study_response(session: AsyncSession, study: ValidationStudy, org_id:
         approved_by_user_id=study.approved_by_user_id,
         failure_reason=study.failure_reason,
         plan=_plan_response(plan),
+        evidence=study.evidence_json,
     )
 
 
@@ -143,6 +145,22 @@ async def approve_plan(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
     study = await ValidationStudyService.approve_plan(session, study_id, org_id, user_id)
+    await session.commit()
+    return await _study_response(session, study, org_id)
+
+
+@router.post("/{study_id}/classify", response_model=ValidationStudyResponse)
+async def classify_study(
+    study_id: int,
+    data: ClassifyRequest,
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Manual comparison gate (Phase 1): a human records the terminal classification from
+    ``comparing`` after reading the computed-vs-claimed evidence."""
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await ValidationStudyService.classify_by_hand(session, study_id, org_id, user_id, data.classification)
     await session.commit()
     return await _study_response(session, study, org_id)
 

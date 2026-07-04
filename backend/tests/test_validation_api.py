@@ -83,6 +83,48 @@ async def test_viewer_cannot_request(client, viewer_token):
     assert r.status_code == 403
 
 
+async def test_classify_by_hand_via_api_after_comparing(client, admin_token, admin_user, session):
+    """The back half is live-only, so drive a study to 'comparing' with an evidence bundle directly,
+    then exercise the HTTP surface: GET shows computed-vs-claimed, POST /classify records the verdict."""
+    from app.services.validation_study_service import ValidationStudyService
+
+    study = await ValidationStudyService.create_study(
+        session, admin_user.organization_id, admin_user.id, source_accession="GSE1"
+    )
+    for nxt in ["acquiring_text", "reading", "plan_ready", "acquiring_data", "setup", "running", "extracting", "comparing"]:
+        study = await ValidationStudyService.transition(
+            session, study.id, admin_user.organization_id, admin_user.id, nxt
+        )
+    study.evidence_json = {
+        "computed_metrics": {"cell_count": 5000},
+        "comparison_targets": [{"metric_key": "cell_count", "claimed_value": 10000}],
+    }
+    await session.commit()
+
+    r = await client.get(f"/api/validation-studies/{study.id}", headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["state"] == "comparing"
+    assert body["evidence"]["computed_metrics"]["cell_count"] == 5000
+    assert body["evidence"]["comparison_targets"][0]["claimed_value"] == 10000
+
+    r = await client.post(
+        f"/api/validation-studies/{study.id}/classify",
+        json={"classification": "not_validated"},
+        headers=_auth(admin_token),
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["state"] == "classified"
+    assert r.json()["classification"] == "not_validated"
+
+
+async def test_viewer_cannot_classify(client, viewer_token):
+    r = await client.post(
+        "/api/validation-studies/1/classify", json={"classification": "validated"}, headers=_auth(viewer_token)
+    )
+    assert r.status_code == 403
+
+
 async def test_missing_data_early_exit_via_api(client, admin_token, monkeypatch):
     no_data = (
         '```json\n{"accessions": [], "method": {"assay": "bulk RNA-seq"}, "claims": [], '
