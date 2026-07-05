@@ -15,14 +15,15 @@ fall back to a pasted-in body. Network egress lives only here.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from xml.etree import ElementTree as ET
 
 import httpx
 
-from app.services.literature.sources import sanitize_source_text
-
 logger = logging.getLogger("bioaf.literature.fulltext")
+
+_WHITESPACE_RE = re.compile(r"\s+")
 
 _BASE = "https://www.ebi.ac.uk/europepmc/webservices/rest"
 _TIMEOUT = 30.0
@@ -48,20 +49,24 @@ def _jats_to_text(xml_text: str) -> str:
     node = root.find(".//{*}body")
     if node is None:
         node = root
+    # ``itertext`` already yields tag-free, entity-decoded plain text, so only whitespace needs
+    # normalizing. Do NOT run the abstract/title HTML sanitizer here: its ``<[^>]+>`` tag-stripper
+    # treats the span between a literal ``<`` and the next ``>`` in statistical prose (P < 0.05,
+    # Q-value < 1E-10, enrichment scores > 1.5) as a tag and deletes it, which routinely swallows the
+    # data-availability accession the reproduction extractor exists to read.
     text = " ".join(t.strip() for t in node.itertext() if t and t.strip())
-    return sanitize_source_text(text) or ""
+    return _WHITESPACE_RE.sub(" ", text).strip()
 
 
 async def _resolve_open_access_id(
     client: httpx.AsyncClient, doi: str | None, pmid: str | None, pmcid: str | None
-) -> tuple[str, str] | None:
-    """Resolve an identifier to an EPMC ``(source, ext_id)`` that has open full text, or None.
+) -> str | None:
+    """Resolve an identifier to an open-full-text EPMC ``PMCID`` (prefix included), or None.
 
     Only open-access PMC records expose ``fullTextXML``; a paper that is merely indexed (abstract
     only) resolves to None so the caller falls back to a pasted body."""
     if pmcid:
-        normalized = pmcid if pmcid.upper().startswith("PMC") else f"PMC{pmcid}"
-        return ("PMC", normalized)
+        return pmcid if pmcid.upper().startswith("PMC") else f"PMC{pmcid}"
 
     if doi:
         query = f'DOI:"{doi}"'
@@ -81,7 +86,7 @@ async def _resolve_open_access_id(
     item = results[0]
     resolved_pmcid = (item.get("pmcid") or "").strip()
     if resolved_pmcid and item.get("inEPMC") == "Y":
-        return ("PMC", resolved_pmcid)
+        return resolved_pmcid
     return None
 
 
@@ -96,11 +101,12 @@ class FullTextFetchService:
 
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             try:
-                resolved = await _resolve_open_access_id(client, doi, pmid, pmcid)
-                if resolved is None:
+                ext_id = await _resolve_open_access_id(client, doi, pmid, pmcid)
+                if ext_id is None:
                     return None
-                source, ext_id = resolved
-                r = await client.get(f"{_BASE}/{source}/{ext_id}/fullTextXML")
+                # Europe PMC keys full text by the bare PMCID: {BASE}/{PMCID}/fullTextXML. There is no
+                # extra source path segment; {BASE}/PMC/{PMCID}/fullTextXML 404s.
+                r = await client.get(f"{_BASE}/{ext_id}/fullTextXML")
                 r.raise_for_status()
                 xml_text = r.text
             except (httpx.HTTPError, ValueError) as exc:
