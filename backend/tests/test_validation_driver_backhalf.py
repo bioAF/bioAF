@@ -234,6 +234,10 @@ async def test_setup_launches_analysis_and_advances_to_running(session, admin_us
     assert len(spy.calls) == 1
     assert spy.calls[0].pipeline_key == "nf-core/rnaseq"  # the analysis pipeline, not fetchngs
     assert spy.calls[0].experiment_id == exp_id
+    # The fetched FASTQ are pipeline_output (derived) files; launch_run's per-sample gate filters
+    # derived inputs OUT unless include_derived_inputs is set, so the analysis run must opt in or every
+    # sample is dropped as "lacking input files". (Live smoke, 2026-07-05.)
+    assert spy.calls[0].include_derived_inputs is True
     await session.refresh(study)
     assert study.analysis_run_id is not None
     assert study.state == "running"

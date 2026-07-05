@@ -235,6 +235,11 @@ class ValidationDriverService:
             experiment_id=study.experiment_id,
             parameters=dict(plan.parameters_json or {}),
             reference_genome=plan.reference_genome,
+            # The fetched FASTQ are the fetchngs run's outputs, so they are pipeline_output (derived)
+            # files. launch_run's per-sample gate filters derived inputs OUT by default, which would
+            # drop every fetched sample as "lacking input files"; opt in so the analysis run consumes
+            # them.
+            include_derived_inputs=True,
             # Some fetched samples may lack usable FASTQ; drop them rather than fail the whole run.
             drop_samples_without_files=True,
         )
