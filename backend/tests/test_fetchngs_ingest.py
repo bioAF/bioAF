@@ -298,6 +298,57 @@ async def test_attach_fastq_files_is_idempotent(session, admin_user):
 
 
 @pytest.mark.asyncio
+async def test_attach_links_monitor_preregistered_output_files(session, admin_user):
+    """Regression (live smoke, 2026-07-05): on completion the pipeline monitor registers a fetchngs
+    run's downloaded FASTQ as generic ``pipeline_output`` File rows (same run + same durable URIs, but
+    untagged and unlinked). attach must REUSE and LINK those to their samples, not skip them as
+    'already registered'. Skipping left every sample with no linked FASTQ, so the driver's
+    ``_has_runnable_samples`` check was False and the study wrongly early-exited to ``missing_data``
+    even though the fetch succeeded and 21 samples + 21 FASTQ existed."""
+    exp = await _experiment(session, admin_user)
+    run = await _fetchngs_run(session, admin_user, exp)
+    storage = _FakeStorage(text=_FETCHNGS_SAMPLESHEET)
+    outdir = run.parameters_json["outdir"]
+    await FetchngsIngestService.ingest_for_run(session, run, outdir=outdir, storage_adapter=storage)
+
+    # Simulate the monitor's generic output-file registration: untagged, unlinked File rows at exactly
+    # the durable URIs attach computes, for this run.
+    for basename in ("SRR1_1.fastq.gz", "SRR1_2.fastq.gz", "SRR2.fastq.gz"):
+        session.add(
+            File(
+                organization_id=admin_user.organization_id,
+                storage_uri=f"{outdir}/fastq/{basename}",
+                filename=basename,
+                file_type="fastq",
+                source_type="pipeline_output",
+                source_pipeline_run_id=run.id,
+                experiment_id=exp.id,
+                uploader_user_id=admin_user.id,
+                ingest_source="fetchngs",
+                tags_json=[],
+            )
+        )
+    await session.flush()
+
+    created = await FetchngsIngestService.attach_fastq_files(session, run, outdir=outdir, storage_adapter=storage)
+    await session.commit()
+
+    # attach reuses the monitor's 3 rows (creates no duplicates)...
+    assert created == []
+    total = (
+        await session.execute(select(func.count()).select_from(File).where(File.source_pipeline_run_id == run.id))
+    ).scalar_one()
+    assert total == 3
+    # ...and links them to their samples (this is what _has_runnable_samples checks).
+    paired = await _files_for_sample(session, (await _sample_by_external(session, exp.id, "GSM7777_SRR1")).id)
+    single = await _files_for_sample(session, (await _sample_by_external(session, exp.id, "GSM7777_SRR2")).id)
+    assert len(paired) == 2
+    assert len(single) == 1
+    # Adopted files gain read tags so the sample-sheet builder can pair mates by lane.
+    assert {tag for f in paired for tag in (f.tags_json or []) if tag.startswith("read:")} == {"read:R1", "read:R2"}
+
+
+@pytest.mark.asyncio
 async def test_attach_fastq_files_multirun_pairs_across_lanes(session, admin_user):
     """When one accession expands to sibling runs collapsed under one sample (spike-02), each run's
     FASTQ must become a DISTINCT sample-sheet row (nf-core merges them), not overwrite a single lane.

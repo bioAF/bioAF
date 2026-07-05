@@ -234,20 +234,27 @@ class FetchngsIngestService:
         if not samples_by_external:
             return []
 
-        # Idempotency: skip FASTQ already registered for this run (re-runs of the driver tick).
-        already: set[str] = set(
-            (
+        # Existing run-scoped FASTQ File rows, keyed by durable URI. A row at a URI is either one a
+        # prior attach tick created, OR a generic ``pipeline_output`` row the pipeline monitor
+        # registered for the run's downloaded FASTQ on completion (same run + same URIs, but with no
+        # sample link and no read/lane tags). We must REUSE and LINK those, not skip them: skipping left
+        # every sample with no linked FASTQ, so the driver's per-sample gate saw "no runnable samples"
+        # and the study wrongly early-exited to missing_data even though the fetch succeeded.
+        existing_by_uri: dict[str, File] = {
+            f.storage_uri: f
+            for f in (
                 await session.execute(
-                    select(File.storage_uri).where(
+                    select(File).where(
                         File.experiment_id == run.experiment_id,
                         File.source_pipeline_run_id == run.id,
                     )
                 )
             ).scalars()
-        )
+        }
 
         lane_for: dict[str, str] = {}
         created: list[File] = []
+        linked = 0
         try:
             async with session.begin_nested():
                 for raw_row in csv.DictReader(io.StringIO(csv_text)):
@@ -263,29 +270,38 @@ class FetchngsIngestService:
                         if not value:
                             continue
                         storage_uri = _fastq_storage_uri(outdir, value)
-                        if storage_uri in already:
-                            continue
-                        already.add(storage_uri)
-                        f = File(
-                            organization_id=run.organization_id,
-                            storage_uri=storage_uri,
-                            filename=storage_uri.rsplit("/", 1)[-1],
-                            file_type="fastq",
-                            source_type="pipeline_output",
-                            source_pipeline_run_id=run.id,
-                            experiment_id=run.experiment_id,
-                            uploader_user_id=run.submitted_by_user_id,
-                            ingest_source="fetchngs",
-                            tags_json=[f"read:{read}", f"lane:{lane}"],
-                            md5_checksum=_row_md5(row, read[-1]),
-                        )
-                        session.add(f)
-                        await session.flush()
+                        f = existing_by_uri.get(storage_uri)
+                        if f is None:
+                            f = File(
+                                organization_id=run.organization_id,
+                                storage_uri=storage_uri,
+                                filename=storage_uri.rsplit("/", 1)[-1],
+                                file_type="fastq",
+                                source_type="pipeline_output",
+                                source_pipeline_run_id=run.id,
+                                experiment_id=run.experiment_id,
+                                uploader_user_id=run.submitted_by_user_id,
+                                ingest_source="fetchngs",
+                                tags_json=[f"read:{read}", f"lane:{lane}"],
+                                md5_checksum=_row_md5(row, read[-1]),
+                            )
+                            session.add(f)
+                            await session.flush()
+                            existing_by_uri[storage_uri] = f
+                            created.append(f)
+                        elif not (f.tags_json or []):
+                            # Adopt a monitor-registered generic output row: give it the read/lane tags
+                            # the sample-sheet builder needs to pair mates by lane.
+                            f.tags_json = [f"read:{read}", f"lane:{lane}"]
+                        # Idempotent (ON CONFLICT DO NOTHING); safe for reused rows and re-run ticks.
                         await FileService.link_file_to_sample(session, f.id, sample.id)
-                        created.append(f)
+                        linked += 1
         except Exception as exc:
             logger.warning("fetchngs run %d: FASTQ attach failed: %s", run.id, exc)
             return []
 
-        logger.info("fetchngs run %d: attached %d FASTQ files to samples", run.id, len(created))
+        logger.info(
+            "fetchngs run %d: attached FASTQ to samples (%d new file rows, %d sample-file links)",
+            run.id, len(created), linked,
+        )
         return created
