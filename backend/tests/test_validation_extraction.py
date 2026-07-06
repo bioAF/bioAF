@@ -115,6 +115,9 @@ async def test_extract_produces_plan_targets_and_mapping(session, admin_user, mo
     assert plan.extractor_provider == "anthropic"
     assert plan.extractor_model == "claude-opus-4-8"
     assert plan.reference_genome == "GRCh37"
+    # The model's key_params ({"aligner": "tophat"}) are experimental metadata, not nf-core params,
+    # so they must NOT be forwarded as pipeline parameters (that failed launch_run's param validation).
+    assert plan.parameters_json == {}
     assert study.reproduction_plan_id == plan.id
 
     targets = list(
@@ -123,6 +126,33 @@ async def test_extract_produces_plan_targets_and_mapping(session, admin_user, mo
     assert {t.metric_key for t in targets} == {"alignment_rate", "de_genes"}
     de = next(t for t in targets if t.metric_key == "de_genes")
     assert de.claimed_value == 316.0  # ints coerced to float for the numeric column
+
+
+def test_normalize_reference_genome_maps_aliases_and_drops_unknowns():
+    assert ext._normalize_reference_genome("GRCh38 / Gencode 29") == "GRCh38"
+    assert ext._normalize_reference_genome("hg19") == "GRCh37"
+    assert ext._normalize_reference_genome("mm10") == "GRCm38"
+    assert ext._normalize_reference_genome("T2T-CHM13v2.0") == "T2T-CHM13"
+    assert ext._normalize_reference_genome("some exotic assembly") is None
+    assert ext._normalize_reference_genome("") is None
+    assert ext._normalize_reference_genome(None) is None
+
+
+@pytest.mark.asyncio
+async def test_extract_normalizes_composite_reference_genome(session, admin_user, monkeypatch):
+    """The model reports a composite build like 'GRCh38 / Gencode 29'; the plan must carry the
+    controlled-vocab token 'GRCh38' or launch_run 422s at setup (live smoke, 2026-07-05)."""
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    await session.flush()
+    _patch_llm(monkeypatch, _GOOD.replace('"reference_build": "GRCh37"', '"reference_build": "GRCh38 / Gencode 29"'))
+
+    plan = await ValidationExtractionService.extract(
+        session, study, "txt", admin_user.organization_id, admin_user.id
+    )
+    await session.commit()
+
+    assert plan.reference_genome == "GRCh38"
+    assert plan.parameters_json == {}
 
 
 @pytest.mark.asyncio

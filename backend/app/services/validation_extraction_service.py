@@ -78,6 +78,29 @@ def _to_float(value) -> float | None:
     return None
 
 
+# The model reports a free-form reference build ("GRCh38 / Gencode 29", "hg19", "mm10"), but
+# plan.reference_genome must be a controlled-vocabulary token or launch_run 422s at the setup gate and
+# errors the study. Map common aliases to the canonical assembly token; an unrecognized build resolves
+# to None (the launch picks a default) rather than a value guaranteed to fail validation.
+_REFERENCE_GENOME_ALIASES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("grch38", "hg38"), "GRCh38"),
+    (("grch37", "hg19"), "GRCh37"),
+    (("grcm39", "mm39"), "GRCm39"),
+    (("grcm38", "mm10"), "GRCm38"),
+    (("t2t", "chm13"), "T2T-CHM13"),
+)
+
+
+def _normalize_reference_genome(raw) -> str | None:
+    text = str(raw or "").lower()
+    if not text.strip():
+        return None
+    for needles, token in _REFERENCE_GENOME_ALIASES:
+        if any(n in text for n in needles):
+            return token
+    return None
+
+
 def parse_extraction(response_text: str) -> dict:
     """Pull the fenced JSON extraction and normalize it. Never raises; flags parse failure instead."""
     empty = {
@@ -146,6 +169,14 @@ class ValidationExtractionService:
         ):
             blockers.append("no data accession found in the paper")
 
+        raw_genome = method.get("reference_build")
+        reference_genome = _normalize_reference_genome(raw_genome)
+        if raw_genome and reference_genome is None:
+            blockers.append(
+                f"could not map the paper's reference genome '{raw_genome}' to a known assembly; "
+                "the analysis run will use a default"
+            )
+
         plan = await ReproductionPlanService.create_plan(
             session,
             study,
@@ -154,8 +185,11 @@ class ValidationExtractionService:
             sample_sheet=parsed["sample_structure"],
             pipeline_key=mapping.pipeline_key,
             pipeline_version=mapping.pipeline_version,
-            parameters=_as_dict(method.get("key_params")),
-            reference_genome=method.get("reference_build") or None,
+            # The model's key_params are experimental metadata (PCR cycles, DE thresholds, ...), not
+            # nf-core pipeline parameters; forwarding them makes the analysis run fail param validation.
+            # Phase 1 runs the pipeline with its defaults, so do not seed parameters_json from them.
+            parameters={},
+            reference_genome=reference_genome,
             mapping_confidence=mapping.mapping_confidence,
             mapping_notes=mapping.mapping_notes,
             blockers=blockers,
