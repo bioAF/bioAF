@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import get_session
-from app.models.validation_study import ValidationStudy
+from app.models.validation_study import ValidationStudy, classification_confidence
 from app.schemas.validation_study import (
     ClassifyRequest,
     ComparisonTargetResponse,
@@ -64,6 +64,7 @@ async def _study_response(session: AsyncSession, study: ValidationStudy, org_id:
         id=study.id,
         state=study.state,
         classification=study.classification,
+        confidence=classification_confidence(study.classification),
         paper_id=study.paper_id,
         source_doi=study.source_doi,
         source_accession=study.source_accession,

@@ -66,6 +66,32 @@ VALIDATION_STUDY_CLASSIFICATIONS = [
     "inconclusive",
 ]
 
+# Interim map: manual classification bucket -> "% confident the results were validated" for the UI
+# status badge (frontend lib/validationStatus). This is a stopgap until the E2 comparison engine
+# produces a real graded confidence; a manual human verdict is discrete, so it only ever yields the
+# extremes. The "couldn't test / couldn't conclude" buckets (and any not-yet-classified study) map to
+# None, which the UI renders as "Could Not Reproduce" -- deliberately distinct from a LOW confidence
+# (could-not-test is not the same as tested-and-unlikely).
+_CLASSIFICATION_CONFIDENCE: dict[str, float | None] = {
+    "validated": 100.0,       # human-confirmed validation -> Fully Validated
+    "not_validated": 0.0,     # human-confirmed contradiction -> Very Unlikely
+    "missing_data": None,     # no data to run -> Could Not Reproduce
+    "missing_methods": None,  # no reproducible method -> Could Not Reproduce
+    "not_reproducible": None, # pipeline could not run -> Could Not Reproduce
+    "inconclusive": None,     # ran but no verdict -> Could Not Reproduce
+}
+
+
+def classification_confidence(classification: str | None) -> float | None:
+    """The UI's "% confident the results were validated" for a classification, or None when validation
+    could not be run/concluded or the study is not yet classified.
+
+    Interim mapping (see the comment above): a discrete manual verdict yields only 100 / 0 / None. The
+    E2 comparison engine will replace this with a real graded confidence."""
+    if classification is None:
+        return None
+    return _CLASSIFICATION_CONFIDENCE.get(classification)
+
 
 def next_states(state: str) -> list[str]:
     """The states reachable from ``state`` in one transition (empty for terminals/unknowns)."""

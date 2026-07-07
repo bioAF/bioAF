@@ -116,6 +116,7 @@ async def test_classify_by_hand_via_api_after_comparing(client, admin_token, adm
     assert r.status_code == 200, r.text
     assert r.json()["state"] == "classified"
     assert r.json()["classification"] == "not_validated"
+    assert r.json()["confidence"] == 0.0  # not_validated -> Very Unlikely (interim mapping)
 
 
 async def test_viewer_cannot_classify(client, viewer_token):
@@ -136,3 +137,4 @@ async def test_missing_data_early_exit_via_api(client, admin_token, monkeypatch)
     assert r.status_code == 200, r.text
     assert r.json()["state"] == "classified"
     assert r.json()["classification"] == "missing_data"
+    assert r.json()["confidence"] is None  # missing_data -> Could Not Reproduce (no confidence)

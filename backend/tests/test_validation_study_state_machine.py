@@ -9,7 +9,9 @@ from app.models.validation_study import (
     VALIDATION_STUDY_TERMINAL_STATES,
     VALIDATION_STUDY_TRANSITIONS,
     VALIDATION_STUDY_CLASSIFICATIONS,
+    _CLASSIFICATION_CONFIDENCE,
     can_transition,
+    classification_confidence,
     next_states,
     is_terminal,
 )
@@ -78,3 +80,16 @@ def test_classifications_are_the_six_buckets():
         "not_reproducible",
         "inconclusive",
     ]
+
+
+def test_classification_confidence_interim_mapping():
+    # Interim until E2: a discrete manual verdict yields only the extremes or None.
+    assert classification_confidence("validated") == 100.0        # -> Fully Validated
+    assert classification_confidence("not_validated") == 0.0      # -> Very Unlikely
+    # "couldn't test / couldn't conclude" and not-yet-classified -> None (UI: Could Not Reproduce),
+    # deliberately NOT a low confidence.
+    for c in ("missing_data", "missing_methods", "not_reproducible", "inconclusive"):
+        assert classification_confidence(c) is None
+    assert classification_confidence(None) is None
+    # Every real bucket must be mapped EXPLICITLY (no silent default-to-None on a new bucket).
+    assert set(VALIDATION_STUDY_CLASSIFICATIONS) == set(_CLASSIFICATION_CONFIDENCE)

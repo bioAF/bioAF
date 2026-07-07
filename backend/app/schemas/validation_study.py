@@ -57,6 +57,11 @@ class ValidationStudyResponse(BaseModel):
     id: int
     state: str
     classification: str | None = None
+    # "% confident the results were validated" (0-100), derived from the classification for the UI status
+    # badge (frontend lib/validationStatus). None = validation could not be run/concluded, or the study
+    # is not yet classified -> rendered as "Could Not Reproduce". Interim mapping until E2 (see
+    # models.validation_study.classification_confidence).
+    confidence: float | None = None
     paper_id: int | None = None
     source_doi: str | None = None
     source_accession: str | None = None
