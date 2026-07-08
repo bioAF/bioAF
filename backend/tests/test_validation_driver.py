@@ -27,6 +27,10 @@ _UNMAPPABLE = (
     '```json\n{"accessions": ["GSE99999"], "method": {"assay": "bespoke spatial assay"}, '
     '"claims": [], "data_availability": "deposited", "blockers": []}\n```'
 )
+_NO_METHOD = (
+    '```json\n{"accessions": ["GSE12345"], "method": {"assay": ""}, "claims": [], '
+    '"data_availability": "deposited", "blockers": []}\n```'
+)
 
 
 def _patch_llm(monkeypatch, response):
@@ -82,6 +86,20 @@ async def test_read_and_plan_early_exits_not_reproducible(session, admin_user, m
     await session.commit()
     assert study.state == "classified"
     assert study.classification == "not_reproducible"
+
+
+@pytest.mark.asyncio
+async def test_read_and_plan_early_exits_missing_methods_when_no_assay(session, admin_user, monkeypatch):
+    # Data is deposited, but the paper's methods are too thin to identify an assay -> missing_methods,
+    # distinct from not_reproducible (a known assay with no nf-core equivalent).
+    _patch_llm(monkeypatch, _NO_METHOD)
+    study = await _requested(session, admin_user)
+    study = await ValidationDriverService.read_and_plan(
+        session, study, "full text", admin_user.organization_id, admin_user.id
+    )
+    await session.commit()
+    assert study.state == "classified"
+    assert study.classification == "missing_methods"
 
 
 @pytest.mark.asyncio

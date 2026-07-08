@@ -40,14 +40,17 @@ from app.services.fetchngs_ingest_service import FetchngsIngestService
 from app.services.literature.fulltext_service import FullTextFetchService
 from app.services.qc_dashboard_service import QCDashboardService
 from app.services.reproduction_plan_service import ReproductionPlanService
+from app.services.validation_classifier_service import classify_study
 from app.services.validation_extraction_service import ValidationExtractionService
 from app.services.validation_study_service import ValidationStudyService
 
 logger = logging.getLogger("bioaf.validation_driver")
 
 # States the background driver owns. `plan_ready` is the human's (C1 gate advances it to
-# acquiring_data); terminals and the pre-approval states are left alone.
-_ACTIVE_BACK_HALF_STATES = ("acquiring_data", "setup", "running", "extracting")
+# acquiring_data); terminals and the pre-approval states are left alone. `comparing` is included so the
+# driver runs the automatic classifier (E2/E3/E4) once; a clean `validated` auto-finalizes, everything
+# else is left AT `comparing` with a suggested verdict for a human to ratify (the hybrid policy).
+_ACTIVE_BACK_HALF_STATES = ("acquiring_data", "setup", "running", "extracting", "comparing")
 
 _FETCHNGS_KEY = "nf-core/fetchngs"
 # fetchngs's catalog default download_method is aspera, unproven on our GKE nodes; ftp is proven
@@ -61,13 +64,17 @@ _RUN_FAILED = {"failed", "cancelled", "error"}
 def _early_exit_classification(plan: ReproductionPlan) -> str | None:
     """Reading-stage early exit, or None to proceed to plan_ready.
 
-    Order matters: a missing accession is the harder stop (no data to run at all) and is checked
-    before pipeline mappability. missing_methods is folded into not_reproducible for now; it is split
-    out when the full classifier (E4) lands.
+    Order matters (spec-03): a missing accession is the harder stop (no data to run at all) and is
+    checked first. When there is data but no pipeline, distinguish `missing_methods` (methods too thin
+    to identify an assay) from `not_reproducible` (a known assay with no nf-core equivalent), keyed off
+    the mapper's marker blocker.
     """
     if not (plan.accessions_json or []):
         return "missing_data"
     if plan.pipeline_key is None:
+        blockers = plan.blockers_json or []
+        if any("insufficient method detail" in (b or "").lower() for b in blockers):
+            return "missing_methods"
         return "not_reproducible"
     return None
 
@@ -187,6 +194,7 @@ class ValidationDriverService:
             "setup": ValidationDriverService._handle_setup,
             "running": ValidationDriverService._handle_running,
             "extracting": ValidationDriverService._handle_extracting,
+            "comparing": ValidationDriverService._handle_comparing,
         }
         handler = handlers.get(study.state)
         return await handler(session, study) if handler else False
@@ -310,6 +318,40 @@ class ValidationDriverService:
         await ValidationStudyService.transition(
             session, study.id, study.organization_id, study.requested_by_user_id, "comparing"
         )
+        return True
+
+    @staticmethod
+    async def _handle_comparing(session: AsyncSession, study: ValidationStudy) -> bool:
+        """Run the automatic classifier (E2/E3/E4) exactly once. A clean, solid ``validated`` auto-
+        finalizes (comparing -> classified); everything else stays at ``comparing`` with the suggested
+        verdict recorded in evidence for a human to ratify or override (the hybrid policy)."""
+        evidence = dict(study.evidence_json or {})
+        if "classification_result" in evidence:
+            # Already classified this study; holding at comparing for a human. Do not recompute.
+            return False
+
+        plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+        result = classify_study(
+            evidence.get("comparison_targets") or [],
+            evidence.get("computed_metrics") or {},
+            mapping_confidence=plan.mapping_confidence if plan else None,
+            reference_genome=plan.reference_genome if plan else None,
+        )
+        evidence["classification_result"] = result
+        study.evidence_json = evidence
+
+        if result["auto_finalize"]:
+            await ValidationStudyService.transition(
+                session,
+                study.id,
+                study.organization_id,
+                study.requested_by_user_id,
+                "classified",
+                classification=result["classification"],
+            )
+        else:
+            # Persist the suggested verdict; leave the study at comparing for the human gate.
+            await session.flush()
         return True
 
     # ---- helpers ----

@@ -318,6 +318,76 @@ async def test_extracting_stashes_metrics_and_advances_to_comparing(session, adm
     assert ev["analysis_run_id"] == analysis.id
 
 
+# ---- comparing (E2/E3/E4 automatic classifier) ----
+
+
+@pytest.mark.asyncio
+async def test_comparing_auto_finalizes_a_clean_validated(session, admin_user, monkeypatch):
+    """Solid agreement (>=2 comparable metrics, all agree) auto-finalizes comparing -> classified."""
+    monkeypatch.setattr(PipelineRunService, "launch_run", _LaunchSpy())
+    study = await _study(session, admin_user, state="comparing")
+    study.evidence_json = {
+        "computed_metrics": {"total_sequences": 6_600_000, "reads_mapped_genome": 0.834},
+        "comparison_targets": [
+            {"metric_key": "total_reads", "claimed_value": 7_000_000, "unit": None, "tolerance": None},
+            {"metric_key": "alignment_rate", "claimed_value": 83.4, "unit": "%", "tolerance": None},
+        ],
+    }
+    await session.flush()
+
+    await ValidationDriverService.advance_active_studies(session)
+
+    await session.refresh(study)
+    assert study.state == "classified"
+    assert study.classification == "validated"
+    assert study.evidence_json["classification_result"]["auto_finalize"] is True
+
+
+@pytest.mark.asyncio
+async def test_comparing_holds_divergence_for_a_human_with_a_suggested_verdict(session, admin_user, monkeypatch):
+    """A divergence our side cannot clear (partial mapping) stays at comparing as suggested inconclusive."""
+    monkeypatch.setattr(PipelineRunService, "launch_run", _LaunchSpy())
+    study = await _study(session, admin_user, state="comparing")
+    plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+    plan.mapping_confidence = "partial"
+    study.evidence_json = {
+        "computed_metrics": {"cell_count": 2000},
+        "comparison_targets": [{"metric_key": "cell_count", "claimed_value": 10000, "unit": None, "tolerance": None}],
+    }
+    await session.flush()
+
+    await ValidationDriverService.advance_active_studies(session)
+
+    await session.refresh(study)
+    assert study.state == "comparing"  # held for the human gate
+    assert study.classification is None
+    result = study.evidence_json["classification_result"]
+    assert result["classification"] == "inconclusive"
+    assert result["auto_finalize"] is False
+
+
+@pytest.mark.asyncio
+async def test_comparing_classifier_runs_once_then_waits(session, admin_user, monkeypatch):
+    """The classifier computes the verdict exactly once; a later tick does not recompute or re-change."""
+    monkeypatch.setattr(PipelineRunService, "launch_run", _LaunchSpy())
+    study = await _study(session, admin_user, state="comparing")
+    plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+    plan.mapping_confidence = "partial"
+    study.evidence_json = {
+        "computed_metrics": {"cell_count": 2000},
+        "comparison_targets": [{"metric_key": "cell_count", "claimed_value": 10000, "unit": None, "tolerance": None}],
+    }
+    await session.flush()
+
+    first = await ValidationDriverService.advance_active_studies(session)
+    second = await ValidationDriverService.advance_active_studies(session)
+
+    assert first == 1  # computed + recorded the verdict
+    assert second == 0  # already classified; left alone for the human
+    await session.refresh(study)
+    assert study.state == "comparing"
+
+
 @pytest.mark.asyncio
 async def test_advance_is_isolated_per_study(session, admin_user, monkeypatch):
     """One study's failure does not stop the others from advancing (per-study isolation)."""

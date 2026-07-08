@@ -68,6 +68,16 @@ def test_map_method_unmappable_yields_blocker_and_none():
     assert m.pipeline_key is None
     assert m.mapping_confidence == "none"
     assert m.blockers
+    # A known-but-unsupported assay is not_reproducible, NOT the thin-methods signal.
+    assert any("no nf-core equivalent" in b.lower() for b in m.blockers)
+    assert not any("insufficient method detail" in b.lower() for b in m.blockers)
+
+
+def test_map_method_empty_assay_signals_thin_methods():
+    for assay in ("", None, "   "):
+        m = map_method(assay, tools=[])
+        assert m.pipeline_key is None
+        assert any("insufficient method detail" in b.lower() for b in m.blockers)
 
 
 # ---- B2 parser (pure) ----

@@ -46,13 +46,24 @@ def map_method(assay: str | None, tools: list[str] | None = None, reference_buil
         key, ver = _SCRNASEQ
     elif any(m in a for m in _BULK_RNA_MARKERS):
         key, ver = _RNASEQ
+    elif not a.strip():
+        # No assay identifiable at all: the methods are too thin to select a pipeline. The classifier
+        # reads this as `missing_methods`, distinct from `not_reproducible` (a known but unsupported
+        # method). The marker blocker is the stable signal the early-exit keys off.
+        return PipelineMapping(
+            pipeline_key=None,
+            pipeline_version=None,
+            mapping_confidence="none",
+            mapping_notes="No assay could be identified from the paper; the methods are too thin to select a pipeline.",
+            blockers=["insufficient method detail to identify an assay"],
+        )
     else:
         return PipelineMapping(
             pipeline_key=None,
             pipeline_version=None,
             mapping_confidence="none",
-            mapping_notes=f"No supported nf-core equivalent identified for assay '{assay or 'unknown'}'.",
-            blockers=[f"no nf-core equivalent for method: {assay or 'unknown'}"],
+            mapping_notes=f"No supported nf-core equivalent identified for assay '{assay}'.",
+            blockers=[f"no nf-core equivalent for method: {assay}"],
         )
 
     if _mentions_nf_core(tools):

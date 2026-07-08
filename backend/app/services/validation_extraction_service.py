@@ -25,6 +25,7 @@ from app.services import llm_provider_config_service
 from app.services.llm_provider_clients import get_client
 from app.services.pipeline_mapper import map_method
 from app.services.reproduction_plan_service import ReproductionPlanService
+from app.services.validation_classifier_service import CONTROLLED_METRIC_KEYS
 
 _FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
 
@@ -49,7 +50,9 @@ def build_extraction_prompt(full_text: str) -> tuple[str, str]:
         "Rules: report a data accession only if the paper actually deposits one; if none, set "
         "accessions to [] and data_availability to \"none\". Capture the QC-level numbers the paper "
         "reports (alignment rate, read/cell counts, saturation, etc.) as claims with a metric_key that "
-        "aligns to a standard QC metric. Do not invent values. Use null when unknown."
+        "aligns to a standard QC metric. When a claim matches one of these controlled QC metric keys, use "
+        f"that exact key so it can be compared automatically: {', '.join(CONTROLLED_METRIC_KEYS)}. If a "
+        "claim matches none of them, use a clear snake_case key. Do not invent values. Use null when unknown."
     )
     payload = f"Paper full text:\n\n{full_text}"
     return system, payload
