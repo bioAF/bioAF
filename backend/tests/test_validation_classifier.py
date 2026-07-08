@@ -39,6 +39,12 @@ class TestKeyNormalization:
         # "reads after trimming" is a distinct quantity the QC dashboard does not compute; honestly unmapped.
         assert normalize_target_key("mean_reads_after_trimming_per_sample") is None
 
+    def test_pre_trim_read_count_maps_but_post_trim_does_not(self):
+        # From a real GSE309060 extraction: total_sequences is the raw (pre-trim) count, so the pre-trim
+        # claim maps; the post-trim claim has no computed counterpart and must stay unmapped.
+        assert normalize_target_key("mean_reads_per_sample_pre_trim") == "total_sequences"
+        assert normalize_target_key("mean_reads_per_sample_post_trim") is None
+
 
 class TestCompare:
     def test_agree_within_relative_tolerance_for_counts(self):

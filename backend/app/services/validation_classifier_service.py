@@ -48,7 +48,11 @@ _SPECS: tuple[MetricSpec, ...] = (
     MetricSpec("total_sequences", "count", 0.25, True,
                ("total_reads", "raw_reads", "read_count", "sequencing_depth", "reads_per_sample",
                 "mean_raw_reads_per_sample", "mean_reads_per_sample", "library_size", "number_of_read_pairs",
-                "read_pairs", "total_read_pairs", "reads_generated")),
+                "read_pairs", "total_read_pairs", "reads_generated",
+                # `total_sequences` is the raw (pre-trim) read count; papers qualify it as "raw"/"pre-trim".
+                # NB: post-trim read counts have no computed counterpart, so they stay unmapped on purpose.
+                "mean_reads_per_sample_pre_trim", "reads_per_sample_pre_trim", "mean_reads_pre_trim",
+                "raw_reads_per_sample", "mean_raw_reads")),
     MetricSpec("avg_sequence_length", "count", 0.10, True,
                ("read_length", "avg_read_length", "mean_read_length", "average_read_length")),
     MetricSpec("percent_duplicates", "percent", 5.0, False,
