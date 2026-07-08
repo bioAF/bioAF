@@ -51,6 +51,13 @@ describe("ValidationStudyActions", () => {
     expect(onChanged).toHaveBeenCalled();
   });
 
+  it("pre-selects the classifier's suggested verdict in the Classify control", () => {
+    render(
+      <ValidationStudyActions study={{ id: 3, state: "comparing" }} onChanged={jest.fn()} suggestedClassification="inconclusive" />,
+    );
+    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("inconclusive");
+  });
+
   it("shows nothing actionable while an automated stage is running", () => {
     render(<ValidationStudyActions study={{ id: 3, state: "running" }} onChanged={jest.fn()} />);
     expect(screen.queryByRole("button", { name: /read paper/i })).not.toBeInTheDocument();

@@ -7,6 +7,7 @@ import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ValidationStudyOutcome } from "@/components/validation/ValidationStudyOutcome";
 import { ValidationStudyActions } from "@/components/validation/ValidationStudyActions";
+import { ValidationVerdictPanel } from "@/components/validation/ValidationVerdictPanel";
 import { ValidationEvidenceTable, type Evidence } from "@/components/validation/ValidationEvidenceTable";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -147,6 +148,12 @@ export default function ValidationStudyPage() {
             />
           </section>
 
+          {study.evidence?.classification_result && (
+            <section className="mb-6">
+              <ValidationVerdictPanel result={study.evidence.classification_result} />
+            </section>
+          )}
+
           {plan && (
             <section className="mb-6">
               <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
@@ -181,6 +188,7 @@ export default function ValidationStudyPage() {
             <ValidationStudyActions
               study={{ id: study.id, state: study.state }}
               onChanged={(updated) => setStudy(updated as ValidationStudy)}
+              suggestedClassification={study.evidence?.classification_result?.classification}
             />
           </section>
 

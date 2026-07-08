@@ -1,9 +1,9 @@
-// The computed-vs-claimed evidence a scientist reads to classify a study by hand at the `comparing`
-// gate (Phase 1 keeps comparison manual). The extractor's ComparisonTarget keys and the QC dashboard's
-// computed metric keys are DIFFERENT vocabularies and do not auto-join (local/lit_validation/LEARNINGS.md
-// "the important one for Phase 2"). So this table joins on exact key where it can, marks an unmatched
-// target "Not reported", and lists the computed metrics that have no target separately, rather than
-// hiding the gap. Phase 2 (E2) replaces the manual read with an automatic verdict.
+// The computed-vs-claimed evidence a scientist reads at the `comparing` gate. Once the automatic
+// classifier (E2/E3/E4) has run, evidence.classification_result.comparisons is the AUTHORITATIVE
+// per-metric comparison (key-mapped, unit-reconciled, tolerance-checked, with a verdict), so this
+// renders those with a verdict chip. Before the classifier runs (older studies), it falls back to a
+// heuristic exact-key join of the raw targets against the computed metrics. Either way it surfaces the
+// metric-key coverage gap (LEARNINGS Phase 2) rather than hiding it.
 
 export interface ComparisonTargetEvidence {
   metric_key: string;
@@ -13,24 +13,117 @@ export interface ComparisonTargetEvidence {
   source_locator?: string | null;
 }
 
+export interface MetricComparison {
+  metric_key: string;
+  mapped_key?: string | null;
+  claimed_value?: number | null;
+  claimed_normalized?: number | null;
+  computed_value?: number | null;
+  unit?: string | null;
+  delta?: number | null;
+  within_tolerance?: boolean | null;
+  verdict: string; // agree | diverge | not_reported | not_computed
+}
+
+export interface ClassificationResult {
+  comparisons?: MetricComparison[] | null;
+  attribution?: { our_side?: string | null; reasons?: string[] | null } | null;
+  coverage?: Record<string, number> | null;
+  classification?: string | null;
+  auto_finalize?: boolean | null;
+  reasoning?: string | null;
+}
+
 export interface Evidence {
   computed_metrics?: Record<string, unknown> | null;
   comparison_targets?: ComparisonTargetEvidence[] | null;
+  classification_result?: ClassificationResult | null;
   data_run_id?: number | null;
   analysis_run_id?: number | null;
   qc_dashboard_id?: number | null;
 }
 
+const VERDICT_META: Record<string, { label: string; cls: string }> = {
+  agree: { label: "Agree", cls: "bg-green-100 text-green-800" },
+  diverge: { label: "Diverge", cls: "bg-red-100 text-red-800" },
+  not_reported: { label: "Not reported", cls: "bg-gray-100 text-gray-600" },
+  not_computed: { label: "Not computed", cls: "bg-amber-100 text-amber-800" },
+};
+
 function formatValue(v: unknown): string {
   if (v === null || v === undefined) return "";
+  if (typeof v === "number") return Number.isInteger(v) ? String(v) : String(Number(v.toFixed(4)));
   return String(v);
 }
 
+function VerdictChip({ verdict }: { verdict: string }) {
+  const meta = VERDICT_META[verdict] ?? { label: verdict, cls: "bg-gray-100 text-gray-600" };
+  return (
+    <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${meta.cls}`}>{meta.label}</span>
+  );
+}
+
 export function ValidationEvidenceTable({ evidence }: { evidence: Evidence | null | undefined }) {
-  const targets = evidence?.comparison_targets ?? [];
+  const comparisons = evidence?.classification_result?.comparisons ?? null;
   const computed = evidence?.computed_metrics ?? {};
   const computedEntries = Object.entries(computed);
 
+  // Authoritative path: the classifier's per-metric comparisons.
+  if (comparisons && comparisons.length > 0) {
+    const mappedKeys = new Set(comparisons.map((c) => c.mapped_key).filter(Boolean) as string[]);
+    const computedOnly = computedEntries.filter(([key]) => !mappedKeys.has(key));
+    return (
+      <div className="space-y-6">
+        <div>
+          <h3 className="mb-2 text-sm font-semibold text-gray-700">Metric comparison</h3>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500">
+                  <th className="py-2 pr-4">Claimed metric</th>
+                  <th className="py-2 pr-4">Claimed</th>
+                  <th className="py-2 pr-4">Computed</th>
+                  <th className="py-2 pr-4">Δ</th>
+                  <th className="py-2">Verdict</th>
+                </tr>
+              </thead>
+              <tbody>
+                {comparisons.map((c, i) => (
+                  <tr key={`${c.metric_key}-${i}`} className="border-b last:border-0">
+                    <td className="py-2 pr-4">
+                      <span className="font-mono text-xs">{c.metric_key}</span>
+                      {c.mapped_key && c.mapped_key !== c.metric_key && (
+                        <span className="ml-1 text-xs text-gray-400" title="Matched computed QC metric">
+                          → {c.mapped_key}
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2 pr-4">{formatValue(c.claimed_value)}</td>
+                    <td className="py-2 pr-4">
+                      {c.verdict === "not_computed" ? (
+                        <span className="text-gray-400">—</span>
+                      ) : (
+                        formatValue(c.computed_value)
+                      )}
+                    </td>
+                    <td className="py-2 pr-4 text-gray-500">{c.delta === null || c.delta === undefined ? "" : formatValue(c.delta)}</td>
+                    <td className="py-2">
+                      <VerdictChip verdict={c.verdict} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {computedOnly.length > 0 && <OtherComputed entries={computedOnly} />}
+      </div>
+    );
+  }
+
+  // Fallback (no classifier result yet): heuristic exact-key join of raw targets vs computed.
+  const targets = evidence?.comparison_targets ?? [];
   if (targets.length === 0 && computedEntries.length === 0) {
     return (
       <p className="text-sm text-gray-500">
@@ -87,33 +180,34 @@ export function ValidationEvidenceTable({ evidence }: { evidence: Evidence | nul
         </div>
       )}
 
-      {computedOnly.length > 0 && (
-        <div>
-          <h3 className="mb-2 text-sm font-semibold text-gray-700">Other computed QC metrics</h3>
-          <p className="mb-2 text-xs text-gray-500">
-            Computed by the run but not claimed in the paper. Metric keys differ between the two, so a
-            human maps them by hand in Phase 1.
-          </p>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500">
-                  <th className="py-2 pr-4">Metric</th>
-                  <th className="py-2">Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                {computedOnly.map(([key, value]) => (
-                  <tr key={key} className="border-b last:border-0">
-                    <td className="py-2 pr-4 font-mono text-xs">{key}</td>
-                    <td className="py-2">{formatValue(value)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      {computedOnly.length > 0 && <OtherComputed entries={computedOnly} />}
+    </div>
+  );
+}
+
+function OtherComputed({ entries }: { entries: [string, unknown][] }) {
+  return (
+    <div>
+      <h3 className="mb-2 text-sm font-semibold text-gray-700">Other computed QC metrics</h3>
+      <p className="mb-2 text-xs text-gray-500">Computed by the run but not matched to a claim in the paper.</p>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead>
+            <tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500">
+              <th className="py-2 pr-4">Metric</th>
+              <th className="py-2">Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map(([key, value]) => (
+              <tr key={key} className="border-b last:border-0">
+                <td className="py-2 pr-4 font-mono text-xs">{key}</td>
+                <td className="py-2">{formatValue(value)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

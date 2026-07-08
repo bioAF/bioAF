@@ -34,6 +34,32 @@ describe("ValidationEvidenceTable", () => {
     expect(within(row).getByText(/not reported/i)).toBeInTheDocument();
   });
 
+  it("renders the classifier's per-metric verdicts when the classifier has run", () => {
+    render(
+      <ValidationEvidenceTable
+        evidence={{
+          computed_metrics: { total_sequences: 6600000, percent_gc: 48 },
+          classification_result: {
+            classification: "validated",
+            comparisons: [
+              { metric_key: "total_reads", mapped_key: "total_sequences", claimed_value: 7000000, computed_value: 6600000, delta: -400000, verdict: "agree" },
+              { metric_key: "mean_reads_after_trimming_per_sample", mapped_key: null, claimed_value: 5000000, computed_value: null, verdict: "not_computed" },
+            ],
+          },
+        }}
+      />
+    );
+    // The agreeing row shows its verdict chip and the mapped key it joined on.
+    const agreeRow = screen.getByText("total_reads").closest("tr")!;
+    expect(within(agreeRow).getByText("Agree")).toBeInTheDocument();
+    expect(within(agreeRow).getByText(/total_sequences/)).toBeInTheDocument();
+    // The uncomparable claim is flagged Not computed, not silently dropped.
+    const gapRow = screen.getByText("mean_reads_after_trimming_per_sample").closest("tr")!;
+    expect(within(gapRow).getByText("Not computed")).toBeInTheDocument();
+    // A computed metric with no claim still surfaces under "other".
+    expect(screen.getByText("percent_gc")).toBeInTheDocument();
+  });
+
   it("lists computed metrics that have no claimed target so a human can hand-map them", () => {
     render(
       <ValidationEvidenceTable

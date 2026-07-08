@@ -16,3 +16,24 @@ export const VALIDATION_CLASSIFICATIONS: ReadonlyArray<ValidationClassificationO
   { value: "not_reproducible", label: "Not reproducible", description: "No equivalent pipeline could run the analysis." },
   { value: "inconclusive", label: "Inconclusive", description: "Ran, but divergence could not be attributed." },
 ];
+
+export type ValidationTone = "positive" | "negative" | "caution" | "neutral";
+
+const CLASSIFICATION_TONE: Record<string, ValidationTone> = {
+  validated: "positive",
+  not_validated: "negative",
+  missing_data: "neutral",
+  missing_methods: "neutral",
+  not_reproducible: "neutral",
+  inconclusive: "caution",
+};
+
+export function classificationLabel(value: string | null | undefined): string {
+  if (!value) return "";
+  const found = VALIDATION_CLASSIFICATIONS.find((c) => c.value === value);
+  return found ? found.label : value.replace(/_/g, " ").replace(/^\w/, (m) => m.toUpperCase());
+}
+
+export function classificationTone(value: string | null | undefined): ValidationTone {
+  return (value && CLASSIFICATION_TONE[value]) || "neutral";
+}

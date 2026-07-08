@@ -13,16 +13,24 @@ import { VALIDATION_CLASSIFICATIONS } from "@/lib/validationClassification";
 export function ValidationStudyActions({
   study,
   onChanged,
+  suggestedClassification,
 }: {
   study: { id: number; state: string };
   onChanged: (updated: unknown) => void;
+  // The classifier's (E2/E3/E4) suggested verdict at comparing; pre-selects the Classify control so the
+  // human ratifies with one click (or overrides).
+  suggestedClassification?: string | null;
 }) {
   const { canAccess } = usePermissions();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fullText, setFullText] = useState("");
   const [declineReason, setDeclineReason] = useState("");
-  const [classification, setClassification] = useState(VALIDATION_CLASSIFICATIONS[0].value);
+  const [classification, setClassification] = useState(() =>
+    suggestedClassification && VALIDATION_CLASSIFICATIONS.some((c) => c.value === suggestedClassification)
+      ? suggestedClassification
+      : VALIDATION_CLASSIFICATIONS[0].value,
+  );
 
   const canRequest = canAccess("lit_validation", "request");
   const canApprove = canAccess("lit_validation", "approve");
