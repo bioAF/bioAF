@@ -7,11 +7,15 @@ jest.mock("next/navigation", () => ({
 }));
 
 jest.mock("@/lib/api", () => ({
-  api: { get: jest.fn() },
+  api: { get: jest.fn(), post: jest.fn() },
 }));
 
 jest.mock("@/lib/auth", () => ({
   isAuthenticated: () => true,
+}));
+
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({ canAccess: () => true, loading: false }),
 }));
 
 // Keep the test focused on the page body, not the app chrome.
@@ -68,6 +72,20 @@ describe("ValidationStudyPage", () => {
 
     await waitFor(() => expect(screen.getByText("total_sequences")).toBeInTheDocument());
     expect(screen.getByText("6600000")).toBeInTheDocument();
+  });
+
+  it("exposes the approve/decline gate on the detail page at plan_ready", async () => {
+    mockGet.mockResolvedValue({
+      id: 5,
+      state: "plan_ready",
+      confidence: null,
+      plan: { pipeline_key: "nf-core/rnaseq", accessions: ["GSE1"], reference_genome: "GRCh38" },
+    });
+
+    render(<ValidationStudyPage />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /approve plan/i })).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /decline/i })).toBeInTheDocument();
   });
 
   it("shows a not-found message when the study cannot be loaded", async () => {

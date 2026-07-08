@@ -1,14 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ValidationStudyOutcome } from "@/components/validation/ValidationStudyOutcome";
+import { ValidationStudyActions } from "@/components/validation/ValidationStudyActions";
 import { ValidationEvidenceTable, type Evidence } from "@/components/validation/ValidationEvidenceTable";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
+
+// States the background driver advances on its own; while a study sits in one, poll so the page
+// reflects progress toward the next human gate (plan_ready / comparing) or a terminal state.
+const ADVANCING_STATES = new Set(["acquiring_data", "setup", "running", "extracting"]);
 
 interface ReproductionPlanView {
   pipeline_key?: string | null;
@@ -48,6 +53,15 @@ export default function ValidationStudyPage() {
   const [study, setStudy] = useState<ValidationStudy | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const refresh = useCallback(async () => {
+    try {
+      const data = await api.get<ValidationStudy>(`/api/validation-studies/${id}`);
+      setStudy(data);
+    } catch {
+      setStudy((prev) => prev ?? null);
+    }
+  }, [id]);
+
   useEffect(() => {
     if (!isAuthenticated()) {
       router.push("/login");
@@ -55,19 +69,20 @@ export default function ValidationStudyPage() {
     }
     let cancelled = false;
     (async () => {
-      try {
-        const data = await api.get<ValidationStudy>(`/api/validation-studies/${id}`);
-        if (!cancelled) setStudy(data);
-      } catch {
-        if (!cancelled) setStudy(null);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+      await refresh();
+      if (!cancelled) setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [id, router]);
+  }, [refresh, router]);
+
+  // While the driver is advancing the study on its own, poll so the stage/evidence stay current.
+  useEffect(() => {
+    if (!study || !ADVANCING_STATES.has(study.state)) return;
+    const t = setInterval(refresh, 5000);
+    return () => clearInterval(t);
+  }, [study, refresh]);
 
   if (loading) {
     return (
@@ -161,6 +176,13 @@ export default function ValidationStudyPage() {
               )}
             </section>
           )}
+
+          <section className="mb-6">
+            <ValidationStudyActions
+              study={{ id: study.id, state: study.state }}
+              onChanged={(updated) => setStudy(updated as ValidationStudy)}
+            />
+          </section>
 
           <section>
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">Evidence</h2>

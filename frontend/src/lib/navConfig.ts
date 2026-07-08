@@ -86,6 +86,7 @@ export const navConfig: NavSection[] = [
       { label: "Files", path: "/data/files", permission: { resource: "files", action: "view" } },
       { label: "Reference Data", path: "/data/references", permission: { resource: "files", action: "view" } },
       { label: "Literature", path: "/data/literature", permission: { resource: "literature", action: "view" } },
+      { label: "Validation Studies", path: "/validation-studies", permission: { resource: "lit_validation", action: "view" } },
       { label: "Naming Profiles", path: "/settings/naming-profiles", permission: { resource: "infrastructure", action: "configure" } },
     ],
   },
