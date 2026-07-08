@@ -20,6 +20,7 @@ from app.schemas.validation_study import (
     ReproductionPlanResponse,
     ValidationStudyRequest,
     ValidationStudyResponse,
+    ValidationStudySummary,
 )
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_driver_service import ValidationDriverService
@@ -109,6 +110,29 @@ async def request_validation(
     )
     await session.commit()
     return await _study_response(session, study, org_id)
+
+
+@router.get("", response_model=list[ValidationStudySummary])
+async def list_studies(
+    current_user: dict = require_permission("lit_validation", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    studies = await ValidationStudyService.list_studies(session, org_id)
+    return [
+        ValidationStudySummary(
+            id=s.id,
+            state=s.state,
+            classification=s.classification,
+            confidence=classification_confidence(s.classification),
+            paper_id=s.paper_id,
+            source_doi=s.source_doi,
+            source_accession=s.source_accession,
+            experiment_id=s.experiment_id,
+            created_at=s.created_at,
+        )
+        for s in studies
+    ]
 
 
 @router.get("/{study_id}", response_model=ValidationStudyResponse)

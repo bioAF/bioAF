@@ -54,6 +54,16 @@ class ValidationStudyService:
         return study
 
     @staticmethod
+    async def list_studies(session: AsyncSession, org_id: int) -> list[ValidationStudy]:
+        """All of an org's validation studies, newest first (for the list surface)."""
+        result = await session.execute(
+            select(ValidationStudy)
+            .where(ValidationStudy.organization_id == org_id)
+            .order_by(ValidationStudy.id.desc())
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
     async def transition(
         session: AsyncSession,
         study_id: int,

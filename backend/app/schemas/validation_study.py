@@ -1,5 +1,7 @@
 """API schemas for the literature-validation flow (lit_validation)."""
 
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -51,6 +53,21 @@ class ReproductionPlanResponse(BaseModel):
     extractor_model: str | None = None
     extractor_provider: str | None = None
     comparison_targets: list[ComparisonTargetResponse] = []
+
+
+class ValidationStudySummary(BaseModel):
+    """A lightweight row for the studies list (no plan/evidence join). ``confidence`` is derived from
+    the classification the same way as the detail response, so the list can render the outcome badge."""
+
+    id: int
+    state: str
+    classification: str | None = None
+    confidence: float | None = None
+    paper_id: int | None = None
+    source_doi: str | None = None
+    source_accession: str | None = None
+    experiment_id: int | None = None
+    created_at: datetime | None = None
 
 
 class ValidationStudyResponse(BaseModel):

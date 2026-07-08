@@ -126,6 +126,31 @@ async def test_viewer_cannot_classify(client, viewer_token):
     assert r.status_code == 403
 
 
+async def test_list_studies_returns_org_studies_newest_first(client, admin_token):
+    a = (await client.post("/api/validation-studies", json={"source_accession": "GSE_A"}, headers=_auth(admin_token))).json()["id"]
+    b = (await client.post("/api/validation-studies", json={"source_accession": "GSE_B"}, headers=_auth(admin_token))).json()["id"]
+
+    r = await client.get("/api/validation-studies", headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    items = r.json()
+    ids = [s["id"] for s in items]
+    assert a in ids and b in ids
+    # newest first (b created after a)
+    assert ids.index(b) < ids.index(a)
+    # the summary carries the fields the list UI renders
+    first = next(s for s in items if s["id"] == b)
+    assert first["state"] == "requested"
+    assert first["source_accession"] == "GSE_B"
+    assert "confidence" in first
+
+
+async def test_viewer_can_list_studies(client, admin_token, viewer_token):
+    await client.post("/api/validation-studies", json={"source_accession": "GSE_V"}, headers=_auth(admin_token))
+    r = await client.get("/api/validation-studies", headers=_auth(viewer_token))
+    assert r.status_code == 200, r.text
+    assert isinstance(r.json(), list)
+
+
 async def test_missing_data_early_exit_via_api(client, admin_token, monkeypatch):
     no_data = (
         '```json\n{"accessions": [], "method": {"assay": "bulk RNA-seq"}, "claims": [], '
