@@ -22,6 +22,7 @@ BUILTIN_PIPELINES = [
         "source_url": "https://github.com/nf-core/scrnaseq",
         "version": "2.7.1",
         "defaults_file": "nf-core-scrnaseq.json",
+        "qc_template": "scrnaseq",
     },
     {
         "pipeline_key": "nf-core/rnaseq",
@@ -31,6 +32,7 @@ BUILTIN_PIPELINES = [
         "source_url": "https://github.com/nf-core/rnaseq",
         "version": "3.14.0",
         "defaults_file": "nf-core-rnaseq.json",
+        "qc_template": "bulk_rnaseq",
     },
     {
         "pipeline_key": "nf-core/fetchngs",
@@ -68,6 +70,7 @@ class PipelineCatalogService:
                 )
             )
             existing = result.scalar_one_or_none()
+            desired_qc_template = pipeline_def.get("qc_template")
             if existing:
                 # Sync defaults from disk when they differ from what is in the DB
                 defaults_file = DEFAULTS_DIR / pipeline_def["defaults_file"]
@@ -76,6 +79,14 @@ class PipelineCatalogService:
                     if existing.default_params_json != disk_defaults:
                         existing.default_params_json = disk_defaults
                         logger.info("Refreshed defaults for %s", pipeline_def["pipeline_key"])
+                # Backfill a missing qc_template on an entry seeded before the
+                # built-in defined one (so a bulk run resolves to bulk_rnaseq, not
+                # the scrnaseq fallback). Don't clobber an operator-set override.
+                if desired_qc_template and existing.qc_template is None:
+                    existing.qc_template = desired_qc_template
+                    logger.info(
+                        "Backfilled qc_template=%s for %s", desired_qc_template, pipeline_def["pipeline_key"]
+                    )
                 continue
 
             default_params = {}
@@ -92,6 +103,7 @@ class PipelineCatalogService:
                 source_url=pipeline_def["source_url"],
                 version=pipeline_def["version"],
                 default_params_json=default_params,
+                qc_template=desired_qc_template,
                 is_builtin=True,
                 enabled=True,
             )

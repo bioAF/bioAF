@@ -81,6 +81,47 @@ async def test_generate_snapshots_qc_config_json_for_scrnaseq(session, setup):
 
 
 @pytest.mark.asyncio
+async def test_extract_metrics_dispatches_to_the_named_template(session, setup):
+    """_extract_metrics runs the resolved template's own extract(), not a
+    hardcoded scrnaseq path. A bulk_rnaseq run must call bulk_rnaseq.extract."""
+    from app.services.qc.templates import bulk_rnaseq, scrnaseq
+    from app.services.qc_dashboard_service import QCDashboardService
+
+    _, run = setup
+
+    with (
+        patch.object(QCDashboardService, "_get_results_bucket", new=AsyncMock(return_value="bkt")),
+        patch.object(bulk_rnaseq, "extract", new=AsyncMock(return_value={"total_sequences": 7_000_000})) as bulk_ex,
+        patch.object(scrnaseq, "extract", new=AsyncMock(return_value={"cell_count": 1})) as scrna_ex,
+    ):
+        metrics = await QCDashboardService._extract_metrics(session, run, template_name="bulk_rnaseq")
+
+    assert metrics == {"total_sequences": 7_000_000}
+    bulk_ex.assert_awaited_once()
+    scrna_ex.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_extract_metrics_unknown_template_returns_empty_not_scrnaseq(session, setup):
+    """A pipeline type with no registered extractor yields empty metrics (an
+    honest 'nothing computed'), NOT the scrnaseq extractor misapplied. This is
+    the generalization: no scrnaseq fallback for unmapped types."""
+    from app.services.qc.templates import scrnaseq
+    from app.services.qc_dashboard_service import QCDashboardService
+
+    _, run = setup
+
+    with (
+        patch.object(QCDashboardService, "_get_results_bucket", new=AsyncMock(return_value="bkt")),
+        patch.object(scrnaseq, "extract", new=AsyncMock(return_value={"cell_count": 1})) as scrna_ex,
+    ):
+        metrics = await QCDashboardService._extract_metrics(session, run, template_name="chipseq")
+
+    assert metrics == {}
+    scrna_ex.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_generate_uses_custom_template_when_run_is_custom_pipeline(session, admin_user):
     """A run linked to a CustomPipelineVersion uses the 'custom' template,
     and the version's qc_config_json override is applied."""

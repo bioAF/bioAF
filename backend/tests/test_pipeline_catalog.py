@@ -62,6 +62,59 @@ async def test_list_pipelines_idempotent(client, admin_token):
 
 
 @pytest.mark.asyncio
+async def test_builtin_rnaseq_seeds_bulk_rnaseq_qc_template(session, admin_user):
+    """The built-in nf-core/rnaseq entry must carry qc_template='bulk_rnaseq' so a
+    bulk run resolves to the bulk extractor, not the scrnaseq default fallback."""
+    from app.services.pipeline_catalog_service import PipelineCatalogService
+
+    org_id = admin_user.organization_id
+    await PipelineCatalogService.initialize_builtin_pipelines(session, org_id)
+
+    rnaseq = await PipelineCatalogService.get_pipeline(session, org_id, "nf-core/rnaseq")
+    scrnaseq = await PipelineCatalogService.get_pipeline(session, org_id, "nf-core/scrnaseq")
+    assert rnaseq is not None and rnaseq.qc_template == "bulk_rnaseq"
+    assert scrnaseq is not None and scrnaseq.qc_template == "scrnaseq"
+
+
+@pytest.mark.asyncio
+async def test_initialize_backfills_missing_qc_template_on_existing_entry(session, admin_user):
+    """A pre-existing rnaseq entry seeded before qc_template was set (qc_template
+    NULL) is backfilled to bulk_rnaseq on the next initialize, so a deploy heals
+    the demo's already-seeded catalog without a migration."""
+    from app.models.pipeline_catalog_entry import PipelineCatalogEntry
+    from app.services.pipeline_catalog_service import PipelineCatalogService
+
+    org_id = admin_user.organization_id
+    stale = PipelineCatalogEntry(
+        organization_id=org_id,
+        pipeline_key="nf-core/rnaseq",
+        name="nf-core/rnaseq",
+        source_type="nf-core",
+        version="3.14.0",
+        qc_template=None,
+        is_builtin=True,
+        enabled=True,
+    )
+    session.add(stale)
+    await session.flush()
+
+    await PipelineCatalogService.initialize_builtin_pipelines(session, org_id)
+
+    refreshed = await PipelineCatalogService.get_pipeline(session, org_id, "nf-core/rnaseq")
+    assert refreshed.qc_template == "bulk_rnaseq"
+
+
+def test_qc_template_map_rnaseq_points_at_a_registered_template():
+    """Registry-installed rnaseq must map to a real template name (bulk_rnaseq),
+    not the unregistered 'rnaseq' string that silently fell back to scrnaseq."""
+    from app.services.nf_core_registry_service import QC_TEMPLATE_MAP
+    from app.services.qc.templates import TEMPLATES
+
+    assert QC_TEMPLATE_MAP["rnaseq"] == "bulk_rnaseq"
+    assert QC_TEMPLATE_MAP["rnaseq"] in TEMPLATES
+
+
+@pytest.mark.asyncio
 async def test_get_pipeline_detail(client, admin_token):
     """Get a specific pipeline by key."""
     # Initialize first
