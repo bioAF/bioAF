@@ -265,10 +265,64 @@ def _render_artifact_csv(report: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _render_validation_study_csv(report: dict[str, Any]) -> dict[str, str]:
+    entity = report["entity"]
+    evidence = entity.get("evidence") if isinstance(entity.get("evidence"), dict) else {}
+    result = (evidence or {}).get("classification_result") or {}
+    plan = entity.get("reproduction_plan") or {}
+
+    comparisons = result.get("comparisons")
+    if comparisons:
+        comparison_csv = _csv_str(
+            ["Claimed Metric", "Computed Key", "Claimed Value", "Computed Value", "Delta", "Within Tolerance", "Verdict"],
+            [
+                [
+                    c.get("metric_key"),
+                    c.get("mapped_key"),
+                    c.get("claimed_value"),
+                    c.get("computed_value"),
+                    c.get("delta"),
+                    c.get("within_tolerance"),
+                    c.get("verdict"),
+                ]
+                for c in comparisons
+            ],
+        )
+    else:
+        targets = plan.get("comparison_targets") or []
+        comparison_csv = _csv_str(
+            ["Claimed Metric", "Claimed Value", "Unit", "Tolerance", "Source"],
+            [
+                [t.get("metric_key"), t.get("claimed_value"), t.get("unit"), t.get("tolerance"), t.get("source_locator")]
+                for t in targets
+            ],
+        )
+
+    runs_csv = _csv_str(
+        ["Role", "Run ID", "Pipeline", "Version", "Status", "Reference Genome", "Started At", "Completed At"],
+        [
+            [
+                r.get("role"),
+                r.get("id"),
+                r.get("pipeline_name"),
+                r.get("pipeline_version"),
+                r.get("status"),
+                r.get("reference_genome"),
+                r.get("started_at"),
+                r.get("completed_at"),
+            ]
+            for r in entity.get("pipeline_runs", [])
+        ],
+    )
+
+    return {"comparison_targets.csv": comparison_csv, "pipeline_runs.csv": runs_csv}
+
+
 _CSV_RENDERERS: dict[str, Any] = {
     "project": _render_project_csv,
     "experiment": _render_experiment_csv,
     "sample": _render_sample_csv,
     "pipeline_run": _render_pipeline_run_csv,
     "artifact": _render_artifact_csv,
+    "validation_study": _render_validation_study_csv,
 }

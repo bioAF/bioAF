@@ -5,11 +5,13 @@ plan_ready or an early-exit classification), then the C1 gate (approve/decline).
 ``lit_validation`` permission. The comparison/execution back half is not wired here yet.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
+from app.api.provenance_reports import ReportFormat
 from app.database import get_session
 from app.models.validation_study import ValidationStudy, classification_confidence
 from app.schemas.validation_study import (
@@ -22,6 +24,8 @@ from app.schemas.validation_study import (
     ValidationStudyResponse,
     ValidationStudySummary,
 )
+from app.services.audit_service import log_action
+from app.services.provenance.report_service import ProvenanceReportService
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_driver_service import ValidationDriverService
 from app.services.validation_study_service import ValidationStudyService
@@ -144,6 +148,45 @@ async def get_study(
     org_id = int(current_user["org_id"])
     study = await _load(session, study_id, org_id)
     return await _study_response(session, study, org_id)
+
+
+@router.get("/{study_id}/provenance/report")
+async def study_provenance_report(
+    study_id: int,
+    format: ReportFormat = Query(ReportFormat.json),
+    current_user: dict = require_permission("lit_validation", "view"),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """F3 / A3: export the study + its evidence bundle (JSON/Markdown/PDF/CSV/all) via the shared
+    provenance report service. The report renders the full paper -> plan -> experiment -> runs chain.
+    A viewer who can see the study can export it (gated ``lit_validation:view``)."""
+    org_id = int(current_user["org_id"])
+    await _load(session, study_id, org_id)  # 404 if missing or another org's study
+    result = await ProvenanceReportService.generate(
+        session=session,
+        entity_type="validation_study",
+        entity_id=study_id,
+        org_id=org_id,
+        user_email=current_user.get("email", ""),
+        format=format.value,
+    )
+    await log_action(
+        session=session,
+        user_id=int(current_user["sub"]),
+        entity_type="validation_study",
+        entity_id=study_id,
+        action="provenance_report_generated",
+        details={"format": format.value},
+    )
+    await session.commit()
+
+    content = result.content
+    if isinstance(content, str):
+        content = content.encode("utf-8")
+    headers: dict[str, str] = {}
+    if format != ReportFormat.json:
+        headers["Content-Disposition"] = f'attachment; filename="{result.filename}"'
+    return Response(content=content, media_type=result.content_type, headers=headers)
 
 
 @router.post("/{study_id}/read", response_model=ValidationStudyResponse)
