@@ -9,12 +9,17 @@ import { ValidationStudyOutcome } from "@/components/validation/ValidationStudyO
 import { ValidationStudyActions } from "@/components/validation/ValidationStudyActions";
 import { ValidationVerdictPanel } from "@/components/validation/ValidationVerdictPanel";
 import { ValidationEvidenceTable, type Evidence } from "@/components/validation/ValidationEvidenceTable";
+import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 
 // States the background driver advances on its own; while a study sits in one, poll so the page
 // reflects progress toward the next human gate (plan_ready / comparing) or a terminal state.
 const ADVANCING_STATES = new Set(["acquiring_data", "setup", "running", "extracting"]);
+
+// Before the paper is read there is no reproduction plan/evidence to report on, so the F3 export
+// control is hidden until the study has advanced past the pre-comprehension states.
+const PRE_REPORT_STATES = new Set(["requested", "acquiring_text", "reading"]);
 
 interface ReproductionPlanView {
   pipeline_key?: string | null;
@@ -135,6 +140,11 @@ export default function ValidationStudyPage() {
               <span className="rounded bg-gray-100 px-2 py-0.5 font-mono text-sm text-gray-600" title="Source accession">
                 {study.source_accession}
               </span>
+            )}
+            {!PRE_REPORT_STATES.has(study.state) && (
+              <div className="ml-auto">
+                <ProvenanceExportMenu entityType="validation-studies" entityId={study.id} label="Export Report" />
+              </div>
             )}
           </div>
 

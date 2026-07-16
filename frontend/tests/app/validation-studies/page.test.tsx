@@ -7,7 +7,7 @@ jest.mock("next/navigation", () => ({
 }));
 
 jest.mock("@/lib/api", () => ({
-  api: { get: jest.fn(), post: jest.fn() },
+  api: { get: jest.fn(), post: jest.fn(), download: jest.fn() },
 }));
 
 jest.mock("@/lib/auth", () => ({
@@ -86,6 +86,29 @@ describe("ValidationStudyPage", () => {
 
     await waitFor(() => expect(screen.getByRole("button", { name: /approve plan/i })).toBeInTheDocument());
     expect(screen.getByRole("button", { name: /decline/i })).toBeInTheDocument();
+  });
+
+  it("offers an Export Report control once the study has been read (F3)", async () => {
+    mockGet.mockResolvedValue({
+      id: 5,
+      state: "classified",
+      classification: "validated",
+      confidence: 100,
+      source_doi: "10.3390/jfb17020057",
+    });
+
+    render(<ValidationStudyPage />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /export report/i })).toBeInTheDocument());
+  });
+
+  it("hides the Export Report control before the paper has been read", async () => {
+    mockGet.mockResolvedValue({ id: 5, state: "requested", confidence: null });
+
+    render(<ValidationStudyPage />);
+
+    await waitFor(() => expect(screen.getByText(/Validation Study #5/)).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /export report/i })).not.toBeInTheDocument();
   });
 
   it("shows a not-found message when the study cannot be loaded", async () => {
