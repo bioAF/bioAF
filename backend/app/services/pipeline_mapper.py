@@ -17,9 +17,17 @@ from dataclasses import dataclass, field
 # (pipeline_catalog_service.BUILTIN_PIPELINES); D2/D3 reconcile against the org's live catalog.
 _SCRNA_MARKERS = ("single-cell", "single cell", "scrna", "sc-rna", "snrna", "10x", "chromium", "cell ranger")
 _BULK_RNA_MARKERS = ("rna-seq", "rnaseq", "bulk rna", "transcriptom", "mrna-seq")
+# Kept specific on purpose: a vague "bespoke ChIP variant" must stay unmappable (not_reproducible),
+# so bare "chip" is NOT a marker. macs2 is excluded because ATAC-seq also uses it (would mis-route
+# ATAC papers to chipseq until atacseq has its own extractor).
+_CHIP_MARKERS = (
+    "chip-seq", "chip seq", "chipseq", "chip-sequencing",
+    "chromatin immunoprecipitation", "histone mark", "histone modification", "h3k",
+)
 
 _RNASEQ = ("nf-core/rnaseq", "3.14.0")
 _SCRNASEQ = ("nf-core/scrnaseq", "2.7.1")
+_CHIPSEQ = ("nf-core/chipseq", "2.1.0")
 
 
 @dataclass
@@ -44,6 +52,8 @@ def map_method(assay: str | None, tools: list[str] | None = None, reference_buil
     # Single-cell markers take precedence: "single-cell RNA-seq" also matches the bulk markers.
     if any(m in a for m in _SCRNA_MARKERS):
         key, ver = _SCRNASEQ
+    elif any(m in a for m in _CHIP_MARKERS):
+        key, ver = _CHIPSEQ
     elif any(m in a for m in _BULK_RNA_MARKERS):
         key, ver = _RNASEQ
     elif not a.strip():

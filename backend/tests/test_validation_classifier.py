@@ -141,3 +141,35 @@ class TestClassify:
     def test_reasoning_is_populated(self):
         result = classify_study([_target("total_reads", 7_000_000)], {"total_sequences": 6_600_000})
         assert isinstance(result["reasoning"], str) and result["reasoning"]
+
+
+class TestChipSeqCoverage:
+    """ChIP-seq controlled keys (lit_validation Phase 4): peak_count, frip, nsc, rsc."""
+
+    def test_chip_aliases_map_to_controlled_keys(self):
+        assert normalize_target_key("num_peaks") == "peak_count"
+        assert normalize_target_key("Number of Peaks") == "peak_count"
+        assert normalize_target_key("frip_score") == "frip"
+        assert normalize_target_key("fraction_reads_in_peaks") == "frip"
+        assert normalize_target_key("NSC") == "nsc"
+        assert normalize_target_key("relative_strand_cross_correlation") == "rsc"
+
+    def test_peak_count_agrees_within_relative_tolerance(self):
+        rows = compare_targets([_target("num_peaks", 24_000)], {"peak_count": 25_000})
+        assert rows[0]["verdict"] == "agree"
+        assert rows[0]["mapped_key"] == "peak_count"
+
+    def test_frip_percent_claim_reconciles_against_fraction_metric(self):
+        # Paper reports FRiP as 4%; the computed metric is a 0-1 fraction. They agree.
+        rows = compare_targets([_target("frip_score", 4.0, unit="%")], {"frip": 0.04})
+        assert rows[0]["verdict"] == "agree"
+
+    def test_chip_paper_all_agree_is_validated(self):
+        result = classify_study(
+            [_target("num_peaks", 24_000), _target("frip_score", 4.0, unit="%")],
+            {"peak_count": 25_000, "frip": 0.04},
+            mapping_confidence="exact",
+            reference_genome="GRCh38",
+        )
+        assert result["classification"] == "validated"
+        assert result["coverage"]["agree"] == 2

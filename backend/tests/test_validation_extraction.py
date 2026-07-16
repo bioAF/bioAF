@@ -63,7 +63,29 @@ def test_map_method_maps_single_cell():
     assert m.pipeline_key == "nf-core/scrnaseq"
 
 
+def test_map_method_maps_chipseq():
+    # lit_validation Phase 4: a ChIP-seq paper now reaches the run instead of early-exiting
+    # not_reproducible. Default confidence is partial (pipeline substitution), like RNA.
+    m = map_method("ChIP-seq", tools=["Bowtie2", "MACS2"])
+    assert m.pipeline_key == "nf-core/chipseq"
+    assert m.mapping_confidence == "partial"
+    assert m.blockers == []
+
+
+def test_map_method_chipseq_exact_when_paper_used_nf_core():
+    m = map_method("ChIP-seq", tools=["nf-core/chipseq"])
+    assert m.pipeline_key == "nf-core/chipseq"
+    assert m.mapping_confidence == "exact"
+
+
+def test_map_method_maps_chipseq_from_histone_mark_language():
+    m = map_method("H3K27ac chromatin immunoprecipitation", tools=[])
+    assert m.pipeline_key == "nf-core/chipseq"
+
+
 def test_map_method_unmappable_yields_blocker_and_none():
+    # Kept deliberately vague ("bespoke ChIP variant" contains no specific ChIP marker) so it
+    # stays not_reproducible even after ChIP-seq coverage landed (Phase 4).
     m = map_method("some bespoke ChIP variant", tools=[])
     assert m.pipeline_key is None
     assert m.mapping_confidence == "none"

@@ -114,6 +114,72 @@ def test_qc_template_map_rnaseq_points_at_a_registered_template():
     assert QC_TEMPLATE_MAP["rnaseq"] in TEMPLATES
 
 
+def test_qc_template_map_chipseq_points_at_a_registered_template():
+    """Registry-installed chipseq must map to the real chipseq template (lit_validation
+    Phase 4), not the 'generic' default that resolves to empty metrics."""
+    from app.services.nf_core_registry_service import QC_TEMPLATE_MAP
+    from app.services.qc.templates import TEMPLATES
+
+    assert QC_TEMPLATE_MAP["chipseq"] == "chipseq"
+    assert QC_TEMPLATE_MAP["chipseq"] in TEMPLATES
+
+
+@pytest.mark.asyncio
+async def test_initialize_heals_generic_chipseq_to_chipseq_template(session, admin_user):
+    """A chipseq entry installed before the template existed carries
+    qc_template='generic' (the install-time default). On the next initialize it is
+    healed to 'chipseq' so a completed run resolves to the real extractor -- the
+    demo and any pre-existing org self-heal without a migration."""
+    from app.models.pipeline_catalog_entry import PipelineCatalogEntry
+    from app.services.pipeline_catalog_service import PipelineCatalogService
+
+    org_id = admin_user.organization_id
+    stale = PipelineCatalogEntry(
+        organization_id=org_id,
+        pipeline_key="nf-core/chipseq",
+        name="nf-core/chipseq",
+        source_type="nf-core",
+        version="2.1.0",
+        qc_template="generic",  # the install-time default before the template landed
+        is_builtin=False,
+        enabled=True,
+    )
+    session.add(stale)
+    await session.flush()
+
+    await PipelineCatalogService.initialize_builtin_pipelines(session, org_id)
+
+    refreshed = await PipelineCatalogService.get_pipeline(session, org_id, "nf-core/chipseq")
+    assert refreshed.qc_template == "chipseq"
+
+
+@pytest.mark.asyncio
+async def test_heal_does_not_clobber_an_operator_set_template(session, admin_user):
+    """Healing only corrects None/'generic' -- an entry an operator deliberately
+    pointed at a specific template is left alone."""
+    from app.models.pipeline_catalog_entry import PipelineCatalogEntry
+    from app.services.pipeline_catalog_service import PipelineCatalogService
+
+    org_id = admin_user.organization_id
+    entry = PipelineCatalogEntry(
+        organization_id=org_id,
+        pipeline_key="nf-core/chipseq",
+        name="nf-core/chipseq",
+        source_type="nf-core",
+        version="2.1.0",
+        qc_template="custom",  # a deliberate operator choice, not the generic default
+        is_builtin=False,
+        enabled=True,
+    )
+    session.add(entry)
+    await session.flush()
+
+    await PipelineCatalogService.initialize_builtin_pipelines(session, org_id)
+
+    refreshed = await PipelineCatalogService.get_pipeline(session, org_id, "nf-core/chipseq")
+    assert refreshed.qc_template == "custom"
+
+
 @pytest.mark.asyncio
 async def test_get_pipeline_detail(client, admin_token):
     """Get a specific pipeline by key."""

@@ -2,7 +2,7 @@ import json
 import logging
 from pathlib import Path
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.custom_pipeline import CustomPipeline
@@ -110,11 +110,51 @@ class PipelineCatalogService:
             session.add(entry)
             created.append(entry)
 
-        if created:
+        healed = await PipelineCatalogService._heal_qc_templates(session, org_id)
+
+        if created or healed:
             await session.flush()
-            logger.info("Initialized %d built-in pipelines for org %d", len(created), org_id)
+            if created:
+                logger.info("Initialized %d built-in pipelines for org %d", len(created), org_id)
 
         return created
+
+    @staticmethod
+    async def _heal_qc_templates(session: AsyncSession, org_id: int) -> int:
+        """Correct catalog entries whose pipeline type gained a tailored QC
+        template after they were installed.
+
+        A registry-installed pipeline (e.g. nf-core/chipseq) gets its qc_template
+        from QC_TEMPLATE_MAP at install time, defaulting to "generic" for types
+        with no template yet. When a template later lands (chipseq, Phase 4), the
+        already-installed rows would otherwise keep resolving to "generic" (empty
+        metrics) forever. Heal only None/"generic" -- never clobber an
+        operator-set choice -- so a run of that type resolves to its real
+        template. Lazy, like the built-in backfill: runs on GET /api/pipelines.
+        """
+        # Local import avoids a module-load cycle (nf_core_registry_service imports this service).
+        from app.services.nf_core_registry_service import QC_TEMPLATE_MAP
+
+        result = await session.execute(
+            select(PipelineCatalogEntry).where(
+                PipelineCatalogEntry.organization_id == org_id,
+                or_(
+                    PipelineCatalogEntry.qc_template.is_(None),
+                    PipelineCatalogEntry.qc_template == "generic",
+                ),
+            )
+        )
+        healed = 0
+        for entry in result.scalars().all():
+            name = entry.pipeline_key.split("/")[-1] if entry.pipeline_key else ""
+            desired = QC_TEMPLATE_MAP.get(name)
+            if desired and entry.qc_template != desired:
+                entry.qc_template = desired
+                healed += 1
+                logger.info(
+                    "Healed qc_template=%s for %s (org %d)", desired, entry.pipeline_key, org_id
+                )
+        return healed
 
     @staticmethod
     async def fetch_pipeline_schema(source_url: str, version: str | None) -> dict:

@@ -76,6 +76,19 @@ _SPECS: tuple[MetricSpec, ...] = (
                ("valid_barcode_rate", "valid_bc", "fraction_valid_barcodes", "percent_valid_barcodes")),
     MetricSpec("mito_pct_median", "percent", 5.0, False,
                ("percent_mito", "mito_pct", "mitochondrial_pct", "pct_mito", "percent_mitochondrial")),
+    # ChIP-seq (nf-core/chipseq; lit_validation Phase 4). Peaks + FRiP are what ChIP papers report;
+    # NSC/RSC are phantompeakqualtools quality ratios rarely stated in prose (usually not_reported).
+    # FRiP and peak counts are pipeline-parameter-sensitive, so the tolerances are deliberately soft
+    # first-pass defaults (calibratable, like every tolerance here).
+    MetricSpec("peak_count", "count", 0.25, True,
+               ("peaks", "num_peaks", "n_peaks", "number_of_peaks", "peak_number", "called_peaks",
+                "total_peaks", "macs2_peaks", "significant_peaks")),
+    MetricSpec("frip", "fraction", 0.5, True,
+               ("frip_score", "fraction_reads_in_peaks", "reads_in_peaks_fraction", "fraction_of_reads_in_peaks")),
+    MetricSpec("nsc", "count", 0.15, False,
+               ("normalized_strand_cross_correlation", "nsc_score", "normalized_scc")),
+    MetricSpec("rsc", "count", 0.25, False,
+               ("relative_strand_cross_correlation", "rsc_score", "relative_scc")),
 )
 
 _CLEARED_MAPPING_CONFIDENCE = {"exact", "high", "full"}

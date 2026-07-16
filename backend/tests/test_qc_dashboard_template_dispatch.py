@@ -102,10 +102,32 @@ async def test_extract_metrics_dispatches_to_the_named_template(session, setup):
 
 
 @pytest.mark.asyncio
+async def test_extract_metrics_dispatches_to_chipseq_template(session, setup):
+    """A chipseq run runs chipseq.extract (lit_validation Phase 4), not the
+    scrnaseq/bulk path."""
+    from app.services.qc.templates import chipseq, scrnaseq
+    from app.services.qc_dashboard_service import QCDashboardService
+
+    _, run = setup
+
+    with (
+        patch.object(QCDashboardService, "_get_results_bucket", new=AsyncMock(return_value="bkt")),
+        patch.object(chipseq, "extract", new=AsyncMock(return_value={"peak_count": 25_000})) as chip_ex,
+        patch.object(scrnaseq, "extract", new=AsyncMock(return_value={"cell_count": 1})) as scrna_ex,
+    ):
+        metrics = await QCDashboardService._extract_metrics(session, run, template_name="chipseq")
+
+    assert metrics == {"peak_count": 25_000}
+    chip_ex.assert_awaited_once()
+    scrna_ex.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_extract_metrics_unknown_template_returns_empty_not_scrnaseq(session, setup):
     """A pipeline type with no registered extractor yields empty metrics (an
     honest 'nothing computed'), NOT the scrnaseq extractor misapplied. This is
-    the generalization: no scrnaseq fallback for unmapped types."""
+    the generalization: no scrnaseq fallback for unmapped types. 'atacseq' has
+    no extractor yet, so it stands in for an unmapped type here."""
     from app.services.qc.templates import scrnaseq
     from app.services.qc_dashboard_service import QCDashboardService
 
@@ -115,7 +137,7 @@ async def test_extract_metrics_unknown_template_returns_empty_not_scrnaseq(sessi
         patch.object(QCDashboardService, "_get_results_bucket", new=AsyncMock(return_value="bkt")),
         patch.object(scrnaseq, "extract", new=AsyncMock(return_value={"cell_count": 1})) as scrna_ex,
     ):
-        metrics = await QCDashboardService._extract_metrics(session, run, template_name="chipseq")
+        metrics = await QCDashboardService._extract_metrics(session, run, template_name="atacseq")
 
     assert metrics == {}
     scrna_ex.assert_not_called()

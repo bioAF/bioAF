@@ -18,6 +18,7 @@ logger = logging.getLogger("bioaf.nf_core_registry")
 QC_TEMPLATE_MAP: dict[str, str] = {
     "scrnaseq": "scrnaseq",
     "rnaseq": "bulk_rnaseq",
+    "chipseq": "chipseq",
 }
 
 
