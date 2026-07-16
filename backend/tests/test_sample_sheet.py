@@ -173,3 +173,26 @@ def test_generate_sheet_routes_chipseq():
     params = {"input_paths": {"1": ["/d/c_R1.fastq.gz", ""], "2": ["/d/i_R1.fastq.gz", ""]}}
     result = SampleSheetService.generate_sheet("nf-core/chipseq", [chip, inp], params)
     assert result.splitlines()[0].strip() == "sample,fastq_1,fastq_2,replicate,antibody,control,control_replicate"
+
+
+# ---- nf-core/atacseq sheet (lit_validation Phase 4) ----
+
+
+def test_atacseq_sheet_has_required_replicate_and_no_antibody():
+    a = _chip_sample(1, "ATAC_A")
+    b = _chip_sample(2, "ATAC_B")
+    params = {"input_paths": {"1": ["/d/a_R1.fastq.gz", "/d/a_R2.fastq.gz"], "2": ["/d/b_R1.fastq.gz", ""]}}
+    result = SampleSheetService.generate_atacseq_sheet([a, b], params)
+    lines = [line.strip() for line in result.strip().splitlines()]
+    # ATAC schema requires a replicate column; there is no antibody/control (no immunoprecipitation).
+    assert lines[0] == "sample,fastq_1,fastq_2,replicate"
+    rows = _rows_by_sample(result)
+    assert rows["ATAC_A"] == ["ATAC_A", "/d/a_R1.fastq.gz", "/d/a_R2.fastq.gz", "1"]
+    assert rows["ATAC_B"][3] == "1"  # replicate present for single-end too
+
+
+def test_generate_sheet_routes_atacseq():
+    a = _chip_sample(1, "ATAC_A")
+    params = {"input_paths": {"1": ["/d/a_R1.fastq.gz", ""]}}
+    result = SampleSheetService.generate_sheet("nf-core/atacseq", [a], params)
+    assert result.splitlines()[0].strip() == "sample,fastq_1,fastq_2,replicate"

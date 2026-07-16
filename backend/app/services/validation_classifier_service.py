@@ -89,6 +89,10 @@ _SPECS: tuple[MetricSpec, ...] = (
                ("normalized_strand_cross_correlation", "nsc_score", "normalized_scc")),
     MetricSpec("rsc", "count", 0.25, False,
                ("relative_strand_cross_correlation", "rsc_score", "relative_scc")),
+    # ATAC-seq (nf-core/atacseq; lit_validation Phase 4). peak_count + frip are shared with ChIP;
+    # TSS enrichment is ATAC's distinctive accessibility score (a unitless ratio, ~3-30). Soft default.
+    MetricSpec("tss_enrichment", "count", 0.25, True,
+               ("tss_score", "tsse", "tss_enrichment_score", "tss_enrichment_ratio")),
 )
 
 _CLEARED_MAPPING_CONFIDENCE = {"exact", "high", "full"}

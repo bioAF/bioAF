@@ -248,6 +248,32 @@ class SampleSheetService:
         return output.getvalue()
 
     @staticmethod
+    def generate_atacseq_sheet(samples: list, parameters: dict) -> str:
+        """Generate an nf-core/atacseq sample sheet CSV (lit_validation Phase 4).
+
+        Columns: sample,fastq_1,fastq_2,replicate. ATAC-seq has no antibody/immunoprecipitation, so
+        (unlike chipseq) there is no antibody/control -- but ``replicate`` is required by the schema.
+        One replicate per sample (=1); a downstream user can merge biological replicates by editing it.
+        """
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["sample", "fastq_1", "fastq_2", "replicate"])
+
+        input_paths = parameters.get("input_paths", {})
+
+        for sample in samples:
+            sample_name = _safe_sample_name(sample)
+            paths = input_paths.get(str(sample.id), [])
+            if paths:
+                rows = [(paths[0] if len(paths) > 0 else "", paths[1] if len(paths) > 1 else "")]
+            else:
+                rows = _extract_fastq_lane_pairs(sample)
+            for fastq_1, fastq_2 in rows:
+                writer.writerow([sample_name, fastq_1, fastq_2, "1"])
+
+        return output.getvalue()
+
+    @staticmethod
     def generate_generic_sheet(samples: list, parameters: dict) -> str:
         """Generic fallback CSV sample sheet."""
         output = io.StringIO()
@@ -292,6 +318,8 @@ class SampleSheetService:
             return SampleSheetService.generate_rnaseq_sheet(samples, parameters)
         elif "chipseq" in pipeline_key:
             return SampleSheetService.generate_chipseq_sheet(samples, parameters)
+        elif "atacseq" in pipeline_key:
+            return SampleSheetService.generate_atacseq_sheet(samples, parameters)
         elif "fetchngs" in pipeline_key:
             return SampleSheetService.generate_fetchngs_ids(parameters)
         else:

@@ -83,6 +83,19 @@ def test_map_method_maps_chipseq_from_histone_mark_language():
     assert m.pipeline_key == "nf-core/chipseq"
 
 
+def test_map_method_maps_atacseq():
+    # lit_validation Phase 4: ATAC-seq maps to nf-core/atacseq at partial (like the others).
+    m = map_method("ATAC-seq", tools=["Bowtie2", "MACS2"])
+    assert m.pipeline_key == "nf-core/atacseq"
+    assert m.mapping_confidence == "partial"
+    assert m.blockers == []
+
+
+def test_map_method_atacseq_from_transposase_language():
+    m = map_method("assay for transposase-accessible chromatin with sequencing", tools=[])
+    assert m.pipeline_key == "nf-core/atacseq"
+
+
 def test_map_method_unmappable_yields_blocker_and_none():
     # Kept deliberately vague ("bespoke ChIP variant" contains no specific ChIP marker) so it
     # stays not_reproducible even after ChIP-seq coverage landed (Phase 4).

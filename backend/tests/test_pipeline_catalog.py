@@ -124,6 +124,15 @@ def test_qc_template_map_chipseq_points_at_a_registered_template():
     assert QC_TEMPLATE_MAP["chipseq"] in TEMPLATES
 
 
+def test_qc_template_map_atacseq_points_at_a_registered_template():
+    """Registry-installed atacseq maps to the real atacseq template (lit_validation Phase 4)."""
+    from app.services.nf_core_registry_service import QC_TEMPLATE_MAP
+    from app.services.qc.templates import TEMPLATES
+
+    assert QC_TEMPLATE_MAP["atacseq"] == "atacseq"
+    assert QC_TEMPLATE_MAP["atacseq"] in TEMPLATES
+
+
 @pytest.mark.asyncio
 async def test_initialize_heals_generic_chipseq_to_chipseq_template(session, admin_user):
     """A chipseq entry installed before the template existed carries

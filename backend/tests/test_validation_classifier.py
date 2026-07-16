@@ -173,3 +173,27 @@ class TestChipSeqCoverage:
         )
         assert result["classification"] == "validated"
         assert result["coverage"]["agree"] == 2
+
+
+class TestAtacSeqCoverage:
+    """ATAC-seq controlled keys (lit_validation Phase 4): peak_count + frip reuse ChIP; tss_enrichment new."""
+
+    def test_tss_enrichment_aliases_map(self):
+        assert normalize_target_key("tss_enrichment") == "tss_enrichment"
+        assert normalize_target_key("TSS score") == "tss_enrichment"
+        assert normalize_target_key("tsse") == "tss_enrichment"
+
+    def test_tss_enrichment_agrees_within_tolerance(self):
+        rows = compare_targets([_target("tss_score", 7.0)], {"tss_enrichment": 7.5})
+        assert rows[0]["verdict"] == "agree"
+        assert rows[0]["mapped_key"] == "tss_enrichment"
+
+    def test_atac_paper_peaks_and_tss_validate(self):
+        result = classify_study(
+            [_target("num_peaks", 48_000), _target("tss_score", 7.0)],
+            {"peak_count": 50_000, "tss_enrichment": 7.5},
+            mapping_confidence="exact",
+            reference_genome="GRCh38",
+        )
+        assert result["classification"] == "validated"
+        assert result["coverage"]["agree"] == 2

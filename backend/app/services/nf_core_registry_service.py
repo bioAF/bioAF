@@ -19,6 +19,7 @@ QC_TEMPLATE_MAP: dict[str, str] = {
     "scrnaseq": "scrnaseq",
     "rnaseq": "bulk_rnaseq",
     "chipseq": "chipseq",
+    "atacseq": "atacseq",
 }
 
 

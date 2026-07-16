@@ -24,10 +24,17 @@ _CHIP_MARKERS = (
     "chip-seq", "chip seq", "chipseq", "chip-sequencing",
     "chromatin immunoprecipitation", "histone mark", "histone modification", "h3k",
 )
+# ATAC-seq markers. Kept specific ("atac"/"transposase-accessible"/"assay for transposase") so an
+# unrelated assay does not mis-route here. Checked before ChIP/RNA (an ATAC paper won't say rna-seq).
+_ATAC_MARKERS = (
+    "atac-seq", "atac seq", "atacseq", "transposase-accessible", "transposase accessible",
+    "assay for transposase", "chromatin accessibility",
+)
 
 _RNASEQ = ("nf-core/rnaseq", "3.14.0")
 _SCRNASEQ = ("nf-core/scrnaseq", "2.7.1")
 _CHIPSEQ = ("nf-core/chipseq", "2.1.0")
+_ATACSEQ = ("nf-core/atacseq", "2.1.2")
 
 
 @dataclass
@@ -52,6 +59,8 @@ def map_method(assay: str | None, tools: list[str] | None = None, reference_buil
     # Single-cell markers take precedence: "single-cell RNA-seq" also matches the bulk markers.
     if any(m in a for m in _SCRNA_MARKERS):
         key, ver = _SCRNASEQ
+    elif any(m in a for m in _ATAC_MARKERS):
+        key, ver = _ATACSEQ
     elif any(m in a for m in _CHIP_MARKERS):
         key, ver = _CHIPSEQ
     elif any(m in a for m in _BULK_RNA_MARKERS):

@@ -126,7 +126,7 @@ async def test_extract_metrics_dispatches_to_chipseq_template(session, setup):
 async def test_extract_metrics_unknown_template_returns_empty_not_scrnaseq(session, setup):
     """A pipeline type with no registered extractor yields empty metrics (an
     honest 'nothing computed'), NOT the scrnaseq extractor misapplied. This is
-    the generalization: no scrnaseq fallback for unmapped types. 'atacseq' has
+    the generalization: no scrnaseq fallback for unmapped types. 'methylseq' has
     no extractor yet, so it stands in for an unmapped type here."""
     from app.services.qc.templates import scrnaseq
     from app.services.qc_dashboard_service import QCDashboardService
@@ -137,7 +137,7 @@ async def test_extract_metrics_unknown_template_returns_empty_not_scrnaseq(sessi
         patch.object(QCDashboardService, "_get_results_bucket", new=AsyncMock(return_value="bkt")),
         patch.object(scrnaseq, "extract", new=AsyncMock(return_value={"cell_count": 1})) as scrna_ex,
     ):
-        metrics = await QCDashboardService._extract_metrics(session, run, template_name="atacseq")
+        metrics = await QCDashboardService._extract_metrics(session, run, template_name="methylseq")
 
     assert metrics == {}
     scrna_ex.assert_not_called()
