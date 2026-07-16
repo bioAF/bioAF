@@ -100,6 +100,22 @@ def test_parse_samplesheet_leaves_vocab_fields_unset():
     assert s.library_layout is None
 
 
+def test_parse_samplesheet_captures_title_and_strategy_for_chip_detection():
+    """The ENA/GEO title + library_strategy are carried into prep_notes so a downstream ChIP-seq
+    sheet can tell a control/input from an IP sample (lit_validation Phase 4)."""
+    csv_text = (
+        "sample,fastq_1,run_accession,experiment_accession,experiment_title,library_strategy,scientific_name\n"
+        'SRX_CHIP,x_R1.fastq.gz,SRR_C,SRX_CHIP,"MDA-MB-231, H3K4me3, ChIP",ChIP-Seq,Homo sapiens\n'
+        'SRX_INPUT,y_R1.fastq.gz,SRR_I,SRX_INPUT,"MDA-MB-231, Input",ChIP-Seq,Homo sapiens\n'
+    )
+    samples = FetchngsIngestService.parse_samplesheet(csv_text)
+    chip = next(s for s in samples if s.external_id == "SRX_CHIP")
+    inp = next(s for s in samples if s.external_id == "SRX_INPUT")
+    assert "strategy=ChIP-Seq" in (chip.prep_notes or "")
+    assert "H3K4me3" in (chip.prep_notes or "")
+    assert "Input" in (inp.prep_notes or "")
+
+
 def test_parse_samplesheet_skips_rows_without_an_identifier():
     csv_text = "sample,run_accession,scientific_name\n,,Mus musculus\nGSM_OK,SRR9,Mus musculus\n"
     samples = FetchngsIngestService.parse_samplesheet(csv_text)

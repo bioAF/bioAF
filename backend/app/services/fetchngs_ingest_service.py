@@ -42,6 +42,11 @@ _FASTQ_SUBDIR = "fastq"
 # names each fetched run in the "sample" column; if that is absent we fall back to the accessions.
 _EXTERNAL_ID_COLUMNS = ("sample", "run_accession", "experiment_accession", "sample_accession")
 _ORGANISM_COLUMNS = ("scientific_name", "organism")
+# The fetched run's descriptive title + library strategy from the ENA/GEO metadata fetchngs pulls.
+# Captured into prep_notes so downstream sheet generation can tell a ChIP-seq control/input from an IP
+# sample (lit_validation Phase 4). Best-first; different fetchngs versions spell these differently.
+_TITLE_COLUMNS = ("experiment_title", "sample_title", "title", "experiment_alias", "sample_alias")
+_STRATEGY_COLUMNS = ("library_strategy", "assay")
 # fetchngs samplesheet FASTQ columns, in read order. fastq_2 is empty for single-end runs.
 _FASTQ_COLUMNS = (("fastq_1", "R1"), ("fastq_2", "R2"))
 
@@ -106,6 +111,14 @@ class FetchngsIngestService:
                 provenance.append(f"run_accession={run_accession}")
             if experiment_accession:
                 provenance.append(f"experiment_accession={experiment_accession}")
+            # Carry the ENA/GEO title + strategy so a ChIP-seq control/input can be distinguished from
+            # an IP sample at sheet-generation time (the accessions alone don't reveal it).
+            strategy = _first(row, _STRATEGY_COLUMNS)
+            if strategy:
+                provenance.append(f"strategy={strategy}")
+            title = _first(row, _TITLE_COLUMNS)
+            if title:
+                provenance.append(f"title={title}")
             samples.append(
                 SampleCreate(
                     external_id=external_id,
