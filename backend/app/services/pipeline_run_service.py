@@ -152,6 +152,14 @@ class PipelineRunService:
         merged_params = dict(pipeline.default_params_json or {})
         merged_params.update(data.parameters)
 
+        # reference_genome is the first-class control for the nf-core iGenomes `--genome` key. Translate
+        # it into the param so pipelines that don't hardcode a `genome` default still receive it: the
+        # built-in rnaseq defaults file sets genome, but registry-installed pipelines (chipseq, atacseq,
+        # ...) do not, so without this they launch with no genome and fail validation ("Missing --fasta").
+        # An explicit `genome` param (from defaults or the caller) wins.
+        if data.reference_genome and "genome" not in merged_params:
+            merged_params["genome"] = data.reference_genome
+
         # 7. Create pipeline_runs record
         run = PipelineRun(
             organization_id=org_id,

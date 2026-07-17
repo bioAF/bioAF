@@ -152,6 +152,65 @@ async def test_launch_run(client, admin_token, experiment, samples, initialized_
 
 
 @pytest.mark.asyncio
+async def test_launch_run_translates_reference_genome_to_genome_param(
+    client, admin_token, experiment, samples, initialized_catalog
+):
+    """reference_genome must become the nf-core `--genome` param so pipelines that don't hardcode a
+    genome default (registry-installed chipseq/atacseq) still receive it. Without this they launch with
+    no genome and nf-core fails validation ("Missing required parameter: --fasta"). scrnaseq has no
+    genome default, so it exercises the translation cleanly."""
+    with (
+        patch(
+            "app.services.slurm_service.SlurmService._run_ssh_command",
+            new_callable=AsyncMock,
+            return_value="12345",
+        ),
+        patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
+    ):
+        response = await client.post(
+            "/api/pipeline-runs",
+            json={
+                "pipeline_key": "nf-core/scrnaseq",
+                "experiment_id": experiment.id,
+                "sample_ids": [s.id for s in samples],
+                "parameters": {},
+                "reference_genome": "GRCh38",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    assert response.status_code == 200
+    assert response.json()["parameters"]["genome"] == "GRCh38"
+
+
+@pytest.mark.asyncio
+async def test_launch_run_explicit_genome_param_wins_over_reference_genome(
+    client, admin_token, experiment, samples, initialized_catalog
+):
+    """An explicit `genome` param (from defaults or the caller) is not overridden by reference_genome."""
+    with (
+        patch(
+            "app.services.slurm_service.SlurmService._run_ssh_command",
+            new_callable=AsyncMock,
+            return_value="12345",
+        ),
+        patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
+    ):
+        response = await client.post(
+            "/api/pipeline-runs",
+            json={
+                "pipeline_key": "nf-core/scrnaseq",
+                "experiment_id": experiment.id,
+                "sample_ids": [s.id for s in samples],
+                "parameters": {"genome": "GRCm39"},
+                "reference_genome": "GRCh38",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    assert response.status_code == 200
+    assert response.json()["parameters"]["genome"] == "GRCm39"
+
+
+@pytest.mark.asyncio
 async def test_launch_run_validates_experiment(client, admin_token, initialized_catalog):
     """Launch fails if experiment doesn't exist."""
     response = await client.post(
