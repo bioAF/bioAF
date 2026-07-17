@@ -33,6 +33,12 @@ class MetricSpec:
     tolerance: float  # in the metric's own scale
     relative: bool  # True: tolerance is a fraction of the claimed value; False: absolute
     aliases: tuple[str, ...] = field(default_factory=tuple)
+    # "finding": a substantive result the paper reports (peaks, cells, genes/UMIs recovered).
+    # "qc_floor": a technical data-quality/identity metric (mapping rate, read depth, GC, dup, ...).
+    # A `validated` verdict requires at least one FINDING to agree - a floor-only agreement proves the
+    # pipeline ran and the data is usable, not that any reported finding held up (spec-06). Default is
+    # qc_floor so an unmarked metric can never earn validated on its own (conservative against overclaim).
+    tier: str = "qc_floor"
 
 
 # The controlled vocabulary is the union of the QC templates' metric keys (bulk_rnaseq + scrnaseq;
@@ -63,12 +69,14 @@ _SPECS: tuple[MetricSpec, ...] = (
                ("n_samples", "num_samples", "sample_count", "number_of_samples")),
     MetricSpec("cell_count", "count", 0.25, True,
                ("n_cells", "num_cells", "estimated_cells", "recovered_cells", "number_of_cells", "cells_recovered",
-                "estimated_number_of_cells", "cell_number", "cells")),
-    MetricSpec("total_genes_detected", "count", 0.25, True, ("genes_detected", "total_genes")),
-    MetricSpec("median_genes_per_cell", "count", 0.25, True, ("median_genes",)),
-    MetricSpec("mean_genes_per_cell", "count", 0.25, True, ("mean_genes",)),
-    MetricSpec("median_umi_per_cell", "count", 0.25, True, ("median_umi", "median_umis", "median_umis_per_cell")),
-    MetricSpec("mean_umi_per_cell", "count", 0.25, True, ("mean_umi", "mean_umis", "mean_umis_per_cell")),
+                "estimated_number_of_cells", "cell_number", "cells"), tier="finding"),
+    MetricSpec("total_genes_detected", "count", 0.25, True, ("genes_detected", "total_genes"), tier="finding"),
+    MetricSpec("median_genes_per_cell", "count", 0.25, True, ("median_genes",), tier="finding"),
+    MetricSpec("mean_genes_per_cell", "count", 0.25, True, ("mean_genes",), tier="finding"),
+    MetricSpec("median_umi_per_cell", "count", 0.25, True,
+               ("median_umi", "median_umis", "median_umis_per_cell"), tier="finding"),
+    MetricSpec("mean_umi_per_cell", "count", 0.25, True,
+               ("mean_umi", "mean_umis", "mean_umis_per_cell"), tier="finding"),
     MetricSpec("median_reads_per_cell", "count", 0.25, True, ("median_reads",)),
     MetricSpec("mean_reads_per_cell", "count", 0.25, True, ("mean_reads",)),
     MetricSpec("saturation", "fraction", 0.05, False, ("sequencing_saturation", "seq_saturation")),
@@ -82,7 +90,7 @@ _SPECS: tuple[MetricSpec, ...] = (
     # first-pass defaults (calibratable, like every tolerance here).
     MetricSpec("peak_count", "count", 0.25, True,
                ("peaks", "num_peaks", "n_peaks", "number_of_peaks", "peak_number", "called_peaks",
-                "total_peaks", "macs2_peaks", "significant_peaks")),
+                "total_peaks", "macs2_peaks", "significant_peaks"), tier="finding"),
     MetricSpec("frip", "fraction", 0.5, True,
                ("frip_score", "fraction_reads_in_peaks", "reads_in_peaks_fraction", "fraction_of_reads_in_peaks")),
     MetricSpec("nsc", "count", 0.15, False,
@@ -163,6 +171,12 @@ def normalize_target_key(metric_key) -> str | None:
 
 def _is_number(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _tier(mapped_key) -> str:
+    """The metric's evidence tier: 'finding' (a substantive result) or 'qc_floor' (technical quality)."""
+    spec = _SPEC_BY_KEY.get(mapped_key)
+    return spec.tier if spec else "qc_floor"
 
 
 def _normalize_value(value: float, unit, spec: MetricSpec) -> float:
@@ -277,12 +291,15 @@ def classify_study(
     comparable = [c for c in comparisons if c["verdict"] in ("agree", "diverge") and not c["advisory"]]
     diverged = [c for c in comparable if c["verdict"] == "diverge"]
     advisory = [c for c in comparisons if c["advisory"] and c["verdict"] in ("agree", "diverge")]
+    # `validated` requires at least one FINDING to agree, not just a technical QC floor (spec-06).
+    finding_agrees = [c for c in comparable if c["verdict"] == "agree" and _tier(c["mapped_key"]) == "finding"]
     coverage = {
         "targets": len(comparisons),
         "comparable": len(comparable),
         "agree": sum(1 for c in comparable if c["verdict"] == "agree"),
         "diverge": len(diverged),
         "advisory": len(advisory),
+        "finding_agree": len(finding_agrees),
         "not_computed": sum(1 for c in comparisons if c["verdict"] == "not_computed"),
         "not_reported": sum(1 for c in comparisons if c["verdict"] == "not_reported"),
     }
@@ -294,6 +311,20 @@ def classify_study(
         reasoning = (
             "The run completed, but none of the paper's claimed metrics could be compared to a computed "
             "QC metric (metric-key coverage gap), so agreement cannot be assessed. Needs a human."
+        )
+    elif not diverged and not finding_agrees:
+        # A+B gate: every comparable metric agrees, but they are all technical QC floors (data
+        # quality/identity), not the paper's findings. Reproducing to QC level is not validating a
+        # finding, so the honest verdict is inconclusive with the scope stated plainly.
+        classification = "inconclusive"
+        auto_finalize = False
+        reasoning = (
+            f"{len(comparable)} technical QC metric(s) agree with the paper within tolerance, but those "
+            "are data-quality floors (mapping rate, read depth, GC, ...), not the paper's findings. "
+            f"None of the paper's finding-level claims were computable ({coverage['not_computed']} claim(s) "
+            "had no computed counterpart; their differential/downstream analyses are outside the "
+            "pipeline's scope). The deposited data is present and reproduces to QC level, but no reported "
+            "finding was validated. Honest verdict: inconclusive, needs a human."
         )
     elif not diverged:
         classification = "validated"

@@ -26,6 +26,25 @@ describe("ValidationVerdictPanel", () => {
     expect(screen.getByText(/pipeline mapping confidence/)).toBeInTheDocument();
   });
 
+  it("surfaces the advisory count and QC-only scope for a floor-only inconclusive (study 5 shape)", () => {
+    render(
+      <ValidationVerdictPanel
+        result={{
+          classification: "inconclusive",
+          auto_finalize: false,
+          reasoning:
+            "1 technical QC metric(s) agree with the paper within tolerance, but those are data-quality " +
+            "floors, not the paper's findings. None of the paper's finding-level claims were computable.",
+          coverage: { targets: 12, comparable: 1, agree: 1, diverge: 0, advisory: 2, finding_agree: 0, not_computed: 9, not_reported: 0 },
+          comparisons: [],
+        }}
+      />
+    );
+    expect(screen.getByText("Inconclusive")).toBeInTheDocument();
+    expect(screen.getByText(/2 advisory/)).toBeInTheDocument();
+    expect(screen.getByText(/data-quality floors, not the paper's findings/)).toBeInTheDocument();
+  });
+
   it("notes when a verdict was applied automatically", () => {
     render(
       <ValidationVerdictPanel

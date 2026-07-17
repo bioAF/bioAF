@@ -77,15 +77,38 @@ class TestCompare:
 
 class TestClassify:
     def test_all_agree_is_validated_and_auto_finalizes(self):
+        # A finding (num_peaks -> peak_count) agrees alongside a QC floor (alignment rate); with a real
+        # finding reproduced and no coverage gap, this is a clean validated that auto-finalizes.
         result = classify_study(
-            [_target("total_reads", 7_000_000), _target("alignment_rate", 83.4, unit="%")],
-            {"total_sequences": 6_600_000, "reads_mapped_genome": 0.834},
+            [_target("num_peaks", 24_000), _target("alignment_rate", 83.4, unit="%")],
+            {"peak_count": 25_000, "reads_mapped_genome": 0.834},
             mapping_confidence="exact",
             reference_genome="GRCh38",
         )
         assert result["classification"] == "validated"
         assert result["auto_finalize"] is True
         assert result["coverage"]["agree"] == 2
+        assert result["coverage"]["finding_agree"] == 1
+
+    def test_floor_only_agreement_is_inconclusive_not_validated(self):
+        # spec-06 gate: the only comparable metrics are technical QC floors (read depth + mapping rate);
+        # the paper's substantive claim has no computed counterpart. Reproducing to QC level is not
+        # validating a finding -> inconclusive, with the scope stated in the reasoning.
+        result = classify_study(
+            [
+                _target("total_reads", 7_000_000),
+                _target("alignment_rate", 83.4, unit="%"),
+                _target("differentially_expressed_genes", 1_200),
+            ],
+            {"total_sequences": 6_600_000, "reads_mapped_genome": 0.834},
+            mapping_confidence="exact",
+            reference_genome="GRCh38",
+        )
+        assert result["classification"] == "inconclusive"
+        assert result["auto_finalize"] is False
+        assert result["coverage"]["agree"] == 2
+        assert result["coverage"]["finding_agree"] == 0
+        assert "finding" in result["reasoning"].lower()
 
     def test_no_comparable_metric_is_inconclusive_not_validated(self):
         # When every claimed target maps to nothing the QC dashboard computes, we can assert neither
@@ -99,17 +122,32 @@ class TestClassify:
         assert result["auto_finalize"] is False
         assert result["coverage"]["not_computed"] == 2
 
-    def test_thin_coverage_pass_is_suggested_validated_but_held_for_a_human(self):
-        # The GSE309060 smoke: one metric maps + agrees (read depth), the other has no counterpart.
-        # A lone agreeing metric is validated-but-thin: suggest validated, do NOT auto-finalize.
+    def test_thin_coverage_pass_with_a_finding_is_suggested_validated_but_held(self):
+        # One FINDING maps + agrees (peak count), the other claim has no counterpart. A lone agreeing
+        # finding is validated-but-thin: suggest validated, do NOT auto-finalize (hold for a human).
         result = classify_study(
-            [_target("mean_raw_reads_per_sample", 7e6), _target("mean_reads_after_trimming_per_sample", 5e6)],
-            {"total_sequences": 6_600_000},
+            [_target("num_peaks", 24_000), _target("mean_reads_after_trimming_per_sample", 5e6)],
+            {"peak_count": 25_000},
             mapping_confidence="partial",
         )
         assert result["classification"] == "validated"
         assert result["auto_finalize"] is False
         assert result["coverage"]["agree"] == 1
+        assert result["coverage"]["finding_agree"] == 1
+        assert result["coverage"]["not_computed"] == 1
+
+    def test_thin_coverage_floor_only_is_inconclusive(self):
+        # The old GSE309060 bulk smoke shape: read depth agrees, the other claim has no counterpart. Under
+        # the spec-06 gate a lone QC-floor agreement no longer earns validated - it is inconclusive.
+        result = classify_study(
+            [_target("mean_raw_reads_per_sample", 7e6), _target("mean_reads_after_trimming_per_sample", 5e6)],
+            {"total_sequences": 6_600_000},
+            mapping_confidence="partial",
+        )
+        assert result["classification"] == "inconclusive"
+        assert result["auto_finalize"] is False
+        assert result["coverage"]["agree"] == 1
+        assert result["coverage"]["finding_agree"] == 0
         assert result["coverage"]["not_computed"] == 1
 
     def test_divergence_with_partial_mapping_is_inconclusive(self):
@@ -235,6 +273,8 @@ class TestPeakCountQualifierAliasing:
     def test_real_study5_target_set_two_advisory_no_false_positive(self):
         # Faithful to study 5's persisted targets: only the two peak_count_* keys are advisory; the
         # differential-accessibility keys stay not_computed (no false positive), read depth agrees.
+        # Under the spec-06 gate the study is INCONCLUSIVE: the only SCORED agreement is a QC floor
+        # (reads_mapped_genome), and no finding was checkable (the peaks are advisory, not scored).
         targets = [
             _target("reads_mapped_genome", 96.0, unit="%"),
             _target("mito_pct_median", 1.2),
@@ -252,9 +292,10 @@ class TestPeakCountQualifierAliasing:
             mapping_confidence="partial",
             reference_genome="GRCh38",
         )
-        assert result["classification"] == "validated"
+        assert result["classification"] == "inconclusive"
         assert result["auto_finalize"] is False
         assert result["coverage"]["agree"] == 1
+        assert result["coverage"]["finding_agree"] == 0
         assert result["coverage"]["diverge"] == 0
         assert result["coverage"]["advisory"] == 2
         # peaks_gained/lost must NOT be advisory - they stay not_computed alongside the rest.
@@ -281,10 +322,11 @@ class TestPeakCountQualifierAliasing:
         # The direct claim is a normal scored row.
         assert direct["advisory"] is False
 
-    def test_advisory_row_does_not_regress_study5_from_validated(self):
-        # Study 5 shape: read-depth agrees (scored), the paper's per-condition peak count is advisory
-        # (would diverge vs per-sample), and the rest have no computed counterpart. The advisory
-        # divergence must NOT count -> stays validated-thin, held for a human.
+    def test_advisory_peak_does_not_count_as_a_scored_divergence(self):
+        # Study 5 shape: read-depth agrees (a QC floor), the paper's per-condition peak count is advisory
+        # (would diverge vs per-sample), and the rest have no computed counterpart. The advisory row must
+        # NOT be scored (diverge stays 0). The verdict is inconclusive because the only scored metric is a
+        # QC floor (spec-06 gate), NOT because of the advisory basis mismatch.
         result = classify_study(
             [
                 _target("reads_mapped", 96.0, unit="%"),
@@ -295,23 +337,26 @@ class TestPeakCountQualifierAliasing:
             mapping_confidence="partial",
             reference_genome="GRCh38",
         )
-        assert result["classification"] == "validated"
+        assert result["classification"] == "inconclusive"
         assert result["auto_finalize"] is False
         assert result["coverage"]["agree"] == 1
         assert result["coverage"]["diverge"] == 0
         assert result["coverage"]["advisory"] == 1
+        assert result["coverage"]["finding_agree"] == 0
         assert result["coverage"]["not_computed"] == 1
 
     def test_advisory_divergence_never_becomes_not_validated_even_when_side_cleared(self):
         # Even with our side fully cleared (exact mapping + recognized genome), an advisory divergence
-        # cannot strike the paper. Only a scored divergence can reach not_validated.
+        # cannot strike the paper: only a SCORED divergence can reach not_validated. Here the only scored
+        # metric is a QC floor, so the verdict is inconclusive - crucially, never not_validated.
         result = classify_study(
             [_target("total_reads", 7_000_000), _target("peak_count_activated", 90_000)],
             {"total_sequences": 6_600_000, "peak_count": 40_000},
             mapping_confidence="exact",
             reference_genome="GRCh38",
         )
-        assert result["classification"] == "validated"
+        assert result["classification"] != "not_validated"
+        assert result["classification"] == "inconclusive"
         assert result["coverage"]["diverge"] == 0
         assert result["coverage"]["advisory"] == 1
 

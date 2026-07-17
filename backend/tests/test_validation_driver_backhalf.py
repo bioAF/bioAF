@@ -16,13 +16,12 @@ in their own suites and are faked here.
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import text
 
 from app.models.comparison_target import ComparisonTarget
 from app.models.file import File
 from app.models.pipeline_run import PipelineRun
 from app.models.sample import Sample
-from app.services import validation_driver_service as driver_mod
 from app.services.pipeline_run_service import PipelineRunService
 from app.services.fetchngs_ingest_service import FetchngsIngestService
 from app.services.qc_dashboard_service import QCDashboardService
@@ -130,7 +129,7 @@ async def test_acquiring_data_launches_fetchngs(session, admin_user, monkeypatch
     monkeypatch.setattr(PipelineRunService, "launch_run", spy)
     study = await _study(session, admin_user, state="acquiring_data")
 
-    advanced = await ValidationDriverService.advance_active_studies(session)
+    await ValidationDriverService.advance_active_studies(session)
 
     assert len(spy.calls) == 1
     assert "fetchngs" in spy.calls[0].pipeline_key
@@ -323,13 +322,13 @@ async def test_extracting_stashes_metrics_and_advances_to_comparing(session, adm
 
 @pytest.mark.asyncio
 async def test_comparing_auto_finalizes_a_clean_validated(session, admin_user, monkeypatch):
-    """Solid agreement (>=2 comparable metrics, all agree) auto-finalizes comparing -> classified."""
+    """Solid agreement with a finding reproduced (peak count + mapping rate) auto-finalizes."""
     monkeypatch.setattr(PipelineRunService, "launch_run", _LaunchSpy())
     study = await _study(session, admin_user, state="comparing")
     study.evidence_json = {
-        "computed_metrics": {"total_sequences": 6_600_000, "reads_mapped_genome": 0.834},
+        "computed_metrics": {"peak_count": 25_000, "reads_mapped_genome": 0.834},
         "comparison_targets": [
-            {"metric_key": "total_reads", "claimed_value": 7_000_000, "unit": None, "tolerance": None},
+            {"metric_key": "num_peaks", "claimed_value": 24_000, "unit": None, "tolerance": None},
             {"metric_key": "alignment_rate", "claimed_value": 83.4, "unit": "%", "tolerance": None},
         ],
     }

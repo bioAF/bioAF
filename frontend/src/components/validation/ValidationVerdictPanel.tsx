@@ -41,7 +41,8 @@ export function ValidationVerdictPanel({ result }: { result: ClassificationResul
         <p className="mt-2 text-xs text-gray-500">
           Coverage: {cov.comparable ?? 0} of {cov.targets ?? 0} claimed metric(s) comparable
           {" · "}
-          {cov.agree ?? 0} agree, {cov.diverge ?? 0} diverge, {cov.not_computed ?? 0} not computed
+          {cov.agree ?? 0} agree, {cov.diverge ?? 0} diverge
+          {cov.advisory ? `, ${cov.advisory} advisory` : ""}, {cov.not_computed ?? 0} not computed
         </p>
       )}
 
