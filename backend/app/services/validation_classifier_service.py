@@ -128,8 +128,17 @@ CONTROLLED_METRIC_KEYS: tuple[str, ...] = tuple(_SPEC_BY_KEY)
 # strip to the `reads_mapped` alias and mis-map to reads_mapped_genome). Longest base first so the most
 # specific alias wins.
 _PEAK_SPEC = _SPEC_BY_KEY["peak_count"]
+# `peaks` (the bare plural) stays a direct alias but is NOT a strip base: as a prefix it over-matches
+# differential-subset keys that are not total counts (`peaks_gained_accessibility`, `peaks_lost_*` - seen
+# live on study 5). Every other peak alias carries a count/number/total/tool qualifier, so a
+# `<base>_<qualifier>` match is unambiguously a peak COUNT.
+_PEAK_STRIP_EXCLUDE = {_slug("peaks")}
 _PEAK_STRIP_BASES: tuple[str, ...] = tuple(
-    sorted({_slug(_PEAK_SPEC.key), *(_slug(a) for a in _PEAK_SPEC.aliases)}, key=len, reverse=True)
+    sorted(
+        {_slug(_PEAK_SPEC.key), *(_slug(a) for a in _PEAK_SPEC.aliases)} - _PEAK_STRIP_EXCLUDE,
+        key=len,
+        reverse=True,
+    )
 )
 
 

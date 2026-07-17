@@ -221,6 +221,46 @@ class TestPeakCountQualifierAliasing:
         assert normalize_target_key("da_peaks") is None
         assert normalize_target_key("differentially_accessible_peaks") is None
 
+    def test_bare_peaks_prefix_does_not_over_strip_differential_subset_keys(self):
+        # Regression (surfaced live on study 5): `peaks` is a direct alias but must NOT be a strip base -
+        # as a prefix it would wrongly map differential-subset keys (peaks that GAINED/LOST accessibility)
+        # to the total peak_count. Those are not total counts, so they stay unmapped.
+        assert normalize_target_key("peaks_gained_accessibility") is None
+        assert normalize_target_key("peaks_lost_accessibility") is None
+        assert normalize_target_key("common_peaks_both_conditions") is None
+        assert normalize_target_key("differentially_accessible_peaks_fdr05") is None
+        # The bare alias itself still direct-maps (unchanged).
+        assert normalize_target_key("peaks") == "peak_count"
+
+    def test_real_study5_target_set_two_advisory_no_false_positive(self):
+        # Faithful to study 5's persisted targets: only the two peak_count_* keys are advisory; the
+        # differential-accessibility keys stay not_computed (no false positive), read depth agrees.
+        targets = [
+            _target("reads_mapped_genome", 96.0, unit="%"),
+            _target("mito_pct_median", 1.2),
+            _target("peak_count_quiescent", 74_834),
+            _target("peak_count_activated", 90_000),
+            _target("common_peaks_both_conditions", 40_000),
+            _target("differentially_accessible_peaks_fdr05", 5_000),
+            _target("peaks_gained_accessibility", 3_000),
+            _target("peaks_lost_accessibility", 2_000),
+            _target("differentially_expressed_genes", 1_200),
+        ]
+        result = classify_study(
+            targets,
+            {"reads_mapped_genome": 0.9978, "peak_count": 31_914},
+            mapping_confidence="partial",
+            reference_genome="GRCh38",
+        )
+        assert result["classification"] == "validated"
+        assert result["auto_finalize"] is False
+        assert result["coverage"]["agree"] == 1
+        assert result["coverage"]["diverge"] == 0
+        assert result["coverage"]["advisory"] == 2
+        # peaks_gained/lost must NOT be advisory - they stay not_computed alongside the rest.
+        advisory_keys = {c["metric_key"] for c in result["comparisons"] if c["advisory"] and c["verdict"] in ("agree", "diverge")}
+        assert advisory_keys == {"peak_count_quiescent", "peak_count_activated"}
+
     def test_bare_peak_count_and_direct_alias_unchanged(self):
         # A bare/direct claim still maps and is NOT advisory (preserves shipped ChIP/ATAC scoring).
         assert normalize_target_key("peak_count") == "peak_count"
