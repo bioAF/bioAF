@@ -60,6 +60,41 @@ describe("ValidationEvidenceTable", () => {
     expect(screen.getByText("percent_gc")).toBeInTheDocument();
   });
 
+  it("marks an advisory (qualifier-stripped) peak-count row as Advisory, not Diverge, keeping the numbers", () => {
+    // The paper's per-condition peak count maps to peak_count but is basis-sensitive (consensus vs
+    // per-sample), so the classifier flags it advisory. The table must NOT show a red "Diverge" (which
+    // reads as a paper failure); it shows "Advisory" while still surfacing claimed/computed/delta and
+    // the mapping arrow so a human can judge the pairing.
+    render(
+      <ValidationEvidenceTable
+        evidence={{
+          computed_metrics: { peak_count: 31914 },
+          classification_result: {
+            classification: "validated",
+            comparisons: [
+              {
+                metric_key: "peak_count_quiescent",
+                mapped_key: "peak_count",
+                advisory: true,
+                claimed_value: 74834,
+                computed_value: 31914,
+                delta: -42920,
+                verdict: "diverge",
+              },
+            ],
+          },
+        }}
+      />
+    );
+    const row = screen.getByText("peak_count_quiescent").closest("tr")!;
+    expect(within(row).getByText("Advisory")).toBeInTheDocument();
+    expect(within(row).queryByText("Diverge")).not.toBeInTheDocument();
+    // The numbers and the mapping are still visible so the human can assess the pairing.
+    expect(within(row).getByText("74834")).toBeInTheDocument();
+    expect(within(row).getByText("31914")).toBeInTheDocument();
+    expect(within(row).getByText("→ peak_count")).toBeInTheDocument();
+  });
+
   it("lists computed metrics that have no claimed target so a human can hand-map them", () => {
     render(
       <ValidationEvidenceTable

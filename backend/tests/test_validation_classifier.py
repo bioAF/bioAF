@@ -197,3 +197,93 @@ class TestAtacSeqCoverage:
         )
         assert result["classification"] == "validated"
         assert result["coverage"]["agree"] == 2
+
+
+class TestPeakCountQualifierAliasing:
+    """Condition/consensus-qualified peak-count keys map to `peak_count` via a prefix-anchored strip
+    (spec-05). The mapping is deliberately loose, so a stripped target is ADVISORY: surfaced with its
+    number + delta, but never scored (papers report a consensus-across-replicates count; we compute a
+    per-sample MACS2 count - a basis mismatch that must not drive a false verdict)."""
+
+    def test_condition_qualified_peak_count_maps_to_peak_count(self):
+        assert normalize_target_key("peak_count_quiescent") == "peak_count"
+        assert normalize_target_key("peak_count_activated") == "peak_count"
+
+    def test_qualified_alias_bases_also_strip_to_peak_count(self):
+        # A qualifier hung off any listed peak alias, not just the canonical key, strips.
+        assert normalize_target_key("num_peaks_consensus") == "peak_count"
+        assert normalize_target_key("total_peaks_treated") == "peak_count"
+
+    def test_non_base_peak_keys_stay_unmapped(self):
+        # These do NOT start with a peak base token, so they are a different quantity (peaks that
+        # CHANGED between conditions), not a total count. They must stay unmapped -> not_computed.
+        assert normalize_target_key("differential_peaks") is None
+        assert normalize_target_key("da_peaks") is None
+        assert normalize_target_key("differentially_accessible_peaks") is None
+
+    def test_bare_peak_count_and_direct_alias_unchanged(self):
+        # A bare/direct claim still maps and is NOT advisory (preserves shipped ChIP/ATAC scoring).
+        assert normalize_target_key("peak_count") == "peak_count"
+        assert normalize_target_key("num_peaks") == "peak_count"
+
+    def test_compare_flags_stripped_row_advisory_but_keeps_the_numbers(self):
+        rows = compare_targets(
+            [_target("peak_count_quiescent", 74_834), _target("num_peaks", 25_000)],
+            {"peak_count": 31_914},
+        )
+        stripped, direct = rows[0], rows[1]
+        # The stripped claim maps, is flagged advisory, and STILL carries the computed value + delta as
+        # evidence the human reads (not hidden behind not_computed).
+        assert stripped["mapped_key"] == "peak_count"
+        assert stripped["advisory"] is True
+        assert stripped["computed_value"] == 31_914
+        assert stripped["delta"] == 31_914 - 74_834
+        # The direct claim is a normal scored row.
+        assert direct["advisory"] is False
+
+    def test_advisory_row_does_not_regress_study5_from_validated(self):
+        # Study 5 shape: read-depth agrees (scored), the paper's per-condition peak count is advisory
+        # (would diverge vs per-sample), and the rest have no computed counterpart. The advisory
+        # divergence must NOT count -> stays validated-thin, held for a human.
+        result = classify_study(
+            [
+                _target("reads_mapped", 96.0, unit="%"),
+                _target("peak_count_quiescent", 74_834),
+                _target("differentially_accessible_peaks", 5_000),
+            ],
+            {"reads_mapped_genome": 0.9978, "peak_count": 31_914},
+            mapping_confidence="partial",
+            reference_genome="GRCh38",
+        )
+        assert result["classification"] == "validated"
+        assert result["auto_finalize"] is False
+        assert result["coverage"]["agree"] == 1
+        assert result["coverage"]["diverge"] == 0
+        assert result["coverage"]["advisory"] == 1
+        assert result["coverage"]["not_computed"] == 1
+
+    def test_advisory_divergence_never_becomes_not_validated_even_when_side_cleared(self):
+        # Even with our side fully cleared (exact mapping + recognized genome), an advisory divergence
+        # cannot strike the paper. Only a scored divergence can reach not_validated.
+        result = classify_study(
+            [_target("total_reads", 7_000_000), _target("peak_count_activated", 90_000)],
+            {"total_sequences": 6_600_000, "peak_count": 40_000},
+            mapping_confidence="exact",
+            reference_genome="GRCh38",
+        )
+        assert result["classification"] == "validated"
+        assert result["coverage"]["diverge"] == 0
+        assert result["coverage"]["advisory"] == 1
+
+    def test_only_advisory_claims_is_inconclusive_with_advisory_surfaced(self):
+        # A paper whose ONLY mappable claims are per-condition peak counts has no scored metric, so the
+        # honest outcome is inconclusive - but the surfaced peak numbers are still counted as advisory.
+        result = classify_study(
+            [_target("peak_count_quiescent", 74_834), _target("peak_count_activated", 90_000)],
+            {"peak_count": 31_914},
+            mapping_confidence="partial",
+        )
+        assert result["classification"] == "inconclusive"
+        assert result["auto_finalize"] is False
+        assert result["coverage"]["comparable"] == 0
+        assert result["coverage"]["advisory"] == 2

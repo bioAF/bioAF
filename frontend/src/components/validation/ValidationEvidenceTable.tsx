@@ -16,6 +16,9 @@ export interface ComparisonTargetEvidence {
 export interface MetricComparison {
   metric_key: string;
   mapped_key?: string | null;
+  // True when the claim mapped only via a qualifier strip (a condition/consensus-qualified peak
+  // count). Such a row is basis-sensitive: surfaced with its number + delta, but not scored.
+  advisory?: boolean | null;
   claimed_value?: number | null;
   claimed_normalized?: number | null;
   computed_value?: number | null;
@@ -49,6 +52,12 @@ const VERDICT_META: Record<string, { label: string; cls: string }> = {
   not_reported: { label: "Not reported", cls: "bg-gray-100 text-gray-600" },
   not_computed: { label: "Not computed", cls: "bg-amber-100 text-amber-800" },
 };
+
+// A qualifier-stripped peak count is not scored (agree/diverge would be misleading against a
+// basis mismatch), so it gets its own neutral chip that says "evidence, not a verdict".
+const ADVISORY_TITLE =
+  "Surfaced as evidence, not scored. This peak-count claim is condition/consensus-qualified, so it is " +
+  "basis-sensitive (a consensus-across-replicates count vs our per-sample count) and not directly comparable.";
 
 function formatValue(v: unknown): string {
   if (v === null || v === undefined) return "";
@@ -93,7 +102,14 @@ export function ValidationEvidenceTable({ evidence }: { evidence: Evidence | nul
                     <td className="py-2 pr-4">
                       <span className="font-mono text-xs">{c.metric_key}</span>
                       {c.mapped_key && c.mapped_key !== c.metric_key && (
-                        <span className="ml-1 text-xs text-gray-400" title="Matched computed QC metric">
+                        <span
+                          className="ml-1 text-xs text-gray-400"
+                          title={
+                            c.advisory
+                              ? "Loosely matched by stripping a condition/consensus qualifier; surfaced as advisory evidence"
+                              : "Matched computed QC metric"
+                          }
+                        >
                           → {c.mapped_key}
                         </span>
                       )}
@@ -108,7 +124,16 @@ export function ValidationEvidenceTable({ evidence }: { evidence: Evidence | nul
                     </td>
                     <td className="py-2 pr-4 text-gray-500">{c.delta === null || c.delta === undefined ? "" : formatValue(c.delta)}</td>
                     <td className="py-2">
-                      <VerdictChip verdict={c.verdict} />
+                      {c.advisory ? (
+                        <span
+                          className="inline-flex items-center rounded bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800"
+                          title={ADVISORY_TITLE}
+                        >
+                          Advisory
+                        </span>
+                      ) : (
+                        <VerdictChip verdict={c.verdict} />
+                      )}
                     </td>
                   </tr>
                 ))}

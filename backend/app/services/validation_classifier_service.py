@@ -118,9 +118,38 @@ for _spec in _SPECS:
 CONTROLLED_METRIC_KEYS: tuple[str, ...] = tuple(_SPEC_BY_KEY)
 
 
+# Peak-count claims are the one metric where papers routinely qualify the key by condition
+# (`peak_count_quiescent`) or report a consensus-across-replicates figure, while we compute a
+# per-sample MACS2 count. A prefix-anchored trailing-qualifier strip maps those to `peak_count` so the
+# paper's number is surfaced next to the computed one. But the strip discards the qualifier that signals
+# the basis may differ, so a target that mapped ONLY via the strip is ADVISORY (spec-05): rated and
+# shown with its delta, but never scored, so a basis mismatch can never drive a false verdict. Scoped to
+# peak_count deliberately - a general qualifier strip collides (e.g. `reads_mapped_genome_unique` would
+# strip to the `reads_mapped` alias and mis-map to reads_mapped_genome). Longest base first so the most
+# specific alias wins.
+_PEAK_SPEC = _SPEC_BY_KEY["peak_count"]
+_PEAK_STRIP_BASES: tuple[str, ...] = tuple(
+    sorted({_slug(_PEAK_SPEC.key), *(_slug(a) for a in _PEAK_SPEC.aliases)}, key=len, reverse=True)
+)
+
+
+def _resolve_key(metric_key) -> tuple[str | None, bool]:
+    """Resolve a paper-side claim key to a controlled key, plus whether the match required stripping a
+    trailing qualifier off a basis-sensitive peak base (which makes the target advisory)."""
+    slug = _slug(metric_key)
+    direct = _KEY_LOOKUP.get(slug)
+    if direct is not None:
+        return direct, False
+    for base in _PEAK_STRIP_BASES:
+        prefix = f"{base}_"
+        if slug.startswith(prefix) and len(slug) > len(prefix):
+            return "peak_count", True
+    return None, False
+
+
 def normalize_target_key(metric_key) -> str | None:
     """Map a paper-side claim key to a controlled QC metric key, or None if there is no counterpart."""
-    return _KEY_LOOKUP.get(_slug(metric_key))
+    return _resolve_key(metric_key)[0]
 
 
 def _is_number(v) -> bool:
@@ -150,10 +179,11 @@ def compare_targets(targets: list[dict], computed_metrics: dict | None) -> list[
         claimed = t.get("claimed_value")
         unit = t.get("unit")
         tol = t.get("tolerance")
-        mapped = normalize_target_key(key)
+        mapped, advisory = _resolve_key(key)
         row = {
             "metric_key": key,
             "mapped_key": mapped,
+            "advisory": advisory,
             "claimed_value": claimed,
             "claimed_normalized": None,
             "computed_value": None,
@@ -232,13 +262,18 @@ def classify_study(
     with this as the suggested verdict for a human to ratify or override.
     """
     comparisons = compare_targets(targets, computed_metrics)
-    comparable = [c for c in comparisons if c["verdict"] in ("agree", "diverge")]
+    # Advisory rows (qualifier-stripped peak counts) are surfaced with their delta but never scored:
+    # excluded from comparable/agree/diverge, so a basis mismatch can neither strike the paper nor
+    # promote it to auto-finalize (spec-05). They are tallied separately as evidence for the human.
+    comparable = [c for c in comparisons if c["verdict"] in ("agree", "diverge") and not c["advisory"]]
     diverged = [c for c in comparable if c["verdict"] == "diverge"]
+    advisory = [c for c in comparisons if c["advisory"] and c["verdict"] in ("agree", "diverge")]
     coverage = {
         "targets": len(comparisons),
         "comparable": len(comparable),
-        "agree": sum(1 for c in comparisons if c["verdict"] == "agree"),
+        "agree": sum(1 for c in comparable if c["verdict"] == "agree"),
         "diverge": len(diverged),
+        "advisory": len(advisory),
         "not_computed": sum(1 for c in comparisons if c["verdict"] == "not_computed"),
         "not_reported": sum(1 for c in comparisons if c["verdict"] == "not_reported"),
     }
@@ -283,6 +318,13 @@ def classify_study(
                 f"({'; '.join(attribution['reasons'])}), so the divergence cannot be attributed to the paper."
             )
         auto_finalize = False
+
+    if coverage["advisory"]:
+        reasoning += (
+            f" ({coverage['advisory']} peak-count claim(s) were surfaced as advisory evidence and not "
+            "scored: a condition/consensus-qualified peak count is not directly comparable to the "
+            "per-sample computed count.)"
+        )
 
     return {
         "comparisons": comparisons,
