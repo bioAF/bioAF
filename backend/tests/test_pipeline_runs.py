@@ -211,6 +211,53 @@ async def test_launch_run_explicit_genome_param_wins_over_reference_genome(
 
 
 @pytest.mark.asyncio
+async def test_launch_run_chipseq_derives_macs_gsize_from_genome(
+    client, admin_token, session, admin_user, experiment, samples, initialized_catalog
+):
+    """A peak-calling pipeline (chipseq/atacseq) must receive macs_gsize derived from the genome, or
+    nf-core fails ("specify --read_length or --macs_gsize"). Found by the live ChIP-seq smoke."""
+    from app.models.pipeline_catalog_entry import PipelineCatalogEntry
+
+    session.add(
+        PipelineCatalogEntry(
+            organization_id=admin_user.organization_id,
+            pipeline_key="nf-core/chipseq",
+            name="nf-core/chipseq",
+            source_type="nf-core",
+            version="2.1.0",
+            qc_template="chipseq",
+            is_builtin=False,
+            enabled=True,
+        )
+    )
+    await session.commit()
+
+    with (
+        patch(
+            "app.services.slurm_service.SlurmService._run_ssh_command",
+            new_callable=AsyncMock,
+            return_value="12345",
+        ),
+        patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
+    ):
+        response = await client.post(
+            "/api/pipeline-runs",
+            json={
+                "pipeline_key": "nf-core/chipseq",
+                "experiment_id": experiment.id,
+                "sample_ids": [s.id for s in samples],
+                "parameters": {},
+                "reference_genome": "GRCh38",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    assert response.status_code == 200
+    params = response.json()["parameters"]
+    assert params["genome"] == "GRCh38"
+    assert params["macs_gsize"] == 2.7e9
+
+
+@pytest.mark.asyncio
 async def test_launch_run_validates_experiment(client, admin_token, initialized_catalog):
     """Launch fails if experiment doesn't exist."""
     response = await client.post(
