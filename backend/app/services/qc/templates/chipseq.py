@@ -357,13 +357,17 @@ def read_multiqc_metrics(multiqc_json_text: str) -> dict[str, Any]:
     # `multiqc_peak_count-plot` / `multiqc_frip_score-plot` ({sample: {series: value}}), NOT a flat
     # per-sample column (verified against the real run-22 output). Parse the plot values; fall back to
     # older names + the general-stats scan. Only the IP samples appear here (controls have no peaks).
-    peaks = _plot_values(_find_section(raw, "multiqc_peak_count-plot", "multiqc_macs2_peak_count", "macs2_peak_count"))
+    # chipseq names the section `multiqc_peak_count-plot`; atacseq prefixes it `_mlib_` (merged library),
+    # verified against real run-22 (chipseq) + run-24 (atacseq) output. Accept both.
+    peaks = _plot_values(_find_section(
+        raw, "multiqc_peak_count-plot", "multiqc_mlib_peak_count-plot", "multiqc_macs2_peak_count", "macs2_peak_count"))
     if not peaks:
         peaks = _scan_general_stats(gstats, "peak_count", "num_peaks", "n_peaks")
     if peaks:
         metrics["peak_count"] = int(round(_mean(peaks)))
 
-    frip = _plot_values(_find_section(raw, "multiqc_frip_score-plot", "multiqc_frip_score", "frip_score"))
+    frip = _plot_values(_find_section(
+        raw, "multiqc_frip_score-plot", "multiqc_mlib_frip_score-plot", "multiqc_frip_score", "frip_score"))
     if not frip:
         frip = _scan_general_stats(gstats, "frip")
     if frip:

@@ -327,13 +327,17 @@ def read_multiqc_metrics(multiqc_json_text: str) -> dict[str, Any]:
 
     # MACS2 peak count + FRiP: MultiQC bar-plot data under `multiqc_peak_count-plot` /
     # `multiqc_frip_score-plot` ({sample: {series: value}}), like chipseq; fall back to older names + stats.
-    peaks = _plot_values(_find_section(raw, "multiqc_peak_count-plot", "multiqc_macs2_peak_count", "macs2_peak_count"))
+    # atacseq prefixes the peak/FRiP plot sections `_mlib_` (merged library), verified against real run-24
+    # output; chipseq uses the bare name. Accept both.
+    peaks = _plot_values(_find_section(
+        raw, "multiqc_mlib_peak_count-plot", "multiqc_peak_count-plot", "multiqc_macs2_peak_count", "macs2_peak_count"))
     if not peaks:
         peaks = _scan_general_stats(gstats, "peak_count", "num_peaks", "n_peaks")
     if peaks:
         metrics["peak_count"] = int(round(_mean(peaks)))
 
-    frip = _plot_values(_find_section(raw, "multiqc_frip_score-plot", "multiqc_frip_score", "frip_score"))
+    frip = _plot_values(_find_section(
+        raw, "multiqc_mlib_frip_score-plot", "multiqc_frip_score-plot", "multiqc_frip_score", "frip_score"))
     if not frip:
         frip = _scan_general_stats(gstats, "frip")
     if frip:
