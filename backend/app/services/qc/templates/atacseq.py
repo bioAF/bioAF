@@ -234,6 +234,23 @@ def _find_section(raw: dict, *names: str) -> dict:
     return best
 
 
+def _plot_values(section: dict) -> list[float]:
+    """Numeric values from a MultiQC bar-plot raw-data section ({sample: {series: value}}); nf-core
+    stores MACS2 peak count + FRiP this way (verified against the real chipseq run-22 output)."""
+    out: list[float] = []
+    for v in (section or {}).values():
+        if isinstance(v, dict):
+            for iv in v.values():
+                n = _num(iv)
+                if n is not None:
+                    out.append(n)
+        else:
+            n = _num(v)
+            if n is not None:
+                out.append(n)
+    return out
+
+
 def _scan_general_stats(gstats: Any, *keys: str) -> list[float]:
     """Fuzzy scan of report_general_stats_data (list of per-sample column-group dicts) for any of the
     given keys as a case-insensitive substring. Fallback for ATAC-core metrics whose names vary."""
@@ -308,16 +325,15 @@ def read_multiqc_metrics(multiqc_json_text: str) -> dict[str, Any]:
         if dups:
             metrics["percent_duplicates"] = round(_mean([d * 100.0 for d in dups]), 1)
 
-    # MACS2 peak count + FRiP (nf-core/atacseq custom content; names vary -> defensive + general-stats fallback)
-    peak_section = _find_section(raw, "multiqc_macs2_peak_count", "macs2_peak_count", "multiqc_peak_count")
-    peaks = _numbers(peak_section, "count", "peak_count", "num_peaks", "peaks") if peak_section else []
+    # MACS2 peak count + FRiP: MultiQC bar-plot data under `multiqc_peak_count-plot` /
+    # `multiqc_frip_score-plot` ({sample: {series: value}}), like chipseq; fall back to older names + stats.
+    peaks = _plot_values(_find_section(raw, "multiqc_peak_count-plot", "multiqc_macs2_peak_count", "macs2_peak_count"))
     if not peaks:
         peaks = _scan_general_stats(gstats, "peak_count", "num_peaks", "n_peaks")
     if peaks:
         metrics["peak_count"] = int(round(_mean(peaks)))
 
-    frip_section = _find_section(raw, "multiqc_frip_score", "frip_score", "multiqc_frip")
-    frip = _numbers(frip_section, "frip", "FRiP", "frip_score") if frip_section else []
+    frip = _plot_values(_find_section(raw, "multiqc_frip_score-plot", "multiqc_frip_score", "frip_score"))
     if not frip:
         frip = _scan_general_stats(gstats, "frip")
     if frip:

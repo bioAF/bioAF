@@ -102,6 +102,23 @@ def test_chip_core_nsc_rsc_peaks_frip_from_named_sections():
     assert m["frip"] == 0.04  # mean(0.05, 0.03)
 
 
+def test_peak_and_frip_from_real_plot_sections():
+    """The REAL nf-core/chipseq MultiQC (verified against run-22 output) stores MACS2 peak count + FRiP
+    as bar-plot data under multiqc_peak_count-plot / multiqc_frip_score-plot, shaped
+    {sample: {series: value}} -- the inner key is the sample label, not a 'count'/'frip' column. Only
+    the IP sample appears (the control has no peaks)."""
+    fixture = {
+        "report_saved_raw_data": {
+            "multiqc_fastqc": _MULTIQC["report_saved_raw_data"]["multiqc_fastqc"],
+            "multiqc_peak_count-plot": {"SRX_CHIP_REP1": {"SRX_CHIP_REP1": 16484.0}},
+            "multiqc_frip_score-plot": {"SRX_CHIP_REP1": {"SRX_CHIP_REP1": 0.134985}},
+        }
+    }
+    m = chipseq.read_multiqc_metrics(json.dumps(fixture))
+    assert m["peak_count"] == 16484
+    assert m["frip"] == 0.135
+
+
 def test_chip_core_from_general_stats_fallback():
     """When the ChIP-core custom-content sections aren't under their own raw-data
     keys (they vary across chipseq versions), fall back to scanning the merged

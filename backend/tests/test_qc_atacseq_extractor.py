@@ -62,6 +62,21 @@ def test_read_multiqc_atac_core_from_named_sections():
     assert m["tss_enrichment"] == 7.0  # mean(8.0, 6.0)
 
 
+def test_peak_and_frip_from_real_plot_sections():
+    """nf-core MultiQC stores MACS2 peak count + FRiP as bar-plot data (multiqc_peak_count-plot /
+    multiqc_frip_score-plot, {sample: {series: value}}), as verified on the real chipseq run."""
+    fixture = {
+        "report_saved_raw_data": {
+            "multiqc_fastqc": _MULTIQC["report_saved_raw_data"]["multiqc_fastqc"],
+            "multiqc_peak_count-plot": {"S1": {"S1": 60_000.0}, "S2": {"S2": 40_000.0}},
+            "multiqc_frip_score-plot": {"S1": {"S1": 0.25}, "S2": {"S2": 0.15}},
+        }
+    }
+    m = atacseq.read_multiqc_metrics(json.dumps(fixture))
+    assert m["peak_count"] == 50_000
+    assert m["frip"] == 0.2
+
+
 def test_atac_core_from_general_stats_fallback():
     fixture = {
         "report_saved_raw_data": {"multiqc_fastqc": _MULTIQC["report_saved_raw_data"]["multiqc_fastqc"]},
