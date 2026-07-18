@@ -6,6 +6,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useCapabilities, type CapabilityFlag } from "@/hooks/useCapabilities";
 import { useComponents } from "@/hooks/useComponents";
+import { useBetaFeatures } from "@/hooks/useBetaFeatures";
 import { useBackendReady } from "@/hooks/useBackendReady";
 import { navConfig, NavSection, NavChild, ComponentGate, PermissionRef, isChildActive } from "@/lib/navConfig";
 
@@ -130,6 +131,7 @@ export function Sidebar() {
   const { canAccess, roleName, loading } = usePermissions();
   const { has: hasCapability } = useCapabilities();
   const { components, loading: componentsLoading } = useComponents();
+  const { available: betaAvailable, flags: betaFlags } = useBetaFeatures();
 
   const passesComponentGate = useCallback(
     (gate?: ComponentGate): boolean => {
@@ -176,6 +178,18 @@ export function Sidebar() {
     [hasCapability],
   );
 
+  // A nav item passes its beta gate when its required beta flag is enabled (and, for the Beta Features
+  // menu itself, when beta features are available on this instance). useBetaFeatures default-denies
+  // while loading, so a hidden beta feature never flashes (spec-07).
+  const passesBetaGate = useCallback(
+    (item: { betaFlag?: string; requiresBetaAvailability?: boolean }): boolean => {
+      if (item.requiresBetaAvailability && !betaAvailable) return false;
+      if (item.betaFlag && !betaFlags[item.betaFlag]) return false;
+      return true;
+    },
+    [betaAvailable, betaFlags],
+  );
+
   // Filter sections and children based on permissions, component gates, and
   // backend capabilities
   const visibleSections = useMemo(() => {
@@ -191,7 +205,8 @@ export function Sidebar() {
             (child) =>
               passesPermission(child) &&
               passesComponentGate(child.componentGate) &&
-              passesCapability(child),
+              passesCapability(child) &&
+              passesBetaGate(child),
           );
         }
         return true;
@@ -202,11 +217,12 @@ export function Sidebar() {
           (child) =>
             passesPermission(child) &&
             passesComponentGate(child.componentGate) &&
-            passesCapability(child),
+            passesCapability(child) &&
+            passesBetaGate(child),
         );
         return { ...section, children: filteredChildren };
       });
-  }, [loading, roleName, passesPermission, passesComponentGate, passesCapability]);
+  }, [loading, roleName, passesPermission, passesComponentGate, passesCapability, passesBetaGate]);
 
   // Initialize expanded state: auto-expand the section containing active path.
   // Only one section can be expanded at a time.

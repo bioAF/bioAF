@@ -67,6 +67,7 @@ from app.api.github_repos import router as github_repos_router
 from app.api.custom_pipelines import router as custom_pipelines_router
 from app.api.integrations_admin import router as integrations_admin_router
 from app.api.llm_config import router as llm_config_router
+from app.api.beta_features import router as beta_features_router
 from app.api.agent_reviews import router as agent_reviews_router
 from app.api.literature import router as literature_router
 from app.api.dashboards import router as dashboards_router
@@ -115,6 +116,7 @@ api_router.include_router(geo_export_router)
 api_router.include_router(snapshots_router)
 api_router.include_router(infrastructure_router)
 api_router.include_router(naming_profiles_router)
+api_router.include_router(beta_features_router)
 api_router.include_router(ingest_router)
 api_router.include_router(claim_router)
 api_router.include_router(ssh_connect_router)

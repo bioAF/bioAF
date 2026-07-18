@@ -34,6 +34,17 @@ from app.services.provenance.schema import SCHEMA_VERSION
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_study_service import ValidationStudyService
 
+
+@pytest_asyncio.fixture(autouse=True)
+async def _enable_lit_validation(session):
+    # The provenance HTTP endpoints live on the beta-gated validation router (spec-07); turn the flag on
+    # so they are reachable (it defaults off -> 404).
+    from app.services import beta_features_service
+
+    await beta_features_service.set_flag(session, "lit_validation", True)
+    await session.commit()
+
+
 _DOI = "10.3390/jfb17020057"
 
 # The classifier's evidence bundle for a bulk RNA-seq study reproduced end to end (mirrors the real

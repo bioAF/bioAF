@@ -10,7 +10,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_permission
+from app.api.dependencies import require_beta_feature, require_permission
 from app.api.provenance_reports import ReportFormat
 from app.database import get_session
 from app.models.validation_study import ValidationStudy, classification_confidence
@@ -30,7 +30,13 @@ from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_driver_service import ValidationDriverService
 from app.services.validation_study_service import ValidationStudyService
 
-router = APIRouter(prefix="/api/validation-studies", tags=["validation-studies"])
+# lit_validation is a beta feature: when its flag is off, every endpoint here 404s (matching the hidden
+# nav entry), so the feature is invisible to instances that have not opted in (spec-07).
+router = APIRouter(
+    prefix="/api/validation-studies",
+    tags=["validation-studies"],
+    dependencies=[require_beta_feature("lit_validation")],
+)
 
 
 def _plan_response(plan) -> ReproductionPlanResponse | None:

@@ -8,10 +8,21 @@ deterministic.
 from types import SimpleNamespace
 
 import pytest
+import pytest_asyncio
 
 from app.services import validation_extraction_service as ext
 
 pytestmark = pytest.mark.asyncio
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _enable_lit_validation(session):
+    # lit_validation is gated behind its beta flag (spec-07); these HTTP tests exercise the feature, so
+    # turn it on (the flag defaults off, which would otherwise 404 every endpoint).
+    from app.services import beta_features_service
+
+    await beta_features_service.set_flag(session, "lit_validation", True)
+    await session.commit()
 
 _GOOD = (
     '```json\n{"accessions": ["GSE52778"], "sample_structure": {"organism": "Homo sapiens"}, '

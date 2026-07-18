@@ -39,6 +39,11 @@ jest.mock("@/hooks/useComponents", () => ({
   useComponents: () => mockComponents(),
 }));
 
+const mockBetaFeatures = jest.fn();
+jest.mock("@/hooks/useBetaFeatures", () => ({
+  useBetaFeatures: () => mockBetaFeatures(),
+}));
+
 beforeEach(() => {
   mockComponents.mockReset();
   mockPermissions.mockReset();
@@ -47,6 +52,9 @@ beforeEach(() => {
     roleName: "admin",
     loading: false,
   });
+  mockBetaFeatures.mockReset();
+  // Default-deny: beta items hidden unless a test opts in.
+  mockBetaFeatures.mockReturnValue({ available: false, flags: {}, loading: false });
 });
 
 function makeComponent(key: string, category: string, enabled: boolean) {
@@ -220,6 +228,40 @@ describe("Sidebar component gating", () => {
 
     expect(screen.queryByText("Loading bioAF...")).not.toBeInTheDocument();
     expect(screen.getByText("Pipelines")).toBeInTheDocument();
+  });
+});
+
+describe("Sidebar beta gating", () => {
+  beforeEach(() => {
+    mockComponents.mockReturnValue({ components: [], loading: false, refetch: jest.fn() });
+  });
+
+  test("hides Validation Studies when the lit_validation flag is off", () => {
+    mockBetaFeatures.mockReturnValue({ available: false, flags: {}, loading: false });
+    render(<Sidebar />);
+    fireEvent.click(screen.getByText("Data & Files"));
+    expect(screen.queryByText("Validation Studies")).not.toBeInTheDocument();
+  });
+
+  test("shows Validation Studies when the lit_validation flag is on", () => {
+    mockBetaFeatures.mockReturnValue({ available: true, flags: { lit_validation: true }, loading: false });
+    render(<Sidebar />);
+    fireEvent.click(screen.getByText("Data & Files"));
+    expect(screen.getByText("Validation Studies")).toBeInTheDocument();
+  });
+
+  test("hides the Beta Features settings menu when beta is not available", () => {
+    mockBetaFeatures.mockReturnValue({ available: false, flags: {}, loading: false });
+    render(<Sidebar />);
+    fireEvent.click(screen.getByText("Settings"));
+    expect(screen.queryByText("Beta Features")).not.toBeInTheDocument();
+  });
+
+  test("shows the Beta Features settings menu when beta is available", () => {
+    mockBetaFeatures.mockReturnValue({ available: true, flags: {}, loading: false });
+    render(<Sidebar />);
+    fireEvent.click(screen.getByText("Settings"));
+    expect(screen.getByText("Beta Features")).toBeInTheDocument();
   });
 });
 
