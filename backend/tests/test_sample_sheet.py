@@ -101,3 +101,98 @@ def test_sample_without_external_id():
     sample = _make_sample(5, None)
     result = SampleSheetService.generate_scrnaseq_sheet([sample], {})
     assert "sample_5" in result
+
+
+# ---- nf-core/chipseq sheet (lit_validation Phase 4) ----
+
+
+def _chip_sample(sample_id: int, external_id: str, prep_notes: str = ""):
+    """A sample with explicit external_id + prep_notes (MagicMock auto-vivifies prep_notes to a
+    truthy mock otherwise, whose repr contains 'mock' and would false-trigger control detection)."""
+    s = MagicMock()
+    s.id = sample_id
+    s.external_id = external_id
+    s.prep_notes = prep_notes
+    return s
+
+
+def _rows_by_sample(csv_text: str) -> dict[str, list[str]]:
+    lines = [line.strip() for line in csv_text.strip().splitlines()]
+    return {line.split(",")[0]: line.split(",") for line in lines[1:]}
+
+
+def test_chipseq_sheet_header_and_pairs_ip_with_input():
+    chip = _chip_sample(1, "SRX_CHIP", "via fetchngs. strategy=ChIP-Seq title=MDA-MB-231, H3K4me3, ChIP")
+    inp = _chip_sample(2, "SRX_INPUT", "via fetchngs. strategy=ChIP-Seq title=MDA-MB-231, Input")
+    params = {
+        "input_paths": {
+            "1": ["/d/chip_R1.fastq.gz", "/d/chip_R2.fastq.gz"],
+            "2": ["/d/input_R1.fastq.gz", "/d/input_R2.fastq.gz"],
+        }
+    }
+    result = SampleSheetService.generate_chipseq_sheet([chip, inp], params)
+    lines = [line.strip() for line in result.strip().splitlines()]
+    assert lines[0] == "sample,fastq_1,fastq_2,replicate,antibody,control,control_replicate"
+
+    rows = _rows_by_sample(result)
+    # IP row: histone-mark antibody parsed from the title, control -> the input sample, replicate set.
+    chip_row = rows["SRX_CHIP"]
+    assert chip_row[4] == "H3K4me3"  # antibody
+    assert chip_row[5] == "SRX_INPUT"  # control
+    assert chip_row[6] == "1"  # control_replicate
+    # Input row: empty antibody/control/control_replicate (it IS the control).
+    input_row = rows["SRX_INPUT"]
+    assert input_row[4] == "" and input_row[5] == "" and input_row[6] == ""
+
+
+def test_chipseq_sheet_detects_igg_control():
+    chip = _chip_sample(1, "SRX_TF", "strategy=ChIP-Seq title=K562, GATA1 ChIP")
+    igg = _chip_sample(2, "SRX_IGG", "strategy=ChIP-Seq title=K562, IgG")
+    params = {"input_paths": {"1": ["/d/tf_R1.fastq.gz", ""], "2": ["/d/igg_R1.fastq.gz", ""]}}
+    rows = _rows_by_sample(SampleSheetService.generate_chipseq_sheet([chip, igg], params))
+    # No histone mark in the title -> antibody falls back to the sanitized sample name; control is the IgG.
+    assert rows["SRX_TF"][4] == "SRX_TF"
+    assert rows["SRX_TF"][5] == "SRX_IGG"
+    assert rows["SRX_IGG"][4] == "" and rows["SRX_IGG"][5] == ""
+
+
+def test_chipseq_sheet_degrades_to_control_less_when_no_input():
+    # No sample looks like a control -> IP samples are emitted WITHOUT antibody/control (still valid;
+    # the run completes, those samples just aren't peak-called). Never a launch failure.
+    a = _chip_sample(1, "SRX_A", "strategy=ChIP-Seq title=cellX, H3K27ac ChIP")
+    b = _chip_sample(2, "SRX_B", "strategy=ChIP-Seq title=cellY, H3K27ac ChIP")
+    params = {"input_paths": {"1": ["/d/a_R1.fastq.gz", ""], "2": ["/d/b_R1.fastq.gz", ""]}}
+    rows = _rows_by_sample(SampleSheetService.generate_chipseq_sheet([a, b], params))
+    for name in ("SRX_A", "SRX_B"):
+        assert rows[name][4] == "" and rows[name][5] == "" and rows[name][6] == ""
+
+
+def test_generate_sheet_routes_chipseq():
+    chip = _chip_sample(1, "SRX_CHIP", "title=H3K4me3 ChIP")
+    inp = _chip_sample(2, "SRX_INPUT", "title=Input")
+    params = {"input_paths": {"1": ["/d/c_R1.fastq.gz", ""], "2": ["/d/i_R1.fastq.gz", ""]}}
+    result = SampleSheetService.generate_sheet("nf-core/chipseq", [chip, inp], params)
+    assert result.splitlines()[0].strip() == "sample,fastq_1,fastq_2,replicate,antibody,control,control_replicate"
+
+
+# ---- nf-core/atacseq sheet (lit_validation Phase 4) ----
+
+
+def test_atacseq_sheet_has_required_replicate_and_no_antibody():
+    a = _chip_sample(1, "ATAC_A")
+    b = _chip_sample(2, "ATAC_B")
+    params = {"input_paths": {"1": ["/d/a_R1.fastq.gz", "/d/a_R2.fastq.gz"], "2": ["/d/b_R1.fastq.gz", ""]}}
+    result = SampleSheetService.generate_atacseq_sheet([a, b], params)
+    lines = [line.strip() for line in result.strip().splitlines()]
+    # ATAC schema requires a replicate column; there is no antibody/control (no immunoprecipitation).
+    assert lines[0] == "sample,fastq_1,fastq_2,replicate"
+    rows = _rows_by_sample(result)
+    assert rows["ATAC_A"] == ["ATAC_A", "/d/a_R1.fastq.gz", "/d/a_R2.fastq.gz", "1"]
+    assert rows["ATAC_B"][3] == "1"  # replicate present for single-end too
+
+
+def test_generate_sheet_routes_atacseq():
+    a = _chip_sample(1, "ATAC_A")
+    params = {"input_paths": {"1": ["/d/a_R1.fastq.gz", ""]}}
+    result = SampleSheetService.generate_sheet("nf-core/atacseq", [a], params)
+    assert result.splitlines()[0].strip() == "sample,fastq_1,fastq_2,replicate"

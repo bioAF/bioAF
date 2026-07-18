@@ -46,6 +46,9 @@ ALL_RESOURCES_ACTIONS: dict[str, list[str]] = {
     "lab_document_tags": ["manage"],
     "lab_glossary": ["view", "manage", "delete"],
     "sdr": ["view", "author", "manage"],
+    # Literature validation (lit_validation). request starts a study and runs the
+    # reproduction-plan extraction; approve is the C1 human gate; view reads studies/plans.
+    "lit_validation": ["request", "approve", "view"],
 }
 
 BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
@@ -88,6 +91,8 @@ BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
             "lab_documents": ["view"],
             "lab_glossary": ["view"],
             "sdr": ["view", "author"],
+            # Comp Bio requests validations, ratifies plans at the C1 gate, and views.
+            "lit_validation": ["request", "approve", "view"],
         },
     ),
     "bench": (
@@ -114,6 +119,8 @@ BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
             "lab_documents": ["view"],
             "lab_glossary": ["view"],
             "sdr": ["view"],
+            # Bench can request a validation and view it; approval is a comp_bio/admin gate.
+            "lit_validation": ["request", "view"],
         },
     ),
     "viewer": (
@@ -130,6 +137,7 @@ BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {
             "lab_documents": ["view"],
             "lab_glossary": ["view"],
             "sdr": ["view"],
+            "lit_validation": ["view"],
         },
     ),
 }

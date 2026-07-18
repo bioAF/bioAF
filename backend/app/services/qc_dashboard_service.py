@@ -19,7 +19,7 @@ from app.services.audit_service import log_action
 from app.services.file_service import FileService
 from app.services.qc.extractors.gcs_helpers import get_results_bucket
 from app.services.qc.resolver import resolve_template_for_run
-from app.services.qc.templates import get_template, scrnaseq as scrnaseq_template
+from app.services.qc.templates import TEMPLATES, get_template, scrnaseq as scrnaseq_template
 
 logger = logging.getLogger("bioaf.qc_dashboard_service")
 
@@ -127,70 +127,44 @@ class QCDashboardService:
         template_name: str = "scrnaseq",
         skip_cache: bool = False,
     ) -> dict:
-        """Dispatch metric extraction to the template module.
+        """Dispatch metric extraction to the resolved template's own ``extract()``.
 
-        scRNA-seq + bulk_rnaseq currently share the same extractor (the existing
-        STARsolo/h5ad/MultiQC pipeline). Custom pipelines drop their own
-        qc_metrics.json, which the dispatcher reads as-is.
+        Each template owns its extractor (scRNA-seq: STARsolo/h5ad/MultiQC;
+        bulk_rnaseq: bulk MultiQC; custom: the pipeline's emitted qc_metrics.json).
+        A pipeline type with no registered extractor gets that template's empty
+        metrics -- an honest "nothing computed" rather than another template's
+        parser misapplied, which is what silently starved bulk RNA-seq before.
         """
+        template = TEMPLATES.get(template_name)
+        extract_fn = getattr(template, "extract", None) if template is not None else None
+        if extract_fn is None:
+            logger.info("No extractor registered for template %r; returning empty metrics", template_name)
+            empty = getattr(template, "EMPTY_METRICS", None)
+            return dict(empty) if empty else {}
+
         results_bucket = await QCDashboardService._get_results_bucket(session)
         if not results_bucket:
             logger.warning("No results bucket configured, cannot extract metrics")
-            if template_name == "custom":
-                return {}
-            return dict(scrnaseq_template.EMPTY_METRICS)
+            empty = getattr(template, "EMPTY_METRICS", None)
+            return dict(empty) if empty else {}
 
-        if template_name == "custom":
-            return await QCDashboardService._extract_custom_metrics(
-                session, run, skip_cache=skip_cache, results_bucket=results_bucket
-            )
-        return await scrnaseq_template.extract(session, run, skip_cache=skip_cache, results_bucket=results_bucket)
-
-    @staticmethod
-    async def _extract_custom_metrics(
-        session: AsyncSession,
-        run: PipelineRun,
-        *,
-        skip_cache: bool = False,
-        results_bucket: str | None = None,
-    ) -> dict:
-        """Custom pipelines emit qc_metrics.json directly into the run output prefix."""
-        if results_bucket is None:
-            results_bucket = await QCDashboardService._get_results_bucket(session)
-        if not results_bucket:
-            logger.warning("No results bucket configured, cannot extract metrics")
-            return {}
-
-        try:
-            import json as _json
-
-            from app.adapters.models import StorageObjectNotFound
-            from app.adapters.registry import get_storage_adapter
-
-            adapter = get_storage_adapter()
-            prefix = f"experiments/{run.experiment_id}/pipeline-runs/{run.id}/"
-            uri = adapter.build_uri(results_bucket, f"{prefix}qc_metrics.json")
-            try:
-                return _json.loads(await adapter.read_text(uri))
-            except StorageObjectNotFound:
-                logger.info("No qc_metrics.json found for custom pipeline run %d", run.id)
-                return {}
-        except Exception as e:
-            logger.warning("Custom-pipeline metric extraction failed for run %d: %s", run.id, e)
-            return {}
+        return await extract_fn(session, run, skip_cache=skip_cache, results_bucket=results_bucket)
 
     @staticmethod
     def _generate_summary(template_name: str, metrics: dict) -> str:
-        """Currently both built-in templates use the scrnaseq summary generator
-        (it covers FastQC + STAR fields used by bulk RNA-seq too). Custom
-        pipelines fall back to a one-liner if they didn't emit one."""
-        if template_name == "custom":
-            emitted = metrics.get("summary_text")
-            if isinstance(emitted, str) and emitted:
-                return emitted
-            quality = metrics.get("quality_rating", "pending_review")
-            return f"Custom pipeline run. Overall quality: **{quality.capitalize()}**."
-        return scrnaseq_template.generate_summary(metrics)
+        """Dispatch summary generation to the template's own ``generate_summary()``
+        if it exposes one; otherwise fall back to a quality-rating one-liner. Uses
+        an exact template lookup so an unmapped type doesn't get a scrnaseq-shaped
+        summary from the render-config fallback."""
+        template = TEMPLATES.get(template_name)
+        gen = getattr(template, "generate_summary", None) if template is not None else None
+        if callable(gen):
+            return gen(metrics)
+        emitted = metrics.get("summary_text")
+        if isinstance(emitted, str) and emitted:
+            return emitted
+        quality = metrics.get("quality_rating", "pending_review")
+        return f"Overall quality: **{quality.capitalize()}**."
 
     @staticmethod
     async def _collect_plots(
@@ -200,14 +174,17 @@ class QCDashboardService:
         *,
         template_name: str = "scrnaseq",
     ) -> list[dict]:
-        """Collect MultiQC plot PNGs the template advertises in its render config.
+        """Collect the MultiQC plot PNGs the resolved template advertises.
 
-        scRNA-seq + bulk_rnaseq both ship the standard nf-core MultiQC PNG set;
-        custom pipelines don't currently auto-collect plots (they can drop
-        their own image files into qc_metrics.json if needed).
+        A template lists its expected PNGs in ``MULTIQC_PLOTS``; a template
+        without that attribute (e.g. custom) collects none. PNGs are matched by
+        basename anywhere under ``multiqc/`` so both the flat scRNA-seq layout and
+        the aligner-nested bulk layout (multiqc/star_salmon/...) are covered.
         """
         plots_meta: list[dict] = []
-        if template_name == "custom":
+        template = get_template(template_name)
+        expected_plots = getattr(template, "MULTIQC_PLOTS", [])
+        if not expected_plots:
             return plots_meta
 
         results_bucket = await get_results_bucket(session)
@@ -219,7 +196,7 @@ class QCDashboardService:
 
             adapter = get_storage_adapter()
             prefix = f"experiments/{run.experiment_id}/pipeline-runs/{run.id}/"
-            plot_prefix = f"{prefix}multiqc/multiqc_plots/png/"
+            plot_prefix = f"{prefix}multiqc/"
 
             objs = await adapter.list_objects(adapter.build_uri(results_bucket, plot_prefix))
             available: dict[str, object] = {}
@@ -228,7 +205,7 @@ class QCDashboardService:
                     filename = obj.storage_uri.rsplit("/", 1)[-1]
                     available[filename] = obj
 
-            for png_name, title, plot_type in scrnaseq_template.MULTIQC_PLOTS:
+            for png_name, title, plot_type in expected_plots:
                 obj = available.get(png_name)
                 if not obj:
                     continue

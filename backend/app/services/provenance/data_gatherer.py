@@ -13,17 +13,21 @@ from sqlalchemy.orm import selectinload
 from app.exceptions import ValidationError
 from app.models.analysis_snapshot import AnalysisSnapshot
 from app.models.sample_batch import SampleBatch
+from app.models.comparison_target import ComparisonTarget  # noqa: F401 (relationship load target)
 from app.models.experiment import Experiment
 from app.models.experiment_custom_field import ExperimentCustomField
 from app.models.file import File
+from app.models.literature import LiteraturePaper
 from app.models.notebook_session import ComputeSession
 from app.models.notebook_session_file import NotebookSessionFile
 from app.models.pipeline_run import PipelineRun
 from app.models.project import Project
 from app.models.project_sample import ProjectSample
 from app.models.qc_dashboard import QCDashboard
+from app.models.reproduction_plan import ReproductionPlan
 from app.models.sample import Sample
 from app.models.user import User
+from app.models.validation_study import ValidationStudy, classification_confidence
 from app.services.provenance.schema import (
     ArtifactProvenanceData,
     ExperimentProvenanceData,
@@ -31,6 +35,7 @@ from app.services.provenance.schema import (
     ProjectProvenanceData,
     ProvenanceData,
     SampleProvenanceData,
+    ValidationStudyProvenanceData,
 )
 
 
@@ -113,6 +118,7 @@ class ProvenanceDataGatherer:
             "sample": ProvenanceDataGatherer.gather_sample,
             "pipeline_run": ProvenanceDataGatherer.gather_pipeline_run,
             "artifact": ProvenanceDataGatherer.gather_artifact,
+            "validation_study": ProvenanceDataGatherer.gather_validation_study,
         }
         gatherer = gatherers.get(entity_type)
         if not gatherer:
@@ -402,6 +408,10 @@ class ProvenanceDataGatherer:
             audit_pairs.append(("qc_dashboard", qc.id))
         audit_trail = await _audit_entries(session, audit_pairs, user_map)
 
+        # lit_validation A3 reverse link: if a ValidationStudy reproduces this experiment, cite the
+        # source paper it reproduces so the experiment's own report closes the paper <-> run loop.
+        validation = await ProvenanceDataGatherer._experiment_validation_link(session, experiment_id, org_id)
+
         return ExperimentProvenanceData(
             experiment={
                 "id": experiment.id,
@@ -534,7 +544,43 @@ class ProvenanceDataGatherer:
                 {"id": cf.id, "field_name": cf.field_name, "field_value": cf.field_value} for cf in custom_fields
             ],
             audit_trail=audit_trail,
+            validation=validation,
         )
+
+    @staticmethod
+    async def _experiment_validation_link(
+        session: AsyncSession, experiment_id: int, org_id: int
+    ) -> dict[str, Any] | None:
+        """The A3 reverse link: the ValidationStudy (if any) whose reproduction target is this
+        experiment, plus the source paper it reproduces. Newest study wins if more than one."""
+        study = (
+            (
+                await session.execute(
+                    select(ValidationStudy)
+                    .where(ValidationStudy.experiment_id == experiment_id, ValidationStudy.organization_id == org_id)
+                    .order_by(ValidationStudy.id.desc())
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if not study:
+            return None
+        paper_title = None
+        if study.paper_id:
+            paper = (
+                await session.execute(select(LiteraturePaper).where(LiteraturePaper.id == study.paper_id))
+            ).scalar_one_or_none()
+            paper_title = paper.title if paper else None
+        return {
+            "study_id": study.id,
+            "state": study.state,
+            "classification": study.classification,
+            "source_doi": study.source_doi,
+            "source_accession": study.source_accession,
+            "paper_id": study.paper_id,
+            "paper_title": paper_title,
+        }
 
     @staticmethod
     async def gather_sample(session: AsyncSession, sample_id: int, org_id: int) -> SampleProvenanceData:
@@ -968,5 +1014,164 @@ class ProvenanceDataGatherer:
             source_pipeline_run=source_run_data,
             linked_samples=linked_samples,
             downstream_usage=downstream_usage,
+            audit_trail=audit_trail,
+        )
+
+    @staticmethod
+    async def gather_validation_study(
+        session: AsyncSession, study_id: int, org_id: int
+    ) -> ValidationStudyProvenanceData:
+        """lit_validation A3 + F3: the full reproduction chain for one ValidationStudy.
+
+        source paper -> reproduction plan -> experiment -> data run (fetchngs) -> analysis run, plus
+        the computed-vs-claimed evidence bundle and the classifier verdict. Org-scoped via the study.
+        """
+        study = (
+            await session.execute(
+                select(ValidationStudy).where(ValidationStudy.id == study_id, ValidationStudy.organization_id == org_id)
+            )
+        ).scalar_one_or_none()
+        if not study:
+            return ValidationStudyProvenanceData()
+
+        user_ids: set[int | None] = {study.requested_by_user_id, study.approved_by_user_id}
+
+        # Source paper (the A3 "paper" side). Prefer the library paper; fall back to the captured
+        # DOI/accession so an ad-hoc study still records what it reproduced.
+        source_paper: dict[str, Any] | None = None
+        if study.paper_id:
+            paper = (
+                await session.execute(
+                    select(LiteraturePaper).where(
+                        LiteraturePaper.id == study.paper_id, LiteraturePaper.organization_id == org_id
+                    )
+                )
+            ).scalar_one_or_none()
+            if paper:
+                source_paper = {
+                    "id": paper.id,
+                    "title": paper.title,
+                    "doi": paper.doi,
+                    "pmid": paper.pmid,
+                    "journal": paper.journal,
+                    "publication_date": _dt(paper.publication_date),
+                    "authors": [a.get("name") for a in (paper.authors_json or []) if isinstance(a, dict)],
+                }
+        if source_paper is None and (study.source_doi or study.source_accession):
+            source_paper = {
+                "id": None,
+                "title": None,
+                "doi": study.source_doi,
+                "pmid": None,
+                "journal": None,
+                "publication_date": None,
+                "authors": [],
+            }
+
+        # Reproduction plan + comparison targets (the ratified recipe + the paper's claims).
+        reproduction_plan: dict[str, Any] | None = None
+        comparison_targets: list[dict[str, Any]] = []
+        if study.reproduction_plan_id:
+            plan = (
+                await session.execute(
+                    select(ReproductionPlan)
+                    .options(selectinload(ReproductionPlan.comparison_targets))
+                    .where(ReproductionPlan.id == study.reproduction_plan_id)
+                )
+            ).scalar_one_or_none()
+            if plan:
+                reproduction_plan = {
+                    "id": plan.id,
+                    "pipeline_key": plan.pipeline_key,
+                    "pipeline_version": plan.pipeline_version,
+                    "reference_genome": plan.reference_genome,
+                    "reference_build": plan.reference_build,
+                    "mapping_confidence": plan.mapping_confidence,
+                    "mapping_notes": plan.mapping_notes,
+                    "accessions": plan.accessions_json,
+                    "parameters": plan.parameters_json,
+                    "blockers": plan.blockers_json,
+                    "extractor_model": plan.extractor_model,
+                    "extractor_provider": plan.extractor_provider,
+                }
+                comparison_targets = [
+                    {
+                        "metric_key": t.metric_key,
+                        "claimed_value": t.claimed_value,
+                        "unit": t.unit,
+                        "tolerance": t.tolerance,
+                        "source_locator": t.source_locator,
+                    }
+                    for t in (plan.comparison_targets or [])
+                ]
+
+        # The reproduction experiment (A3 "run" side, the entity created for this study).
+        experiment: dict[str, Any] | None = None
+        if study.experiment_id:
+            exp = (
+                await session.execute(select(Experiment).where(Experiment.id == study.experiment_id))
+            ).scalar_one_or_none()
+            if exp:
+                experiment = {"id": exp.id, "name": exp.name, "status": exp.status}
+
+        # The two runs the driver launched, each labelled by its role in the chain.
+        role_runs = [("data_acquisition", study.data_run_id), ("analysis", study.analysis_run_id)]
+        pipeline_runs: list[dict[str, Any]] = []
+        for role, rid in role_runs:
+            if not rid:
+                continue
+            run = (await session.execute(select(PipelineRun).where(PipelineRun.id == rid))).scalar_one_or_none()
+            if run:
+                user_ids.add(run.submitted_by_user_id)
+                pipeline_runs.append(
+                    {
+                        "role": role,
+                        "id": run.id,
+                        "pipeline_name": run.pipeline_name,
+                        "pipeline_version": run.pipeline_version,
+                        "status": run.status,
+                        "reference_genome": run.reference_genome,
+                        "started_at": _dt(run.started_at),
+                        "completed_at": _dt(run.completed_at),
+                    }
+                )
+
+        user_map = await _user_map(session, user_ids)
+
+        audit_pairs: list[tuple[str, int]] = [("validation_study", study_id)]
+        if study.reproduction_plan_id:
+            audit_pairs.append(("reproduction_plan", study.reproduction_plan_id))
+        for _, rid in role_runs:
+            if rid:
+                audit_pairs.append(("pipeline_run", rid))
+        if study.experiment_id:
+            audit_pairs.append(("experiment", study.experiment_id))
+        audit_trail = await _audit_entries(session, audit_pairs, user_map)
+
+        return ValidationStudyProvenanceData(
+            study={
+                "id": study.id,
+                "uuid": str(study.uuid),
+                "state": study.state,
+                "classification": study.classification,
+                "confidence": classification_confidence(study.classification),
+                "source_doi": study.source_doi,
+                "source_accession": study.source_accession,
+                "paper_id": study.paper_id,
+                "experiment_id": study.experiment_id,
+                "requested_by": _user_ref(user_map, study.requested_by_user_id),
+                "requested_at": _dt(study.requested_at),
+                "approved_by": _user_ref(user_map, study.approved_by_user_id),
+                "approved_at": _dt(study.approved_at),
+                "failure_reason": study.failure_reason,
+                "created_at": _dt(study.created_at),
+                "updated_at": _dt(study.updated_at),
+            },
+            source_paper=source_paper,
+            reproduction_plan=reproduction_plan,
+            comparison_targets=comparison_targets,
+            experiment=experiment,
+            pipeline_runs=pipeline_runs,
+            evidence=study.evidence_json,
             audit_trail=audit_trail,
         )

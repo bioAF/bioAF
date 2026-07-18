@@ -3,12 +3,14 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
 
-type EntityType = "experiments" | "projects" | "samples" | "pipeline-runs" | "files";
+type EntityType = "experiments" | "projects" | "samples" | "pipeline-runs" | "files" | "validation-studies";
 type ExportFormat = "json" | "csv" | "pdf";
 
 interface ProvenanceExportMenuProps {
   entityType: EntityType;
   entityId: number;
+  /** Trigger label. Defaults to "Export Provenance"; validation studies use "Export Report". */
+  label?: string;
 }
 
 const FORMAT_LABELS: Record<ExportFormat, string> = {
@@ -17,7 +19,7 @@ const FORMAT_LABELS: Record<ExportFormat, string> = {
   pdf: "PDF",
 };
 
-export function ProvenanceExportMenu({ entityType, entityId }: ProvenanceExportMenuProps) {
+export function ProvenanceExportMenu({ entityType, entityId, label = "Export Provenance" }: ProvenanceExportMenuProps) {
   const [open, setOpen] = useState(false);
   const [exporting, setExporting] = useState<ExportFormat | null>(null);
 
@@ -53,7 +55,7 @@ export function ProvenanceExportMenu({ entityType, entityId }: ProvenanceExportM
             d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
           />
         </svg>
-        Export Provenance
+        {label}
         <svg
           xmlns="http://www.w3.org/2000/svg"
           className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`}

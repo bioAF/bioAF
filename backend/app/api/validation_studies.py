@@ -1,0 +1,253 @@
+"""HTTP API for the literature-validation flow (lit_validation).
+
+Thin glue over the services: request a study, run read-and-plan (B1 text -> B2/B3 extraction ->
+plan_ready or an early-exit classification), then the C1 gate (approve/decline). RBAC via the
+``lit_validation`` permission. The comparison/execution back half is not wired here yet.
+"""
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.dependencies import require_beta_feature, require_permission
+from app.api.provenance_reports import ReportFormat
+from app.database import get_session
+from app.models.validation_study import ValidationStudy, classification_confidence
+from app.schemas.validation_study import (
+    ClassifyRequest,
+    ComparisonTargetResponse,
+    DeclineRequest,
+    ReadRequest,
+    ReproductionPlanResponse,
+    ValidationStudyRequest,
+    ValidationStudyResponse,
+    ValidationStudySummary,
+)
+from app.services.audit_service import log_action
+from app.services.provenance.report_service import ProvenanceReportService
+from app.services.reproduction_plan_service import ReproductionPlanService
+from app.services.validation_driver_service import ValidationDriverService
+from app.services.validation_study_service import ValidationStudyService
+
+# lit_validation is a beta feature: when its flag is off, every endpoint here 404s (matching the hidden
+# nav entry), so the feature is invisible to instances that have not opted in (spec-07).
+router = APIRouter(
+    prefix="/api/validation-studies",
+    tags=["validation-studies"],
+    dependencies=[require_beta_feature("lit_validation")],
+)
+
+
+def _plan_response(plan) -> ReproductionPlanResponse | None:
+    if plan is None:
+        return None
+    return ReproductionPlanResponse(
+        id=plan.id,
+        accessions=plan.accessions_json,
+        sample_sheet=plan.sample_sheet_json,
+        pipeline_key=plan.pipeline_key,
+        pipeline_version=plan.pipeline_version,
+        parameters=plan.parameters_json,
+        reference_genome=plan.reference_genome,
+        reference_build=plan.reference_build,
+        mapping_confidence=plan.mapping_confidence,
+        mapping_notes=plan.mapping_notes,
+        blockers=plan.blockers_json,
+        extractor_model=plan.extractor_model,
+        extractor_provider=plan.extractor_provider,
+        comparison_targets=[
+            ComparisonTargetResponse(
+                metric_key=t.metric_key,
+                claimed_value=t.claimed_value,
+                unit=t.unit,
+                tolerance=t.tolerance,
+                source_locator=t.source_locator,
+            )
+            for t in (plan.comparison_targets or [])
+        ],
+    )
+
+
+async def _study_response(session: AsyncSession, study: ValidationStudy, org_id: int) -> ValidationStudyResponse:
+    plan = await ReproductionPlanService.get_plan(session, study.id, org_id)
+    return ValidationStudyResponse(
+        id=study.id,
+        state=study.state,
+        classification=study.classification,
+        confidence=classification_confidence(study.classification),
+        paper_id=study.paper_id,
+        source_doi=study.source_doi,
+        source_accession=study.source_accession,
+        experiment_id=study.experiment_id,
+        reproduction_plan_id=study.reproduction_plan_id,
+        approved_by_user_id=study.approved_by_user_id,
+        failure_reason=study.failure_reason,
+        plan=_plan_response(plan),
+        evidence=study.evidence_json,
+    )
+
+
+async def _load(session: AsyncSession, study_id: int, org_id: int) -> ValidationStudy:
+    study = (
+        await session.execute(
+            select(ValidationStudy).where(
+                ValidationStudy.id == study_id,
+                ValidationStudy.organization_id == org_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if not study:
+        raise HTTPException(404, "Validation study not found")
+    return study
+
+
+@router.post("", response_model=ValidationStudyResponse)
+async def request_validation(
+    data: ValidationStudyRequest,
+    current_user: dict = require_permission("lit_validation", "request"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await ValidationStudyService.create_study(
+        session,
+        org_id,
+        user_id,
+        paper_id=data.paper_id,
+        source_doi=data.source_doi,
+        source_accession=data.source_accession,
+    )
+    await session.commit()
+    return await _study_response(session, study, org_id)
+
+
+@router.get("", response_model=list[ValidationStudySummary])
+async def list_studies(
+    current_user: dict = require_permission("lit_validation", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    studies = await ValidationStudyService.list_studies(session, org_id)
+    return [
+        ValidationStudySummary(
+            id=s.id,
+            state=s.state,
+            classification=s.classification,
+            confidence=classification_confidence(s.classification),
+            paper_id=s.paper_id,
+            source_doi=s.source_doi,
+            source_accession=s.source_accession,
+            experiment_id=s.experiment_id,
+            created_at=s.created_at,
+        )
+        for s in studies
+    ]
+
+
+@router.get("/{study_id}", response_model=ValidationStudyResponse)
+async def get_study(
+    study_id: int,
+    current_user: dict = require_permission("lit_validation", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    study = await _load(session, study_id, org_id)
+    return await _study_response(session, study, org_id)
+
+
+@router.get("/{study_id}/provenance/report")
+async def study_provenance_report(
+    study_id: int,
+    format: ReportFormat = Query(ReportFormat.json),
+    current_user: dict = require_permission("lit_validation", "view"),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """F3 / A3: export the study + its evidence bundle (JSON/Markdown/PDF/CSV/all) via the shared
+    provenance report service. The report renders the full paper -> plan -> experiment -> runs chain.
+    A viewer who can see the study can export it (gated ``lit_validation:view``)."""
+    org_id = int(current_user["org_id"])
+    await _load(session, study_id, org_id)  # 404 if missing or another org's study
+    result = await ProvenanceReportService.generate(
+        session=session,
+        entity_type="validation_study",
+        entity_id=study_id,
+        org_id=org_id,
+        user_email=current_user.get("email", ""),
+        format=format.value,
+    )
+    await log_action(
+        session=session,
+        user_id=int(current_user["sub"]),
+        entity_type="validation_study",
+        entity_id=study_id,
+        action="provenance_report_generated",
+        details={"format": format.value},
+    )
+    await session.commit()
+
+    content = result.content
+    if isinstance(content, str):
+        content = content.encode("utf-8")
+    headers: dict[str, str] = {}
+    if format != ReportFormat.json:
+        headers["Content-Disposition"] = f'attachment; filename="{result.filename}"'
+    return Response(content=content, media_type=result.content_type, headers=headers)
+
+
+@router.post("/{study_id}/read", response_model=ValidationStudyResponse)
+async def read_and_plan(
+    study_id: int,
+    data: ReadRequest,
+    current_user: dict = require_permission("lit_validation", "request"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await _load(session, study_id, org_id)
+    study = await ValidationDriverService.read_and_plan(session, study, data.full_text, org_id, user_id)
+    await session.commit()
+    return await _study_response(session, study, org_id)
+
+
+@router.post("/{study_id}/approve", response_model=ValidationStudyResponse)
+async def approve_plan(
+    study_id: int,
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await ValidationStudyService.approve_plan(session, study_id, org_id, user_id)
+    await session.commit()
+    return await _study_response(session, study, org_id)
+
+
+@router.post("/{study_id}/classify", response_model=ValidationStudyResponse)
+async def classify_study(
+    study_id: int,
+    data: ClassifyRequest,
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Manual comparison gate (Phase 1): a human records the terminal classification from
+    ``comparing`` after reading the computed-vs-claimed evidence."""
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await ValidationStudyService.classify_by_hand(session, study_id, org_id, user_id, data.classification)
+    await session.commit()
+    return await _study_response(session, study, org_id)
+
+
+@router.post("/{study_id}/decline", response_model=ValidationStudyResponse)
+async def decline_plan(
+    study_id: int,
+    data: DeclineRequest,
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await ValidationStudyService.decline_plan(session, study_id, org_id, user_id, reason=data.reason)
+    await session.commit()
+    return await _study_response(session, study, org_id)

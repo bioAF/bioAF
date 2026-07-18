@@ -117,6 +117,9 @@ from app.models.sdr import (
     SdrCategory,
     SdrStatusTransition,
 )
+from app.models.validation_study import ValidationStudy
+from app.models.reproduction_plan import ReproductionPlan
+from app.models.comparison_target import ComparisonTarget
 
 __all__ = [
     "User",
@@ -235,4 +238,7 @@ __all__ = [
     "SdrCategory",
     "ScientificDecisionRecord",
     "SdrStatusTransition",
+    "ValidationStudy",
+    "ReproductionPlan",
+    "ComparisonTarget",
 ]
