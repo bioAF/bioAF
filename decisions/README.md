@@ -61,6 +61,7 @@
 | [ADR-063](ADR-063-sdr-status-machine.md) | Scientific Decision Records (SDR) Status Machine | Proposed | 2026-06-05 |
 | [ADR-064](ADR-064-sdr-reassessment-triggers.md) | Date-Based SDR Re-Assessment Triggers | Proposed | 2026-06-05 |
 | [ADR-065](ADR-065-bal-normalized-contract.md) | BAL Normalized Contract, Capabilities, and the Category/Backend Rule | Accepted | 2026-06-08 |
+| [ADR-068](ADR-068-literature-validation-reproduction-triage.md) | Literature Validation as a Reproduction-Triage Screen | Accepted | 2026-07-15 |
 
 ## How to Use This Directory
 

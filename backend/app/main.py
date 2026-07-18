@@ -285,6 +285,7 @@ async def lifespan(app: FastAPI):
     background_tasks.append(asyncio.create_task(_version_check_loop()))
     background_tasks.append(asyncio.create_task(_review_reminder_loop()))
     background_tasks.append(asyncio.create_task(_auto_run_launch_loop()))
+    background_tasks.append(asyncio.create_task(_validation_driver_loop()))
     background_tasks.append(asyncio.create_task(_pubsub_listener_loop()))
     background_tasks.append(asyncio.create_task(_session_monitor_loop()))
     background_tasks.append(asyncio.create_task(_notebook_image_build_loop()))
@@ -681,6 +682,29 @@ async def _auto_run_launch_loop():
             break
         except Exception as e:
             logger.error("Auto-run launch loop error: %s", e)
+
+
+async def _validation_driver_loop():
+    """Advance active literature-validation studies through the execution back half every 30s.
+
+    The A2 back-half driver reacts to committed pipeline-run state (fetchngs done, analysis done),
+    so a periodic tick that polls the DB is the right shape (like pipeline-monitor and auto-run),
+    not an event subscriber racing the run's completion emit. advance_active_studies isolates and
+    commits each study on its own."""
+    from app.database import async_session_factory
+    from app.services.validation_driver_service import ValidationDriverService
+
+    while True:
+        try:
+            await asyncio.sleep(30)
+            async with async_session_factory() as session:
+                advanced = await ValidationDriverService.advance_active_studies(session)
+                if advanced:
+                    logger.info("Validation driver loop: advanced %d studies", advanced)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error("Validation driver loop error: %s", e)
 
 
 async def _pubsub_listener_loop():

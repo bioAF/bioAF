@@ -21,6 +21,11 @@ export interface NavChild {
   /** Hidden when the active backend lacks this BAL capability (distinct from
    * componentGate availability). See useCapabilities / ProviderCapabilities. */
   capability?: string;
+  /** Hidden unless this beta feature flag is enabled (spec-07). See useBetaFeatures. */
+  betaFlag?: string;
+  /** Shown only when beta features are available on this instance (a bioAF-operated
+   * instance). Used for the Beta Features menu itself. */
+  requiresBetaAvailability?: boolean;
 }
 
 export interface NavSection {
@@ -86,6 +91,7 @@ export const navConfig: NavSection[] = [
       { label: "Files", path: "/data/files", permission: { resource: "files", action: "view" } },
       { label: "Reference Data", path: "/data/references", permission: { resource: "files", action: "view" } },
       { label: "Literature", path: "/data/literature", permission: { resource: "literature", action: "view" } },
+      { label: "Validation Studies", path: "/validation-studies", permission: { resource: "lit_validation", action: "view" }, betaFlag: "lit_validation" },
       { label: "Naming Profiles", path: "/settings/naming-profiles", permission: { resource: "infrastructure", action: "configure" } },
     ],
   },
@@ -118,6 +124,7 @@ export const navConfig: NavSection[] = [
       { label: "Integrations", path: "/settings/integrations", permission: { resource: "infrastructure", action: "configure" } },
       { label: "Workbench Settings", path: "/settings/work-nodes", permission: { resource: "work_nodes", action: "configure" }, capability: "work_nodes" },
       { label: "Networking", path: "/settings/networking", permission: { resource: "infrastructure", action: "edit" } },
+      { label: "Beta Features", path: "/settings/beta-features", permission: { resource: "infrastructure", action: "configure" }, requiresBetaAvailability: true },
       { label: "Information", path: "/settings/info", permission: { resource: "infrastructure", action: "view" } },
     ],
   },

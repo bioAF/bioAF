@@ -324,6 +324,28 @@ def test_pipeline_head_pool_is_tainted_for_strict_isolation():
     assert 'effect = "NO_SCHEDULE"' in block
 
 
+def test_pipelines_pool_is_tainted_to_repel_system_pods():
+    """The pipelines pool carries a NoSchedule taint so GKE-managed system addons
+    (kube-dns, metrics-server, konnectivity, ...) can never schedule onto it and pin
+    an expensive n2-highmem-16 node, which blocks scale-to-zero and leaks cost (seen
+    2026-07-04: a pipelines node stuck ~2 days hosting only system pods). Nextflow task
+    pods carry the matching toleration + nodeSelector (see _build_nextflow_k8s_config),
+    so pipeline work still lands here while system pods stay on the bioaf-system pool."""
+    main_tf = (COMPUTE_MODULE_DIR / "main.tf").read_text()
+
+    resource_marker = 'resource "google_container_node_pool" "pipelines"'
+    start = main_tf.index(resource_marker)
+    end = main_tf.find('resource "', start + 1)
+    if end == -1:
+        end = len(main_tf)
+    block = main_tf[start:end]
+
+    assert "taint" in block, "pipelines pool must declare a taint block"
+    assert 'key    = "bioaf.io/pool"' in block or 'key = "bioaf.io/pool"' in block
+    assert 'value  = "pipelines"' in block or 'value = "pipelines"' in block
+    assert 'effect = "NO_SCHEDULE"' in block
+
+
 def test_pipeline_head_pool_variables_defined():
     """variables.tf must declare machine_type and max_nodes for the head pool."""
     variables_tf = (COMPUTE_MODULE_DIR / "variables.tf").read_text()

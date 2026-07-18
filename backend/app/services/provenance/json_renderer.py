@@ -14,6 +14,7 @@ from app.services.provenance.schema import (
     ProvenanceData,
     SampleProvenanceData,
     SCHEMA_VERSION,
+    ValidationStudyProvenanceData,
 )
 
 
@@ -49,6 +50,8 @@ def _get_audit_trail(data: ProvenanceData) -> list[dict[str, Any]]:
         return data.audit_trail
     if isinstance(data, ArtifactProvenanceData):
         return data.audit_trail
+    if isinstance(data, ValidationStudyProvenanceData):
+        return data.audit_trail
     return []
 
 
@@ -70,6 +73,7 @@ def _render_experiment(data: ProvenanceData) -> dict[str, Any]:
     return {
         "type": "experiment",
         **data.experiment,
+        "validation": data.validation,
         "samples": data.samples,
         "pipeline_runs": data.pipeline_runs,
         "files": {
@@ -118,10 +122,27 @@ def _render_artifact(data: ProvenanceData) -> dict[str, Any]:
     }
 
 
+def _render_validation_study(data: ProvenanceData) -> dict[str, Any]:
+    assert isinstance(data, ValidationStudyProvenanceData)
+    plan = dict(data.reproduction_plan) if data.reproduction_plan else None
+    if plan is not None:
+        plan["comparison_targets"] = data.comparison_targets
+    return {
+        "type": "validation_study",
+        **data.study,
+        "source_paper": data.source_paper,
+        "reproduction_plan": plan,
+        "experiment": data.experiment,
+        "pipeline_runs": data.pipeline_runs,
+        "evidence": data.evidence,
+    }
+
+
 _ENTITY_RENDERERS: dict[str, Any] = {
     "project": _render_project,
     "experiment": _render_experiment,
     "sample": _render_sample,
     "pipeline_run": _render_pipeline_run,
     "artifact": _render_artifact,
+    "validation_study": _render_validation_study,
 }

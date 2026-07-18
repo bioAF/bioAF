@@ -36,6 +36,12 @@ jest.mock("@/hooks/useBackendReady", () => ({
   useBackendReady: () => ({ ready: true }),
 }));
 
+// Beta features default-deny (the Sidebar now consults useBetaFeatures; without this it would hit the
+// real hook -> auth/network).
+jest.mock("@/hooks/useBetaFeatures", () => ({
+  useBetaFeatures: () => ({ available: false, flags: {}, loading: false }),
+}));
+
 jest.mock("@/hooks/useCapabilities", () => ({
   useCapabilities: () => ({ has: () => true, capabilities: {}, loading: false }),
 }));

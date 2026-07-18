@@ -5,6 +5,21 @@ from app.database import get_session
 from app.services import role_service
 
 
+def require_beta_feature(key: str):
+    """Gate a router/route behind a beta flag. When the flag is off the feature must look like it does
+    not exist, so this raises 404 (not 403). Used to hide the lit_validation endpoints when its flag is
+    off, matching the UI which hides the nav entry (spec-07)."""
+
+    async def checker(session: AsyncSession = Depends(get_session)):
+        from app.services import beta_features_service
+
+        if not await beta_features_service.is_enabled(session, key):
+            raise HTTPException(404, "Not Found")
+        return True
+
+    return Depends(checker)
+
+
 def require_permission(resource: str, action: str):
     async def checker(request: Request, session: AsyncSession = Depends(get_session)):
         user = request.state.current_user

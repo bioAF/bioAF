@@ -8,7 +8,7 @@ from typing import Any
 SCHEMA_VERSION = "1.0"
 
 # Entity type literals
-ENTITY_TYPES = ("project", "experiment", "sample", "pipeline_run", "artifact")
+ENTITY_TYPES = ("project", "experiment", "sample", "pipeline_run", "artifact", "validation_study")
 
 
 @dataclass
@@ -52,6 +52,9 @@ class ExperimentProvenanceData:
     references: list[dict[str, Any]] = field(default_factory=list)
     custom_fields: list[dict[str, Any]] = field(default_factory=list)
     audit_trail: list[dict[str, Any]] = field(default_factory=list)
+    # lit_validation A3 reverse link: set when this experiment is the reproduction target of a
+    # ValidationStudy, so the experiment's own report can cite the source paper it reproduces.
+    validation: dict[str, Any] | None = None
 
 
 @dataclass
@@ -86,10 +89,27 @@ class ArtifactProvenanceData:
     audit_trail: list[dict[str, Any]] = field(default_factory=list)
 
 
+@dataclass
+class ValidationStudyProvenanceData:
+    """A lit_validation reproduction attempt (A3 + F3). Wires the source paper to the reproduction
+    plan, the created experiment, and the two pipeline runs (data acquisition + analysis), alongside
+    the computed-vs-claimed evidence bundle and the classifier's verdict."""
+
+    study: dict[str, Any] = field(default_factory=dict)
+    source_paper: dict[str, Any] | None = None
+    reproduction_plan: dict[str, Any] | None = None
+    comparison_targets: list[dict[str, Any]] = field(default_factory=list)
+    experiment: dict[str, Any] | None = None
+    pipeline_runs: list[dict[str, Any]] = field(default_factory=list)
+    evidence: dict[str, Any] | None = None
+    audit_trail: list[dict[str, Any]] = field(default_factory=list)
+
+
 ProvenanceData = (
     ProjectProvenanceData
     | ExperimentProvenanceData
     | SampleProvenanceData
     | PipelineRunProvenanceData
     | ArtifactProvenanceData
+    | ValidationStudyProvenanceData
 )

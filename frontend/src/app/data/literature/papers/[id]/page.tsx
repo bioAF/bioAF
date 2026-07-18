@@ -8,6 +8,7 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { getCurrentUser, isAuthenticated } from "@/lib/auth";
 import { PaperPdfViewer } from "@/components/literature/PaperPdfViewer";
 import { AssociatePaperModal } from "@/components/literature/AssociatePaperModal";
+import { ValidatePaperButton } from "@/components/validation/ValidatePaperButton";
 import {
   advanceReadingStatus,
   cleanText,
@@ -244,6 +245,9 @@ export default function PaperDetailPage() {
           <div className="text-gray-600 mb-4">
             {formatAuthors(paper.authors)} · {formatYear(paper.publication_date)} ·{" "}
             {cleanText(paper.journal)}
+          </div>
+          <div className="mb-4">
+            <ValidatePaperButton paperId={paper.id} doi={paper.doi} />
           </div>
           {paper.dismissed && (
             <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-2 rounded mb-4">

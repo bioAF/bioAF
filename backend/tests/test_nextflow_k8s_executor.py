@@ -142,8 +142,10 @@ class TestK8sExecutor:
         assert "GOOGLE_APPLICATION_CREDENTIALS" in config_script
 
     @pytest.mark.asyncio
-    async def test_k8s_config_omits_unsupported_tolerations(self, adapter):
-        """Nextflow K8s executor does not support tolerations in k8s.pod."""
+    async def test_k8s_config_pins_task_pods_to_the_tainted_pipelines_pool(self, adapter):
+        """The bioaf-pipelines pool is tainted (cost-leak fix), so task pods must carry the matching
+        toleration plus a nodeSelector pinning them to the pool. Nextflow 25.10 supports these k8s.pod
+        options (an earlier assumption that it did not is why the pool used to be left untainted)."""
         mock_batch = _mock_batch_client()
         mock_core = _mock_core_client()
 
@@ -171,9 +173,9 @@ class TestK8sExecutor:
         config_writers = [ic for ic in init_containers if ic["name"] == "write-nf-config"]
         config_script = config_writers[0]["command"][-1]
 
-        # Nextflow doesn't support tolerations or nodeSelector in k8s.pod
-        assert "tolerations" not in config_script
-        assert "nodeSelector" not in config_script
+        # The generated k8s.pod config pins task pods to the tainted pipelines pool.
+        assert "nodeSelector: 'bioaf.io/pool=pipelines'" in config_script
+        assert "toleration: [key: 'bioaf.io/pool'" in config_script
 
     def test_k8s_config_sets_gcs_work_dir(self):
         """Nextflow workDir must point to GCS so head and process pods share files."""

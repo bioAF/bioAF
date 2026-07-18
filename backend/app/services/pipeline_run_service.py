@@ -22,6 +22,21 @@ from app.services.vocabulary_validator import VocabularyValidator
 
 logger = logging.getLogger("bioaf.pipeline_runs")
 
+# MACS mappable ("effective") genome size per reference build, for peak-calling pipelines
+# (chipseq/atacseq). These are the standard MACS values: human ~2.7e9, mouse ~1.87e9. Keyed by the
+# controlled reference_genome vocabulary (+ common UCSC aliases). Unknown builds are left unset so
+# nf-core surfaces its own "specify --read_length or --macs_gsize" guidance rather than a wrong size.
+_MACS_GSIZE_BY_GENOME: dict[str, float] = {
+    "GRCh38": 2.7e9,
+    "GRCh37": 2.7e9,
+    "hg38": 2.7e9,
+    "hg19": 2.7e9,
+    "T2T-CHM13": 3.03e9,
+    "GRCm39": 1.87e9,
+    "GRCm38": 1.87e9,
+    "mm10": 1.87e9,
+}
+
 
 class PipelineRunService:
     @staticmethod
@@ -151,6 +166,24 @@ class PipelineRunService:
         # 6. Merge parameters (user params override defaults)
         merged_params = dict(pipeline.default_params_json or {})
         merged_params.update(data.parameters)
+
+        # reference_genome is the first-class control for the nf-core iGenomes `--genome` key. Translate
+        # it into the param so pipelines that don't hardcode a `genome` default still receive it: the
+        # built-in rnaseq defaults file sets genome, but registry-installed pipelines (chipseq, atacseq,
+        # ...) do not, so without this they launch with no genome and fail validation ("Missing --fasta").
+        # An explicit `genome` param (from defaults or the caller) wins.
+        if data.reference_genome and "genome" not in merged_params:
+            merged_params["genome"] = data.reference_genome
+
+        # Peak-calling pipelines (chipseq/atacseq) need the mappable genome size for MACS; nf-core
+        # fails ("specify --read_length or --macs_gsize") when neither is set and iGenomes doesn't
+        # supply it. Derive macs_gsize from the genome so these runs work out of the box; an explicit
+        # macs_gsize/read_length wins.
+        if any(k in pipeline.pipeline_key for k in ("chipseq", "atacseq")):
+            if "macs_gsize" not in merged_params and "read_length" not in merged_params:
+                gsize = _MACS_GSIZE_BY_GENOME.get(merged_params.get("genome"))
+                if gsize is not None:
+                    merged_params["macs_gsize"] = gsize
 
         # 7. Create pipeline_runs record
         run = PipelineRun(

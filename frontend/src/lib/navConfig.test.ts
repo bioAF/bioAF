@@ -76,6 +76,15 @@ describe("Experiments surfaced as a top-level section", () => {
   });
 });
 
+describe("Validation Studies nav entry", () => {
+  it("adds a Validation Studies child under Data & Files gated on lit_validation:view", () => {
+    const data = navConfig.find((s) => s.label === "Data & Files");
+    const child = data?.children?.find((c) => c.label === "Validation Studies");
+    expect(child?.path).toBe("/validation-studies");
+    expect(child?.permission).toEqual({ resource: "lit_validation", action: "view" });
+  });
+});
+
 describe("top-level nav order", () => {
   it("lists sections in the intended order", () => {
     expect(navConfig.map((s) => s.label)).toEqual([

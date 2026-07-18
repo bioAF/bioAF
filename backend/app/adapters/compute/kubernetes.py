@@ -1004,15 +1004,20 @@ class KubernetesComputeProvider(ComputeProvider):
             ": (task.attempt <= 2 ? 'retry' : 'finish') }"
         )
 
-        # Build k8s.pod directives for secrets/env (Nextflow doesn't
-        # support tolerations in k8s.pod, so node placement is left to
-        # the cluster autoscaler; the head Job already targets the
-        # pipeline pool via nodeSelector + toleration in the Job manifest).
-        # Pin every task pod with safe-to-evict=false so long-running
-        # steps (STAR_GENOMEGENERATE, alignment, etc.) don't get killed
-        # when the autoscaler decides their node is "underutilized".
+        # Build k8s.pod directives for task pod placement, secrets, and env.
+        #
+        # Placement: the bioaf-pipelines pool is tainted (bioaf.io/pool=pipelines:NoSchedule) so
+        # GKE-managed system addons can never pin an expensive node and block scale-to-zero. Task
+        # pods therefore MUST carry the matching toleration to schedule there, plus a nodeSelector
+        # pinning them to the pool. Nextflow 25.10 supports the `toleration` pod option (an earlier
+        # assumption that it did not is why the pool used to be left untainted).
+        #
+        # safe-to-evict=false keeps long-running steps (STAR_GENOMEGENERATE, alignment, ...) from
+        # being killed when the autoscaler decides their node is "underutilized".
         pod_directives: list[str] = [
             "[annotation: 'cluster-autoscaler.kubernetes.io/safe-to-evict', value: 'false']",
+            "[nodeSelector: 'bioaf.io/pool=pipelines']",
+            "[toleration: [key: 'bioaf.io/pool', operator: 'Equal', value: 'pipelines', effect: 'NoSchedule']]",
         ]
         if has_gcs_secret:
             pod_directives.append("[secret: 'bioaf-gcs-sa-key', mountPath: '/secrets/gcp']")
@@ -1385,8 +1390,8 @@ class KubernetesComputeProvider(ComputeProvider):
                         # the head pod kills the entire pipeline; on-demand keeps
                         # the orchestrator alive while task pods (Spot, retried
                         # by Nextflow's errorStrategy on exit 143/137/247) stay
-                        # cheap. The pool is tainted so Nextflow's task pods
-                        # (which can't carry custom tolerations) cannot land here.
+                        # cheap. This head pool is tainted bioaf.io/pool=pipeline-head;
+                        # task pods tolerate only the pipelines taint, so they never land here.
                         "nodeSelector": {"bioaf.io/pool": "pipeline-head"},
                         "tolerations": [
                             {

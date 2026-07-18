@@ -40,6 +40,7 @@ from app.api.infrastructure import router as infrastructure_router
 from app.api.naming_profiles import router as naming_profiles_router
 from app.api.ingest import router as ingest_router
 from app.api.ingest import claim_router
+from app.api.validation_studies import router as validation_studies_router
 from app.api.ssh_connect import router as ssh_connect_router
 from app.api.gcp_config import router as gcp_config_router
 from app.api.aws_config import router as aws_config_router
@@ -66,6 +67,7 @@ from app.api.github_repos import router as github_repos_router
 from app.api.custom_pipelines import router as custom_pipelines_router
 from app.api.integrations_admin import router as integrations_admin_router
 from app.api.llm_config import router as llm_config_router
+from app.api.beta_features import router as beta_features_router
 from app.api.agent_reviews import router as agent_reviews_router
 from app.api.literature import router as literature_router
 from app.api.dashboards import router as dashboards_router
@@ -114,6 +116,7 @@ api_router.include_router(geo_export_router)
 api_router.include_router(snapshots_router)
 api_router.include_router(infrastructure_router)
 api_router.include_router(naming_profiles_router)
+api_router.include_router(beta_features_router)
 api_router.include_router(ingest_router)
 api_router.include_router(claim_router)
 api_router.include_router(ssh_connect_router)
@@ -145,6 +148,7 @@ api_router.include_router(llm_config_router)
 api_router.include_router(agent_reviews_router)
 api_router.include_router(assistant_router)
 api_router.include_router(literature_router)
+api_router.include_router(validation_studies_router)
 api_router.include_router(dashboards_router)
 api_router.include_router(lab_documents_router)
 api_router.include_router(lab_glossary_router)

@@ -7,6 +7,14 @@ logger = logging.getLogger("bioaf.sample_sheet")
 
 _ILLUMINA_READ_RE = re.compile(r"_(R[12]|I[12])_")
 
+# ChIP-seq control/input detection (lit_validation Phase 4). A fetched sample carries its ENA/GEO
+# title + library_strategy in prep_notes (captured by FetchngsIngestService); we read that plus the
+# external_id to tell a control/input sample from an IP sample. Markers are matched case-insensitively
+# on word-ish boundaries so "input" doesn't fire on "reinput" etc.
+_CONTROL_MARKERS = ("input", "igg", "mock", "control", "wce", "whole cell extract", "no antibody", "no-antibody")
+# A histone-mark antibody token (H3K4me3, H3K27ac, H3K9me2, ...); a clean, no-space antibody label.
+_HISTONE_MARK_RE = re.compile(r"\bH[1-4](?:K\d+)(?:me[1-3]|ac|ub)?\b", re.IGNORECASE)
+
 # A sample name that is purely numeric (int or float). nf-core/nf-schema infers a
 # CSV column's type from its values, so such a name is typed as integer/number and
 # rejected against the schema's string 'sample' field ("Value is [integer] but
@@ -114,6 +122,32 @@ def _extract_fastq_paths(sample) -> tuple[str, str]:
     return pairs[0] if pairs else ("", "")
 
 
+def _sample_text(sample) -> str:
+    """Text used to classify a ChIP-seq sample: its external_id + prep_notes (which carry the ENA/GEO
+    title + library_strategy for a fetched sample). Original case preserved for antibody extraction;
+    control matching lowercases it itself."""
+    parts = [getattr(sample, "external_id", None) or "", getattr(sample, "prep_notes", None) or ""]
+    return " ".join(parts)
+
+
+def _is_chip_control(sample) -> bool:
+    """True if a sample looks like a ChIP-seq control/input (IgG, input, mock, WCE)."""
+    text = _sample_text(sample).lower()
+    return any(m in text for m in _CONTROL_MARKERS)
+
+
+def _antibody_label(sample) -> str:
+    """A no-space antibody token for a ChIP (IP) sample's ``antibody`` column.
+
+    Prefers a recognized histone mark parsed from the title (H3K4me3, H3K27ac, ...); otherwise falls
+    back to a sanitized sample name. The value only needs to be non-empty, space-free, and consistent
+    across replicates of the same target (nf-core/chipseq groups consensus peaks by it)."""
+    m = _HISTONE_MARK_RE.search(_sample_text(sample))
+    if m:
+        return m.group(0).replace(" ", "")
+    return re.sub(r"\s+", "_", _safe_sample_name(sample))
+
+
 class SampleSheetService:
     @staticmethod
     def generate_scrnaseq_sheet(samples: list, parameters: dict) -> str:
@@ -165,6 +199,81 @@ class SampleSheetService:
         return output.getvalue()
 
     @staticmethod
+    def generate_chipseq_sheet(samples: list, parameters: dict) -> str:
+        """Generate an nf-core/chipseq sample sheet CSV (lit_validation Phase 4).
+
+        Columns: sample,fastq_1,fastq_2,replicate,antibody,control,control_replicate. Only sample +
+        fastq_1 are mandatory; antibody requires control (schema dependency). Control/input samples
+        carry empty antibody/control; IP samples get an antibody label and point ``control`` at the
+        detected control sample (so MACS2 subtracts input and peaks/FRiP are computed).
+
+        Control detection is best-effort from each sample's metadata (external_id + prep_notes, which
+        carry the ENA/GEO title for a fetched sample). If no control can be identified, IP samples are
+        emitted WITHOUT antibody/control -- still schema-valid and the run completes (alignment + QC),
+        but those samples are not peak-called. This degrade is logged, never a launch failure.
+        """
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["sample", "fastq_1", "fastq_2", "replicate", "antibody", "control", "control_replicate"])
+
+        input_paths = parameters.get("input_paths", {})
+
+        controls = [s for s in samples if _is_chip_control(s)]
+        control_name = _safe_sample_name(controls[0]) if controls else ""
+        if not controls:
+            logger.info(
+                "chipseq sheet: no control/input sample identified among %d samples; IP samples will be "
+                "emitted without antibody/control (no peak calling for them)",
+                len(samples),
+            )
+
+        def _rows_for(sample):
+            paths = input_paths.get(str(sample.id), [])
+            if paths:
+                return [(paths[0] if len(paths) > 0 else "", paths[1] if len(paths) > 1 else "")]
+            return _extract_fastq_lane_pairs(sample)
+
+        for sample in samples:
+            sample_name = _safe_sample_name(sample)
+            is_control = _is_chip_control(sample)
+            # An IP sample gets an antibody only if there is a control to reference (schema: antibody
+            # requires control). Control samples, and IP samples with no available control, go bare.
+            if is_control or not control_name:
+                antibody, control, control_replicate = "", "", ""
+            else:
+                antibody, control, control_replicate = _antibody_label(sample), control_name, "1"
+            for fastq_1, fastq_2 in _rows_for(sample):
+                writer.writerow([sample_name, fastq_1, fastq_2, "1", antibody, control, control_replicate])
+
+        return output.getvalue()
+
+    @staticmethod
+    def generate_atacseq_sheet(samples: list, parameters: dict) -> str:
+        """Generate an nf-core/atacseq sample sheet CSV (lit_validation Phase 4).
+
+        Columns: sample,fastq_1,fastq_2,replicate. ATAC-seq has no antibody/immunoprecipitation, so
+        (unlike chipseq) there is no antibody/control -- but ``replicate`` is required by the schema.
+        One replicate per sample (=1); a downstream user can merge biological replicates by editing it.
+        """
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["sample", "fastq_1", "fastq_2", "replicate"])
+
+        input_paths = parameters.get("input_paths", {})
+
+        for sample in samples:
+            sample_name = _safe_sample_name(sample)
+            paths = input_paths.get(str(sample.id), [])
+            if paths:
+                rows = [(paths[0] if len(paths) > 0 else "", paths[1] if len(paths) > 1 else "")]
+            else:
+                rows = _extract_fastq_lane_pairs(sample)
+            for fastq_1, fastq_2 in rows:
+                writer.writerow([sample_name, fastq_1, fastq_2, "1"])
+
+        return output.getvalue()
+
+    @staticmethod
     def generate_generic_sheet(samples: list, parameters: dict) -> str:
         """Generic fallback CSV sample sheet."""
         output = io.StringIO()
@@ -207,6 +316,10 @@ class SampleSheetService:
             return SampleSheetService.generate_scrnaseq_sheet(samples, parameters)
         elif "rnaseq" in pipeline_key:
             return SampleSheetService.generate_rnaseq_sheet(samples, parameters)
+        elif "chipseq" in pipeline_key:
+            return SampleSheetService.generate_chipseq_sheet(samples, parameters)
+        elif "atacseq" in pipeline_key:
+            return SampleSheetService.generate_atacseq_sheet(samples, parameters)
         elif "fetchngs" in pipeline_key:
             return SampleSheetService.generate_fetchngs_ids(parameters)
         else:
