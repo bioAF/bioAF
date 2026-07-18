@@ -97,30 +97,22 @@ class TestApi:
 
     async def test_put_toggles_when_admin_and_available(self, client, session, admin_user, admin_token):
         await _add_user(session, admin_user, "op@bioaf.co", "admin")  # instance becomes bioAF-operated
-        r = await client.put(
-            "/api/beta-features/lit_validation", json={"enabled": True}, headers=_auth(admin_token)
-        )
+        r = await client.put("/api/beta-features/lit_validation", json={"enabled": True}, headers=_auth(admin_token))
         assert r.status_code == 200, r.text
         assert r.json()["flags"]["lit_validation"] is True
 
     async def test_put_403_when_not_available(self, client, admin_token):
-        r = await client.put(
-            "/api/beta-features/lit_validation", json={"enabled": True}, headers=_auth(admin_token)
-        )
+        r = await client.put("/api/beta-features/lit_validation", json={"enabled": True}, headers=_auth(admin_token))
         assert r.status_code == 403, r.text
 
     async def test_put_403_for_viewer(self, client, session, admin_user, viewer_token):
         await _add_user(session, admin_user, "op@bioaf.co", "admin")
-        r = await client.put(
-            "/api/beta-features/lit_validation", json={"enabled": True}, headers=_auth(viewer_token)
-        )
+        r = await client.put("/api/beta-features/lit_validation", json={"enabled": True}, headers=_auth(viewer_token))
         assert r.status_code == 403, r.text
 
     async def test_put_404_unknown_key(self, client, session, admin_user, admin_token):
         await _add_user(session, admin_user, "op@bioaf.co", "admin")
-        r = await client.put(
-            "/api/beta-features/nonsense", json={"enabled": True}, headers=_auth(admin_token)
-        )
+        r = await client.put("/api/beta-features/nonsense", json={"enabled": True}, headers=_auth(admin_token))
         assert r.status_code == 404, r.text
 
 

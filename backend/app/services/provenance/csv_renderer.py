@@ -274,7 +274,15 @@ def _render_validation_study_csv(report: dict[str, Any]) -> dict[str, str]:
     comparisons = result.get("comparisons")
     if comparisons:
         comparison_csv = _csv_str(
-            ["Claimed Metric", "Computed Key", "Claimed Value", "Computed Value", "Delta", "Within Tolerance", "Verdict"],
+            [
+                "Claimed Metric",
+                "Computed Key",
+                "Claimed Value",
+                "Computed Value",
+                "Delta",
+                "Within Tolerance",
+                "Verdict",
+            ],
             [
                 [
                     c.get("metric_key"),
@@ -293,7 +301,13 @@ def _render_validation_study_csv(report: dict[str, Any]) -> dict[str, str]:
         comparison_csv = _csv_str(
             ["Claimed Metric", "Claimed Value", "Unit", "Tolerance", "Source"],
             [
-                [t.get("metric_key"), t.get("claimed_value"), t.get("unit"), t.get("tolerance"), t.get("source_locator")]
+                [
+                    t.get("metric_key"),
+                    t.get("claimed_value"),
+                    t.get("unit"),
+                    t.get("tolerance"),
+                    t.get("source_locator"),
+                ]
                 for t in targets
             ],
         )

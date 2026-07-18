@@ -122,9 +122,7 @@ class ValidationDriverService:
         DOI. The fetch happens BEFORE any state change so a failure leaves the study in ``requested``
         and the caller can retry (e.g. by pasting a body)."""
         if study.state != "requested":
-            raise ValidationError(
-                f"read_and_plan can only start from 'requested'; study is in '{study.state}'."
-            )
+            raise ValidationError(f"read_and_plan can only start from 'requested'; study is in '{study.state}'.")
 
         if not full_text:
             result = await FullTextFetchService.fetch(doi=study.source_doi)
@@ -221,8 +219,12 @@ class ValidationDriverService:
         if not await _has_runnable_samples(session, study.experiment_id):
             study.failure_reason = "fetched data was not usable (no runnable samples with FASTQ)"
             await ValidationStudyService.transition(
-                session, study.id, study.organization_id, study.requested_by_user_id,
-                "classified", classification="missing_data",
+                session,
+                study.id,
+                study.organization_id,
+                study.requested_by_user_id,
+                "classified",
+                classification="missing_data",
             )
             return True
 
@@ -363,8 +365,12 @@ class ValidationDriverService:
         if not accessions:
             study.failure_reason = "no accession in the approved plan"
             await ValidationStudyService.transition(
-                session, study.id, study.organization_id, study.requested_by_user_id,
-                "classified", classification="missing_data",
+                session,
+                study.id,
+                study.organization_id,
+                study.requested_by_user_id,
+                "classified",
+                classification="missing_data",
             )
             return True
 
@@ -393,9 +399,7 @@ class ValidationDriverService:
     async def _launch(session: AsyncSession, study: ValidationStudy, launch: PipelineRunLaunchRequest):
         from app.services.pipeline_run_service import PipelineRunService
 
-        return await PipelineRunService.launch_run(
-            session, study.organization_id, study.requested_by_user_id, launch
-        )
+        return await PipelineRunService.launch_run(session, study.organization_id, study.requested_by_user_id, launch)
 
     @staticmethod
     async def _load_run(session: AsyncSession, run_id: int | None):
@@ -408,8 +412,12 @@ class ValidationDriverService:
     @staticmethod
     async def _fail(session: AsyncSession, study: ValidationStudy, reason: str) -> bool:
         await ValidationStudyService.transition(
-            session, study.id, study.organization_id, study.requested_by_user_id,
-            "error", failure_reason=reason,
+            session,
+            study.id,
+            study.organization_id,
+            study.requested_by_user_id,
+            "error",
+            failure_reason=reason,
         )
         return True
 

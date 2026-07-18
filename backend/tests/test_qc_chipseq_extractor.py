@@ -152,9 +152,7 @@ def test_frip_percent_is_normalized_to_fraction():
 
 
 def test_missing_chip_sections_leave_honest_none():
-    fastqc_only = {
-        "report_saved_raw_data": {"multiqc_fastqc": _MULTIQC["report_saved_raw_data"]["multiqc_fastqc"]}
-    }
+    fastqc_only = {"report_saved_raw_data": {"multiqc_fastqc": _MULTIQC["report_saved_raw_data"]["multiqc_fastqc"]}}
     m = chipseq.read_multiqc_metrics(json.dumps(fastqc_only))
     assert m["total_sequences"] == 25_000_000
     assert m["peak_count"] is None

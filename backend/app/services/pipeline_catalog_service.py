@@ -84,9 +84,7 @@ class PipelineCatalogService:
                 # the scrnaseq fallback). Don't clobber an operator-set override.
                 if desired_qc_template and existing.qc_template is None:
                     existing.qc_template = desired_qc_template
-                    logger.info(
-                        "Backfilled qc_template=%s for %s", desired_qc_template, pipeline_def["pipeline_key"]
-                    )
+                    logger.info("Backfilled qc_template=%s for %s", desired_qc_template, pipeline_def["pipeline_key"])
                 continue
 
             default_params = {}
@@ -151,9 +149,7 @@ class PipelineCatalogService:
             if desired and entry.qc_template != desired:
                 entry.qc_template = desired
                 healed += 1
-                logger.info(
-                    "Healed qc_template=%s for %s (org %d)", desired, entry.pipeline_key, org_id
-                )
+                logger.info("Healed qc_template=%s for %s (org %d)", desired, entry.pipeline_key, org_id)
         return healed
 
     @staticmethod

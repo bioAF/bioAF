@@ -24,6 +24,7 @@ async def _enable_lit_validation(session):
     await beta_features_service.set_flag(session, "lit_validation", True)
     await session.commit()
 
+
 _GOOD = (
     '```json\n{"accessions": ["GSE52778"], "sample_structure": {"organism": "Homo sapiens"}, '
     '"method": {"assay": "bulk RNA-seq", "tools": ["TopHat"], "reference_build": "GRCh37"}, '
@@ -51,9 +52,7 @@ def _patch_llm(monkeypatch, response):
 async def test_request_read_approve_flow(client, admin_token, monkeypatch):
     _patch_llm(monkeypatch, _GOOD)
 
-    r = await client.post(
-        "/api/validation-studies", json={"source_accession": "GSE52778"}, headers=_auth(admin_token)
-    )
+    r = await client.post("/api/validation-studies", json={"source_accession": "GSE52778"}, headers=_auth(admin_token))
     assert r.status_code == 200, r.text
     study = r.json()
     assert study["state"] == "requested"
@@ -102,7 +101,16 @@ async def test_classify_by_hand_via_api_after_comparing(client, admin_token, adm
     study = await ValidationStudyService.create_study(
         session, admin_user.organization_id, admin_user.id, source_accession="GSE1"
     )
-    for nxt in ["acquiring_text", "reading", "plan_ready", "acquiring_data", "setup", "running", "extracting", "comparing"]:
+    for nxt in [
+        "acquiring_text",
+        "reading",
+        "plan_ready",
+        "acquiring_data",
+        "setup",
+        "running",
+        "extracting",
+        "comparing",
+    ]:
         study = await ValidationStudyService.transition(
             session, study.id, admin_user.organization_id, admin_user.id, nxt
         )
@@ -138,8 +146,12 @@ async def test_viewer_cannot_classify(client, viewer_token):
 
 
 async def test_list_studies_returns_org_studies_newest_first(client, admin_token):
-    a = (await client.post("/api/validation-studies", json={"source_accession": "GSE_A"}, headers=_auth(admin_token))).json()["id"]
-    b = (await client.post("/api/validation-studies", json={"source_accession": "GSE_B"}, headers=_auth(admin_token))).json()["id"]
+    a = (
+        await client.post("/api/validation-studies", json={"source_accession": "GSE_A"}, headers=_auth(admin_token))
+    ).json()["id"]
+    b = (
+        await client.post("/api/validation-studies", json={"source_accession": "GSE_B"}, headers=_auth(admin_token))
+    ).json()["id"]
 
     r = await client.get("/api/validation-studies", headers=_auth(admin_token))
     assert r.status_code == 200, r.text

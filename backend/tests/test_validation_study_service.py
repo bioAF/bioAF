@@ -54,7 +54,9 @@ async def test_reaching_classified_requires_a_valid_classification(session, admi
     study = await _walk(session, study, admin_user.organization_id, admin_user.id, _HAPPY)
 
     with pytest.raises(HTTPException) as ei:  # missing classification
-        await ValidationStudyService.transition(session, study.id, admin_user.organization_id, admin_user.id, "classified")
+        await ValidationStudyService.transition(
+            session, study.id, admin_user.organization_id, admin_user.id, "classified"
+        )
     assert ei.value.status_code == 400
 
     with pytest.raises(HTTPException):  # invalid classification

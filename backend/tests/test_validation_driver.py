@@ -119,9 +119,7 @@ async def test_read_and_plan_fetches_full_text_when_not_supplied(session, admin_
         session, admin_user.organization_id, admin_user.id, source_doi="10.1/abc"
     )
     await session.flush()
-    study = await ValidationDriverService.read_and_plan(
-        session, study, None, admin_user.organization_id, admin_user.id
-    )
+    study = await ValidationDriverService.read_and_plan(session, study, None, admin_user.organization_id, admin_user.id)
     await session.commit()
     assert study.state == "plan_ready"
 
@@ -140,9 +138,7 @@ async def test_read_and_plan_errors_and_stays_requested_when_no_text_available(s
 
     study = await _requested(session, admin_user)
     with pytest.raises(Exception):
-        await ValidationDriverService.read_and_plan(
-            session, study, None, admin_user.organization_id, admin_user.id
-        )
+        await ValidationDriverService.read_and_plan(session, study, None, admin_user.organization_id, admin_user.id)
     assert study.state == "requested"
 
 

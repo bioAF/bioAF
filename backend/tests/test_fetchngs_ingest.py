@@ -252,9 +252,7 @@ async def _files_for_sample(session, sample_id) -> list[File]:
 
 async def _sample_by_external(session, exp_id, external_id) -> Sample:
     return (
-        await session.execute(
-            select(Sample).where(Sample.experiment_id == exp_id, Sample.external_id == external_id)
-        )
+        await session.execute(select(Sample).where(Sample.experiment_id == exp_id, Sample.external_id == external_id))
     ).scalar_one()
 
 

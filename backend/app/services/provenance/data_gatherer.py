@@ -554,12 +554,16 @@ class ProvenanceDataGatherer:
         """The A3 reverse link: the ValidationStudy (if any) whose reproduction target is this
         experiment, plus the source paper it reproduces. Newest study wins if more than one."""
         study = (
-            await session.execute(
-                select(ValidationStudy)
-                .where(ValidationStudy.experiment_id == experiment_id, ValidationStudy.organization_id == org_id)
-                .order_by(ValidationStudy.id.desc())
+            (
+                await session.execute(
+                    select(ValidationStudy)
+                    .where(ValidationStudy.experiment_id == experiment_id, ValidationStudy.organization_id == org_id)
+                    .order_by(ValidationStudy.id.desc())
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if not study:
             return None
         paper_title = None
@@ -1024,9 +1028,7 @@ class ProvenanceDataGatherer:
         """
         study = (
             await session.execute(
-                select(ValidationStudy).where(
-                    ValidationStudy.id == study_id, ValidationStudy.organization_id == org_id
-                )
+                select(ValidationStudy).where(ValidationStudy.id == study_id, ValidationStudy.organization_id == org_id)
             )
         ).scalar_one_or_none()
         if not study:
@@ -1118,9 +1120,7 @@ class ProvenanceDataGatherer:
         for role, rid in role_runs:
             if not rid:
                 continue
-            run = (
-                await session.execute(select(PipelineRun).where(PipelineRun.id == rid))
-            ).scalar_one_or_none()
+            run = (await session.execute(select(PipelineRun).where(PipelineRun.id == rid))).scalar_one_or_none()
             if run:
                 user_ids.add(run.submitted_by_user_id)
                 pipeline_runs.append(

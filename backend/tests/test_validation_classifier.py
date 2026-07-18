@@ -66,7 +66,9 @@ class TestCompare:
         assert rows[0]["verdict"] == "not_reported"
 
     def test_not_computed_when_no_metric_shares_the_key(self):
-        rows = compare_targets([_target("mean_reads_after_trimming_per_sample", 5_000_000)], {"total_sequences": 6_600_000})
+        rows = compare_targets(
+            [_target("mean_reads_after_trimming_per_sample", 5_000_000)], {"total_sequences": 6_600_000}
+        )
         assert rows[0]["verdict"] == "not_computed"
 
     def test_explicit_target_tolerance_overrides_the_default(self):
@@ -299,7 +301,9 @@ class TestPeakCountQualifierAliasing:
         assert result["coverage"]["diverge"] == 0
         assert result["coverage"]["advisory"] == 2
         # peaks_gained/lost must NOT be advisory - they stay not_computed alongside the rest.
-        advisory_keys = {c["metric_key"] for c in result["comparisons"] if c["advisory"] and c["verdict"] in ("agree", "diverge")}
+        advisory_keys = {
+            c["metric_key"] for c in result["comparisons"] if c["advisory"] and c["verdict"] in ("agree", "diverge")
+        }
         assert advisory_keys == {"peak_count_quiescent", "peak_count_activated"}
 
     def test_bare_peak_count_and_direct_alias_unchanged(self):

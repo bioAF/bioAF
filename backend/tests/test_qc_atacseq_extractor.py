@@ -14,8 +14,18 @@ from app.services.qc.templates import atacseq
 _MULTIQC = {
     "report_saved_raw_data": {
         "multiqc_fastqc": {  # raw
-            "S1": {"Total Sequences": 20_000_000.0, "%GC": 45.0, "total_deduplicated_percentage": 40.0, "avg_sequence_length": 50.0},
-            "S2": {"Total Sequences": 30_000_000.0, "%GC": 47.0, "total_deduplicated_percentage": 50.0, "avg_sequence_length": 50.0},
+            "S1": {
+                "Total Sequences": 20_000_000.0,
+                "%GC": 45.0,
+                "total_deduplicated_percentage": 40.0,
+                "avg_sequence_length": 50.0,
+            },
+            "S2": {
+                "Total Sequences": 30_000_000.0,
+                "%GC": 47.0,
+                "total_deduplicated_percentage": 50.0,
+                "avg_sequence_length": 50.0,
+            },
         },
         "multiqc_fastqc_1": {  # trimmed
             "S1": {"Total Sequences": 18_000_000.0, "%GC": 45.0},
@@ -135,5 +145,8 @@ def test_generate_summary_describes_peaks_frip_tss():
 def test_compute_quality_flags_low_signal():
     assert atacseq.compute_quality({"peak_count": 0}) == "concerning"
     assert atacseq.compute_quality({"frip": 0.02, "peak_count": 100}) == "concerning"
-    assert atacseq.compute_quality({"frip": 0.3, "tss_enrichment": 8.0, "reads_mapped_genome": 0.9, "peak_count": 50_000}) == "good"
+    assert (
+        atacseq.compute_quality({"frip": 0.3, "tss_enrichment": 8.0, "reads_mapped_genome": 0.9, "peak_count": 50_000})
+        == "good"
+    )
     assert atacseq.compute_quality({}) == "pending_review"

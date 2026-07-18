@@ -16,16 +16,16 @@ _TO_PLAN_READY = ["acquiring_text", "reading", "plan_ready"]
 async def _study_at_plan_ready(session, admin_user):
     study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
     for nxt in _TO_PLAN_READY:
-        study = await ValidationStudyService.transition(session, study.id, admin_user.organization_id, admin_user.id, nxt)
+        study = await ValidationStudyService.transition(
+            session, study.id, admin_user.organization_id, admin_user.id, nxt
+        )
     return study
 
 
 @pytest.mark.asyncio
 async def test_approve_plan_advances_to_acquiring_data_and_stamps_approver(session, admin_user):
     study = await _study_at_plan_ready(session, admin_user)
-    approved = await ValidationStudyService.approve_plan(
-        session, study.id, admin_user.organization_id, admin_user.id
-    )
+    approved = await ValidationStudyService.approve_plan(session, study.id, admin_user.organization_id, admin_user.id)
     await session.commit()
     assert approved.state == "acquiring_data"
     assert approved.approved_by_user_id == admin_user.id
@@ -72,7 +72,5 @@ async def test_approve_plan_is_org_scoped(session, admin_user):
     study = await _study_at_plan_ready(session, admin_user)
     await session.commit()
     with pytest.raises(HTTPException) as ei:
-        await ValidationStudyService.approve_plan(
-            session, study.id, admin_user.organization_id + 999, admin_user.id
-        )
+        await ValidationStudyService.approve_plan(session, study.id, admin_user.organization_id + 999, admin_user.id)
     assert ei.value.status_code == 404

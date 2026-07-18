@@ -57,9 +57,7 @@ class ValidationStudyService:
     async def list_studies(session: AsyncSession, org_id: int) -> list[ValidationStudy]:
         """All of an org's validation studies, newest first (for the list surface)."""
         result = await session.execute(
-            select(ValidationStudy)
-            .where(ValidationStudy.organization_id == org_id)
-            .order_by(ValidationStudy.id.desc())
+            select(ValidationStudy).where(ValidationStudy.organization_id == org_id).order_by(ValidationStudy.id.desc())
         )
         return list(result.scalars().all())
 
@@ -140,9 +138,7 @@ class ValidationStudyService:
         return study
 
     @staticmethod
-    async def approve_plan(
-        session: AsyncSession, study_id: int, org_id: int, user_id: int
-    ) -> ValidationStudy:
+    async def approve_plan(session: AsyncSession, study_id: int, org_id: int, user_id: int) -> ValidationStudy:
         """C1 gate: ratify the plan and advance plan_ready -> acquiring_data, stamping the approver."""
         study = await ValidationStudyService._load(session, study_id, org_id)
         if not can_transition(study.state, "acquiring_data"):

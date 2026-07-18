@@ -168,8 +168,18 @@ async def _seed_validation_study(session, user) -> dict:
         session,
         plan,
         [
-            {"metric_key": "mean_reads_per_sample_pre_trim", "claimed_value": 7_000_000.0, "unit": "reads", "source_locator": "Methods"},
-            {"metric_key": "mean_reads_after_trimming_per_sample", "claimed_value": 5_000_000.0, "unit": "reads", "source_locator": "Methods"},
+            {
+                "metric_key": "mean_reads_per_sample_pre_trim",
+                "claimed_value": 7_000_000.0,
+                "unit": "reads",
+                "source_locator": "Methods",
+            },
+            {
+                "metric_key": "mean_reads_after_trimming_per_sample",
+                "claimed_value": 5_000_000.0,
+                "unit": "reads",
+                "source_locator": "Methods",
+            },
         ],
     )
 
@@ -228,10 +238,12 @@ class TestGatherer:
         assert data.source_paper["doi"] == _DOI
         assert "Gingival Fibroblasts" in data.source_paper["title"]
 
+        assert data.reproduction_plan is not None
         assert data.reproduction_plan["pipeline_key"] == "nf-core/rnaseq"
         assert data.reproduction_plan["reference_genome"] == "GRCh38"
         assert len(data.comparison_targets) == 2
 
+        assert data.experiment is not None
         assert data.experiment["id"] == seeded_study["experiment_id"]
 
         # A3: both runs, each labelled by its role in the reproduction chain
@@ -240,6 +252,7 @@ class TestGatherer:
         assert by_role["data_acquisition"]["pipeline_name"] == "nf-core/fetchngs"
         assert by_role["analysis"]["pipeline_name"] == "nf-core/rnaseq"
 
+        assert data.evidence is not None
         assert data.evidence["classification_result"]["classification"] == "validated"
         assert len(data.audit_trail) >= 1
 
@@ -457,7 +470,5 @@ class TestReportEndpoint:
     @pytest.mark.asyncio
     async def test_missing_study_is_404(self, client, session, admin_token):
         await session.commit()
-        r = await client.get(
-            "/api/validation-studies/999999/provenance/report?format=json", headers=_auth(admin_token)
-        )
+        r = await client.get("/api/validation-studies/999999/provenance/report?format=json", headers=_auth(admin_token))
         assert r.status_code == 404

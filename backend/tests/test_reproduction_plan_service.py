@@ -9,7 +9,6 @@ import pytest
 from sqlalchemy import select
 
 from app.models.comparison_target import ComparisonTarget
-from app.models.reproduction_plan import ReproductionPlan
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_study_service import ValidationStudyService
 
@@ -62,8 +61,13 @@ async def test_add_comparison_targets_links_to_plan(session, admin_user):
         session,
         plan,
         [
-            {"metric_key": "alignment_rate", "claimed_value": 83.4, "unit": "%", "tolerance": 0.05,
-             "source_locator": "Results, para 2"},
+            {
+                "metric_key": "alignment_rate",
+                "claimed_value": 83.4,
+                "unit": "%",
+                "tolerance": 0.05,
+                "source_locator": "Results, para 2",
+            },
             {"metric_key": "de_genes", "claimed_value": 316, "unit": "count", "source_locator": "Fig 3"},
         ],
     )
@@ -71,7 +75,9 @@ async def test_add_comparison_targets_links_to_plan(session, admin_user):
 
     assert len(targets) == 2
     rows = list(
-        (await session.execute(select(ComparisonTarget).where(ComparisonTarget.reproduction_plan_id == plan.id))).scalars()
+        (
+            await session.execute(select(ComparisonTarget).where(ComparisonTarget.reproduction_plan_id == plan.id))
+        ).scalars()
     )
     assert {t.metric_key for t in rows} == {"alignment_rate", "de_genes"}
     align = next(t for t in rows if t.metric_key == "alignment_rate")

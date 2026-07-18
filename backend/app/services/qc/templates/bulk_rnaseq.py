@@ -316,7 +316,7 @@ async def extract(
 
         metrics = dict(EMPTY_METRICS)
         if multiqc_uri:
-            logger.info("Found bulk multiqc_data.json for run %d at %s", run.id, multiqc_uri[len(base):])
+            logger.info("Found bulk multiqc_data.json for run %d at %s", run.id, multiqc_uri[len(base) :])
             text = await adapter.read_text(multiqc_uri)
             metrics = read_multiqc_metrics(text)
             try:

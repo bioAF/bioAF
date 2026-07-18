@@ -166,7 +166,9 @@ async def test_extract_produces_plan_targets_and_mapping(session, admin_user, mo
     assert study.reproduction_plan_id == plan.id
 
     targets = list(
-        (await session.execute(select(ComparisonTarget).where(ComparisonTarget.reproduction_plan_id == plan.id))).scalars()
+        (
+            await session.execute(select(ComparisonTarget).where(ComparisonTarget.reproduction_plan_id == plan.id))
+        ).scalars()
     )
     assert {t.metric_key for t in targets} == {"alignment_rate", "de_genes"}
     de = next(t for t in targets if t.metric_key == "de_genes")
@@ -191,9 +193,7 @@ async def test_extract_normalizes_composite_reference_genome(session, admin_user
     await session.flush()
     _patch_llm(monkeypatch, _GOOD.replace('"reference_build": "GRCh37"', '"reference_build": "GRCh38 / Gencode 29"'))
 
-    plan = await ValidationExtractionService.extract(
-        session, study, "txt", admin_user.organization_id, admin_user.id
-    )
+    plan = await ValidationExtractionService.extract(session, study, "txt", admin_user.organization_id, admin_user.id)
     await session.commit()
 
     assert plan.reference_genome == "GRCh38"
@@ -210,9 +210,7 @@ async def test_extract_flags_missing_data_when_no_accession(session, admin_user,
     )
     _patch_llm(monkeypatch, no_data)
 
-    plan = await ValidationExtractionService.extract(
-        session, study, "txt", admin_user.organization_id, admin_user.id
-    )
+    plan = await ValidationExtractionService.extract(session, study, "txt", admin_user.organization_id, admin_user.id)
     await session.commit()
     assert plan.accessions_json == []
     assert any("accession" in b.lower() for b in (plan.blockers_json or []))
@@ -224,9 +222,7 @@ async def test_extract_on_parse_failure_records_blocker_not_crash(session, admin
     await session.flush()
     _patch_llm(monkeypatch, "the model returned prose, no JSON")
 
-    plan = await ValidationExtractionService.extract(
-        session, study, "txt", admin_user.organization_id, admin_user.id
-    )
+    plan = await ValidationExtractionService.extract(session, study, "txt", admin_user.organization_id, admin_user.id)
     await session.commit()
     assert plan.pipeline_key is None
     assert any("could not" in b.lower() or "parse" in b.lower() for b in (plan.blockers_json or []))

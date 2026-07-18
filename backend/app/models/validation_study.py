@@ -31,9 +31,9 @@ VALIDATION_STUDY_STATES = [
     "running",
     "extracting",
     "comparing",
-    "classified",     # terminal: carries a classification
+    "classified",  # terminal: carries a classification
     "plan_declined",  # terminal: human rejected the plan at the C1 gate
-    "error",          # terminal: infra failure, not a judgment on the paper (retryable)
+    "error",  # terminal: infra failure, not a judgment on the paper (retryable)
 ]
 
 VALIDATION_STUDY_TERMINAL_STATES = {"classified", "plan_declined", "error"}
@@ -73,12 +73,12 @@ VALIDATION_STUDY_CLASSIFICATIONS = [
 # None, which the UI renders as "Could Not Reproduce" -- deliberately distinct from a LOW confidence
 # (could-not-test is not the same as tested-and-unlikely).
 _CLASSIFICATION_CONFIDENCE: dict[str, float | None] = {
-    "validated": 100.0,       # human-confirmed validation -> Fully Validated
-    "not_validated": 0.0,     # human-confirmed contradiction -> Very Unlikely
-    "missing_data": None,     # no data to run -> Could Not Reproduce
+    "validated": 100.0,  # human-confirmed validation -> Fully Validated
+    "not_validated": 0.0,  # human-confirmed contradiction -> Very Unlikely
+    "missing_data": None,  # no data to run -> Could Not Reproduce
     "missing_methods": None,  # no reproducible method -> Could Not Reproduce
-    "not_reproducible": None, # pipeline could not run -> Could Not Reproduce
-    "inconclusive": None,     # ran but no verdict -> Could Not Reproduce
+    "not_reproducible": None,  # pipeline could not run -> Could Not Reproduce
+    "inconclusive": None,  # ran but no verdict -> Could Not Reproduce
 }
 
 
@@ -123,9 +123,7 @@ class ValidationStudy(Base):
     uuid: Mapped[uuid_pkg.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False, server_default=text("gen_random_uuid()"), unique=True
     )
-    organization_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("organizations.id"), nullable=False, index=True
-    )
+    organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
     # Source provenance. paper_id links the library paper when sourced from it; the DOI/accession are
     # captured even for ad-hoc papers not in the library.

@@ -25,10 +25,7 @@ def test_task_pods_select_the_pipelines_pool():
 
 def test_task_pods_tolerate_the_pipelines_pool_taint():
     config = _config()
-    assert (
-        "[toleration: [key: 'bioaf.io/pool', operator: 'Equal', value: 'pipelines', effect: 'NoSchedule']]"
-        in config
-    )
+    assert "[toleration: [key: 'bioaf.io/pool', operator: 'Equal', value: 'pipelines', effect: 'NoSchedule']]" in config
 
 
 def test_task_pod_directives_stay_in_the_k8s_pod_list():

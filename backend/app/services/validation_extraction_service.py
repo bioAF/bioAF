@@ -48,7 +48,7 @@ def build_extraction_prompt(full_text: str) -> tuple[str, str]:
         "JSON block (```json ... ```) and nothing else, matching exactly this schema:\n\n"
         f"{_SCHEMA_HINT}\n\n"
         "Rules: report a data accession only if the paper actually deposits one; if none, set "
-        "accessions to [] and data_availability to \"none\". Capture the QC-level numbers the paper "
+        'accessions to [] and data_availability to "none". Capture the QC-level numbers the paper '
         "reports (alignment rate, read/cell counts, saturation, etc.) as claims with a metric_key that "
         "aligns to a standard QC metric. When a claim matches one of these controlled QC metric keys, use "
         f"that exact key so it can be compared automatically: {', '.join(CONTROLLED_METRIC_KEYS)}. If a "

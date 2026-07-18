@@ -21,14 +21,25 @@ _BULK_RNA_MARKERS = ("rna-seq", "rnaseq", "bulk rna", "transcriptom", "mrna-seq"
 # so bare "chip" is NOT a marker. macs2 is excluded because ATAC-seq also uses it (would mis-route
 # ATAC papers to chipseq until atacseq has its own extractor).
 _CHIP_MARKERS = (
-    "chip-seq", "chip seq", "chipseq", "chip-sequencing",
-    "chromatin immunoprecipitation", "histone mark", "histone modification", "h3k",
+    "chip-seq",
+    "chip seq",
+    "chipseq",
+    "chip-sequencing",
+    "chromatin immunoprecipitation",
+    "histone mark",
+    "histone modification",
+    "h3k",
 )
 # ATAC-seq markers. Kept specific ("atac"/"transposase-accessible"/"assay for transposase") so an
 # unrelated assay does not mis-route here. Checked before ChIP/RNA (an ATAC paper won't say rna-seq).
 _ATAC_MARKERS = (
-    "atac-seq", "atac seq", "atacseq", "transposase-accessible", "transposase accessible",
-    "assay for transposase", "chromatin accessibility",
+    "atac-seq",
+    "atac seq",
+    "atacseq",
+    "transposase-accessible",
+    "transposase accessible",
+    "assay for transposase",
+    "chromatin accessibility",
 )
 
 _RNASEQ = ("nf-core/rnaseq", "3.14.0")
@@ -50,7 +61,9 @@ def _mentions_nf_core(tools: list[str]) -> bool:
     return any("nf-core" in (t or "").lower() or "nfcore" in (t or "").lower() for t in tools)
 
 
-def map_method(assay: str | None, tools: list[str] | None = None, reference_build: str | None = None) -> PipelineMapping:
+def map_method(
+    assay: str | None, tools: list[str] | None = None, reference_build: str | None = None
+) -> PipelineMapping:
     """Map ``assay`` (with optional tool hints) to a supported nf-core pipeline."""
     a = (assay or "").lower()
     tools = tools or []

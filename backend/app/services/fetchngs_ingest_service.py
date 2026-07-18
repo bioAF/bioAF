@@ -239,9 +239,7 @@ class FetchngsIngestService:
 
         samples_by_external = {
             s.external_id: s
-            for s in (
-                await session.execute(select(Sample).where(Sample.experiment_id == run.experiment_id))
-            ).scalars()
+            for s in (await session.execute(select(Sample).where(Sample.experiment_id == run.experiment_id))).scalars()
             if s.external_id
         }
         if not samples_by_external:
@@ -263,6 +261,7 @@ class FetchngsIngestService:
                     )
                 )
             ).scalars()
+            if f.storage_uri is not None
         }
 
         lane_for: dict[str, str] = {}
@@ -315,6 +314,8 @@ class FetchngsIngestService:
 
         logger.info(
             "fetchngs run %d: attached FASTQ to samples (%d new file rows, %d sample-file links)",
-            run.id, len(created), linked,
+            run.id,
+            len(created),
+            linked,
         )
         return created
