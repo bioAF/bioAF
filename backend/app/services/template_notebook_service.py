@@ -13,6 +13,10 @@ from app.services.gitops_service import GitOpsService
 logger = logging.getLogger("bioaf.template_notebook")
 
 TEMPLATES_DIR = Path(__file__).parent.parent.parent.parent / "scripts" / "notebooks" / "templates"
+# Package-local template dir. Builtin templates whose files live here ship inside the backend
+# image (via `COPY app/ app/`), so they resolve without a per-org GitOps repo. The repo-root
+# scripts dir above only exists in a source checkout, not in the deployed container.
+PACKAGE_TEMPLATES_DIR = Path(__file__).parent / "notebook_templates"
 
 BUILTIN_TEMPLATES = [
     {
@@ -213,10 +217,13 @@ class TemplateNotebookService:
         except Exception:
             pass
 
-        # Fall back to local file
-        local_file = TEMPLATES_DIR / template.notebook_path.split("/")[-1]
-        if local_file.exists():
-            return local_file.read_text()
+        # Fall back to a local file: the repo-root scripts dir (source checkout), then the
+        # package-local dir (shipped in the deployed image).
+        basename = template.notebook_path.split("/")[-1]
+        for base in (TEMPLATES_DIR, PACKAGE_TEMPLATES_DIR):
+            local_file = base / basename
+            if local_file.exists():
+                return local_file.read_text()
 
         raise NotFoundError(f"Template notebook not found: {template.notebook_path}")
 

@@ -7,14 +7,19 @@ into the (R) cell, and None/True/False are not valid R.
 
 import json
 
-from app.services.template_notebook_service import BUILTIN_TEMPLATES, TEMPLATES_DIR, TemplateNotebookService
+from app.services.template_notebook_service import (
+    BUILTIN_TEMPLATES,
+    PACKAGE_TEMPLATES_DIR,
+    TemplateNotebookService,
+)
 
 _L3 = ["de_bulk_deseq2.ipynb", "da_peaks_deseq2.ipynb"]
 
 
-def test_level3_template_files_exist_and_valid():
+def test_level3_template_files_ship_in_package():
+    # Must live in the package dir so they ship inside the backend image (not just the repo scripts/).
     for f in _L3:
-        p = TEMPLATES_DIR / f
+        p = PACKAGE_TEMPLATES_DIR / f
         assert p.exists(), f"missing template {p}"
         nb = json.loads(p.read_text())
         assert nb["metadata"]["kernelspec"]["name"] == "ir"
