@@ -126,6 +126,6 @@ async def test_templates_ordered_by_sort_order(client, admin_token):
     response = await client.get("/api/template-notebooks", headers={"Authorization": f"Bearer {admin_token}"})
     data = response.json()
     notebooks = data["notebooks"]
-    # QC should come first, trajectory last
+    # QC comes first; the Level-3 differential-accessibility template has the highest sort_order.
     assert notebooks[0]["category"] == "qc"
-    assert notebooks[-1]["category"] == "trajectory"
+    assert notebooks[-1]["category"] == "differential_accessibility"

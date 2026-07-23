@@ -99,6 +99,45 @@ BUILTIN_TEMPLATES = [
             "experiment_id": None,
         },
     },
+    # Level-3 headless differential-analysis templates (lit_validation, ADR-069). R notebooks
+    # (kernelspec 'ir') run by the headless executor; parameters are all str/number so the
+    # Python-literal injector stays valid R. They write a normalizer-compatible result table to
+    # /outputs. Both use DESeq2 (RNA on gene counts; ATAC/ChIP on the consensus-peak count matrix).
+    {
+        "name": "Differential Expression (DESeq2, headless)",
+        "description": "Reproduce a paper's DEG finding from a gene-count matrix (Level-3 concordance)",
+        "category": "differential_expression",
+        "notebook_path": "notebooks/de_bulk_deseq2.ipynb",
+        "local_file": "de_bulk_deseq2.ipynb",
+        "compatible_with": "nf-core/rnaseq",
+        "sort_order": 6,
+        "parameters": {
+            "counts_path": "/data/counts.tsv",
+            "output_path": "/outputs/de_results.csv",
+            "id_column": "gene_id",
+            "test_samples": "",
+            "reference_samples": "",
+            "lfc_threshold": 1.0,
+            "padj_threshold": 0.05,
+        },
+    },
+    {
+        "name": "Differential Accessibility (DESeq2, headless)",
+        "description": "Reproduce a paper's differential-peak finding from a consensus-peak matrix (Level-3)",
+        "category": "differential_accessibility",
+        "notebook_path": "notebooks/da_peaks_deseq2.ipynb",
+        "local_file": "da_peaks_deseq2.ipynb",
+        "compatible_with": "nf-core/atacseq",
+        "sort_order": 7,
+        "parameters": {
+            "counts_path": "/data/consensus_peaks.featureCounts.txt",
+            "output_path": "/outputs/da_results.csv",
+            "test_samples": "",
+            "reference_samples": "",
+            "lfc_threshold": 1.0,
+            "padj_threshold": 0.05,
+        },
+    },
 ]
 
 
