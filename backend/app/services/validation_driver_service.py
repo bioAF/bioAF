@@ -38,9 +38,12 @@ from app.schemas.pipeline_run import PipelineRunLaunchRequest
 from app.services.experiment_service import ExperimentService
 from app.services.fetchngs_ingest_service import FetchngsIngestService
 from app.services.literature.fulltext_service import FullTextFetchService
+from app.services.notebook_execution_service import NotebookExecutionService
 from app.services.qc_dashboard_service import QCDashboardService
 from app.services.reproduction_plan_service import ReproductionPlanService
+from app.services.result_set_normalizer import FindingSet, normalize_gene_table, normalize_interval_table
 from app.services.validation_classifier_service import classify_study
+from app.services.validation_concordance_service import compare_gene_sets, compare_interval_sets
 from app.services.validation_extraction_service import ValidationExtractionService
 from app.services.validation_study_service import ValidationStudyService
 
@@ -50,7 +53,7 @@ logger = logging.getLogger("bioaf.validation_driver")
 # acquiring_data); terminals and the pre-approval states are left alone. `comparing` is included so the
 # driver runs the automatic classifier (E2/E3/E4) once; a clean `validated` auto-finalizes, everything
 # else is left AT `comparing` with a suggested verdict for a human to ratify (the hybrid policy).
-_ACTIVE_BACK_HALF_STATES = ("acquiring_data", "setup", "running", "extracting", "comparing")
+_ACTIVE_BACK_HALF_STATES = ("acquiring_data", "setup", "running", "extracting", "reproducing", "comparing")
 
 _FETCHNGS_KEY = "nf-core/fetchngs"
 # fetchngs's catalog default download_method is aspera, unproven on our GKE nodes; ftp is proven
@@ -192,6 +195,7 @@ class ValidationDriverService:
             "setup": ValidationDriverService._handle_setup,
             "running": ValidationDriverService._handle_running,
             "extracting": ValidationDriverService._handle_extracting,
+            "reproducing": ValidationDriverService._handle_reproducing,
             "comparing": ValidationDriverService._handle_comparing,
         }
         handler = handlers.get(study.state)
@@ -310,13 +314,82 @@ class ValidationDriverService:
             }
             for t in (plan.comparison_targets if plan else [])
         ]
-        study.evidence_json = {
-            "computed_metrics": metrics,
-            "comparison_targets": targets,
-            "data_run_id": study.data_run_id,
-            "analysis_run_id": study.analysis_run_id,
-            "qc_dashboard_id": dashboard_id,
-        }
+        # Preserve any Level-3 inputs (the `level3` block set at plan approval by B2e/B4) while
+        # writing the QC evidence.
+        evidence = dict(study.evidence_json or {})
+        evidence.update(
+            {
+                "computed_metrics": metrics,
+                "comparison_targets": targets,
+                "data_run_id": study.data_run_id,
+                "analysis_run_id": study.analysis_run_id,
+                "qc_dashboard_id": dashboard_id,
+            }
+        )
+        study.evidence_json = evidence
+
+        # Route to Level-3 reproduction when its inputs are present; otherwise straight to comparing
+        # (Level-2 only), unchanged from before.
+        next_state = "reproducing" if evidence.get("level3") else "comparing"
+        await ValidationStudyService.transition(
+            session, study.id, study.organization_id, study.requested_by_user_id, next_state
+        )
+        return True
+
+    @staticmethod
+    async def _handle_reproducing(session: AsyncSession, study: ValidationStudy) -> bool:
+        """C3 (ADR-069): reproduce the paper's finding and score concordance (E6).
+
+        Launch the headless differential-analysis notebook (G1) that reproduces the finding from the
+        analysis run's matrix, poll it, then compare OUR result set to the paper's deposited set and
+        record the concordance before advancing to comparing. If Level-3 inputs are absent, fall
+        straight through to comparing (Level-2 only)."""
+        evidence = dict(study.evidence_json or {})
+        level3 = evidence.get("level3")
+        if not level3:
+            await ValidationStudyService.transition(
+                session, study.id, study.organization_id, study.requested_by_user_id, "comparing"
+            )
+            return True
+
+        sid = evidence.get("level3_run_session_id")
+        if sid is None:
+            cs = await NotebookExecutionService.execute_template(
+                session,
+                org_id=study.organization_id,
+                user_id=study.requested_by_user_id,
+                template_id=level3["template_id"],
+                parameters=level3.get("parameters") or {},
+                input_file_ids=level3.get("input_file_ids") or None,
+                experiment_id=study.experiment_id,
+            )
+            evidence["level3_run_session_id"] = cs.id
+            study.evidence_json = evidence
+            if cs.status == "failed":
+                return await ValidationDriverService._fail(session, study, "differential reproduction failed to launch")
+            await session.flush()
+            return True
+
+        cs = await ValidationDriverService._load_compute_session(session, sid)
+        if cs is None:
+            return await ValidationDriverService._fail(session, study, "reproduction session missing")
+        cs = await NotebookExecutionService.poll_execution(session, cs)
+        if cs.status == "failed":
+            return await ValidationDriverService._fail(session, study, "differential reproduction failed")
+        if cs.status != "completed":
+            return False  # still running
+
+        our_fs = await ValidationDriverService._extract_reproduced_set(session, cs, level3.get("kind", "gene"))
+        paper_fs = FindingSet.from_dict(level3.get("paper_finding_set") or {})
+        universe = int(
+            level3.get("universe") or our_fs.n_tested or max(len(paper_fs.entities), len(our_fs.entities), 1)
+        )
+        if level3.get("kind") == "interval":
+            conc = compare_interval_sets(paper_fs, our_fs, universe)
+        else:
+            conc = compare_gene_sets(paper_fs, our_fs, universe)
+        evidence["level3_result"] = {"concordance": conc.to_dict(), "our_finding_set": our_fs.to_dict()}
+        study.evidence_json = evidence
         await ValidationStudyService.transition(
             session, study.id, study.organization_id, study.requested_by_user_id, "comparing"
         )
@@ -333,11 +406,15 @@ class ValidationDriverService:
             return False
 
         plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+        # Fold in the Level-3 finding-concordance verdict (E6) if the reproducing step produced one.
+        level3_result = evidence.get("level3_result") or {}
+        concordance = level3_result.get("concordance")
         result = classify_study(
             evidence.get("comparison_targets") or [],
             evidence.get("computed_metrics") or {},
             mapping_confidence=plan.mapping_confidence if plan else None,
             reference_genome=plan.reference_genome if plan else None,
+            concordance_results=[concordance] if concordance else None,
         )
         evidence["classification_result"] = result
         study.evidence_json = evidence
@@ -408,6 +485,59 @@ class ValidationDriverService:
         from app.services.pipeline_run_service import PipelineRunService
 
         return await PipelineRunService.get_run_model(session, run_id)
+
+    @staticmethod
+    async def _load_compute_session(session: AsyncSession, session_id: int):
+        from app.models.notebook_session import ComputeSession
+
+        return (
+            await session.execute(select(ComputeSession).where(ComputeSession.id == session_id))
+        ).scalar_one_or_none()
+
+    @staticmethod
+    async def _extract_reproduced_set(session: AsyncSession, cs, kind: str) -> FindingSet:
+        """Read the normalized result table the differential notebook wrote (a registered output
+        File) and normalize it into OUR FindingSet. Live seam (reads object storage); mocked in
+        unit tests."""
+        text = await ValidationDriverService._read_reproduction_output(session, cs)
+        if not text:
+            ns = "interval" if kind == "interval" else "unknown"
+            return FindingSet(kind=kind, namespace=ns, parse_notes=["no reproduction output found"])
+        if kind == "interval":
+            return normalize_interval_table(text)
+        return normalize_gene_table(text)
+
+    @staticmethod
+    async def _read_reproduction_output(session: AsyncSession, cs) -> str | None:
+        from app.models.file import File
+        from app.models.notebook_session_file import NotebookSessionFile
+
+        rows = list(
+            (
+                await session.execute(
+                    select(File)
+                    .join(NotebookSessionFile, NotebookSessionFile.file_id == File.id)
+                    .where(NotebookSessionFile.session_id == cs.id, NotebookSessionFile.access_type == "output")
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not rows:
+            return None
+
+        def _score(f) -> tuple[bool, bool]:
+            n = (f.filename or "").lower()
+            looks_like_result = any(t in n for t in ("finding", "result", "de_", "diff"))
+            tabular = n.endswith((".csv", ".tsv", ".txt"))
+            return (looks_like_result, tabular)
+
+        rows.sort(key=_score, reverse=True)
+        try:
+            return await get_storage_adapter().read_text(rows[0].storage_uri)
+        except Exception:
+            logger.exception("validation study: failed to read reproduction output for session %d", cs.id)
+            return None
 
     @staticmethod
     async def _fail(session: AsyncSession, study: ValidationStudy, reason: str) -> bool:

@@ -74,6 +74,25 @@ class FindingSet:
     def directions(self) -> dict[str, str | None]:
         return {e.id: e.direction for e in self.entities}
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "FindingSet":
+        """Reconstruct a FindingSet from its ``to_dict`` form (e.g. stored in evidence_json)."""
+        return cls(
+            kind=d.get("kind", "gene"),
+            namespace=d.get("namespace", "unknown"),
+            n_tested=d.get("n_tested", 0),
+            parse_notes=list(d.get("parse_notes", [])),
+            entities=[
+                FindingEntity(
+                    id=e["id"],
+                    direction=e.get("direction"),
+                    effect_size=e.get("effect_size"),
+                    significance=e.get("significance"),
+                )
+                for e in d.get("entities", [])
+            ],
+        )
+
     def to_dict(self) -> dict:
         return {
             "kind": self.kind,

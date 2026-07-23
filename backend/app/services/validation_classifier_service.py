@@ -375,12 +375,21 @@ def _attribute(mapping_confidence: str | None, reference_genome: str | None) -> 
     return {"our_side": "cleared" if cleared else "suspected", "reasons": reasons}
 
 
+def _concordance_desc(c: dict) -> str:
+    frac = round(float(c.get("directional_overlap_frac", 0.0)) * 100)
+    return (
+        f"{c.get('concordant', 0)}/{c.get('paper_n', 0)} of the paper's {c.get('kind', '')} hits recovered "
+        f"with concordant direction (directional overlap {frac}%, enrichment p={c.get('enrichment_p', 1.0):.1e})"
+    )
+
+
 def classify_study(
     targets: list[dict],
     computed_metrics: dict | None,
     *,
     mapping_confidence: str | None = None,
     reference_genome: str | None = None,
+    concordance_results: list[dict] | None = None,
 ) -> dict:
     """E4: the spec-03 verdict over the E2 comparison + E3 attribution.
 
@@ -388,6 +397,12 @@ def classify_study(
     ``auto_finalize`` flag (True only for a clean ``validated``), and human-readable reasoning. The
     caller (driver) auto-finalizes a clean validated study and holds everything else at ``comparing``
     with this as the suggested verdict for a human to ratify or override.
+
+    ``concordance_results`` (E6, ADR-069) carries Level-3 finding-concordance verdicts (the paper's
+    actual differential finding reproduced or not). A concordance ``agree`` is the strongest finding-tier
+    agreement (it is the biological finding itself), so it satisfies the finding gate and can earn a
+    Level-3 ``validated``; a concordance ``diverge`` is a divergence routed through the same attribution
+    guard. When ``concordance_results`` is empty the logic reduces exactly to the Level-2 behavior.
     """
     comparisons = compare_targets(targets, computed_metrics)
     # Advisory rows (qualifier-stripped peak counts) are surfaced with their delta but never scored:
@@ -398,6 +413,14 @@ def classify_study(
     advisory = [c for c in comparisons if c["advisory"] and c["verdict"] in ("agree", "diverge")]
     # `validated` requires at least one FINDING to agree, not just a technical QC floor (spec-06).
     finding_agrees = [c for c in comparable if c["verdict"] == "agree" and _tier(c["mapped_key"]) == "finding"]
+
+    # E6 Level-3 concordance verdicts (ADR-069). A concordance agree is a finding-tier agreement;
+    # a concordance diverge is a divergence. not_computed concordance (e.g. namespace mismatch) is
+    # unscored, like a not_computed metric.
+    conc = concordance_results or []
+    conc_agree = [c for c in conc if c.get("verdict") == "agree"]
+    conc_diverge = [c for c in conc if c.get("verdict") == "diverge"]
+
     coverage = {
         "targets": len(comparisons),
         "comparable": len(comparable),
@@ -407,17 +430,25 @@ def classify_study(
         "finding_agree": len(finding_agrees),
         "not_computed": sum(1 for c in comparisons if c["verdict"] == "not_computed"),
         "not_reported": sum(1 for c in comparisons if c["verdict"] == "not_reported"),
+        "concordance": len(conc),
+        "concordance_agree": len(conc_agree),
+        "concordance_diverge": len(conc_diverge),
     }
     attribution = {"our_side": "n/a", "reasons": []}
 
-    if not comparable:
+    # Combined predicates: a concordance verdict joins the scalar sets in the same decision tree.
+    scored_any = bool(comparable) or bool(conc_agree) or bool(conc_diverge)
+    has_diverge = bool(diverged) or bool(conc_diverge)
+    has_finding = bool(finding_agrees) or bool(conc_agree)
+
+    if not scored_any:
         classification = "inconclusive"
         auto_finalize = False
         reasoning = (
             "The run completed, but none of the paper's claimed metrics could be compared to a computed "
             "QC metric (metric-key coverage gap), so agreement cannot be assessed. Needs a human."
         )
-    elif not diverged and not finding_agrees:
+    elif not has_diverge and not has_finding:
         # A+B gate: every comparable metric agrees, but they are all technical QC floors (data
         # quality/identity), not the paper's findings. Reproducing to QC level is not validating a
         # finding, so the honest verdict is inconclusive with the scope stated plainly.
@@ -431,7 +462,17 @@ def classify_study(
             "pipeline's scope). The deposited data is present and reproduces to QC level, but no reported "
             "finding was validated. Honest verdict: inconclusive, needs a human."
         )
-    elif not diverged:
+    elif not has_diverge and conc_agree and not finding_agrees:
+        # Level-3 validated driven purely by finding concordance (no scalar finding agreed). This is
+        # the feature's whole point (the paper's reported finding reproduced), but it is a consequential
+        # claim and thresholds are first-pass, so it is held for a human rather than auto-finalized.
+        classification = "validated"
+        auto_finalize = False
+        reasoning = (
+            f"The paper's reported finding reproduced: {'; '.join(_concordance_desc(c) for c in conc_agree)}. "
+            "This is a Level-3 finding-level agreement. Suggesting validated; confirm before finalizing."
+        )
+    elif not has_diverge:
         classification = "validated"
         # Auto-finalize (remove the human) only for SOLID agreement: several metrics agree, or we
         # compared every metric the paper claimed with no coverage gap. A lone agreeing metric amid
@@ -447,20 +488,27 @@ def classify_study(
                 f"{coverage['not_computed']} other claimed metric(s) had no computed counterpart, so "
                 "coverage is thin. Suggesting validated; confirm before finalizing."
             )
+        if conc_agree:
+            reasoning += f" The paper's reported finding also reproduced ({_concordance_desc(conc_agree[0])})."
     else:
         attribution = _attribute(mapping_confidence, reference_genome)
+        n_div = len(diverged) + len(conc_diverge)
+        finding_note = ""
+        if conc_diverge:
+            finding_note = f" The paper's reported finding did not reproduce ({_concordance_desc(conc_diverge[0])})."
         if attribution["our_side"] == "cleared":
             classification = "not_validated"
             reasoning = (
-                f"{len(diverged)} metric(s) diverge beyond tolerance and our side was cleared "
+                f"{n_div} finding/metric(s) diverge beyond tolerance and our side was cleared "
                 "(confident pipeline equivalent, recognized reference build), so the run did not reproduce "
-                "the paper's values in our hands."
+                "the paper's values in our hands." + finding_note
             )
         else:
             classification = "inconclusive"
             reasoning = (
-                f"{len(diverged)} metric(s) diverge, but our side could not be cleared "
+                f"{n_div} finding/metric(s) diverge, but our side could not be cleared "
                 f"({'; '.join(attribution['reasons'])}), so the divergence cannot be attributed to the paper."
+                + finding_note
             )
         auto_finalize = False
 

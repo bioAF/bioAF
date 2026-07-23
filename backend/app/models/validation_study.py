@@ -30,6 +30,7 @@ VALIDATION_STUDY_STATES = [
     "setup",
     "running",
     "extracting",
+    "reproducing",  # Level-3 (ADR-069): reproduce the paper's finding + score concordance
     "comparing",
     "classified",  # terminal: carries a classification
     "plan_declined",  # terminal: human rejected the plan at the C1 gate
@@ -49,7 +50,10 @@ VALIDATION_STUDY_TRANSITIONS: dict[str, list[str]] = {
     "acquiring_data": ["setup", "classified", "error"],
     "setup": ["running", "error"],
     "running": ["extracting", "error"],
-    "extracting": ["comparing", "error"],
+    # extracting routes to reproducing when Level-3 inputs are present, else straight to comparing
+    # (Level-2 only), so the existing QC-only flow is unchanged.
+    "extracting": ["reproducing", "comparing", "error"],
+    "reproducing": ["comparing", "error"],
     "comparing": ["classified", "error"],
     "classified": [],
     "plan_declined": [],
