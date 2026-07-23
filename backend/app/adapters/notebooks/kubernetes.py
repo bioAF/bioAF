@@ -442,6 +442,30 @@ class KubernetesNotebookProvider(NotebookProvider):
                 "exec /usr/sbin/sshd -D"
             )
             container_command = ["/bin/sh", "-c", startup_script]
+        elif session_type == "headless":
+            # Headless (non-interactive) execution (lit_validation Level-3): run the injected,
+            # already-parameterized notebook to completion with nbconvert, writing any result files
+            # to /outputs, then exit. Completion is detected off THIS container's terminated state
+            # (the gcs-sync sidecar keeps the pod phase Running), and terminate_session syncs /outputs
+            # the same way it does for interactive sessions. The kernel is whatever the template
+            # declares (IRkernel for the R DE/DA templates; python3 otherwise).
+            import base64
+            import json as _json
+
+            notebook_json = session_spec.get("notebook_json")
+            if notebook_json is None:
+                raise ValidationError("headless execution requires notebook_json in the session spec")
+            nb_b64 = base64.b64encode(_json.dumps(notebook_json).encode()).decode()
+            cell_timeout = int(session_spec.get("cell_timeout_seconds", 3600))
+            container_port = 8888  # unused; a headless run exposes no server
+            exec_script = (
+                "set -e && mkdir -p /outputs /tmp/exec && cd /tmp/exec && "
+                f"printf '%s' '{nb_b64}' | base64 -d > input.ipynb && "
+                "jupyter nbconvert --to notebook --execute --output executed.ipynb "
+                f"--ExecutePreprocessor.timeout={cell_timeout} input.ipynb && "
+                "cp -f /tmp/exec/executed.ipynb /outputs/ 2>/dev/null || true"
+            )
+            container_command = ["/bin/sh", "-c", exec_script]
         else:
             # RStudio uses PAM auth -- session credentials are required.
             # User creation must happen inside the main container (not an
@@ -786,35 +810,37 @@ class KubernetesNotebookProvider(NotebookProvider):
         core_client.create_namespaced_pod(namespace=namespace, body=pod_manifest)
         logger.info("Created pod %s in %s", pod_name, namespace)
 
-        # Create Service
-        service_manifest = {
-            "apiVersion": "v1",
-            "kind": "Service",
-            "metadata": {
-                "name": service_name,
-                "namespace": namespace,
-                "labels": {
-                    "bioaf.io/session": str(session_id),
+        # A headless run exposes no server: skip the LoadBalancer Service and the readiness poll
+        # (there is nothing to reach). Its completion is polled off the notebook container's exit.
+        if session_type != "headless":
+            service_manifest = {
+                "apiVersion": "v1",
+                "kind": "Service",
+                "metadata": {
+                    "name": service_name,
+                    "namespace": namespace,
+                    "labels": {
+                        "bioaf.io/session": str(session_id),
+                    },
                 },
-            },
-            "spec": {
-                "selector": {"bioaf.io/session": str(session_id)},
-                "ports": [
-                    {
-                        "port": container_port,
-                        "targetPort": container_port,
-                        "protocol": "TCP",
-                    }
-                ],
-                "type": "LoadBalancer",
-            },
-        }
-        core_client.create_namespaced_service(namespace=namespace, body=service_manifest)
-        logger.info("Created service %s in %s", service_name, namespace)
+                "spec": {
+                    "selector": {"bioaf.io/session": str(session_id)},
+                    "ports": [
+                        {
+                            "port": container_port,
+                            "targetPort": container_port,
+                            "protocol": "TCP",
+                        }
+                    ],
+                    "type": "LoadBalancer",
+                },
+            }
+            core_client.create_namespaced_service(namespace=namespace, body=service_manifest)
+            logger.info("Created service %s in %s", service_name, namespace)
 
-        # Launch background task to poll for pod readiness and LB IP,
-        # then update the DB session record once both are available.
-        asyncio.create_task(self._poll_session_ready(session_id, pod_name, service_name, namespace, container_port))
+            # Launch background task to poll for pod readiness and LB IP,
+            # then update the DB session record once both are available.
+            asyncio.create_task(self._poll_session_ready(session_id, pod_name, service_name, namespace, container_port))
 
         return {
             "session_id": session_id,
@@ -1252,19 +1278,29 @@ class KubernetesNotebookProvider(NotebookProvider):
                 "pod_name": pod_name,
             }
 
-        phase = pod.status.phase
-        if phase == "Running":
-            conditions = pod.status.conditions or []
-            ready = any(c.type == "Ready" and c.status == "True" for c in conditions)
-            status = "running" if ready else "starting"
-        elif phase == "Pending":
-            status = "starting"
-        elif phase in ("Failed", "Unknown"):
-            status = "error"
-        elif phase == "Succeeded":
-            status = "stopped"
+        # A headless run's completion is NOT visible in the pod phase: the gcs-sync sidecar runs
+        # `while true; sleep`, so with restartPolicy=Never the pod stays "Running" after the notebook
+        # container exits. Key off the notebook container's terminated state instead (exit 0 -> done,
+        # non-zero -> failed). Detected from the pod's own `bioaf.io/type` label so the caller need
+        # not pass session_type.
+        labels = (pod.metadata.labels or {}) if pod.metadata else {}
+        is_headless = session_type == "headless" or labels.get("bioaf.io/type") == "headless"
+        if is_headless:
+            status = self._headless_container_status(pod)
         else:
-            status = "unknown"
+            phase = pod.status.phase
+            if phase == "Running":
+                conditions = pod.status.conditions or []
+                ready = any(c.type == "Ready" and c.status == "True" for c in conditions)
+                status = "running" if ready else "starting"
+            elif phase == "Pending":
+                status = "starting"
+            elif phase in ("Failed", "Unknown"):
+                status = "error"
+            elif phase == "Succeeded":
+                status = "stopped"
+            else:
+                status = "unknown"
 
         result = {
             "session_id": session_id,
@@ -1276,14 +1312,33 @@ class KubernetesNotebookProvider(NotebookProvider):
             result["session_type"] = session_type
 
         # Resolve the LoadBalancer URL for live sessions so the API layer never
-        # builds K8s service URLs itself.
-        if status in ("running", "starting"):
+        # builds K8s service URLs itself. Headless runs have no Service, so skip it.
+        if status in ("running", "starting") and not is_headless:
             container_port = 8888 if session_type == "jupyter" else 8787
             url = self._resolve_service_url(f"bioaf-notebook-svc-{session_id}", namespace, container_port)
             if url:
                 result["access_url"] = url
 
         return result
+
+    @staticmethod
+    def _headless_container_status(pod) -> str:
+        """Map a headless pod's `notebook` container terminated state to a session status.
+
+        The pod phase is unreliable for headless (the sleeping gcs-sync sidecar keeps it Running),
+        so we read the notebook container directly: terminated exit 0 -> stopped (done), non-zero ->
+        error, still running -> running, otherwise starting.
+        """
+        statuses = (pod.status.container_statuses or []) if pod.status else []
+        nb = next((c for c in statuses if c.name == "notebook"), None)
+        if nb is None or nb.state is None:
+            return "starting"
+        terminated = getattr(nb.state, "terminated", None)
+        if terminated is not None:
+            return "stopped" if terminated.exit_code == 0 else "error"
+        if getattr(nb.state, "running", None) is not None:
+            return "running"
+        return "starting"
 
     def _resolve_service_url(self, service_name: str, namespace: str, container_port: int) -> str | None:
         """Single-attempt LoadBalancer external-IP lookup -> http URL, or None.
