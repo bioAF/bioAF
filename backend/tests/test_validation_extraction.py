@@ -25,6 +25,10 @@ _GOOD = """Here is the extraction:
 {"accessions": ["GSE52778"],
  "sample_structure": {"organism": "Homo sapiens", "sample_count": 8, "library_layout": "PAIRED"},
  "method": {"assay": "bulk RNA-seq", "tools": ["TopHat", "Cufflinks"], "reference_build": "GRCh37", "key_params": {"aligner": "tophat"}},
+ "differential_design": {
+   "contrasts": [{"name": "dex vs untreated", "test_condition": "dexamethasone", "reference_condition": "untreated",
+                  "test_samples": ["GSM1", "GSM2"], "reference_samples": ["GSM3", "GSM4"]}],
+   "thresholds": {"log2fc": 1.0, "padj": 0.05}},
  "claims": [{"metric_key": "alignment_rate", "value": 83.4, "unit": "%", "tolerance": 0.05, "source_locator": "Results"},
             {"metric_key": "de_genes", "value": 316, "unit": "count", "source_locator": "Fig 3"}],
  "data_availability": "deposited", "blockers": []}
@@ -134,6 +138,49 @@ def test_parse_extraction_handles_non_json():
     assert p["claims"] == []
 
 
+def test_parse_extraction_reads_differential_design():
+    # B2e (ADR-069): the extractor stops dropping the differential design. The contrast(s),
+    # the condition->sample mapping, and the paper's significance thresholds are captured as a
+    # structured object so the C1 gate can ratify them and Level-3 can run them.
+    p = parse_extraction(_GOOD)
+    design = p["differential_design"]
+    assert design["thresholds"] == {"log2fc": 1.0, "padj": 0.05}
+    assert len(design["contrasts"]) == 1
+    c = design["contrasts"][0]
+    assert c["test_condition"] == "dexamethasone"
+    assert c["reference_condition"] == "untreated"
+    assert c["test_samples"] == ["GSM1", "GSM2"]
+    assert c["reference_samples"] == ["GSM3", "GSM4"]
+
+
+def test_parse_extraction_differential_design_absent_is_empty():
+    # A QC-only paper (no differential finding) yields an empty design, never a fabricated one.
+    p = parse_extraction(
+        '```json\n{"accessions": [], "method": {"assay": "bulk RNA-seq"}, "claims": [], '
+        '"data_availability": "none", "blockers": []}\n```'
+    )
+    assert p["differential_design"] == {"contrasts": [], "thresholds": {"log2fc": None, "padj": None}}
+
+
+def test_parse_extraction_differential_design_tolerates_partial():
+    # honest-None on missing sub-fields; a bare contrast with no sample lists still parses.
+    p = parse_extraction(
+        '```json\n{"differential_design": {"contrasts": [{"name": "KO vs WT"}], '
+        '"thresholds": {"padj": 0.01}}}\n```'
+    )
+    design = p["differential_design"]
+    assert design["contrasts"] == [
+        {
+            "name": "KO vs WT",
+            "test_condition": None,
+            "reference_condition": None,
+            "test_samples": [],
+            "reference_samples": [],
+        }
+    ]
+    assert design["thresholds"] == {"log2fc": None, "padj": 0.01}
+
+
 def test_build_extraction_prompt_includes_text_and_schema():
     system, payload = build_extraction_prompt("MY PAPER BODY")
     assert "MY PAPER BODY" in payload
@@ -163,6 +210,10 @@ async def test_extract_produces_plan_targets_and_mapping(session, admin_user, mo
     # The model's key_params ({"aligner": "tophat"}) are experimental metadata, not nf-core params,
     # so they must NOT be forwarded as pipeline parameters (that failed launch_run's param validation).
     assert plan.parameters_json == {}
+    # B2e: the differential design is captured on the plan (dropped before), so Level-3 can run it.
+    design = plan.differential_design_json
+    assert design["thresholds"] == {"log2fc": 1.0, "padj": 0.05}
+    assert design["contrasts"][0]["test_samples"] == ["GSM1", "GSM2"]
     assert study.reproduction_plan_id == plan.id
 
     targets = list(

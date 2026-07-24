@@ -28,6 +28,9 @@ async def _enable_lit_validation(session):
 _GOOD = (
     '```json\n{"accessions": ["GSE52778"], "sample_structure": {"organism": "Homo sapiens"}, '
     '"method": {"assay": "bulk RNA-seq", "tools": ["TopHat"], "reference_build": "GRCh37"}, '
+    '"differential_design": {"contrasts": [{"name": "dex vs untreated", "test_condition": "dex", '
+    '"reference_condition": "untreated", "test_samples": ["GSM1"], "reference_samples": ["GSM2"]}], '
+    '"thresholds": {"log2fc": 1.0, "padj": 0.05}}, '
     '"claims": [{"metric_key": "alignment_rate", "value": 83.4, "unit": "%", "source_locator": "Results"}], '
     '"data_availability": "deposited", "blockers": []}\n```'
 )
@@ -66,6 +69,10 @@ async def test_request_read_approve_flow(client, admin_token, monkeypatch):
     assert body["state"] == "plan_ready"
     assert body["plan"]["pipeline_key"] == "nf-core/rnaseq"
     assert body["plan"]["comparison_targets"][0]["metric_key"] == "alignment_rate"
+    # B2e: the differential design is captured and surfaced for the human to ratify at the C1 gate.
+    design = body["plan"]["differential_design"]
+    assert design["thresholds"] == {"log2fc": 1.0, "padj": 0.05}
+    assert design["contrasts"][0]["test_samples"] == ["GSM1"]
 
     r = await client.post(f"/api/validation-studies/{sid}/approve", headers=_auth(admin_token))
     assert r.status_code == 200, r.text

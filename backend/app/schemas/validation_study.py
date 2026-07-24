@@ -45,6 +45,7 @@ class ReproductionPlanResponse(BaseModel):
     pipeline_key: str | None = None
     pipeline_version: str | None = None
     parameters: dict | None = None
+    differential_design: dict | None = None
     reference_genome: str | None = None
     reference_build: str | None = None
     mapping_confidence: str | None = None

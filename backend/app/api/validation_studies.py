@@ -49,6 +49,7 @@ def _plan_response(plan) -> ReproductionPlanResponse | None:
         pipeline_key=plan.pipeline_key,
         pipeline_version=plan.pipeline_version,
         parameters=plan.parameters_json,
+        differential_design=plan.differential_design_json,
         reference_genome=plan.reference_genome,
         reference_build=plan.reference_build,
         mapping_confidence=plan.mapping_confidence,
