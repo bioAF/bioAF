@@ -5,6 +5,7 @@ through the owning study. The extractor calls create_plan + add_comparison_targe
 the result views read via get_plan.
 """
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -13,6 +14,7 @@ from app.models.comparison_target import ComparisonTarget
 from app.models.reproduction_plan import ReproductionPlan
 from app.models.validation_study import ValidationStudy
 from app.services.audit_service import log_action
+from app.services.result_set_normalizer import normalize_gene_table, normalize_interval_table
 
 
 class ReproductionPlanService:
@@ -117,3 +119,88 @@ class ReproductionPlanService:
                 .options(selectinload(ReproductionPlan.comparison_targets))
             )
         ).scalar_one_or_none()
+
+    @staticmethod
+    async def set_finding_claim(
+        session: AsyncSession,
+        study_id: int,
+        org_id: int,
+        user_id: int,
+        *,
+        kind: str,
+        table_text: str,
+        contrast: str | None = None,
+        lfc_threshold: float | None = None,
+        padj_threshold: float | None = None,
+        source_locator: str | None = None,
+    ) -> dict:
+        """B4 (ADR-069): normalize the paper's deposited result table into a directional FindingSet
+        and persist it as the plan's confirmed ground-truth claim (the C1 gate).
+
+        The human supplies the paper's own DEG table (``kind="gene"``) or DA peak table
+        (``kind="interval"``); we normalize it with the paper's stated thresholds (defaulting to the
+        differential design captured in B2e) and store it so plan approval can read it into
+        ``evidence["level3"].paper_finding_set``. Returns the claim (finding set + parse notes) so the
+        UI can show the parse for confirmation/correction. Only valid at the ``plan_ready`` C1 gate.
+        """
+        if kind not in ("gene", "interval"):
+            raise HTTPException(400, f"Unknown finding-set kind '{kind}'; expected 'gene' or 'interval'.")
+
+        study = (
+            await session.execute(
+                select(ValidationStudy).where(
+                    ValidationStudy.id == study_id,
+                    ValidationStudy.organization_id == org_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if not study:
+            raise HTTPException(404, "Validation study not found")
+        if study.state != "plan_ready":
+            raise HTTPException(
+                400,
+                f"Cannot confirm a ground-truth set from '{study.state}'; the study must be in 'plan_ready'.",
+            )
+        plan = await ReproductionPlanService.get_plan(session, study_id, org_id)
+        if plan is None:
+            raise HTTPException(404, "No reproduction plan to attach the ground-truth set to.")
+
+        # The paper's own stated thresholds normalize its own table. Default to the captured design.
+        design_thresholds = (plan.differential_design_json or {}).get("thresholds") or {}
+        lfc = lfc_threshold if lfc_threshold is not None else design_thresholds.get("log2fc")
+        padj = padj_threshold if padj_threshold is not None else design_thresholds.get("padj")
+        lfc = float(lfc) if lfc is not None else 1.0
+        padj = float(padj) if padj is not None else 0.05
+
+        if kind == "interval":
+            fs = normalize_interval_table(table_text, lfc_threshold=lfc, padj_threshold=padj, contrast=contrast)
+        else:
+            fs = normalize_gene_table(table_text, lfc_threshold=lfc, padj_threshold=padj, contrast=contrast)
+
+        claim = {
+            "kind": kind,
+            "namespace": fs.namespace,
+            "source_locator": source_locator,
+            "contrast": contrast,
+            "confirmed": True,
+            "thresholds": {"log2fc": lfc, "padj": padj},
+            "finding_set": fs.to_dict(),
+        }
+        plan.finding_claim_json = claim
+        await session.flush()
+
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="reproduction_plan",
+            entity_id=plan.id,
+            action="confirm_finding_claim",
+            details={
+                "validation_study_id": study_id,
+                "kind": kind,
+                "n_sig": len(fs.entities),
+                "namespace": fs.namespace,
+                "source_locator": source_locator,
+            },
+        )
+        return claim

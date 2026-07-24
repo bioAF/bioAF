@@ -30,6 +30,22 @@ class ClassifyRequest(BaseModel):
     classification: str
 
 
+class FindingSetRequest(BaseModel):
+    """B4 (Level-3): the human confirms the paper's deposited result set at the C1 gate.
+
+    ``table_text`` is the raw DEG/DA table (csv/tsv). ``kind`` selects the gene vs interval
+    normalizer. ``contrast`` picks the columns of a multi-contrast wide table. Thresholds default to
+    the paper's captured differential design when omitted.
+    """
+
+    kind: str  # "gene" | "interval"
+    table_text: str
+    contrast: str | None = None
+    lfc_threshold: float | None = None
+    padj_threshold: float | None = None
+    source_locator: str | None = None
+
+
 class ComparisonTargetResponse(BaseModel):
     metric_key: str
     claimed_value: float | None = None
@@ -46,6 +62,7 @@ class ReproductionPlanResponse(BaseModel):
     pipeline_version: str | None = None
     parameters: dict | None = None
     differential_design: dict | None = None
+    finding_claim: dict | None = None
     reference_genome: str | None = None
     reference_build: str | None = None
     mapping_confidence: str | None = None

@@ -18,6 +18,7 @@ from app.schemas.validation_study import (
     ClassifyRequest,
     ComparisonTargetResponse,
     DeclineRequest,
+    FindingSetRequest,
     ReadRequest,
     ReproductionPlanResponse,
     ValidationStudyRequest,
@@ -50,6 +51,7 @@ def _plan_response(plan) -> ReproductionPlanResponse | None:
         pipeline_version=plan.pipeline_version,
         parameters=plan.parameters_json,
         differential_design=plan.differential_design_json,
+        finding_claim=plan.finding_claim_json,
         reference_genome=plan.reference_genome,
         reference_build=plan.reference_build,
         mapping_confidence=plan.mapping_confidence,
@@ -207,6 +209,36 @@ async def read_and_plan(
     user_id = int(current_user["sub"])
     study = await _load(session, study_id, org_id)
     study = await ValidationDriverService.read_and_plan(session, study, data.full_text, org_id, user_id)
+    await session.commit()
+    return await _study_response(session, study, org_id)
+
+
+@router.post("/{study_id}/finding-set", response_model=ValidationStudyResponse)
+async def confirm_finding_set(
+    study_id: int,
+    data: FindingSetRequest,
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """B4 (Level-3): confirm the paper's deposited ground-truth result set at the C1 gate. Normalizes
+    the supplied DEG/DA table into a directional FindingSet and persists it on the plan so approval
+    can run Level-3 concordance. The response carries the updated plan (with the parsed finding set)
+    for the human to review before approving."""
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    await ReproductionPlanService.set_finding_claim(
+        session,
+        study_id,
+        org_id,
+        user_id,
+        kind=data.kind,
+        table_text=data.table_text,
+        contrast=data.contrast,
+        lfc_threshold=data.lfc_threshold,
+        padj_threshold=data.padj_threshold,
+        source_locator=data.source_locator,
+    )
+    study = await _load(session, study_id, org_id)
     await session.commit()
     return await _study_response(session, study, org_id)
 

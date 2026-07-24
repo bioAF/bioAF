@@ -83,6 +83,42 @@ async def test_request_read_approve_flow(client, admin_token, monkeypatch):
     assert r.json()["approved_by_user_id"] is not None
 
 
+async def test_confirm_finding_set_at_c1_gate(client, admin_token, monkeypatch):
+    """B4: the human confirms the paper's deposited DEG table at the C1 gate; the endpoint normalizes
+    it and surfaces the parsed finding set on the plan so approval can run Level-3 concordance."""
+    _patch_llm(monkeypatch, _GOOD)
+    sid = (
+        await client.post("/api/validation-studies", json={"source_accession": "GSE52778"}, headers=_auth(admin_token))
+    ).json()["id"]
+    await client.post(
+        f"/api/validation-studies/{sid}/read", json={"full_text": "the paper body"}, headers=_auth(admin_token)
+    )
+
+    table = "gene,log2FoldChange,padj\nA1BG,2.5,0.001\nTP53,-1.8,0.01\nGAPDH,0.1,0.9\n"
+    r = await client.post(
+        f"/api/validation-studies/{sid}/finding-set",
+        json={"kind": "gene", "table_text": table, "source_locator": "Table S3"},
+        headers=_auth(admin_token),
+    )
+    assert r.status_code == 200, r.text
+    claim = r.json()["plan"]["finding_claim"]
+    assert claim["confirmed"] is True
+    assert claim["finding_set"]["n_sig"] == 2
+    assert {e["id"] for e in claim["finding_set"]["entities"]} == {"A1BG", "TP53"}
+
+
+async def test_viewer_cannot_confirm_finding_set(client, admin_token, viewer_token, monkeypatch):
+    _patch_llm(monkeypatch, _GOOD)
+    sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]
+    await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+    r = await client.post(
+        f"/api/validation-studies/{sid}/finding-set",
+        json={"kind": "gene", "table_text": "gene,log2FoldChange,padj\nA1BG,2.5,0.001\n"},
+        headers=_auth(viewer_token),
+    )
+    assert r.status_code == 403
+
+
 async def test_decline_flow(client, admin_token, monkeypatch):
     _patch_llm(monkeypatch, _GOOD)
     sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]

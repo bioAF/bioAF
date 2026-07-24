@@ -41,6 +41,14 @@ class ReproductionPlan(Base):
     # headless differential notebook. None/empty for a QC-only paper with no differential finding.
     differential_design_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
+    # B4 (ADR-069 / spec-08 Level-3): the paper's OWN deposited result set (its DEG table / DA peak
+    # list), normalized to a directional FindingSet and confirmed by the human at the C1 gate. This
+    # is the ground truth Level-3 concordance scores our reproduction against. Shape:
+    # {"kind": "gene"|"interval", "namespace", "source_locator", "contrast", "confirmed": bool,
+    #  "thresholds": {"log2fc", "padj"}, "finding_set": FindingSet.to_dict()}. None until confirmed;
+    # a paper with no obtainable set stays None (verdict caps at Level-2, never a fabricated set).
+    finding_claim_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
     # B3 mapping rationale: how confident the method -> nf-core mapping is, and why.
     mapping_confidence: Mapped[str | None] = mapped_column(String(20), nullable=True)  # exact | partial | none
     mapping_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
