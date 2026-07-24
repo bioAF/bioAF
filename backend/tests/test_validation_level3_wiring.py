@@ -97,6 +97,19 @@ async def _study_with_plan(session, admin_user, run, *, design=_DESIGN, claim=_C
 @pytest.mark.asyncio
 async def test_build_level3_inputs_assembles_full_gene_bundle(session, admin_user, analysis_run, de_template):
     f = await _count_matrix_file(session, admin_user, analysis_run)
+    # A decoy template shares the differential_expression category (the interactive scRNA DE notebook,
+    # seeded id 4 on the demo). It must NOT be selected: only the headless de_bulk_deseq2 template runs.
+    session.add(
+        TemplateNotebook(
+            organization_id=admin_user.organization_id,
+            name="scRNA DE (interactive)",
+            category="differential_expression",
+            notebook_path="notebooks/04_differential_expression.ipynb",
+            parameters_json={},
+            is_builtin=True,
+        )
+    )
+    await session.flush()
     study, plan = await _study_with_plan(session, admin_user, analysis_run)
 
     level3 = await build_level3_inputs(session, study, plan)

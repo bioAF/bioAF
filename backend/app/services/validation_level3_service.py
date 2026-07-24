@@ -27,14 +27,19 @@ logger = logging.getLogger("bioaf.validation_level3")
 # Per finding-kind wiring: which builtin template reproduces the finding, how to recognize the
 # count-matrix file among the analysis run's outputs, and the id column the template reads. RNA-seq DE
 # runs on salmon's gene-count matrix; ATAC/ChIP DA runs on the consensus-peak featureCounts matrix.
+#
+# The template is keyed by its exact notebook_path, NOT by category: the `differential_expression`
+# category is shared with the interactive scRNA DE template (04_differential_expression.ipynb), so a
+# category lookup can pick the wrong, non-headless notebook. Only the headless bulk/peak DESeq2
+# templates are valid Level-3 reproducers.
 _TYPE_WIRING: dict[str, dict] = {
     "gene": {
-        "template_category": "differential_expression",
+        "template_notebook_path": "notebooks/de_bulk_deseq2.ipynb",
         "count_matrix_exact": "salmon.merged.gene_counts.tsv",
         "id_column": "gene_id",
     },
     "interval": {
-        "template_category": "differential_accessibility",
+        "template_notebook_path": "notebooks/da_peaks_deseq2.ipynb",
         "count_matrix_contains": ("consensus", "featurecounts"),
         "id_column": None,
     },
@@ -82,12 +87,12 @@ async def build_level3_inputs(
         )
         return None
 
-    template = await _find_builtin_template(session, study.organization_id, wiring["template_category"])
+    template = await _find_builtin_template(session, study.organization_id, wiring["template_notebook_path"])
     if template is None:
         logger.info(
             "study %d: no builtin '%s' template registered; staying Level-2",
             study.id,
-            wiring["template_category"],
+            wiring["template_notebook_path"],
         )
         return None
 
@@ -144,15 +149,17 @@ async def _find_count_matrix(
     return None
 
 
-async def _find_builtin_template(session: AsyncSession, org_id: int, category: str) -> TemplateNotebook | None:
+async def _find_builtin_template(
+    session: AsyncSession, org_id: int, notebook_path: str
+) -> TemplateNotebook | None:
     return (
         await session.execute(
             select(TemplateNotebook)
             .where(
                 TemplateNotebook.organization_id == org_id,
-                TemplateNotebook.category == category,
+                TemplateNotebook.notebook_path == notebook_path,
                 TemplateNotebook.is_builtin.is_(True),
             )
-            .order_by(TemplateNotebook.sort_order, TemplateNotebook.id)
+            .order_by(TemplateNotebook.id)
         )
     ).scalars().first()
