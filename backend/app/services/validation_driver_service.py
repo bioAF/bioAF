@@ -45,6 +45,7 @@ from app.services.result_set_normalizer import FindingSet, normalize_gene_table,
 from app.services.validation_classifier_service import classify_study
 from app.services.validation_concordance_service import compare_gene_sets, compare_interval_sets
 from app.services.validation_extraction_service import ValidationExtractionService
+from app.services.validation_level3_service import build_level3_inputs
 from app.services.validation_study_service import ValidationStudyService
 
 logger = logging.getLogger("bioaf.validation_driver")
@@ -327,6 +328,16 @@ class ValidationDriverService:
             }
         )
         study.evidence_json = evidence
+
+        # Assemble the Level-3 inputs now that the analysis run produced the count matrix (B2e design +
+        # B4 confirmed finding claim + the matrix file + the matching template). A study with no
+        # confirmed differential finding gets None here and stays Level-2, unchanged. Pre-set inputs
+        # (tests / a future approval-time path) are respected and not rebuilt.
+        if not evidence.get("level3"):
+            level3 = await build_level3_inputs(session, study, plan)
+            if level3:
+                evidence["level3"] = level3
+                study.evidence_json = evidence
 
         # Route to Level-3 reproduction when its inputs are present; otherwise straight to comparing
         # (Level-2 only), unchanged from before.

@@ -317,6 +317,87 @@ async def test_extracting_stashes_metrics_and_advances_to_comparing(session, adm
     assert ev["analysis_run_id"] == analysis.id
 
 
+@pytest.mark.asyncio
+async def test_extracting_activates_level3_and_routes_to_reproducing(session, admin_user, monkeypatch):
+    """When the plan carries a confirmed finding claim (B4) + a differential design (B2e) and the
+    analysis run produced the count matrix, extracting assembles evidence["level3"] and routes to the
+    reproducing state instead of straight to comparing."""
+    from app.models.template_notebook import TemplateNotebook
+
+    async def _fake_get(session, org_id, run_id):
+        return SimpleNamespace(id=7, status="ready", metrics_json={"reads_mapped_genome_unique": 0.9})
+
+    monkeypatch.setattr(QCDashboardService, "get_dashboard_by_run", _fake_get)
+
+    exp_id = await _experiment_id(session, admin_user)
+    study = await _study(session, admin_user, state="extracting", experiment_id=exp_id)
+    analysis = await _run(session, admin_user, exp_id, name="nf-core/rnaseq", status="completed")
+    study.analysis_run_id = analysis.id
+
+    # B2e design + B4 confirmed finding claim on the plan.
+    plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+    plan.differential_design_json = {
+        "contrasts": [{"name": "t vs c", "test_samples": ["S1"], "reference_samples": ["S2"]}],
+        "thresholds": {"log2fc": 1.0, "padj": 0.05},
+    }
+    plan.finding_claim_json = {
+        "kind": "gene",
+        "confirmed": True,
+        "thresholds": {"log2fc": 1.0, "padj": 0.05},
+        "finding_set": {"kind": "gene", "namespace": "symbol", "n_sig": 1, "entities": [{"id": "A1BG"}]},
+    }
+    # The salmon gene-count matrix from the analysis run + the builtin DE template.
+    session.add(
+        File(
+            organization_id=admin_user.organization_id,
+            gcs_uri="gs://b/counts.tsv",
+            storage_uri="gs://b/counts.tsv",
+            filename="salmon.merged.gene_counts.tsv",
+            file_type="count_matrix",
+            source_pipeline_run_id=analysis.id,
+        )
+    )
+    tmpl = TemplateNotebook(
+        organization_id=admin_user.organization_id,
+        name="DE",
+        category="differential_expression",
+        notebook_path="notebooks/de_bulk_deseq2.ipynb",
+        parameters_json={},
+        is_builtin=True,
+    )
+    session.add(tmpl)
+    await session.flush()
+
+    await ValidationDriverService._handle_extracting(session, study)
+
+    assert study.state == "reproducing"
+    level3 = study.evidence_json["level3"]
+    assert level3["template_id"] == tmpl.id
+    assert level3["kind"] == "gene"
+    assert level3["parameters"]["test_samples"] == "S1"
+
+
+@pytest.mark.asyncio
+async def test_extracting_stays_level2_without_finding_claim(session, admin_user, monkeypatch):
+    """A study with a differential design but no confirmed ground-truth set stays Level-2: extracting
+    routes straight to comparing, no reproducing."""
+
+    async def _fake_get(session, org_id, run_id):
+        return SimpleNamespace(id=7, status="ready", metrics_json={})
+
+    monkeypatch.setattr(QCDashboardService, "get_dashboard_by_run", _fake_get)
+    exp_id = await _experiment_id(session, admin_user)
+    study = await _study(session, admin_user, state="extracting", experiment_id=exp_id)
+    analysis = await _run(session, admin_user, exp_id, name="nf-core/rnaseq", status="completed")
+    study.analysis_run_id = analysis.id
+    await session.flush()
+
+    await ValidationDriverService._handle_extracting(session, study)
+
+    assert study.state == "comparing"
+    assert "level3" not in study.evidence_json
+
+
 # ---- comparing (E2/E3/E4 automatic classifier) ----
 
 
