@@ -295,3 +295,48 @@ class TestApiClientCacheInvalidation:
         first = await provider._get_api_client_async()
         second = await provider._get_api_client_async()
         assert first is second
+
+
+class TestHeadlessTerminateSkipsService:
+    """A headless run never creates a LoadBalancer Service (no readiness endpoint), so terminate must
+    not try to delete one, otherwise every headless teardown logs a noisy 404 traceback.
+
+    stream + get_storage_adapter are imported locally inside _k8s_terminate_session, so they are
+    patched at their source modules; gcs_home_prefix/working_bucket are empty to skip the sync blocks.
+    """
+
+    def _patch(self, monkeypatch, adapter):
+        core = MagicMock()
+        monkeypatch.setattr(adapter, "_get_k8s_core_client", lambda: core)
+        monkeypatch.setattr("kubernetes.stream.stream", lambda *a, **k: "")
+        storage = MagicMock()
+        storage.cli_auth_command.return_value = ""
+        monkeypatch.setattr("app.adapters.registry.get_storage_adapter", lambda: storage)
+        return core
+
+    @pytest.mark.asyncio
+    async def test_headless_terminate_does_not_delete_service(self, adapter, monkeypatch):
+        core = self._patch(monkeypatch, adapter)
+        await adapter._k8s_terminate_session(
+            session_id=26,
+            pod_name="bioaf-notebook-26",
+            namespace="ns",
+            gcs_home_prefix="",
+            working_bucket="",
+            session_type="headless",
+        )
+        core.delete_namespaced_pod.assert_called_once()
+        core.delete_namespaced_service.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_interactive_terminate_still_deletes_service(self, adapter, monkeypatch):
+        core = self._patch(monkeypatch, adapter)
+        await adapter._k8s_terminate_session(
+            session_id=27,
+            pod_name="bioaf-notebook-27",
+            namespace="ns",
+            gcs_home_prefix="",
+            working_bucket="",
+            session_type="jupyter",
+        )
+        core.delete_namespaced_service.assert_called_once()

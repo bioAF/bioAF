@@ -1238,13 +1238,17 @@ class KubernetesNotebookProvider(NotebookProvider):
         except Exception as e:
             logger.warning("Failed to delete pod %s: %s", pod_name, e)
 
-        # Delete service
-        service_name = f"bioaf-notebook-svc-{session_id}"
-        try:
-            core_client.delete_namespaced_service(name=service_name, namespace=namespace)
-            logger.info("Deleted notebook service")
-        except Exception:
-            logger.exception("Failed to delete notebook service")
+        # Delete service. Headless runs never create a LoadBalancer Service (no readiness endpoint to
+        # expose), so a delete would 404 with a noisy traceback on every headless teardown; skip it.
+        # (session_type matches the pod's `bioaf.io/type` label; "headless" is the same literal used by
+        # the headless-completion detection above.)
+        if session_type != "headless":
+            service_name = f"bioaf-notebook-svc-{session_id}"
+            try:
+                core_client.delete_namespaced_service(name=service_name, namespace=namespace)
+                logger.info("Deleted notebook service")
+            except Exception:
+                logger.exception("Failed to delete notebook service")
 
         return {
             "session_id": session_id,
