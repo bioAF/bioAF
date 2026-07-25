@@ -107,6 +107,29 @@ async def test_confirm_finding_set_at_c1_gate(client, admin_token, monkeypatch):
     assert {e["id"] for e in claim["finding_set"]["entities"]} == {"A1BG", "TP53"}
 
 
+async def test_edit_differential_design_at_c1_gate(client, admin_token, monkeypatch):
+    """B2e: the human corrects the contrast's sample labels at the C1 gate; the edited design is
+    normalized and surfaced back on the plan."""
+    _patch_llm(monkeypatch, _GOOD)
+    sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]
+    await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+
+    r = await client.put(
+        f"/api/validation-studies/{sid}/differential-design",
+        json={
+            "contrasts": [
+                {"name": "dex vs untreated", "test_samples": ["SRX30659361"], "reference_samples": ["SRX30659368"]}
+            ],
+            "thresholds": {"log2fc": 1.5, "padj": 0.01},
+        },
+        headers=_auth(admin_token),
+    )
+    assert r.status_code == 200, r.text
+    design = r.json()["plan"]["differential_design"]
+    assert design["thresholds"] == {"log2fc": 1.5, "padj": 0.01}
+    assert design["contrasts"][0]["test_samples"] == ["SRX30659361"]
+
+
 async def test_viewer_cannot_confirm_finding_set(client, admin_token, viewer_token, monkeypatch):
     _patch_llm(monkeypatch, _GOOD)
     sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]

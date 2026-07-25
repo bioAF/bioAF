@@ -18,6 +18,7 @@ from app.schemas.validation_study import (
     ClassifyRequest,
     ComparisonTargetResponse,
     DeclineRequest,
+    DifferentialDesignRequest,
     FindingSetRequest,
     ReadRequest,
     ReproductionPlanResponse,
@@ -209,6 +210,25 @@ async def read_and_plan(
     user_id = int(current_user["sub"])
     study = await _load(session, study_id, org_id)
     study = await ValidationDriverService.read_and_plan(session, study, data.full_text, org_id, user_id)
+    await session.commit()
+    return await _study_response(session, study, org_id)
+
+
+@router.put("/{study_id}/differential-design", response_model=ValidationStudyResponse)
+async def edit_differential_design(
+    study_id: int,
+    data: DifferentialDesignRequest,
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """B2e edit (Level-3): ratify/correct the paper's differential design at the C1 gate (typically to
+    fix the contrast's sample labels to the analysis matrix's column names) before Level-3 runs it."""
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    await ReproductionPlanService.set_differential_design(
+        session, study_id, org_id, user_id, {"contrasts": data.contrasts, "thresholds": data.thresholds or {}}
+    )
+    study = await _load(session, study_id, org_id)
     await session.commit()
     return await _study_response(session, study, org_id)
 

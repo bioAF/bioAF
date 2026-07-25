@@ -121,6 +121,54 @@ class ReproductionPlanService:
         ).scalar_one_or_none()
 
     @staticmethod
+    async def set_differential_design(
+        session: AsyncSession, study_id: int, org_id: int, user_id: int, design: dict
+    ) -> ReproductionPlan:
+        """B2e edit: persist the human-ratified differential design onto the plan at the C1 gate.
+
+        The extractor drafts the design, but its sample labels rarely match the analysis matrix's
+        column names, so the human corrects the contrast(s) + thresholds before Level-3 runs it. The
+        design is normalized to the canonical shape (honest-None on missing sub-fields); an empty
+        contrast list clears it to None so the plan stays Level-2. Only valid at ``plan_ready``.
+        """
+        # Local import: validation_extraction_service imports this module, so import its normalizer
+        # lazily to avoid a circular import at load time.
+        from app.services.validation_extraction_service import _differential_design_or_none, _normalize_differential_design
+
+        study = (
+            await session.execute(
+                select(ValidationStudy).where(
+                    ValidationStudy.id == study_id, ValidationStudy.organization_id == org_id
+                )
+            )
+        ).scalar_one_or_none()
+        if not study:
+            raise HTTPException(404, "Validation study not found")
+        if study.state != "plan_ready":
+            raise HTTPException(
+                400,
+                f"Cannot edit the differential design from '{study.state}'; the study must be in 'plan_ready'.",
+            )
+        plan = await ReproductionPlanService.get_plan(session, study_id, org_id)
+        if plan is None:
+            raise HTTPException(404, "No reproduction plan to attach the differential design to.")
+
+        plan.differential_design_json = _differential_design_or_none(_normalize_differential_design(design))
+        await session.flush()
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="reproduction_plan",
+            entity_id=plan.id,
+            action="edit_differential_design",
+            details={
+                "validation_study_id": study_id,
+                "n_contrasts": len((plan.differential_design_json or {}).get("contrasts", [])),
+            },
+        )
+        return plan
+
+    @staticmethod
     async def set_finding_claim(
         session: AsyncSession,
         study_id: int,

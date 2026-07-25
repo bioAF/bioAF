@@ -30,6 +30,14 @@ class ClassifyRequest(BaseModel):
     classification: str
 
 
+class DifferentialDesignRequest(BaseModel):
+    """B2e edit (Level-3): the human-ratified differential design at the C1 gate. An empty contrasts
+    list clears the design (the plan stays Level-2)."""
+
+    contrasts: list = []
+    thresholds: dict | None = None
+
+
 class FindingSetRequest(BaseModel):
     """B4 (Level-3): the human confirms the paper's deposited result set at the C1 gate.
 
