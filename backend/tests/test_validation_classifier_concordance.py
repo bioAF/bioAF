@@ -56,6 +56,49 @@ def test_concordance_diverge_uncleared_is_inconclusive():
     assert r["classification"] == "inconclusive"
 
 
+def test_concordance_diverge_thresholds_not_matched_is_inconclusive():
+    # E3' (ADR-069): even with a cleared QC side, a concordance divergence cannot strike the paper
+    # unless our reproduction applied the paper's OWN thresholds. If it did not, the low overlap could
+    # be an our-side threshold effect -> the honest verdict is inconclusive, not not_validated.
+    r = classify_study(
+        [],
+        {},
+        mapping_confidence="high",
+        reference_genome="GRCh38",
+        concordance_results=[_conc("diverge", directional_overlap_frac=0.1, enrichment_p=0.9, concordant=8)],
+        differential_attribution={"thresholds_matched": False, "method_comparable": True},
+    )
+    assert r["classification"] == "inconclusive"
+    assert any("threshold" in reason.lower() for reason in r["attribution"]["reasons"])
+
+
+def test_concordance_diverge_method_not_comparable_is_inconclusive():
+    r = classify_study(
+        [],
+        {},
+        mapping_confidence="high",
+        reference_genome="GRCh38",
+        concordance_results=[_conc("diverge", directional_overlap_frac=0.1, enrichment_p=0.9, concordant=8)],
+        differential_attribution={"thresholds_matched": True, "method_comparable": False},
+    )
+    assert r["classification"] == "inconclusive"
+    assert any("method" in reason.lower() for reason in r["attribution"]["reasons"])
+
+
+def test_concordance_diverge_fully_cleared_differential_is_not_validated():
+    # QC side cleared AND the differential side cleared (paper thresholds applied + comparable method)
+    # -> the strongest negative: not_validated.
+    r = classify_study(
+        [],
+        {},
+        mapping_confidence="high",
+        reference_genome="GRCh38",
+        concordance_results=[_conc("diverge", directional_overlap_frac=0.1, enrichment_p=0.9, concordant=8)],
+        differential_attribution={"thresholds_matched": True, "method_comparable": True},
+    )
+    assert r["classification"] == "not_validated"
+
+
 def test_concordance_not_computed_is_coverage_gap():
     r = classify_study([], {}, concordance_results=[_conc("not_computed")])
     assert r["classification"] == "inconclusive"

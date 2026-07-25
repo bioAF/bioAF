@@ -390,7 +390,14 @@ class ValidationDriverService:
         if cs.status != "completed":
             return False  # still running
 
-        our_fs = await ValidationDriverService._extract_reproduced_set(session, cs, level3.get("kind", "gene"))
+        params = level3.get("parameters") or {}
+        our_fs = await ValidationDriverService._extract_reproduced_set(
+            session,
+            cs,
+            level3.get("kind", "gene"),
+            lfc_threshold=float(params.get("lfc_threshold", 1.0)),
+            padj_threshold=float(params.get("padj_threshold", 0.05)),
+        )
         paper_fs = FindingSet.from_dict(level3.get("paper_finding_set") or {})
         universe = int(
             level3.get("universe") or our_fs.n_tested or max(len(paper_fs.entities), len(our_fs.entities), 1)
@@ -420,12 +427,26 @@ class ValidationDriverService:
         # Fold in the Level-3 finding-concordance verdict (E6) if the reproducing step produced one.
         level3_result = evidence.get("level3_result") or {}
         concordance = level3_result.get("concordance")
+        differential_attribution = None
+        if concordance:
+            # E3' (ADR-069): clear the DIFFERENTIAL side before a concordance divergence can strike the
+            # paper. thresholds_matched: the paper stated its cutoffs AND we applied them (the reproduced
+            # set is normalized with the plan's thresholds). method_comparable: our reproduction uses
+            # DESeq2, the standard count-based DE/DA method for the supported RNA/ATAC/ChIP substrates,
+            # so it is comparable by construction (a future refinement could compare the paper's exact tool).
+            design = (plan.differential_design_json if plan else None) or {}
+            th = design.get("thresholds") or {}
+            differential_attribution = {
+                "thresholds_matched": th.get("log2fc") is not None and th.get("padj") is not None,
+                "method_comparable": True,
+            }
         result = classify_study(
             evidence.get("comparison_targets") or [],
             evidence.get("computed_metrics") or {},
             mapping_confidence=plan.mapping_confidence if plan else None,
             reference_genome=plan.reference_genome if plan else None,
             concordance_results=[concordance] if concordance else None,
+            differential_attribution=differential_attribution,
         )
         evidence["classification_result"] = result
         study.evidence_json = evidence
@@ -506,17 +527,25 @@ class ValidationDriverService:
         ).scalar_one_or_none()
 
     @staticmethod
-    async def _extract_reproduced_set(session: AsyncSession, cs, kind: str) -> FindingSet:
+    async def _extract_reproduced_set(
+        session: AsyncSession,
+        cs,
+        kind: str,
+        lfc_threshold: float = 1.0,
+        padj_threshold: float = 0.05,
+    ) -> FindingSet:
         """Read the normalized result table the differential notebook wrote (a registered output
-        File) and normalize it into OUR FindingSet. Live seam (reads object storage); mocked in
-        unit tests."""
+        File) and normalize it into OUR FindingSet. Applies the paper's captured thresholds (passed
+        from the plan) so our set is defined by the same cutoffs as the paper's set (E3': a threshold
+        mismatch is an our-side effect, not a real divergence). Live seam (reads object storage);
+        mocked in unit tests."""
         text = await ValidationDriverService._read_reproduction_output(session, cs)
         if not text:
             ns = "interval" if kind == "interval" else "unknown"
             return FindingSet(kind=kind, namespace=ns, parse_notes=["no reproduction output found"])
         if kind == "interval":
-            return normalize_interval_table(text)
-        return normalize_gene_table(text)
+            return normalize_interval_table(text, lfc_threshold=lfc_threshold, padj_threshold=padj_threshold)
+        return normalize_gene_table(text, lfc_threshold=lfc_threshold, padj_threshold=padj_threshold)
 
     @staticmethod
     async def _read_reproduction_output(session: AsyncSession, cs) -> str | None:

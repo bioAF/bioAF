@@ -91,7 +91,7 @@ async def test_reproducing_completed_scores_concordance_and_advances(session, ad
     async def _poll(_session, cs):
         return SimpleNamespace(status="completed")
 
-    async def _extract(_session, cs, kind):
+    async def _extract(_session, cs, kind, **kwargs):
         # our reproduced set recovers all three of the paper's genes with concordant direction
         return _paper_genes()
 
@@ -108,6 +108,86 @@ async def test_reproducing_completed_scores_concordance_and_advances(session, ad
     conc = study.evidence_json["level3_result"]["concordance"]
     assert conc["verdict"] == "agree"
     assert conc["concordant"] == 3
+
+
+@pytest.mark.asyncio
+async def test_extract_reproduced_set_applies_the_papers_thresholds(session, admin_user, monkeypatch):
+    """Our reproduced set must be defined by the SAME cutoffs as the paper's set (the plan's captured
+    thresholds), not hardcoded defaults, or a threshold mismatch would spuriously depress overlap."""
+    table = "gene,log2FoldChange,padj\nA,2.5,0.001\nB,1.2,0.01\n"
+
+    async def _read(_session, _cs):
+        return table
+
+    monkeypatch.setattr(ValidationDriverService, "_read_reproduction_output", _read)
+    cs = SimpleNamespace(id=1)
+
+    # Default cutoff |lfc|>=1: both A and B are significant.
+    fs_default = await ValidationDriverService._extract_reproduced_set(session, cs, "gene")
+    assert {e.id for e in fs_default.entities} == {"A", "B"}
+
+    # The paper's stricter |lfc|>=2 cutoff: only A survives.
+    fs_strict = await ValidationDriverService._extract_reproduced_set(
+        session, cs, "gene", lfc_threshold=2.0, padj_threshold=0.05
+    )
+    assert {e.id for e in fs_strict.entities} == {"A"}
+
+
+async def _comparing_study_with_diverge(session, admin_user, design):
+    from app.services.reproduction_plan_service import ReproductionPlanService
+
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    await ReproductionPlanService.create_plan(
+        session,
+        study,
+        admin_user.id,
+        pipeline_key="nf-core/rnaseq",
+        mapping_confidence="exact",  # QC side cleared
+        reference_genome="GRCh38",
+        differential_design=design,
+    )
+    study.state = "comparing"
+    study.evidence_json = {
+        "computed_metrics": {},
+        "comparison_targets": [],
+        "level3_result": {
+            "concordance": {
+                "kind": "gene",
+                "verdict": "diverge",
+                "paper_n": 100,
+                "our_n": 90,
+                "overlap": 8,
+                "concordant": 8,
+                "directional_overlap_frac": 0.08,
+                "enrichment_p": 0.9,
+                "notes": [],
+            }
+        },
+    }
+    await session.flush()
+    return study
+
+
+@pytest.mark.asyncio
+async def test_comparing_e3prime_holds_divergence_without_paper_thresholds(session, admin_user):
+    """E3' end to end: a concordance divergence with a cleared QC side but NO stated paper thresholds
+    (so we cannot claim we applied the paper's cutoffs) is inconclusive, not not_validated."""
+    study = await _comparing_study_with_diverge(
+        session, admin_user, {"contrasts": [{"name": "x"}], "thresholds": {"log2fc": None, "padj": None}}
+    )
+    await ValidationDriverService._handle_comparing(session, study)
+    assert study.evidence_json["classification_result"]["classification"] == "inconclusive"
+
+
+@pytest.mark.asyncio
+async def test_comparing_e3prime_not_validated_when_thresholds_matched(session, admin_user):
+    """With the paper's thresholds stated (and applied) and a comparable method, a cleared divergence
+    reaches the strongest negative: not_validated."""
+    study = await _comparing_study_with_diverge(
+        session, admin_user, {"contrasts": [{"name": "x"}], "thresholds": {"log2fc": 1.0, "padj": 0.05}}
+    )
+    await ValidationDriverService._handle_comparing(session, study)
+    assert study.evidence_json["classification_result"]["classification"] == "not_validated"
 
 
 @pytest.mark.asyncio

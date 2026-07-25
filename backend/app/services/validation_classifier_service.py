@@ -375,6 +375,30 @@ def _attribute(mapping_confidence: str | None, reference_genome: str | None) -> 
     return {"our_side": "cleared" if cleared else "suspected", "reasons": reasons}
 
 
+def _attribute_differential(qc_attribution: dict, differential_attribution: dict) -> dict:
+    """E3' (ADR-069): extend the our-side clearance to the differential step for a concordance
+    divergence. A low concordance can strike the paper only if, ON TOP of the QC clearance, our
+    reproduction applied the paper's stated thresholds and used a comparable DE/DA method. Any
+    unmet differential clearance downgrades our side to 'suspected' (verdict -> inconclusive)."""
+    diff_reasons: list[str] = []
+    if not differential_attribution.get("thresholds_matched", False):
+        diff_reasons.append(
+            "our reproduction did not apply the paper's stated significance thresholds (|log2FC|/padj), "
+            "so a threshold difference could explain the low overlap"
+        )
+    if not differential_attribution.get("method_comparable", False):
+        diff_reasons.append(
+            "the differential method was not established as comparable to the paper's, so a method "
+            "difference could explain the low overlap"
+        )
+    if not diff_reasons:
+        return qc_attribution  # QC clearance stands; the differential side is also cleared.
+    # Our side is not cleared for the differential finding. Keep any QC suspicion, drop the QC
+    # "cleared" rationale (it no longer holds), and record the differential reasons.
+    qc_reasons = qc_attribution["reasons"] if qc_attribution["our_side"] == "suspected" else []
+    return {"our_side": "suspected", "reasons": qc_reasons + diff_reasons}
+
+
 def _concordance_desc(c: dict) -> str:
     frac = round(float(c.get("directional_overlap_frac", 0.0)) * 100)
     return (
@@ -390,6 +414,7 @@ def classify_study(
     mapping_confidence: str | None = None,
     reference_genome: str | None = None,
     concordance_results: list[dict] | None = None,
+    differential_attribution: dict | None = None,
 ) -> dict:
     """E4: the spec-03 verdict over the E2 comparison + E3 attribution.
 
@@ -492,6 +517,12 @@ def classify_study(
             reasoning += f" The paper's reported finding also reproduced ({_concordance_desc(conc_agree[0])})."
     else:
         attribution = _attribute(mapping_confidence, reference_genome)
+        # E3' (ADR-069): a concordance divergence carries extra our-side risk beyond the QC guard.
+        # Before it can strike the paper, the DIFFERENTIAL step must also be cleared: our reproduction
+        # applied the paper's stated thresholds and used a comparable DE/DA method. If the caller
+        # supplied that signal and it is not cleared, the divergence is unattributable -> inconclusive.
+        if conc_diverge and differential_attribution is not None:
+            attribution = _attribute_differential(attribution, differential_attribution)
         n_div = len(diverged) + len(conc_diverge)
         finding_note = ""
         if conc_diverge:
