@@ -1090,6 +1090,10 @@ class ProvenanceDataGatherer:
                     "mapping_notes": plan.mapping_notes,
                     "accessions": plan.accessions_json,
                     "parameters": plan.parameters_json,
+                    # Level-3 (ADR-069): the ratified differential design + the confirmed ground-truth
+                    # set, so the report shows what finding was reproduced and against what.
+                    "differential_design": plan.differential_design_json,
+                    "finding_claim": plan.finding_claim_json,
                     "blockers": plan.blockers_json,
                     "extractor_model": plan.extractor_model,
                     "extractor_provider": plan.extractor_provider,

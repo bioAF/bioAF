@@ -317,6 +317,71 @@ class TestMarkdownRenderer:
         assert "not_computed" in md
 
 
+def _report_with_level3():
+    """A minimal validation_study report dict (JsonRenderer output shape) carrying Level-3 evidence."""
+    return {
+        "report_type": "validation_study",
+        "schema_version": "1.0",
+        "generated_at": "2026-07-24T00:00:00Z",
+        "generated_by": "admin@test.com",
+        "bioaf_version": "test",
+        "entity": {
+            "id": 3,
+            "state": "comparing",
+            "classification": "validated",
+            "source_paper": {"title": "T"},
+            "reproduction_plan": {
+                "pipeline_key": "nf-core/rnaseq",
+                "differential_design": {
+                    "contrasts": [
+                        {"name": "dex vs untreated", "test_samples": ["SRX1"], "reference_samples": ["SRX2"]}
+                    ],
+                    "thresholds": {"log2fc": 1.0, "padj": 0.05},
+                },
+                "finding_claim": {"kind": "gene", "confirmed": True, "finding_set": {"n_sig": 10}},
+            },
+            "evidence": {
+                "classification_result": {"classification": "validated", "comparisons": []},
+                "level3_result": {
+                    "concordance": {
+                        "kind": "gene",
+                        "verdict": "agree",
+                        "paper_n": 100,
+                        "our_n": 90,
+                        "overlap": 85,
+                        "concordant": 82,
+                        "directional_overlap_frac": 0.82,
+                        "enrichment_p": 1e-30,
+                        "notes": [],
+                    },
+                    "our_finding_set": {"n_sig": 90},
+                },
+            },
+        },
+        "audit_trail": [],
+    }
+
+
+class TestLevel3Report:
+    """F3' (ADR-069): the exported report renders the differential-finding concordance evidence."""
+
+    def test_markdown_renders_level3_concordance_section(self):
+        md = MarkdownRenderer.render("validation_study", _report_with_level3())
+        assert "## Level 3" in md
+        assert "dex vs untreated" in md  # the contrast
+        assert "reproduced" in md.lower()  # the agree verdict
+        assert "100" in md and "90" in md  # paper set vs our set
+        assert "82" in md  # directional overlap
+
+    def test_markdown_omits_level3_when_absent(self):
+        report = _report_with_level3()
+        report["entity"]["evidence"].pop("level3_result")
+        report["entity"]["reproduction_plan"].pop("differential_design")
+        report["entity"]["reproduction_plan"].pop("finding_claim")
+        md = MarkdownRenderer.render("validation_study", report)
+        assert "## Level 3" not in md
+
+
 # ---------------------------------------------------------------------------
 # CSV renderer
 # ---------------------------------------------------------------------------

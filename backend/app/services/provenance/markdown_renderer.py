@@ -685,6 +685,9 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
             parts.append("No comparison targets.")
         parts.append("")
 
+    # Level 3: differential-finding concordance (ADR-069). Only present when the reproducing step ran.
+    _append_level3_concordance(parts, plan, evidence)
+
     # Provenance Chain (A3 link: paper -> experiment -> runs)
     parts.append("## Provenance Chain")
     parts.append("")
@@ -710,6 +713,56 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
 
     _append_audit_trail(parts, report.get("audit_trail", []))
     return "\n".join(parts)
+
+
+_LEVEL3_VERDICT_LABEL = {
+    "agree": "The paper's differential finding reproduced.",
+    "diverge": "The paper's differential finding did NOT reproduce.",
+    "not_computed": "Concordance was not computed.",
+}
+
+
+def _append_level3_concordance(parts: list[str], plan: dict[str, Any], evidence: dict[str, Any]) -> None:
+    """F3' (ADR-069): render the Level-3 finding-concordance evidence when it exists.
+
+    Shows the ratified contrast + thresholds, the paper's set vs our reproduced set, the directional
+    overlap, and the enrichment significance. Absent for a Level-2-only study (no section emitted)."""
+    level3 = evidence.get("level3_result") if isinstance(evidence, dict) else None
+    conc = (level3 or {}).get("concordance") if isinstance(level3, dict) else None
+    if not conc:
+        return
+
+    parts.append("## Level 3: Differential Finding Concordance")
+    parts.append("")
+    parts.append(_LEVEL3_VERDICT_LABEL.get(conc.get("verdict"), str(conc.get("verdict"))))
+    parts.append("")
+
+    design = (plan.get("differential_design") or {}) if isinstance(plan, dict) else {}
+    contrasts = design.get("contrasts") or []
+    contrast = contrasts[0].get("name") if contrasts and isinstance(contrasts[0], dict) else None
+    thresholds = design.get("thresholds") or {}
+    frac = conc.get("directional_overlap_frac")
+    pct = f"{round((frac or 0) * 100)}% ({conc.get('concordant')}/{conc.get('paper_n')})"
+
+    parts.append(
+        _table(
+            ["Field", "Value"],
+            [
+                ["Contrast", contrast or "--"],
+                ["Thresholds", f"|log2FC| >= {thresholds.get('log2fc')}, padj <= {thresholds.get('padj')}"],
+                ["Paper's set", conc.get("paper_n")],
+                ["Our reproduced set", conc.get("our_n")],
+                ["Directional overlap", pct],
+                ["Enrichment p", conc.get("enrichment_p")],
+            ],
+        )
+    )
+    parts.append("")
+    notes = conc.get("notes") or []
+    if notes:
+        for n in notes:
+            parts.append(f"- {n}")
+        parts.append("")
 
 
 def _append_audit_trail(parts: list[str], audit_trail: list[dict[str, Any]]) -> None:
