@@ -130,6 +130,29 @@ async def test_edit_differential_design_at_c1_gate(client, admin_token, monkeypa
     assert design["contrasts"][0]["test_samples"] == ["SRX30659361"]
 
 
+async def test_finding_set_candidates_returns_autofetched(client, admin_token, monkeypatch):
+    """B4 auto-fetch assist: the C1 gate can pull best-effort GEO candidates to pre-fill the confirm.
+    The fetch is stubbed (no network); the endpoint just surfaces what the service returns."""
+    _patch_llm(monkeypatch, _GOOD)
+    sid = (
+        await client.post("/api/validation-studies", json={"source_accession": "GSE52778"}, headers=_auth(admin_token))
+    ).json()["id"]
+    await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+
+    from app.services.literature.ground_truth_fetch_service import GroundTruthFetchService
+
+    async def _fake(accession, *, kind="gene", fetcher=None):
+        return [{"source": "geo_supplementary", "filename": f"{accession}_DEG.csv", "n_sig": 5, "finding_set": {}}]
+
+    monkeypatch.setattr(GroundTruthFetchService, "fetch_geo_candidates", _fake)
+
+    r = await client.get(f"/api/validation-studies/{sid}/finding-set/candidates", headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    cands = r.json()["candidates"]
+    assert len(cands) == 1
+    assert cands[0]["filename"] == "GSE52778_DEG.csv"
+
+
 async def test_viewer_cannot_confirm_finding_set(client, admin_token, viewer_token, monkeypatch):
     _patch_llm(monkeypatch, _GOOD)
     sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]

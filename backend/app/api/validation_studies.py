@@ -27,6 +27,7 @@ from app.schemas.validation_study import (
     ValidationStudySummary,
 )
 from app.services.audit_service import log_action
+from app.services.literature.ground_truth_fetch_service import GroundTruthFetchService
 from app.services.provenance.report_service import ProvenanceReportService
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_driver_service import ValidationDriverService
@@ -231,6 +232,26 @@ async def edit_differential_design(
     study = await _load(session, study_id, org_id)
     await session.commit()
     return await _study_response(session, study, org_id)
+
+
+@router.get("/{study_id}/finding-set/candidates")
+async def finding_set_candidates(
+    study_id: int,
+    kind: str = Query("gene"),
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """B4 auto-fetch ASSIST (Level-3): best-effort GEO-supplementary candidates for the paper's
+    deposited result set, to pre-fill the C1 confirm. Empty when nothing is found (the common case,
+    per spike-03) so the human supplies the table; this never auto-confirms a ground-truth set."""
+    org_id = int(current_user["org_id"])
+    plan = await ReproductionPlanService.get_plan(session, study_id, org_id)
+    if plan is None:
+        raise HTTPException(404, "No reproduction plan for this study.")
+    candidates: list[dict] = []
+    for accession in plan.accessions_json or []:
+        candidates.extend(await GroundTruthFetchService.fetch_geo_candidates(accession, kind=kind))
+    return {"candidates": candidates}
 
 
 @router.post("/{study_id}/finding-set", response_model=ValidationStudyResponse)
