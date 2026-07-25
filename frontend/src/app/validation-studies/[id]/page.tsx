@@ -9,6 +9,12 @@ import { ValidationStudyOutcome } from "@/components/validation/ValidationStudyO
 import { ValidationStudyActions } from "@/components/validation/ValidationStudyActions";
 import { ValidationVerdictPanel } from "@/components/validation/ValidationVerdictPanel";
 import { ValidationEvidenceTable, type Evidence } from "@/components/validation/ValidationEvidenceTable";
+import {
+  Level3Gate,
+  type DifferentialDesign,
+  type FindingClaim,
+} from "@/components/validation/Level3Gate";
+import { Level3ResultPanel } from "@/components/validation/Level3ResultPanel";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -30,6 +36,8 @@ interface ReproductionPlanView {
   mapping_confidence?: string | null;
   mapping_notes?: string | null;
   blockers?: string[] | null;
+  differential_design?: DifferentialDesign | null;
+  finding_claim?: FindingClaim | null;
 }
 
 interface ValidationStudy {
@@ -173,13 +181,13 @@ export default function ValidationStudyPage() {
                 <Field label="Pipeline">
                   {plan.pipeline_key
                     ? `${plan.pipeline_key}${plan.pipeline_version ? ` ${plan.pipeline_version}` : ""}`
-                    : "—"}
+                    : "-"}
                 </Field>
-                <Field label="Reference genome">{plan.reference_genome || "—"}</Field>
+                <Field label="Reference genome">{plan.reference_genome || "-"}</Field>
                 <Field label="Accessions">
-                  {plan.accessions && plan.accessions.length > 0 ? plan.accessions.join(", ") : "—"}
+                  {plan.accessions && plan.accessions.length > 0 ? plan.accessions.join(", ") : "-"}
                 </Field>
-                <Field label="Mapping confidence">{plan.mapping_confidence || "—"}</Field>
+                <Field label="Mapping confidence">{plan.mapping_confidence || "-"}</Field>
               </dl>
               {plan.blockers && plan.blockers.length > 0 && (
                 <div className="mt-3">
@@ -191,6 +199,26 @@ export default function ValidationStudyPage() {
                   </ul>
                 </div>
               )}
+            </section>
+          )}
+
+          {study.state === "plan_ready" && (
+            <section className="mb-6">
+              <Level3Gate
+                studyId={study.id}
+                design={plan?.differential_design}
+                claim={plan?.finding_claim}
+                onChanged={(updated) => setStudy(updated as ValidationStudy)}
+              />
+            </section>
+          )}
+
+          {study.evidence?.level3_result && (
+            <section className="mb-6">
+              <Level3ResultPanel
+                result={study.evidence.level3_result}
+                contrast={plan?.differential_design?.contrasts?.[0]?.name ?? undefined}
+              />
             </section>
           )}
 

@@ -41,6 +41,8 @@ export interface Evidence {
   computed_metrics?: Record<string, unknown> | null;
   comparison_targets?: ComparisonTargetEvidence[] | null;
   classification_result?: ClassificationResult | null;
+  // Level-3 finding-concordance evidence (ADR-069), present once the reproducing step scored E6.
+  level3_result?: import("./Level3ResultPanel").Level3Result | null;
   data_run_id?: number | null;
   analysis_run_id?: number | null;
   qc_dashboard_id?: number | null;
