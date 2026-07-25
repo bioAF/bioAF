@@ -7,13 +7,14 @@ jest.mock("@/hooks/usePermissions", () => ({
 }));
 
 jest.mock("@/lib/api", () => ({
-  api: { put: jest.fn(), post: jest.fn() },
+  api: { put: jest.fn(), post: jest.fn(), get: jest.fn() },
 }));
 
 import { api } from "@/lib/api";
 
 const mockPut = api.put as jest.Mock;
 const mockPost = api.post as jest.Mock;
+const mockGet = api.get as jest.Mock;
 
 const DESIGN = {
   contrasts: [
@@ -31,8 +32,10 @@ const DESIGN = {
 beforeEach(() => {
   mockPut.mockReset();
   mockPost.mockReset();
+  mockGet.mockReset();
   mockPut.mockResolvedValue({ id: 1, state: "plan_ready" });
   mockPost.mockResolvedValue({ id: 1, state: "plan_ready" });
+  mockGet.mockResolvedValue({ candidates: [] });
 });
 
 test("renders the extracted differential design for review", () => {
@@ -75,6 +78,36 @@ test("confirming a pasted ground-truth table POSTs to the finding-set endpoint",
   expect(body.table_text).toContain("A1BG");
   expect(body.source_locator).toBe("Table S3");
   expect(onChanged).toHaveBeenCalled();
+});
+
+test("auto-fetch pre-fills the table from a GEO candidate", async () => {
+  mockGet.mockResolvedValue({
+    candidates: [
+      {
+        filename: "GSE1_DEG.csv",
+        source: "geo_supplementary",
+        n_sig: 5,
+        table_text: "gene,log2FoldChange,padj\nA1BG,2.5,0.001",
+      },
+    ],
+  });
+  render(<Level3Gate studyId={7} design={DESIGN} claim={null} onChanged={jest.fn()} />);
+
+  await userEvent.click(screen.getByRole("button", { name: /auto-fetch/i }));
+
+  await waitFor(() =>
+    expect(mockGet).toHaveBeenCalledWith("/api/validation-studies/7/finding-set/candidates?kind=gene"),
+  );
+  const textarea = screen.getByLabelText(/result table/i) as HTMLTextAreaElement;
+  expect(textarea.value).toContain("A1BG");
+  expect((screen.getByLabelText(/source/i) as HTMLInputElement).value).toBe("GSE1_DEG.csv");
+});
+
+test("auto-fetch with no candidates points the user to the journal SI", async () => {
+  mockGet.mockResolvedValue({ candidates: [] });
+  render(<Level3Gate studyId={7} design={DESIGN} claim={null} onChanged={jest.fn()} />);
+  await userEvent.click(screen.getByRole("button", { name: /auto-fetch/i }));
+  await waitFor(() => expect(screen.getByText(/no deposited result table/i)).toBeInTheDocument());
 });
 
 test("shows the parsed finding-set summary once a claim is confirmed", () => {

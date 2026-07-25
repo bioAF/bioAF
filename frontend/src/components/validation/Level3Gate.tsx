@@ -80,8 +80,9 @@ export function Level3Gate({
   const [tableText, setTableText] = useState("");
   const [source, setSource] = useState(claim?.source_locator ?? "");
 
-  const [busy, setBusy] = useState<null | "design" | "claim">(null);
+  const [busy, setBusy] = useState<null | "design" | "claim" | "fetch">(null);
   const [error, setError] = useState<string | null>(null);
+  const [fetchMsg, setFetchMsg] = useState<string | null>(null);
 
   if (!canAccess("lit_validation", "approve")) return null;
 
@@ -125,6 +126,34 @@ export function Level3Gate({
         source_locator: source.trim() || null,
       }),
     );
+  }
+
+  async function autoFetch() {
+    setBusy("fetch");
+    setError(null);
+    setFetchMsg(null);
+    try {
+      const res = await api.get<{
+        candidates: Array<{ filename: string; source: string; n_sig: number; table_text?: string }>;
+      }>(`${base}/finding-set/candidates?kind=${kind}`);
+      const cands = res.candidates ?? [];
+      if (cands.length === 0) {
+        setFetchMsg(
+          "No deposited result table found in GEO (usual case). Paste the paper's table below; it is typically in the journal supplementary.",
+        );
+        return;
+      }
+      const top = cands[0];
+      if (top.table_text) setTableText(top.table_text);
+      if (top.filename) setSource(top.filename);
+      setFetchMsg(
+        `Found ${cands.length} candidate(s); pre-filled from ${top.filename} (${top.n_sig} significant). Review, then confirm.`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Auto-fetch failed.");
+    } finally {
+      setBusy(null);
+    }
   }
 
   const fs = claim?.finding_set;
@@ -249,13 +278,24 @@ export function Level3Gate({
             placeholder={"gene,log2FoldChange,padj\nA1BG,2.5,0.001\n..."}
           />
         </label>
-        <button
-          className={`${btn} bg-bioaf-600 text-white hover:bg-bioaf-700`}
-          disabled={busy !== null || tableText.trim() === ""}
-          onClick={confirmSet}
-        >
-          {busy === "claim" ? "Parsing..." : "Confirm ground-truth set"}
-        </button>
+        {fetchMsg && <p className="text-xs text-gray-600">{fetchMsg}</p>}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            className={`${btn} bg-bioaf-600 text-white hover:bg-bioaf-700`}
+            disabled={busy !== null || tableText.trim() === ""}
+            onClick={confirmSet}
+          >
+            {busy === "claim" ? "Parsing..." : "Confirm ground-truth set"}
+          </button>
+          <button
+            className={`${btn} border border-gray-300 text-gray-700 hover:bg-gray-100`}
+            disabled={busy !== null}
+            onClick={autoFetch}
+            title="Best-effort fetch of the paper's deposited table from GEO supplementary files"
+          >
+            {busy === "fetch" ? "Fetching..." : "Try GEO auto-fetch"}
+          </button>
+        </div>
       </div>
 
       {error && <p className="text-sm text-red-700">{error}</p>}
