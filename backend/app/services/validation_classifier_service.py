@@ -121,6 +121,11 @@ _SPECS: tuple[MetricSpec, ...] = (
     ),
     MetricSpec("percent_gc", "percent", 5.0, False, ("gc_content", "gc_percent", "pct_gc", "percent_gc_content", "gc")),
     MetricSpec("total_samples", "count", 0.0, False, ("n_samples", "num_samples", "sample_count", "number_of_samples")),
+    # scRNA cell yield + sequencing-depth metrics. spec-06 refinement (2026-07-25): these are QC-FLOOR
+    # metrics (the default tier), NOT findings. Recovering a similar cell count / genes-per-cell / UMIs-
+    # per-cell proves the data processed to a comparable yield and depth, not that any biological finding
+    # (cell types, clusters, markers) reproduced. The real finding signal is Level-3 concordance (ADR-069),
+    # so a yield/depth agreement on its own must not earn `validated`.
     MetricSpec(
         "cell_count",
         "count",
@@ -137,22 +142,12 @@ _SPECS: tuple[MetricSpec, ...] = (
             "cell_number",
             "cells",
         ),
-        tier="finding",
     ),
-    MetricSpec("total_genes_detected", "count", 0.25, True, ("genes_detected", "total_genes"), tier="finding"),
-    MetricSpec("median_genes_per_cell", "count", 0.25, True, ("median_genes",), tier="finding"),
-    MetricSpec("mean_genes_per_cell", "count", 0.25, True, ("mean_genes",), tier="finding"),
-    MetricSpec(
-        "median_umi_per_cell",
-        "count",
-        0.25,
-        True,
-        ("median_umi", "median_umis", "median_umis_per_cell"),
-        tier="finding",
-    ),
-    MetricSpec(
-        "mean_umi_per_cell", "count", 0.25, True, ("mean_umi", "mean_umis", "mean_umis_per_cell"), tier="finding"
-    ),
+    MetricSpec("total_genes_detected", "count", 0.25, True, ("genes_detected", "total_genes")),
+    MetricSpec("median_genes_per_cell", "count", 0.25, True, ("median_genes",)),
+    MetricSpec("mean_genes_per_cell", "count", 0.25, True, ("mean_genes",)),
+    MetricSpec("median_umi_per_cell", "count", 0.25, True, ("median_umi", "median_umis", "median_umis_per_cell")),
+    MetricSpec("mean_umi_per_cell", "count", 0.25, True, ("mean_umi", "mean_umis", "mean_umis_per_cell")),
     MetricSpec("median_reads_per_cell", "count", 0.25, True, ("median_reads",)),
     MetricSpec("mean_reads_per_cell", "count", 0.25, True, ("mean_reads",)),
     MetricSpec("saturation", "fraction", 0.05, False, ("sequencing_saturation", "seq_saturation")),
