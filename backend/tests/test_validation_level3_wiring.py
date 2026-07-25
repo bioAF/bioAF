@@ -129,6 +129,75 @@ async def test_build_level3_inputs_assembles_full_gene_bundle(session, admin_use
     assert params["id_column"] == "gene_id"
 
 
+@pytest_asyncio.fixture
+async def da_template(session, admin_user):
+    tmpl = TemplateNotebook(
+        organization_id=admin_user.organization_id,
+        name="Differential Accessibility (DESeq2, headless)",
+        category="differential_accessibility",
+        notebook_path="notebooks/da_peaks_deseq2.ipynb",
+        parameters_json={},
+        compatible_with="nf-core/atacseq",
+        is_builtin=True,
+    )
+    session.add(tmpl)
+    await session.flush()
+    return tmpl
+
+
+_INTERVAL_DESIGN = {
+    "contrasts": [{"name": "KO vs WT", "test_samples": ["S1", "S2"], "reference_samples": ["S3", "S4"]}],
+    "thresholds": {"log2fc": 1.0, "padj": 0.05},
+}
+_INTERVAL_CLAIM = {
+    "kind": "interval",
+    "namespace": "interval",
+    "confirmed": True,
+    "thresholds": {"log2fc": 1.0, "padj": 0.05},
+    "finding_set": {
+        "kind": "interval",
+        "namespace": "interval",
+        "n_sig": 2,
+        "entities": [{"id": "chr1:1000-2000", "direction": "up"}],
+    },
+}
+
+# The real nf-core/atacseq|chipseq consensus-peak count matrix filename.
+_NFCORE_CONSENSUS = "consensus_peaks.mLb.clN.featureCounts.txt"
+
+
+@pytest.mark.asyncio
+async def test_build_level3_inputs_assembles_interval_bundle(session, admin_user, analysis_run, da_template):
+    f = await _count_matrix_file(session, admin_user, analysis_run, filename=_NFCORE_CONSENSUS)
+    study, plan = await _study_with_plan(
+        session, admin_user, analysis_run, design=_INTERVAL_DESIGN, claim=_INTERVAL_CLAIM
+    )
+
+    level3 = await build_level3_inputs(session, study, plan)
+
+    assert level3 is not None
+    assert level3["template_id"] == da_template.id  # the headless DA template, keyed by notebook_path
+    assert level3["kind"] == "interval"
+    assert level3["input_file_ids"] == [f.id]
+    params = level3["parameters"]
+    assert params["counts_path"].endswith(_NFCORE_CONSENSUS)
+    assert params["test_samples"] == "S1,S2"
+    # The DA template takes no id_column (intervals are keyed by coordinates, not an id column).
+    assert "id_column" not in params
+
+
+@pytest.mark.asyncio
+async def test_interval_count_matrix_heuristic_rejects_non_consensus_files(
+    session, admin_user, analysis_run, da_template
+):
+    # A non-consensus output from the same run must NOT be mistaken for the DA count matrix.
+    await _count_matrix_file(session, admin_user, analysis_run, filename="multiqc_report.html")
+    study, plan = await _study_with_plan(
+        session, admin_user, analysis_run, design=_INTERVAL_DESIGN, claim=_INTERVAL_CLAIM
+    )
+    assert await build_level3_inputs(session, study, plan) is None
+
+
 @pytest.mark.asyncio
 async def test_build_level3_inputs_none_without_finding_claim(session, admin_user, analysis_run, de_template):
     await _count_matrix_file(session, admin_user, analysis_run)

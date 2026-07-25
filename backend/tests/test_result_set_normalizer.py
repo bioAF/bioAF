@@ -82,6 +82,46 @@ def test_normalize_interval_table():
     assert dirs == {"chr1:1000-2000": "up", "chr2:5000-6000": "down"}
 
 
+# The EXACT header the headless DA template (da_peaks_deseq2.ipynb) writes to /outputs. This pins the
+# template<->normalizer contract: if either side's columns drift, this round-trip breaks locally.
+_DA_TEMPLATE_OUTPUT = (
+    "chr,start,end,log2FoldChange,padj\n"
+    "chr1,1000,2000,2.5,0.001\n"  # up sig
+    "chr2,5000,6000,-1.8,0.01\n"  # down sig
+    "chr3,100,200,0.1,0.9\n"  # excluded
+)
+
+# a wide multi-contrast DA table: two contrasts side by side, no bare log2FC column
+_MULTI_CONTRAST_INTERVAL = (
+    "chr\tstart\tend\tKO v WT logFC\tKO v WT FDR\tTREAT v WT logFC\tTREAT v WT FDR\n"
+    "chr1\t1000\t2000\t2.0\t0.001\t0.1\t0.9\n"  # sig ONLY in KO v WT
+    "chr2\t5000\t6000\t0.1\t0.9\t3.0\t0.001\n"  # sig ONLY in TREAT v WT
+)
+
+
+def test_normalize_da_template_output_roundtrips():
+    # The DA template's own output columns (chr/start/end/log2FoldChange/padj) normalize cleanly.
+    fs = normalize_interval_table(_DA_TEMPLATE_OUTPUT, lfc_threshold=1.0, padj_threshold=0.05)
+    assert fs.kind == "interval"
+    assert fs.directions() == {"chr1:1000-2000": "up", "chr2:5000-6000": "down"}
+
+
+def test_normalize_interval_multi_contrast_selects_named_contrast():
+    # A wide DA table with no bare log2FC must select the ratified contrast's columns (the interval
+    # path must do this BEFORE giving up, like the gene path).
+    fs = normalize_interval_table(_MULTI_CONTRAST_INTERVAL, contrast="KO v WT")
+    assert fs.directions() == {"chr1:1000-2000": "up"}  # only the KO v WT-significant peak
+
+    fs2 = normalize_interval_table(_MULTI_CONTRAST_INTERVAL, contrast="TREAT v WT")
+    assert fs2.directions() == {"chr2:5000-6000": "up"}
+
+
+def test_normalize_interval_multi_contrast_without_selection_records_note():
+    fs = normalize_interval_table(_MULTI_CONTRAST_INTERVAL)
+    assert fs.entities == []
+    assert any("log2fc" in n.lower() or "contrast" in n.lower() for n in fs.parse_notes)
+
+
 def test_to_dict_shape():
     fs = normalize_gene_table(_DESEQ2_CSV)
     d = fs.to_dict()

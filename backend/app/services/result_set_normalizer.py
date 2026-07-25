@@ -285,14 +285,20 @@ def normalize_interval_table(
     if chrom_i is None or start_i is None or end_i is None:
         fs.parse_notes.append("could not locate chrom/start/end columns")
         return fs
+
+    # Multi-contrast wide DA table (no bare log2FC/padj): select the ratified contrast's columns.
+    # This must run BEFORE the locate check below, mirroring the gene path (previously it sat after
+    # the early return and was dead code, so multi-contrast peak tables silently yielded nothing).
+    if (lfc_i is None or padj_i is None) and contrast:
+        c_lfc, c_padj = _find_contrast_columns(header, contrast)
+        if c_lfc is not None:
+            lfc_i = c_lfc
+        if c_padj is not None:
+            padj_i = c_padj
+
     if lfc_i is None or (padj_i is None and pval_i is None):
         fs.parse_notes.append("could not locate log2FC and/or significance columns")
         return fs
-
-    if lfc_i is None and contrast:
-        c_lfc, c_padj = _find_contrast_columns(header, contrast)
-        lfc_i = c_lfc if c_lfc is not None else lfc_i
-        padj_i = c_padj if c_padj is not None else padj_i
 
     sig_src = padj_i if padj_i is not None else pval_i
     tested = 0
