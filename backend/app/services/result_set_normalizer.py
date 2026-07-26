@@ -34,16 +34,23 @@ _PADJ_COLS = [
     "adj.pvalue",
 ]
 _PVAL_COLS = ["pvalue", "p.value", "pval", "p_val"]
+# Order encodes PREFERENCE (_pick returns the first of these present in the header), so gene-symbol
+# aliases come before Ensembl aliases: our nf-core/salmon output is symbol-keyed, and a table that
+# carries both (e.g. MDPI-SI DESeq2 exports with GeneSymbol + ENSG) should match on the symbol.
 _ID_COLS = [
     "gene",
     "gene_id",
     "geneid",
     "gene_symbol",
+    "genesymbol",
     "symbol",
     "genename",
     "gene_name",
     "id",
     "ensembl",
+    "ensembl_gene",
+    "ensembl_id",
+    "ensg",
     "feature",
     "",
 ]

@@ -99,6 +99,23 @@ _MULTI_CONTRAST_INTERVAL = (
 )
 
 
+# A DESeq2 export in the MDPI-SI style (real: GSE309060 / jfb17020057 Table S1): GeneType is the
+# FIRST column, with GeneSymbol + ENSG alongside. The id must resolve to the gene symbol, not the
+# GeneType (which would make every entity id "protein_coding" and score 0 overlap against a real set).
+_GENESYMBOL_TABLE = (
+    '"GeneType"\t"GeneSymbol"\t"ENSG"\t"log2FoldChange"\t"pvalue"\t"padj"\n'
+    'protein_coding\tCEMIP\t"ENSG00000103888.16"\t4.41\t5.6e-11\t4.99e-08\n'  # up, significant
+    'protein_coding\tGAPDH\t"ENSG00000111640.14"\t0.10\t0.5\t0.9\n'  # excluded
+    'protein_coding\tADM2\t"ENSG00000128165.8"\t-4.94\t3.3e-17\t1.75e-13\n'  # down, significant
+)
+
+
+def test_normalize_genesymbol_genetype_columns_picks_the_symbol():
+    fs = normalize_gene_table(_GENESYMBOL_TABLE, lfc_threshold=1.0, padj_threshold=0.05)
+    assert fs.namespace == "symbol"
+    assert fs.directions() == {"CEMIP": "up", "ADM2": "down"}
+
+
 def test_normalize_da_template_output_roundtrips():
     # The DA template's own output columns (chr/start/end/log2FoldChange/padj) normalize cleanly.
     fs = normalize_interval_table(_DA_TEMPLATE_OUTPUT, lfc_threshold=1.0, padj_threshold=0.05)
