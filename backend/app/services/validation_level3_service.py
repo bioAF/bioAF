@@ -105,15 +105,26 @@ async def build_level3_inputs(
     lfc = thresholds.get("log2fc")
     padj = thresholds.get("padj")
 
+    test_samples = primary.get("test_samples") or []
+    reference_samples = primary.get("reference_samples") or []
     parameters: dict = {
         "counts_path": counts_path,
-        "test_samples": ",".join(primary.get("test_samples") or []),
-        "reference_samples": ",".join(primary.get("reference_samples") or []),
+        "test_samples": ",".join(test_samples),
+        "reference_samples": ",".join(reference_samples),
         "lfc_threshold": float(lfc) if lfc is not None else 1.0,
         "padj_threshold": float(padj) if padj is not None else 0.05,
     }
     if wiring.get("id_column"):
         parameters["id_column"] = wiring["id_column"]
+
+    # Matched-pairs / blocked design (ADR-069 item #2): flatten the per-sample subject map to a comma
+    # list ALIGNED to the notebook's sample order (test then reference) so the DE template can build
+    # `design = ~ block + condition`. Emit it only when every sample is labeled (the C1 gate guarantees
+    # a balanced pairing when present); a partial/absent map degrades honestly to the unpaired design.
+    subjects = primary.get("subjects") or {}
+    ordered_samples = list(test_samples) + list(reference_samples)
+    if subjects and ordered_samples and all(s in subjects for s in ordered_samples):
+        parameters["block_labels"] = ",".join(subjects[s] for s in ordered_samples)
 
     return {
         "template_id": template.id,

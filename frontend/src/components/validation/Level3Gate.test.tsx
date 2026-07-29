@@ -63,6 +63,34 @@ test("saving an edited design PUTs the normalized contrast to the design endpoin
   expect(onChanged).toHaveBeenCalled();
 });
 
+test("a matched-pairs pairing is parsed into the subjects map on save", async () => {
+  render(<Level3Gate studyId={7} design={DESIGN} claim={null} onChanged={jest.fn()} />);
+
+  await userEvent.type(
+    screen.getByLabelText(/subject pairing/i),
+    "SRX1=donorA\nSRX2=donorB\nSRX3=donorA\nSRX4=donorB",
+  );
+  await userEvent.click(screen.getByRole("button", { name: /save design/i }));
+
+  await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+  const [, body] = mockPut.mock.calls[0];
+  expect(body.contrasts[0].subjects).toEqual({
+    SRX1: "donorA",
+    SRX2: "donorB",
+    SRX3: "donorA",
+    SRX4: "donorB",
+  });
+});
+
+test("an already-saved pairing pre-fills the subject-pairing field", () => {
+  const paired = {
+    ...DESIGN,
+    contrasts: [{ ...DESIGN.contrasts[0], subjects: { SRX1: "donorA", SRX3: "donorA" } }],
+  };
+  render(<Level3Gate studyId={1} design={paired} claim={null} onChanged={jest.fn()} />);
+  expect((screen.getByLabelText(/subject pairing/i) as HTMLTextAreaElement).value).toContain("SRX1=donorA");
+});
+
 test("confirming a pasted ground-truth table POSTs to the finding-set endpoint", async () => {
   const onChanged = jest.fn();
   render(<Level3Gate studyId={7} design={DESIGN} claim={null} onChanged={onChanged} />);

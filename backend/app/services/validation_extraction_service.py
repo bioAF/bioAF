@@ -121,6 +121,19 @@ def _str_or_none(value) -> str | None:
     return text or None
 
 
+def _normalize_subjects(value) -> dict:
+    """Coerce a per-sample subject/block map ({sample_id: label}) to a stable {str: str} shape,
+    dropping blank keys/values. A non-dict (or empty) yields {} (the default unpaired design)."""
+    out: dict[str, str] = {}
+    if isinstance(value, dict):
+        for k, v in value.items():
+            key = str(k).strip()
+            label = str(v).strip()
+            if key and label:
+                out[key] = label
+    return out
+
+
 def _normalize_differential_design(value) -> dict:
     """B2e: coerce the model's differential_design to a stable, human-editable shape.
 
@@ -141,6 +154,11 @@ def _normalize_differential_design(value) -> dict:
                 "reference_samples": [
                     str(s).strip() for s in _as_list(c.get("reference_samples")) if str(s).strip()
                 ],
+                # Optional matched-pairs / blocked design (ADR-069, item #2): a per-sample subject/block
+                # label so the DE notebook can run `~ block + condition` (cancels donor-to-donor baseline
+                # variance). Empty for the default unpaired design. Human-supplied at the C1 gate (the
+                # donor->sample mapping lives in GEO sample metadata, not the paper text).
+                "subjects": _normalize_subjects(c.get("subjects")),
             }
         )
     return {

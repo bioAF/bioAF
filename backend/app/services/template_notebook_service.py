@@ -121,6 +121,10 @@ BUILTIN_TEMPLATES = [
             "id_column": "gene_id",
             "test_samples": "",
             "reference_samples": "",
+            # Default empty (unpaired `~ condition`). build_level3_inputs overrides with per-sample block
+            # labels for a matched-pairs design (`~ block + condition`). The injector rebuilds the whole
+            # parameters cell from this merged dict, so the default MUST live here to stay defined.
+            "block_labels": "",
             "lfc_threshold": 1.0,
             "padj_threshold": 0.05,
         },

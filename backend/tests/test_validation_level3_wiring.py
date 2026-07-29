@@ -131,6 +131,47 @@ async def test_build_level3_inputs_assembles_full_gene_bundle(session, admin_use
     assert params["id_column"] == "gene_id"
 
 
+_PAIRED_DESIGN = {
+    "contrasts": [
+        {
+            "name": "mucoderm vs tcs",
+            "test_samples": ["SRX1", "SRX2"],
+            "reference_samples": ["SRX3", "SRX4"],
+            "subjects": {"SRX1": "donorA", "SRX2": "donorB", "SRX3": "donorA", "SRX4": "donorB"},
+        }
+    ],
+    "thresholds": {"log2fc": 1.0, "padj": 0.05},
+}
+
+
+@pytest.mark.asyncio
+async def test_build_level3_inputs_emits_block_labels_for_paired_design(
+    session, admin_user, analysis_run, de_template
+):
+    await _count_matrix_file(session, admin_user, analysis_run)
+    study, plan = await _study_with_plan(session, admin_user, analysis_run, design=_PAIRED_DESIGN)
+
+    level3 = await build_level3_inputs(session, study, plan)
+
+    assert level3 is not None
+    params = level3["parameters"]
+    # block labels are aligned to the notebook's sample order: test_samples then reference_samples.
+    assert params["test_samples"] == "SRX1,SRX2"
+    assert params["reference_samples"] == "SRX3,SRX4"
+    assert params["block_labels"] == "donorA,donorB,donorA,donorB"
+
+
+@pytest.mark.asyncio
+async def test_build_level3_inputs_omits_block_labels_for_unpaired_design(
+    session, admin_user, analysis_run, de_template
+):
+    await _count_matrix_file(session, admin_user, analysis_run)
+    study, plan = await _study_with_plan(session, admin_user, analysis_run)  # default _DESIGN, no subjects
+    level3 = await build_level3_inputs(session, study, plan)
+    assert level3 is not None
+    assert "block_labels" not in level3["parameters"]
+
+
 @pytest_asyncio.fixture
 async def da_template(session, admin_user):
     tmpl = TemplateNotebook(

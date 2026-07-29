@@ -32,6 +32,17 @@ def test_level3_templates_registered_builtin():
     assert "notebooks/da_peaks_deseq2.ipynb" in paths
 
 
+def test_de_template_supports_a_paired_block_design():
+    # ADR-069 item #2: with a per-sample block label the DE notebook must build `~ block + condition`
+    # (cancels donor-to-donor baseline variance), and fall back to `~ condition` when unpaired.
+    nb = json.loads((PACKAGE_TEMPLATES_DIR / "de_bulk_deseq2.ipynb").read_text())
+    params_cell = next(c for c in nb["cells"] if "parameters" in c.get("metadata", {}).get("tags", []))
+    assert "block_labels" in "".join(params_cell["source"])
+    src = "\n".join("".join(c.get("source", [])) for c in nb["cells"])
+    assert "block + condition" in src  # paired design
+    assert "~ condition" in src  # unpaired fallback preserved
+
+
 def test_level3_params_inject_to_valid_r():
     for tmpl in BUILTIN_TEMPLATES:
         if not tmpl["notebook_path"].endswith(tuple(_L3)):

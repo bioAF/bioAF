@@ -743,16 +743,26 @@ def _append_level3_concordance(parts: list[str], plan: dict[str, Any], evidence:
 
     design = (plan.get("differential_design") or {}) if isinstance(plan, dict) else {}
     contrasts = design.get("contrasts") or []
-    contrast = contrasts[0].get("name") if contrasts and isinstance(contrasts[0], dict) else None
+    primary = contrasts[0] if contrasts and isinstance(contrasts[0], dict) else {}
+    contrast = primary.get("name")
     thresholds = design.get("thresholds") or {}
     frac = conc.get("directional_overlap_frac")
     pct = f"{round((frac or 0) * 100)}% ({conc.get('concordant')}/{conc.get('paper_n')})"
+
+    # Design row: a matched-pairs (subject-blocked) run models `~ subject + condition`, which materially
+    # affects power and comparability, so surface it beside the contrast (ADR-069 item #2).
+    subjects = primary.get("subjects") or {}
+    if subjects:
+        design_desc = f"paired (~ subject + condition, {len(set(subjects.values()))} subjects)"
+    else:
+        design_desc = "unpaired (~ condition)"
 
     parts.append(
         _table(
             ["Field", "Value"],
             [
                 ["Contrast", contrast or "--"],
+                ["Design", design_desc],
                 ["Thresholds", f"|log2FC| >= {thresholds.get('log2fc')}, padj <= {thresholds.get('padj')}"],
                 ["Paper's set", conc.get("paper_n")],
                 ["Our reproduced set", conc.get("our_n")],

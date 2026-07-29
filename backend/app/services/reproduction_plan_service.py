@@ -17,6 +17,51 @@ from app.services.audit_service import log_action
 from app.services.result_set_normalizer import normalize_gene_table, normalize_interval_table
 
 
+def validate_paired_designs(design: dict) -> list[str]:
+    """C1-gate guard for the optional matched-pairs / blocked design (ADR-069 item #2).
+
+    A per-contrast ``subjects`` map ({sample_id: block_label}) drives ``design = ~ block + condition``
+    in the DE notebook. DESeq2 errors ("model matrix not full rank") if that block factor is confounded
+    with condition, so we reject a bad pairing BEFORE any fetch/compute spend rather than let the run
+    fail. Returns a list of human-readable problems (empty == valid). Contrasts with no ``subjects`` are
+    the default unpaired design and are never flagged. For a contrast that does declare subjects:
+
+    - every sample in the contrast must have a block label (no unlabeled sample);
+    - no stray labels for samples outside the contrast;
+    - at least 2 distinct block labels (a constant block factor has one level and cannot be modeled);
+    - each block label must appear in BOTH arms (a label confined to one arm is confounded).
+    """
+    errors: list[str] = []
+    for c in design.get("contrasts") or []:
+        subjects = c.get("subjects") or {}
+        if not subjects:
+            continue
+        name = c.get("name") or "contrast"
+        test_samples = c.get("test_samples") or []
+        reference_samples = c.get("reference_samples") or []
+        samples = list(test_samples) + list(reference_samples)
+
+        unlabeled = [s for s in samples if s not in subjects]
+        if unlabeled:
+            errors.append(f"{name}: samples with no subject/block label: {', '.join(unlabeled)}.")
+        stray = [k for k in subjects if k not in samples]
+        if stray:
+            errors.append(f"{name}: subject labels for samples not in the contrast: {', '.join(stray)}.")
+
+        test_labels = {subjects[s] for s in test_samples if s in subjects}
+        ref_labels = {subjects[s] for s in reference_samples if s in subjects}
+        all_labels = test_labels | ref_labels
+        if len(all_labels) < 2:
+            errors.append(f"{name}: a paired/blocked design needs >= 2 distinct subject labels.")
+        confounded = sorted((all_labels - test_labels) | (all_labels - ref_labels))
+        if confounded:
+            errors.append(
+                f"{name}: subject(s) present in only one arm (confounded with condition): "
+                f"{', '.join(confounded)}. Each subject must appear in both the test and reference arms."
+            )
+    return errors
+
+
 class ReproductionPlanService:
     @staticmethod
     async def create_plan(
@@ -153,7 +198,12 @@ class ReproductionPlanService:
         if plan is None:
             raise HTTPException(404, "No reproduction plan to attach the differential design to.")
 
-        plan.differential_design_json = _differential_design_or_none(_normalize_differential_design(design))
+        normalized = _normalize_differential_design(design)
+        # Reject a confounded/unbalanced matched-pairs design at the C1 gate, before any spend.
+        paired_errors = validate_paired_designs(normalized)
+        if paired_errors:
+            raise HTTPException(400, "Invalid matched-pairs design. " + " ".join(paired_errors))
+        plan.differential_design_json = _differential_design_or_none(normalized)
         await session.flush()
         await log_action(
             session,

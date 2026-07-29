@@ -95,6 +95,15 @@ p=6.8e-156, 79/210 concordant, 37.6% recovery), which reclassifies from `inconcl
 `partially_reproduced`. The agree-vs-`partial` recovery cutoff and the enrichment alpha are the C5
 calibration levers.
 
+**Amendment (2026-07-29): the DE reproduction supports an optional matched-pairs / blocked design.**
+The DE template accepts a per-sample block label and builds `design = ~ block + condition` (instead of
+the default unpaired `~ condition`), cancelling donor-to-donor (or batch) baseline variance and sharply
+raising power. The pairing is a per-contrast `subjects` map ({sample: label}) on the reproduction plan,
+captured at the C1 gate (the donor->sample mapping lives in GEO sample metadata, not the paper text); a
+confounded/unbalanced pairing is rejected at the gate before any spend. This is a bounded general
+primitive (paired/blocked designs are common), not per-paper replication. apeglm LFC shrinkage and the
+full multi-condition model remain deferred follow-ups.
+
 ### Starting types are RNA-seq DE and ATAC-seq DA
 
 The two starting types are chosen to prove the framework generalizes across **both** comparator

@@ -176,6 +176,7 @@ def test_parse_extraction_differential_design_tolerates_partial():
             "reference_condition": None,
             "test_samples": [],
             "reference_samples": [],
+            "subjects": {},  # canonical shape now carries the optional matched-pairs map (empty = unpaired)
         }
     ]
     assert design["thresholds"] == {"log2fc": None, "padj": 0.01}

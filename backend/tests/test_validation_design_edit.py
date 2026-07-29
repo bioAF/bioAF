@@ -8,8 +8,61 @@ guarded to plan_ready and org-scoped, normalized to the canonical shape.
 
 import pytest
 
-from app.services.reproduction_plan_service import ReproductionPlanService
+from app.services.reproduction_plan_service import ReproductionPlanService, validate_paired_designs
 from app.services.validation_study_service import ValidationStudyService
+
+
+def _paired(subjects):
+    return {
+        "contrasts": [
+            {
+                "name": "mucoderm vs tcs",
+                "test_samples": ["T1", "T2"],
+                "reference_samples": ["R1", "R2"],
+                "subjects": subjects,
+            }
+        ],
+        "thresholds": {"log2fc": 1.0, "padj": 0.05},
+    }
+
+
+# --- pure validator (no DB) ---
+
+
+def test_validate_paired_designs_accepts_balanced_pairing():
+    # donorA and donorB each contribute one sample to BOTH arms: a proper paired design.
+    design = _paired({"T1": "donorA", "T2": "donorB", "R1": "donorA", "R2": "donorB"})
+    assert validate_paired_designs(design) == []
+
+
+def test_validate_paired_designs_ignores_contrasts_without_subjects():
+    design = {"contrasts": [{"test_samples": ["T1"], "reference_samples": ["R1"]}], "thresholds": {}}
+    assert validate_paired_designs(design) == []
+
+
+def test_validate_paired_designs_flags_unlabeled_sample():
+    design = _paired({"T1": "donorA", "R1": "donorA", "R2": "donorB"})  # T2 has no label
+    errs = validate_paired_designs(design)
+    assert any("T2" in e for e in errs)
+
+
+def test_validate_paired_designs_flags_single_subject():
+    design = _paired({"T1": "donorA", "T2": "donorA", "R1": "donorA", "R2": "donorA"})
+    errs = validate_paired_designs(design)
+    assert any("2" in e for e in errs)  # needs >= 2 distinct subjects
+
+
+def test_validate_paired_designs_flags_confounded_subject():
+    # donorB appears only in the reference arm -> confounded with condition (DESeq2: not full rank).
+    design = _paired({"T1": "donorA", "T2": "donorA", "R1": "donorA", "R2": "donorB"})
+    errs = validate_paired_designs(design)
+    assert any("donorB" in e for e in errs)
+
+
+def test_validate_paired_designs_flags_stray_label():
+    design = _paired({"T1": "donorA", "T2": "donorB", "R1": "donorA", "R2": "donorB", "GHOST": "donorC"})
+    errs = validate_paired_designs(design)
+    assert any("GHOST" in e for e in errs)
 
 
 async def _plan_ready_study(session, admin_user):
@@ -47,6 +100,32 @@ async def test_set_differential_design_persists_and_normalizes(session, admin_us
     assert c["test_samples"] == ["SRX1", "SRX2"]
     # Normalized to the canonical shape: missing sub-fields become explicit None, not absent keys.
     assert c["reference_condition"] == "untreated"
+
+
+@pytest.mark.asyncio
+async def test_set_differential_design_persists_a_balanced_pairing(session, admin_user):
+    study, plan = await _plan_ready_study(session, admin_user)
+    design = _paired({"T1": "donorA", "T2": "donorB", "R1": "donorA", "R2": "donorB"})
+    saved = await ReproductionPlanService.set_differential_design(
+        session, study.id, admin_user.organization_id, admin_user.id, design
+    )
+    await session.commit()
+    assert saved.differential_design_json["contrasts"][0]["subjects"] == {
+        "T1": "donorA",
+        "T2": "donorB",
+        "R1": "donorA",
+        "R2": "donorB",
+    }
+
+
+@pytest.mark.asyncio
+async def test_set_differential_design_rejects_a_confounded_pairing(session, admin_user):
+    study, plan = await _plan_ready_study(session, admin_user)
+    design = _paired({"T1": "donorA", "T2": "donorA", "R1": "donorA", "R2": "donorB"})
+    with pytest.raises(Exception):
+        await ReproductionPlanService.set_differential_design(
+            session, study.id, admin_user.organization_id, admin_user.id, design
+        )
 
 
 @pytest.mark.asyncio

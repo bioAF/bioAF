@@ -381,6 +381,17 @@ class TestLevel3Report:
         md = MarkdownRenderer.render("validation_study", report)
         assert "## Level 3" not in md
 
+    def test_markdown_renders_paired_design(self):
+        # A matched-pairs design (per-sample subjects) is surfaced so the reader knows the DE method.
+        report = _report_with_level3()
+        report["entity"]["reproduction_plan"]["differential_design"]["contrasts"][0]["subjects"] = {
+            "SRX1": "donorA",
+            "SRX2": "donorB",
+        }
+        md = MarkdownRenderer.render("validation_study", report)
+        assert "paired" in md.lower()
+        assert "subject + condition" in md
+
     def test_markdown_renders_partial_concordance_verdict(self):
         # A strong-but-partial concordance renders a distinct "partially reproduced" verdict line.
         report = _report_with_level3()

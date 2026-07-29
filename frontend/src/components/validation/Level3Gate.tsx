@@ -11,6 +11,9 @@ export interface Contrast {
   reference_condition?: string | null;
   test_samples: string[];
   reference_samples: string[];
+  // Optional matched-pairs design: {sample_id: subject/block label}. Empty for the default unpaired
+  // design. When present the DE run models `~ subject + condition` (ADR-069 item #2).
+  subjects?: Record<string, string> | null;
 }
 
 export interface DifferentialDesign {
@@ -48,6 +51,27 @@ function numOrNull(s: string): number | null {
   return Number.isNaN(n) ? null : n;
 }
 
+// Matched-pairs input: the human enters one `sample=subject` per line (or comma-separated). Parse to a
+// {sample: label} map; format the reverse for pre-filling an already-saved pairing.
+function parseSubjects(s: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const part of s.split(/[\n,]/)) {
+    const eq = part.indexOf("=");
+    if (eq < 0) continue;
+    const key = part.slice(0, eq).trim();
+    const label = part.slice(eq + 1).trim();
+    if (key && label) out[key] = label;
+  }
+  return out;
+}
+
+function formatSubjects(m?: Record<string, string> | null): string {
+  if (!m) return "";
+  return Object.entries(m)
+    .map(([k, v]) => `${k}=${v}`)
+    .join("\n");
+}
+
 /**
  * C1-gate Level-3 controls (ADR-069 / spec-08). At `plan_ready`, before spending compute, the human
  * (1) ratifies/corrects the paper's differential design (the extractor's sample labels rarely match
@@ -73,6 +97,7 @@ export function Level3Gate({
   const [refCondition, setRefCondition] = useState(primary.reference_condition ?? "");
   const [testSamples, setTestSamples] = useState((primary.test_samples ?? []).join(", "));
   const [refSamples, setRefSamples] = useState((primary.reference_samples ?? []).join(", "));
+  const [subjectsText, setSubjectsText] = useState(formatSubjects(primary.subjects));
   const [lfc, setLfc] = useState(design?.thresholds?.log2fc != null ? String(design.thresholds.log2fc) : "");
   const [padj, setPadj] = useState(design?.thresholds?.padj != null ? String(design.thresholds.padj) : "");
 
@@ -111,6 +136,7 @@ export function Level3Gate({
           reference_condition: refCondition.trim() || null,
           test_samples: parseList(testSamples),
           reference_samples: parseList(refSamples),
+          subjects: parseSubjects(subjectsText),
         },
       ],
       thresholds: { log2fc: numOrNull(lfc), padj: numOrNull(padj) },
@@ -221,6 +247,22 @@ export function Level3Gate({
               value={refSamples}
               onChange={(e) => setRefSamples(e.target.value)}
             />
+          </label>
+          <label className="text-xs text-gray-600 sm:col-span-2">
+            Subject / donor pairing (optional, matched-pairs)
+            <textarea
+              className={`${input} font-mono`}
+              aria-label="Subject pairing"
+              rows={3}
+              value={subjectsText}
+              onChange={(e) => setSubjectsText(e.target.value)}
+              placeholder={"SRX...=donorA\nSRX...=donorB\n..."}
+            />
+            <span className="mt-1 block text-[11px] leading-snug text-gray-500">
+              One <code>sample=subject</code> per line. Each subject must appear in BOTH arms; the run then
+              models <code>~ subject + condition</code> (paired), cancelling donor-to-donor baseline
+              variance. Leave blank for an unpaired design.
+            </span>
           </label>
         </div>
         <button
