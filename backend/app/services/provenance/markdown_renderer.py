@@ -717,6 +717,10 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
 
 _LEVEL3_VERDICT_LABEL = {
     "agree": "The paper's differential finding reproduced.",
+    "partial": (
+        "The paper's differential finding was partially reproduced: the overlap is statistically real, "
+        "but directional recovery fell below the agreement threshold."
+    ),
     "diverge": "The paper's differential finding did NOT reproduce.",
     "not_computed": "Concordance was not computed.",
 }

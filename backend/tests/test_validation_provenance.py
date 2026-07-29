@@ -381,6 +381,18 @@ class TestLevel3Report:
         md = MarkdownRenderer.render("validation_study", report)
         assert "## Level 3" not in md
 
+    def test_markdown_renders_partial_concordance_verdict(self):
+        # A strong-but-partial concordance renders a distinct "partially reproduced" verdict line.
+        report = _report_with_level3()
+        report["entity"]["classification"] = "partially_reproduced"
+        report["entity"]["evidence"]["classification_result"]["classification"] = "partially_reproduced"
+        report["entity"]["evidence"]["level3_result"]["concordance"].update(
+            verdict="partial", concordant=79, paper_n=210, directional_overlap_frac=0.376
+        )
+        md = MarkdownRenderer.render("validation_study", report)
+        assert "## Level 3" in md
+        assert "partially reproduced" in md.lower()
+
 
 # ---------------------------------------------------------------------------
 # CSV renderer

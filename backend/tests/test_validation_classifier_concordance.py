@@ -99,6 +99,43 @@ def test_concordance_diverge_fully_cleared_differential_is_not_validated():
     assert r["classification"] == "not_validated"
 
 
+def test_concordance_partial_is_partially_reproduced():
+    # The calibration case (study 6): the overlap enrichment clears (the recovery is unmistakably real)
+    # but directional recovery is below the agree line. That is not a full validation and not an
+    # unattributable divergence: the paper's finding PARTIALLY reproduced. Held for a human.
+    r = classify_study(
+        [],
+        {},
+        concordance_results=[_conc("partial", directional_overlap_frac=0.376, concordant=79, paper_n=210, our_n=101)],
+    )
+    assert r["classification"] == "partially_reproduced"
+    assert r["auto_finalize"] is False
+    assert r["coverage"]["concordance_partial"] == 1
+    assert "partial" in r["reasoning"].lower()
+
+
+def test_concordance_partial_with_floor_agree_is_partially_reproduced():
+    # A QC-floor metric agrees (which alone is the spec-06 floor-only inconclusive) AND the finding
+    # partially reproduced. The partial finding lifts it out of inconclusive to partially_reproduced.
+    targets = [{"metric_key": "reads_mapped_genome", "claimed_value": 0.96, "unit": "", "tolerance": None}]
+    computed = {"reads_mapped_genome": 0.97}
+    r = classify_study(targets, computed, concordance_results=[_conc("partial", directional_overlap_frac=0.3)])
+    assert r["classification"] == "partially_reproduced"
+    assert r["auto_finalize"] is False
+
+
+def test_concordance_agree_beats_partial():
+    # A full finding agreement dominates a co-occurring partial: the study is validated, not downgraded.
+    r = classify_study([], {}, concordance_results=[_conc("agree"), _conc("partial", directional_overlap_frac=0.3)])
+    assert r["classification"] == "validated"
+
+
+def test_concordance_partial_does_not_auto_finalize():
+    # partially_reproduced ALWAYS holds for a human: it is inherently a "look at this" signal.
+    r = classify_study([], {}, concordance_results=[_conc("partial", directional_overlap_frac=0.4)])
+    assert r["auto_finalize"] is False
+
+
 def test_concordance_not_computed_is_coverage_gap():
     r = classify_study([], {}, concordance_results=[_conc("not_computed")])
     assert r["classification"] == "inconclusive"

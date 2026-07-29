@@ -6,7 +6,7 @@
 
 export interface Concordance {
   kind: string;
-  verdict: string; // "agree" | "diverge" | "not_computed"
+  verdict: string; // "agree" | "partial" | "diverge" | "not_computed"
   paper_n: number;
   our_n: number;
   overlap: number;
@@ -29,6 +29,7 @@ function fmtP(p: number): string {
 
 const VERDICT: Record<string, { label: string; cls: string }> = {
   agree: { label: "Finding reproduced", cls: "bg-green-100 text-green-800" },
+  partial: { label: "Finding partially reproduced", cls: "bg-yellow-100 text-yellow-800" },
   diverge: { label: "Finding did not reproduce", cls: "bg-red-100 text-red-800" },
   not_computed: { label: "Not computed", cls: "bg-gray-100 text-gray-700" },
 };

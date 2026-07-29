@@ -39,12 +39,40 @@ def test_gene_agree_full_recovery():
     assert r.enrichment_p <= 0.05
 
 
-def test_gene_diverge_low_overlap():
+def test_gene_low_recovery_but_enrichment_clears_is_partial():
+    # Under the 3-way taxonomy (ADR-069) a low recovery is NOT automatically a divergence: recovering
+    # 1 of the paper's 20 hits from just 2 of our own is still ~500x enriched over chance (p ~ 2e-3),
+    # so the overlap is real, just thin. That is `partial` (held for a human), superseding the old
+    # 2-way `diverge`. The alpha/agree cutoffs are the C5 calibration lever (spec-08).
     paper = _genes([(f"g{i}", "up") for i in range(20)])
     ours = _genes([("g0", "up"), ("x1", "up")])
     r = compare_gene_sets(paper, ours, universe=20000)
-    assert r.verdict == "diverge"
     assert r.directional_overlap_frac == 1 / 20
+    assert r.enrichment_p <= 0.05
+    assert r.verdict == "partial"
+
+
+def test_gene_partial_enrichment_real_recovery_short():
+    # The strong-but-partial case (study 6): the overlap is unmistakably NOT coincidence
+    # (enrichment clears) but we recover well under the agree threshold of the paper's hits.
+    # This is `partial`, distinct from a `diverge` where the overlap is no better than chance.
+    paper = _genes([(f"g{i}", "up") for i in range(20)])
+    ours = _genes([("g0", "up"), ("g1", "up"), ("g2", "up"), ("g3", "up"), ("g4", "up"), ("x1", "up"), ("x2", "up")])
+    r = compare_gene_sets(paper, ours, universe=20000)
+    assert r.directional_overlap_frac == 5 / 20  # below the 0.5 agree threshold
+    assert r.enrichment_p <= 0.05  # but the overlap is statistically real, not coincidence
+    assert r.verdict == "partial"
+
+
+def test_gene_diverge_when_overlap_is_coincidence():
+    # Recovery short AND the overlap is no better than chance (enrichment does not clear) -> diverge,
+    # NOT partial. Enrichment significance is the guard that keeps `partial` from being gamed by luck.
+    paper = _genes([(f"g{i}", "up") for i in range(200)])
+    ours = _genes([("g0", "up")] + [(f"x{i}", "up") for i in range(400)])
+    r = compare_gene_sets(paper, ours, universe=20000)
+    assert r.directional_overlap_frac < 0.5
+    assert r.enrichment_p > 0.05
+    assert r.verdict == "diverge"
 
 
 def test_gene_direction_discordance_is_not_concordant():
@@ -84,6 +112,21 @@ def test_interval_no_overlap_diverges():
     r = compare_interval_sets(paper, ours, universe=30000)
     assert r.overlap == 0
     assert r.verdict == "diverge"
+
+
+def test_interval_partial_enrichment_real_recovery_short():
+    # ATAC/ChIP analogue of the strong-but-partial gene case: several peaks recover with concordant
+    # direction and the overlap enrichment clears, but the recovered fraction is below the agree line.
+    paper = _intervals([(f"chr1:{1000 + i * 1000}-{2000 + i * 1000}", "up") for i in range(10)])
+    ours = _intervals(
+        [(f"chr1:{1100 + i * 1000}-{2100 + i * 1000}", "up") for i in range(3)]
+        + [("chr9:1000-2000", "up"), ("chr9:3000-4000", "up")]
+    )
+    r = compare_interval_sets(paper, ours, universe=30000)
+    assert r.concordant == 3
+    assert r.directional_overlap_frac == 3 / 10  # below the 0.5 agree threshold
+    assert r.enrichment_p <= 0.05
+    assert r.verdict == "partial"
 
 
 def test_interval_below_reciprocal_fraction_not_matched():

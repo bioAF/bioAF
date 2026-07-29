@@ -81,6 +81,20 @@ paper's stated thresholds applied, a comparable differential method); otherwise 
 `inconclusive`. The hybrid auto-finalize policy is unchanged: a solid pass auto-finalizes, everything
 else holds for a human.
 
+**Amendment (2026-07-29): the concordance verdict is 3-way, adding `partially_reproduced`.**
+Concordance measures two INDEPENDENT things that the original 2-way verdict collapsed: enrichment
+("is the overlap real, or coincidence?") and directional recovery ("how complete?"). The verdict is
+now `agree` (both clear), `partial` (enrichment clears but recovery is below the agree line), or
+`diverge` (enrichment does not clear, or there is no concordant recovery at all). A `partial` maps to
+a new classification bucket `partially_reproduced` (surfaced as "Partially Reproduced"): the finding
+reproduced in part, unmistakably above chance but incomplete. It is not a full finding agreement and
+always holds for a human. This shrinks `inconclusive` back to its true meaning (no detectable real
+overlap and unattributable) instead of lumping "clearly reproduced part of it" together with "we
+genuinely cannot tell." The calibration case is study 6 (GSE309060 Mucoderm vs TCS: enrichment
+p=6.8e-156, 79/210 concordant, 37.6% recovery), which reclassifies from `inconclusive` to
+`partially_reproduced`. The agree-vs-`partial` recovery cutoff and the enrichment alpha are the C5
+calibration levers.
+
 ### Starting types are RNA-seq DE and ATAC-seq DA
 
 The two starting types are chosen to prove the framework generalizes across **both** comparator

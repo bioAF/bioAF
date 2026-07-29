@@ -2,10 +2,19 @@
 
 Compares OUR reproduced finding set against the paper's deposited finding set (both
 normalized by result_set_normalizer) and returns a deterministic concordance verdict.
-Per ADR-069 the verdict requires BOTH signals to clear a threshold: directional overlap
-(the fraction of the paper's significant hits we recover with concordant direction) AND
-an enrichment significance of the overlap (hypergeometric). Two families: gene-set
-(RNA-seq, id equality) and genomic-interval-set (ATAC/ChIP, reciprocal overlap).
+Per ADR-069 the verdict keys on TWO independent signals: an enrichment significance of the
+overlap (hypergeometric: is the overlap real, or coincidence?) AND a directional recovery
+fraction (the fraction of the paper's significant hits we recover with concordant direction:
+how complete?). The two do not collapse into one pass/fail:
+
+- ``agree``   -- enrichment clears AND recovery meets the agree threshold (fully reproduced).
+- ``partial`` -- enrichment clears BUT recovery is below the agree threshold (the overlap is
+  unmistakably real, but we recovered only part of it). Enrichment significance is itself the
+  guard against trivial luck, so ``partial`` cannot be earned by a couple of coincidental hits.
+- ``diverge`` -- enrichment does NOT clear (the overlap is no better than chance).
+
+Two families: gene-set (RNA-seq, id equality) and genomic-interval-set (ATAC/ChIP, reciprocal
+overlap).
 
 The hypergeometric survival function is computed with math.lgamma so this has no numeric
 dependency (scipy is not a declared backend requirement). The comparator is pure logic; the
@@ -28,7 +37,7 @@ _DEFAULT_RECIPROCAL_FRACTION = 0.5
 @dataclass
 class ConcordanceResult:
     kind: str  # "gene" | "interval"
-    verdict: str  # "agree" | "diverge" | "not_computed"
+    verdict: str  # "agree" | "partial" | "diverge" | "not_computed"
     paper_n: int = 0
     our_n: int = 0
     overlap: int = 0
@@ -79,7 +88,14 @@ def _hypergeom_sf(k: int, N: int, K: int, n: int) -> float:
 
 
 def _verdict(directional_frac: float, enrichment_p: float, overlap_threshold: float, alpha: float) -> str:
-    return "agree" if (directional_frac >= overlap_threshold and enrichment_p <= alpha) else "diverge"
+    # A divergence is EITHER the overlap being no better than chance (enrichment does not clear) OR no
+    # concordant recovery at all: an overlap that is entirely in the opposite direction is a directional
+    # contradiction, not a partial reproduction, even though its raw set overlap can be enrichment-
+    # significant. Once the overlap is real AND we recovered some of it concordantly, recovery decides
+    # agree (>= threshold) vs partial (below it).
+    if enrichment_p > alpha or directional_frac <= 0:
+        return "diverge"
+    return "agree" if directional_frac >= overlap_threshold else "partial"
 
 
 def compare_gene_sets(

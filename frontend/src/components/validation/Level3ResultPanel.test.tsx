@@ -38,6 +38,16 @@ test("a divergence reads as not reproduced", () => {
   expect(screen.getByText(/did not reproduce/i)).toBeInTheDocument();
 });
 
+test("a partial concordance reads as partially reproduced and still shows the stats", () => {
+  const partial = {
+    ...AGREE,
+    concordance: { ...AGREE.concordance, verdict: "partial", concordant: 79, paper_n: 210, directional_overlap_frac: 0.376 },
+  };
+  render(<Level3ResultPanel result={partial} />);
+  expect(screen.getByText(/partially reproduced/i)).toBeInTheDocument();
+  expect(screen.getByText(/38%/)).toBeInTheDocument(); // directional overlap still surfaced
+});
+
 test("not_computed surfaces its notes and does not claim a verdict", () => {
   const nc = {
     concordance: {
