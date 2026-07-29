@@ -327,17 +327,25 @@ class ValidationDriverService:
                 "qc_dashboard_id": dashboard_id,
             }
         )
-        study.evidence_json = evidence
-
         # Assemble the Level-3 inputs now that the analysis run produced the count matrix (B2e design +
         # B4 confirmed finding claim + the matrix file + the matching template). A study with no
         # confirmed differential finding gets None here and stays Level-2, unchanged. Pre-set inputs
         # (tests / a future approval-time path) are respected and not rebuilt.
+        #
+        # This runs BEFORE the single `study.evidence_json = evidence` assignment below, and that
+        # ordering is load-bearing: `build_level3_inputs` issues SELECTs whose autoflush would flush a
+        # previously-assigned evidence_json and clear its dirty flag, after which the in-place
+        # `evidence["level3"] = ...` on this plain (non-Mutable) JSONB column plus a same-reference
+        # reassignment goes untracked and is silently dropped -- the study would reach `reproducing`
+        # with no persisted level3, and `_handle_reproducing` would fall straight through to comparing,
+        # collapsing the Level-3 finding to a Level-2 verdict. Build the full evidence dict first, then
+        # assign evidence_json exactly once so the reassignment is detected and persisted.
         if not evidence.get("level3"):
             level3 = await build_level3_inputs(session, study, plan)
             if level3:
                 evidence["level3"] = level3
-                study.evidence_json = evidence
+
+        study.evidence_json = evidence
 
         # Route to Level-3 reproduction when its inputs are present; otherwise straight to comparing
         # (Level-2 only), unchanged from before.

@@ -12,7 +12,9 @@ import pytest_asyncio
 from app.models.file import File
 from app.models.pipeline_run import PipelineRun
 from app.models.template_notebook import TemplateNotebook
+from app.services.qc_dashboard_service import QCDashboardService
 from app.services.reproduction_plan_service import ReproductionPlanService
+from app.services.validation_driver_service import ValidationDriverService
 from app.services.validation_level3_service import build_level3_inputs
 from app.services.validation_study_service import ValidationStudyService
 
@@ -234,3 +236,39 @@ async def test_build_level3_inputs_none_without_template(session, admin_user, an
     await _count_matrix_file(session, admin_user, analysis_run)
     study, plan = await _study_with_plan(session, admin_user, analysis_run)
     assert await build_level3_inputs(session, study, plan) is None
+
+
+@pytest.mark.asyncio
+async def test_extracting_persists_level3_bundle_and_routes_to_reproducing(
+    session, admin_user, analysis_run, de_template, monkeypatch
+):
+    """Regression: `_handle_extracting` must PERSIST the level3 bundle it builds, not just set it in
+    memory. `build_level3_inputs` issues SELECTs whose autoflush flushes `evidence_json` and clears its
+    dirty flag; a following in-place `evidence["level3"] = ...` on the plain (non-Mutable) JSONB column
+    plus a same-reference reassignment was then not tracked, so the study reached `reproducing` with NO
+    level3 persisted. The next tick's `_handle_reproducing` loaded evidence without level3, fell through
+    its `if not level3` guard to `comparing`, and the whole Level-3 finding silently collapsed to a
+    Level-2 verdict. This asserts the DB-persisted evidence, so it fails on the in-place-mutation bug."""
+
+    async def _no_dashboard(*a, **k):
+        return None
+
+    # Isolate the persistence behavior from QC-dashboard generation (a bare run has no MultiQC data).
+    monkeypatch.setattr(QCDashboardService, "get_dashboard_by_run", _no_dashboard)
+    monkeypatch.setattr(QCDashboardService, "generate_qc_dashboard", _no_dashboard)
+
+    await _count_matrix_file(session, admin_user, analysis_run)
+    study, plan = await _study_with_plan(session, admin_user, analysis_run)  # real level3 inputs
+    study.state = "extracting"
+    await session.commit()
+
+    await ValidationDriverService._handle_extracting(session, study)
+    await session.commit()
+
+    # Read back the committed value (not the in-memory dict, which holds level3 even when the bug hides it).
+    await session.refresh(study)
+    assert study.state == "reproducing"
+    evidence = study.evidence_json or {}
+    assert evidence.get("level3") is not None, "evidence['level3'] was set in memory but not persisted"
+    assert evidence["level3"]["template_id"] == de_template.id
+    assert evidence["level3"]["kind"] == "gene"
