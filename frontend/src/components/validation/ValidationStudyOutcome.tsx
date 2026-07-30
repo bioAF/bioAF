@@ -34,8 +34,8 @@ export function ValidationStudyOutcome({
   if (state === "classified") {
     return (
       <span className="inline-flex items-center gap-2">
-        <ValidationStatusBadge confidence={confidence} />
-        {classification && (
+        <ValidationStatusBadge confidence={confidence} classification={classification} />
+        {classification && classification !== "partially_reproduced" && (
           <span className="text-xs text-gray-500" title="Classification bucket">
             {humanizeClassification(classification)}
           </span>

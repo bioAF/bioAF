@@ -18,6 +18,8 @@ from app.schemas.validation_study import (
     ClassifyRequest,
     ComparisonTargetResponse,
     DeclineRequest,
+    DifferentialDesignRequest,
+    FindingSetRequest,
     ReadRequest,
     ReproductionPlanResponse,
     ValidationStudyRequest,
@@ -25,6 +27,7 @@ from app.schemas.validation_study import (
     ValidationStudySummary,
 )
 from app.services.audit_service import log_action
+from app.services.literature.ground_truth_fetch_service import GroundTruthFetchService
 from app.services.provenance.report_service import ProvenanceReportService
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_driver_service import ValidationDriverService
@@ -49,6 +52,8 @@ def _plan_response(plan) -> ReproductionPlanResponse | None:
         pipeline_key=plan.pipeline_key,
         pipeline_version=plan.pipeline_version,
         parameters=plan.parameters_json,
+        differential_design=plan.differential_design_json,
+        finding_claim=plan.finding_claim_json,
         reference_genome=plan.reference_genome,
         reference_build=plan.reference_build,
         mapping_confidence=plan.mapping_confidence,
@@ -206,6 +211,75 @@ async def read_and_plan(
     user_id = int(current_user["sub"])
     study = await _load(session, study_id, org_id)
     study = await ValidationDriverService.read_and_plan(session, study, data.full_text, org_id, user_id)
+    await session.commit()
+    return await _study_response(session, study, org_id)
+
+
+@router.put("/{study_id}/differential-design", response_model=ValidationStudyResponse)
+async def edit_differential_design(
+    study_id: int,
+    data: DifferentialDesignRequest,
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """B2e edit (Level-3): ratify/correct the paper's differential design at the C1 gate (typically to
+    fix the contrast's sample labels to the analysis matrix's column names) before Level-3 runs it."""
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    await ReproductionPlanService.set_differential_design(
+        session, study_id, org_id, user_id, {"contrasts": data.contrasts, "thresholds": data.thresholds or {}}
+    )
+    study = await _load(session, study_id, org_id)
+    await session.commit()
+    return await _study_response(session, study, org_id)
+
+
+@router.get("/{study_id}/finding-set/candidates")
+async def finding_set_candidates(
+    study_id: int,
+    kind: str = Query("gene"),
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """B4 auto-fetch ASSIST (Level-3): best-effort GEO-supplementary candidates for the paper's
+    deposited result set, to pre-fill the C1 confirm. Empty when nothing is found (the common case,
+    per spike-03) so the human supplies the table; this never auto-confirms a ground-truth set."""
+    org_id = int(current_user["org_id"])
+    plan = await ReproductionPlanService.get_plan(session, study_id, org_id)
+    if plan is None:
+        raise HTTPException(404, "No reproduction plan for this study.")
+    candidates: list[dict] = []
+    for accession in plan.accessions_json or []:
+        candidates.extend(await GroundTruthFetchService.fetch_geo_candidates(accession, kind=kind))
+    return {"candidates": candidates}
+
+
+@router.post("/{study_id}/finding-set", response_model=ValidationStudyResponse)
+async def confirm_finding_set(
+    study_id: int,
+    data: FindingSetRequest,
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """B4 (Level-3): confirm the paper's deposited ground-truth result set at the C1 gate. Normalizes
+    the supplied DEG/DA table into a directional FindingSet and persists it on the plan so approval
+    can run Level-3 concordance. The response carries the updated plan (with the parsed finding set)
+    for the human to review before approving."""
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    await ReproductionPlanService.set_finding_claim(
+        session,
+        study_id,
+        org_id,
+        user_id,
+        kind=data.kind,
+        table_text=data.table_text,
+        contrast=data.contrast,
+        lfc_threshold=data.lfc_threshold,
+        padj_threshold=data.padj_threshold,
+        source_locator=data.source_locator,
+    )
+    study = await _load(session, study_id, org_id)
     await session.commit()
     return await _study_response(session, study, org_id)
 

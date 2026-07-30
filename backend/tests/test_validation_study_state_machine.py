@@ -71,9 +71,10 @@ def test_error_is_reachable_from_every_active_state():
         assert can_transition(state, "error"), f"{state} should be able to fail into error"
 
 
-def test_classifications_are_the_six_buckets():
+def test_classifications_are_the_seven_buckets():
     assert VALIDATION_STUDY_CLASSIFICATIONS == [
         "validated",
+        "partially_reproduced",
         "not_validated",
         "missing_data",
         "missing_methods",
@@ -86,6 +87,11 @@ def test_classification_confidence_interim_mapping():
     # Interim until E2: a discrete manual verdict yields only the extremes or None.
     assert classification_confidence("validated") == 100.0  # -> Fully Validated
     assert classification_confidence("not_validated") == 0.0  # -> Very Unlikely
+    # partially_reproduced WAS tested and DID conclude (the finding partially reproduced), so it is not
+    # None ("could not reproduce"); it lands in a caution/needs-review band. The frontend badge renders
+    # the precise "Partially Reproduced" label from the classification; this number is the fallback for
+    # confidence-only consumers (the provenance report).
+    assert classification_confidence("partially_reproduced") == 60.0
     # "couldn't test / couldn't conclude" and not-yet-classified -> None (UI: Could Not Reproduce),
     # deliberately NOT a low confidence.
     for c in ("missing_data", "missing_methods", "not_reproducible", "inconclusive"):

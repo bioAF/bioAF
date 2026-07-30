@@ -12,6 +12,7 @@
 
 export type ValidationStatusKey =
   | "fully_validated"
+  | "partially_reproduced"
   | "likely_validated"
   | "possibly_validated"
   | "questionable"
@@ -35,6 +36,20 @@ const COULD_NOT_REPRODUCE: ValidationStatus = {
   tone: "neutral",
   needsHumanReview: false,
   description: "Validation could not be run for this study.",
+};
+
+// The `partially_reproduced` classification (ADR-069) is not a point on the confidence scale: the
+// finding reproduced in PART (the overlap is statistically real) but recovery was incomplete. It is
+// keyed on the classification bucket, not a confidence band, so it reads as its precise factual state
+// rather than a probabilistic hedge like "Possibly Validated". Always needs a human.
+const PARTIALLY_REPRODUCED: ValidationStatus = {
+  key: "partially_reproduced",
+  label: "Partially Reproduced",
+  tone: "caution",
+  needsHumanReview: true,
+  description:
+    "The paper's finding partially reproduced: the overlap is statistically real, but recovery was " +
+    "incomplete. Needs human review.",
 };
 
 // Ordered highest-first; the first band whose lower bound the confidence meets wins.
@@ -101,7 +116,15 @@ const BANDS: ReadonlyArray<{ min: number; status: ValidationStatus }> = [
   },
 ];
 
-export function getValidationStatus(confidencePct: number | null | undefined): ValidationStatus {
+export function getValidationStatus(
+  confidencePct: number | null | undefined,
+  classification?: string | null,
+): ValidationStatus {
+  // A discrete classification bucket that does not map cleanly onto the confidence scale wins over the
+  // band: partially_reproduced reads as its own factual state regardless of the fallback confidence.
+  if (classification === "partially_reproduced") {
+    return PARTIALLY_REPRODUCED;
+  }
   if (confidencePct === null || confidencePct === undefined || Number.isNaN(confidencePct)) {
     return COULD_NOT_REPRODUCE;
   }

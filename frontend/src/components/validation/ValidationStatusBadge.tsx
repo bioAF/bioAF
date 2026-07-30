@@ -13,16 +13,19 @@ const TONE_CLASSES: Record<ValidationStatusTone, string> = {
  * (0-100, "how confident the results were validated"). A null/undefined
  * confidence renders "Could Not Reproduce". The middle bands surface a
  * "Needs review" hint (suppress with showReview={false}); the band description
- * is exposed as a tooltip.
+ * is exposed as a tooltip. `classification` lets a bucket that does not map onto
+ * the confidence scale (e.g. partially_reproduced) render its precise label.
  */
 export function ValidationStatusBadge({
   confidence,
+  classification,
   showReview = true,
 }: {
   confidence: number | null | undefined;
+  classification?: string | null;
   showReview?: boolean;
 }) {
-  const status = getValidationStatus(confidence);
+  const status = getValidationStatus(confidence, classification);
   return (
     <span className="inline-flex items-center gap-1.5">
       <span

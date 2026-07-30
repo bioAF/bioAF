@@ -28,6 +28,9 @@ async def _enable_lit_validation(session):
 _GOOD = (
     '```json\n{"accessions": ["GSE52778"], "sample_structure": {"organism": "Homo sapiens"}, '
     '"method": {"assay": "bulk RNA-seq", "tools": ["TopHat"], "reference_build": "GRCh37"}, '
+    '"differential_design": {"contrasts": [{"name": "dex vs untreated", "test_condition": "dex", '
+    '"reference_condition": "untreated", "test_samples": ["GSM1"], "reference_samples": ["GSM2"]}], '
+    '"thresholds": {"log2fc": 1.0, "padj": 0.05}}, '
     '"claims": [{"metric_key": "alignment_rate", "value": 83.4, "unit": "%", "source_locator": "Results"}], '
     '"data_availability": "deposited", "blockers": []}\n```'
 )
@@ -66,6 +69,10 @@ async def test_request_read_approve_flow(client, admin_token, monkeypatch):
     assert body["state"] == "plan_ready"
     assert body["plan"]["pipeline_key"] == "nf-core/rnaseq"
     assert body["plan"]["comparison_targets"][0]["metric_key"] == "alignment_rate"
+    # B2e: the differential design is captured and surfaced for the human to ratify at the C1 gate.
+    design = body["plan"]["differential_design"]
+    assert design["thresholds"] == {"log2fc": 1.0, "padj": 0.05}
+    assert design["contrasts"][0]["test_samples"] == ["GSM1"]
 
     r = await client.post(f"/api/validation-studies/{sid}/approve", headers=_auth(admin_token))
     assert r.status_code == 200, r.text
@@ -74,6 +81,88 @@ async def test_request_read_approve_flow(client, admin_token, monkeypatch):
     r = await client.get(f"/api/validation-studies/{sid}", headers=_auth(admin_token))
     assert r.status_code == 200
     assert r.json()["approved_by_user_id"] is not None
+
+
+async def test_confirm_finding_set_at_c1_gate(client, admin_token, monkeypatch):
+    """B4: the human confirms the paper's deposited DEG table at the C1 gate; the endpoint normalizes
+    it and surfaces the parsed finding set on the plan so approval can run Level-3 concordance."""
+    _patch_llm(monkeypatch, _GOOD)
+    sid = (
+        await client.post("/api/validation-studies", json={"source_accession": "GSE52778"}, headers=_auth(admin_token))
+    ).json()["id"]
+    await client.post(
+        f"/api/validation-studies/{sid}/read", json={"full_text": "the paper body"}, headers=_auth(admin_token)
+    )
+
+    table = "gene,log2FoldChange,padj\nA1BG,2.5,0.001\nTP53,-1.8,0.01\nGAPDH,0.1,0.9\n"
+    r = await client.post(
+        f"/api/validation-studies/{sid}/finding-set",
+        json={"kind": "gene", "table_text": table, "source_locator": "Table S3"},
+        headers=_auth(admin_token),
+    )
+    assert r.status_code == 200, r.text
+    claim = r.json()["plan"]["finding_claim"]
+    assert claim["confirmed"] is True
+    assert claim["finding_set"]["n_sig"] == 2
+    assert {e["id"] for e in claim["finding_set"]["entities"]} == {"A1BG", "TP53"}
+
+
+async def test_edit_differential_design_at_c1_gate(client, admin_token, monkeypatch):
+    """B2e: the human corrects the contrast's sample labels at the C1 gate; the edited design is
+    normalized and surfaced back on the plan."""
+    _patch_llm(monkeypatch, _GOOD)
+    sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]
+    await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+
+    r = await client.put(
+        f"/api/validation-studies/{sid}/differential-design",
+        json={
+            "contrasts": [
+                {"name": "dex vs untreated", "test_samples": ["SRX30659361"], "reference_samples": ["SRX30659368"]}
+            ],
+            "thresholds": {"log2fc": 1.5, "padj": 0.01},
+        },
+        headers=_auth(admin_token),
+    )
+    assert r.status_code == 200, r.text
+    design = r.json()["plan"]["differential_design"]
+    assert design["thresholds"] == {"log2fc": 1.5, "padj": 0.01}
+    assert design["contrasts"][0]["test_samples"] == ["SRX30659361"]
+
+
+async def test_finding_set_candidates_returns_autofetched(client, admin_token, monkeypatch):
+    """B4 auto-fetch assist: the C1 gate can pull best-effort GEO candidates to pre-fill the confirm.
+    The fetch is stubbed (no network); the endpoint just surfaces what the service returns."""
+    _patch_llm(monkeypatch, _GOOD)
+    sid = (
+        await client.post("/api/validation-studies", json={"source_accession": "GSE52778"}, headers=_auth(admin_token))
+    ).json()["id"]
+    await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+
+    from app.services.literature.ground_truth_fetch_service import GroundTruthFetchService
+
+    async def _fake(accession, *, kind="gene", fetcher=None):
+        return [{"source": "geo_supplementary", "filename": f"{accession}_DEG.csv", "n_sig": 5, "finding_set": {}}]
+
+    monkeypatch.setattr(GroundTruthFetchService, "fetch_geo_candidates", _fake)
+
+    r = await client.get(f"/api/validation-studies/{sid}/finding-set/candidates", headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    cands = r.json()["candidates"]
+    assert len(cands) == 1
+    assert cands[0]["filename"] == "GSE52778_DEG.csv"
+
+
+async def test_viewer_cannot_confirm_finding_set(client, admin_token, viewer_token, monkeypatch):
+    _patch_llm(monkeypatch, _GOOD)
+    sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]
+    await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+    r = await client.post(
+        f"/api/validation-studies/{sid}/finding-set",
+        json={"kind": "gene", "table_text": "gene,log2FoldChange,padj\nA1BG,2.5,0.001\n"},
+        headers=_auth(viewer_token),
+    )
+    assert r.status_code == 403
 
 
 async def test_decline_flow(client, admin_token, monkeypatch):

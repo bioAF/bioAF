@@ -62,6 +62,7 @@
 | [ADR-064](ADR-064-sdr-reassessment-triggers.md) | Date-Based SDR Re-Assessment Triggers | Proposed | 2026-06-05 |
 | [ADR-065](ADR-065-bal-normalized-contract.md) | BAL Normalized Contract, Capabilities, and the Category/Backend Rule | Accepted | 2026-06-08 |
 | [ADR-068](ADR-068-literature-validation-reproduction-triage.md) | Literature Validation as a Reproduction-Triage Screen | Accepted | 2026-07-15 |
+| [ADR-069](ADR-069-level3-finding-concordance.md) | Level-3 Finding Concordance for Literature Validation | Proposed | 2026-07-22 |
 
 ## How to Use This Directory
 
