@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bioaf-cli"
-version = "2026.7.1"
+version = "2026.7.2"
 description = "bioAF deployment CLI"
 requires-python = ">=3.12"
 dependencies = [
