@@ -151,9 +151,7 @@ def _normalize_differential_design(value) -> dict:
                 "test_condition": _str_or_none(c.get("test_condition")),
                 "reference_condition": _str_or_none(c.get("reference_condition")),
                 "test_samples": [str(s).strip() for s in _as_list(c.get("test_samples")) if str(s).strip()],
-                "reference_samples": [
-                    str(s).strip() for s in _as_list(c.get("reference_samples")) if str(s).strip()
-                ],
+                "reference_samples": [str(s).strip() for s in _as_list(c.get("reference_samples")) if str(s).strip()],
                 # Optional matched-pairs / blocked design (ADR-069, item #2): a per-sample subject/block
                 # label so the DE notebook can run `~ block + condition` (cancels donor-to-donor baseline
                 # variance). Empty for the default unpaired design. Human-supplied at the C1 gate (the

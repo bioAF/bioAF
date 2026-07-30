@@ -20,9 +20,7 @@ from app.services.literature.ground_truth_fetch_service import (
 
 
 def test_geo_suppl_dir_url_builds_ftp_path():
-    assert geo_suppl_dir_url("GSE309060") == (
-        "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE309nnn/GSE309060/suppl/"
-    )
+    assert geo_suppl_dir_url("GSE309060") == ("https://ftp.ncbi.nlm.nih.gov/geo/series/GSE309nnn/GSE309060/suppl/")
     assert geo_suppl_dir_url("GSE52778") == "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE52nnn/GSE52778/suppl/"
     assert geo_suppl_dir_url("GSE12") == "https://ftp.ncbi.nlm.nih.gov/geo/series/GSEnnn/GSE12/suppl/"
 

@@ -95,8 +95,10 @@ async def test_set_differential_design_persists_and_normalizes(session, admin_us
     )
     await session.commit()
 
-    assert saved.differential_design_json["thresholds"] == {"log2fc": 1.0, "padj": 0.05}
-    c = saved.differential_design_json["contrasts"][0]
+    dd = saved.differential_design_json
+    assert dd is not None
+    assert dd["thresholds"] == {"log2fc": 1.0, "padj": 0.05}
+    c = dd["contrasts"][0]
     assert c["test_samples"] == ["SRX1", "SRX2"]
     # Normalized to the canonical shape: missing sub-fields become explicit None, not absent keys.
     assert c["reference_condition"] == "untreated"
@@ -110,7 +112,9 @@ async def test_set_differential_design_persists_a_balanced_pairing(session, admi
         session, study.id, admin_user.organization_id, admin_user.id, design
     )
     await session.commit()
-    assert saved.differential_design_json["contrasts"][0]["subjects"] == {
+    dd = saved.differential_design_json
+    assert dd is not None
+    assert dd["contrasts"][0]["subjects"] == {
         "T1": "donorA",
         "T2": "donorB",
         "R1": "donorA",

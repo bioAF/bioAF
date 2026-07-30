@@ -251,8 +251,13 @@ async def test_transient_fetch_failure_schedules_a_backoff_retry(session, admin_
     exp_id = await _experiment_id(session, admin_user)
     study = await _study(session, admin_user, state="acquiring_data", experiment_id=exp_id)
     fetch = await _run(
-        session, admin_user, exp_id, name="nf-core/fetchngs", status="failed",
-        failure_reason="task_error", error_message="ENA HTTP 503; connection refused",
+        session,
+        admin_user,
+        exp_id,
+        name="nf-core/fetchngs",
+        status="failed",
+        failure_reason="task_error",
+        error_message="ENA HTTP 503; connection refused",
     )
     study.data_run_id = fetch.id
     await session.flush()
@@ -275,8 +280,13 @@ async def test_permanent_fetch_failure_is_missing_data(session, admin_user, monk
     exp_id = await _experiment_id(session, admin_user)
     study = await _study(session, admin_user, state="acquiring_data", experiment_id=exp_id)
     fetch = await _run(
-        session, admin_user, exp_id, name="nf-core/fetchngs", status="failed",
-        failure_reason="task_error", error_message="SRA_IDS_TO_RUNINFO: no records for the accession",
+        session,
+        admin_user,
+        exp_id,
+        name="nf-core/fetchngs",
+        status="failed",
+        failure_reason="task_error",
+        error_message="SRA_IDS_TO_RUNINFO: no records for the accession",
     )
     study.data_run_id = fetch.id
     await session.flush()
@@ -342,8 +352,13 @@ async def test_transient_retries_exhaust_to_error(session, admin_user, monkeypat
     study = await _study(session, admin_user, state="acquiring_data", experiment_id=exp_id)
     study.evidence_json = {"acquire_retries": 3}  # budget already spent
     fetch = await _run(
-        session, admin_user, exp_id, name="nf-core/fetchngs", status="failed",
-        failure_reason="task_error", error_message="ENA still down (HTTP 500)",
+        session,
+        admin_user,
+        exp_id,
+        name="nf-core/fetchngs",
+        status="failed",
+        failure_reason="task_error",
+        error_message="ENA still down (HTTP 500)",
     )
     study.data_run_id = fetch.id
     await session.flush()

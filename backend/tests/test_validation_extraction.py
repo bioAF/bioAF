@@ -165,8 +165,7 @@ def test_parse_extraction_differential_design_absent_is_empty():
 def test_parse_extraction_differential_design_tolerates_partial():
     # honest-None on missing sub-fields; a bare contrast with no sample lists still parses.
     p = parse_extraction(
-        '```json\n{"differential_design": {"contrasts": [{"name": "KO vs WT"}], '
-        '"thresholds": {"padj": 0.01}}}\n```'
+        '```json\n{"differential_design": {"contrasts": [{"name": "KO vs WT"}], "thresholds": {"padj": 0.01}}}\n```'
     )
     design = p["differential_design"]
     assert design["contrasts"] == [
@@ -213,6 +212,7 @@ async def test_extract_produces_plan_targets_and_mapping(session, admin_user, mo
     assert plan.parameters_json == {}
     # B2e: the differential design is captured on the plan (dropped before), so Level-3 can run it.
     design = plan.differential_design_json
+    assert design is not None
     assert design["thresholds"] == {"log2fc": 1.0, "padj": 0.05}
     assert design["contrasts"][0]["test_samples"] == ["GSM1", "GSM2"]
     assert study.reproduction_plan_id == plan.id

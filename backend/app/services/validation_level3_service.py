@@ -136,14 +136,16 @@ async def build_level3_inputs(
     }
 
 
-async def _find_count_matrix(
-    session: AsyncSession, org_id: int, run_id: int, wiring: dict
-) -> File | None:
+async def _find_count_matrix(session: AsyncSession, org_id: int, run_id: int, wiring: dict) -> File | None:
     rows = (
-        await session.execute(
-            select(File).where(File.source_pipeline_run_id == run_id, File.organization_id == org_id)
+        (
+            await session.execute(
+                select(File).where(File.source_pipeline_run_id == run_id, File.organization_id == org_id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     exact = wiring.get("count_matrix_exact")
     if exact:
@@ -160,17 +162,19 @@ async def _find_count_matrix(
     return None
 
 
-async def _find_builtin_template(
-    session: AsyncSession, org_id: int, notebook_path: str
-) -> TemplateNotebook | None:
+async def _find_builtin_template(session: AsyncSession, org_id: int, notebook_path: str) -> TemplateNotebook | None:
     return (
-        await session.execute(
-            select(TemplateNotebook)
-            .where(
-                TemplateNotebook.organization_id == org_id,
-                TemplateNotebook.notebook_path == notebook_path,
-                TemplateNotebook.is_builtin.is_(True),
+        (
+            await session.execute(
+                select(TemplateNotebook)
+                .where(
+                    TemplateNotebook.organization_id == org_id,
+                    TemplateNotebook.notebook_path == notebook_path,
+                    TemplateNotebook.is_builtin.is_(True),
+                )
+                .order_by(TemplateNotebook.id)
             )
-            .order_by(TemplateNotebook.id)
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )

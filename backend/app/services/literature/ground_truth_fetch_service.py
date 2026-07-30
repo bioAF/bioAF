@@ -90,9 +90,7 @@ async def _http_fetch_text(url: str) -> str:
 
 class GroundTruthFetchService:
     @staticmethod
-    async def fetch_geo_candidates(
-        accession: str, *, kind: str = "gene", fetcher: Fetcher | None = None
-    ) -> list[dict]:
+    async def fetch_geo_candidates(accession: str, *, kind: str = "gene", fetcher: Fetcher | None = None) -> list[dict]:
         """List a GEO series' supplementary dir, download the DE (gene) or DA (interval) table
         candidates, and parse each into a best-effort FindingSet. Returns [] on any failure or when
         nothing matches (assist, never a gate)."""
@@ -117,11 +115,7 @@ class GroundTruthFetchService:
             except Exception:
                 logger.info("GEO suppl file fetch failed: %s", file_url)
                 continue
-            fs = (
-                normalize_interval_table(text)
-                if kind == "interval"
-                else normalize_gene_table(text)
-            )
+            fs = normalize_interval_table(text) if kind == "interval" else normalize_gene_table(text)
             candidates.append(
                 {
                     "source": "geo_supplementary",

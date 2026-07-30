@@ -178,13 +178,14 @@ class ReproductionPlanService:
         """
         # Local import: validation_extraction_service imports this module, so import its normalizer
         # lazily to avoid a circular import at load time.
-        from app.services.validation_extraction_service import _differential_design_or_none, _normalize_differential_design
+        from app.services.validation_extraction_service import (
+            _differential_design_or_none,
+            _normalize_differential_design,
+        )
 
         study = (
             await session.execute(
-                select(ValidationStudy).where(
-                    ValidationStudy.id == study_id, ValidationStudy.organization_id == org_id
-                )
+                select(ValidationStudy).where(ValidationStudy.id == study_id, ValidationStudy.organization_id == org_id)
             )
         ).scalar_one_or_none()
         if not study:

@@ -145,9 +145,7 @@ _PAIRED_DESIGN = {
 
 
 @pytest.mark.asyncio
-async def test_build_level3_inputs_emits_block_labels_for_paired_design(
-    session, admin_user, analysis_run, de_template
-):
+async def test_build_level3_inputs_emits_block_labels_for_paired_design(session, admin_user, analysis_run, de_template):
     await _count_matrix_file(session, admin_user, analysis_run)
     study, plan = await _study_with_plan(session, admin_user, analysis_run, design=_PAIRED_DESIGN)
 
