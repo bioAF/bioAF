@@ -41,6 +41,10 @@ def test_de_template_supports_a_paired_block_design():
     src = "\n".join("".join(c.get("source", [])) for c in nb["cells"])
     assert "block + condition" in src  # paired design
     assert "~ condition" in src  # unpaired fallback preserved
+    # The injector rebuilds the parameters cell from the merged param dict, and a template row seeded
+    # before block_labels existed will not inject it, so the notebook must self-default the optional
+    # param or the design cell hits `object 'block_labels' not found` (caught live on the demo).
+    assert 'exists("block_labels")' in src
 
 
 def test_level3_params_inject_to_valid_r():
