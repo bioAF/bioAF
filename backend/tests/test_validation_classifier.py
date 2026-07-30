@@ -112,6 +112,31 @@ class TestClassify:
         assert result["coverage"]["finding_agree"] == 0
         assert "finding" in result["reasoning"].lower()
 
+    def test_yield_metric_agreement_alone_is_inconclusive(self):
+        # spec-06 refinement: cell yield + sequencing-depth metrics (cell_count, genes/UMI-per-cell)
+        # are floors, not findings. Recovering a similar cell count is a yield floor, not a validated
+        # finding; the real finding signal is Level-3 concordance. So an agreement on cell_count alone
+        # no longer earns validated.
+        result = classify_study(
+            [_target("cell_count", 5_000)],
+            {"cell_count": 5_100},
+            mapping_confidence="exact",
+            reference_genome="GRCh38",
+        )
+        assert result["classification"] == "inconclusive"
+        assert result["coverage"]["agree"] == 1
+        assert result["coverage"]["finding_agree"] == 0
+
+    def test_genes_per_cell_agreement_alone_is_inconclusive(self):
+        result = classify_study(
+            [_target("median_genes_per_cell", 2_000)],
+            {"median_genes_per_cell": 2_050},
+            mapping_confidence="exact",
+            reference_genome="GRCh38",
+        )
+        assert result["classification"] == "inconclusive"
+        assert result["coverage"]["finding_agree"] == 0
+
     def test_no_comparable_metric_is_inconclusive_not_validated(self):
         # When every claimed target maps to nothing the QC dashboard computes, we can assert neither
         # agreement NOR contradiction. Honest outcome is inconclusive, held for a human.

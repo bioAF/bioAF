@@ -121,6 +121,11 @@ _SPECS: tuple[MetricSpec, ...] = (
     ),
     MetricSpec("percent_gc", "percent", 5.0, False, ("gc_content", "gc_percent", "pct_gc", "percent_gc_content", "gc")),
     MetricSpec("total_samples", "count", 0.0, False, ("n_samples", "num_samples", "sample_count", "number_of_samples")),
+    # scRNA cell yield + sequencing-depth metrics. spec-06 refinement (2026-07-25): these are QC-FLOOR
+    # metrics (the default tier), NOT findings. Recovering a similar cell count / genes-per-cell / UMIs-
+    # per-cell proves the data processed to a comparable yield and depth, not that any biological finding
+    # (cell types, clusters, markers) reproduced. The real finding signal is Level-3 concordance (ADR-069),
+    # so a yield/depth agreement on its own must not earn `validated`.
     MetricSpec(
         "cell_count",
         "count",
@@ -137,22 +142,12 @@ _SPECS: tuple[MetricSpec, ...] = (
             "cell_number",
             "cells",
         ),
-        tier="finding",
     ),
-    MetricSpec("total_genes_detected", "count", 0.25, True, ("genes_detected", "total_genes"), tier="finding"),
-    MetricSpec("median_genes_per_cell", "count", 0.25, True, ("median_genes",), tier="finding"),
-    MetricSpec("mean_genes_per_cell", "count", 0.25, True, ("mean_genes",), tier="finding"),
-    MetricSpec(
-        "median_umi_per_cell",
-        "count",
-        0.25,
-        True,
-        ("median_umi", "median_umis", "median_umis_per_cell"),
-        tier="finding",
-    ),
-    MetricSpec(
-        "mean_umi_per_cell", "count", 0.25, True, ("mean_umi", "mean_umis", "mean_umis_per_cell"), tier="finding"
-    ),
+    MetricSpec("total_genes_detected", "count", 0.25, True, ("genes_detected", "total_genes")),
+    MetricSpec("median_genes_per_cell", "count", 0.25, True, ("median_genes",)),
+    MetricSpec("mean_genes_per_cell", "count", 0.25, True, ("mean_genes",)),
+    MetricSpec("median_umi_per_cell", "count", 0.25, True, ("median_umi", "median_umis", "median_umis_per_cell")),
+    MetricSpec("mean_umi_per_cell", "count", 0.25, True, ("mean_umi", "mean_umis", "mean_umis_per_cell")),
     MetricSpec("median_reads_per_cell", "count", 0.25, True, ("median_reads",)),
     MetricSpec("mean_reads_per_cell", "count", 0.25, True, ("mean_reads",)),
     MetricSpec("saturation", "fraction", 0.05, False, ("sequencing_saturation", "seq_saturation")),
@@ -375,12 +370,46 @@ def _attribute(mapping_confidence: str | None, reference_genome: str | None) -> 
     return {"our_side": "cleared" if cleared else "suspected", "reasons": reasons}
 
 
+def _attribute_differential(qc_attribution: dict, differential_attribution: dict) -> dict:
+    """E3' (ADR-069): extend the our-side clearance to the differential step for a concordance
+    divergence. A low concordance can strike the paper only if, ON TOP of the QC clearance, our
+    reproduction applied the paper's stated thresholds and used a comparable DE/DA method. Any
+    unmet differential clearance downgrades our side to 'suspected' (verdict -> inconclusive)."""
+    diff_reasons: list[str] = []
+    if not differential_attribution.get("thresholds_matched", False):
+        diff_reasons.append(
+            "our reproduction did not apply the paper's stated significance thresholds (|log2FC|/padj), "
+            "so a threshold difference could explain the low overlap"
+        )
+    if not differential_attribution.get("method_comparable", False):
+        diff_reasons.append(
+            "the differential method was not established as comparable to the paper's, so a method "
+            "difference could explain the low overlap"
+        )
+    if not diff_reasons:
+        return qc_attribution  # QC clearance stands; the differential side is also cleared.
+    # Our side is not cleared for the differential finding. Keep any QC suspicion, drop the QC
+    # "cleared" rationale (it no longer holds), and record the differential reasons.
+    qc_reasons = qc_attribution["reasons"] if qc_attribution["our_side"] == "suspected" else []
+    return {"our_side": "suspected", "reasons": qc_reasons + diff_reasons}
+
+
+def _concordance_desc(c: dict) -> str:
+    frac = round(float(c.get("directional_overlap_frac", 0.0)) * 100)
+    return (
+        f"{c.get('concordant', 0)}/{c.get('paper_n', 0)} of the paper's {c.get('kind', '')} hits recovered "
+        f"with concordant direction (directional overlap {frac}%, enrichment p={c.get('enrichment_p', 1.0):.1e})"
+    )
+
+
 def classify_study(
     targets: list[dict],
     computed_metrics: dict | None,
     *,
     mapping_confidence: str | None = None,
     reference_genome: str | None = None,
+    concordance_results: list[dict] | None = None,
+    differential_attribution: dict | None = None,
 ) -> dict:
     """E4: the spec-03 verdict over the E2 comparison + E3 attribution.
 
@@ -388,6 +417,15 @@ def classify_study(
     ``auto_finalize`` flag (True only for a clean ``validated``), and human-readable reasoning. The
     caller (driver) auto-finalizes a clean validated study and holds everything else at ``comparing``
     with this as the suggested verdict for a human to ratify or override.
+
+    ``concordance_results`` (E6, ADR-069) carries Level-3 finding-concordance verdicts (the paper's
+    actual differential finding reproduced or not). A concordance ``agree`` is the strongest finding-tier
+    agreement (it is the biological finding itself), so it satisfies the finding gate and can earn a
+    Level-3 ``validated``; a concordance ``partial`` (real overlap enrichment, recovery below the agree
+    line) is a strong-but-incomplete reproduction that earns ``partially_reproduced`` (held for a human)
+    when nothing diverges and no full finding agrees; a concordance ``diverge`` is a divergence routed
+    through the same attribution guard. When ``concordance_results`` is empty the logic reduces exactly
+    to the Level-2 behavior.
     """
     comparisons = compare_targets(targets, computed_metrics)
     # Advisory rows (qualifier-stripped peak counts) are surfaced with their delta but never scored:
@@ -398,6 +436,17 @@ def classify_study(
     advisory = [c for c in comparisons if c["advisory"] and c["verdict"] in ("agree", "diverge")]
     # `validated` requires at least one FINDING to agree, not just a technical QC floor (spec-06).
     finding_agrees = [c for c in comparable if c["verdict"] == "agree" and _tier(c["mapped_key"]) == "finding"]
+
+    # E6 Level-3 concordance verdicts (ADR-069). A concordance agree is a finding-tier agreement;
+    # a concordance diverge is a divergence; a concordance partial is a strong-but-incomplete
+    # reproduction (the overlap enrichment is real, but recovery is below the agree line). A partial
+    # is neither a full finding agreement nor a divergence. not_computed concordance (e.g. namespace
+    # mismatch) is unscored, like a not_computed metric.
+    conc = concordance_results or []
+    conc_agree = [c for c in conc if c.get("verdict") == "agree"]
+    conc_diverge = [c for c in conc if c.get("verdict") == "diverge"]
+    conc_partial = [c for c in conc if c.get("verdict") == "partial"]
+
     coverage = {
         "targets": len(comparisons),
         "comparable": len(comparable),
@@ -407,17 +456,30 @@ def classify_study(
         "finding_agree": len(finding_agrees),
         "not_computed": sum(1 for c in comparisons if c["verdict"] == "not_computed"),
         "not_reported": sum(1 for c in comparisons if c["verdict"] == "not_reported"),
+        "concordance": len(conc),
+        "concordance_agree": len(conc_agree),
+        "concordance_partial": len(conc_partial),
+        "concordance_diverge": len(conc_diverge),
     }
     attribution = {"our_side": "n/a", "reasons": []}
 
-    if not comparable:
+    # Combined predicates: a concordance verdict joins the scalar sets in the same decision tree.
+    scored_any = bool(comparable) or bool(conc_agree) or bool(conc_diverge) or bool(conc_partial)
+    has_diverge = bool(diverged) or bool(conc_diverge)
+    has_finding = bool(finding_agrees) or bool(conc_agree)
+    # A partial finding reproduction is its own outcome: not a full agreement (so it does not satisfy
+    # the finding gate), not a divergence (the overlap is real). It only decides the verdict when there
+    # is no divergence and no full finding agreement to take precedence.
+    has_partial = bool(conc_partial)
+
+    if not scored_any:
         classification = "inconclusive"
         auto_finalize = False
         reasoning = (
             "The run completed, but none of the paper's claimed metrics could be compared to a computed "
             "QC metric (metric-key coverage gap), so agreement cannot be assessed. Needs a human."
         )
-    elif not diverged and not finding_agrees:
+    elif not has_diverge and not has_finding and not has_partial:
         # A+B gate: every comparable metric agrees, but they are all technical QC floors (data
         # quality/identity), not the paper's findings. Reproducing to QC level is not validating a
         # finding, so the honest verdict is inconclusive with the scope stated plainly.
@@ -431,7 +493,17 @@ def classify_study(
             "pipeline's scope). The deposited data is present and reproduces to QC level, but no reported "
             "finding was validated. Honest verdict: inconclusive, needs a human."
         )
-    elif not diverged:
+    elif not has_diverge and conc_agree and not finding_agrees:
+        # Level-3 validated driven purely by finding concordance (no scalar finding agreed). This is
+        # the feature's whole point (the paper's reported finding reproduced), but it is a consequential
+        # claim and thresholds are first-pass, so it is held for a human rather than auto-finalized.
+        classification = "validated"
+        auto_finalize = False
+        reasoning = (
+            f"The paper's reported finding reproduced: {'; '.join(_concordance_desc(c) for c in conc_agree)}. "
+            "This is a Level-3 finding-level agreement. Suggesting validated; confirm before finalizing."
+        )
+    elif not has_diverge and has_finding:
         classification = "validated"
         # Auto-finalize (remove the human) only for SOLID agreement: several metrics agree, or we
         # compared every metric the paper claimed with no coverage gap. A lone agreeing metric amid
@@ -447,20 +519,50 @@ def classify_study(
                 f"{coverage['not_computed']} other claimed metric(s) had no computed counterpart, so "
                 "coverage is thin. Suggesting validated; confirm before finalizing."
             )
+        if conc_agree:
+            reasoning += f" The paper's reported finding also reproduced ({_concordance_desc(conc_agree[0])})."
+    elif not has_diverge and has_partial:
+        # Strong-but-partial: the paper's finding partially reproduced. The overlap enrichment is
+        # statistically real (not coincidence), but directional recovery is below the agree line, so
+        # this is neither a full validation nor an unattributable divergence. It ALWAYS holds for a
+        # human: it is inherently a "look at this" signal (never auto-finalizes).
+        classification = "partially_reproduced"
+        auto_finalize = False
+        reasoning = (
+            "The paper's reported finding PARTIALLY reproduced: "
+            f"{'; '.join(_concordance_desc(c) for c in conc_partial)}. The overlap is statistically "
+            "real (not coincidence), but recovery is below the agreement threshold, so part of the "
+            "finding reproduced and part did not. Suggesting partially reproduced; needs a human."
+        )
     else:
         attribution = _attribute(mapping_confidence, reference_genome)
+        # E3' (ADR-069): a concordance divergence carries extra our-side risk beyond the QC guard.
+        # Before it can strike the paper, the DIFFERENTIAL step must also be cleared: our reproduction
+        # applied the paper's stated thresholds and used a comparable DE/DA method. If the caller
+        # supplied that signal and it is not cleared, the divergence is unattributable -> inconclusive.
+        if conc_diverge and differential_attribution is not None:
+            attribution = _attribute_differential(attribution, differential_attribution)
+        n_div = len(diverged) + len(conc_diverge)
+        finding_note = ""
+        if conc_diverge:
+            finding_note = f" The paper's reported finding did not reproduce ({_concordance_desc(conc_diverge[0])})."
+        elif conc_partial:
+            # A metric diverged, but a finding concordance was strong-but-partial: surface it so the
+            # human sees the divergence and the partial reproduction side by side.
+            finding_note = f" A reported finding partially reproduced ({_concordance_desc(conc_partial[0])})."
         if attribution["our_side"] == "cleared":
             classification = "not_validated"
             reasoning = (
-                f"{len(diverged)} metric(s) diverge beyond tolerance and our side was cleared "
+                f"{n_div} finding/metric(s) diverge beyond tolerance and our side was cleared "
                 "(confident pipeline equivalent, recognized reference build), so the run did not reproduce "
-                "the paper's values in our hands."
+                "the paper's values in our hands." + finding_note
             )
         else:
             classification = "inconclusive"
             reasoning = (
-                f"{len(diverged)} metric(s) diverge, but our side could not be cleared "
+                f"{n_div} finding/metric(s) diverge, but our side could not be cleared "
                 f"({'; '.join(attribution['reasons'])}), so the divergence cannot be attributed to the paper."
+                + finding_note
             )
         auto_finalize = False
 

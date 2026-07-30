@@ -90,8 +90,14 @@ RUN pip install --no-cache-dir \\
 RUN echo "options(repos = c(P3M = 'https://packagemanager.posit.co/cran/__linux__/jammy/${CRAN_SNAPSHOT}'))" >> /opt/R/${R_VERSION}/lib/R/etc/Rprofile.site
 RUN echo 'options(HTTPUserAgent = sprintf("R/%s R (%s)", getRversion(), paste(getRversion(), R.version$platform, R.version$arch, R.version$os)))' >> /opt/R/${R_VERSION}/lib/R/etc/Rprofile.site
 
-# R / CRAN: Seurat stack, single-cell helpers, plotting, dev tooling
-RUN R -e "install.packages(c('Seurat','SeuratObject','Matrix','harmony','future','tidyverse','data.table','patchwork','cowplot','ggplot2','pheatmap','RColorBrewer','viridis','devtools','remotes','R.utils','BiocManager'))"
+# R / CRAN: Seurat stack, single-cell helpers, plotting, dev tooling. IRkernel is the R
+# Jupyter kernel; headless notebook execution (lit_validation Level-3, `jupyter nbconvert
+# --execute` on the R DE/DA templates) needs it registered as a kernelspec named "ir".
+RUN R -e "install.packages(c('Seurat','SeuratObject','Matrix','harmony','future','tidyverse','data.table','patchwork','cowplot','ggplot2','pheatmap','RColorBrewer','viridis','devtools','remotes','R.utils','BiocManager','IRkernel'))"
+
+# Register the R kernel system-wide (as root) so nbconvert finds "ir" when it runs a
+# headless R notebook as the jovyan user.
+RUN R -e "IRkernel::installspec(user = FALSE)"
 
 # hdf5r built from source links whatever HDF5 its configure finds first, which in
 # this base image is conda's (libhdf5_hl.so.310) -- not on the runtime linker path,
@@ -108,7 +114,10 @@ RUN R -e "BiocManager::install(version='${BIOC_VERSION}', update=FALSE, ask=FALS
 # Fail the build if any expected package is missing. install.packages() and
 # BiocManager::install() exit 0 even when a package fails to install, which is
 # how images previously shipped without Seurat. This is the guardrail.
-RUN R -e "req <- c('Seurat','SeuratObject','hdf5r','harmony','presto','SingleCellExperiment','scater','scran','glmGamPoi','batchelor','DropletUtils','SingleR','zellkonverter','DESeq2','edgeR','limma','clusterProfiler','fgsea','ComplexHeatmap','org.Hs.eg.db'); missing <- req[!req %in% rownames(installed.packages())]; if (length(missing) > 0) stop(paste('Missing R packages:', paste(missing, collapse=', '))); cat('R package check passed')"
+RUN R -e "req <- c('Seurat','SeuratObject','hdf5r','harmony','presto','SingleCellExperiment','scater','scran','glmGamPoi','batchelor','DropletUtils','SingleR','zellkonverter','DESeq2','edgeR','limma','clusterProfiler','fgsea','ComplexHeatmap','org.Hs.eg.db','IRkernel'); missing <- req[!req %in% rownames(installed.packages())]; if (length(missing) > 0) stop(paste('Missing R packages:', paste(missing, collapse=', '))); cat('R package check passed')"
+
+# Verify the R Jupyter kernel is registered (headless nbconvert needs the "ir" kernelspec).
+RUN jupyter kernelspec list | grep -qi '\\bir\\b' || (echo 'ERROR: IRkernel spec not registered' && exit 1)
 
 # Verify the key Python imports resolve too
 RUN python -c "import scanpy, anndata, scvi, muon, harmonypy, scanorama, scrublet, celltypist, decoupler, gseapy, scvelo; print('Python deps ok')"

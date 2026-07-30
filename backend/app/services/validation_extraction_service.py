@@ -34,6 +34,10 @@ _SCHEMA_HINT = (
     '{"accessions": ["GEO/SRA/ENA ids, or empty"], '
     '"sample_structure": {"organism": "", "sample_count": 0, "library_layout": "", "chemistry": "", "conditions": []}, '
     '"method": {"assay": "e.g. bulk RNA-seq / scRNA-seq", "tools": [], "reference_build": "", "key_params": {}}, '
+    '"differential_design": {"contrasts": [{"name": "e.g. treated vs control", "test_condition": "", '
+    '"reference_condition": "", "test_samples": ["sample ids in the test group"], '
+    '"reference_samples": ["sample ids in the reference group"]}], '
+    '"thresholds": {"log2fc": null, "padj": null}}, '
     '"claims": [{"metric_key": "aligns to a QC metric", "value": 0, "unit": "", "tolerance": null, "source_locator": "section/figure"}], '
     '"data_availability": "deposited | none | restricted", '
     '"blockers": ["reasons the paper cannot be reproduced"]}'
@@ -52,7 +56,13 @@ def build_extraction_prompt(full_text: str) -> tuple[str, str]:
         "reports (alignment rate, read/cell counts, saturation, etc.) as claims with a metric_key that "
         "aligns to a standard QC metric. When a claim matches one of these controlled QC metric keys, use "
         f"that exact key so it can be compared automatically: {', '.join(CONTROLLED_METRIC_KEYS)}. If a "
-        "claim matches none of them, use a clear snake_case key. Do not invent values. Use null when unknown."
+        "claim matches none of them, use a clear snake_case key. Do not invent values. Use null when unknown.\n\n"
+        "Also capture the paper's PRIMARY DIFFERENTIAL DESIGN in differential_design: the contrast(s) it "
+        "tests (which condition is compared against which reference), the sample ids belonging to each "
+        "group, and the significance thresholds it used (|log2 fold-change| and adjusted p / FDR). This is "
+        "the finding to be reproduced, not the pipeline's parameters. If the paper reports no differential "
+        "comparison (a descriptive/QC-only paper), set contrasts to [] and leave thresholds null. Never "
+        "fabricate a contrast or a threshold."
     )
     payload = f"Paper full text:\n\n{full_text}"
     return system, payload
@@ -104,12 +114,70 @@ def _normalize_reference_genome(raw) -> str | None:
     return None
 
 
+def _str_or_none(value) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _normalize_subjects(value) -> dict:
+    """Coerce a per-sample subject/block map ({sample_id: label}) to a stable {str: str} shape,
+    dropping blank keys/values. A non-dict (or empty) yields {} (the default unpaired design)."""
+    out: dict[str, str] = {}
+    if isinstance(value, dict):
+        for k, v in value.items():
+            key = str(k).strip()
+            label = str(v).strip()
+            if key and label:
+                out[key] = label
+    return out
+
+
+def _normalize_differential_design(value) -> dict:
+    """B2e: coerce the model's differential_design to a stable, human-editable shape.
+
+    Honest-None on missing sub-fields; a QC-only paper yields empty contrasts and null thresholds.
+    Never fabricates a contrast. This is the draft the human ratifies/edits at the C1 gate.
+    """
+    data = _as_dict(value)
+    thresholds = _as_dict(data.get("thresholds"))
+    contrasts = []
+    for c in _as_list(data.get("contrasts")):
+        c = _as_dict(c)
+        contrasts.append(
+            {
+                "name": _str_or_none(c.get("name")),
+                "test_condition": _str_or_none(c.get("test_condition")),
+                "reference_condition": _str_or_none(c.get("reference_condition")),
+                "test_samples": [str(s).strip() for s in _as_list(c.get("test_samples")) if str(s).strip()],
+                "reference_samples": [str(s).strip() for s in _as_list(c.get("reference_samples")) if str(s).strip()],
+                # Optional matched-pairs / blocked design (ADR-069, item #2): a per-sample subject/block
+                # label so the DE notebook can run `~ block + condition` (cancels donor-to-donor baseline
+                # variance). Empty for the default unpaired design. Human-supplied at the C1 gate (the
+                # donor->sample mapping lives in GEO sample metadata, not the paper text).
+                "subjects": _normalize_subjects(c.get("subjects")),
+            }
+        )
+    return {
+        "contrasts": contrasts,
+        "thresholds": {"log2fc": _to_float(thresholds.get("log2fc")), "padj": _to_float(thresholds.get("padj"))},
+    }
+
+
+def _differential_design_or_none(design: dict) -> dict | None:
+    """Persist the design only when there is a differential finding to reproduce. A QC-only paper
+    (no contrasts) stores None so the plan stays Level-2-only and the driver skips ``reproducing``."""
+    return design if design.get("contrasts") else None
+
+
 def parse_extraction(response_text: str) -> dict:
     """Pull the fenced JSON extraction and normalize it. Never raises; flags parse failure instead."""
     empty = {
         "accessions": [],
         "sample_structure": {},
         "method": {},
+        "differential_design": _normalize_differential_design(None),
         "claims": [],
         "data_availability": "unknown",
         "blockers": [],
@@ -129,6 +197,7 @@ def parse_extraction(response_text: str) -> dict:
         "accessions": [str(a).strip() for a in _as_list(data.get("accessions")) if str(a).strip()],
         "sample_structure": _as_dict(data.get("sample_structure")),
         "method": _as_dict(data.get("method")),
+        "differential_design": _normalize_differential_design(data.get("differential_design")),
         "claims": [c for c in _as_list(data.get("claims")) if isinstance(c, dict)],
         "data_availability": str(data.get("data_availability") or "unknown"),
         "blockers": [str(b) for b in _as_list(data.get("blockers")) if str(b).strip()],
@@ -192,6 +261,9 @@ class ValidationExtractionService:
             # nf-core pipeline parameters; forwarding them makes the analysis run fail param validation.
             # Phase 1 runs the pipeline with its defaults, so do not seed parameters_json from them.
             parameters={},
+            # B2e: capture the differential design (the finding to reproduce) for the C1 gate and
+            # Level-3. None when the paper reports no contrast, keeping the plan Level-2-only.
+            differential_design=_differential_design_or_none(parsed["differential_design"]),
             reference_genome=reference_genome,
             mapping_confidence=mapping.mapping_confidence,
             mapping_notes=mapping.mapping_notes,

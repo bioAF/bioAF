@@ -30,6 +30,7 @@ VALIDATION_STUDY_STATES = [
     "setup",
     "running",
     "extracting",
+    "reproducing",  # Level-3 (ADR-069): reproduce the paper's finding + score concordance
     "comparing",
     "classified",  # terminal: carries a classification
     "plan_declined",  # terminal: human rejected the plan at the C1 gate
@@ -49,7 +50,10 @@ VALIDATION_STUDY_TRANSITIONS: dict[str, list[str]] = {
     "acquiring_data": ["setup", "classified", "error"],
     "setup": ["running", "error"],
     "running": ["extracting", "error"],
-    "extracting": ["comparing", "error"],
+    # extracting routes to reproducing when Level-3 inputs are present, else straight to comparing
+    # (Level-2 only), so the existing QC-only flow is unchanged.
+    "extracting": ["reproducing", "comparing", "error"],
+    "reproducing": ["comparing", "error"],
     "comparing": ["classified", "error"],
     "classified": [],
     "plan_declined": [],
@@ -57,8 +61,12 @@ VALIDATION_STUDY_TRANSITIONS: dict[str, list[str]] = {
 }
 
 # Terminal classification buckets (spec-03). The classifier states facts; there is no "bad" label.
+# `partially_reproduced` sits between `validated` and `not_validated`: the paper's finding reproduced
+# in part (the overlap enrichment is statistically real) but recovery was incomplete (ADR-069, E6
+# `partial`). It always holds for a human.
 VALIDATION_STUDY_CLASSIFICATIONS = [
     "validated",
+    "partially_reproduced",
     "not_validated",
     "missing_data",
     "missing_methods",
@@ -74,6 +82,11 @@ VALIDATION_STUDY_CLASSIFICATIONS = [
 # (could-not-test is not the same as tested-and-unlikely).
 _CLASSIFICATION_CONFIDENCE: dict[str, float | None] = {
     "validated": 100.0,  # human-confirmed validation -> Fully Validated
+    # partially_reproduced was tested AND concluded (the finding reproduced in part), so it is NOT a
+    # "could not reproduce" None; it lands in a caution/needs-review band. The frontend renders the
+    # precise "Partially Reproduced" label from the classification bucket; this number is the fallback
+    # for confidence-only consumers (e.g. the provenance report).
+    "partially_reproduced": 60.0,  # -> Possibly Validated (caution, needs human review)
     "not_validated": 0.0,  # human-confirmed contradiction -> Very Unlikely
     "missing_data": None,  # no data to run -> Could Not Reproduce
     "missing_methods": None,  # no reproducible method -> Could Not Reproduce

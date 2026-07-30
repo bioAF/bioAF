@@ -23,6 +23,7 @@ machinery; this driver is the orchestration glue that sequences it and moves the
 """
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,10 +39,14 @@ from app.schemas.pipeline_run import PipelineRunLaunchRequest
 from app.services.experiment_service import ExperimentService
 from app.services.fetchngs_ingest_service import FetchngsIngestService
 from app.services.literature.fulltext_service import FullTextFetchService
+from app.services.notebook_execution_service import NotebookExecutionService
 from app.services.qc_dashboard_service import QCDashboardService
 from app.services.reproduction_plan_service import ReproductionPlanService
+from app.services.result_set_normalizer import FindingSet, normalize_gene_table, normalize_interval_table
 from app.services.validation_classifier_service import classify_study
+from app.services.validation_concordance_service import compare_gene_sets, compare_interval_sets
 from app.services.validation_extraction_service import ValidationExtractionService
+from app.services.validation_level3_service import build_level3_inputs
 from app.services.validation_study_service import ValidationStudyService
 
 logger = logging.getLogger("bioaf.validation_driver")
@@ -50,7 +55,7 @@ logger = logging.getLogger("bioaf.validation_driver")
 # acquiring_data); terminals and the pre-approval states are left alone. `comparing` is included so the
 # driver runs the automatic classifier (E2/E3/E4) once; a clean `validated` auto-finalizes, everything
 # else is left AT `comparing` with a suggested verdict for a human to ratify (the hybrid policy).
-_ACTIVE_BACK_HALF_STATES = ("acquiring_data", "setup", "running", "extracting", "comparing")
+_ACTIVE_BACK_HALF_STATES = ("acquiring_data", "setup", "running", "extracting", "reproducing", "comparing")
 
 _FETCHNGS_KEY = "nf-core/fetchngs"
 # fetchngs's catalog default download_method is aspera, unproven on our GKE nodes; ftp is proven
@@ -59,6 +64,51 @@ _FETCHNGS_DOWNLOAD_METHOD = "ftp"
 
 _RUN_DONE = "completed"
 _RUN_FAILED = {"failed", "cancelled", "error"}
+
+# Transient data-acquisition (fetchngs) auto-retry (pre-PR item, 2026-07-28). A transient external
+# outage (ENA/SRA 5xx, connection-refused, timeout) used to park a study terminally in `error`,
+# needing manual intervention. Instead, retry the fetch a bounded number of times with exponential
+# backoff (releasing the pipeline node between attempts), staying in `acquiring_data`; a genuinely
+# unavailable accession short-circuits to `missing_data`; exhausting the budget parks to `error`.
+_MAX_ACQUIRE_RETRIES = 3
+# Backoff before each retry (seconds): 5 min, 15 min, 45 min -> a ~65 min window before giving up.
+_ACQUIRE_BACKOFF_SECONDS = (300, 900, 2700)
+
+# High-precision "the accession is genuinely unavailable" signatures. ONLY these short-circuit a fetch
+# failure to `missing_data`; every other failure (network/5xx/timeout AND anything unrecognized) is
+# treated as transient and retried, so a real outage is NEVER falsely called missing_data (a wrong,
+# terminal verdict on the paper). Kept tight to avoid false positives.
+_PERMANENT_ACQUISITION_SIGNATURES = (
+    "no records",
+    "no runinfo",
+    "invalid accession",
+    "not a valid",
+    "could not be resolved",
+    "does not exist",
+    "no such",
+    "withdrawn",
+    "suppressed",
+)
+
+
+def classify_acquisition_failure(failure_reason: str | None, error_message: str | None) -> str:
+    """Classify a failed data-acquisition run as ``"permanent"`` (the accession is genuinely
+    unavailable -> missing_data) or ``"transient"`` (retry with backoff). Conservative: only a
+    high-confidence permanent signature returns permanent; everything else is transient."""
+    text = f"{failure_reason or ''} {error_message or ''}".lower()
+    if any(sig in text for sig in _PERMANENT_ACQUISITION_SIGNATURES):
+        return "permanent"
+    return "transient"
+
+
+def _now() -> datetime:
+    """Current UTC time. A module-level indirection so tests can freeze/advance it if needed."""
+    return datetime.now(timezone.utc)
+
+
+def _parse_iso(value: str) -> datetime:
+    dt = datetime.fromisoformat(value)
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 def _early_exit_classification(plan: ReproductionPlan) -> str | None:
@@ -192,6 +242,7 @@ class ValidationDriverService:
             "setup": ValidationDriverService._handle_setup,
             "running": ValidationDriverService._handle_running,
             "extracting": ValidationDriverService._handle_extracting,
+            "reproducing": ValidationDriverService._handle_reproducing,
             "comparing": ValidationDriverService._handle_comparing,
         }
         handler = handlers.get(study.state)
@@ -202,11 +253,15 @@ class ValidationDriverService:
         """Launch fetchngs (first visit), or on its completion run D2 and advance to setup (or, if the
         fetched data is not usable, early-exit to missing_data per spec-02/spec-03)."""
         if study.data_run_id is None:
+            # A scheduled transient-failure retry waits out its backoff before relaunching fetchngs.
+            retry_at = (study.evidence_json or {}).get("acquire_retry_at")
+            if retry_at and _now() < _parse_iso(retry_at):
+                return False
             return await ValidationDriverService._launch_fetchngs(session, study)
 
         run = await ValidationDriverService._load_run(session, study.data_run_id)
         if run is None or run.status in _RUN_FAILED:
-            return await ValidationDriverService._fail(session, study, "data acquisition run failed")
+            return await ValidationDriverService._handle_acquisition_failure(session, study, run)
         if run.status != _RUN_DONE:
             return False  # still fetching
 
@@ -310,13 +365,107 @@ class ValidationDriverService:
             }
             for t in (plan.comparison_targets if plan else [])
         ]
-        study.evidence_json = {
-            "computed_metrics": metrics,
-            "comparison_targets": targets,
-            "data_run_id": study.data_run_id,
-            "analysis_run_id": study.analysis_run_id,
-            "qc_dashboard_id": dashboard_id,
-        }
+        # Preserve any Level-3 inputs (the `level3` block set at plan approval by B2e/B4) while
+        # writing the QC evidence.
+        evidence = dict(study.evidence_json or {})
+        evidence.update(
+            {
+                "computed_metrics": metrics,
+                "comparison_targets": targets,
+                "data_run_id": study.data_run_id,
+                "analysis_run_id": study.analysis_run_id,
+                "qc_dashboard_id": dashboard_id,
+            }
+        )
+        # Assemble the Level-3 inputs now that the analysis run produced the count matrix (B2e design +
+        # B4 confirmed finding claim + the matrix file + the matching template). A study with no
+        # confirmed differential finding gets None here and stays Level-2, unchanged. Pre-set inputs
+        # (tests / a future approval-time path) are respected and not rebuilt.
+        #
+        # This runs BEFORE the single `study.evidence_json = evidence` assignment below, and that
+        # ordering is load-bearing: `build_level3_inputs` issues SELECTs whose autoflush would flush a
+        # previously-assigned evidence_json and clear its dirty flag, after which the in-place
+        # `evidence["level3"] = ...` on this plain (non-Mutable) JSONB column plus a same-reference
+        # reassignment goes untracked and is silently dropped -- the study would reach `reproducing`
+        # with no persisted level3, and `_handle_reproducing` would fall straight through to comparing,
+        # collapsing the Level-3 finding to a Level-2 verdict. Build the full evidence dict first, then
+        # assign evidence_json exactly once so the reassignment is detected and persisted.
+        if not evidence.get("level3"):
+            level3 = await build_level3_inputs(session, study, plan)
+            if level3:
+                evidence["level3"] = level3
+
+        study.evidence_json = evidence
+
+        # Route to Level-3 reproduction when its inputs are present; otherwise straight to comparing
+        # (Level-2 only), unchanged from before.
+        next_state = "reproducing" if evidence.get("level3") else "comparing"
+        await ValidationStudyService.transition(
+            session, study.id, study.organization_id, study.requested_by_user_id, next_state
+        )
+        return True
+
+    @staticmethod
+    async def _handle_reproducing(session: AsyncSession, study: ValidationStudy) -> bool:
+        """C3 (ADR-069): reproduce the paper's finding and score concordance (E6).
+
+        Launch the headless differential-analysis notebook (G1) that reproduces the finding from the
+        analysis run's matrix, poll it, then compare OUR result set to the paper's deposited set and
+        record the concordance before advancing to comparing. If Level-3 inputs are absent, fall
+        straight through to comparing (Level-2 only)."""
+        evidence = dict(study.evidence_json or {})
+        level3 = evidence.get("level3")
+        if not level3:
+            await ValidationStudyService.transition(
+                session, study.id, study.organization_id, study.requested_by_user_id, "comparing"
+            )
+            return True
+
+        sid = evidence.get("level3_run_session_id")
+        if sid is None:
+            cs = await NotebookExecutionService.execute_template(
+                session,
+                org_id=study.organization_id,
+                user_id=study.requested_by_user_id,
+                template_id=level3["template_id"],
+                parameters=level3.get("parameters") or {},
+                input_file_ids=level3.get("input_file_ids") or None,
+                experiment_id=study.experiment_id,
+            )
+            evidence["level3_run_session_id"] = cs.id
+            study.evidence_json = evidence
+            if cs.status == "failed":
+                return await ValidationDriverService._fail(session, study, "differential reproduction failed to launch")
+            await session.flush()
+            return True
+
+        cs = await ValidationDriverService._load_compute_session(session, sid)
+        if cs is None:
+            return await ValidationDriverService._fail(session, study, "reproduction session missing")
+        cs = await NotebookExecutionService.poll_execution(session, cs)
+        if cs.status == "failed":
+            return await ValidationDriverService._fail(session, study, "differential reproduction failed")
+        if cs.status != "completed":
+            return False  # still running
+
+        params = level3.get("parameters") or {}
+        our_fs = await ValidationDriverService._extract_reproduced_set(
+            session,
+            cs,
+            level3.get("kind", "gene"),
+            lfc_threshold=float(params.get("lfc_threshold", 1.0)),
+            padj_threshold=float(params.get("padj_threshold", 0.05)),
+        )
+        paper_fs = FindingSet.from_dict(level3.get("paper_finding_set") or {})
+        universe = int(
+            level3.get("universe") or our_fs.n_tested or max(len(paper_fs.entities), len(our_fs.entities), 1)
+        )
+        if level3.get("kind") == "interval":
+            conc = compare_interval_sets(paper_fs, our_fs, universe)
+        else:
+            conc = compare_gene_sets(paper_fs, our_fs, universe)
+        evidence["level3_result"] = {"concordance": conc.to_dict(), "our_finding_set": our_fs.to_dict()}
+        study.evidence_json = evidence
         await ValidationStudyService.transition(
             session, study.id, study.organization_id, study.requested_by_user_id, "comparing"
         )
@@ -333,11 +482,29 @@ class ValidationDriverService:
             return False
 
         plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+        # Fold in the Level-3 finding-concordance verdict (E6) if the reproducing step produced one.
+        level3_result = evidence.get("level3_result") or {}
+        concordance = level3_result.get("concordance")
+        differential_attribution = None
+        if concordance:
+            # E3' (ADR-069): clear the DIFFERENTIAL side before a concordance divergence can strike the
+            # paper. thresholds_matched: the paper stated its cutoffs AND we applied them (the reproduced
+            # set is normalized with the plan's thresholds). method_comparable: our reproduction uses
+            # DESeq2, the standard count-based DE/DA method for the supported RNA/ATAC/ChIP substrates,
+            # so it is comparable by construction (a future refinement could compare the paper's exact tool).
+            design = (plan.differential_design_json if plan else None) or {}
+            th = design.get("thresholds") or {}
+            differential_attribution = {
+                "thresholds_matched": th.get("log2fc") is not None and th.get("padj") is not None,
+                "method_comparable": True,
+            }
         result = classify_study(
             evidence.get("comparison_targets") or [],
             evidence.get("computed_metrics") or {},
             mapping_confidence=plan.mapping_confidence if plan else None,
             reference_genome=plan.reference_genome if plan else None,
+            concordance_results=[concordance] if concordance else None,
+            differential_attribution=differential_attribution,
         )
         evidence["classification_result"] = result
         study.evidence_json = evidence
@@ -357,6 +524,50 @@ class ValidationDriverService:
         return True
 
     # ---- helpers ----
+
+    @staticmethod
+    async def _handle_acquisition_failure(session: AsyncSession, study: ValidationStudy, run) -> bool:
+        """A failed data-acquisition run: a genuinely unavailable accession -> missing_data; a transient
+        outage -> a bounded backoff retry (release the node between attempts), then terminal error when
+        the budget is spent. A missing run row is treated as transient (retry)."""
+        reason = run.failure_reason if run is not None else None
+        message = run.error_message if run is not None else "data acquisition run row not found"
+
+        if classify_acquisition_failure(reason, message) == "permanent":
+            study.failure_reason = f"data acquisition failed permanently: {reason or 'accession unavailable'}"
+            await ValidationStudyService.transition(
+                session,
+                study.id,
+                study.organization_id,
+                study.requested_by_user_id,
+                "classified",
+                classification="missing_data",
+            )
+            return True
+
+        evidence = dict(study.evidence_json or {})
+        retries = int(evidence.get("acquire_retries", 0))
+        if retries >= _MAX_ACQUIRE_RETRIES:
+            return await ValidationDriverService._fail(
+                session,
+                study,
+                f"data acquisition run failed after {retries} retries (transient failures did not clear)",
+            )
+        delay = _ACQUIRE_BACKOFF_SECONDS[min(retries, len(_ACQUIRE_BACKOFF_SECONDS) - 1)]
+        evidence["acquire_retries"] = retries + 1
+        evidence["acquire_retry_at"] = (_now() + timedelta(seconds=delay)).isoformat()
+        # Reassign a fresh dict (evidence_json is a plain, non-Mutable JSONB column) and clear the run so
+        # a later tick, once the backoff elapses, relaunches fetchngs (D1).
+        study.evidence_json = evidence
+        study.data_run_id = None
+        logger.info(
+            "validation study %d: transient data-acquisition failure, retry %d/%d scheduled in %ds",
+            study.id,
+            retries + 1,
+            _MAX_ACQUIRE_RETRIES,
+            delay,
+        )
+        return True
 
     @staticmethod
     async def _launch_fetchngs(session: AsyncSession, study: ValidationStudy) -> bool:
@@ -408,6 +619,67 @@ class ValidationDriverService:
         from app.services.pipeline_run_service import PipelineRunService
 
         return await PipelineRunService.get_run_model(session, run_id)
+
+    @staticmethod
+    async def _load_compute_session(session: AsyncSession, session_id: int):
+        from app.models.notebook_session import ComputeSession
+
+        return (
+            await session.execute(select(ComputeSession).where(ComputeSession.id == session_id))
+        ).scalar_one_or_none()
+
+    @staticmethod
+    async def _extract_reproduced_set(
+        session: AsyncSession,
+        cs,
+        kind: str,
+        lfc_threshold: float = 1.0,
+        padj_threshold: float = 0.05,
+    ) -> FindingSet:
+        """Read the normalized result table the differential notebook wrote (a registered output
+        File) and normalize it into OUR FindingSet. Applies the paper's captured thresholds (passed
+        from the plan) so our set is defined by the same cutoffs as the paper's set (E3': a threshold
+        mismatch is an our-side effect, not a real divergence). Live seam (reads object storage);
+        mocked in unit tests."""
+        text = await ValidationDriverService._read_reproduction_output(session, cs)
+        if not text:
+            ns = "interval" if kind == "interval" else "unknown"
+            return FindingSet(kind=kind, namespace=ns, parse_notes=["no reproduction output found"])
+        if kind == "interval":
+            return normalize_interval_table(text, lfc_threshold=lfc_threshold, padj_threshold=padj_threshold)
+        return normalize_gene_table(text, lfc_threshold=lfc_threshold, padj_threshold=padj_threshold)
+
+    @staticmethod
+    async def _read_reproduction_output(session: AsyncSession, cs) -> str | None:
+        from app.models.file import File
+        from app.models.notebook_session_file import NotebookSessionFile
+
+        rows = list(
+            (
+                await session.execute(
+                    select(File)
+                    .join(NotebookSessionFile, NotebookSessionFile.file_id == File.id)
+                    .where(NotebookSessionFile.session_id == cs.id, NotebookSessionFile.access_type == "output")
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not rows:
+            return None
+
+        def _score(f) -> tuple[bool, bool]:
+            n = (f.filename or "").lower()
+            looks_like_result = any(t in n for t in ("finding", "result", "de_", "diff"))
+            tabular = n.endswith((".csv", ".tsv", ".txt"))
+            return (looks_like_result, tabular)
+
+        rows.sort(key=_score, reverse=True)
+        try:
+            return await get_storage_adapter().read_text(rows[0].storage_uri)
+        except Exception:
+            logger.exception("validation study: failed to read reproduction output for session %d", cs.id)
+            return None
 
     @staticmethod
     async def _fail(session: AsyncSession, study: ValidationStudy, reason: str) -> bool:
