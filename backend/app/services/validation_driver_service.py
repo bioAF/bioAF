@@ -23,6 +23,7 @@ machinery; this driver is the orchestration glue that sequences it and moves the
 """
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,6 +64,51 @@ _FETCHNGS_DOWNLOAD_METHOD = "ftp"
 
 _RUN_DONE = "completed"
 _RUN_FAILED = {"failed", "cancelled", "error"}
+
+# Transient data-acquisition (fetchngs) auto-retry (pre-PR item, 2026-07-28). A transient external
+# outage (ENA/SRA 5xx, connection-refused, timeout) used to park a study terminally in `error`,
+# needing manual intervention. Instead, retry the fetch a bounded number of times with exponential
+# backoff (releasing the pipeline node between attempts), staying in `acquiring_data`; a genuinely
+# unavailable accession short-circuits to `missing_data`; exhausting the budget parks to `error`.
+_MAX_ACQUIRE_RETRIES = 3
+# Backoff before each retry (seconds): 5 min, 15 min, 45 min -> a ~65 min window before giving up.
+_ACQUIRE_BACKOFF_SECONDS = (300, 900, 2700)
+
+# High-precision "the accession is genuinely unavailable" signatures. ONLY these short-circuit a fetch
+# failure to `missing_data`; every other failure (network/5xx/timeout AND anything unrecognized) is
+# treated as transient and retried, so a real outage is NEVER falsely called missing_data (a wrong,
+# terminal verdict on the paper). Kept tight to avoid false positives.
+_PERMANENT_ACQUISITION_SIGNATURES = (
+    "no records",
+    "no runinfo",
+    "invalid accession",
+    "not a valid",
+    "could not be resolved",
+    "does not exist",
+    "no such",
+    "withdrawn",
+    "suppressed",
+)
+
+
+def classify_acquisition_failure(failure_reason: str | None, error_message: str | None) -> str:
+    """Classify a failed data-acquisition run as ``"permanent"`` (the accession is genuinely
+    unavailable -> missing_data) or ``"transient"`` (retry with backoff). Conservative: only a
+    high-confidence permanent signature returns permanent; everything else is transient."""
+    text = f"{failure_reason or ''} {error_message or ''}".lower()
+    if any(sig in text for sig in _PERMANENT_ACQUISITION_SIGNATURES):
+        return "permanent"
+    return "transient"
+
+
+def _now() -> datetime:
+    """Current UTC time. A module-level indirection so tests can freeze/advance it if needed."""
+    return datetime.now(timezone.utc)
+
+
+def _parse_iso(value: str) -> datetime:
+    dt = datetime.fromisoformat(value)
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 def _early_exit_classification(plan: ReproductionPlan) -> str | None:
@@ -207,11 +253,15 @@ class ValidationDriverService:
         """Launch fetchngs (first visit), or on its completion run D2 and advance to setup (or, if the
         fetched data is not usable, early-exit to missing_data per spec-02/spec-03)."""
         if study.data_run_id is None:
+            # A scheduled transient-failure retry waits out its backoff before relaunching fetchngs.
+            retry_at = (study.evidence_json or {}).get("acquire_retry_at")
+            if retry_at and _now() < _parse_iso(retry_at):
+                return False
             return await ValidationDriverService._launch_fetchngs(session, study)
 
         run = await ValidationDriverService._load_run(session, study.data_run_id)
         if run is None or run.status in _RUN_FAILED:
-            return await ValidationDriverService._fail(session, study, "data acquisition run failed")
+            return await ValidationDriverService._handle_acquisition_failure(session, study, run)
         if run.status != _RUN_DONE:
             return False  # still fetching
 
@@ -474,6 +524,50 @@ class ValidationDriverService:
         return True
 
     # ---- helpers ----
+
+    @staticmethod
+    async def _handle_acquisition_failure(session: AsyncSession, study: ValidationStudy, run) -> bool:
+        """A failed data-acquisition run: a genuinely unavailable accession -> missing_data; a transient
+        outage -> a bounded backoff retry (release the node between attempts), then terminal error when
+        the budget is spent. A missing run row is treated as transient (retry)."""
+        reason = run.failure_reason if run is not None else None
+        message = run.error_message if run is not None else "data acquisition run row not found"
+
+        if classify_acquisition_failure(reason, message) == "permanent":
+            study.failure_reason = f"data acquisition failed permanently: {reason or 'accession unavailable'}"
+            await ValidationStudyService.transition(
+                session,
+                study.id,
+                study.organization_id,
+                study.requested_by_user_id,
+                "classified",
+                classification="missing_data",
+            )
+            return True
+
+        evidence = dict(study.evidence_json or {})
+        retries = int(evidence.get("acquire_retries", 0))
+        if retries >= _MAX_ACQUIRE_RETRIES:
+            return await ValidationDriverService._fail(
+                session,
+                study,
+                f"data acquisition run failed after {retries} retries (transient failures did not clear)",
+            )
+        delay = _ACQUIRE_BACKOFF_SECONDS[min(retries, len(_ACQUIRE_BACKOFF_SECONDS) - 1)]
+        evidence["acquire_retries"] = retries + 1
+        evidence["acquire_retry_at"] = (_now() + timedelta(seconds=delay)).isoformat()
+        # Reassign a fresh dict (evidence_json is a plain, non-Mutable JSONB column) and clear the run so
+        # a later tick, once the backoff elapses, relaunches fetchngs (D1).
+        study.evidence_json = evidence
+        study.data_run_id = None
+        logger.info(
+            "validation study %d: transient data-acquisition failure, retry %d/%d scheduled in %ds",
+            study.id,
+            retries + 1,
+            _MAX_ACQUIRE_RETRIES,
+            delay,
+        )
+        return True
 
     @staticmethod
     async def _launch_fetchngs(session: AsyncSession, study: ValidationStudy) -> bool:
