@@ -8,8 +8,19 @@ import { useCapabilities, type CapabilityFlag } from "@/hooks/useCapabilities";
 import { useComponents } from "@/hooks/useComponents";
 import { useBetaFeatures } from "@/hooks/useBetaFeatures";
 import { navConfig, NavSection, NavChild, ComponentGate, PermissionRef, isChildActive } from "@/lib/navConfig";
+import { NavIcon } from "./navIcons";
 
 const SIDEBAR_COLLAPSED_KEY = "bioaf-sidebar-collapsed";
+
+// A section is active when the current path is (or is under) one of its children,
+// or matches its own path for a childless section. Shared by the expanded rows and
+// the collapsed rail so both highlight the same section.
+function sectionIsActive(section: NavSection, pathname: string): boolean {
+  if (section.children) {
+    return section.children.some((c) => isChildActive(pathname, c, section.children!));
+  }
+  return pathname === section.path || (section.path === "/dashboard" && pathname === "/");
+}
 
 function ChevronIcon({ expanded }: { expanded: boolean }) {
   return (
@@ -76,21 +87,19 @@ function SidebarSection({
   onToggle: () => void;
 }) {
   const isExpandable = !!section.children;
-  const isSectionActive = isExpandable
-    ? section.children!.some((c) => isChildActive(pathname, c, section.children!))
-    : pathname === section.path ||
-      (section.path === "/dashboard" && pathname === "/");
+  const isSectionActive = sectionIsActive(section, pathname);
 
   if (!isExpandable) {
     return (
       <Link
         href={section.path!}
-        className={`flex items-center px-3 py-2 rounded-md transition-colors ${
+        className={`flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
           isSectionActive
             ? "bg-bioaf-700 text-white"
             : "text-gray-300 hover:bg-gray-800 hover:text-white"
         }`}
       >
+        <NavIcon name={section.icon} testId={`nav-icon-${section.label}`} />
         <span>{section.label}</span>
       </Link>
     );
@@ -106,7 +115,10 @@ function SidebarSection({
             : "text-gray-300 hover:bg-gray-800 hover:text-white"
         }`}
       >
-        <span>{section.label}</span>
+        <span className="flex items-center gap-3">
+          <NavIcon name={section.icon} testId={`nav-icon-${section.label}`} />
+          <span>{section.label}</span>
+        </span>
         <ChevronIcon expanded={expanded} />
       </button>
       {expanded && (
@@ -348,7 +360,46 @@ export function Sidebar() {
         </nav>
       )}
 
-      {collapsed && <div className="flex-1" />}
+      {collapsed && (
+        <nav
+          className="flex-1 overflow-y-auto py-4 flex flex-col items-center gap-1"
+          data-testid="sidebar-rail"
+        >
+          {visibleSections.map((section) => {
+            const active = sectionIsActive(section, pathname);
+            const cls = `flex h-10 w-10 items-center justify-center rounded-md transition-colors ${
+              active
+                ? "bg-bioaf-700 text-white"
+                : "text-gray-300 hover:bg-gray-800 hover:text-white"
+            }`;
+            return section.children ? (
+              <button
+                key={section.label}
+                type="button"
+                aria-label={section.label}
+                title={section.label}
+                onClick={() => {
+                  setCollapsed(false);
+                  setExpandedSection(section.label);
+                }}
+                className={cls}
+              >
+                <NavIcon name={section.icon} testId={`nav-icon-${section.label}`} />
+              </button>
+            ) : (
+              <Link
+                key={section.label}
+                href={section.path!}
+                aria-label={section.label}
+                title={section.label}
+                className={cls}
+              >
+                <NavIcon name={section.icon} testId={`nav-icon-${section.label}`} />
+              </Link>
+            );
+          })}
+        </nav>
+      )}
 
       <div className={`border-t border-gray-700 ${collapsed ? "p-2 text-center" : "p-4"}`}>
         <div className="text-xs text-gray-600">v{process.env.NEXT_PUBLIC_APP_VERSION}</div>

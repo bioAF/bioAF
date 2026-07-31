@@ -454,6 +454,51 @@ describe("Sidebar header height matches main header", () => {
   });
 });
 
+describe("Sidebar navigation icons", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    mockComponents.mockReturnValue({
+      components: [
+        makeComponent("nextflow_k8s", "pipeline_orchestration", true),
+        makeComponent("jupyterhub", "analysis", true),
+      ],
+      loading: false,
+      refetch: jest.fn(),
+    });
+  });
+
+  test("renders an icon for each top-level section when expanded", () => {
+    render(<Sidebar />);
+
+    expect(screen.getByTestId("nav-icon-Dashboard")).toBeInTheDocument();
+    expect(screen.getByTestId("nav-icon-Experiments")).toBeInTheDocument();
+    expect(screen.getByTestId("nav-icon-Lab Knowledge")).toBeInTheDocument();
+  });
+
+  test("keeps navigation reachable as a labelled icon rail when collapsed", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+
+    // The rail replaces the old empty collapsed sidebar with per-section icons.
+    expect(screen.getByTestId("sidebar-rail")).toBeInTheDocument();
+    expect(screen.getByTestId("nav-icon-Experiments")).toBeInTheDocument();
+    // Icons are labelled for accessibility (no visible text label in the rail).
+    expect(screen.getByLabelText("Experiments")).toBeInTheDocument();
+    expect(screen.queryByText("Experiments")).not.toBeInTheDocument();
+  });
+
+  test("clicking a collapsed section icon re-expands the sidebar and opens that section", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+    fireEvent.click(screen.getByLabelText("Pipelines"));
+
+    expect(screen.getByTestId("sidebar")).toHaveAttribute("data-collapsed", "false");
+    expect(screen.getByTestId("children-Pipelines")).toBeInTheDocument();
+  });
+});
+
 describe("Sidebar collapse persistence", () => {
   const STORAGE_KEY = "bioaf-sidebar-collapsed";
 
