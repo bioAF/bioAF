@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { literature } from "@/lib/literature";
 import type { ExperimentListResponse, ProjectListResponse } from "@/lib/types";
@@ -31,6 +31,8 @@ export function AssociatePaperModal({ paperIds, onClose, onAssociated }: Props) 
   const [experiments, setExperiments] = useState<NamedItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const titleId = useId();
+  const firstFieldRef = useRef<HTMLSelectElement>(null);
 
   const open = paperIds.length > 0;
 
@@ -39,12 +41,15 @@ export function AssociatePaperModal({ paperIds, onClose, onAssociated }: Props) 
     setProjectId("");
     setExperimentId("");
     setError(null);
+    // Move focus into the dialog on open so keyboard users start inside it.
+    const id = window.setTimeout(() => firstFieldRef.current?.focus(), 0);
     api
       .get<ProjectListResponse>("/api/projects?page_size=100")
       .then((data) =>
         setProjects(data.projects.map((p) => ({ id: p.id, name: p.name }))),
       )
       .catch(() => setProjects([]));
+    return () => window.clearTimeout(id);
   }, [open, paperIds]);
 
   useEffect(() => {
@@ -92,15 +97,31 @@ export function AssociatePaperModal({ paperIds, onClose, onAssociated }: Props) 
     }
   };
 
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape" && !busy) {
+      e.preventDefault();
+      onClose();
+    }
+  };
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl p-6 w-96">
-        <h3 className="font-semibold mb-3">
+    <div
+      className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50"
+      onKeyDown={onKeyDown}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="bg-white rounded-lg shadow-xl p-6 w-96"
+      >
+        <h3 id={titleId} className="font-semibold mb-3">
           Associate {paperIds.length === 1 ? "paper" : `${paperIds.length} papers`}
         </h3>
         <div className="mb-3">
           <label className="block text-xs text-gray-500 mb-1">Project</label>
           <select
+            ref={firstFieldRef}
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
             className="w-full border border-gray-300 rounded px-3 py-2"
