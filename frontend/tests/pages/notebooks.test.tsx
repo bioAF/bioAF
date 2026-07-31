@@ -42,7 +42,7 @@ jest.mock("@/components/shared/LoadingSpinner", () => ({
   LoadingSpinner: () => <div data-testid="loading-spinner">Loading...</div>,
 }));
 
-import NotebooksPage from "@/app/notebooks/page";
+import NotebooksPage from "@/app/(app)/notebooks/page";
 
 const mockSessions = {
   sessions: [

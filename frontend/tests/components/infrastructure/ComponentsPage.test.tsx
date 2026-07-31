@@ -15,7 +15,7 @@
  */
 
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
-import InfraComponentsPage from "@/app/infrastructure/components/page";
+import InfraComponentsPage from "@/app/(app)/infrastructure/components/page";
 
 // Mock API
 const mockApiGet = jest.fn();

@@ -45,7 +45,7 @@ jest.mock("@/components/shared/PlotModal", () => ({
   ),
 }));
 
-import PlotArchivePage from "@/app/results/plot-archive/page";
+import PlotArchivePage from "@/app/(app)/results/plot-archive/page";
 
 const mockPlots = {
   plots: [

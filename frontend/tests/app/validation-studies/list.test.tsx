@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import ValidationStudiesListPage from "@/app/lab-knowledge/validation-studies/page";
+import ValidationStudiesListPage from "@/app/(app)/lab-knowledge/validation-studies/page";
 
 const mockPush = jest.fn();
 jest.mock("next/navigation", () => ({

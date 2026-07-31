@@ -1,5 +1,5 @@
 import { render, screen, act, waitFor, fireEvent } from "@testing-library/react";
-import SettingsInfoPage from "@/app/settings/info/page";
+import SettingsInfoPage from "@/app/(app)/settings/info/page";
 
 jest.mock("next/navigation", () => ({
   usePathname: () => "/settings/info",

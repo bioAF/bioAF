@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import PipelineRunsPage from "@/app/pipelines/runs/page";
+import PipelineRunsPage from "@/app/(app)/pipelines/runs/page";
 
 const mockPush = jest.fn();
 const mockRouter = { push: mockPush };

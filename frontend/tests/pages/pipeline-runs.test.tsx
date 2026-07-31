@@ -130,7 +130,7 @@ describe("Pipeline Run Detail - References Used", () => {
     });
 
     const PipelineRunDetailPage =
-      require("@/app/pipelines/runs/[id]/page").default;
+      require("@/app/(app)/pipelines/runs/[id]/page").default;
     render(<PipelineRunDetailPage />);
 
     await waitFor(() => {
@@ -159,7 +159,7 @@ describe("Pipeline Run Detail - Provider details (Test 28)", () => {
     });
 
     const PipelineRunDetailPage =
-      require("@/app/pipelines/runs/[id]/page").default;
+      require("@/app/(app)/pipelines/runs/[id]/page").default;
     render(<PipelineRunDetailPage />);
 
     await waitFor(() => {
@@ -207,7 +207,7 @@ describe("Pipeline Logs Display (Test 29)", () => {
     });
 
     const PipelineRunDetailPage =
-      require("@/app/pipelines/runs/[id]/page").default;
+      require("@/app/(app)/pipelines/runs/[id]/page").default;
     render(<PipelineRunDetailPage />);
 
     // Wait for page to load (pipeline name is embedded in heading)
@@ -251,7 +251,7 @@ describe("Cancel Button (Test 30)", () => {
     jest.spyOn(window, "confirm").mockReturnValue(true);
 
     const PipelineRunDetailPage =
-      require("@/app/pipelines/runs/[id]/page").default;
+      require("@/app/(app)/pipelines/runs/[id]/page").default;
     render(<PipelineRunDetailPage />);
 
     await waitFor(() => {
@@ -292,7 +292,7 @@ describe("Nextflow Report iframe", () => {
     });
 
     const PipelineRunDetailPage =
-      require("@/app/pipelines/runs/[id]/page").default;
+      require("@/app/(app)/pipelines/runs/[id]/page").default;
     const { container } = render(<PipelineRunDetailPage />);
 
     await waitFor(() => {

@@ -40,7 +40,7 @@ jest.mock("@/components/layout/Header", () => ({
 }));
 
 // Dynamic import so mocks register first
-import DataBrowserPage from "@/app/data/browser/page";
+import DataBrowserPage from "@/app/(app)/data/browser/page";
 
 const mockDatasets = {
   experiments: [

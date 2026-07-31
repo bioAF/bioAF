@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import DataUploadPage from "@/app/data/upload/page";
+import DataUploadPage from "@/app/(app)/data/upload/page";
 
 jest.mock("@/components/layout/Sidebar", () => ({
   Sidebar: () => <div data-testid="sidebar" />,

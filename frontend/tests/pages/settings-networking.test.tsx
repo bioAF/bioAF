@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import NetworkingSettingsPage from "@/app/settings/networking/page";
+import NetworkingSettingsPage from "@/app/(app)/settings/networking/page";
 
 const mockPush = jest.fn();
 jest.mock("next/navigation", () => ({

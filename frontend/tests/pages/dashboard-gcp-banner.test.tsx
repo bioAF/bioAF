@@ -3,7 +3,7 @@
  * Tests 24-25: banner shows when unconfigured, hides when configured.
  */
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import DashboardPage from "@/app/dashboard/page";
+import DashboardPage from "@/app/(app)/dashboard/page";
 
 const mockPush = jest.fn();
 jest.mock("next/navigation", () => ({

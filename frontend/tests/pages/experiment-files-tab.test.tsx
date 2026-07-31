@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import ExperimentDetailPage from "@/app/experiments/[id]/page";
+import ExperimentDetailPage from "@/app/(app)/experiments/[id]/page";
 
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: jest.fn() }),
