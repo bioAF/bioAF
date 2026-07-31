@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { getCurrentUser, isAuthenticated } from "@/lib/auth";
 import {
   cleanText,
@@ -31,6 +32,8 @@ export default function LiteratureRecommendationsPage() {
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [status, setStatus] = useState<RecommendationStatus>("accepted");
   const [loading, setLoading] = useState(true);
+  const [dismissing, setDismissing] = useState<Recommendation | null>(null);
+  const [dismissBusy, setDismissBusy] = useState(false);
 
   function refresh() {
     setLoading(true);
@@ -49,10 +52,16 @@ export default function LiteratureRecommendationsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
 
-  async function dismiss(r: Recommendation) {
-    if (!confirm(`Dismiss "${cleanText(r.paper.title)}" org-wide?`)) return;
-    await literature.dismissRecommendation(r.id);
-    refresh();
+  async function confirmDismiss() {
+    if (!dismissing) return;
+    setDismissBusy(true);
+    try {
+      await literature.dismissRecommendation(dismissing.id);
+      setDismissing(null);
+      refresh();
+    } finally {
+      setDismissBusy(false);
+    }
   }
 
   return (
@@ -149,7 +158,7 @@ export default function LiteratureRecommendationsPage() {
                     {status === "accepted" && canDecide && (
                       <div className="flex flex-col gap-2 ml-4">
                         <button
-                          onClick={() => dismiss(r)}
+                          onClick={() => setDismissing(r)}
                           className="border border-red-300 text-red-700 px-3 py-1 rounded text-sm hover:bg-red-50"
                         >
                           Dismiss
@@ -163,6 +172,20 @@ export default function LiteratureRecommendationsPage() {
           )}
         </main>
       </div>
+      <ConfirmDialog
+        open={dismissing !== null}
+        title="Dismiss recommendation"
+        message={
+          dismissing
+            ? `Dismiss "${cleanText(dismissing.paper.title)}" org-wide? It leaves the active recommendations and is excluded from future AI Literature Review. An admin can reverse this later.`
+            : ""
+        }
+        confirmLabel="Dismiss"
+        variant="danger"
+        busy={dismissBusy}
+        onConfirm={confirmDismiss}
+        onCancel={() => setDismissing(null)}
+      />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { InputDialog } from "@/components/shared/InputDialog";
 import { getCurrentUser, isAuthenticated } from "@/lib/auth";
 import { literature, type SourceConfig, type LiteratureSourceName } from "@/lib/literature";
 
@@ -26,6 +27,9 @@ export default function LiteratureSourcesPage() {
   const [testResults, setTestResults] = useState<
     Record<string, { success: boolean; message: string; latency_ms: number }>
   >({});
+  const [keyDialogSource, setKeyDialogSource] = useState<SourceConfig | null>(null);
+  const [savingKey, setSavingKey] = useState(false);
+  const [keyError, setKeyError] = useState<string | null>(null);
 
   function refresh() {
     literature
@@ -47,14 +51,23 @@ export default function LiteratureSourcesPage() {
     await literature.updateSource(s.source, { enabled: !s.enabled });
     refresh();
   }
-  async function setKey(s: SourceConfig) {
-    const k = prompt(
-      `API key for ${SOURCE_LABELS[s.source]} (leave empty to clear)`,
-      "",
-    );
-    if (k === null) return;
-    await literature.updateSource(s.source, { api_key: k });
-    refresh();
+  function openKeyDialog(s: SourceConfig) {
+    setKeyError(null);
+    setKeyDialogSource(s);
+  }
+  async function saveKey(apiKey: string) {
+    if (!keyDialogSource) return;
+    setSavingKey(true);
+    setKeyError(null);
+    try {
+      await literature.updateSource(keyDialogSource.source, { api_key: apiKey });
+      setKeyDialogSource(null);
+      refresh();
+    } catch (e) {
+      setKeyError(e instanceof Error ? e.message : "Could not save the key.");
+    } finally {
+      setSavingKey(false);
+    }
   }
   async function test(s: SourceConfig) {
     const r = await literature.testSource(s.source);
@@ -110,7 +123,7 @@ export default function LiteratureSourcesPage() {
                     {canConfigure && (
                       <>
                         <button
-                          onClick={() => setKey(s)}
+                          onClick={() => openKeyDialog(s)}
                           className="border border-gray-300 px-3 py-1 rounded text-sm hover:bg-gray-50"
                         >
                           {s.has_api_key ? "Update key" : "Set key"}
@@ -132,6 +145,21 @@ export default function LiteratureSourcesPage() {
           )}
         </main>
       </div>
+      <InputDialog
+        open={keyDialogSource !== null}
+        title={keyDialogSource ? `API key for ${SOURCE_LABELS[keyDialogSource.source]}` : ""}
+        message="Stored encrypted on the server. Leave the field empty and save to clear the current key."
+        label="API key"
+        type="password"
+        placeholder="Paste the key"
+        allowEmpty
+        confirmLabel="Save key"
+        busyLabel="Saving..."
+        busy={savingKey}
+        error={keyError}
+        onConfirm={saveKey}
+        onCancel={() => setKeyDialogSource(null)}
+      />
     </div>
   );
 }

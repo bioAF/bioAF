@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { AssociatePaperModal } from "@/components/literature/AssociatePaperModal";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { api } from "@/lib/api";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import {
@@ -86,6 +87,7 @@ export default function LiteratureLibraryPage() {
   // Associate modal state (the picker lives in AssociatePaperModal).
   const [linkingPaperIds, setLinkingPaperIds] = useState<number[]>([]);
   const [dismissBusy, setDismissBusy] = useState(false);
+  const [confirmingBulkDismiss, setConfirmingBulkDismiss] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -195,17 +197,11 @@ export default function LiteratureLibraryPage() {
   const performBulkDismiss = async () => {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
-    const plural = ids.length === 1 ? "paper" : "papers";
-    if (
-      !confirm(
-        `Dismiss ${ids.length} ${plural}? They leave your active Library and are ` +
-          `excluded from future AI Literature Review. An admin can reverse this later.`,
-      )
-    )
-      return;
     setDismissBusy(true);
     try {
       await literature.bulkDismiss(ids);
+      setConfirmingBulkDismiss(false);
+      setSelectedIds(new Set());
       refresh();
     } finally {
       setDismissBusy(false);
@@ -419,7 +415,7 @@ export default function LiteratureLibraryPage() {
                 Associate
               </button>
               <button
-                onClick={performBulkDismiss}
+                onClick={() => setConfirmingBulkDismiss(true)}
                 disabled={dismissBusy}
                 className="px-3 py-1.5 bg-amber-600 text-white rounded-md text-sm hover:bg-amber-700 disabled:opacity-50"
               >
@@ -556,6 +552,16 @@ export default function LiteratureLibraryPage() {
             paperIds={linkingPaperIds}
             onClose={closeAssociate}
             onAssociated={refresh}
+          />
+          <ConfirmDialog
+            open={confirmingBulkDismiss}
+            title="Dismiss papers"
+            message={`Dismiss ${selectedIds.size} ${selectedIds.size === 1 ? "paper" : "papers"}? They leave your active Library and are excluded from future AI Literature Review. An admin can reverse this later.`}
+            confirmLabel="Dismiss"
+            variant="danger"
+            busy={dismissBusy}
+            onConfirm={performBulkDismiss}
+            onCancel={() => setConfirmingBulkDismiss(false)}
           />
         </main>
       </div>

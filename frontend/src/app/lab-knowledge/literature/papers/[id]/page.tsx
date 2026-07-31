@@ -5,6 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { InputDialog } from "@/components/shared/InputDialog";
 import { getCurrentUser, isAuthenticated } from "@/lib/auth";
 import { PaperPdfViewer } from "@/components/literature/PaperPdfViewer";
 import { AssociatePaperModal } from "@/components/literature/AssociatePaperModal";
@@ -60,7 +62,21 @@ export default function PaperDetailPage() {
   const [conflict, setConflict] = useState<DoiConflict | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [associating, setAssociating] = useState(false);
+  // One generic confirm dialog drives the small yes/no actions (delete comment,
+  // reverse dismissal, remove association) instead of a native confirm().
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    variant?: "danger" | "default";
+    run: () => Promise<void>;
+  } | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [dismissOpen, setDismissOpen] = useState(false);
+  const [dismissBusy, setDismissBusy] = useState(false);
+  const [copiedCitation, setCopiedCitation] = useState<string | null>(null);
 
   function refresh() {
     setLoading(true);
@@ -141,10 +157,17 @@ export default function PaperDetailPage() {
     setReplyToId(null);
     refresh();
   }
-  async function deleteComment(commentId: number) {
-    if (!confirm("Delete this comment?")) return;
-    await literature.deleteComment(commentId);
-    refresh();
+  function deleteComment(commentId: number) {
+    setPendingConfirm({
+      title: "Delete comment",
+      message: "Delete this comment? This cannot be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+      run: async () => {
+        await literature.deleteComment(commentId);
+        refresh();
+      },
+    });
   }
   async function setReading(status: ReadingStatusValue) {
     await literature.setReadingStatus(paperId, status);
@@ -166,31 +189,67 @@ export default function PaperDetailPage() {
   }
   async function deletePaper() {
     setDeleting(true);
+    setDeleteError(null);
     try {
       await literature.deletePaper(paperId);
       router.push("/lab-knowledge/literature");
     } catch (e) {
+      // Keep the dialog open so the inline error is visible.
       setDeleting(false);
-      setConfirmingDelete(false);
-      alert(e instanceof Error ? e.message : "Delete failed.");
+      setDeleteError(e instanceof Error ? e.message : "Delete failed.");
     }
   }
-  async function dismiss() {
-    const reason = prompt(
-      "Why dismiss this paper? (reason is logged and shown on the dismissed card)",
-    );
-    await literature.dismissPaper(paperId, reason ?? undefined);
-    refresh();
+  function dismiss() {
+    setDismissOpen(true);
   }
-  async function reverseDismiss() {
-    if (!confirm("Reverse the dismissal?")) return;
-    await literature.reverseDismiss(paperId);
-    refresh();
+  async function submitDismiss(reason: string) {
+    setDismissBusy(true);
+    try {
+      await literature.dismissPaper(paperId, reason.trim() ? reason.trim() : undefined);
+      setDismissOpen(false);
+      refresh();
+    } finally {
+      setDismissBusy(false);
+    }
+  }
+  function reverseDismiss() {
+    setPendingConfirm({
+      title: "Reverse dismissal",
+      message: "Reverse the dismissal? The paper returns to the active Library.",
+      confirmLabel: "Reverse",
+      run: async () => {
+        await literature.reverseDismiss(paperId);
+        refresh();
+      },
+    });
+  }
+  function removeAssociation(associationId: number) {
+    setPendingConfirm({
+      title: "Remove association",
+      message: "Remove this association? The link between this paper and that scope is deleted.",
+      confirmLabel: "Remove",
+      variant: "danger",
+      run: async () => {
+        await literature.deleteAssociation(paperId, associationId);
+        refresh();
+      },
+    });
+  }
+  async function runPendingConfirm() {
+    if (!pendingConfirm) return;
+    setConfirmBusy(true);
+    try {
+      await pendingConfirm.run();
+      setPendingConfirm(null);
+    } finally {
+      setConfirmBusy(false);
+    }
   }
   async function downloadCitation(format: "bibtex" | "ris") {
     const text = await literature.citation(paperId, format);
     await navigator.clipboard.writeText(text);
-    alert(`${format.toUpperCase()} citation copied to clipboard.`);
+    setCopiedCitation(format === "bibtex" ? "BibTeX" : "RIS");
+    window.setTimeout(() => setCopiedCitation(null), 2500);
   }
 
   if (loading) {
@@ -551,11 +610,7 @@ export default function PaperDetailPage() {
                           canDismiss ||
                           user?.role_name === "admin") && (
                           <button
-                            onClick={async () => {
-                              if (!confirm("Remove this association?")) return;
-                              await literature.deleteAssociation(paper.id, a.id);
-                              refresh();
-                            }}
+                            onClick={() => removeAssociation(a.id)}
                             className="border border-red-300 text-red-700 px-2 py-0.5 rounded text-xs hover:bg-red-50"
                           >
                             Remove
@@ -583,6 +638,11 @@ export default function PaperDetailPage() {
                     Copy RIS
                   </button>
                 </div>
+                {copiedCitation && (
+                  <p className="mt-2 text-sm text-green-700" role="status">
+                    {copiedCitation} citation copied to clipboard.
+                  </p>
+                )}
               </div>
 
               {(canDismiss || canReverseDismiss || canDeletePaper) && (
@@ -607,7 +667,10 @@ export default function PaperDetailPage() {
                     )}
                     {canDeletePaper && (
                       <button
-                        onClick={() => setConfirmingDelete(true)}
+                        onClick={() => {
+                          setDeleteError(null);
+                          setConfirmingDelete(true);
+                        }}
                         className="border border-red-300 text-red-700 px-3 py-1 rounded text-sm hover:bg-red-50"
                       >
                         Delete paper
@@ -627,6 +690,32 @@ export default function PaperDetailPage() {
         onAssociated={refresh}
       />
 
+      <ConfirmDialog
+        open={pendingConfirm !== null}
+        title={pendingConfirm?.title ?? ""}
+        message={pendingConfirm?.message ?? ""}
+        confirmLabel={pendingConfirm?.confirmLabel ?? "Confirm"}
+        variant={pendingConfirm?.variant ?? "default"}
+        busy={confirmBusy}
+        onConfirm={runPendingConfirm}
+        onCancel={() => setPendingConfirm(null)}
+      />
+
+      <InputDialog
+        open={dismissOpen}
+        title="Dismiss paper org-wide"
+        message="The reason is logged and shown on the dismissed card. Leave it blank to dismiss without a note."
+        label="Reason (optional)"
+        placeholder="e.g. superseded by a newer study"
+        multiline
+        allowEmpty
+        confirmLabel="Dismiss"
+        busyLabel="Dismissing..."
+        busy={dismissBusy}
+        onConfirm={submitDismiss}
+        onCancel={() => setDismissOpen(false)}
+      />
+
       {confirmingDelete && (
         <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-xl p-6 w-[28rem]">
@@ -638,9 +727,15 @@ export default function PaperDetailPage() {
               metadata, comments, and history are kept; an admin can reverse the
               dismissal, but the deleted PDF would need to be uploaded again.
             </p>
+            {deleteError && (
+              <p className="text-sm text-red-700 mb-4">{deleteError}</p>
+            )}
             <div className="flex justify-end gap-2">
               <button
-                onClick={() => setConfirmingDelete(false)}
+                onClick={() => {
+                  setDeleteError(null);
+                  setConfirmingDelete(false);
+                }}
                 disabled={deleting}
                 className="px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50"
               >
