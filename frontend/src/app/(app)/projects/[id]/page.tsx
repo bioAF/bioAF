@@ -196,302 +196,302 @@ export default function ProjectDetailPage() {
   return (
     <>
       <main className="flex-1 overflow-y-auto p-6">
-          {/* Project Header */}
-          <div className="mb-6">
-            <div className="flex items-center gap-3 mb-2">
-              <h1 className="text-2xl font-bold">{project.name}</h1>
-              {project.code && (
-                <span className="text-sm font-mono bg-gray-100 text-gray-600 px-2 py-0.5 rounded" title="Internal ID">{project.code}</span>
-              )}
-              {project.external_id && (
-                <span className="text-sm font-mono bg-blue-50 text-blue-700 px-2 py-0.5 rounded" title="External ID">{project.external_id}</span>
-              )}
-              <StatusBadge status={project.status || "active"} />
-              <div className="ml-auto">
-                {canModify && (
-                  <button
-                    onClick={() => setShowProjectExport(true)}
-                    className="bg-gray-100 text-gray-800 px-4 py-2 rounded-md text-sm hover:bg-gray-200"
-                  >
-                    Export Data
-                  </button>
-                )}
-              </div>
-            </div>
-            {project.hypothesis && (
-              <p className="text-gray-600 italic mb-1">{project.hypothesis}</p>
+        {/* Project Header */}
+        <div className="mb-6">
+          <div className="flex items-center gap-3 mb-2">
+            <h1 className="text-2xl font-bold">{project.name}</h1>
+            {project.code && (
+              <span className="text-sm font-mono bg-gray-100 text-gray-600 px-2 py-0.5 rounded" title="Internal ID">{project.code}</span>
             )}
-            {project.description && (
-              <p className="text-gray-500 text-sm">{project.description}</p>
+            {project.external_id && (
+              <span className="text-sm font-mono bg-blue-50 text-blue-700 px-2 py-0.5 rounded" title="External ID">{project.external_id}</span>
             )}
-            <div className="flex gap-6 mt-3 text-sm text-gray-500">
-              <span>{project.sample_count} samples</span>
-              <span>{project.experiment_count} experiments</span>
-              <span>{project.pipeline_run_count} runs</span>
-              {project.owner_name && <span>Owner: {project.owner_name}</span>}
-            </div>
-          </div>
-
-          {/* Tabs */}
-          <div className="border-b border-gray-200 mb-6">
-            <nav className="flex space-x-8">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.key}
-                  onClick={() => setActiveTab(tab.key)}
-                  className={`py-2 px-1 border-b-2 text-sm font-medium ${
-                    activeTab === tab.key
-                      ? "border-bioaf-600 text-bioaf-600"
-                      : "border-transparent text-gray-500 hover:text-gray-700"
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </nav>
-          </div>
-
-          {/* Experiments Tab */}
-          {activeTab === "experiments" && (
-            <div>
-              {project.experiments.length === 0 ? (
-                <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">
-                  No experiments linked to this project.
-                </div>
-              ) : (
-                <div className="bg-white rounded-lg shadow overflow-hidden">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Samples</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {project.experiments.map((exp) => (
-                        <tr
-                          key={exp.id}
-                          onClick={() => router.push(`/experiments/${exp.id}`)}
-                          className="hover:bg-gray-50 cursor-pointer"
-                        >
-                          <td className="px-6 py-4 text-sm font-medium text-gray-900">{exp.name}</td>
-                          <td className="px-6 py-4">
-                            <StatusBadge status={exp.status} />
-                          </td>
-                          <td className="px-6 py-4 text-sm text-gray-500">{exp.sample_count}</td>
-                          <td className="px-6 py-4 text-sm text-gray-500">
-                            {exp.created_at ? new Date(exp.created_at).toLocaleDateString() : "—"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Samples Tab */}
-          {activeTab === "samples" && (
-            <div>
+            <StatusBadge status={project.status || "active"} />
+            <div className="ml-auto">
               {canModify && (
-                <div className="mb-4">
-                  <button
-                    onClick={openSamplePicker}
-                    className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
-                  >
-                    Add Samples
-                  </button>
-                </div>
+                <button
+                  onClick={() => setShowProjectExport(true)}
+                  className="bg-gray-100 text-gray-800 px-4 py-2 rounded-md text-sm hover:bg-gray-200"
+                >
+                  Export Data
+                </button>
               )}
-              {project.samples.length === 0 ? (
-                <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">
-                  No samples added yet. Click &quot;Add Samples&quot; to get started.
-                </div>
-              ) : (
-                project.samples.map((group) => (
-                  <div key={group.experiment_id} className="mb-6">
-                    <h3 className="text-sm font-semibold text-gray-700 mb-2">
-                      {group.experiment_name}
-                    </h3>
-                    <div className="bg-white rounded-lg shadow overflow-hidden">
-                      <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Organism</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tissue</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">QC</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Added By</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Added</th>
+            </div>
+          </div>
+          {project.hypothesis && (
+            <p className="text-gray-600 italic mb-1">{project.hypothesis}</p>
+          )}
+          {project.description && (
+            <p className="text-gray-500 text-sm">{project.description}</p>
+          )}
+          <div className="flex gap-6 mt-3 text-sm text-gray-500">
+            <span>{project.sample_count} samples</span>
+            <span>{project.experiment_count} experiments</span>
+            <span>{project.pipeline_run_count} runs</span>
+            {project.owner_name && <span>Owner: {project.owner_name}</span>}
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="border-b border-gray-200 mb-6">
+          <nav className="flex space-x-8">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`py-2 px-1 border-b-2 text-sm font-medium ${
+                  activeTab === tab.key
+                    ? "border-bioaf-600 text-bioaf-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+
+        {/* Experiments Tab */}
+        {activeTab === "experiments" && (
+          <div>
+            {project.experiments.length === 0 ? (
+              <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">
+                No experiments linked to this project.
+              </div>
+            ) : (
+              <div className="bg-white rounded-lg shadow overflow-hidden">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Samples</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {project.experiments.map((exp) => (
+                      <tr
+                        key={exp.id}
+                        onClick={() => router.push(`/experiments/${exp.id}`)}
+                        className="hover:bg-gray-50 cursor-pointer"
+                      >
+                        <td className="px-6 py-4 text-sm font-medium text-gray-900">{exp.name}</td>
+                        <td className="px-6 py-4">
+                          <StatusBadge status={exp.status} />
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-500">{exp.sample_count}</td>
+                        <td className="px-6 py-4 text-sm text-gray-500">
+                          {exp.created_at ? new Date(exp.created_at).toLocaleDateString() : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Samples Tab */}
+        {activeTab === "samples" && (
+          <div>
+            {canModify && (
+              <div className="mb-4">
+                <button
+                  onClick={openSamplePicker}
+                  className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
+                >
+                  Add Samples
+                </button>
+              </div>
+            )}
+            {project.samples.length === 0 ? (
+              <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">
+                No samples added yet. Click &quot;Add Samples&quot; to get started.
+              </div>
+            ) : (
+              project.samples.map((group) => (
+                <div key={group.experiment_id} className="mb-6">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                    {group.experiment_name}
+                  </h3>
+                  <div className="bg-white rounded-lg shadow overflow-hidden">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Organism</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tissue</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">QC</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Added By</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Added</th>
+                          {canModify && (
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase"></th>
+                          )}
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {group.samples.map((s) => (
+                          <tr key={s.sample_id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setViewingSample({ ...s, experiment_name: group.experiment_name })}>
+                            <td className="px-6 py-4 text-sm font-medium text-gray-900">
+                              {s.external_id || `#${s.sample_id}`}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-500">{s.organism || "—"}</td>
+                            <td className="px-6 py-4 text-sm text-gray-500">{s.tissue_type || "—"}</td>
+                            <td className="px-6 py-4">
+                              {s.qc_status ? <SampleQCBadge status={s.qc_status} /> : "—"}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-500">{s.added_by || "—"}</td>
+                            <td className="px-6 py-4 text-sm text-gray-500">
+                              {s.added_at ? new Date(s.added_at).toLocaleDateString() : "—"}
+                            </td>
                             {canModify && (
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase"></th>
+                              <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  onClick={() => handleRemoveSample(s.sample_id)}
+                                  className="text-xs px-2 py-1 border border-red-600 text-red-600 rounded hover:bg-red-50"
+                                >
+                                  Remove
+                                </button>
+                              </td>
                             )}
                           </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                          {group.samples.map((s) => (
-                            <tr key={s.sample_id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setViewingSample({ ...s, experiment_name: group.experiment_name })}>
-                              <td className="px-6 py-4 text-sm font-medium text-gray-900">
-                                {s.external_id || `#${s.sample_id}`}
-                              </td>
-                              <td className="px-6 py-4 text-sm text-gray-500">{s.organism || "—"}</td>
-                              <td className="px-6 py-4 text-sm text-gray-500">{s.tissue_type || "—"}</td>
-                              <td className="px-6 py-4">
-                                {s.qc_status ? <SampleQCBadge status={s.qc_status} /> : "—"}
-                              </td>
-                              <td className="px-6 py-4 text-sm text-gray-500">{s.added_by || "—"}</td>
-                              <td className="px-6 py-4 text-sm text-gray-500">
-                                {s.added_at ? new Date(s.added_at).toLocaleDateString() : "—"}
-                              </td>
-                              {canModify && (
-                                <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                                  <button
-                                    onClick={() => handleRemoveSample(s.sample_id)}
-                                    className="text-xs px-2 py-1 border border-red-600 text-red-600 rounded hover:bg-red-50"
-                                  >
-                                    Remove
-                                  </button>
-                                </td>
-                              )}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-
-          {viewingSample && (
-            <DetailModal
-              title={viewingSample.external_id || `Sample #${viewingSample.sample_id}`}
-              onClose={() => setViewingSample(null)}
-              fields={[
-                { label: "Internal ID", value: `#${viewingSample.sample_id}` },
-                { label: "External ID", value: viewingSample.external_id },
-                { label: "Experiment", value: viewingSample.experiment_name },
-                { label: "Organism", value: viewingSample.organism },
-                { label: "Tissue Type", value: viewingSample.tissue_type },
-                { label: "QC Status", value: viewingSample.qc_status },
-                { label: "Added By", value: viewingSample.added_by },
-                { label: "Added", value: viewingSample.added_at ? new Date(viewingSample.added_at).toLocaleDateString() : null },
-                { label: "Notes", value: viewingSample.notes },
-              ]}
-              actions={
-                canModify ? (
-                  <button
-                    onClick={() => { handleRemoveSample(viewingSample.sample_id); setViewingSample(null); }}
-                    className="px-3 py-1.5 border border-red-600 text-red-600 rounded text-sm hover:bg-red-50"
-                  >
-                    Remove from Project
-                  </button>
-                ) : undefined
-              }
-            />
-          )}
-
-          {/* Pipeline Runs Tab */}
-          {activeTab === "runs" && (
-            <div>
-              {project.pipeline_runs.length === 0 ? (
-                <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">
-                  No pipeline runs yet.
-                </div>
-              ) : (
-                <div className="bg-white rounded-lg shadow overflow-hidden">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pipeline</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Version</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {project.pipeline_runs.map((run) => (
-                        <tr
-                          key={run.id}
-                          onClick={() => router.push(`/pipelines/runs/${run.id}`)}
-                          className="hover:bg-gray-50 cursor-pointer"
-                        >
-                          <td className="px-6 py-4 text-sm font-medium text-gray-900">{run.pipeline_name}</td>
-                          <td className="px-6 py-4 text-sm text-gray-500">{run.pipeline_version || "—"}</td>
-                          <td className="px-6 py-4">
-                            <StatusBadge status={run.status} />
-                          </td>
-                          <td className="px-6 py-4 text-sm text-gray-500">
-                            {run.created_at ? new Date(run.created_at).toLocaleDateString() : "—"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Analysis Tab */}
-          {activeTab === "analysis" && (
-            <SnapshotTimeline projectId={Number(projectId)} />
-          )}
-
-          {/* Provenance Tab */}
-          {activeTab === "provenance" && (
-            <div>
-              {provenanceLoading ? (
-                <div className="flex justify-center py-12">
-                  <LoadingSpinner size="lg" />
-                </div>
-              ) : provenance ? (
-                <div className="bg-white rounded-lg shadow p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-sm font-semibold text-gray-700">
-                      Provenance DAG — {provenance.nodes.length} nodes, {provenance.edges.length} edges
-                    </h3>
-                    <ProvenanceExportMenu entityType="projects" entityId={Number(projectId)} />
-                  </div>
-                  <div className="min-h-[400px]">
-                    <ProvenanceDAGComponent data={provenance} />
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
-              ) : (
-                <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">
-                  No provenance data available.
-                </div>
-              )}
-              <div className="mt-6">
-                <ProvenanceReportPanel
-                  entityType="project"
-                  entityId={Number(projectId)}
-                  entityName={project.name}
-                />
+              ))
+            )}
+          </div>
+        )}
+
+        {viewingSample && (
+          <DetailModal
+            title={viewingSample.external_id || `Sample #${viewingSample.sample_id}`}
+            onClose={() => setViewingSample(null)}
+            fields={[
+              { label: "Internal ID", value: `#${viewingSample.sample_id}` },
+              { label: "External ID", value: viewingSample.external_id },
+              { label: "Experiment", value: viewingSample.experiment_name },
+              { label: "Organism", value: viewingSample.organism },
+              { label: "Tissue Type", value: viewingSample.tissue_type },
+              { label: "QC Status", value: viewingSample.qc_status },
+              { label: "Added By", value: viewingSample.added_by },
+              { label: "Added", value: viewingSample.added_at ? new Date(viewingSample.added_at).toLocaleDateString() : null },
+              { label: "Notes", value: viewingSample.notes },
+            ]}
+            actions={
+              canModify ? (
+                <button
+                  onClick={() => { handleRemoveSample(viewingSample.sample_id); setViewingSample(null); }}
+                  className="px-3 py-1.5 border border-red-600 text-red-600 rounded text-sm hover:bg-red-50"
+                >
+                  Remove from Project
+                </button>
+              ) : undefined
+            }
+          />
+        )}
+
+        {/* Pipeline Runs Tab */}
+        {activeTab === "runs" && (
+          <div>
+            {project.pipeline_runs.length === 0 ? (
+              <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">
+                No pipeline runs yet.
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="bg-white rounded-lg shadow overflow-hidden">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pipeline</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Version</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {project.pipeline_runs.map((run) => (
+                      <tr
+                        key={run.id}
+                        onClick={() => router.push(`/pipelines/runs/${run.id}`)}
+                        className="hover:bg-gray-50 cursor-pointer"
+                      >
+                        <td className="px-6 py-4 text-sm font-medium text-gray-900">{run.pipeline_name}</td>
+                        <td className="px-6 py-4 text-sm text-gray-500">{run.pipeline_version || "—"}</td>
+                        <td className="px-6 py-4">
+                          <StatusBadge status={run.status} />
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-500">
+                          {run.created_at ? new Date(run.created_at).toLocaleDateString() : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
 
-          {/* Data Tab */}
-          {activeTab === "data" && (
-            <div>
-              <h2 className="text-lg font-semibold mb-4">Files</h2>
-              <FileBrowser projectId={project.id} />
-            </div>
-          )}
+        {/* Analysis Tab */}
+        {activeTab === "analysis" && (
+          <SnapshotTimeline projectId={Number(projectId)} />
+        )}
 
-          {/* Literature Tab */}
-          {activeTab === "literature" && (
-            <div>
-              <h2 className="text-lg font-semibold mb-4">Literature</h2>
-              <LiteratureTabPanel projectId={project.id} />
+        {/* Provenance Tab */}
+        {activeTab === "provenance" && (
+          <div>
+            {provenanceLoading ? (
+              <div className="flex justify-center py-12">
+                <LoadingSpinner size="lg" />
+              </div>
+            ) : provenance ? (
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold text-gray-700">
+                    Provenance DAG — {provenance.nodes.length} nodes, {provenance.edges.length} edges
+                  </h3>
+                  <ProvenanceExportMenu entityType="projects" entityId={Number(projectId)} />
+                </div>
+                <div className="min-h-[400px]">
+                  <ProvenanceDAGComponent data={provenance} />
+                </div>
+              </div>
+            ) : (
+              <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">
+                No provenance data available.
+              </div>
+            )}
+            <div className="mt-6">
+              <ProvenanceReportPanel
+                entityType="project"
+                entityId={Number(projectId)}
+                entityName={project.name}
+              />
             </div>
-          )}
-        </main>
+          </div>
+        )}
+
+        {/* Data Tab */}
+        {activeTab === "data" && (
+          <div>
+            <h2 className="text-lg font-semibold mb-4">Files</h2>
+            <FileBrowser projectId={project.id} />
+          </div>
+        )}
+
+        {/* Literature Tab */}
+        {activeTab === "literature" && (
+          <div>
+            <h2 className="text-lg font-semibold mb-4">Literature</h2>
+            <LiteratureTabPanel projectId={project.id} />
+          </div>
+        )}
+      </main>
 
       {/* Sample Picker Modal */}
       {showSamplePicker && (
@@ -579,12 +579,12 @@ export default function ProjectDetailPage() {
           </div>
         </div>
       )}
-    <ProjectExportModal
-      projectId={Number(projectId)}
-      projectName={project?.name ?? ""}
-      isOpen={showProjectExport}
-      onClose={() => setShowProjectExport(false)}
-    />
+      <ProjectExportModal
+        projectId={Number(projectId)}
+        projectName={project?.name ?? ""}
+        isOpen={showProjectExport}
+        onClose={() => setShowProjectExport(false)}
+      />
     </>
   );
 }

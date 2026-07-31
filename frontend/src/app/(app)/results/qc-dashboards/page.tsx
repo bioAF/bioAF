@@ -203,30 +203,30 @@ function QCDashboardsPageInner() {
   return (
     <>
       <main className="flex-1 overflow-y-auto p-6">
-          <h1 className="text-2xl font-bold mb-6">QC Dashboards</h1>
+        <h1 className="text-2xl font-bold mb-6">QC Dashboards</h1>
 
-          {selected ? (
-            <DashboardDetail
-              dashboard={selected}
-              onBack={() => setSelected(null)}
-              onRegenerate={regenerateQc}
-              regenerating={regenerating}
-              onExpandPlot={handleExpandPlot}
-            />
-          ) : loading ? (
-            <ContentLoading />
-          ) : dashboards.length === 0 ? (
-            <p className="text-gray-400 text-sm">
-              No QC dashboards yet. They are generated automatically when pipeline runs complete.
-            </p>
-          ) : (
-            <div className="bg-white rounded-lg shadow divide-y divide-gray-200">
-              {dashboards.map((d) => (
-                <QCDashboardListItem key={d.id} dashboard={d} onClick={() => viewDashboard(d.id)} />
-              ))}
-            </div>
-          )}
-        </main>
+        {selected ? (
+          <DashboardDetail
+            dashboard={selected}
+            onBack={() => setSelected(null)}
+            onRegenerate={regenerateQc}
+            regenerating={regenerating}
+            onExpandPlot={handleExpandPlot}
+          />
+        ) : loading ? (
+          <ContentLoading />
+        ) : dashboards.length === 0 ? (
+          <p className="text-gray-400 text-sm">
+            No QC dashboards yet. They are generated automatically when pipeline runs complete.
+          </p>
+        ) : (
+          <div className="bg-white rounded-lg shadow divide-y divide-gray-200">
+            {dashboards.map((d) => (
+              <QCDashboardListItem key={d.id} dashboard={d} onClick={() => viewDashboard(d.id)} />
+            ))}
+          </div>
+        )}
+      </main>
 
       {expandedPlot && (
         <PlotModal

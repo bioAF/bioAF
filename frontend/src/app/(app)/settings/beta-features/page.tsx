@@ -47,56 +47,56 @@ export default function BetaFeaturesPage() {
   };
 
   return (
-        <main className="flex-1 overflow-y-auto p-6">
-          <h1 className="text-2xl font-bold mb-2">Beta Features</h1>
-          <p className="text-sm text-gray-500 mb-6">
-            Preview features that are not yet enabled for everyone. Toggles here affect this entire
-            instance.
-          </p>
+    <main className="flex-1 overflow-y-auto p-6">
+      <h1 className="text-2xl font-bold mb-2">Beta Features</h1>
+      <p className="text-sm text-gray-500 mb-6">
+        Preview features that are not yet enabled for everyone. Toggles here affect this entire
+        instance.
+      </p>
 
-          {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
-          {state && !state.available && (
-            <p className="mb-4 text-sm text-amber-700">
-              Beta features are not available on this instance.
-            </p>
-          )}
+      {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
+      {state && !state.available && (
+        <p className="mb-4 text-sm text-amber-700">
+          Beta features are not available on this instance.
+        </p>
+      )}
 
-          {state && (
-            <div className="max-w-2xl space-y-3">
-              {Object.entries(state.flags).map(([key, enabled]) => {
-                const meta = BETA_FEATURE_LABELS[key] ?? { label: key, description: "" };
-                const disabled = !state.available || saving === key;
-                return (
-                  <div
-                    key={key}
-                    className="flex items-center justify-between rounded-lg border border-gray-200 p-4"
-                  >
-                    <div>
-                      <div className="font-medium text-gray-900">{meta.label}</div>
-                      {meta.description && <div className="text-sm text-gray-500">{meta.description}</div>}
-                    </div>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={enabled}
-                      aria-label={`Toggle ${meta.label}`}
-                      disabled={disabled}
-                      onClick={() => toggle(key, !enabled)}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                        enabled ? "bg-bioaf-600" : "bg-gray-300"
-                      } ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
-                    >
-                      <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                          enabled ? "translate-x-6" : "translate-x-1"
-                        }`}
-                      />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </main>
+      {state && (
+        <div className="max-w-2xl space-y-3">
+          {Object.entries(state.flags).map(([key, enabled]) => {
+            const meta = BETA_FEATURE_LABELS[key] ?? { label: key, description: "" };
+            const disabled = !state.available || saving === key;
+            return (
+              <div
+                key={key}
+                className="flex items-center justify-between rounded-lg border border-gray-200 p-4"
+              >
+                <div>
+                  <div className="font-medium text-gray-900">{meta.label}</div>
+                  {meta.description && <div className="text-sm text-gray-500">{meta.description}</div>}
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={enabled}
+                  aria-label={`Toggle ${meta.label}`}
+                  disabled={disabled}
+                  onClick={() => toggle(key, !enabled)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    enabled ? "bg-bioaf-600" : "bg-gray-300"
+                  } ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      enabled ? "translate-x-6" : "translate-x-1"
+                    }`}
+                  />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </main>
   );
 }

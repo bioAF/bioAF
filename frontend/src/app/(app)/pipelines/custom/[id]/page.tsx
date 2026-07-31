@@ -422,370 +422,370 @@ export default function CustomPipelineDetailPage() {
 
   return (
     <main className="flex-1 overflow-y-auto p-6">
-          {loading ? (
-            <ContentLoading />
-          ) : error || !pipeline ? (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">
-              {error || "Pipeline not found"}
-              <button
-                onClick={() => router.push("/pipelines/custom")}
-                className="ml-2 underline"
-              >
-                Back to list
-              </button>
-            </div>
-          ) : (
-            <>
-              <button
-                onClick={() => router.push("/pipelines/custom")}
-                className="text-sm text-bioaf-600 mb-4 hover:underline"
-              >
-                &larr; Back to custom pipelines
-              </button>
+      {loading ? (
+        <ContentLoading />
+      ) : error || !pipeline ? (
+        <div className="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">
+          {error || "Pipeline not found"}
+          <button
+            onClick={() => router.push("/pipelines/custom")}
+            className="ml-2 underline"
+          >
+            Back to list
+          </button>
+        </div>
+      ) : (
+        <>
+          <button
+            onClick={() => router.push("/pipelines/custom")}
+            className="text-sm text-bioaf-600 mb-4 hover:underline"
+          >
+            &larr; Back to custom pipelines
+          </button>
 
-              <div className="bg-white rounded-lg shadow mb-6">
-                <div className="p-6 flex items-start justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    {editingMeta ? (
-                      <div className="space-y-3">
-                        <input
-                          value={editName}
-                          onChange={(e) => setEditName(e.target.value)}
-                          className="w-full text-xl font-bold border rounded px-3 py-1.5"
-                        />
-                        <textarea
-                          value={editDescription}
-                          onChange={(e) => setEditDescription(e.target.value)}
-                          rows={2}
-                          placeholder="Description"
-                          className="w-full border rounded px-3 py-2 text-sm"
-                        />
-                        {metaError && <p className="text-sm text-red-600">{metaError}</p>}
-                        <div className="flex gap-2">
-                          <button
-                            onClick={handleSaveMeta}
-                            disabled={savingMeta || !editName.trim()}
-                            className="bg-bioaf-600 text-white px-4 py-1.5 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-                          >
-                            {savingMeta ? "Saving..." : "Save"}
-                          </button>
-                          <button
-                            onClick={() => {
-                              setEditingMeta(false);
-                              setEditName(pipeline.name);
-                              setEditDescription(pipeline.description ?? "");
-                              setMetaError(null);
-                            }}
-                            className="border px-4 py-1.5 rounded text-sm"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <h1 className="text-2xl font-bold truncate">{pipeline.name}</h1>
-                        {pipeline.description && (
-                          <p className="text-sm text-gray-500 mt-1">{pipeline.description}</p>
-                        )}
-                        <p className="text-xs text-gray-400 mt-2 font-mono">
-                          {pipeline.pipeline_key}
-                        </p>
-                      </>
-                    )}
-                  </div>
-                  {!editingMeta && (
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      {canLaunch && (
-                        <button
-                          onClick={handleLaunch}
-                          className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
-                        >
-                          Launch
-                        </button>
-                      )}
-                      {canEdit && (
-                        <button
-                          onClick={() => setEditingMeta(true)}
-                          className="border px-4 py-2 rounded-md text-sm"
-                        >
-                          Edit
-                        </button>
-                      )}
-                      {canDelete && (
-                        <button
-                          onClick={() => setShowDeleteConfirm(true)}
-                          className="text-red-500 text-sm px-2 py-2 hover:underline"
-                        >
-                          Delete
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="bg-white rounded-lg shadow">
-                <div className="px-6 py-4 border-b flex items-center justify-between">
-                  <h2 className="font-semibold text-lg">Versions</h2>
-                  {canEdit && (
-                    <button
-                      onClick={() => {
-                        setShowNewVersionForm((s) => !s);
-                        if (!showNewVersionForm) {
-                          seedVersionFormFromLatest(pipeline, envOptions);
-                        }
-                      }}
-                      className="bg-bioaf-600 text-white px-3 py-1.5 rounded text-sm hover:bg-bioaf-700"
-                    >
-                      {showNewVersionForm ? "Cancel" : "New Version"}
-                    </button>
-                  )}
-                </div>
-
-                {showNewVersionForm && canEdit && (
-                  <div className="p-6 border-b bg-gray-50">
-                    <h3 className="font-semibold mb-4">New Version</h3>
-                    <NewVersionForm
-                      versionForm={versionForm}
-                      setVersionForm={setVersionForm}
-                      readyEnvOptions={readyEnvOptions}
-                      repos={repos}
-                      addVariable={addVariable}
-                      updateVariable={updateVariable}
-                      removeVariable={removeVariable}
+          <div className="bg-white rounded-lg shadow mb-6">
+            <div className="p-6 flex items-start justify-between gap-4">
+              <div className="flex-1 min-w-0">
+                {editingMeta ? (
+                  <div className="space-y-3">
+                    <input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="w-full text-xl font-bold border rounded px-3 py-1.5"
                     />
-                    {versionError && (
-                      <p className="text-sm text-red-600 mt-3">{versionError}</p>
-                    )}
-                    <div className="mt-4 flex gap-2">
+                    <textarea
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                      rows={2}
+                      placeholder="Description"
+                      className="w-full border rounded px-3 py-2 text-sm"
+                    />
+                    {metaError && <p className="text-sm text-red-600">{metaError}</p>}
+                    <div className="flex gap-2">
                       <button
-                        onClick={handleCreateVersion}
-                        disabled={creatingVersion}
-                        className="bg-bioaf-600 text-white px-4 py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
+                        onClick={handleSaveMeta}
+                        disabled={savingMeta || !editName.trim()}
+                        className="bg-bioaf-600 text-white px-4 py-1.5 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
                       >
-                        {creatingVersion ? "Creating..." : "Create Version"}
+                        {savingMeta ? "Saving..." : "Save"}
                       </button>
                       <button
                         onClick={() => {
-                          setShowNewVersionForm(false);
-                          setVersionError(null);
+                          setEditingMeta(false);
+                          setEditName(pipeline.name);
+                          setEditDescription(pipeline.description ?? "");
+                          setMetaError(null);
                         }}
-                        className="border px-4 py-2 rounded text-sm"
+                        className="border px-4 py-1.5 rounded text-sm"
                       >
                         Cancel
                       </button>
                     </div>
                   </div>
+                ) : (
+                  <>
+                    <h1 className="text-2xl font-bold truncate">{pipeline.name}</h1>
+                    {pipeline.description && (
+                      <p className="text-sm text-gray-500 mt-1">{pipeline.description}</p>
+                    )}
+                    <p className="text-xs text-gray-400 mt-2 font-mono">
+                      {pipeline.pipeline_key}
+                    </p>
+                  </>
                 )}
-
-                <div className="divide-y">
-                  {pipeline.versions.map((version, idx) => {
-                    const previous = pipeline.versions[idx + 1] ?? null;
-                    const change = changeLabel(version, previous);
-                    const expanded = expandedVersionIds.has(version.id);
-                    const env = envOptionsById.get(version.environment_version_id);
-                    const repo =
-                      version.github_repo_id != null
-                        ? repoById.get(version.github_repo_id)
-                        : null;
-                    return (
-                      <div key={version.id} className="p-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-3 flex-wrap">
-                            <span className="font-mono font-semibold">
-                              v{version.version_number}
-                            </span>
-                            <span
-                              className={`px-2 py-0.5 text-xs rounded-full ${TONE_CLASSES[change.tone]}`}
-                            >
-                              {change.label}
-                            </span>
-                            <span
-                              className={`px-2 py-0.5 text-xs rounded-full ${
-                                version.status === "active"
-                                  ? "bg-green-100 text-green-700"
-                                  : "bg-gray-200 text-gray-600"
-                              }`}
-                            >
-                              {version.status}
-                            </span>
-                            <span className="text-xs text-gray-400">
-                              {new Date(version.created_at).toLocaleString()}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <button
-                              onClick={() => toggleVersion(version.id)}
-                              className="text-sm text-bioaf-600 hover:underline"
-                            >
-                              {expanded ? "Hide Details" : "Show Details"}
-                            </button>
-                            {canEdit && version.status === "active" && (
-                              <button
-                                onClick={() => handleDeprecate(version.id)}
-                                className="text-sm text-gray-500 hover:text-red-600 hover:underline"
-                              >
-                                Deprecate
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                        {expanded && (
-                          <div className="mt-4 pl-2 border-l-2 border-gray-200 space-y-3 text-sm">
-                            <DetailRow label="Code source">
-                              {version.code_source_type === "github_repo" ? (
-                                repo ? (
-                                  <span className="font-mono text-gray-700">
-                                    {repo.display_name} ({repo.git_ssh_url})
-                                  </span>
-                                ) : (
-                                  <span className="font-mono text-gray-500">
-                                    GitHub repo #{version.github_repo_id}
-                                  </span>
-                                )
-                              ) : version.code_source_type === "code_blob" ? (
-                                <span>Code blob</span>
-                              ) : (
-                                <span>Inline command</span>
-                              )}
-                            </DetailRow>
-                            <DetailRow label="Entrypoint">
-                              <code className="font-mono bg-gray-100 px-2 py-0.5 rounded">
-                                {version.entrypoint_command}
-                              </code>
-                            </DetailRow>
-                            {(version.code_source_type === "code_blob" ||
-                              version.code_source_type === "inline") &&
-                              version.code_content && (
-                                <div>
-                                  <div className="text-xs text-gray-500 mb-1">Code content</div>
-                                  <pre className="bg-gray-50 border rounded p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap max-h-72">
-                                    {version.code_content}
-                                  </pre>
-                                </div>
-                              )}
-                            <DetailRow label="Environment">
-                              {env ? (
-                                <span>
-                                  {env.env_name} v{env.version_number}{" "}
-                                  <span className="text-xs text-gray-400">
-                                    ({env.status})
-                                  </span>
-                                </span>
-                              ) : (
-                                <span className="text-gray-500">
-                                  Environment version #{version.environment_version_id}
-                                </span>
-                              )}
-                            </DetailRow>
-                            <DetailRow label="Resources">
-                              <span className="font-mono">
-                                CPU {version.cpu_request} / Memory {version.memory_request}
-                              </span>
-                            </DetailRow>
-                            <DetailRow label="Log file">
-                              {version.log_file_path ? (
-                                <code className="font-mono">{version.log_file_path}</code>
-                              ) : (
-                                <span className="text-gray-500">Default (terminal output)</span>
-                              )}
-                            </DetailRow>
-                            <div>
-                              <div className="text-xs text-gray-500 mb-1">Variables</div>
-                              {version.variables.length === 0 ? (
-                                <p className="text-gray-500 text-xs">No variables.</p>
-                              ) : (
-                                <table className="w-full text-xs border">
-                                  <thead className="bg-gray-100 text-gray-500 uppercase">
-                                    <tr>
-                                      <th className="px-2 py-1 text-left">Name</th>
-                                      <th className="px-2 py-1 text-left">Type</th>
-                                      <th className="px-2 py-1 text-left">Default</th>
-                                      <th className="px-2 py-1 text-left">Required</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {version.variables.map((v) => (
-                                      <tr key={v.id} className="border-t">
-                                        <td className="px-2 py-1 font-mono">
-                                          {v.variable_name}
-                                        </td>
-                                        <td className="px-2 py-1">{v.variable_type}</td>
-                                        <td className="px-2 py-1 font-mono">
-                                          {v.default_value ?? ""}
-                                        </td>
-                                        <td className="px-2 py-1">
-                                          {v.is_required ? "Yes" : "No"}
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {pipeline.versions.length === 0 && (
-                    <div className="p-12 text-center text-gray-500 text-sm">
-                      <p className="font-medium text-gray-700">No versions yet.</p>
-                      {canEdit && (
-                        <p className="mt-1 text-gray-500">
-                          A version holds the code, entrypoint command, environment, and
-                          variables. Click <span className="font-semibold">New Version</span>{" "}
-                          to define the first one and make this pipeline launchable.
-                        </p>
-                      )}
-                    </div>
+              </div>
+              {!editingMeta && (
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {canLaunch && (
+                    <button
+                      onClick={handleLaunch}
+                      className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
+                    >
+                      Launch
+                    </button>
+                  )}
+                  {canEdit && (
+                    <button
+                      onClick={() => setEditingMeta(true)}
+                      className="border px-4 py-2 rounded-md text-sm"
+                    >
+                      Edit
+                    </button>
+                  )}
+                  {canDelete && (
+                    <button
+                      onClick={() => setShowDeleteConfirm(true)}
+                      className="text-red-500 text-sm px-2 py-2 hover:underline"
+                    >
+                      Delete
+                    </button>
                   )}
                 </div>
-              </div>
-
-              {showLaunchDialog && (
-                <CustomPipelineLaunchDialog
-                  pipeline={pipeline}
-                  envOptionsById={envOptionsById}
-                  repoById={repoById}
-                  onClose={() => setShowLaunchDialog(false)}
-                  onLaunched={(runId) => {
-                    setShowLaunchDialog(false);
-                    router.push(`/pipelines/runs/${runId}`);
-                  }}
-                />
               )}
+            </div>
+          </div>
 
-              {showDeleteConfirm && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                  <div className="bg-white rounded-lg shadow-xl p-6 w-96">
-                    <h3 className="font-semibold text-lg mb-4">Delete Pipeline</h3>
-                    <p className="text-sm text-gray-600 mb-4">
-                      This will soft-delete <strong>{pipeline.name}</strong>. Existing pipeline
-                      runs are preserved.
-                    </p>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleDelete}
-                        disabled={deleting}
-                        className="flex-1 bg-red-600 text-white py-2 rounded text-sm hover:bg-red-700 disabled:opacity-50"
-                      >
-                        {deleting ? "Deleting..." : "Delete"}
-                      </button>
-                      <button
-                        onClick={() => setShowDeleteConfirm(false)}
-                        className="flex-1 border py-2 rounded text-sm"
-                      >
-                        Cancel
-                      </button>
+          <div className="bg-white rounded-lg shadow">
+            <div className="px-6 py-4 border-b flex items-center justify-between">
+              <h2 className="font-semibold text-lg">Versions</h2>
+              {canEdit && (
+                <button
+                  onClick={() => {
+                    setShowNewVersionForm((s) => !s);
+                    if (!showNewVersionForm) {
+                      seedVersionFormFromLatest(pipeline, envOptions);
+                    }
+                  }}
+                  className="bg-bioaf-600 text-white px-3 py-1.5 rounded text-sm hover:bg-bioaf-700"
+                >
+                  {showNewVersionForm ? "Cancel" : "New Version"}
+                </button>
+              )}
+            </div>
+
+            {showNewVersionForm && canEdit && (
+              <div className="p-6 border-b bg-gray-50">
+                <h3 className="font-semibold mb-4">New Version</h3>
+                <NewVersionForm
+                  versionForm={versionForm}
+                  setVersionForm={setVersionForm}
+                  readyEnvOptions={readyEnvOptions}
+                  repos={repos}
+                  addVariable={addVariable}
+                  updateVariable={updateVariable}
+                  removeVariable={removeVariable}
+                />
+                {versionError && (
+                  <p className="text-sm text-red-600 mt-3">{versionError}</p>
+                )}
+                <div className="mt-4 flex gap-2">
+                  <button
+                    onClick={handleCreateVersion}
+                    disabled={creatingVersion}
+                    className="bg-bioaf-600 text-white px-4 py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
+                  >
+                    {creatingVersion ? "Creating..." : "Create Version"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowNewVersionForm(false);
+                      setVersionError(null);
+                    }}
+                    className="border px-4 py-2 rounded text-sm"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="divide-y">
+              {pipeline.versions.map((version, idx) => {
+                const previous = pipeline.versions[idx + 1] ?? null;
+                const change = changeLabel(version, previous);
+                const expanded = expandedVersionIds.has(version.id);
+                const env = envOptionsById.get(version.environment_version_id);
+                const repo =
+                  version.github_repo_id != null
+                    ? repoById.get(version.github_repo_id)
+                    : null;
+                return (
+                  <div key={version.id} className="p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span className="font-mono font-semibold">
+                          v{version.version_number}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 text-xs rounded-full ${TONE_CLASSES[change.tone]}`}
+                        >
+                          {change.label}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 text-xs rounded-full ${
+                            version.status === "active"
+                              ? "bg-green-100 text-green-700"
+                              : "bg-gray-200 text-gray-600"
+                          }`}
+                        >
+                          {version.status}
+                        </span>
+                        <span className="text-xs text-gray-400">
+                          {new Date(version.created_at).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => toggleVersion(version.id)}
+                          className="text-sm text-bioaf-600 hover:underline"
+                        >
+                          {expanded ? "Hide Details" : "Show Details"}
+                        </button>
+                        {canEdit && version.status === "active" && (
+                          <button
+                            onClick={() => handleDeprecate(version.id)}
+                            className="text-sm text-gray-500 hover:text-red-600 hover:underline"
+                          >
+                            Deprecate
+                          </button>
+                        )}
+                      </div>
                     </div>
+
+                    {expanded && (
+                      <div className="mt-4 pl-2 border-l-2 border-gray-200 space-y-3 text-sm">
+                        <DetailRow label="Code source">
+                          {version.code_source_type === "github_repo" ? (
+                            repo ? (
+                              <span className="font-mono text-gray-700">
+                                {repo.display_name} ({repo.git_ssh_url})
+                              </span>
+                            ) : (
+                              <span className="font-mono text-gray-500">
+                                GitHub repo #{version.github_repo_id}
+                              </span>
+                            )
+                          ) : version.code_source_type === "code_blob" ? (
+                            <span>Code blob</span>
+                          ) : (
+                            <span>Inline command</span>
+                          )}
+                        </DetailRow>
+                        <DetailRow label="Entrypoint">
+                          <code className="font-mono bg-gray-100 px-2 py-0.5 rounded">
+                            {version.entrypoint_command}
+                          </code>
+                        </DetailRow>
+                        {(version.code_source_type === "code_blob" ||
+                          version.code_source_type === "inline") &&
+                          version.code_content && (
+                            <div>
+                              <div className="text-xs text-gray-500 mb-1">Code content</div>
+                              <pre className="bg-gray-50 border rounded p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap max-h-72">
+                                {version.code_content}
+                              </pre>
+                            </div>
+                          )}
+                        <DetailRow label="Environment">
+                          {env ? (
+                            <span>
+                              {env.env_name} v{env.version_number}{" "}
+                              <span className="text-xs text-gray-400">
+                                ({env.status})
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="text-gray-500">
+                              Environment version #{version.environment_version_id}
+                            </span>
+                          )}
+                        </DetailRow>
+                        <DetailRow label="Resources">
+                          <span className="font-mono">
+                            CPU {version.cpu_request} / Memory {version.memory_request}
+                          </span>
+                        </DetailRow>
+                        <DetailRow label="Log file">
+                          {version.log_file_path ? (
+                            <code className="font-mono">{version.log_file_path}</code>
+                          ) : (
+                            <span className="text-gray-500">Default (terminal output)</span>
+                          )}
+                        </DetailRow>
+                        <div>
+                          <div className="text-xs text-gray-500 mb-1">Variables</div>
+                          {version.variables.length === 0 ? (
+                            <p className="text-gray-500 text-xs">No variables.</p>
+                          ) : (
+                            <table className="w-full text-xs border">
+                              <thead className="bg-gray-100 text-gray-500 uppercase">
+                                <tr>
+                                  <th className="px-2 py-1 text-left">Name</th>
+                                  <th className="px-2 py-1 text-left">Type</th>
+                                  <th className="px-2 py-1 text-left">Default</th>
+                                  <th className="px-2 py-1 text-left">Required</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {version.variables.map((v) => (
+                                  <tr key={v.id} className="border-t">
+                                    <td className="px-2 py-1 font-mono">
+                                      {v.variable_name}
+                                    </td>
+                                    <td className="px-2 py-1">{v.variable_type}</td>
+                                    <td className="px-2 py-1 font-mono">
+                                      {v.default_value ?? ""}
+                                    </td>
+                                    <td className="px-2 py-1">
+                                      {v.is_required ? "Yes" : "No"}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
+                );
+              })}
+              {pipeline.versions.length === 0 && (
+                <div className="p-12 text-center text-gray-500 text-sm">
+                  <p className="font-medium text-gray-700">No versions yet.</p>
+                  {canEdit && (
+                    <p className="mt-1 text-gray-500">
+                      A version holds the code, entrypoint command, environment, and
+                      variables. Click <span className="font-semibold">New Version</span>{" "}
+                      to define the first one and make this pipeline launchable.
+                    </p>
+                  )}
                 </div>
               )}
-            </>
+            </div>
+          </div>
+
+          {showLaunchDialog && (
+            <CustomPipelineLaunchDialog
+              pipeline={pipeline}
+              envOptionsById={envOptionsById}
+              repoById={repoById}
+              onClose={() => setShowLaunchDialog(false)}
+              onLaunched={(runId) => {
+                setShowLaunchDialog(false);
+                router.push(`/pipelines/runs/${runId}`);
+              }}
+            />
           )}
+
+          {showDeleteConfirm && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg shadow-xl p-6 w-96">
+                <h3 className="font-semibold text-lg mb-4">Delete Pipeline</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  This will soft-delete <strong>{pipeline.name}</strong>. Existing pipeline
+                  runs are preserved.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleDelete}
+                    disabled={deleting}
+                    className="flex-1 bg-red-600 text-white py-2 rounded text-sm hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {deleting ? "Deleting..." : "Delete"}
+                  </button>
+                  <button
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="flex-1 border py-2 rounded text-sm"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </main>
   );
 }

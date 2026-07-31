@@ -386,525 +386,525 @@ export default function PipelineRunDetailPage() {
   return (
     <>
       <main className="flex-1 overflow-y-auto p-6">
-          {loading ? (
-            <ContentLoading />
-          ) : run && (
-          <>
-          <div className="flex items-center gap-4 mb-6">
-            <button onClick={() => router.push("/pipelines/runs")} className="text-gray-500 hover:text-gray-700">← Back</button>
-            <h1 className="text-2xl font-bold">Run #{run.id} — {run.pipeline_name}</h1>
-            <span className={`px-2 py-0.5 text-xs rounded-full ${statusBadgeClass("pipelineRun", run.status)}`}>{run.status}</span>
-            {isActive && (
-              <button onClick={handleCancel} className="ml-auto bg-red-600 text-white px-4 py-1.5 rounded text-sm hover:bg-red-700">Cancel</button>
-            )}
-            {!isActive && (
-              <button onClick={() => handleReproduce()} className="ml-auto bg-bioaf-600 text-white px-4 py-1.5 rounded text-sm hover:bg-bioaf-700">Reproduce</button>
-            )}
-          </div>
+        {loading ? (
+          <ContentLoading />
+        ) : run && (
+        <>
+        <div className="flex items-center gap-4 mb-6">
+          <button onClick={() => router.push("/pipelines/runs")} className="text-gray-500 hover:text-gray-700">← Back</button>
+          <h1 className="text-2xl font-bold">Run #{run.id} — {run.pipeline_name}</h1>
+          <span className={`px-2 py-0.5 text-xs rounded-full ${statusBadgeClass("pipelineRun", run.status)}`}>{run.status}</span>
+          {isActive && (
+            <button onClick={handleCancel} className="ml-auto bg-red-600 text-white px-4 py-1.5 rounded text-sm hover:bg-red-700">Cancel</button>
+          )}
+          {!isActive && (
+            <button onClick={() => handleReproduce()} className="ml-auto bg-bioaf-600 text-white px-4 py-1.5 rounded text-sm hover:bg-bioaf-700">Reproduce</button>
+          )}
+        </div>
 
-          {/* Timing metadata */}
-          <div className="bg-white rounded-lg shadow p-4 mb-6 flex gap-6">
-            <div><span className="text-xs text-gray-500">Started</span><p className="text-sm font-medium">{formatDateTime(run.started_at)}</p></div>
-            {run.completed_at && (
-              <div><span className="text-xs text-gray-500">Completed</span><p className="text-sm font-medium">{formatDateTime(run.completed_at)}</p></div>
-            )}
-            <div><span className="text-xs text-gray-500">Duration</span><p className="text-sm font-medium">{formatDuration(run.started_at, run.completed_at)}</p></div>
-            {run.progress?.retries && run.progress.retries.length > 0 && (
-              <div>
-                <span className="text-xs text-gray-500">Step retries</span>
-                <p>
+        {/* Timing metadata */}
+        <div className="bg-white rounded-lg shadow p-4 mb-6 flex gap-6">
+          <div><span className="text-xs text-gray-500">Started</span><p className="text-sm font-medium">{formatDateTime(run.started_at)}</p></div>
+          {run.completed_at && (
+            <div><span className="text-xs text-gray-500">Completed</span><p className="text-sm font-medium">{formatDateTime(run.completed_at)}</p></div>
+          )}
+          <div><span className="text-xs text-gray-500">Duration</span><p className="text-sm font-medium">{formatDuration(run.started_at, run.completed_at)}</p></div>
+          {run.progress?.retries && run.progress.retries.length > 0 && (
+            <div>
+              <span className="text-xs text-gray-500">Step retries</span>
+              <p>
+                <button
+                  onClick={() => setShowRetriesModal(true)}
+                  className="text-sm font-medium text-bioaf-600 hover:underline"
+                  data-testid="retries-pill"
+                >
+                  {run.progress.retries.length}
+                </button>
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Overall progress */}
+        {run.progress && (
+          <div className="bg-white rounded-lg shadow p-4 mb-6">
+            <div className="flex items-center gap-4">
+              <div className="flex-1">
+                <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
+                  <div className="h-full bg-bioaf-500 rounded-full transition-all" style={{ width: `${run.progress.percent_complete}%` }} />
+                </div>
+              </div>
+              <span className="text-sm font-medium">{Math.round(run.progress.percent_complete)}%</span>
+              {!isCustomRun && (
+                <span className="text-xs text-gray-500">
+                  {run.progress.completed + run.progress.cached}/{run.progress.total_processes} processes
+                </span>
+              )}
+            </div>
+            {run.failure_reason === "oom" && (
+              <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
+                <span className="text-amber-600 text-lg" title="Memory">&#x1F4BE;</span>
+                <div className="flex-1">
+                  <p className="text-sm text-amber-800 font-medium">This pipeline ran out of memory.</p>
+                  <p className="text-sm text-amber-700 mt-1">The current pipeline node size does not have enough RAM for this workload.</p>
                   <button
-                    onClick={() => setShowRetriesModal(true)}
-                    className="text-sm font-medium text-bioaf-600 hover:underline"
-                    data-testid="retries-pill"
+                    onClick={() => router.push("/infrastructure/components")}
+                    className="mt-2 px-3 py-1 text-sm bg-amber-600 text-white rounded hover:bg-amber-700"
                   >
-                    {run.progress.retries.length}
+                    Update node size
                   </button>
-                </p>
+                </div>
               </div>
             )}
-          </div>
-
-          {/* Overall progress */}
-          {run.progress && (
-            <div className="bg-white rounded-lg shadow p-4 mb-6">
-              <div className="flex items-center gap-4">
-                <div className="flex-1">
-                  <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
-                    <div className="h-full bg-bioaf-500 rounded-full transition-all" style={{ width: `${run.progress.percent_complete}%` }} />
-                  </div>
+            {run.failure_reason === "preemption_exhausted" && (
+              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-sm text-blue-800 font-medium">This pipeline was interrupted multiple times by Spot instance reclamation.</p>
+                <p className="text-sm text-blue-700 mt-1">This is unusual and typically resolves on its own.</p>
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={() => handleReproduce()}
+                    className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                  >
+                    Re-run pipeline
+                  </button>
+                  <button
+                    onClick={() => router.push("/infrastructure/components")}
+                    className="px-3 py-1 text-sm border border-blue-300 text-blue-700 rounded hover:bg-blue-50"
+                  >
+                    Disable Spot instances
+                  </button>
                 </div>
-                <span className="text-sm font-medium">{Math.round(run.progress.percent_complete)}%</span>
-                {!isCustomRun && (
-                  <span className="text-xs text-gray-500">
-                    {run.progress.completed + run.progress.cached}/{run.progress.total_processes} processes
+              </div>
+            )}
+            {run.error_message && run.failure_reason !== "oom" && run.failure_reason !== "preemption_exhausted" && (
+              <p className="text-sm text-red-600 mt-2">{run.error_message}</p>
+            )}
+          </div>
+        )}
+
+        {/* MINSEQE metadata (NF-Core only) */}
+        {!isCustomRun && (run.reference_genome || run.alignment_algorithm) && (
+          <div className="bg-white rounded-lg shadow p-4 mb-6 flex gap-6">
+            {run.reference_genome && (
+              <div><span className="text-xs text-gray-500">Reference Genome</span><p className="text-sm font-medium">{run.reference_genome}</p></div>
+            )}
+            {run.alignment_algorithm && (
+              <div><span className="text-xs text-gray-500">Alignment Algorithm</span><p className="text-sm font-medium">{run.alignment_algorithm}</p></div>
+            )}
+          </div>
+        )}
+
+        {/* Custom pipeline overview */}
+        {isCustomRun && customOverview && (
+          <div className="bg-white rounded-lg shadow p-4 mb-6 space-y-3">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+              <div>
+                <span className="text-xs text-gray-500 block">Pipeline</span>
+                <a
+                  href={`/pipelines/custom/${customOverview.pipeline_id}`}
+                  className="text-bioaf-600 hover:underline font-medium"
+                >
+                  {customOverview.pipeline_name}
+                </a>
+              </div>
+              <div>
+                <span className="text-xs text-gray-500 block">Version</span>
+                <span className="font-mono">v{customOverview.version_number}</span>
+              </div>
+              <div>
+                <span className="text-xs text-gray-500 block">Code source</span>
+                <span>
+                  {customOverview.code_source_type === "github_repo"
+                    ? "GitHub repo"
+                    : customOverview.code_source_type === "code_blob"
+                      ? "Code blob"
+                      : "Inline command"}
+                </span>
+              </div>
+              <div>
+                <span className="text-xs text-gray-500 block">Entrypoint</span>
+                <code className="font-mono text-xs bg-gray-100 px-2 py-0.5 rounded">
+                  {customOverview.entrypoint_command}
+                </code>
+              </div>
+              <div>
+                <span className="text-xs text-gray-500 block">Environment</span>
+                {customOverview.environment ? (
+                  <span>
+                    {customOverview.environment.environment_name} v
+                    {customOverview.environment.version_number}.
+                    {customOverview.environment.build_number}
                   </span>
+                ) : (
+                  <span className="text-gray-500">—</span>
                 )}
               </div>
-              {run.failure_reason === "oom" && (
-                <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
-                  <span className="text-amber-600 text-lg" title="Memory">&#x1F4BE;</span>
-                  <div className="flex-1">
-                    <p className="text-sm text-amber-800 font-medium">This pipeline ran out of memory.</p>
-                    <p className="text-sm text-amber-700 mt-1">The current pipeline node size does not have enough RAM for this workload.</p>
-                    <button
-                      onClick={() => router.push("/infrastructure/components")}
-                      className="mt-2 px-3 py-1 text-sm bg-amber-600 text-white rounded hover:bg-amber-700"
-                    >
-                      Update node size
-                    </button>
-                  </div>
+              <div>
+                <span className="text-xs text-gray-500 block">Resources</span>
+                <span className="font-mono">
+                  CPU {customOverview.cpu_request} / Memory {customOverview.memory_request}
+                </span>
+              </div>
+            </div>
+            {run.parameters && Object.keys(run.parameters).length > 0 && (
+              <div>
+                <span className="text-xs text-gray-500 block mb-1">Variables used</span>
+                <table className="text-xs border w-full">
+                  <thead className="bg-gray-50 text-gray-500 uppercase">
+                    <tr>
+                      <th className="px-2 py-1 text-left">Name</th>
+                      <th className="px-2 py-1 text-left">Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(run.parameters).map(([key, value]) => (
+                      <tr key={key} className="border-t">
+                        <td className="px-2 py-1 font-mono">{key}</td>
+                        <td className="px-2 py-1 font-mono">
+                          {typeof value === "string" ? value : JSON.stringify(value)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Provider details: backend-specific metadata, rendered generically
+            from provider_metadata so it works for any compute backend. */}
+        {run.provider_metadata && Object.keys(run.provider_metadata).length > 0 && (
+          <details className="bg-white rounded-lg shadow p-4 mb-6" data-testid="provider-details">
+            <summary className="text-sm text-gray-600 cursor-pointer">Provider details</summary>
+            <div className="mt-3 flex flex-wrap gap-6">
+              {Object.entries(run.provider_metadata).map(([key, value]) => (
+                <div key={key}>
+                  <span className="text-xs text-gray-500">{key}</span>
+                  <p className="text-sm font-mono break-all">{String(value)}</p>
                 </div>
-              )}
-              {run.failure_reason === "preemption_exhausted" && (
-                <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                  <p className="text-sm text-blue-800 font-medium">This pipeline was interrupted multiple times by Spot instance reclamation.</p>
-                  <p className="text-sm text-blue-700 mt-1">This is unusual and typically resolves on its own.</p>
-                  <div className="flex gap-2 mt-2">
-                    <button
-                      onClick={() => handleReproduce()}
-                      className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-                    >
-                      Re-run pipeline
-                    </button>
-                    <button
-                      onClick={() => router.push("/infrastructure/components")}
-                      className="px-3 py-1 text-sm border border-blue-300 text-blue-700 rounded hover:bg-blue-50"
-                    >
-                      Disable Spot instances
-                    </button>
+              ))}
+            </div>
+          </details>
+        )}
+
+        {/* Tabs */}
+        <div className="border-b border-gray-200 mb-6">
+          <nav className="flex -mb-px space-x-8">
+            {tabs.map((tab) => (
+              <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+                className={`py-2 px-1 border-b-2 text-sm font-medium ${activeTab === tab.key ? "border-bioaf-500 text-bioaf-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+              >{tab.label}</button>
+            ))}
+          </nav>
+        </div>
+
+        {/* Parameters tab */}
+        {activeTab === "parameters" && (
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-lg font-semibold mb-4">Parameters</h2>
+            {run.parameters ? (
+              <pre className="text-sm bg-gray-50 p-4 rounded overflow-auto max-h-96">{JSON.stringify(run.parameters, null, 2)}</pre>
+            ) : <p className="text-gray-400">No parameters recorded</p>}
+          </div>
+        )}
+
+        {/* Provenance tab */}
+        {activeTab === "provenance" && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold">Provenance</h2>
+                <ProvenanceExportMenu entityType="pipeline-runs" entityId={Number(runId)} />
+              </div>
+
+              {/* Input files as readable records (project / experiment / sample
+                  / filename) instead of bare file IDs. */}
+              {(() => {
+                const inputFiles =
+                  (provenance?.input_files as
+                    | {
+                        file_id: number;
+                        filename: string;
+                        project?: { id: number; name: string } | null;
+                        experiment?: { id: number; name: string } | null;
+                        samples?: { id: number; external_id: string | null }[];
+                      }[]
+                    | undefined) ?? [];
+                if (inputFiles.length === 0) return null;
+                return (
+                  <div className="mb-6">
+                    <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                      Input Files ({inputFiles.length})
+                    </h3>
+                    <div className="overflow-x-auto border rounded">
+                      <table className="min-w-full text-sm">
+                        <thead className="bg-gray-50 text-gray-600">
+                          <tr>
+                            <th className="text-left px-3 py-2 font-medium">Project</th>
+                            <th className="text-left px-3 py-2 font-medium">Experiment</th>
+                            <th className="text-left px-3 py-2 font-medium">Sample</th>
+                            <th className="text-left px-3 py-2 font-medium">File</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {inputFiles.map((f) => (
+                            <tr key={f.file_id}>
+                              <td className="px-3 py-2">{f.project?.name ?? "-"}</td>
+                              <td className="px-3 py-2">{f.experiment?.name ?? "-"}</td>
+                              <td className="px-3 py-2">
+                                {f.samples && f.samples.length > 0
+                                  ? f.samples
+                                      .map((s) => s.external_id || `sample ${s.id}`)
+                                      .join(", ")
+                                  : "-"}
+                              </td>
+                              <td className="px-3 py-2 font-mono text-xs">{f.filename}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
+                );
+              })()}
+
+              {provenance ? (
+                <pre className="text-sm bg-gray-50 p-4 rounded overflow-auto max-h-96">
+                  {JSON.stringify(
+                    references.length > 0
+                      ? {
+                          ...provenance,
+                          reference_datasets: references.map((ref) => ({
+                            name: ref.name,
+                            version: ref.version,
+                            status: ref.status,
+                            ...(ref.status === "deprecated"
+                              ? {
+                                  warning: "This reference dataset has been deprecated.",
+                                  ...(ref.deprecation_note ? { deprecation_note: ref.deprecation_note } : {}),
+                                  ...(ref.superseded_by_id ? { superseded_by_id: ref.superseded_by_id } : {}),
+                                }
+                              : {}),
+                          })),
+                        }
+                      : provenance,
+                    null,
+                    2,
+                  )}
+                </pre>
+              ) : <LoadingSpinner size="sm" />}
+            </div>
+
+            {/* Reference datasets in provenance view */}
+            {references.length > 0 && (
+              <div className="bg-white rounded-lg shadow p-6">
+                <h3 className="text-md font-semibold mb-3">Reference Datasets</h3>
+                <div className="space-y-2">
+                  {references.map((ref) => (
+                    <div key={ref.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-md">
+                      <div className="flex-1">
+                        <span className="font-medium text-sm">{ref.name}</span>
+                        <span className="text-gray-500 text-sm ml-2">v{ref.version}</span>
+                      </div>
+                      <ReferenceStatusBadge status={ref.status} />
+                      {ref.status === "deprecated" && (
+                        <span className="text-amber-600 text-xs">
+                          Deprecated{ref.deprecation_note ? `: ${ref.deprecation_note}` : ""}
+                        </span>
+                      )}
+                    </div>
+                  ))}
                 </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Report tab */}
+        {activeTab === "report" && showReportTab && (
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-lg font-semibold mb-4">
+              {isCustomRun ? "Pipeline Report" : "Nextflow Report"}
+            </h2>
+            {report ? (
+              isCustomRun && customReportFormat === "md" ? (
+                <div
+                  className="prose prose-sm max-w-none"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(report) }}
+                />
+              ) : (
+                <iframe
+                  srcDoc={report}
+                  className="w-full h-[600px] border rounded"
+                  title={isCustomRun ? "Pipeline Report" : "Nextflow Report"}
+                />
+              )
+            ) : isActive ? (
+              <p className="text-gray-400">Reports are available after the pipeline run completes.</p>
+            ) : reportLoading ? (
+              <div className="flex items-center gap-2 text-gray-400"><LoadingSpinner size="sm" /><span>Loading report...</span></div>
+            ) : (
+              <p className="text-gray-400">No report available.</p>
+            )}
+          </div>
+        )}
+
+        {/* Logs tab */}
+        {activeTab === "logs" && (
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center gap-4 mb-4">
+              <h2 className="text-lg font-semibold">Logs</h2>
+              {!run.compute_job_ref && run.processes.length > 0 && (
+                <select value={selectedProcess} onChange={(e) => setSelectedProcess(e.target.value)} className="border rounded px-3 py-1.5 text-sm">
+                  <option value="">Select process...</option>
+                  {run.processes.map((p) => <option key={p.id} value={p.process_name}>{p.process_name}</option>)}
+                </select>
               )}
-              {run.error_message && run.failure_reason !== "oom" && run.failure_reason !== "preemption_exhausted" && (
-                <p className="text-sm text-red-600 mt-2">{run.error_message}</p>
+              {isCustomRun && logs.pod_logs_available && (
+                <button
+                  onClick={() => {
+                    const next = !showSystemLogs;
+                    setShowSystemLogs(next);
+                    if (next && systemLogs == null) {
+                      void loadSystemLogs();
+                    }
+                  }}
+                  className={`ml-auto text-xs px-3 py-1 rounded border ${
+                    showSystemLogs
+                      ? "bg-bioaf-600 text-white border-bioaf-600"
+                      : "border-gray-300 text-gray-700 hover:bg-gray-50"
+                  }`}
+                >
+                  {showSystemLogs ? "Hide System Logs" : "Show System Logs"}
+                </button>
               )}
             </div>
-          )}
 
-          {/* MINSEQE metadata (NF-Core only) */}
-          {!isCustomRun && (run.reference_genome || run.alignment_algorithm) && (
-            <div className="bg-white rounded-lg shadow p-4 mb-6 flex gap-6">
-              {run.reference_genome && (
-                <div><span className="text-xs text-gray-500">Reference Genome</span><p className="text-sm font-medium">{run.reference_genome}</p></div>
-              )}
-              {run.alignment_algorithm && (
-                <div><span className="text-xs text-gray-500">Alignment Algorithm</span><p className="text-sm font-medium">{run.alignment_algorithm}</p></div>
-              )}
-            </div>
-          )}
+            {isCustomRun && logs.custom_log_pending && customOverview?.log_file_path && (
+              <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
+                Custom log file ({customOverview.log_file_path}) will be available after
+                completion. Showing terminal output.
+              </div>
+            )}
+            {isCustomRun && logs.custom_log_missing && (
+              <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded text-sm text-amber-800">
+                Custom log file not available. Showing terminal output.
+              </div>
+            )}
 
-          {/* Custom pipeline overview */}
-          {isCustomRun && customOverview && (
-            <div className="bg-white rounded-lg shadow p-4 mb-6 space-y-3">
-              <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                <div>
-                  <span className="text-xs text-gray-500 block">Pipeline</span>
-                  <a
-                    href={`/pipelines/custom/${customOverview.pipeline_id}`}
-                    className="text-bioaf-600 hover:underline font-medium"
-                  >
-                    {customOverview.pipeline_name}
-                  </a>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500 block">Version</span>
-                  <span className="font-mono">v{customOverview.version_number}</span>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500 block">Code source</span>
-                  <span>
-                    {customOverview.code_source_type === "github_repo"
-                      ? "GitHub repo"
-                      : customOverview.code_source_type === "code_blob"
-                        ? "Code blob"
-                        : "Inline command"}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500 block">Entrypoint</span>
-                  <code className="font-mono text-xs bg-gray-100 px-2 py-0.5 rounded">
-                    {customOverview.entrypoint_command}
-                  </code>
-                </div>
-                <div>
-                  <span className="text-xs text-gray-500 block">Environment</span>
-                  {customOverview.environment ? (
-                    <span>
-                      {customOverview.environment.environment_name} v
-                      {customOverview.environment.version_number}.
-                      {customOverview.environment.build_number}
-                    </span>
-                  ) : (
-                    <span className="text-gray-500">—</span>
+            {(run.compute_job_ref || selectedProcess) ? (
+              logsLoading ? (
+                <div className="flex items-center gap-2 text-gray-400"><LoadingSpinner size="sm" /><span>Loading logs...</span></div>
+              ) : (
+                <div className="space-y-4">
+                  <div>
+                    <pre className="text-xs bg-gray-900 text-green-400 p-4 rounded overflow-auto max-h-96 whitespace-pre-wrap">{logs.stdout || "(empty)"}</pre>
+                  </div>
+                  {logs.stderr && (
+                    <div>
+                      <h3 className="text-sm font-medium mb-1">stderr</h3>
+                      <pre className="text-xs bg-gray-900 text-red-400 p-4 rounded overflow-auto max-h-64 whitespace-pre-wrap">{logs.stderr || "(empty)"}</pre>
+                    </div>
+                  )}
+
+                  {isCustomRun && showSystemLogs && (
+                    <div className="border-t pt-4">
+                      <h3 className="text-sm font-medium mb-2">System Logs (pod stdout/stderr)</h3>
+                      {systemLogsLoading ? (
+                        <div className="flex items-center gap-2 text-gray-400">
+                          <LoadingSpinner size="sm" /><span>Loading system logs...</span>
+                        </div>
+                      ) : (
+                        <pre className="text-xs bg-gray-900 text-green-400 p-4 rounded overflow-auto max-h-96 whitespace-pre-wrap">
+                          {systemLogs?.stdout || "(empty)"}
+                        </pre>
+                      )}
+                    </div>
                   )}
                 </div>
-                <div>
-                  <span className="text-xs text-gray-500 block">Resources</span>
-                  <span className="font-mono">
-                    CPU {customOverview.cpu_request} / Memory {customOverview.memory_request}
-                  </span>
-                </div>
-              </div>
-              {run.parameters && Object.keys(run.parameters).length > 0 && (
-                <div>
-                  <span className="text-xs text-gray-500 block mb-1">Variables used</span>
-                  <table className="text-xs border w-full">
-                    <thead className="bg-gray-50 text-gray-500 uppercase">
-                      <tr>
-                        <th className="px-2 py-1 text-left">Name</th>
-                        <th className="px-2 py-1 text-left">Value</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {Object.entries(run.parameters).map(([key, value]) => (
-                        <tr key={key} className="border-t">
-                          <td className="px-2 py-1 font-mono">{key}</td>
-                          <td className="px-2 py-1 font-mono">
-                            {typeof value === "string" ? value : JSON.stringify(value)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Provider details: backend-specific metadata, rendered generically
-              from provider_metadata so it works for any compute backend. */}
-          {run.provider_metadata && Object.keys(run.provider_metadata).length > 0 && (
-            <details className="bg-white rounded-lg shadow p-4 mb-6" data-testid="provider-details">
-              <summary className="text-sm text-gray-600 cursor-pointer">Provider details</summary>
-              <div className="mt-3 flex flex-wrap gap-6">
-                {Object.entries(run.provider_metadata).map(([key, value]) => (
-                  <div key={key}>
-                    <span className="text-xs text-gray-500">{key}</span>
-                    <p className="text-sm font-mono break-all">{String(value)}</p>
-                  </div>
-                ))}
-              </div>
-            </details>
-          )}
-
-          {/* Tabs */}
-          <div className="border-b border-gray-200 mb-6">
-            <nav className="flex -mb-px space-x-8">
-              {tabs.map((tab) => (
-                <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-                  className={`py-2 px-1 border-b-2 text-sm font-medium ${activeTab === tab.key ? "border-bioaf-500 text-bioaf-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
-                >{tab.label}</button>
-              ))}
-            </nav>
+              )
+            ) : <p className="text-gray-400">Select a process to view logs</p>}
           </div>
+        )}
 
-          {/* Parameters tab */}
-          {activeTab === "parameters" && (
-            <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-lg font-semibold mb-4">Parameters</h2>
-              {run.parameters ? (
-                <pre className="text-sm bg-gray-50 p-4 rounded overflow-auto max-h-96">{JSON.stringify(run.parameters, null, 2)}</pre>
-              ) : <p className="text-gray-400">No parameters recorded</p>}
+        {/* Results tab */}
+        {activeTab === "results" && (
+          <PipelineRunResultsTab pipelineRunId={run.id} />
+        )}
+
+        {/* Review tab */}
+        {activeTab === "review" && (
+          <ReviewPanel pipelineRunId={run.id} userRole={getUserRole()} onReviewSubmitted={loadRun} />
+        )}
+
+        {/* AI Review tab (ADR-055) */}
+        {activeTab === "agent_review" && (
+          <div className="space-y-4">
+            <AgentReviewButtons
+              mode="pipeline_run"
+              runId={run.id}
+              experimentId={run.experiment?.id ?? null}
+              pipelineStatus={run.status}
+              onTriggered={() => setAiReviewSignal((v) => v + 1)}
+            />
+            <AgentReviewTab
+              entityType="pipeline_run"
+              entityId={run.id}
+              refreshSignal={aiReviewSignal}
+            />
+          </div>
+        )}
+
+        {/* References Used section — shown below active tab content */}
+        {references.length > 0 && (
+          <div className="bg-white rounded-lg shadow mt-6">
+            <div className="p-6 border-b">
+              <h2 className="text-lg font-semibold">References Used</h2>
             </div>
-          )}
-
-          {/* Provenance tab */}
-          {activeTab === "provenance" && (
-            <div className="space-y-6">
-              <div className="bg-white rounded-lg shadow p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold">Provenance</h2>
-                  <ProvenanceExportMenu entityType="pipeline-runs" entityId={Number(runId)} />
-                </div>
-
-                {/* Input files as readable records (project / experiment / sample
-                    / filename) instead of bare file IDs. */}
-                {(() => {
-                  const inputFiles =
-                    (provenance?.input_files as
-                      | {
-                          file_id: number;
-                          filename: string;
-                          project?: { id: number; name: string } | null;
-                          experiment?: { id: number; name: string } | null;
-                          samples?: { id: number; external_id: string | null }[];
-                        }[]
-                      | undefined) ?? [];
-                  if (inputFiles.length === 0) return null;
-                  return (
-                    <div className="mb-6">
-                      <h3 className="text-sm font-semibold text-gray-700 mb-2">
-                        Input Files ({inputFiles.length})
-                      </h3>
-                      <div className="overflow-x-auto border rounded">
-                        <table className="min-w-full text-sm">
-                          <thead className="bg-gray-50 text-gray-600">
-                            <tr>
-                              <th className="text-left px-3 py-2 font-medium">Project</th>
-                              <th className="text-left px-3 py-2 font-medium">Experiment</th>
-                              <th className="text-left px-3 py-2 font-medium">Sample</th>
-                              <th className="text-left px-3 py-2 font-medium">File</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y">
-                            {inputFiles.map((f) => (
-                              <tr key={f.file_id}>
-                                <td className="px-3 py-2">{f.project?.name ?? "-"}</td>
-                                <td className="px-3 py-2">{f.experiment?.name ?? "-"}</td>
-                                <td className="px-3 py-2">
-                                  {f.samples && f.samples.length > 0
-                                    ? f.samples
-                                        .map((s) => s.external_id || `sample ${s.id}`)
-                                        .join(", ")
-                                    : "-"}
-                                </td>
-                                <td className="px-3 py-2 font-mono text-xs">{f.filename}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {provenance ? (
-                  <pre className="text-sm bg-gray-50 p-4 rounded overflow-auto max-h-96">
-                    {JSON.stringify(
-                      references.length > 0
-                        ? {
-                            ...provenance,
-                            reference_datasets: references.map((ref) => ({
-                              name: ref.name,
-                              version: ref.version,
-                              status: ref.status,
-                              ...(ref.status === "deprecated"
-                                ? {
-                                    warning: "This reference dataset has been deprecated.",
-                                    ...(ref.deprecation_note ? { deprecation_note: ref.deprecation_note } : {}),
-                                    ...(ref.superseded_by_id ? { superseded_by_id: ref.superseded_by_id } : {}),
-                                  }
-                                : {}),
-                            })),
-                          }
-                        : provenance,
-                      null,
-                      2,
-                    )}
-                  </pre>
-                ) : <LoadingSpinner size="sm" />}
-              </div>
-
-              {/* Reference datasets in provenance view */}
-              {references.length > 0 && (
-                <div className="bg-white rounded-lg shadow p-6">
-                  <h3 className="text-md font-semibold mb-3">Reference Datasets</h3>
-                  <div className="space-y-2">
-                    {references.map((ref) => (
-                      <div key={ref.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-md">
-                        <div className="flex-1">
-                          <span className="font-medium text-sm">{ref.name}</span>
-                          <span className="text-gray-500 text-sm ml-2">v{ref.version}</span>
-                        </div>
-                        <ReferenceStatusBadge status={ref.status} />
-                        {ref.status === "deprecated" && (
-                          <span className="text-amber-600 text-xs">
-                            Deprecated{ref.deprecation_note ? `: ${ref.deprecation_note}` : ""}
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Report tab */}
-          {activeTab === "report" && showReportTab && (
-            <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-lg font-semibold mb-4">
-                {isCustomRun ? "Pipeline Report" : "Nextflow Report"}
-              </h2>
-              {report ? (
-                isCustomRun && customReportFormat === "md" ? (
-                  <div
-                    className="prose prose-sm max-w-none"
-                    dangerouslySetInnerHTML={{ __html: renderMarkdown(report) }}
-                  />
-                ) : (
-                  <iframe
-                    srcDoc={report}
-                    className="w-full h-[600px] border rounded"
-                    title={isCustomRun ? "Pipeline Report" : "Nextflow Report"}
-                  />
-                )
-              ) : isActive ? (
-                <p className="text-gray-400">Reports are available after the pipeline run completes.</p>
-              ) : reportLoading ? (
-                <div className="flex items-center gap-2 text-gray-400"><LoadingSpinner size="sm" /><span>Loading report...</span></div>
-              ) : (
-                <p className="text-gray-400">No report available.</p>
-              )}
-            </div>
-          )}
-
-          {/* Logs tab */}
-          {activeTab === "logs" && (
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-center gap-4 mb-4">
-                <h2 className="text-lg font-semibold">Logs</h2>
-                {!run.compute_job_ref && run.processes.length > 0 && (
-                  <select value={selectedProcess} onChange={(e) => setSelectedProcess(e.target.value)} className="border rounded px-3 py-1.5 text-sm">
-                    <option value="">Select process...</option>
-                    {run.processes.map((p) => <option key={p.id} value={p.process_name}>{p.process_name}</option>)}
-                  </select>
-                )}
-                {isCustomRun && logs.pod_logs_available && (
-                  <button
-                    onClick={() => {
-                      const next = !showSystemLogs;
-                      setShowSystemLogs(next);
-                      if (next && systemLogs == null) {
-                        void loadSystemLogs();
-                      }
-                    }}
-                    className={`ml-auto text-xs px-3 py-1 rounded border ${
-                      showSystemLogs
-                        ? "bg-bioaf-600 text-white border-bioaf-600"
-                        : "border-gray-300 text-gray-700 hover:bg-gray-50"
-                    }`}
-                  >
-                    {showSystemLogs ? "Hide System Logs" : "Show System Logs"}
-                  </button>
-                )}
-              </div>
-
-              {isCustomRun && logs.custom_log_pending && customOverview?.log_file_path && (
-                <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
-                  Custom log file ({customOverview.log_file_path}) will be available after
-                  completion. Showing terminal output.
-                </div>
-              )}
-              {isCustomRun && logs.custom_log_missing && (
-                <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded text-sm text-amber-800">
-                  Custom log file not available. Showing terminal output.
-                </div>
-              )}
-
-              {(run.compute_job_ref || selectedProcess) ? (
-                logsLoading ? (
-                  <div className="flex items-center gap-2 text-gray-400"><LoadingSpinner size="sm" /><span>Loading logs...</span></div>
-                ) : (
-                  <div className="space-y-4">
-                    <div>
-                      <pre className="text-xs bg-gray-900 text-green-400 p-4 rounded overflow-auto max-h-96 whitespace-pre-wrap">{logs.stdout || "(empty)"}</pre>
-                    </div>
-                    {logs.stderr && (
-                      <div>
-                        <h3 className="text-sm font-medium mb-1">stderr</h3>
-                        <pre className="text-xs bg-gray-900 text-red-400 p-4 rounded overflow-auto max-h-64 whitespace-pre-wrap">{logs.stderr || "(empty)"}</pre>
-                      </div>
-                    )}
-
-                    {isCustomRun && showSystemLogs && (
-                      <div className="border-t pt-4">
-                        <h3 className="text-sm font-medium mb-2">System Logs (pod stdout/stderr)</h3>
-                        {systemLogsLoading ? (
-                          <div className="flex items-center gap-2 text-gray-400">
-                            <LoadingSpinner size="sm" /><span>Loading system logs...</span>
-                          </div>
-                        ) : (
-                          <pre className="text-xs bg-gray-900 text-green-400 p-4 rounded overflow-auto max-h-96 whitespace-pre-wrap">
-                            {systemLogs?.stdout || "(empty)"}
-                          </pre>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )
-              ) : <p className="text-gray-400">Select a process to view logs</p>}
-            </div>
-          )}
-
-          {/* Results tab */}
-          {activeTab === "results" && (
-            <PipelineRunResultsTab pipelineRunId={run.id} />
-          )}
-
-          {/* Review tab */}
-          {activeTab === "review" && (
-            <ReviewPanel pipelineRunId={run.id} userRole={getUserRole()} onReviewSubmitted={loadRun} />
-          )}
-
-          {/* AI Review tab (ADR-055) */}
-          {activeTab === "agent_review" && (
-            <div className="space-y-4">
-              <AgentReviewButtons
-                mode="pipeline_run"
-                runId={run.id}
-                experimentId={run.experiment?.id ?? null}
-                pipelineStatus={run.status}
-                onTriggered={() => setAiReviewSignal((v) => v + 1)}
-              />
-              <AgentReviewTab
-                entityType="pipeline_run"
-                entityId={run.id}
-                refreshSignal={aiReviewSignal}
-              />
-            </div>
-          )}
-
-          {/* References Used section — shown below active tab content */}
-          {references.length > 0 && (
-            <div className="bg-white rounded-lg shadow mt-6">
-              <div className="p-6 border-b">
-                <h2 className="text-lg font-semibold">References Used</h2>
-              </div>
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Version</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Version</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {references.map((ref) => (
+                  <tr key={ref.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-medium">
+                      <a
+                        href={`/data/references/${ref.id}`}
+                        className="text-bioaf-700 hover:underline"
+                      >
+                        {ref.name}
+                      </a>
+                    </td>
+                    <td className="px-4 py-3 text-sm">{ref.version}</td>
+                    <td className="px-4 py-3 text-sm capitalize text-gray-700">{ref.category}</td>
+                    <td className="px-4 py-3">
+                      <ReferenceStatusBadge status={ref.status} />
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-500">
+                      {ref.status === "deprecated" && (
+                        <span className="text-amber-600">
+                          This reference dataset has been deprecated.
+                          {ref.deprecation_note ? ` ${ref.deprecation_note}` : ""}
+                          {ref.superseded_by_id ? ` Superseded by reference #${ref.superseded_by_id}.` : ""}
+                        </span>
+                      )}
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {references.map((ref) => (
-                    <tr key={ref.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-sm font-medium">
-                        <a
-                          href={`/data/references/${ref.id}`}
-                          className="text-bioaf-700 hover:underline"
-                        >
-                          {ref.name}
-                        </a>
-                      </td>
-                      <td className="px-4 py-3 text-sm">{ref.version}</td>
-                      <td className="px-4 py-3 text-sm capitalize text-gray-700">{ref.category}</td>
-                      <td className="px-4 py-3">
-                        <ReferenceStatusBadge status={ref.status} />
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-500">
-                        {ref.status === "deprecated" && (
-                          <span className="text-amber-600">
-                            This reference dataset has been deprecated.
-                            {ref.deprecation_note ? ` ${ref.deprecation_note}` : ""}
-                            {ref.superseded_by_id ? ` Superseded by reference #${ref.superseded_by_id}.` : ""}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          </>
-          )}
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        </>
+        )}
       </main>
 
       {showRetriesModal && run?.progress?.retries && (

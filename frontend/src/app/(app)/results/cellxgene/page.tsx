@@ -343,65 +343,65 @@ export default function CellxgenePage() {
 
   return (
     <main className="flex-1 overflow-y-auto p-6">
-          <div className="flex items-center justify-between mb-2">
-            <h1 className="text-2xl font-bold">cellxgene Explorer</h1>
-            <button
-              onClick={() => setShowPublishForm(!showPublishForm)}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
-            >
-              Publish Dataset
-            </button>
-          </div>
+      <div className="flex items-center justify-between mb-2">
+        <h1 className="text-2xl font-bold">cellxgene Explorer</h1>
+        <button
+          onClick={() => setShowPublishForm(!showPublishForm)}
+          className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
+        >
+          Publish Dataset
+        </button>
+      </div>
 
-          <p className="text-sm text-gray-500 mb-6">
-            Publish h5ad datasets for interactive single-cell exploration with cellxgene.
-          </p>
+      <p className="text-sm text-gray-500 mb-6">
+        Publish h5ad datasets for interactive single-cell exploration with cellxgene.
+      </p>
 
-          {showPublishForm && (
-            <PublishForm
-              onPublish={handlePublish}
-              onCancel={() => setShowPublishForm(false)}
+      {showPublishForm && (
+        <PublishForm
+          onPublish={handlePublish}
+          onCancel={() => setShowPublishForm(false)}
+        />
+      )}
+
+      {/* Experiment filter */}
+      {pubExperimentIds.length > 0 && (
+        <div className="mb-4">
+          <select
+            value={filterExperimentId ?? ""}
+            onChange={(e) => setFilterExperimentId(e.target.value ? parseInt(e.target.value) : null)}
+            className="px-3 py-1.5 border border-gray-300 rounded-md text-sm bg-white"
+          >
+            <option value="">All experiments</option>
+            {pubExperimentIds.map((id) => (
+              <option key={id} value={id}>
+                {experiments.get(id) || `Experiment #${id}`}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {loading ? (
+        <ContentLoading />
+      ) : publications.length === 0 ? (
+        <p className="text-gray-400 text-sm">
+          {filterExperimentId
+            ? "No published datasets for this experiment."
+            : "No published datasets yet. Use the Publish Dataset button to get started."}
+        </p>
+      ) : (
+        <div className="bg-white rounded-lg shadow divide-y divide-gray-200">
+          {publications.map((pub) => (
+            <PublicationCard
+              key={pub.id}
+              pub={pub}
+              experiments={experiments}
+              onUnpublish={handleUnpublish}
             />
-          )}
-
-          {/* Experiment filter */}
-          {pubExperimentIds.length > 0 && (
-            <div className="mb-4">
-              <select
-                value={filterExperimentId ?? ""}
-                onChange={(e) => setFilterExperimentId(e.target.value ? parseInt(e.target.value) : null)}
-                className="px-3 py-1.5 border border-gray-300 rounded-md text-sm bg-white"
-              >
-                <option value="">All experiments</option>
-                {pubExperimentIds.map((id) => (
-                  <option key={id} value={id}>
-                    {experiments.get(id) || `Experiment #${id}`}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {loading ? (
-            <ContentLoading />
-          ) : publications.length === 0 ? (
-            <p className="text-gray-400 text-sm">
-              {filterExperimentId
-                ? "No published datasets for this experiment."
-                : "No published datasets yet. Use the Publish Dataset button to get started."}
-            </p>
-          ) : (
-            <div className="bg-white rounded-lg shadow divide-y divide-gray-200">
-              {publications.map((pub) => (
-                <PublicationCard
-                  key={pub.id}
-                  pub={pub}
-                  experiments={experiments}
-                  onUnpublish={handleUnpublish}
-                />
-              ))}
-            </div>
-          )}
+          ))}
+        </div>
+      )}
     </main>
   );
 }

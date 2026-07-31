@@ -124,166 +124,166 @@ export default function CustomPipelineListPage() {
 
   return (
     <main className="flex-1 overflow-y-auto p-6">
-          {loading ? (
-            <ContentLoading />
-          ) : (
-            <>
-              {error && (
-                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">
-                  {error}
-                  <button onClick={loadPipelines} className="ml-2 underline">
-                    Retry
-                  </button>
-                </div>
-              )}
+      {loading ? (
+        <ContentLoading />
+      ) : (
+        <>
+          {error && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">
+              {error}
+              <button onClick={loadPipelines} className="ml-2 underline">
+                Retry
+              </button>
+            </div>
+          )}
 
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h1 className="text-2xl font-bold">Custom Pipelines</h1>
-                  <p className="text-sm text-gray-500 mt-1">
-                    User-defined pipeline wrappers, versioned with linked conda environments.
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h1 className="text-2xl font-bold">Custom Pipelines</h1>
+              <p className="text-sm text-gray-500 mt-1">
+                User-defined pipeline wrappers, versioned with linked conda environments.
+              </p>
+            </div>
+            {canCreate && (
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
+              >
+                Create Pipeline
+              </button>
+            )}
+          </div>
+
+          <div className="bg-white rounded-lg shadow overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-500 uppercase text-xs tracking-wide">
+                <tr>
+                  <th className="px-4 py-3 text-left font-medium">Name</th>
+                  <th className="px-4 py-3 text-left font-medium">Creator</th>
+                  <th className="px-4 py-3 text-left font-medium">Latest Version</th>
+                  <th className="px-4 py-3 text-left font-medium">Last Run Status</th>
+                  <th className="px-4 py-3 text-left font-medium">Created At</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr
+                    key={row.id}
+                    onClick={() => router.push(`/pipelines/custom/${row.id}`)}
+                    className="border-t hover:bg-gray-50 cursor-pointer"
+                  >
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-gray-900">{row.name}</div>
+                      {row.description && (
+                        <div className="text-xs text-gray-500 mt-0.5 line-clamp-1">
+                          {row.description}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-gray-700">
+                      {row.created_by_username || "--"}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-gray-700">
+                      {row.latest_version_number != null
+                        ? `v${row.latest_version_number}`
+                        : "--"}
+                    </td>
+                    <td className="px-4 py-3">
+                      {row.last_run ? (
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 text-xs rounded-full ${statusBadgeClass(
+                            "pipelineRun",
+                            row.last_run.status,
+                          )}`}
+                        >
+                          {row.last_run.status}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-400">Never run</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-gray-500">
+                      {new Date(row.created_at).toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+                {rows.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-12 text-center text-gray-400">
+                      No custom pipelines yet.
+                      {canCreate && " Click \"Create Pipeline\" to get started."}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {showCreateModal && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg shadow-xl p-6 w-[480px]">
+                <h3 className="font-semibold text-lg mb-1">Create Custom Pipeline</h3>
+                <p className="text-xs text-gray-500 mb-4">
+                  Step 1 of 2: name your pipeline. Next, you&apos;ll define a version
+                  with the code, entrypoint command, environment, and variables.
+                </p>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-sm text-gray-500 block mb-1">Name</label>
+                    <input
+                      value={createForm.name}
+                      onChange={(e) =>
+                        setCreateForm({ ...createForm, name: e.target.value })
+                      }
+                      placeholder="my-pipeline"
+                      className="w-full border rounded px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm text-gray-500 block mb-1">
+                      Description
+                    </label>
+                    <input
+                      value={createForm.description ?? ""}
+                      onChange={(e) =>
+                        setCreateForm({ ...createForm, description: e.target.value })
+                      }
+                      placeholder="Optional description"
+                      className="w-full border rounded px-3 py-2 text-sm"
+                    />
+                  </div>
+                  {createError && (
+                    <p className="text-sm text-red-600">{createError}</p>
+                  )}
+                  <p className="text-xs text-gray-400">
+                    After clicking Create, you&apos;ll be taken to the version form to
+                    provide the code source, entrypoint command (e.g.{" "}
+                    <code>bash run.sh</code>), pipeline environment, and any variables.
                   </p>
                 </div>
-                {canCreate && (
+                <div className="flex gap-2 mt-6">
                   <button
-                    onClick={() => setShowCreateModal(true)}
-                    className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
+                    onClick={handleCreate}
+                    disabled={creating || !createForm.name}
+                    className="flex-1 bg-bioaf-600 text-white py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
                   >
-                    Create Pipeline
+                    {creating ? "Creating..." : "Create"}
                   </button>
-                )}
-              </div>
-
-              <div className="bg-white rounded-lg shadow overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-500 uppercase text-xs tracking-wide">
-                    <tr>
-                      <th className="px-4 py-3 text-left font-medium">Name</th>
-                      <th className="px-4 py-3 text-left font-medium">Creator</th>
-                      <th className="px-4 py-3 text-left font-medium">Latest Version</th>
-                      <th className="px-4 py-3 text-left font-medium">Last Run Status</th>
-                      <th className="px-4 py-3 text-left font-medium">Created At</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((row) => (
-                      <tr
-                        key={row.id}
-                        onClick={() => router.push(`/pipelines/custom/${row.id}`)}
-                        className="border-t hover:bg-gray-50 cursor-pointer"
-                      >
-                        <td className="px-4 py-3">
-                          <div className="font-medium text-gray-900">{row.name}</div>
-                          {row.description && (
-                            <div className="text-xs text-gray-500 mt-0.5 line-clamp-1">
-                              {row.description}
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-gray-700">
-                          {row.created_by_username || "--"}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-gray-700">
-                          {row.latest_version_number != null
-                            ? `v${row.latest_version_number}`
-                            : "--"}
-                        </td>
-                        <td className="px-4 py-3">
-                          {row.last_run ? (
-                            <span
-                              className={`inline-flex items-center px-2 py-0.5 text-xs rounded-full ${statusBadgeClass(
-                                "pipelineRun",
-                                row.last_run.status,
-                              )}`}
-                            >
-                              {row.last_run.status}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-gray-400">Never run</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-gray-500">
-                          {new Date(row.created_at).toLocaleString()}
-                        </td>
-                      </tr>
-                    ))}
-                    {rows.length === 0 && (
-                      <tr>
-                        <td colSpan={5} className="px-4 py-12 text-center text-gray-400">
-                          No custom pipelines yet.
-                          {canCreate && " Click \"Create Pipeline\" to get started."}
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {showCreateModal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                  <div className="bg-white rounded-lg shadow-xl p-6 w-[480px]">
-                    <h3 className="font-semibold text-lg mb-1">Create Custom Pipeline</h3>
-                    <p className="text-xs text-gray-500 mb-4">
-                      Step 1 of 2: name your pipeline. Next, you&apos;ll define a version
-                      with the code, entrypoint command, environment, and variables.
-                    </p>
-                    <div className="space-y-3">
-                      <div>
-                        <label className="text-sm text-gray-500 block mb-1">Name</label>
-                        <input
-                          value={createForm.name}
-                          onChange={(e) =>
-                            setCreateForm({ ...createForm, name: e.target.value })
-                          }
-                          placeholder="my-pipeline"
-                          className="w-full border rounded px-3 py-2 text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm text-gray-500 block mb-1">
-                          Description
-                        </label>
-                        <input
-                          value={createForm.description ?? ""}
-                          onChange={(e) =>
-                            setCreateForm({ ...createForm, description: e.target.value })
-                          }
-                          placeholder="Optional description"
-                          className="w-full border rounded px-3 py-2 text-sm"
-                        />
-                      </div>
-                      {createError && (
-                        <p className="text-sm text-red-600">{createError}</p>
-                      )}
-                      <p className="text-xs text-gray-400">
-                        After clicking Create, you&apos;ll be taken to the version form to
-                        provide the code source, entrypoint command (e.g.{" "}
-                        <code>bash run.sh</code>), pipeline environment, and any variables.
-                      </p>
-                    </div>
-                    <div className="flex gap-2 mt-6">
-                      <button
-                        onClick={handleCreate}
-                        disabled={creating || !createForm.name}
-                        className="flex-1 bg-bioaf-600 text-white py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-                      >
-                        {creating ? "Creating..." : "Create"}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setShowCreateModal(false);
-                          setCreateError(null);
-                        }}
-                        className="flex-1 border py-2 rounded text-sm"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
+                  <button
+                    onClick={() => {
+                      setShowCreateModal(false);
+                      setCreateError(null);
+                    }}
+                    className="flex-1 border py-2 rounded text-sm"
+                  >
+                    Cancel
+                  </button>
                 </div>
-              )}
-            </>
+              </div>
+            </div>
           )}
+        </>
+      )}
     </main>
   );
 }

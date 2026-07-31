@@ -358,308 +358,308 @@ function SettingsUsersPageInner() {
   const confirm = getConfirmMessage();
 
   return (
-        <main className="flex-1 overflow-y-auto p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h1 className="text-2xl font-bold">Users &amp; Accounts</h1>
-            {activeTab === "users" && (
-              <button
-                onClick={() => setShowInvite(!showInvite)}
-                className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
-              >
-                {showInvite ? "Close" : "Invite Users"}
-              </button>
-            )}
-          </div>
+    <main className="flex-1 overflow-y-auto p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-2xl font-bold">Users &amp; Accounts</h1>
+        {activeTab === "users" && (
+          <button
+            onClick={() => setShowInvite(!showInvite)}
+            className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
+          >
+            {showInvite ? "Close" : "Invite Users"}
+          </button>
+        )}
+      </div>
 
-          <div className="flex border-b border-gray-200 mb-6">
-            {(Object.keys(TAB_LABELS) as TabKey[]).map((key) => (
-              <button
-                key={key}
-                onClick={() => {
-                  setActiveTab(key);
-                  const params = new URLSearchParams(searchParams?.toString() ?? "");
-                  params.set("tab", key);
-                  router.replace(`/settings/users?${params.toString()}`);
-                }}
-                className={`px-4 py-2 -mb-px border-b-2 text-sm font-medium ${
-                  activeTab === key
-                    ? "border-bioaf-600 text-bioaf-700"
-                    : "border-transparent text-gray-500 hover:text-gray-700"
-                }`}
-              >
-                {TAB_LABELS[key]}
-              </button>
+      <div className="flex border-b border-gray-200 mb-6">
+        {(Object.keys(TAB_LABELS) as TabKey[]).map((key) => (
+          <button
+            key={key}
+            onClick={() => {
+              setActiveTab(key);
+              const params = new URLSearchParams(searchParams?.toString() ?? "");
+              params.set("tab", key);
+              router.replace(`/settings/users?${params.toString()}`);
+            }}
+            className={`px-4 py-2 -mb-px border-b-2 text-sm font-medium ${
+              activeTab === key
+                ? "border-bioaf-600 text-bioaf-700"
+                : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            {TAB_LABELS[key]}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "service-accounts" && (
+        <ServiceAccountsTab
+          roles={roles}
+          onRolesChanged={() => {
+            api.get<RoleListResponse>("/api/roles")
+              .then((data) => setRoles(data.roles))
+              .catch(() => {});
+          }}
+        />
+      )}
+      {activeTab === "webhooks" && <WebhooksTab />}
+      {activeTab === "api-activity" && <ApiActivityTab />}
+
+      {activeTab === "users" && (
+      <>
+      {error && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded text-sm">
+          {error}
+        </div>
+      )}
+      {success && (
+        <div className="mb-4 p-3 bg-green-50 border border-green-200 text-green-700 rounded text-sm">
+          {success}
+        </div>
+      )}
+
+      {neverLoggedIn.length > 0 && (
+        <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+          <h3 className="text-sm font-semibold text-amber-800 mb-2">
+            Users who have never logged in ({neverLoggedIn.length})
+          </h3>
+          <ul className="text-sm text-amber-700 space-y-1">
+            {neverLoggedIn.map((u) => (
+              <li key={u.id}>
+                {u.email}
+                {u.role_name && u.role_name !== "viewer" && (
+                  <span className="ml-2 text-amber-500">({u.role_name})</span>
+                )}
+                {u.created_at && (
+                  <span className="ml-2 text-amber-400 text-xs">
+                    invited {new Date(u.created_at).toLocaleDateString()}
+                  </span>
+                )}
+              </li>
             ))}
-          </div>
+          </ul>
+        </div>
+      )}
 
-          {activeTab === "service-accounts" && (
-            <ServiceAccountsTab
-              roles={roles}
-              onRolesChanged={() => {
-                api.get<RoleListResponse>("/api/roles")
-                  .then((data) => setRoles(data.roles))
-                  .catch(() => {});
-              }}
-            />
-          )}
-          {activeTab === "webhooks" && <WebhooksTab />}
-          {activeTab === "api-activity" && <ApiActivityTab />}
+      {showInvite && (
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
+          <h2 className="text-lg font-semibold mb-4">Invite Users</h2>
+          <InviteForm roles={roles} />
+        </div>
+      )}
 
-          {activeTab === "users" && (
-          <>
-          {error && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded text-sm">
-              {error}
-            </div>
-          )}
-          {success && (
-            <div className="mb-4 p-3 bg-green-50 border border-green-200 text-green-700 rounded text-sm">
-              {success}
-            </div>
-          )}
-
-          {neverLoggedIn.length > 0 && (
-            <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-              <h3 className="text-sm font-semibold text-amber-800 mb-2">
-                Users who have never logged in ({neverLoggedIn.length})
-              </h3>
-              <ul className="text-sm text-amber-700 space-y-1">
-                {neverLoggedIn.map((u) => (
-                  <li key={u.id}>
-                    {u.email}
-                    {u.role_name && u.role_name !== "viewer" && (
-                      <span className="ml-2 text-amber-500">({u.role_name})</span>
-                    )}
-                    {u.created_at && (
-                      <span className="ml-2 text-amber-400 text-xs">
-                        invited {new Date(u.created_at).toLocaleDateString()}
+      {loading ? (
+        <LoadingSpinner size="lg" />
+      ) : (
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  Email
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  Name
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  Role
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  Status
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  Last Login
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  Session Keys
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {users.map((user) => (
+                <tr
+                  key={user.id}
+                  className="hover:bg-gray-50 cursor-pointer"
+                  onClick={() => setViewingUser(user)}
+                >
+                  <td className="px-4 py-3 text-sm">{user.email}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500">
+                    {user.name || "\u2014"}
+                  </td>
+                  <td className="px-4 py-3 text-sm">
+                    <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">
+                      {user.role_name}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <StatusBadge status={user.status} />
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-500">
+                    {formatLastLogin(user.last_login)}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {user.session_credentials_configured ? (
+                      <span className="text-green-600 text-sm" title="Session credentials configured">
+                        &#10003;
+                      </span>
+                    ) : (
+                      <span className="text-gray-300 text-sm" title="Not configured">
+                        &#8212;
                       </span>
                     )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      </>
+      )}
 
-          {showInvite && (
-            <div className="bg-white rounded-lg shadow p-6 mb-6">
-              <h2 className="text-lg font-semibold mb-4">Invite Users</h2>
-              <InviteForm roles={roles} />
-            </div>
-          )}
+      {/* Confirmation dialog */}
+      {pendingAction && (
+        <ConfirmDialog
+          open={true}
+          title={confirm.title}
+          message={confirm.message}
+          variant={confirm.variant}
+          confirmLabel={
+            pendingAction.type === "deactivate" ? "Deactivate"
+              : pendingAction.type === "lock" ? "Lock"
+                : pendingAction.type === "delete" ? "Delete"
+                  : pendingAction.type === "reactivate" ? "Reactivate"
+                    : "Confirm"
+          }
+          onConfirm={handleConfirmAction}
+          onCancel={() => setPendingAction(null)}
+          busy={confirmBusy}
+        />
+      )}
 
-          {loading ? (
-            <LoadingSpinner size="lg" />
-          ) : (
-            <div className="bg-white rounded-lg shadow overflow-hidden">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Email
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Name
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Role
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Status
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Last Login
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Session Keys
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {users.map((user) => (
-                    <tr
-                      key={user.id}
-                      className="hover:bg-gray-50 cursor-pointer"
-                      onClick={() => setViewingUser(user)}
-                    >
-                      <td className="px-4 py-3 text-sm">{user.email}</td>
-                      <td className="px-4 py-3 text-sm text-gray-500">
-                        {user.name || "\u2014"}
-                      </td>
-                      <td className="px-4 py-3 text-sm">
-                        <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">
-                          {user.role_name}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge status={user.status} />
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-500">
-                        {formatLastLogin(user.last_login)}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        {user.session_credentials_configured ? (
-                          <span className="text-green-600 text-sm" title="Session credentials configured">
-                            &#10003;
-                          </span>
-                        ) : (
-                          <span className="text-gray-300 text-sm" title="Not configured">
-                            &#8212;
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          </>
-          )}
-
-          {/* Confirmation dialog */}
-          {pendingAction && (
-            <ConfirmDialog
-              open={true}
-              title={confirm.title}
-              message={confirm.message}
-              variant={confirm.variant}
-              confirmLabel={
-                pendingAction.type === "deactivate" ? "Deactivate"
-                  : pendingAction.type === "lock" ? "Lock"
-                    : pendingAction.type === "delete" ? "Delete"
-                      : pendingAction.type === "reactivate" ? "Reactivate"
-                        : "Confirm"
-              }
-              onConfirm={handleConfirmAction}
-              onCancel={() => setPendingAction(null)}
-              busy={confirmBusy}
+      {/* Change password form modal */}
+      {showTempPasswordForm && tempPasswordUser && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+            <h3 className="text-lg font-semibold mb-2">Change Password</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Set a new password for {tempPasswordUser.email}. They should change
+              it after logging in.
+            </p>
+            <input
+              type="password"
+              value={tempPassword}
+              onChange={(e) => setTempPassword(e.target.value)}
+              placeholder="Enter new password"
+              className="w-full px-3 py-2 border rounded-md text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-bioaf-500"
             />
-          )}
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setShowTempPasswordForm(false);
+                  setTempPasswordUser(null);
+                  setTempPassword("");
+                }}
+                className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSetTempPassword}
+                disabled={!tempPassword}
+                className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded hover:bg-bioaf-700 disabled:opacity-50"
+              >
+                Set Password
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
-          {/* Change password form modal */}
-          {showTempPasswordForm && tempPasswordUser && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-                <h3 className="text-lg font-semibold mb-2">Change Password</h3>
-                <p className="text-sm text-gray-600 mb-4">
-                  Set a new password for {tempPasswordUser.email}. They should change
-                  it after logging in.
-                </p>
+      {/* Edit user modal */}
+      {editingUser && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+            <h3 className="text-lg font-semibold mb-4">
+              Edit {editingUser.email}
+            </h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Name
+                </label>
                 <input
-                  type="password"
-                  value={tempPassword}
-                  onChange={(e) => setTempPassword(e.target.value)}
-                  placeholder="Enter new password"
-                  className="w-full px-3 py-2 border rounded-md text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-bioaf-500"
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-bioaf-500"
                 />
-                <div className="flex justify-end gap-3">
-                  <button
-                    onClick={() => {
-                      setShowTempPasswordForm(false);
-                      setTempPasswordUser(null);
-                      setTempPassword("");
-                    }}
-                    className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleSetTempPassword}
-                    disabled={!tempPassword}
-                    className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded hover:bg-bioaf-700 disabled:opacity-50"
-                  >
-                    Set Password
-                  </button>
-                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Role
+                </label>
+                <select
+                  value={editRole}
+                  onChange={(e) => setEditRole(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-md text-sm"
+                >
+                  {roles.map((r) => (
+                    <option key={r.id} value={r.name}>{r.name}</option>
+                  ))}
+                </select>
               </div>
             </div>
-          )}
-
-          {/* Edit user modal */}
-          {editingUser && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-                <h3 className="text-lg font-semibold mb-4">
-                  Edit {editingUser.email}
-                </h3>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Name
-                    </label>
-                    <input
-                      type="text"
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-bioaf-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Role
-                    </label>
-                    <select
-                      value={editRole}
-                      onChange={(e) => setEditRole(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-md text-sm"
-                    >
-                      {roles.map((r) => (
-                        <option key={r.id} value={r.name}>{r.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="flex justify-end gap-3 mt-6">
-                  <button
-                    onClick={() => setEditingUser(null)}
-                    className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleEditSave}
-                    className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded hover:bg-bioaf-700"
-                  >
-                    Save Changes
-                  </button>
-                </div>
-              </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setEditingUser(null)}
+                className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleEditSave}
+                className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded hover:bg-bioaf-700"
+              >
+                Save Changes
+              </button>
             </div>
-          )}
+          </div>
+        </div>
+      )}
 
-          {/* Detail modal */}
-          {viewingUser && (
-            <DetailModal
-              title={viewingUser.name || viewingUser.email}
-              onClose={() => setViewingUser(null)}
-              fields={[
-                { label: "Email", value: viewingUser.email },
-                { label: "Name", value: viewingUser.name },
-                { label: "Role", value: viewingUser.role_name },
-                { label: "Status", value: viewingUser.status },
-                {
-                  label: "Last Login",
-                  value: formatLastLogin(viewingUser.last_login),
-                },
-                {
-                  label: "Session Keys",
-                  value: viewingUser.session_credentials_configured
-                    ? "Configured"
-                    : "Not configured",
-                },
-                {
-                  label: "Created",
-                  value: new Date(viewingUser.created_at).toLocaleString(),
-                },
-                {
-                  label: "Updated",
-                  value: new Date(viewingUser.updated_at).toLocaleString(),
-                },
-              ]}
-              actions={renderUserActions(viewingUser)}
-            />
-          )}
-        </main>
+      {/* Detail modal */}
+      {viewingUser && (
+        <DetailModal
+          title={viewingUser.name || viewingUser.email}
+          onClose={() => setViewingUser(null)}
+          fields={[
+            { label: "Email", value: viewingUser.email },
+            { label: "Name", value: viewingUser.name },
+            { label: "Role", value: viewingUser.role_name },
+            { label: "Status", value: viewingUser.status },
+            {
+              label: "Last Login",
+              value: formatLastLogin(viewingUser.last_login),
+            },
+            {
+              label: "Session Keys",
+              value: viewingUser.session_credentials_configured
+                ? "Configured"
+                : "Not configured",
+            },
+            {
+              label: "Created",
+              value: new Date(viewingUser.created_at).toLocaleString(),
+            },
+            {
+              label: "Updated",
+              value: new Date(viewingUser.updated_at).toLocaleString(),
+            },
+          ]}
+          actions={renderUserActions(viewingUser)}
+        />
+      )}
+    </main>
   );
 }

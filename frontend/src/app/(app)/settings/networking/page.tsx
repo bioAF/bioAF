@@ -4,8 +4,8 @@ import { NetworkingSettingsContent } from "@/components/settings/NetworkingSetti
 
 export default function NetworkingSettingsPage() {
   return (
-        <main className="flex-1 overflow-y-auto p-6">
-          <NetworkingSettingsContent />
-        </main>
+    <main className="flex-1 overflow-y-auto p-6">
+      <NetworkingSettingsContent />
+    </main>
   );
 }

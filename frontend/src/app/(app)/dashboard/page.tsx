@@ -43,30 +43,30 @@ export default function DashboardPage() {
 
   return (
     <main className="flex-1 flex flex-col overflow-y-auto p-6" data-testid="dashboard">
-          {showCloudBanner && (
-            <div
-              data-testid="cloud-setup-banner"
-              className="mb-6 shrink-0 flex items-start justify-between gap-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-blue-800"
-            >
-              <div className="flex-1 text-sm">
-                <span className="font-semibold">{cloudLabel} not configured.</span>{" "}
-                Set up your {cloudLabel} credentials so bioAF can deploy infrastructure.{" "}
-                <Link href={settingsPath} className="underline font-medium hover:text-blue-900">
-                  Configure {cloudLabel} settings
-                </Link>
-              </div>
-              <button
-                data-testid="cloud-banner-dismiss"
-                onClick={() => setBannerDismissed(true)}
-                className="shrink-0 text-blue-600 hover:text-blue-900 text-lg leading-none"
-                aria-label={`Dismiss ${cloudLabel} banner`}
-              >
-                &times;
-              </button>
-            </div>
-          )}
+      {showCloudBanner && (
+        <div
+          data-testid="cloud-setup-banner"
+          className="mb-6 shrink-0 flex items-start justify-between gap-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-blue-800"
+        >
+          <div className="flex-1 text-sm">
+            <span className="font-semibold">{cloudLabel} not configured.</span>{" "}
+            Set up your {cloudLabel} credentials so bioAF can deploy infrastructure.{" "}
+            <Link href={settingsPath} className="underline font-medium hover:text-blue-900">
+              Configure {cloudLabel} settings
+            </Link>
+          </div>
+          <button
+            data-testid="cloud-banner-dismiss"
+            onClick={() => setBannerDismissed(true)}
+            className="shrink-0 text-blue-600 hover:text-blue-900 text-lg leading-none"
+            aria-label={`Dismiss ${cloudLabel} banner`}
+          >
+            &times;
+          </button>
+        </div>
+      )}
 
-          <DashboardContent />
-        </main>
+      <DashboardContent />
+    </main>
   );
 }

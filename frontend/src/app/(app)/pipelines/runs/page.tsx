@@ -75,88 +75,88 @@ export default function PipelineRunsPage() {
 
   return (
     <main className="flex-1 overflow-y-auto p-6">
-          {loading ? (
-            <ContentLoading />
-          ) : (
-          <>
-          <div className="flex items-center justify-between mb-6">
-            <h1 className="text-2xl font-bold">Pipeline Runs</h1>
-            <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} className="border rounded-md px-3 py-1.5 text-sm">
-              <option value="">All statuses</option>
-              <option value="running">Running</option>
-              <option value="completed">Completed</option>
-              <option value="failed">Failed</option>
-              <option value="pending">Pending</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
-          </div>
+      {loading ? (
+        <ContentLoading />
+      ) : (
+      <>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold">Pipeline Runs</h1>
+        <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} className="border rounded-md px-3 py-1.5 text-sm">
+          <option value="">All statuses</option>
+          <option value="running">Running</option>
+          <option value="completed">Completed</option>
+          <option value="failed">Failed</option>
+          <option value="pending">Pending</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+      </div>
 
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort("id")}>Run{sortIcon("id")}</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort("pipeline_name")}>Pipeline{sortIcon("pipeline_name")}</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Experiment</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort("status")}>Status{sortIcon("status")}</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Review</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Progress</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Submitter</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Started</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
-                  {showCost && <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Est. $/hr</th>}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {sortedRuns.map((r) => (
-                  <tr key={r.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => router.push(`/pipelines/runs/${r.id}`)}>
-                    <td className="px-4 py-3 text-sm font-mono">#{r.id}</td>
-                    <td className="px-4 py-3 text-sm">{r.pipeline_name}</td>
-                    <td className="px-4 py-3 text-sm">{r.experiment?.name || "—"}</td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-0.5 text-xs rounded-full ${statusBadgeClass("pipelineRun", r.status)}`}>{r.status}</span>
-                      {r.status === "failed" && r.failure_reason === "oom" && (
-                        <span className="ml-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-orange-100 text-orange-700">OOM</span>
-                      )}
-                      {r.status === "failed" && r.failure_reason === "preemption_exhausted" && (
-                        <span className="ml-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-100 text-blue-700">Preempted</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.review_verdict ? <ReviewBadge verdict={r.review_verdict} /> : <span className="text-xs text-gray-400">—</span>}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.progress ? (
-                        <div className="flex items-center gap-2">
-                          <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
-                            <div className="h-full bg-bioaf-500 rounded-full" style={{ width: `${r.progress.percent_complete}%` }} />
-                          </div>
-                          <span className="text-xs text-gray-500">{Math.round(r.progress.percent_complete)}%</span>
-                        </div>
-                      ) : <span className="text-xs text-gray-400">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-sm">{r.submitted_by?.name || r.submitted_by?.email || "—"}</td>
-                    <td className="px-4 py-3 text-sm text-gray-500">{formatDateTime(r.started_at)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-500">{formatDuration(r.started_at, r.completed_at)}</td>
-                    {showCost && <td className="px-4 py-3 text-sm text-gray-500">{r.cost_estimate ? `$${r.cost_estimate.toFixed(2)}/hr` : "—"}</td>}
-                  </tr>
-                ))}
-                {runs.length === 0 && (
-                  <tr><td colSpan={showCost ? 10 : 9} className="px-4 py-12 text-center text-gray-400">No pipeline runs</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort("id")}>Run{sortIcon("id")}</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort("pipeline_name")}>Pipeline{sortIcon("pipeline_name")}</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Experiment</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort("status")}>Status{sortIcon("status")}</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Review</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Progress</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Submitter</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Started</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
+              {showCost && <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Est. $/hr</th>}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200">
+            {sortedRuns.map((r) => (
+              <tr key={r.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => router.push(`/pipelines/runs/${r.id}`)}>
+                <td className="px-4 py-3 text-sm font-mono">#{r.id}</td>
+                <td className="px-4 py-3 text-sm">{r.pipeline_name}</td>
+                <td className="px-4 py-3 text-sm">{r.experiment?.name || "—"}</td>
+                <td className="px-4 py-3">
+                  <span className={`px-2 py-0.5 text-xs rounded-full ${statusBadgeClass("pipelineRun", r.status)}`}>{r.status}</span>
+                  {r.status === "failed" && r.failure_reason === "oom" && (
+                    <span className="ml-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-orange-100 text-orange-700">OOM</span>
+                  )}
+                  {r.status === "failed" && r.failure_reason === "preemption_exhausted" && (
+                    <span className="ml-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-100 text-blue-700">Preempted</span>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  {r.review_verdict ? <ReviewBadge verdict={r.review_verdict} /> : <span className="text-xs text-gray-400">—</span>}
+                </td>
+                <td className="px-4 py-3">
+                  {r.progress ? (
+                    <div className="flex items-center gap-2">
+                      <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
+                        <div className="h-full bg-bioaf-500 rounded-full" style={{ width: `${r.progress.percent_complete}%` }} />
+                      </div>
+                      <span className="text-xs text-gray-500">{Math.round(r.progress.percent_complete)}%</span>
+                    </div>
+                  ) : <span className="text-xs text-gray-400">—</span>}
+                </td>
+                <td className="px-4 py-3 text-sm">{r.submitted_by?.name || r.submitted_by?.email || "—"}</td>
+                <td className="px-4 py-3 text-sm text-gray-500">{formatDateTime(r.started_at)}</td>
+                <td className="px-4 py-3 text-sm text-gray-500">{formatDuration(r.started_at, r.completed_at)}</td>
+                {showCost && <td className="px-4 py-3 text-sm text-gray-500">{r.cost_estimate ? `$${r.cost_estimate.toFixed(2)}/hr` : "—"}</td>}
+              </tr>
+            ))}
+            {runs.length === 0 && (
+              <tr><td colSpan={showCost ? 10 : 9} className="px-4 py-12 text-center text-gray-400">No pipeline runs</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
-          {total > 25 && (
-            <div className="flex justify-center gap-2 mt-4">
-              <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1} className="border px-3 py-1 rounded text-sm disabled:opacity-50">Previous</button>
-              <span className="text-sm text-gray-500 py-1">Page {page} of {Math.ceil(total / 25)}</span>
-              <button onClick={() => setPage(page + 1)} disabled={page >= Math.ceil(total / 25)} className="border px-3 py-1 rounded text-sm disabled:opacity-50">Next</button>
-            </div>
-          )}
-          </>
-          )}
+      {total > 25 && (
+        <div className="flex justify-center gap-2 mt-4">
+          <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1} className="border px-3 py-1 rounded text-sm disabled:opacity-50">Previous</button>
+          <span className="text-sm text-gray-500 py-1">Page {page} of {Math.ceil(total / 25)}</span>
+          <button onClick={() => setPage(page + 1)} disabled={page >= Math.ceil(total / 25)} className="border px-3 py-1 rounded text-sm disabled:opacity-50">Next</button>
+        </div>
+      )}
+      </>
+      )}
     </main>
   );
 }

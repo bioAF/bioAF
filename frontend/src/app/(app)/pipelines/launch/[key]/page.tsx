@@ -163,166 +163,166 @@ export default function PipelineLauncherPage() {
 
   return (
     <main className="flex-1 overflow-y-auto p-6">
-          {loading ? (
-            <ContentLoading />
-          ) : pipeline && (
-          <>
-          <div className="flex items-center gap-4 mb-6">
-            <button onClick={() => router.push("/pipelines/catalog")} className="text-gray-500 hover:text-gray-700">← Back</button>
-            <h1 className="text-2xl font-bold">Launch {pipeline.name}</h1>
-          </div>
+      {loading ? (
+        <ContentLoading />
+      ) : pipeline && (
+      <>
+      <div className="flex items-center gap-4 mb-6">
+        <button onClick={() => router.push("/pipelines/catalog")} className="text-gray-500 hover:text-gray-700">← Back</button>
+        <h1 className="text-2xl font-bold">Launch {pipeline.name}</h1>
+      </div>
 
-          {/* Step indicator */}
-          <div className="flex items-center gap-2 mb-8">
-            {[1, 2, 3, 4].map((s) => (
-              <div key={s} className="flex items-center gap-2">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-                  s === step ? "bg-bioaf-600 text-white" : s < step ? "bg-green-500 text-white" : "bg-gray-200 text-gray-500"
-                }`}>{s}</div>
-                <span className="text-sm text-gray-500">
-                  {s === 1 ? "Experiment" : s === 2 ? "Samples" : s === 3 ? "Parameters" : "Review"}
-                </span>
-                {s < 4 && <div className="w-8 h-px bg-gray-300" />}
-              </div>
+      {/* Step indicator */}
+      <div className="flex items-center gap-2 mb-8">
+        {[1, 2, 3, 4].map((s) => (
+          <div key={s} className="flex items-center gap-2">
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+              s === step ? "bg-bioaf-600 text-white" : s < step ? "bg-green-500 text-white" : "bg-gray-200 text-gray-500"
+            }`}>{s}</div>
+            <span className="text-sm text-gray-500">
+              {s === 1 ? "Experiment" : s === 2 ? "Samples" : s === 3 ? "Parameters" : "Review"}
+            </span>
+            {s < 4 && <div className="w-8 h-px bg-gray-300" />}
+          </div>
+        ))}
+      </div>
+
+      {/* Step 1: Select Experiment */}
+      {step === 1 && (
+        <div className="bg-white rounded-lg shadow p-6 max-w-2xl">
+          <h2 className="text-lg font-semibold mb-4">Select Experiment</h2>
+          <select
+            value={selectedExperimentId ?? ""}
+            onChange={(e) => setSelectedExperimentId(Number(e.target.value) || null)}
+            className="w-full border rounded-md px-3 py-2 text-sm"
+          >
+            <option value="">Choose an experiment...</option>
+            {experiments.map((exp) => (
+              <option key={exp.id} value={exp.id}>{exp.name} ({exp.sample_count} samples, {exp.status})</option>
             ))}
+          </select>
+          <div className="mt-4 flex justify-end">
+            <button
+              onClick={() => setStep(2)}
+              disabled={!selectedExperimentId}
+              className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
+            >Next</button>
           </div>
+        </div>
+      )}
 
-          {/* Step 1: Select Experiment */}
-          {step === 1 && (
-            <div className="bg-white rounded-lg shadow p-6 max-w-2xl">
-              <h2 className="text-lg font-semibold mb-4">Select Experiment</h2>
-              <select
-                value={selectedExperimentId ?? ""}
-                onChange={(e) => setSelectedExperimentId(Number(e.target.value) || null)}
-                className="w-full border rounded-md px-3 py-2 text-sm"
-              >
-                <option value="">Choose an experiment...</option>
-                {experiments.map((exp) => (
-                  <option key={exp.id} value={exp.id}>{exp.name} ({exp.sample_count} samples, {exp.status})</option>
-                ))}
-              </select>
-              <div className="mt-4 flex justify-end">
-                <button
-                  onClick={() => setStep(2)}
-                  disabled={!selectedExperimentId}
-                  className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
-                >Next</button>
-              </div>
-            </div>
-          )}
-
-          {/* Step 2: Select Samples */}
-          {step === 2 && (
-            <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-lg font-semibold mb-4">Select Samples</h2>
-              <div className="mb-3 flex items-center gap-4">
-                <label className="text-sm">
-                  <input
-                    type="checkbox"
-                    checked={selectedSampleIds.length === samples.length}
-                    onChange={() => setSelectedSampleIds(selectedSampleIds.length === samples.length ? [] : samples.map((s) => s.id))}
-                    className="mr-2"
-                  />
-                  Select All ({samples.length})
-                </label>
-                <span className="text-sm text-gray-500">{selectedSampleIds.length} selected</span>
-              </div>
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 w-10"></th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sample ID</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Organism</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tissue</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">QC</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {samples.map((s) => (
-                    <tr key={s.id} className={s.qc_status === "fail" ? "bg-red-50" : ""}>
-                      <td className="px-4 py-3">
-                        <input type="checkbox" checked={selectedSampleIds.includes(s.id)} onChange={() => toggleSample(s.id)} />
-                      </td>
-                      <td className="px-4 py-3 text-sm">{s.external_id || `#${s.id}`}</td>
-                      <td className="px-4 py-3 text-sm">{s.organism || "—"}</td>
-                      <td className="px-4 py-3 text-sm">{s.tissue_type || "—"}</td>
-                      <td className="px-4 py-3 text-sm">
-                        {s.qc_status === "fail" && <span className="text-red-600 font-medium">FAIL</span>}
-                        {s.qc_status === "warning" && <span className="text-yellow-600">Warning</span>}
-                        {s.qc_status === "pass" && <span className="text-green-600">Pass</span>}
-                        {!s.qc_status && "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="mt-4 flex justify-between">
-                <button onClick={() => setStep(1)} className="border px-6 py-2 rounded-md text-sm">Back</button>
-                <button onClick={() => setStep(3)} disabled={selectedSampleIds.length === 0} className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50">Next</button>
-              </div>
-            </div>
-          )}
-
-          {/* Step 3: Configure Parameters */}
-          {step === 3 && (
-            <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-lg font-semibold mb-4">Configure Parameters</h2>
-              {detectedProtocol && (
-                <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded text-sm">
-                  Protocol auto-detected as <span className="font-semibold">{detectedProtocol}</span> from sample chemistry version.
-                </div>
-              )}
-              <ProtocolInfo />
-              <ParameterForm
-                schema={pipeline.parameter_schema}
-                defaultParams={pipeline.default_params || {}}
-                values={userParams}
-                onChange={setUserParams}
+      {/* Step 2: Select Samples */}
+      {step === 2 && (
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-lg font-semibold mb-4">Select Samples</h2>
+          <div className="mb-3 flex items-center gap-4">
+            <label className="text-sm">
+              <input
+                type="checkbox"
+                checked={selectedSampleIds.length === samples.length}
+                onChange={() => setSelectedSampleIds(selectedSampleIds.length === samples.length ? [] : samples.map((s) => s.id))}
+                className="mr-2"
               />
-              <div className="mt-4 flex justify-between">
-                <button onClick={() => setStep(2)} className="border px-6 py-2 rounded-md text-sm">Back</button>
-                <button onClick={() => setStep(4)} className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700">Next</button>
-              </div>
+              Select All ({samples.length})
+            </label>
+            <span className="text-sm text-gray-500">{selectedSampleIds.length} selected</span>
+          </div>
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 w-10"></th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sample ID</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Organism</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tissue</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">QC</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {samples.map((s) => (
+                <tr key={s.id} className={s.qc_status === "fail" ? "bg-red-50" : ""}>
+                  <td className="px-4 py-3">
+                    <input type="checkbox" checked={selectedSampleIds.includes(s.id)} onChange={() => toggleSample(s.id)} />
+                  </td>
+                  <td className="px-4 py-3 text-sm">{s.external_id || `#${s.id}`}</td>
+                  <td className="px-4 py-3 text-sm">{s.organism || "—"}</td>
+                  <td className="px-4 py-3 text-sm">{s.tissue_type || "—"}</td>
+                  <td className="px-4 py-3 text-sm">
+                    {s.qc_status === "fail" && <span className="text-red-600 font-medium">FAIL</span>}
+                    {s.qc_status === "warning" && <span className="text-yellow-600">Warning</span>}
+                    {s.qc_status === "pass" && <span className="text-green-600">Pass</span>}
+                    {!s.qc_status && "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="mt-4 flex justify-between">
+            <button onClick={() => setStep(1)} className="border px-6 py-2 rounded-md text-sm">Back</button>
+            <button onClick={() => setStep(3)} disabled={selectedSampleIds.length === 0} className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50">Next</button>
+          </div>
+        </div>
+      )}
+
+      {/* Step 3: Configure Parameters */}
+      {step === 3 && (
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-lg font-semibold mb-4">Configure Parameters</h2>
+          {detectedProtocol && (
+            <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded text-sm">
+              Protocol auto-detected as <span className="font-semibold">{detectedProtocol}</span> from sample chemistry version.
             </div>
           )}
+          <ProtocolInfo />
+          <ParameterForm
+            schema={pipeline.parameter_schema}
+            defaultParams={pipeline.default_params || {}}
+            values={userParams}
+            onChange={setUserParams}
+          />
+          <div className="mt-4 flex justify-between">
+            <button onClick={() => setStep(2)} className="border px-6 py-2 rounded-md text-sm">Back</button>
+            <button onClick={() => setStep(4)} className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700">Next</button>
+          </div>
+        </div>
+      )}
 
-          {/* Step 4: Review & Launch */}
-          {step === 4 && (
-            <div className="bg-white rounded-lg shadow p-6 max-w-2xl">
-              <h2 className="text-lg font-semibold mb-4">Review & Launch</h2>
-              <dl className="space-y-3 mb-6">
-                <div><dt className="text-sm text-gray-500">Pipeline</dt><dd className="text-sm font-medium">{pipeline.name} v{pipeline.version}</dd></div>
-                <div><dt className="text-sm text-gray-500">Experiment</dt><dd className="text-sm">{selectedExperiment?.name}</dd></div>
-                <div><dt className="text-sm text-gray-500">Samples</dt><dd className="text-sm">{selectedSampleIds.length} selected</dd></div>
-                <div>
-                  <dt className="text-sm text-gray-500">Non-default Parameters</dt>
-                  <dd className="text-sm">
+      {/* Step 4: Review & Launch */}
+      {step === 4 && (
+        <div className="bg-white rounded-lg shadow p-6 max-w-2xl">
+          <h2 className="text-lg font-semibold mb-4">Review & Launch</h2>
+          <dl className="space-y-3 mb-6">
+            <div><dt className="text-sm text-gray-500">Pipeline</dt><dd className="text-sm font-medium">{pipeline.name} v{pipeline.version}</dd></div>
+            <div><dt className="text-sm text-gray-500">Experiment</dt><dd className="text-sm">{selectedExperiment?.name}</dd></div>
+            <div><dt className="text-sm text-gray-500">Samples</dt><dd className="text-sm">{selectedSampleIds.length} selected</dd></div>
+            <div>
+              <dt className="text-sm text-gray-500">Non-default Parameters</dt>
+              <dd className="text-sm">
+                {Object.entries(userParams).filter(([k, v]) => {
+                  const def = (pipeline.default_params || {})[k];
+                  return JSON.stringify(v) !== JSON.stringify(def);
+                }).length === 0 ? (
+                  <span className="text-gray-400">All defaults</span>
+                ) : (
+                  <ul className="list-disc ml-4 mt-1">
                     {Object.entries(userParams).filter(([k, v]) => {
                       const def = (pipeline.default_params || {})[k];
                       return JSON.stringify(v) !== JSON.stringify(def);
-                    }).length === 0 ? (
-                      <span className="text-gray-400">All defaults</span>
-                    ) : (
-                      <ul className="list-disc ml-4 mt-1">
-                        {Object.entries(userParams).filter(([k, v]) => {
-                          const def = (pipeline.default_params || {})[k];
-                          return JSON.stringify(v) !== JSON.stringify(def);
-                        }).map(([k, v]) => <li key={k}><span className="font-mono text-xs">{k}</span>: {String(v)}</li>)}
-                      </ul>
-                    )}
-                  </dd>
-                </div>
-              </dl>
-              <div className="flex justify-between">
-                <button onClick={() => setStep(3)} className="border px-6 py-2 rounded-md text-sm">Back</button>
-                <button onClick={() => handleLaunch()} disabled={launching} className="bg-green-600 text-white px-8 py-2 rounded-md text-sm hover:bg-green-700 disabled:opacity-50">
-                  {launching ? "Launching..." : "Launch Pipeline"}
-                </button>
-              </div>
+                    }).map(([k, v]) => <li key={k}><span className="font-mono text-xs">{k}</span>: {String(v)}</li>)}
+                  </ul>
+                )}
+              </dd>
             </div>
-          )}
-          </>
-          )}
+          </dl>
+          <div className="flex justify-between">
+            <button onClick={() => setStep(3)} className="border px-6 py-2 rounded-md text-sm">Back</button>
+            <button onClick={() => handleLaunch()} disabled={launching} className="bg-green-600 text-white px-8 py-2 rounded-md text-sm hover:bg-green-700 disabled:opacity-50">
+              {launching ? "Launching..." : "Launch Pipeline"}
+            </button>
+          </div>
+        </div>
+      )}
+      </>
+      )}
     </main>
   );
 }

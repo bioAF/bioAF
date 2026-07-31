@@ -80,98 +80,98 @@ function ProjectsPageInner() {
   return (
     <>
       <main className="flex-1 overflow-y-auto p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h1 className="text-2xl font-bold">Projects</h1>
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-bold">Projects</h1>
+          {canCreate && (
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700 transition-colors"
+            >
+              New Project
+            </button>
+          )}
+        </div>
+
+        <div className="bg-white rounded-lg shadow mb-6 p-4">
+          <div className="flex flex-wrap gap-4">
+            <input
+              type="text"
+              placeholder="Search projects..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="border border-gray-300 rounded-md px-3 py-2 text-sm flex-1 min-w-[200px]"
+            />
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="border border-gray-300 rounded-md px-3 py-2 text-sm"
+            >
+              <option value="">All Statuses</option>
+              <option value="active">Active</option>
+              <option value="archived">Archived</option>
+              <option value="complete">Complete</option>
+            </select>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="flex justify-center py-12">
+            <LoadingSpinner size="lg" />
+          </div>
+        ) : projects.length === 0 ? (
+          <div className="bg-white rounded-lg shadow p-12 text-center">
+            <h2 className="text-lg font-semibold text-gray-400 mb-2">No projects found</h2>
+            <p className="text-gray-400 mb-4">Create a project to organize cross-experiment analysis.</p>
             {canCreate && (
               <button
                 onClick={() => setShowCreateModal(true)}
-                className="bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700 transition-colors"
+                className="bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700"
               >
                 New Project
               </button>
             )}
           </div>
-
-          <div className="bg-white rounded-lg shadow mb-6 p-4">
-            <div className="flex flex-wrap gap-4">
-              <input
-                type="text"
-                placeholder="Search projects..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="border border-gray-300 rounded-md px-3 py-2 text-sm flex-1 min-w-[200px]"
-              />
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="border border-gray-300 rounded-md px-3 py-2 text-sm"
-              >
-                <option value="">All Statuses</option>
-                <option value="active">Active</option>
-                <option value="archived">Archived</option>
-                <option value="complete">Complete</option>
-              </select>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="flex justify-center py-12">
-              <LoadingSpinner size="lg" />
-            </div>
-          ) : projects.length === 0 ? (
-            <div className="bg-white rounded-lg shadow p-12 text-center">
-              <h2 className="text-lg font-semibold text-gray-400 mb-2">No projects found</h2>
-              <p className="text-gray-400 mb-4">Create a project to organize cross-experiment analysis.</p>
-              {canCreate && (
-                <button
-                  onClick={() => setShowCreateModal(true)}
-                  className="bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700"
-                >
-                  New Project
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="bg-white rounded-lg shadow overflow-hidden">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Owner</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Samples</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Experiments</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Runs</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+        ) : (
+          <div className="bg-white rounded-lg shadow overflow-hidden">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Owner</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Samples</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Experiments</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Runs</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {projects.map((p) => (
+                  <tr
+                    key={p.id}
+                    onClick={() => router.push(`/projects/${p.id}`)}
+                    className="hover:bg-gray-50 cursor-pointer"
+                  >
+                    <td className="px-6 py-4 text-sm font-medium text-gray-900">{p.name}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500 font-mono">{p.external_id || p.code || "-"}</td>
+                    <td className="px-6 py-4">
+                      <StatusBadge status={p.status || "active"} />
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{p.owner_name || "—"}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{p.sample_count}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{p.experiment_count}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{p.pipeline_run_count}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500">
+                      {new Date(p.created_at).toLocaleDateString()}
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {projects.map((p) => (
-                    <tr
-                      key={p.id}
-                      onClick={() => router.push(`/projects/${p.id}`)}
-                      className="hover:bg-gray-50 cursor-pointer"
-                    >
-                      <td className="px-6 py-4 text-sm font-medium text-gray-900">{p.name}</td>
-                      <td className="px-6 py-4 text-sm text-gray-500 font-mono">{p.external_id || p.code || "-"}</td>
-                      <td className="px-6 py-4">
-                        <StatusBadge status={p.status || "active"} />
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-500">{p.owner_name || "—"}</td>
-                      <td className="px-6 py-4 text-sm text-gray-500">{p.sample_count}</td>
-                      <td className="px-6 py-4 text-sm text-gray-500">{p.experiment_count}</td>
-                      <td className="px-6 py-4 text-sm text-gray-500">{p.pipeline_run_count}</td>
-                      <td className="px-6 py-4 text-sm text-gray-500">
-                        {new Date(p.created_at).toLocaleDateString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </main>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </main>
 
       {/* Create Project Modal */}
       {showCreateModal && (

@@ -50,91 +50,91 @@ export default function PipelineCatalogPage() {
   return (
     <>
       <main className="flex-1 overflow-y-auto p-6">
-          {loading ? (
-            <ContentLoading />
-          ) : (
-          <>
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h1 className="text-2xl font-bold">Pipeline Catalog</h1>
-              <p className="text-sm text-gray-500 mt-1">
-                Built-in NF-Core pipelines and your organization&apos;s custom pipelines.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              {canBrowseRegistry && (
-                <button
-                  onClick={() => setRegistryOpen(true)}
-                  className="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-md text-sm hover:bg-gray-50"
-                >
-                  Search Available Pipelines
-                </button>
-              )}
-              {canCreateCustom && (
-                <button
-                  onClick={() => router.push("/pipelines/custom")}
-                  className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
-                >
-                  Manage Custom Pipelines
-                </button>
-              )}
-            </div>
+        {loading ? (
+          <ContentLoading />
+        ) : (
+        <>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-2xl font-bold">Pipeline Catalog</h1>
+            <p className="text-sm text-gray-500 mt-1">
+              Built-in NF-Core pipelines and your organization&apos;s custom pipelines.
+            </p>
           </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {pipelines.map((p) => {
-              const isCustom = p.source_type === "custom";
-              const versionLabel = isCustom
-                ? p.latest_version_number != null
-                  ? `v${p.latest_version_number}`
-                  : "no versions"
-                : `v${p.version || "latest"}`;
-              return (
-                <div
-                  key={p.id}
-                  onClick={() => openPipeline(p)}
-                  className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow cursor-pointer"
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <h3 className="font-semibold text-lg">{p.name}</h3>
-                    <span className={`px-2 py-0.5 text-xs rounded-full ${
-                      isCustom
-                        ? "bg-blue-100 text-blue-700"
-                        : "bg-green-100 text-green-700"
-                    }`}>
-                      {p.source_type}
-                    </span>
-                  </div>
-                  <p className="text-sm text-gray-500 mb-4 line-clamp-2">{p.description || "No description"}</p>
-                  <div className="flex items-center justify-between">
-                    <div className="text-xs text-gray-400">
-                      {isCustom && p.created_by_username ? (
-                        <>
-                          <span>by {p.created_by_username}</span>
-                          <span className="mx-1.5">•</span>
-                          <span>{versionLabel}</span>
-                        </>
-                      ) : (
-                        <span>{versionLabel}</span>
-                      )}
-                    </div>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); launchPipeline(p); }}
-                      disabled={isCustom && p.latest_version_number == null}
-                      className="bg-bioaf-600 text-white px-4 py-1.5 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-                    >
-                      Launch
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-            {pipelines.length === 0 && (
-              <div className="col-span-full text-center py-12 text-gray-400">No pipelines available</div>
+          <div className="flex items-center gap-2">
+            {canBrowseRegistry && (
+              <button
+                onClick={() => setRegistryOpen(true)}
+                className="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-md text-sm hover:bg-gray-50"
+              >
+                Search Available Pipelines
+              </button>
+            )}
+            {canCreateCustom && (
+              <button
+                onClick={() => router.push("/pipelines/custom")}
+                className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
+              >
+                Manage Custom Pipelines
+              </button>
             )}
           </div>
-          </>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {pipelines.map((p) => {
+            const isCustom = p.source_type === "custom";
+            const versionLabel = isCustom
+              ? p.latest_version_number != null
+                ? `v${p.latest_version_number}`
+                : "no versions"
+              : `v${p.version || "latest"}`;
+            return (
+              <div
+                key={p.id}
+                onClick={() => openPipeline(p)}
+                className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow cursor-pointer"
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <h3 className="font-semibold text-lg">{p.name}</h3>
+                  <span className={`px-2 py-0.5 text-xs rounded-full ${
+                    isCustom
+                      ? "bg-blue-100 text-blue-700"
+                      : "bg-green-100 text-green-700"
+                  }`}>
+                    {p.source_type}
+                  </span>
+                </div>
+                <p className="text-sm text-gray-500 mb-4 line-clamp-2">{p.description || "No description"}</p>
+                <div className="flex items-center justify-between">
+                  <div className="text-xs text-gray-400">
+                    {isCustom && p.created_by_username ? (
+                      <>
+                        <span>by {p.created_by_username}</span>
+                        <span className="mx-1.5">•</span>
+                        <span>{versionLabel}</span>
+                      </>
+                    ) : (
+                      <span>{versionLabel}</span>
+                    )}
+                  </div>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); launchPipeline(p); }}
+                    disabled={isCustom && p.latest_version_number == null}
+                    className="bg-bioaf-600 text-white px-4 py-1.5 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
+                  >
+                    Launch
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+          {pipelines.length === 0 && (
+            <div className="col-span-full text-center py-12 text-gray-400">No pipelines available</div>
           )}
+        </div>
+        </>
+        )}
       </main>
       <RegistryBrowseModal
         open={registryOpen}

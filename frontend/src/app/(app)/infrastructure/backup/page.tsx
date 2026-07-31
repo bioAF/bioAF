@@ -299,430 +299,430 @@ export default function InfraBackupPage() {
   return (
     <>
       <main className="flex-1 overflow-y-auto p-6">
-          <h1 className="text-2xl font-bold text-gray-900 mb-6">Backup & Recovery</h1>
+        <h1 className="text-2xl font-bold text-gray-900 mb-6">Backup & Recovery</h1>
 
-          {/* Restore review banner */}
-          {restoreStatus.active && (
-            <div className="mb-4 p-4 rounded-lg bg-amber-50 border border-amber-300">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-amber-900">
-                    Reviewing restored database
-                  </p>
-                  <p className="text-sm text-amber-700 mt-1">
-                    Restored from <span className="font-mono">{restoreStatus.backup_filename}</span>.
-                    {restoreStatus.seconds_remaining !== undefined && (
-                      <> Auto-reverts in <span className="font-semibold">{formatMinutes(restoreStatus.seconds_remaining)}</span>.</>
-                    )}
-                  </p>
-                  <p className="text-xs text-amber-600 mt-1">
-                    Browse the application to verify data. Accept to make permanent, or reject to revert.
-                  </p>
+        {/* Restore review banner */}
+        {restoreStatus.active && (
+          <div className="mb-4 p-4 rounded-lg bg-amber-50 border border-amber-300">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-amber-900">
+                  Reviewing restored database
+                </p>
+                <p className="text-sm text-amber-700 mt-1">
+                  Restored from <span className="font-mono">{restoreStatus.backup_filename}</span>.
+                  {restoreStatus.seconds_remaining !== undefined && (
+                    <> Auto-reverts in <span className="font-semibold">{formatMinutes(restoreStatus.seconds_remaining)}</span>.</>
+                  )}
+                </p>
+                <p className="text-xs text-amber-600 mt-1">
+                  Browse the application to verify data. Accept to make permanent, or reject to revert.
+                </p>
+              </div>
+              {canAccess("backups", "restore") && (
+                <div className="flex gap-2 ml-4">
+                  <button
+                    onClick={handleRejectRestore}
+                    className="text-sm px-4 py-2 rounded border border-gray-300 text-gray-700 bg-white hover:bg-gray-50"
+                  >
+                    Reject
+                  </button>
+                  <button
+                    onClick={handleAcceptRestore}
+                    className="text-sm px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700"
+                  >
+                    Accept
+                  </button>
                 </div>
-                {canAccess("backups", "restore") && (
-                  <div className="flex gap-2 ml-4">
-                    <button
-                      onClick={handleRejectRestore}
-                      className="text-sm px-4 py-2 rounded border border-gray-300 text-gray-700 bg-white hover:bg-gray-50"
-                    >
-                      Reject
-                    </button>
-                    <button
-                      onClick={handleAcceptRestore}
-                      className="text-sm px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700"
-                    >
-                      Accept
-                    </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {actionMessage && (
+          <div className="mb-4 p-3 rounded bg-blue-50 text-blue-700 text-sm">
+            {actionMessage}
+          </div>
+        )}
+
+        {loading ? (
+          <div className="text-gray-500">Loading backup status...</div>
+        ) : (
+          <>
+            <div className="mb-4 flex items-center gap-2">
+              <span className="text-sm text-gray-600">Overall Status:</span>
+              <span className={`text-xs px-2 py-1 rounded font-medium ${statusBadgeClass("backupTier", overallStatus)}`}>
+                {overallStatus}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+              {tiers.map((tier) => (
+                <div key={tier.tier} className="bg-white rounded-lg border border-gray-200 p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-semibold text-gray-900">{tier.name}</h3>
+                    <span className={`text-xs px-2 py-0.5 rounded ${statusBadgeClass("backupTier", tier.status)}`}>
+                      {tier.status}
+                    </span>
                   </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {actionMessage && (
-            <div className="mb-4 p-3 rounded bg-blue-50 text-blue-700 text-sm">
-              {actionMessage}
-            </div>
-          )}
-
-          {loading ? (
-            <div className="text-gray-500">Loading backup status...</div>
-          ) : (
-            <>
-              <div className="mb-4 flex items-center gap-2">
-                <span className="text-sm text-gray-600">Overall Status:</span>
-                <span className={`text-xs px-2 py-1 rounded font-medium ${statusBadgeClass("backupTier", overallStatus)}`}>
-                  {overallStatus}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-                {tiers.map((tier) => (
-                  <div key={tier.tier} className="bg-white rounded-lg border border-gray-200 p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="font-semibold text-gray-900">{tier.name}</h3>
-                      <span className={`text-xs px-2 py-0.5 rounded ${statusBadgeClass("backupTier", tier.status)}`}>
-                        {tier.status}
+                  <div className="space-y-2 text-sm text-gray-600">
+                    <div className="flex justify-between">
+                      <span>Last Backup:</span>
+                      <span className="text-gray-900">
+                        {tier.last_backup ? new Date(tier.last_backup).toLocaleString() : "N/A"}
                       </span>
                     </div>
-                    <div className="space-y-2 text-sm text-gray-600">
-                      <div className="flex justify-between">
-                        <span>Last Backup:</span>
-                        <span className="text-gray-900">
-                          {tier.last_backup ? new Date(tier.last_backup).toLocaleString() : "N/A"}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Size:</span>
-                        <span className="text-gray-900">{formatBytes(tier.size_bytes)}</span>
-                      </div>
-                      {tier.retention_days && (
-                        <div className="flex justify-between">
-                          <span>Retention:</span>
-                          <span className="text-gray-900">{tier.retention_days} days</span>
-                        </div>
-                      )}
-                      {tier.backup_count !== null && (
-                        <div className="flex justify-between">
-                          <span>Backups:</span>
-                          <span className="text-gray-900">{tier.backup_count}</span>
-                        </div>
-                      )}
-                      {tier.versioning_enabled !== null && (
-                        <div className="flex justify-between">
-                          <span>Versioning:</span>
-                          <span className="text-gray-900">{tier.versioning_enabled ? "Enabled" : "Disabled"}</span>
-                        </div>
-                      )}
-                      {tier.next_scheduled && (
-                        <div className="flex justify-between">
-                          <span>Next:</span>
-                          <span className="text-gray-900">{new Date(tier.next_scheduled).toLocaleString()}</span>
-                        </div>
-                      )}
+                    <div className="flex justify-between">
+                      <span>Size:</span>
+                      <span className="text-gray-900">{formatBytes(tier.size_bytes)}</span>
                     </div>
-                    {tier.tier === "postgres" && canAccess("backups", "create") && (
-                      <button
-                        onClick={() => handleTriggerBackup("postgres")}
-                        disabled={runningAction !== "" || restoreStatus.active}
-                        className="mt-3 w-full text-sm bg-blue-50 text-blue-700 px-3 py-1.5 rounded hover:bg-blue-100 disabled:opacity-50"
-                      >
-                        {runningAction === "postgres" ? "Running..." : "Run Backup Now"}
-                      </button>
+                    {tier.retention_days && (
+                      <div className="flex justify-between">
+                        <span>Retention:</span>
+                        <span className="text-gray-900">{tier.retention_days} days</span>
+                      </div>
                     )}
-                    {tier.tier === "platform_config" && canAccess("backups", "create") && (
-                      <button
-                        onClick={() => handleTriggerBackup("config")}
-                        disabled={runningAction !== ""}
-                        className="mt-3 w-full text-sm bg-blue-50 text-blue-700 px-3 py-1.5 rounded hover:bg-blue-100 disabled:opacity-50"
-                      >
-                        {runningAction === "config" ? "Running..." : "Run Backup Now"}
-                      </button>
+                    {tier.backup_count !== null && (
+                      <div className="flex justify-between">
+                        <span>Backups:</span>
+                        <span className="text-gray-900">{tier.backup_count}</span>
+                      </div>
                     )}
-                    {tier.tier === "platform_config" && canAccess("backups", "restore") && (
-                      <button
-                        onClick={handleConfigRestore}
-                        className="mt-1 w-full text-sm bg-gray-100 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-200"
-                      >
-                        Restore
-                      </button>
+                    {tier.versioning_enabled !== null && (
+                      <div className="flex justify-between">
+                        <span>Versioning:</span>
+                        <span className="text-gray-900">{tier.versioning_enabled ? "Enabled" : "Disabled"}</span>
+                      </div>
+                    )}
+                    {tier.next_scheduled && (
+                      <div className="flex justify-between">
+                        <span>Next:</span>
+                        <span className="text-gray-900">{new Date(tier.next_scheduled).toLocaleString()}</span>
+                      </div>
                     )}
                   </div>
-                ))}
-              </div>
-
-              {/* Backup Schedule */}
-              {settings && canAccess("backups", "create") && (
-                <>
-                  <h2 className="text-lg font-semibold text-gray-900 mb-4">Backup Schedule</h2>
-                  <div className="bg-white rounded-lg border border-gray-200 p-4 mb-8">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      {/* PostgreSQL Schedule */}
-                      <div>
-                        <div className="flex items-center justify-between mb-3">
-                          <h3 className="text-sm font-medium text-gray-900">PostgreSQL</h3>
-                          <label className="relative inline-flex items-center cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={settings.postgres_schedule_enabled}
-                              onChange={(e) => setSettings({ ...settings, postgres_schedule_enabled: e.target.checked })}
-                              className="sr-only peer"
-                            />
-                            <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-                          </label>
-                        </div>
-                        {settings.postgres_schedule_enabled && (
-                          <div className="space-y-3">
-                            {!settings.postgres_next_run && (
-                              <div>
-                                <label className="block text-xs text-gray-500 mb-1">First backup</label>
-                                <div className="flex gap-2">
-                                  <select
-                                    value={pgFirstRun === "now" ? "now" : "scheduled"}
-                                    onChange={(e) => {
-                                      if (e.target.value === "now") {
-                                        setPgFirstRun("now");
-                                      } else {
-                                        const d = new Date();
-                                        d.setHours(d.getHours() + 1, 0, 0, 0);
-                                        setPgFirstRun(d.toISOString().slice(0, 16));
-                                      }
-                                    }}
-                                    className="border border-gray-300 rounded px-2 py-1.5 text-sm"
-                                  >
-                                    <option value="now">Now</option>
-                                    <option value="scheduled">Pick a time</option>
-                                  </select>
-                                  {pgFirstRun !== "now" && (
-                                    <input
-                                      type="datetime-local"
-                                      value={pgFirstRun}
-                                      onChange={(e) => setPgFirstRun(e.target.value)}
-                                      className="flex-1 border border-gray-300 rounded px-2 py-1.5 text-sm"
-                                    />
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                            {settings.postgres_next_run && (
-                              <div className="text-xs text-gray-600 bg-blue-50 rounded p-2">
-                                Next backup: {new Date(settings.postgres_next_run).toLocaleString()}
-                              </div>
-                            )}
-                            <div>
-                              <label className="block text-xs text-gray-500 mb-1">Run every (hours)</label>
-                              <input
-                                type="number"
-                                min={1}
-                                value={settings.postgres_schedule_hours}
-                                onChange={(e) => setSettings({ ...settings, postgres_schedule_hours: parseInt(e.target.value) || 1 })}
-                                className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs text-gray-500 mb-1">Keep backups for (days)</label>
-                              <input
-                                type="number"
-                                min={1}
-                                value={settings.postgres_retention_days}
-                                onChange={(e) => setSettings({ ...settings, postgres_retention_days: parseInt(e.target.value) || 1 })}
-                                className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
-                              />
-                            </div>
-                          </div>
-                        )}
-                        {!settings.postgres_schedule_enabled && (
-                          <p className="text-xs text-gray-500">Automatic backups disabled. Use &quot;Run Backup Now&quot; for manual backups.</p>
-                        )}
-                      </div>
-
-                      {/* Config Schedule */}
-                      <div>
-                        <div className="flex items-center justify-between mb-3">
-                          <h3 className="text-sm font-medium text-gray-900">Platform Config</h3>
-                          <label className="relative inline-flex items-center cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={settings.config_schedule_enabled}
-                              onChange={(e) => setSettings({ ...settings, config_schedule_enabled: e.target.checked })}
-                              className="sr-only peer"
-                            />
-                            <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-                          </label>
-                        </div>
-                        {settings.config_schedule_enabled && (
-                          <div className="space-y-3">
-                            {!settings.config_next_run && (
-                              <div>
-                                <label className="block text-xs text-gray-500 mb-1">First backup</label>
-                                <div className="flex gap-2">
-                                  <select
-                                    value={cfgFirstRun === "now" ? "now" : "scheduled"}
-                                    onChange={(e) => {
-                                      if (e.target.value === "now") {
-                                        setCfgFirstRun("now");
-                                      } else {
-                                        const d = new Date();
-                                        d.setHours(d.getHours() + 1, 0, 0, 0);
-                                        setCfgFirstRun(d.toISOString().slice(0, 16));
-                                      }
-                                    }}
-                                    className="border border-gray-300 rounded px-2 py-1.5 text-sm"
-                                  >
-                                    <option value="now">Now</option>
-                                    <option value="scheduled">Pick a time</option>
-                                  </select>
-                                  {cfgFirstRun !== "now" && (
-                                    <input
-                                      type="datetime-local"
-                                      value={cfgFirstRun}
-                                      onChange={(e) => setCfgFirstRun(e.target.value)}
-                                      className="flex-1 border border-gray-300 rounded px-2 py-1.5 text-sm"
-                                    />
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                            {settings.config_next_run && (
-                              <div className="text-xs text-gray-600 bg-blue-50 rounded p-2">
-                                Next backup: {new Date(settings.config_next_run).toLocaleString()}
-                              </div>
-                            )}
-                            <div>
-                              <label className="block text-xs text-gray-500 mb-1">Run every (hours)</label>
-                              <input
-                                type="number"
-                                min={1}
-                                value={settings.config_schedule_hours}
-                                onChange={(e) => setSettings({ ...settings, config_schedule_hours: parseInt(e.target.value) || 1 })}
-                                className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs text-gray-500 mb-1">Keep backups for (days)</label>
-                              <input
-                                type="number"
-                                min={1}
-                                value={settings.config_retention_days}
-                                onChange={(e) => setSettings({ ...settings, config_retention_days: parseInt(e.target.value) || 1 })}
-                                className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
-                              />
-                            </div>
-                          </div>
-                        )}
-                        {!settings.config_schedule_enabled && (
-                          <p className="text-xs text-gray-500">Automatic backups disabled. Use &quot;Run Backup Now&quot; for manual backups.</p>
-                        )}
-                      </div>
-                    </div>
+                  {tier.tier === "postgres" && canAccess("backups", "create") && (
                     <button
-                      onClick={handleSaveSettings}
-                      disabled={savingSettings}
-                      className="mt-4 text-sm bg-blue-600 text-white px-4 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50"
+                      onClick={() => handleTriggerBackup("postgres")}
+                      disabled={runningAction !== "" || restoreStatus.active}
+                      className="mt-3 w-full text-sm bg-blue-50 text-blue-700 px-3 py-1.5 rounded hover:bg-blue-100 disabled:opacity-50"
                     >
-                      {savingSettings ? "Saving..." : "Save Settings"}
+                      {runningAction === "postgres" ? "Running..." : "Run Backup Now"}
                     </button>
-                  </div>
-                </>
-              )}
+                  )}
+                  {tier.tier === "platform_config" && canAccess("backups", "create") && (
+                    <button
+                      onClick={() => handleTriggerBackup("config")}
+                      disabled={runningAction !== ""}
+                      className="mt-3 w-full text-sm bg-blue-50 text-blue-700 px-3 py-1.5 rounded hover:bg-blue-100 disabled:opacity-50"
+                    >
+                      {runningAction === "config" ? "Running..." : "Run Backup Now"}
+                    </button>
+                  )}
+                  {tier.tier === "platform_config" && canAccess("backups", "restore") && (
+                    <button
+                      onClick={handleConfigRestore}
+                      className="mt-1 w-full text-sm bg-gray-100 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-200"
+                    >
+                      Restore
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
 
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">PostgreSQL Snapshots</h2>
-              <div className="bg-white rounded-lg border border-gray-200 mb-8">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b bg-gray-50">
-                      <th className="text-left px-4 py-3 font-medium text-gray-700">Filename</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-700">Date</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-700">Size</th>
-                      {canAccess("backups", "restore") && (
-                        <th className="text-left px-4 py-3 font-medium text-gray-700"></th>
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pgSnapshots.length === 0 ? (
-                      <tr>
-                        <td colSpan={canAccess("backups", "restore") ? 4 : 3} className="px-4 py-8 text-center text-gray-500">
-                          No snapshots available
-                        </td>
-                      </tr>
-                    ) : (
-                      pgSnapshots.map((s) => (
-                        <tr key={s.filename} className="border-b hover:bg-gray-50">
-                          <td className="px-4 py-2.5 text-gray-900 font-mono text-xs">{s.filename}</td>
-                          <td className="px-4 py-2.5 text-gray-600">{new Date(s.date).toLocaleString()}</td>
-                          <td className="px-4 py-2.5 text-gray-600">{formatBytes(s.size_bytes)}</td>
-                          {canAccess("backups", "restore") && (
-                            <td className="px-4 py-2.5">
-                              <button
-                                onClick={() => handleStartRestore(s.filename)}
-                                disabled={restoreStatus.active || restoringFile !== ""}
-                                className="text-xs text-amber-600 hover:text-amber-800 disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                {restoringFile === s.filename ? "Restoring..." : "Restore"}
-                              </button>
-                            </td>
+            {/* Backup Schedule */}
+            {settings && canAccess("backups", "create") && (
+              <>
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Backup Schedule</h2>
+                <div className="bg-white rounded-lg border border-gray-200 p-4 mb-8">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* PostgreSQL Schedule */}
+                    <div>
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-medium text-gray-900">PostgreSQL</h3>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={settings.postgres_schedule_enabled}
+                            onChange={(e) => setSettings({ ...settings, postgres_schedule_enabled: e.target.checked })}
+                            className="sr-only peer"
+                          />
+                          <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                      </div>
+                      {settings.postgres_schedule_enabled && (
+                        <div className="space-y-3">
+                          {!settings.postgres_next_run && (
+                            <div>
+                              <label className="block text-xs text-gray-500 mb-1">First backup</label>
+                              <div className="flex gap-2">
+                                <select
+                                  value={pgFirstRun === "now" ? "now" : "scheduled"}
+                                  onChange={(e) => {
+                                    if (e.target.value === "now") {
+                                      setPgFirstRun("now");
+                                    } else {
+                                      const d = new Date();
+                                      d.setHours(d.getHours() + 1, 0, 0, 0);
+                                      setPgFirstRun(d.toISOString().slice(0, 16));
+                                    }
+                                  }}
+                                  className="border border-gray-300 rounded px-2 py-1.5 text-sm"
+                                >
+                                  <option value="now">Now</option>
+                                  <option value="scheduled">Pick a time</option>
+                                </select>
+                                {pgFirstRun !== "now" && (
+                                  <input
+                                    type="datetime-local"
+                                    value={pgFirstRun}
+                                    onChange={(e) => setPgFirstRun(e.target.value)}
+                                    className="flex-1 border border-gray-300 rounded px-2 py-1.5 text-sm"
+                                  />
+                                )}
+                              </div>
+                            </div>
                           )}
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                          {settings.postgres_next_run && (
+                            <div className="text-xs text-gray-600 bg-blue-50 rounded p-2">
+                              Next backup: {new Date(settings.postgres_next_run).toLocaleString()}
+                            </div>
+                          )}
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Run every (hours)</label>
+                            <input
+                              type="number"
+                              min={1}
+                              value={settings.postgres_schedule_hours}
+                              onChange={(e) => setSettings({ ...settings, postgres_schedule_hours: parseInt(e.target.value) || 1 })}
+                              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Keep backups for (days)</label>
+                            <input
+                              type="number"
+                              min={1}
+                              value={settings.postgres_retention_days}
+                              onChange={(e) => setSettings({ ...settings, postgres_retention_days: parseInt(e.target.value) || 1 })}
+                              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+                            />
+                          </div>
+                        </div>
+                      )}
+                      {!settings.postgres_schedule_enabled && (
+                        <p className="text-xs text-gray-500">Automatic backups disabled. Use &quot;Run Backup Now&quot; for manual backups.</p>
+                      )}
+                    </div>
 
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Config Snapshots</h2>
-              <div className="bg-white rounded-lg border border-gray-200 mb-8">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b bg-gray-50">
-                      <th className="text-left px-4 py-3 font-medium text-gray-700">Date</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-700">Size</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-700">Tier</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {snapshots.length === 0 ? (
-                      <tr>
-                        <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
-                          No snapshots available
-                        </td>
-                      </tr>
-                    ) : (
-                      snapshots.map((s) => (
-                        <tr key={s.date} className="border-b hover:bg-gray-50">
-                          <td className="px-4 py-2.5 text-gray-900">{new Date(s.date).toLocaleString()}</td>
-                          <td className="px-4 py-2.5 text-gray-600">{formatBytes(s.size_bytes)}</td>
-                          <td className="px-4 py-2.5 text-gray-600">{s.tier}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                    {/* Config Schedule */}
+                    <div>
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-medium text-gray-900">Platform Config</h3>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={settings.config_schedule_enabled}
+                            onChange={(e) => setSettings({ ...settings, config_schedule_enabled: e.target.checked })}
+                            className="sr-only peer"
+                          />
+                          <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                      </div>
+                      {settings.config_schedule_enabled && (
+                        <div className="space-y-3">
+                          {!settings.config_next_run && (
+                            <div>
+                              <label className="block text-xs text-gray-500 mb-1">First backup</label>
+                              <div className="flex gap-2">
+                                <select
+                                  value={cfgFirstRun === "now" ? "now" : "scheduled"}
+                                  onChange={(e) => {
+                                    if (e.target.value === "now") {
+                                      setCfgFirstRun("now");
+                                    } else {
+                                      const d = new Date();
+                                      d.setHours(d.getHours() + 1, 0, 0, 0);
+                                      setCfgFirstRun(d.toISOString().slice(0, 16));
+                                    }
+                                  }}
+                                  className="border border-gray-300 rounded px-2 py-1.5 text-sm"
+                                >
+                                  <option value="now">Now</option>
+                                  <option value="scheduled">Pick a time</option>
+                                </select>
+                                {cfgFirstRun !== "now" && (
+                                  <input
+                                    type="datetime-local"
+                                    value={cfgFirstRun}
+                                    onChange={(e) => setCfgFirstRun(e.target.value)}
+                                    className="flex-1 border border-gray-300 rounded px-2 py-1.5 text-sm"
+                                  />
+                                )}
+                              </div>
+                            </div>
+                          )}
+                          {settings.config_next_run && (
+                            <div className="text-xs text-gray-600 bg-blue-50 rounded p-2">
+                              Next backup: {new Date(settings.config_next_run).toLocaleString()}
+                            </div>
+                          )}
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Run every (hours)</label>
+                            <input
+                              type="number"
+                              min={1}
+                              value={settings.config_schedule_hours}
+                              onChange={(e) => setSettings({ ...settings, config_schedule_hours: parseInt(e.target.value) || 1 })}
+                              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Keep backups for (days)</label>
+                            <input
+                              type="number"
+                              min={1}
+                              value={settings.config_retention_days}
+                              onChange={(e) => setSettings({ ...settings, config_retention_days: parseInt(e.target.value) || 1 })}
+                              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+                            />
+                          </div>
+                        </div>
+                      )}
+                      {!settings.config_schedule_enabled && (
+                        <p className="text-xs text-gray-500">Automatic backups disabled. Use &quot;Run Backup Now&quot; for manual backups.</p>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleSaveSettings}
+                    disabled={savingSettings}
+                    className="mt-4 text-sm bg-blue-600 text-white px-4 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {savingSettings ? "Saving..." : "Save Settings"}
+                  </button>
+                </div>
+              </>
+            )}
 
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Terraform State Files</h2>
-              <div className="bg-white rounded-lg border border-gray-200">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b bg-gray-50">
-                      <th className="text-left px-4 py-3 font-medium text-gray-700">Name</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-700">Size</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-700">Last Updated</th>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">PostgreSQL Snapshots</h2>
+            <div className="bg-white rounded-lg border border-gray-200 mb-8">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-gray-50">
+                    <th className="text-left px-4 py-3 font-medium text-gray-700">Filename</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-700">Date</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-700">Size</th>
+                    {canAccess("backups", "restore") && (
                       <th className="text-left px-4 py-3 font-medium text-gray-700"></th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {pgSnapshots.length === 0 ? (
+                    <tr>
+                      <td colSpan={canAccess("backups", "restore") ? 4 : 3} className="px-4 py-8 text-center text-gray-500">
+                        No snapshots available
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {tfstateFiles.length === 0 ? (
-                      <tr>
-                        <td colSpan={4} className="px-4 py-8 text-center text-gray-500">
-                          No state files available
-                        </td>
-                      </tr>
-                    ) : (
-                      tfstateFiles.map((f) => (
-                        <tr key={f.name} className="border-b hover:bg-gray-50">
-                          <td className="px-4 py-2.5 text-gray-900 font-mono text-xs">{f.name}</td>
-                          <td className="px-4 py-2.5 text-gray-600">{formatBytes(f.size_bytes)}</td>
-                          <td className="px-4 py-2.5 text-gray-600">
-                            {f.updated ? new Date(f.updated).toLocaleString() : "N/A"}
-                          </td>
+                  ) : (
+                    pgSnapshots.map((s) => (
+                      <tr key={s.filename} className="border-b hover:bg-gray-50">
+                        <td className="px-4 py-2.5 text-gray-900 font-mono text-xs">{s.filename}</td>
+                        <td className="px-4 py-2.5 text-gray-600">{new Date(s.date).toLocaleString()}</td>
+                        <td className="px-4 py-2.5 text-gray-600">{formatBytes(s.size_bytes)}</td>
+                        {canAccess("backups", "restore") && (
                           <td className="px-4 py-2.5">
                             <button
-                              onClick={() => handleDownloadTfstate(f.name)}
-                              className="text-xs text-blue-600 hover:text-blue-800"
+                              onClick={() => handleStartRestore(s.filename)}
+                              disabled={restoreStatus.active || restoringFile !== ""}
+                              className="text-xs text-amber-600 hover:text-amber-800 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              Download
+                              {restoringFile === s.filename ? "Restoring..." : "Restore"}
                             </button>
                           </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-        </main>
+                        )}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Config Snapshots</h2>
+            <div className="bg-white rounded-lg border border-gray-200 mb-8">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-gray-50">
+                    <th className="text-left px-4 py-3 font-medium text-gray-700">Date</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-700">Size</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-700">Tier</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {snapshots.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
+                        No snapshots available
+                      </td>
+                    </tr>
+                  ) : (
+                    snapshots.map((s) => (
+                      <tr key={s.date} className="border-b hover:bg-gray-50">
+                        <td className="px-4 py-2.5 text-gray-900">{new Date(s.date).toLocaleString()}</td>
+                        <td className="px-4 py-2.5 text-gray-600">{formatBytes(s.size_bytes)}</td>
+                        <td className="px-4 py-2.5 text-gray-600">{s.tier}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Terraform State Files</h2>
+            <div className="bg-white rounded-lg border border-gray-200">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-gray-50">
+                    <th className="text-left px-4 py-3 font-medium text-gray-700">Name</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-700">Size</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-700">Last Updated</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-700"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tfstateFiles.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-8 text-center text-gray-500">
+                        No state files available
+                      </td>
+                    </tr>
+                  ) : (
+                    tfstateFiles.map((f) => (
+                      <tr key={f.name} className="border-b hover:bg-gray-50">
+                        <td className="px-4 py-2.5 text-gray-900 font-mono text-xs">{f.name}</td>
+                        <td className="px-4 py-2.5 text-gray-600">{formatBytes(f.size_bytes)}</td>
+                        <td className="px-4 py-2.5 text-gray-600">
+                          {f.updated ? new Date(f.updated).toLocaleString() : "N/A"}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <button
+                            onClick={() => handleDownloadTfstate(f.name)}
+                            className="text-xs text-blue-600 hover:text-blue-800"
+                          >
+                            Download
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </main>
       <ConfirmDialog
         open={confirmDialog.open}
         title={confirmDialog.title}
