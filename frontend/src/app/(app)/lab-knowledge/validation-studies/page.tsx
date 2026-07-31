@@ -100,7 +100,7 @@ export default function ValidationStudiesListPage() {
                         </Link>
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-gray-600">
-                        {s.source_doi || s.source_accession || (s.paper_id ? `paper ${s.paper_id}` : "—")}
+                        {s.source_doi || s.source_accession || (s.paper_id ? `paper ${s.paper_id}` : "-")}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-500">{formatDate(s.created_at)}</td>
                       <td className="px-4 py-3 text-sm">

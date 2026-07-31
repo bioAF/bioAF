@@ -130,7 +130,7 @@ export function AssociatePaperModal({ paperIds, onClose, onAssociated }: Props) 
               </option>
             ))}
           </select>
-          <p className="text-xs text-gray-400 mt-1">
+          <p className="text-xs text-gray-500 mt-1">
             Choosing an experiment associates with the experiment scope; choosing
             only a project associates with the project scope.
           </p>

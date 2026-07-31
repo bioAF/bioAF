@@ -105,7 +105,7 @@ export function ValidationEvidenceTable({ evidence }: { evidence: Evidence | nul
                       <span className="font-mono text-xs">{c.metric_key}</span>
                       {c.mapped_key && c.mapped_key !== c.metric_key && (
                         <span
-                          className="ml-1 text-xs text-gray-400"
+                          className="ml-1 text-xs text-gray-500"
                           title={
                             c.advisory
                               ? "Loosely matched by stripping a condition/consensus qualifier; surfaced as advisory evidence"
@@ -119,7 +119,7 @@ export function ValidationEvidenceTable({ evidence }: { evidence: Evidence | nul
                     <td className="py-2 pr-4">{formatValue(c.claimed_value)}</td>
                     <td className="py-2 pr-4">
                       {c.verdict === "not_computed" ? (
-                        <span className="text-gray-400">—</span>
+                        <span className="text-gray-500">-</span>
                       ) : (
                         formatValue(c.computed_value)
                       )}
@@ -191,7 +191,7 @@ export function ValidationEvidenceTable({ evidence }: { evidence: Evidence | nul
                         {hasComputed ? (
                           formatValue(computed[t.metric_key])
                         ) : (
-                          <span className="text-gray-400" title="No computed QC metric shares this key">
+                          <span className="text-gray-500" title="No computed QC metric shares this key">
                             Not reported
                           </span>
                         )}

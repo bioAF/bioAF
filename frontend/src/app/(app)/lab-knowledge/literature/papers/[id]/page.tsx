@@ -516,11 +516,11 @@ export default function PaperDetailPage() {
                       {paper.doi}
                     </a>
                   ) : (
-                    "—"
+                    "-"
                   )}
                 </dd>
                 <dt className="text-gray-500 mt-2">PMID</dt>
-                <dd>{paper.pmid ?? "—"}</dd>
+                <dd>{paper.pmid ?? "-"}</dd>
                 <dt className="text-gray-500 mt-2">Provenance</dt>
                 <dd>{paper.provenance}</dd>
                 <dt className="text-gray-500 mt-2">Extraction</dt>

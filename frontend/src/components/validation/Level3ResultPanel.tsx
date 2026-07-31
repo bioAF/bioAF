@@ -78,7 +78,7 @@ export function Level3ResultPanel({
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
     <div>
-      <dt className="text-xs uppercase tracking-wide text-gray-400">{label}</dt>
+      <dt className="text-xs uppercase tracking-wide text-gray-500">{label}</dt>
       <dd className="font-semibold text-gray-800">{value}</dd>
     </div>
   );

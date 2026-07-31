@@ -63,7 +63,7 @@ export function LiteratureTabPanel({ experimentId, projectId }: Props) {
   }, [experimentId, projectId]);
 
   if (loading) {
-    return <div className="text-gray-400 text-sm">Loading literature...</div>;
+    return <div className="text-gray-500 text-sm">Loading literature...</div>;
   }
 
   if (papers.length === 0) {

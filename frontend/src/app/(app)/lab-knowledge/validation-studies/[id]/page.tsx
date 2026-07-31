@@ -262,7 +262,7 @@ export default function ValidationStudyPage() {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-xs uppercase tracking-wide text-gray-400">{label}</dt>
+      <dt className="text-xs uppercase tracking-wide text-gray-500">{label}</dt>
       <dd className="text-gray-800">{children}</dd>
     </div>
   );
