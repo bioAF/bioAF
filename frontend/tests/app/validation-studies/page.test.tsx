@@ -115,6 +115,30 @@ describe("ValidationStudyPage", () => {
     expect(screen.queryByRole("button", { name: /export report/i })).not.toBeInTheDocument();
   });
 
+  it("links to the in-app source paper when the study has a paper_id", async () => {
+    mockGet.mockResolvedValue({
+      id: 5,
+      state: "classified",
+      classification: "validated",
+      confidence: 100,
+      paper_id: 88,
+    });
+
+    render(<ValidationStudyPage />);
+
+    const link = await screen.findByRole("link", { name: /source paper/i });
+    expect(link).toHaveAttribute("href", "/lab-knowledge/literature/papers/88");
+  });
+
+  it("omits the source-paper link when the study has no paper_id", async () => {
+    mockGet.mockResolvedValue({ id: 5, state: "requested", confidence: null });
+
+    render(<ValidationStudyPage />);
+
+    await waitFor(() => expect(screen.getByText(/Validation Study #5/)).toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: /source paper/i })).not.toBeInTheDocument();
+  });
+
   it("shows a not-found message when the study cannot be loaded", async () => {
     mockGet.mockRejectedValue(new Error("404"));
 

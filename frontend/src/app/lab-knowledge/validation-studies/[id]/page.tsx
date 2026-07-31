@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
+import Link from "next/link";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
@@ -47,6 +48,7 @@ interface ValidationStudy {
   state: string;
   classification?: string | null;
   confidence?: number | null;
+  paper_id?: number | null;
   source_doi?: string | null;
   source_accession?: string | null;
   experiment_id?: number | null;
@@ -167,6 +169,15 @@ export default function ValidationStudyPage() {
               <span className="rounded bg-gray-100 px-2 py-0.5 font-mono text-sm text-gray-600" title="Source accession">
                 {study.source_accession}
               </span>
+            )}
+            {study.paper_id && (
+              <Link
+                href={`/lab-knowledge/literature/papers/${study.paper_id}`}
+                className="rounded bg-bioaf-50 px-2 py-0.5 text-sm text-bioaf-700 hover:underline"
+                title="Open this paper in the Literature library"
+              >
+                Source paper
+              </Link>
             )}
             {!PRE_REPORT_STATES.has(study.state) && (
               <div className="ml-auto">
