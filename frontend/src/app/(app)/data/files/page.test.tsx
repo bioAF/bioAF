@@ -13,12 +13,6 @@ jest.mock("next/link", () => {
   };
 });
 
-jest.mock("@/components/layout/Sidebar", () => ({
-  Sidebar: () => <nav data-testid="sidebar" />,
-}));
-jest.mock("@/components/layout/Header", () => ({
-  Header: () => <header data-testid="header" />,
-}));
 
 jest.mock("@/lib/api", () => ({
   api: {

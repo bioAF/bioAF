@@ -7,8 +7,6 @@ jest.mock("@/lib/auth", () => ({
   isAuthenticated: () => true,
   getCurrentUser: () => ({ role_name: "admin" }),
 }));
-jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => null }));
-jest.mock("@/components/layout/Header", () => ({ Header: () => null }));
 jest.mock("@/lib/literature", () => {
   const actual = jest.requireActual("@/lib/literature");
   return { ...actual, literature: { listSearches: jest.fn() } };

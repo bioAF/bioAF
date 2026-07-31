@@ -27,8 +27,6 @@ jest.mock("@/lib/auth", () => ({
   isAuthenticated: () => true,
 }));
 
-jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => null }));
-jest.mock("@/components/layout/Header", () => ({ Header: () => null }));
 jest.mock("@/components/layout/Breadcrumb", () => ({ Breadcrumb: () => null }));
 
 jest.mock("@/lib/api", () => ({

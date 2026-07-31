@@ -8,8 +8,6 @@ jest.mock("next/navigation", () => ({
 
 jest.mock("@/lib/api", () => ({ api: { get: jest.fn() } }));
 jest.mock("@/lib/auth", () => ({ isAuthenticated: () => true }));
-jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => null }));
-jest.mock("@/components/layout/Header", () => ({ Header: () => null }));
 
 let litBeta = { available: true, flags: { lit_validation: true } as Record<string, boolean>, loading: false };
 jest.mock("@/hooks/useBetaFeatures", () => ({ useBetaFeatures: () => litBeta }));

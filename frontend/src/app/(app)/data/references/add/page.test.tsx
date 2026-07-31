@@ -8,12 +8,6 @@ jest.mock("next/navigation", () => ({
   useSearchParams: () => mockSearch,
 }));
 
-jest.mock("@/components/layout/Sidebar", () => ({
-  Sidebar: () => <nav data-testid="sidebar" />,
-}));
-jest.mock("@/components/layout/Header", () => ({
-  Header: () => <header data-testid="header" />,
-}));
 
 // Stub the two forms so this page-level test only exercises the toggle.
 jest.mock("@/components/references/UploadReferenceForm", () => ({

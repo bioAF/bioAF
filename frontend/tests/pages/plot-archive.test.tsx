@@ -26,12 +26,6 @@ jest.mock("@/hooks/useContentUrl", () => ({
     id != null ? `http://localhost:8000/api/plots/${id}/thumbnail/content?token=fake` : null,
 }));
 
-jest.mock("@/components/layout/Sidebar", () => ({
-  Sidebar: () => <div data-testid="sidebar">Sidebar</div>,
-}));
-jest.mock("@/components/layout/Header", () => ({
-  Header: () => <div data-testid="header">Header</div>,
-}));
 jest.mock("@/components/shared/PlotModal", () => ({
   PlotModal: ({ title, metadata, onClose }: { title: string; metadata?: { experimentName?: string | null; projectName?: string | null; pipelineRunName?: string | null; sourceType?: string | null }; onClose: () => void }) => (
     <div data-testid="plot-modal">

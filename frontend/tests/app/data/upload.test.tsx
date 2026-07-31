@@ -1,12 +1,6 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import DataUploadPage from "@/app/(app)/data/upload/page";
 
-jest.mock("@/components/layout/Sidebar", () => ({
-  Sidebar: () => <div data-testid="sidebar" />,
-}));
-jest.mock("@/components/layout/Header", () => ({
-  Header: () => <div data-testid="header" />,
-}));
 jest.mock("@/lib/auth", () => ({
   getToken: () => "test-token",
   removeToken: jest.fn(),

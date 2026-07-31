@@ -1,8 +1,6 @@
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import BetaFeaturesPage from "./page";
 
-jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => <div data-testid="sidebar" /> }));
-jest.mock("@/components/layout/Header", () => ({ Header: () => <div data-testid="header" /> }));
 
 const mockGet = jest.fn();
 const mockPut = jest.fn();

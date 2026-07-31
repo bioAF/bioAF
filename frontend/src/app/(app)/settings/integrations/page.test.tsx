@@ -13,8 +13,6 @@ jest.mock("@/hooks/useStackOptions", () => ({
 }));
 
 // Stub the heavy layout + the settings panels so the test isolates tab gating.
-jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => <div /> }));
-jest.mock("@/components/layout/Header", () => ({ Header: () => <div /> }));
 jest.mock("@/components/settings/GcpSettingsContent", () => ({
   GcpSettingsContent: () => <div data-testid="gcp-panel" />,
 }));

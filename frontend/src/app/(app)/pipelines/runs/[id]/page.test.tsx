@@ -30,8 +30,6 @@ jest.mock("@/lib/api", () => {
   };
 });
 
-jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => null }));
-jest.mock("@/components/layout/Header", () => ({ Header: () => null }));
 jest.mock("@/components/shared/LoadingSpinner", () => ({ LoadingSpinner: () => null }));
 jest.mock("@/components/shared/ContentLoading", () => ({ ContentLoading: () => null }));
 jest.mock("@/components/experiments/ReviewPanel", () => ({ ReviewPanel: () => null }));

@@ -31,13 +31,7 @@ jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: jest.fn() }),
 }));
 
-jest.mock("@/components/layout/Sidebar", () => ({
-  Sidebar: () => <nav data-testid="sidebar" />,
-}));
 
-jest.mock("@/components/layout/Header", () => ({
-  Header: () => <header data-testid="header" />,
-}));
 
 // Dynamic import so mocks register first
 import DataBrowserPage from "@/app/(app)/data/browser/page";

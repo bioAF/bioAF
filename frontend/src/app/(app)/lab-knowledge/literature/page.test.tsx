@@ -8,8 +8,6 @@ jest.mock("@/lib/auth", () => ({
   isAuthenticated: () => true,
   getCurrentUser: () => ({ role_name: "admin" }),
 }));
-jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => null }));
-jest.mock("@/components/layout/Header", () => ({ Header: () => null }));
 jest.mock("@/components/literature/AssociatePaperModal", () => ({ AssociatePaperModal: () => null }));
 jest.mock("@/lib/api", () => ({ api: { get: jest.fn() } }));
 // Keep the real helper functions (cleanText, formatAuthors, ...) the page renders with; only

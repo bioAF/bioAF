@@ -18,8 +18,6 @@ jest.mock("next/link", () => {
   };
 });
 
-jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => null }));
-jest.mock("@/components/layout/Header", () => ({ Header: () => null }));
 jest.mock("@/components/shared/ContentLoading", () => ({ ContentLoading: () => null }));
 jest.mock("@/components/shared/PlotModal", () => ({ PlotModal: () => null }));
 jest.mock("@/components/shared/ExportPdfButton", () => ({ ExportPdfButton: () => null }));

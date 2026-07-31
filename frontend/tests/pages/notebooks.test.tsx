@@ -32,12 +32,6 @@ jest.mock("@/hooks/useComponents", () => ({
 }));
 
 // Mock layout components
-jest.mock("@/components/layout/Sidebar", () => ({
-  Sidebar: () => <div data-testid="sidebar">Sidebar</div>,
-}));
-jest.mock("@/components/layout/Header", () => ({
-  Header: () => <div data-testid="header">Header</div>,
-}));
 jest.mock("@/components/shared/LoadingSpinner", () => ({
   LoadingSpinner: () => <div data-testid="loading-spinner">Loading...</div>,
 }));

@@ -16,8 +16,6 @@ jest.mock("@/lib/auth", () => ({
   getCurrentUser: () => ({ id: 1, role_name: "admin" }),
 }));
 
-jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => <div /> }));
-jest.mock("@/components/layout/Header", () => ({ Header: () => <div /> }));
 jest.mock("@/components/lab-knowledge/LabDocumentViewer", () => ({
   LabDocumentViewer: () => <div data-testid="viewer" />,
 }));

@@ -7,12 +7,6 @@ jest.mock("next/navigation", () => ({
   useParams: () => ({ id: "1" }),
 }));
 
-jest.mock("@/components/layout/Sidebar", () => ({
-  Sidebar: () => <nav data-testid="sidebar" />,
-}));
-jest.mock("@/components/layout/Header", () => ({
-  Header: () => <header data-testid="header" />,
-}));
 
 const mockPost = jest.fn();
 jest.mock("@/lib/api", () => ({

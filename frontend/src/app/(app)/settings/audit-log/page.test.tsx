@@ -13,8 +13,6 @@ jest.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => ({ canAccess: () => true, loading: false }),
 }));
 
-jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => null }));
-jest.mock("@/components/layout/Header", () => ({ Header: () => null }));
 jest.mock("@/components/layout/Breadcrumb", () => ({ Breadcrumb: () => null }));
 jest.mock("@/components/shared/ContentLoading", () => ({ ContentLoading: () => null }));
 

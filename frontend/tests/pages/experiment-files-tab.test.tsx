@@ -7,12 +7,6 @@ jest.mock("next/navigation", () => ({
   useSearchParams: () => ({ get: () => null }),
 }));
 
-jest.mock("@/components/layout/Sidebar", () => ({
-  Sidebar: () => <div data-testid="sidebar" />,
-}));
-jest.mock("@/components/layout/Header", () => ({
-  Header: () => <div data-testid="header" />,
-}));
 jest.mock("@/components/experiments/ExperimentStatusBadge", () => ({
   ExperimentStatusBadge: () => <span data-testid="status-badge" />,
 }));

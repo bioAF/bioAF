@@ -8,8 +8,6 @@ jest.mock("@/hooks/usePermissions", () => ({
 jest.mock("next/navigation", () => ({ useRouter: () => ({ push: jest.fn() }) }));
 jest.mock("@/lib/auth", () => ({ isAuthenticated: () => true }));
 
-jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => <div /> }));
-jest.mock("@/components/layout/Header", () => ({ Header: () => <div /> }));
 jest.mock("./components/AccountTab", () => ({ AccountTab: () => <div>ACCOUNT_TAB</div> }));
 jest.mock("./components/SessionCredentialsTab", () => ({
   SessionCredentialsTab: () => <div>SESSION_TAB</div>,

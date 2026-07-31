@@ -6,8 +6,6 @@ jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: mockPush }),
   useSearchParams: () => ({ get: (k: string) => mockGetParam(k) }),
 }));
-jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => <div /> }));
-jest.mock("@/components/layout/Header", () => ({ Header: () => <div /> }));
 jest.mock("@/lib/api", () => ({ api: { get: jest.fn() } }));
 
 import SearchPage from "./page";

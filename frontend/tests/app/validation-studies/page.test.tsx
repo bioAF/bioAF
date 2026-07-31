@@ -22,8 +22,6 @@ let litBeta = { available: true, flags: { lit_validation: true } as Record<strin
 jest.mock("@/hooks/useBetaFeatures", () => ({ useBetaFeatures: () => litBeta }));
 
 // Keep the test focused on the page body, not the app chrome.
-jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => null }));
-jest.mock("@/components/layout/Header", () => ({ Header: () => null }));
 
 import { api } from "@/lib/api";
 

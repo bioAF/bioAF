@@ -23,8 +23,6 @@ jest.mock("@/lib/api", () => ({
   api: { get: jest.fn() },
 }));
 
-jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => <div /> }));
-jest.mock("@/components/layout/Header", () => ({ Header: () => <div /> }));
 jest.mock("@/components/dashboard/DashboardContent", () => ({
   DashboardContent: () => <div data-testid="dashboard-content" />,
 }));
