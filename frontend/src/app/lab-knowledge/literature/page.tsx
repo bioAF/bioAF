@@ -9,6 +9,7 @@ import { AssociatePaperModal } from "@/components/literature/AssociatePaperModal
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { api } from "@/lib/api";
+import { statusBadgeClass } from "@/lib/statusStyles";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import {
   cleanText,
@@ -34,22 +35,10 @@ const PROVENANCE_LABELS: Record<Provenance, string> = {
   lit_review_run: "AI Lit Review",
 };
 
-const PROVENANCE_BADGE: Record<Provenance, string> = {
-  user_upload: "bg-blue-100 text-blue-800",
-  source_search: "bg-green-100 text-green-800",
-  lit_review_run: "bg-purple-100 text-purple-800",
-};
-
 const READING_LABELS: Record<ReadingStatusValue, string> = {
   unread: "Unread",
   reading: "Reading",
   read: "Read",
-};
-
-const READING_BADGE: Record<ReadingStatusValue, string> = {
-  unread: "bg-gray-100 text-gray-700",
-  reading: "bg-amber-100 text-amber-800",
-  read: "bg-emerald-100 text-emerald-800",
 };
 
 const DEFAULT_TOGGLES: Record<StatusFlag, boolean> = {
@@ -224,7 +213,7 @@ export default function LiteratureLibraryPage() {
             e.stopPropagation();
             openAssociate([paper.id]);
           }}
-          className="text-blue-600 hover:underline text-xs"
+          className="text-bioaf-600 hover:underline text-xs"
         >
           Associate
         </button>
@@ -245,7 +234,7 @@ export default function LiteratureLibraryPage() {
             e.stopPropagation();
             openAssociate([paper.id]);
           }}
-          className="text-blue-600 hover:underline text-xs"
+          className="text-bioaf-600 hover:underline text-xs"
         >
           +
         </button>
@@ -415,7 +404,7 @@ export default function LiteratureLibraryPage() {
               </span>
               <button
                 onClick={() => openAssociate(Array.from(selectedIds))}
-                className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
+                className="px-3 py-1.5 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700"
               >
                 Associate
               </button>
@@ -523,7 +512,7 @@ export default function LiteratureLibraryPage() {
                       </td>
                       <td className="px-4 py-3 text-xs">
                         <span
-                          className={`inline-block px-2 py-0.5 rounded ${PROVENANCE_BADGE[p.provenance]}`}
+                          className={`inline-block px-2 py-0.5 rounded ${statusBadgeClass("literatureProvenance", p.provenance)}`}
                         >
                           {PROVENANCE_LABELS[p.provenance]}
                         </span>
@@ -532,7 +521,7 @@ export default function LiteratureLibraryPage() {
                         <div className="flex flex-wrap gap-1">
                           {p.reading_status && (
                             <span
-                              className={`px-1.5 py-0.5 rounded ${READING_BADGE[p.reading_status]}`}
+                              className={`px-1.5 py-0.5 rounded ${statusBadgeClass("literatureReading", p.reading_status)}`}
                             >
                               {READING_LABELS[p.reading_status]}
                             </span>

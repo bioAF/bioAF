@@ -9,6 +9,7 @@ import {
   literature,
   type Paper,
 } from "@/lib/literature";
+import { statusBadgeClass } from "@/lib/statusStyles";
 
 interface Props {
   experimentId?: number;
@@ -19,12 +20,6 @@ const PROVENANCE_LABELS: Record<string, string> = {
   user_upload: "Uploaded",
   source_search: "From search",
   lit_review_run: "AI Lit Review",
-};
-
-const PROVENANCE_BADGE: Record<string, string> = {
-  user_upload: "bg-blue-100 text-blue-800",
-  source_search: "bg-green-100 text-green-800",
-  lit_review_run: "bg-purple-100 text-purple-800",
 };
 
 export function LiteratureTabPanel({ experimentId, projectId }: Props) {
@@ -130,7 +125,7 @@ export function LiteratureTabPanel({ experimentId, projectId }: Props) {
                 <td className="px-4 py-3 text-xs">
                   <span
                     className={`inline-block px-2 py-0.5 rounded ${
-                      PROVENANCE_BADGE[p.provenance] ?? "bg-gray-100 text-gray-700"
+                      statusBadgeClass("literatureProvenance", p.provenance)
                     }`}
                   >
                     {PROVENANCE_LABELS[p.provenance] ?? p.provenance}

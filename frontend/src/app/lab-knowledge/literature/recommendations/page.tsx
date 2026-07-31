@@ -17,12 +17,7 @@ import {
   type RecommendationStatus,
 } from "@/lib/literature";
 import { AiLitReviewLauncher } from "@/components/literature/AiLitReviewLauncher";
-
-const BUCKET_COLORS: Record<string, string> = {
-  high: "bg-green-100 text-green-800",
-  medium: "bg-yellow-100 text-yellow-800",
-  low: "bg-gray-100 text-gray-700",
-};
+import { statusBadgeClass } from "@/lib/statusStyles";
 
 export default function LiteratureRecommendationsPage() {
   const router = useRouter();
@@ -156,7 +151,7 @@ export default function LiteratureRecommendationsPage() {
                       )}
                       <div className="flex gap-2 mt-3 text-xs">
                         <span
-                          className={`px-2 py-0.5 rounded ${BUCKET_COLORS[r.relevance_bucket] ?? "bg-gray-100"}`}
+                          className={`px-2 py-0.5 rounded ${statusBadgeClass("recommendationBucket", r.relevance_bucket)}`}
                         >
                           relevance {r.relevance_score.toFixed(2)} ({r.relevance_bucket})
                         </span>

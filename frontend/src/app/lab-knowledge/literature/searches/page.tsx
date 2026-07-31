@@ -280,7 +280,7 @@ export default function LiteratureSearchesPage() {
                           <button
                             disabled={adding}
                             onClick={() => addOne(p.id)}
-                            className="text-blue-600 hover:underline"
+                            className="text-bioaf-600 hover:underline"
                           >
                             Add to Library
                           </button>

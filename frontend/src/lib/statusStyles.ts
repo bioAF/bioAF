@@ -156,6 +156,74 @@ export const STATUS_STYLES: Record<string, StatusDomain> = {
     missing_recommended: { badge: "bg-gray-400", label: "Missing (Recommended)" },
   },
 
+  // Literature Paper provenance (how a paper entered the Library). The label is
+  // supplied separately by the page (PROVENANCE_LABELS); this is the color only.
+  literatureProvenance: {
+    user_upload: { badge: "bg-blue-100 text-blue-800" },
+    source_search: { badge: "bg-green-100 text-green-800" },
+    lit_review_run: { badge: "bg-purple-100 text-purple-800" },
+  },
+
+  // Literature Paper reading status (color only; label supplied by the page).
+  literatureReading: {
+    unread: { badge: "bg-gray-100 text-gray-700" },
+    reading: { badge: "bg-amber-100 text-amber-800" },
+    read: { badge: "bg-emerald-100 text-emerald-800" },
+  },
+
+  // Literature recommendation relevance bucket (color only).
+  recommendationBucket: {
+    high: { badge: "bg-green-100 text-green-800" },
+    medium: { badge: "bg-yellow-100 text-yellow-800" },
+    low: { badge: "bg-gray-100 text-gray-700" },
+  },
+
+  // Literature Validation outcome tone (positive/caution/negative/neutral). The
+  // tone itself is derived in lib/validationStatus + lib/validationClassification;
+  // this is the shared palette those tones map to.
+  validationTone: {
+    positive: { badge: "bg-green-100 text-green-800" },
+    caution: { badge: "bg-yellow-100 text-yellow-800" },
+    negative: { badge: "bg-red-100 text-red-800" },
+    neutral: { badge: "bg-gray-100 text-gray-700" },
+  },
+
+  // Literature Validation pipeline-stage kind, shown while a study is in progress
+  // (before it reaches a classification). Keyed by ValidationStageKind
+  // (lib/validationStage). `classified` renders a validationTone badge instead.
+  validationStage: {
+    in_progress: { badge: "bg-blue-100 text-blue-800" },
+    awaiting_review: { badge: "bg-yellow-100 text-yellow-800" },
+    declined: { badge: "bg-gray-100 text-gray-700" },
+    error: { badge: "bg-red-100 text-red-800" },
+    classified: { badge: "bg-gray-100 text-gray-700" },
+  },
+
+  // Sample QC status.
+  sampleQc: {
+    pass: { badge: "bg-green-100 text-green-800", label: "Pass" },
+    warning: { badge: "bg-yellow-100 text-yellow-800", label: "Warning" },
+    fail: { badge: "bg-red-100 text-red-800", label: "Fail" },
+  },
+
+  // Scientific review verdict.
+  review: {
+    approved: { badge: "bg-green-100 text-green-800", label: "Approved" },
+    approved_with_caveats: { badge: "bg-yellow-100 text-yellow-800", label: "Approved w/ Caveats" },
+    rejected: { badge: "bg-red-100 text-red-800", label: "Rejected" },
+    revision_requested: { badge: "bg-orange-100 text-orange-800", label: "Revision Requested" },
+  },
+
+  // QC quality_rating pill (excellent/good/acceptable/pending_review). An unknown
+  // rating renders red at the call site (a data error should read as alarming),
+  // so it is deliberately NOT listed here as a neutral fallback.
+  qcQuality: {
+    excellent: { badge: "bg-green-100 text-green-700" },
+    good: { badge: "bg-blue-100 text-blue-700" },
+    acceptable: { badge: "bg-yellow-100 text-yellow-700" },
+    pending_review: { badge: "bg-gray-100 text-gray-700" },
+  },
+
   // Catch-all for mixed/generic status surfaces (component health, users,
   // projects, publications). Labels default to the humanized status.
   generic: {

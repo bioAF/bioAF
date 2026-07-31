@@ -64,6 +64,48 @@ describe("statusStyles library", () => {
   it("exposes the registry for enumerations (e.g. dropdowns/legends)", () => {
     expect(Object.keys(STATUS_STYLES.sdr)).toContain("flagged_for_review");
   });
+
+  it("consolidates the literature paper provenance palette", () => {
+    expect(statusBadgeClass("literatureProvenance", "user_upload")).toBe("bg-blue-100 text-blue-800");
+    expect(statusBadgeClass("literatureProvenance", "source_search")).toBe("bg-green-100 text-green-800");
+    expect(statusBadgeClass("literatureProvenance", "lit_review_run")).toBe("bg-purple-100 text-purple-800");
+  });
+
+  it("consolidates the literature reading-status palette", () => {
+    expect(statusBadgeClass("literatureReading", "unread")).toBe("bg-gray-100 text-gray-700");
+    expect(statusBadgeClass("literatureReading", "reading")).toBe("bg-amber-100 text-amber-800");
+    expect(statusBadgeClass("literatureReading", "read")).toBe("bg-emerald-100 text-emerald-800");
+  });
+
+  it("consolidates the recommendation relevance-bucket palette", () => {
+    expect(statusBadgeClass("recommendationBucket", "high")).toBe("bg-green-100 text-green-800");
+    expect(statusBadgeClass("recommendationBucket", "medium")).toBe("bg-yellow-100 text-yellow-800");
+    expect(statusBadgeClass("recommendationBucket", "low")).toBe("bg-gray-100 text-gray-700");
+  });
+
+  it("consolidates the validation outcome tone palette (positive/caution/negative/neutral)", () => {
+    expect(statusBadgeClass("validationTone", "positive")).toBe("bg-green-100 text-green-800");
+    expect(statusBadgeClass("validationTone", "caution")).toBe("bg-yellow-100 text-yellow-800");
+    expect(statusBadgeClass("validationTone", "negative")).toBe("bg-red-100 text-red-800");
+    expect(statusBadgeClass("validationTone", "neutral")).toBe("bg-gray-100 text-gray-700");
+  });
+
+  it("consolidates the validation pipeline-stage palette", () => {
+    expect(statusBadgeClass("validationStage", "in_progress")).toBe("bg-blue-100 text-blue-800");
+    expect(statusBadgeClass("validationStage", "awaiting_review")).toBe("bg-yellow-100 text-yellow-800");
+    expect(statusBadgeClass("validationStage", "error")).toBe("bg-red-100 text-red-800");
+    expect(statusBadgeClass("validationStage", "declined")).toBe("bg-gray-100 text-gray-700");
+    expect(statusBadgeClass("validationStage", "classified")).toBe("bg-gray-100 text-gray-700");
+  });
+
+  it("keeps sample QC, review verdict, and QC quality labels + colors", () => {
+    expect(statusBadgeClass("sampleQc", "pass")).toBe("bg-green-100 text-green-800");
+    expect(statusLabel("sampleQc", "warning")).toBe("Warning");
+    expect(statusLabel("review", "approved_with_caveats")).toBe("Approved w/ Caveats");
+    expect(statusBadgeClass("review", "revision_requested")).toBe("bg-orange-100 text-orange-800");
+    expect(statusBadgeClass("qcQuality", "good")).toBe("bg-blue-100 text-blue-700");
+    expect(statusBadgeClass("qcQuality", "excellent")).toBe("bg-green-100 text-green-700");
+  });
 });
 
 describe("tailwind content config covers statusStyles", () => {

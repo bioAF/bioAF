@@ -1,14 +1,6 @@
 import { ValidationStatusBadge } from "@/components/validation/ValidationStatusBadge";
-import { getValidationStage, type ValidationStageKind } from "@/lib/validationStage";
-
-// Stage-kind -> palette, matching the app's status colors.
-const STAGE_CLASSES: Record<ValidationStageKind, string> = {
-  in_progress: "bg-blue-100 text-blue-800",
-  awaiting_review: "bg-yellow-100 text-yellow-800",
-  declined: "bg-gray-100 text-gray-700",
-  error: "bg-red-100 text-red-800",
-  classified: "bg-gray-100 text-gray-700",
-};
+import { getValidationStage } from "@/lib/validationStage";
+import { statusBadgeClass } from "@/lib/statusStyles";
 
 function humanizeClassification(c: string): string {
   return c.replace(/_/g, " ").replace(/^\w/, (m) => m.toUpperCase());
@@ -49,7 +41,7 @@ export function ValidationStudyOutcome({
     <span className="inline-flex items-center gap-2">
       <span
         title={stage.description}
-        className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${STAGE_CLASSES[stage.kind]}`}
+        className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${statusBadgeClass("validationStage", stage.kind)}`}
       >
         {stage.label}
       </span>
