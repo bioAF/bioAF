@@ -18,6 +18,7 @@
     --color-ink-muted: 55 65 81; /* secondary text (gray-700) */
     --color-ink-subtle: 107 114 128; /* muted labels (gray-500) */
     --color-hairline: 229 231 235; /* borders/dividers (gray-200) */
+    --color-focus-ring: 2 132 199; /* keyboard focus outline (bioaf-600) */
   }
 
   .dark {
@@ -29,6 +30,7 @@
     --color-ink-muted: 173 181 192;
     --color-ink-subtle: 138 146 158;
     --color-hairline: 48 54 63;
+    --color-focus-ring: 56 189 248; /* bioaf-400, brighter on dark surfaces */
   }
 
   html {
@@ -36,6 +38,15 @@
   }
   html.dark {
     color-scheme: dark;
+  }
+
+  /* Keyboard-only focus ring. `:focus-visible` fires for keyboard / assistive-tech
+     navigation but not mouse clicks, so pointer users see no outline while keyboard
+     users get a clear, brand-colored indicator on every interactive element. The app
+     previously shipped zero focus-visible styling, so tab-focus was invisible. */
+  :focus-visible {
+    outline: 2px solid rgb(var(--color-focus-ring));
+    outline-offset: 2px;
   }
 }
 
