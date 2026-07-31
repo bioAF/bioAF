@@ -4,6 +4,12 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { permissionsCache, clearPermissionsCache } from "@/hooks/permissionsCache";
+
+// Re-exported so existing importers (Header, api.ts's leaf import, tests that mock
+// this module) keep working. The cache state itself lives in the leaf
+// permissionsCache module to avoid the api.ts <-> usePermissions import cycle.
+export { clearPermissionsCache };
 
 interface Permission {
   resource: string;
@@ -21,27 +27,17 @@ interface MeResponse {
   permissions: Permission[];
 }
 
-let cachedPermissions: Set<string> | null = null;
-let cachedRoleName: string | null = null;
-let fetchPromise: Promise<void> | null = null;
-
 function permKey(resource: string, action: string): string {
   return `${resource}:${action}`;
-}
-
-export function clearPermissionsCache(): void {
-  cachedPermissions = null;
-  cachedRoleName = null;
-  fetchPromise = null;
 }
 
 export function usePermissions() {
   const router = useRouter();
   const [permissions, setPermissions] = useState<Set<string>>(
-    cachedPermissions ?? new Set(),
+    permissionsCache.permissions ?? new Set(),
   );
-  const [roleName, setRoleName] = useState<string>(cachedRoleName ?? "");
-  const [loading, setLoading] = useState(!cachedPermissions);
+  const [roleName, setRoleName] = useState<string>(permissionsCache.roleName ?? "");
+  const [loading, setLoading] = useState(!permissionsCache.permissions);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -49,33 +45,33 @@ export function usePermissions() {
       return;
     }
 
-    if (cachedPermissions) {
-      setPermissions(cachedPermissions);
-      setRoleName(cachedRoleName ?? "");
+    if (permissionsCache.permissions) {
+      setPermissions(permissionsCache.permissions);
+      setRoleName(permissionsCache.roleName ?? "");
       setLoading(false);
       return;
     }
 
-    if (!fetchPromise) {
-      fetchPromise = api
+    if (!permissionsCache.promise) {
+      permissionsCache.promise = api
         .get<MeResponse>("/api/auth/me")
         .then((me) => {
           const permSet = new Set<string>();
           for (const p of me.permissions) {
             permSet.add(permKey(p.resource, p.action));
           }
-          cachedPermissions = permSet;
-          cachedRoleName = me.role_name;
+          permissionsCache.permissions = permSet;
+          permissionsCache.roleName = me.role_name;
         })
         .catch(() => {
-          cachedPermissions = new Set();
-          cachedRoleName = "";
+          permissionsCache.permissions = new Set();
+          permissionsCache.roleName = "";
         });
     }
 
-    fetchPromise.then(() => {
-      setPermissions(cachedPermissions!);
-      setRoleName(cachedRoleName ?? "");
+    permissionsCache.promise.then(() => {
+      setPermissions(permissionsCache.permissions!);
+      setRoleName(permissionsCache.roleName ?? "");
       setLoading(false);
     });
   }, [router]);
