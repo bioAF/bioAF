@@ -28,6 +28,36 @@ beforeEach(() => {
   mockListPapers.mockReset();
 });
 
+test("makes each paper keyboard-openable via a title link and labels the bulk checkboxes", async () => {
+  mockListPapers.mockResolvedValue({
+    items: [
+      {
+        id: 42,
+        title: "CRISPR screen paper",
+        authors: [],
+        publication_date: null,
+        journal: null,
+        provenance: "user_upload",
+        reading_status: "unread",
+        dismissed: false,
+        has_full_text: false,
+        associations: [{ id: 1, scope_type: "experiment", scope_id: 7, label: "Exp 7" }],
+        comment_count: 0,
+      },
+    ],
+    total: 1,
+  });
+  render(<LiteraturePage />);
+
+  // The title is a real link (focusable + keyboard-activatable), not a div behind a row onClick.
+  const link = await screen.findByRole("link", { name: /CRISPR screen paper/ });
+  expect(link).toHaveAttribute("href", "/lab-knowledge/literature/papers/42");
+
+  // The select-all and per-row checkboxes carry accessible names for screen readers.
+  expect(screen.getByRole("checkbox", { name: /select all/i })).toBeInTheDocument();
+  expect(screen.getByRole("checkbox", { name: /select CRISPR screen paper/i })).toBeInTheDocument();
+});
+
 test("labels paper provenance consistently in the filter and the table column (no Provenance/Source split)", async () => {
   mockListPapers.mockResolvedValue({
     items: [

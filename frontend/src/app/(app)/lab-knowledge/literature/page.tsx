@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { AssociatePaperModal } from "@/components/literature/AssociatePaperModal";
@@ -436,6 +437,7 @@ export default function LiteratureLibraryPage() {
                   <th className="px-4 py-3 w-10">
                     <input
                       type="checkbox"
+                      aria-label="Select all papers"
                       checked={
                         papers.length > 0 &&
                         selectedIds.size === papers.length
@@ -467,25 +469,23 @@ export default function LiteratureLibraryPage() {
                 {papers.map((p) => (
                   <tr
                     key={p.id}
-                    className="hover:bg-gray-50 cursor-pointer align-top"
-                    onClick={() =>
-                      router.push(`/lab-knowledge/literature/papers/${p.id}`)
-                    }
+                    className="hover:bg-gray-50 align-top"
                   >
-                    <td
-                      className="px-4 py-3"
-                      onClick={(e) => e.stopPropagation()}
-                    >
+                    <td className="px-4 py-3">
                       <input
                         type="checkbox"
+                        aria-label={`Select ${cleanText(p.title)}`}
                         checked={selectedIds.has(p.id)}
                         onChange={() => toggleSelect(p.id)}
                       />
                     </td>
                     <td className="px-4 py-3 text-sm">
-                      <div className="font-medium text-bioaf-700">
+                      <Link
+                        href={`/lab-knowledge/literature/papers/${p.id}`}
+                        className="font-medium text-bioaf-700 hover:underline"
+                      >
                         {cleanText(p.title)}
-                      </div>
+                      </Link>
                       {p.journal && (
                         <div className="text-xs text-gray-500 mt-0.5">
                           {cleanText(p.journal)}
