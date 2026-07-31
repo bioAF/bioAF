@@ -313,7 +313,7 @@ export default function LiteratureLibraryPage() {
             </select>
           </div>
           <div>
-            <label className="block text-xs text-gray-600 mb-1">Origin</label>
+            <label className="block text-xs text-gray-600 mb-1">Provenance</label>
             <select
               value={provenance}
               onChange={(e) =>
@@ -453,7 +453,7 @@ export default function LiteratureLibraryPage() {
                     Year
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-32">
-                    Origin
+                    Provenance
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-44">
                     Flags

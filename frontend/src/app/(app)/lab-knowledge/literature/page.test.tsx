@@ -28,7 +28,7 @@ beforeEach(() => {
   mockListPapers.mockReset();
 });
 
-test("labels paper origin consistently in the filter and the table column (no Provenance/Source split)", async () => {
+test("labels paper provenance consistently in the filter and the table column (no Provenance/Source split)", async () => {
   mockListPapers.mockResolvedValue({
     items: [
       {
@@ -50,12 +50,11 @@ test("labels paper origin consistently in the filter and the table column (no Pr
   render(<LiteraturePage />);
 
   await screen.findByText("A paper");
-  // Both the filter label and the table column header read "Origin".
-  expect(screen.getAllByText("Origin")).toHaveLength(2);
-  // The old split names are gone: no "Provenance" label, no "Source" column header.
-  expect(screen.queryByText("Provenance")).not.toBeInTheDocument();
+  // "Provenance" is the domain-correct term; the filter and the column now agree on it.
+  expect(screen.getAllByText("Provenance")).toHaveLength(2);
+  // The split is resolved: the column no longer reads "Source".
   const headers = screen.getAllByRole("columnheader").map((h) => h.textContent?.trim());
-  expect(headers).toContain("Origin");
+  expect(headers).toContain("Provenance");
   expect(headers).not.toContain("Source");
 });
 
