@@ -86,7 +86,7 @@ describe("notificationHref", () => {
     );
     expect(
       notificationHref(notif("literature.review_run_completed", { entity_type: "literature_review_run", entity_id: 1 })),
-    ).toBe("/data/literature");
+    ).toBe("/lab-knowledge/literature");
   });
 
   it("returns null when there is no usable destination", () => {

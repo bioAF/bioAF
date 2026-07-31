@@ -26,7 +26,7 @@ export function ValidatePaperButton({ paperId, doi }: { paperId: number; doi?: s
         paper_id: paperId,
         source_doi: doi ?? undefined,
       });
-      router.push(`/validation-studies/${study.id}`);
+      router.push(`/lab-knowledge/validation-studies/${study.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not start validation.");
       setBusy(false);

@@ -239,14 +239,14 @@ describe("Sidebar beta gating", () => {
   test("hides Validation Studies when the lit_validation flag is off", () => {
     mockBetaFeatures.mockReturnValue({ available: false, flags: {}, loading: false });
     render(<Sidebar />);
-    fireEvent.click(screen.getByText("Data & Files"));
+    fireEvent.click(screen.getByText("Lab Knowledge"));
     expect(screen.queryByText("Validation Studies")).not.toBeInTheDocument();
   });
 
   test("shows Validation Studies when the lit_validation flag is on", () => {
     mockBetaFeatures.mockReturnValue({ available: true, flags: { lit_validation: true }, loading: false });
     render(<Sidebar />);
-    fireEvent.click(screen.getByText("Data & Files"));
+    fireEvent.click(screen.getByText("Lab Knowledge"));
     expect(screen.getByText("Validation Studies")).toBeInTheDocument();
   });
 

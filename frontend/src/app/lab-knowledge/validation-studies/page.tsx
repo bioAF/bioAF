@@ -92,7 +92,7 @@ export default function ValidationStudiesListPage() {
                     <tr key={s.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm">
                         <Link
-                          href={`/validation-studies/${s.id}`}
+                          href={`/lab-knowledge/validation-studies/${s.id}`}
                           className="font-medium text-bioaf-700 hover:underline"
                         >
                           Study #{s.id}

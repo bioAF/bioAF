@@ -123,7 +123,7 @@ export default function LiteratureSearchesPage() {
         <Header />
         <main className="flex-1 overflow-y-auto p-6">
           <button
-            onClick={() => router.push("/data/literature")}
+            onClick={() => router.push("/lab-knowledge/literature")}
             className="text-bioaf-700 hover:underline text-sm mb-4"
           >
             &larr; Back to library
@@ -244,7 +244,7 @@ export default function LiteratureSearchesPage() {
                     <div className="flex-1">
                       <button
                         onClick={() =>
-                          router.push(`/data/literature/papers/${p.id}`)
+                          router.push(`/lab-knowledge/literature/papers/${p.id}`)
                         }
                         className="text-bioaf-700 hover:underline text-left font-medium"
                       >

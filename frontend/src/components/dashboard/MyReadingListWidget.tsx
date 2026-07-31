@@ -67,7 +67,7 @@ export function MyReadingListWidget() {
             {items.map((p) => (
               <li key={p.id}>
                 <Link
-                  href={`/data/literature/papers/${p.id}`}
+                  href={`/lab-knowledge/literature/papers/${p.id}`}
                   className="block rounded px-1 py-0.5 hover:bg-gray-50"
                 >
                   <span className="block truncate text-sm text-gray-800">{p.title}</span>
@@ -79,7 +79,7 @@ export function MyReadingListWidget() {
             ))}
           </ul>
           <Link
-            href="/data/literature"
+            href="/lab-knowledge/literature"
             className="text-xs text-bioaf-600 hover:underline mt-2 inline-block"
           >
             View literature

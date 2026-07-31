@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import ValidationStudiesListPage from "@/app/validation-studies/page";
+import ValidationStudiesListPage from "@/app/lab-knowledge/validation-studies/page";
 
 const mockPush = jest.fn();
 jest.mock("next/navigation", () => ({
@@ -33,8 +33,8 @@ describe("ValidationStudiesListPage", () => {
     expect(screen.getByText("Running analysis")).toBeInTheDocument();
     expect(screen.queryByText("Could Not Reproduce")).not.toBeInTheDocument();
     // Each row links to the detail page.
-    expect(screen.getByRole("link", { name: /Study #7/ })).toHaveAttribute("href", "/validation-studies/7");
-    expect(screen.getByRole("link", { name: /Study #8/ })).toHaveAttribute("href", "/validation-studies/8");
+    expect(screen.getByRole("link", { name: /Study #7/ })).toHaveAttribute("href", "/lab-knowledge/validation-studies/7");
+    expect(screen.getByRole("link", { name: /Study #8/ })).toHaveAttribute("href", "/lab-knowledge/validation-studies/8");
   });
 
   it("shows an empty state when there are no studies", async () => {

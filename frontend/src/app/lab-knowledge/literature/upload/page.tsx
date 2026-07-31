@@ -31,7 +31,7 @@ export default function LiteratureUploadPage() {
       if (journal) extra.journal = journal;
       if (abstract) extra.abstract = abstract;
       const paper = await literature.uploadPaper(file, extra);
-      router.push(`/data/literature/papers/${paper.id}`);
+      router.push(`/lab-knowledge/literature/papers/${paper.id}`);
     } catch (e) {
       const message =
         e instanceof Error ? e.message : "Upload failed.";
@@ -112,7 +112,7 @@ export default function LiteratureUploadPage() {
             <div className="flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => router.push("/data/literature")}
+                onClick={() => router.push("/lab-knowledge/literature")}
                 className="border border-gray-300 px-4 py-2 rounded hover:bg-gray-50"
               >
                 Cancel

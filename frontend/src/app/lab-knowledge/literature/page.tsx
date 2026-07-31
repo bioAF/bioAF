@@ -262,26 +262,26 @@ export default function LiteratureLibraryPage() {
             <h1 className="text-2xl font-bold">Literature Library</h1>
             <div className="flex gap-2">
               <button
-                onClick={() => router.push("/data/literature/recommendations")}
+                onClick={() => router.push("/lab-knowledge/literature/recommendations")}
                 className="border border-gray-300 px-4 py-2 rounded-md hover:bg-gray-50"
               >
                 AI Literature Review
               </button>
               <button
-                onClick={() => router.push("/data/literature/searches")}
+                onClick={() => router.push("/lab-knowledge/literature/searches")}
                 className="border border-gray-300 px-4 py-2 rounded-md hover:bg-gray-50"
               >
                 Searches
               </button>
               <button
-                onClick={() => router.push("/data/literature/sources")}
+                onClick={() => router.push("/lab-knowledge/literature/sources")}
                 className="border border-gray-300 px-4 py-2 rounded-md hover:bg-gray-50"
               >
                 Sources
               </button>
               {canUpload && (
                 <button
-                  onClick={() => router.push("/data/literature/upload")}
+                  onClick={() => router.push("/lab-knowledge/literature/upload")}
                   className="bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700"
                 >
                   Upload paper
@@ -482,7 +482,7 @@ export default function LiteratureLibraryPage() {
                       key={p.id}
                       className="hover:bg-gray-50 cursor-pointer align-top"
                       onClick={() =>
-                        router.push(`/data/literature/papers/${p.id}`)
+                        router.push(`/lab-knowledge/literature/papers/${p.id}`)
                       }
                     >
                       <td

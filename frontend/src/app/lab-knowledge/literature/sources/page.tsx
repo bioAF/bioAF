@@ -68,7 +68,7 @@ export default function LiteratureSourcesPage() {
         <Header />
         <main className="flex-1 overflow-y-auto p-6">
           <button
-            onClick={() => router.push("/data/literature")}
+            onClick={() => router.push("/lab-knowledge/literature")}
             className="text-bioaf-700 hover:underline text-sm mb-4"
           >
             ← Back to library

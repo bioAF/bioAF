@@ -29,7 +29,7 @@ describe("ValidatePaperButton", () => {
     await waitFor(() =>
       expect(mockPost).toHaveBeenCalledWith("/api/validation-studies", { paper_id: 9, source_doi: "10.1/x" }),
     );
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/validation-studies/42"));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/lab-knowledge/validation-studies/42"));
   });
 
   it("renders nothing for a user without the request permission", () => {

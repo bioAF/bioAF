@@ -55,6 +55,11 @@ const nextConfig = {
       { source: "/pipelines/triggers", destination: "/pipelines/runs", permanent: true },
       // Old data paths
       { source: "/data", destination: "/data/browser", permanent: true },
+      // Literature + Validation Studies moved from Data & Files into Lab Knowledge
+      { source: "/data/literature", destination: "/lab-knowledge/literature", permanent: true },
+      { source: "/data/literature/:path*", destination: "/lab-knowledge/literature/:path*", permanent: true },
+      { source: "/validation-studies", destination: "/lab-knowledge/validation-studies", permanent: true },
+      { source: "/validation-studies/:path*", destination: "/lab-knowledge/validation-studies/:path*", permanent: true },
       // Old references path
       { source: "/references", destination: "/data/references", permanent: true },
       { source: "/references/:id", destination: "/data/references/:id", permanent: true },

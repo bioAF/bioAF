@@ -110,7 +110,7 @@ export function LiteratureTabPanel({ experimentId, projectId }: Props) {
               <tr key={p.id} className="align-top hover:bg-gray-50">
                 <td className="px-4 py-3 text-sm">
                   <a
-                    href={`/data/literature/papers/${p.id}`}
+                    href={`/lab-knowledge/literature/papers/${p.id}`}
                     className="text-bioaf-700 hover:underline font-medium"
                   >
                     {cleanText(p.title)}

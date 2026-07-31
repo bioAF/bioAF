@@ -90,8 +90,6 @@ export const navConfig: NavSection[] = [
       { label: "Upload", path: "/data/upload", permission: { resource: "files", action: "upload" } },
       { label: "Files", path: "/data/files", permission: { resource: "files", action: "view" } },
       { label: "Reference Data", path: "/data/references", permission: { resource: "files", action: "view" } },
-      { label: "Literature", path: "/data/literature", permission: { resource: "literature", action: "view" } },
-      { label: "Validation Studies", path: "/validation-studies", permission: { resource: "lit_validation", action: "view" }, betaFlag: "lit_validation" },
       { label: "Naming Profiles", path: "/settings/naming-profiles", permission: { resource: "infrastructure", action: "configure" } },
     ],
   },
@@ -100,6 +98,10 @@ export const navConfig: NavSection[] = [
     icon: "book",
     children: [
       { label: "Documents", path: "/lab-knowledge/documents", permission: { resource: "lab_documents", action: "view" } },
+      // Papers-as-knowledge: Literature + its Validation Studies live alongside Documents/Glossary,
+      // where scientists look for reference material (moved out of Data & Files).
+      { label: "Literature", path: "/lab-knowledge/literature", permission: { resource: "literature", action: "view" } },
+      { label: "Validation Studies", path: "/lab-knowledge/validation-studies", permission: { resource: "lit_validation", action: "view" }, betaFlag: "lit_validation" },
       { label: "Glossary", path: "/lab-knowledge/glossary", permission: { resource: "lab_glossary", action: "view" } },
       { label: "Decision Records", path: "/lab-knowledge/decision-records", permission: { resource: "sdr", action: "view" } },
     ],
