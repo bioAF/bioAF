@@ -4,18 +4,24 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useBetaFeatures } from "@/hooks/useBetaFeatures";
 
 /**
  * Entry point (F2) for the validation flow from a library paper: creates a ValidationStudy for the
- * paper and opens its detail page, where the reader drives Read -> Approve -> Classify. Gated on the
- * lit_validation:request permission; renders nothing without it.
+ * paper and opens its detail page, where the reader drives Read -> Approve -> Classify. Gated on BOTH
+ * the `lit_validation` beta flag (so it stays hidden until the feature is switched on, matching the
+ * Validation Studies nav gate) and the lit_validation:request permission; renders nothing otherwise.
  */
 export function ValidatePaperButton({ paperId, doi }: { paperId: number; doi?: string | null }) {
   const router = useRouter();
   const { canAccess } = usePermissions();
+  const { flags } = useBetaFeatures();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Match the nav's beta gate. useBetaFeatures default-denies while loading, so the entry point
+  // never flashes in, and never appears on an instance where the Validation Studies nav is hidden.
+  if (!flags.lit_validation) return null;
   if (!canAccess("lit_validation", "request")) return null;
 
   async function start() {

@@ -9,6 +9,11 @@ jest.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => ({ canAccess: (r: string, a: string) => canAccessImpl(r, a), loading: false }),
 }));
 
+let betaFlags: Record<string, boolean> = { lit_validation: true };
+jest.mock("@/hooks/useBetaFeatures", () => ({
+  useBetaFeatures: () => ({ available: true, flags: betaFlags, loading: false }),
+}));
+
 jest.mock("@/lib/api", () => ({ api: { post: jest.fn() } }));
 import { api } from "@/lib/api";
 const mockPost = api.post as jest.Mock;
@@ -17,6 +22,7 @@ beforeEach(() => {
   mockPost.mockReset();
   mockPush.mockReset();
   canAccessImpl = () => true;
+  betaFlags = { lit_validation: true };
 });
 
 describe("ValidatePaperButton", () => {
@@ -34,6 +40,12 @@ describe("ValidatePaperButton", () => {
 
   it("renders nothing for a user without the request permission", () => {
     canAccessImpl = (r, a) => !(r === "lit_validation" && a === "request");
+    const { container } = render(<ValidatePaperButton paperId={9} doi="10.1/x" />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("renders nothing when the lit_validation beta flag is off, even with permission", () => {
+    betaFlags = {};
     const { container } = render(<ValidatePaperButton paperId={9} doi="10.1/x" />);
     expect(container).toBeEmptyDOMElement();
   });
