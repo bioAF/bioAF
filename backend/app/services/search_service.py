@@ -586,7 +586,7 @@ class SearchService:
                 "entity_id": paper.id,
                 "title": paper.title,
                 "snippet": SearchService._paper_snippet(paper),
-                "url": f"/data/literature/papers/{paper.id}",
+                "url": f"/lab-knowledge/literature/papers/{paper.id}",
                 "experiment_id": None,
                 "relevance_score": None,
                 "_match_name": paper.title,

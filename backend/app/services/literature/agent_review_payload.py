@@ -376,7 +376,7 @@ async def rewrite_dois_to_library_links(
         stripped = raw.strip(".,;:)").lower()
         paper_id = by_doi.get(stripped)
         if paper_id is not None:
-            return f"[{stripped}](/data/literature/papers/{paper_id})"
+            return f"[{stripped}](/lab-knowledge/literature/papers/{paper_id})"
         return f"[{stripped}](https://doi.org/{stripped})"
 
     return _DOI_RE.sub(_replace, text)

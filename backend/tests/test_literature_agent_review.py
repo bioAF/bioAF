@@ -252,7 +252,7 @@ async def test_doi_rewrite_to_library_links(session, admin_user):
     out = await agent_review_payload.rewrite_dois_to_library_links(
         session, org_id=admin_user.organization_id, text=text_in
     )
-    assert f"/data/literature/papers/{paper.id}" in out
+    assert f"/lab-knowledge/literature/papers/{paper.id}" in out
     assert "https://doi.org/10.9999/unknown" in out
 
 
