@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
+import { SearchProgress, sourceChipClass } from "@/components/literature/SearchProgress";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";
 import {
@@ -25,6 +26,8 @@ export default function LiteratureSearchesPage() {
   const [activeResults, setActiveResults] = useState<Paper[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [adding, setAdding] = useState(false);
+  const [pollStatus, setPollStatus] = useState<SearchSummary | null>(null);
+  const cancelRef = useRef(false);
 
   useEffect(() => {
     refresh();
@@ -46,15 +49,23 @@ export default function LiteratureSearchesPage() {
 
   async function submit() {
     if (!query.trim()) return;
+    cancelRef.current = false;
     setSubmitting(true);
     try {
       const created = await literature.submitSearch({ query: query.trim() });
       setQuery("");
       setActiveSearchId(created.id);
-      // Poll briefly for status updates.
+      // Show progress immediately from the created record, then keep it live.
+      setPollStatus(created);
+      // Poll per-source status until every source is terminal (or the user stops
+      // watching). The count of finished sources is the honest progress signal.
       for (let i = 0; i < 60; i++) {
+        if (cancelRef.current) break;
         await new Promise((r) => setTimeout(r, 1000));
+        if (cancelRef.current) break;
         const s = await literature.getSearch(created.id);
+        if (cancelRef.current) break;
+        setPollStatus(s);
         if (
           s.status === "complete" ||
           s.status === "partial" ||
@@ -63,13 +74,25 @@ export default function LiteratureSearchesPage() {
           break;
         }
       }
-      refresh();
-      const results = await literature.getSearchResults(created.id);
-      setActiveResults(results.items);
-      setSelectedIds(new Set());
+      if (!cancelRef.current) {
+        refresh();
+        const results = await literature.getSearchResults(created.id);
+        setActiveResults(results.items);
+        setSelectedIds(new Set());
+      }
     } finally {
       setSubmitting(false);
+      setPollStatus(null);
     }
+  }
+
+  // Stop the client from waiting. The search keeps running server-side and appears
+  // in the list below when it finishes; the poll loop notices the flag and exits.
+  function stopWatching() {
+    cancelRef.current = true;
+    setSubmitting(false);
+    setPollStatus(null);
+    refresh();
   }
 
   async function viewResults(id: number) {
@@ -151,6 +174,10 @@ export default function LiteratureSearchesPage() {
           </p>
         </div>
 
+        {submitting && pollStatus && (
+          <SearchProgress status={pollStatus} onStop={stopWatching} />
+        )}
+
         {loading ? (
           <LoadingSpinner />
         ) : error ? (
@@ -182,16 +209,7 @@ export default function LiteratureSearchesPage() {
                   </div>
                   <div className="flex flex-wrap gap-2 mt-2">
                     {Object.entries(s.per_source_status).map(([source, st]) => (
-                      <span
-                        key={source}
-                        className={
-                          st === "complete"
-                            ? "px-2 py-0.5 text-xs rounded bg-green-100 text-green-700"
-                            : st.startsWith("failed")
-                              ? "px-2 py-0.5 text-xs rounded bg-red-100 text-red-700"
-                              : "px-2 py-0.5 text-xs rounded bg-gray-100 text-gray-700"
-                        }
-                      >
+                      <span key={source} className={sourceChipClass(st)}>
                         {source}: {st}
                       </span>
                     ))}
