@@ -7,6 +7,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ValidationStudyOutcome } from "@/components/validation/ValidationStudyOutcome";
+import { LitValidationGate } from "@/components/validation/LitValidationGate";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 
@@ -62,6 +63,7 @@ export default function ValidationStudiesListPage() {
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header />
         <main className="flex-1 overflow-y-auto p-6">
+          <LitValidationGate>
           <h1 className="mb-1 text-2xl font-bold">Validation Studies</h1>
           <p className="mb-6 text-sm text-gray-500">
             Reproduction attempts against papers. Start one from a paper in the Literature library.
@@ -115,6 +117,7 @@ export default function ValidationStudiesListPage() {
               </table>
             </div>
           )}
+          </LitValidationGate>
         </main>
       </div>
     </div>

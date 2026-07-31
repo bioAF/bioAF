@@ -18,6 +18,9 @@ jest.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => ({ canAccess: () => true, loading: false }),
 }));
 
+let litBeta = { available: true, flags: { lit_validation: true } as Record<string, boolean>, loading: false };
+jest.mock("@/hooks/useBetaFeatures", () => ({ useBetaFeatures: () => litBeta }));
+
 // Keep the test focused on the page body, not the app chrome.
 jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => null }));
 jest.mock("@/components/layout/Header", () => ({ Header: () => null }));
@@ -28,6 +31,7 @@ const mockGet = api.get as jest.Mock;
 
 beforeEach(() => {
   mockGet.mockReset();
+  litBeta = { available: true, flags: { lit_validation: true }, loading: false };
 });
 
 describe("ValidationStudyPage", () => {
@@ -117,5 +121,15 @@ describe("ValidationStudyPage", () => {
     render(<ValidationStudyPage />);
 
     await waitFor(() => expect(screen.getByText(/not found/i)).toBeInTheDocument());
+  });
+
+  it("shows the not-enabled notice, not the study, when the lit_validation flag is off", async () => {
+    litBeta = { available: true, flags: {}, loading: false };
+    mockGet.mockResolvedValue({ id: 5, state: "classified", classification: "validated", confidence: 100 });
+
+    render(<ValidationStudyPage />);
+
+    await waitFor(() => expect(screen.getByText(/isn't enabled/i)).toBeInTheDocument());
+    expect(screen.queryByText("Fully Validated")).not.toBeInTheDocument();
   });
 });

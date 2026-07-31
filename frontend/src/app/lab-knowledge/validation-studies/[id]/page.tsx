@@ -16,6 +16,8 @@ import {
 } from "@/components/validation/Level3Gate";
 import { Level3ResultPanel } from "@/components/validation/Level3ResultPanel";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
+import { LitValidationDisabledNotice } from "@/components/validation/LitValidationGate";
+import { useBetaFeatures } from "@/hooks/useBetaFeatures";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 
@@ -66,6 +68,7 @@ export default function ValidationStudyPage() {
 
   const [study, setStudy] = useState<ValidationStudy | null>(null);
   const [loading, setLoading] = useState(true);
+  const { flags, loading: betaLoading } = useBetaFeatures();
 
   const refresh = useCallback(async () => {
     try {
@@ -98,10 +101,26 @@ export default function ValidationStudyPage() {
     return () => clearInterval(t);
   }, [study, refresh]);
 
-  if (loading) {
+  if (loading || betaLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
         <LoadingSpinner size="lg" />
+      </div>
+    );
+  }
+
+  // Match the nav + entry-button beta gate: a flag-off user reaching this URL directly gets the
+  // "not enabled" notice, not the study.
+  if (!flags.lit_validation) {
+    return (
+      <div className="flex h-screen">
+        <Sidebar />
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <Header />
+          <main className="flex flex-1 items-center justify-center p-6">
+            <LitValidationDisabledNotice />
+          </main>
+        </div>
       </div>
     );
   }

@@ -11,12 +11,16 @@ jest.mock("@/lib/auth", () => ({ isAuthenticated: () => true }));
 jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => null }));
 jest.mock("@/components/layout/Header", () => ({ Header: () => null }));
 
+let litBeta = { available: true, flags: { lit_validation: true } as Record<string, boolean>, loading: false };
+jest.mock("@/hooks/useBetaFeatures", () => ({ useBetaFeatures: () => litBeta }));
+
 import { api } from "@/lib/api";
 const mockGet = api.get as jest.Mock;
 
 beforeEach(() => {
   mockGet.mockReset();
   mockPush.mockReset();
+  litBeta = { available: true, flags: { lit_validation: true }, loading: false };
 });
 
 describe("ValidationStudiesListPage", () => {
@@ -41,5 +45,15 @@ describe("ValidationStudiesListPage", () => {
     mockGet.mockResolvedValue([]);
     render(<ValidationStudiesListPage />);
     await waitFor(() => expect(screen.getByText(/no validation studies/i)).toBeInTheDocument());
+  });
+
+  it("shows the not-enabled notice, not studies, when the lit_validation flag is off", async () => {
+    litBeta = { available: true, flags: {}, loading: false };
+    mockGet.mockResolvedValue([
+      { id: 7, state: "classified", classification: "validated", confidence: 100, created_at: "2026-07-06T00:00:00Z" },
+    ]);
+    render(<ValidationStudiesListPage />);
+    expect(await screen.findByText(/isn't enabled/i)).toBeInTheDocument();
+    expect(screen.queryByText("Fully Validated")).not.toBeInTheDocument();
   });
 });
