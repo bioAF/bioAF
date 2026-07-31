@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Sidebar } from "@/components/layout/Sidebar";
@@ -8,6 +8,7 @@ import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ValidationStudyOutcome } from "@/components/validation/ValidationStudyOutcome";
 import { LitValidationGate } from "@/components/validation/LitValidationGate";
+import { ErrorState } from "@/components/shared/ErrorState";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 
@@ -37,25 +38,27 @@ function formatDate(iso?: string | null): string {
 export default function ValidationStudiesListPage() {
   const router = useRouter();
   const [studies, setStudies] = useState<ValidationStudySummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setError(null);
+    setStudies(null);
+    try {
+      const data = await api.get<ValidationStudySummary[]>("/api/validation-studies");
+      setStudies(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load validation studies.");
+    }
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated()) {
       router.push("/login");
       return;
     }
-    let cancelled = false;
-    api
-      .get<ValidationStudySummary[]>("/api/validation-studies")
-      .then((data) => {
-        if (!cancelled) setStudies(data);
-      })
-      .catch(() => {
-        if (!cancelled) setStudies([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [router]);
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="flex h-screen">
@@ -69,7 +72,13 @@ export default function ValidationStudiesListPage() {
             Reproduction attempts against papers. Start one from a paper in the Literature library.
           </p>
 
-          {studies === null ? (
+          {error ? (
+            <ErrorState
+              message="Couldn't load validation studies."
+              details={error}
+              onRetry={load}
+            />
+          ) : studies === null ? (
             <div className="flex justify-center py-16">
               <LoadingSpinner size="lg" />
             </div>

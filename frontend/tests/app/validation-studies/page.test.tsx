@@ -139,12 +139,13 @@ describe("ValidationStudyPage", () => {
     expect(screen.queryByRole("link", { name: /source paper/i })).not.toBeInTheDocument();
   });
 
-  it("shows a not-found message when the study cannot be loaded", async () => {
+  it("shows a not-found message with a retry when the study cannot be loaded", async () => {
     mockGet.mockRejectedValue(new Error("404"));
 
     render(<ValidationStudyPage />);
 
     await waitFor(() => expect(screen.getByText(/not found/i)).toBeInTheDocument());
+    expect(screen.getByTestId("error-retry")).toBeInTheDocument();
   });
 
   it("shows the not-enabled notice, not the study, when the lit_validation flag is off", async () => {

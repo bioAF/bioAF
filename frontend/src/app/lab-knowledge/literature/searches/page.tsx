@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ErrorState } from "@/components/shared/ErrorState";
 import { isAuthenticated } from "@/lib/auth";
 import {
   cleanText,
@@ -19,6 +20,7 @@ export default function LiteratureSearchesPage() {
   const router = useRouter();
   const [searches, setSearches] = useState<SearchSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [activeSearchId, setActiveSearchId] = useState<number | null>(null);
@@ -37,9 +39,14 @@ export default function LiteratureSearchesPage() {
 
   function refresh() {
     setLoading(true);
+    setError(null);
     literature
       .listSearches()
-      .then((data) => setSearches(data.items))
+      .then((data) => {
+        setSearches(data.items);
+        setError(null);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load searches."))
       .finally(() => setLoading(false));
   }
 
@@ -154,6 +161,12 @@ export default function LiteratureSearchesPage() {
 
           {loading ? (
             <LoadingSpinner />
+          ) : error ? (
+            <ErrorState
+              message="Couldn't load searches."
+              details={error}
+              onRetry={refresh}
+            />
           ) : (
             <div className="bg-white rounded shadow divide-y">
               {searches.length === 0 ? (

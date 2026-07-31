@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { ErrorState } from "@/components/shared/ErrorState";
 import { getCurrentUser, isAuthenticated } from "@/lib/auth";
 import {
   cleanText,
@@ -32,14 +33,20 @@ export default function LiteratureRecommendationsPage() {
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [status, setStatus] = useState<RecommendationStatus>("accepted");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [dismissing, setDismissing] = useState<Recommendation | null>(null);
   const [dismissBusy, setDismissBusy] = useState(false);
 
   function refresh() {
     setLoading(true);
+    setError(null);
     literature
       .listRecommendations({ status })
-      .then((data) => setRecommendations(data.items))
+      .then((data) => {
+        setRecommendations(data.items);
+        setError(null);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load recommendations."))
       .finally(() => setLoading(false));
   }
 
@@ -106,6 +113,12 @@ export default function LiteratureRecommendationsPage() {
 
           {loading ? (
             <LoadingSpinner />
+          ) : error ? (
+            <ErrorState
+              message="Couldn't load recommendations."
+              details={error}
+              onRetry={refresh}
+            />
           ) : recommendations.length === 0 ? (
             <div className="border border-dashed border-gray-300 rounded p-12 text-center text-gray-500">
               No {status === "accepted" ? "active" : "dismissed"} recommendations.

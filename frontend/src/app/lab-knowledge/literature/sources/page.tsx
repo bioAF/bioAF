@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { InputDialog } from "@/components/shared/InputDialog";
+import { ErrorState } from "@/components/shared/ErrorState";
 import { getCurrentUser, isAuthenticated } from "@/lib/auth";
 import { literature, type SourceConfig, type LiteratureSourceName } from "@/lib/literature";
 
@@ -24,6 +25,7 @@ export default function LiteratureSourcesPage() {
 
   const [sources, setSources] = useState<SourceConfig[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<
     Record<string, { success: boolean; message: string; latency_ms: number }>
   >({});
@@ -32,9 +34,15 @@ export default function LiteratureSourcesPage() {
   const [keyError, setKeyError] = useState<string | null>(null);
 
   function refresh() {
+    setLoading(true);
+    setError(null);
     literature
       .listSources()
-      .then((data) => setSources(data.items))
+      .then((data) => {
+        setSources(data.items);
+        setError(null);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load sources."))
       .finally(() => setLoading(false));
   }
 
@@ -89,6 +97,12 @@ export default function LiteratureSourcesPage() {
           <h1 className="text-2xl font-bold mb-6">Literature Sources</h1>
           {loading ? (
             <LoadingSpinner />
+          ) : error ? (
+            <ErrorState
+              message="Couldn't load literature sources."
+              details={error}
+              onRetry={refresh}
+            />
           ) : (
             <div className="bg-white rounded shadow divide-y">
               {sources.map((s) => {

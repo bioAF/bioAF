@@ -17,6 +17,7 @@ import {
 } from "@/components/validation/Level3Gate";
 import { Level3ResultPanel } from "@/components/validation/Level3ResultPanel";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
+import { ErrorState } from "@/components/shared/ErrorState";
 import { LitValidationDisabledNotice } from "@/components/validation/LitValidationGate";
 import { useBetaFeatures } from "@/hooks/useBetaFeatures";
 import { isAuthenticated } from "@/lib/auth";
@@ -103,6 +104,12 @@ export default function ValidationStudyPage() {
     return () => clearInterval(t);
   }, [study, refresh]);
 
+  const retry = useCallback(async () => {
+    setLoading(true);
+    await refresh();
+    setLoading(false);
+  }, [refresh]);
+
   if (loading || betaLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -133,8 +140,11 @@ export default function ValidationStudyPage() {
         <Sidebar />
         <div className="flex flex-1 flex-col overflow-hidden">
           <Header />
-          <main className="flex flex-1 items-center justify-center">
-            <p className="text-gray-500">Validation study not found</p>
+          <main className="flex-1 overflow-y-auto p-6">
+            <ErrorState
+              message="Validation study not found, or it could not be loaded."
+              onRetry={retry}
+            />
           </main>
         </div>
       </div>

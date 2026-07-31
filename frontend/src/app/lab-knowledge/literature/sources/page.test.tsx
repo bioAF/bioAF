@@ -27,6 +27,14 @@ beforeEach(() => {
   mockUpdate.mockResolvedValue({});
 });
 
+test("shows a retry-able error when sources fail to load", async () => {
+  mockList.mockRejectedValue(new Error("boom"));
+  render(<LiteratureSourcesPage />);
+  expect(await screen.findByTestId("error-state")).toBeInTheDocument();
+  expect(screen.getByText(/couldn't load literature sources/i)).toBeInTheDocument();
+  expect(screen.getByTestId("error-retry")).toBeInTheDocument();
+});
+
 test("collects the API key in a styled password dialog, never a native prompt()", async () => {
   const promptSpy = jest.spyOn(window, "prompt");
   render(<LiteratureSourcesPage />);

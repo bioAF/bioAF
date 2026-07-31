@@ -7,6 +7,7 @@ import { Header } from "@/components/layout/Header";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { AssociatePaperModal } from "@/components/literature/AssociatePaperModal";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { ErrorState } from "@/components/shared/ErrorState";
 import { api } from "@/lib/api";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import {
@@ -71,6 +72,7 @@ export default function LiteratureLibraryPage() {
   const [papers, setPapers] = useState<Paper[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [provenance, setProvenance] = useState<Provenance | "">("");
   const [toggles, setToggles] = useState<Record<StatusFlag, boolean>>(
     DEFAULT_TOGGLES,
@@ -139,8 +141,9 @@ export default function LiteratureLibraryPage() {
         setPapers(data.items);
         setTotal(data.total);
         setSelectedIds(new Set());
+        setError(null);
       })
-      .catch(() => {})
+      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load the library."))
       .finally(() => setLoading(false));
   }, [
     provenance,
@@ -170,7 +173,9 @@ export default function LiteratureLibraryPage() {
         setPapers(data.items);
         setTotal(data.total);
         setSelectedIds(new Set());
+        setError(null);
       })
+      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load the library."))
       .finally(() => setLoading(false));
   };
 
@@ -432,6 +437,12 @@ export default function LiteratureLibraryPage() {
 
           {loading ? (
             <LoadingSpinner />
+          ) : error ? (
+            <ErrorState
+              message="Couldn't load the library."
+              details={error}
+              onRetry={refresh}
+            />
           ) : papers.length === 0 ? (
             <div className="border border-dashed border-gray-300 rounded p-12 text-center text-gray-500">
               No papers match these filters. Use Upload, Search, or run a Lit

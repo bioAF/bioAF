@@ -47,6 +47,15 @@ describe("ValidationStudiesListPage", () => {
     await waitFor(() => expect(screen.getByText(/no validation studies/i)).toBeInTheDocument());
   });
 
+  it("surfaces a retry-able error, not the empty state, when the load fails", async () => {
+    mockGet.mockRejectedValue(new Error("network down"));
+    render(<ValidationStudiesListPage />);
+    expect(await screen.findByTestId("error-state")).toBeInTheDocument();
+    expect(screen.getByText(/couldn't load validation studies/i)).toBeInTheDocument();
+    expect(screen.getByTestId("error-retry")).toBeInTheDocument();
+    expect(screen.queryByText(/no validation studies/i)).not.toBeInTheDocument();
+  });
+
   it("shows the not-enabled notice, not studies, when the lit_validation flag is off", async () => {
     litBeta = { available: true, flags: {}, loading: false };
     mockGet.mockResolvedValue([
