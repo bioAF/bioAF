@@ -12,6 +12,7 @@ import { DeploymentBanner } from "@/components/infrastructure/DeploymentBanner";
 import { GlobalSearch } from "@/components/layout/GlobalSearch";
 import { QuickCreateMenu } from "@/components/layout/QuickCreateMenu";
 import { AssistantLauncher } from "@/components/assistant/AssistantLauncher";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 
 export function Header() {
   const router = useRouter();
@@ -46,6 +47,7 @@ export function Header() {
         {user && <GlobalSearch />}
       </div>
       <div className="flex items-center gap-4">
+        <ThemeToggle />
         {user && (
           <>
             <QuickCreateMenu />

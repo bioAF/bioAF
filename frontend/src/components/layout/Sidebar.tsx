@@ -284,7 +284,7 @@ export function Sidebar() {
 
   return (
     <aside
-      className={`${collapsed ? "w-12" : "w-64"} bg-gray-900 text-white min-h-screen flex flex-col transition-[width] duration-150`}
+      className={`${collapsed ? "w-12" : "w-64"} bg-gray-900 text-white min-h-screen flex flex-col transition-[width] duration-150 dark:border-r dark:border-gray-800`}
       data-testid="sidebar"
       data-collapsed={collapsed ? "true" : "false"}
     >

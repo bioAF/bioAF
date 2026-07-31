@@ -1,3 +1,171 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* -------------------------------------------------------------------------- */
+/* Theme tokens                                                               */
+/* Semantic colors as RGB channels (space-separated so Tailwind's             */
+/* rgb(var(--x) / <alpha-value>) can apply opacity). Light is the default;    */
+/* `.dark` on <html> (set by ThemeProvider / THEME_INIT_SCRIPT) swaps them.   */
+/* -------------------------------------------------------------------------- */
+@layer base {
+  :root {
+    --color-canvas: 249 250 251; /* page background (gray-50) */
+    --color-surface: 255 255 255; /* cards, header, inputs (white) */
+    --color-surface-muted: 249 250 251; /* subtle hover lift */
+    --color-elevated: 243 244 246; /* chips, tracks (gray-100) */
+    --color-ink: 17 24 39; /* primary text (gray-900) */
+    --color-ink-muted: 55 65 81; /* secondary text (gray-700) */
+    --color-ink-subtle: 107 114 128; /* muted labels (gray-500) */
+    --color-hairline: 229 231 235; /* borders/dividers (gray-200) */
+  }
+
+  .dark {
+    --color-canvas: 13 17 23;
+    --color-surface: 22 27 34;
+    --color-surface-muted: 28 33 40;
+    --color-elevated: 33 38 46;
+    --color-ink: 230 233 238;
+    --color-ink-muted: 173 181 192;
+    --color-ink-subtle: 138 146 158;
+    --color-hairline: 48 54 63;
+  }
+
+  html {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Dark override layer                                                        */
+/*                                                                            */
+/* Retrofits dark mode across the app without editing every component: it     */
+/* remaps the ubiquitous *light-neutral* Tailwind utilities to theme tokens   */
+/* under `.dark`. Every selector is `.dark .<util>` (or a variant), which is  */
+/* +1 class more specific than the utility itself, so it wins without         */
+/* !important. Intentional-dark classes (text-white, bg-gray-800/900,         */
+/* bg-black/*, colored solid buttons) are deliberately NOT listed, so the     */
+/* sidebar, terminal blocks and modal backdrops stay dark in both modes.      */
+/* These rules live outside @layer so Tailwind's purge never drops them.      */
+/* -------------------------------------------------------------------------- */
+
+/* Surfaces */
+.dark .bg-white {
+  background-color: rgb(var(--color-surface));
+}
+.dark .bg-gray-50 {
+  background-color: rgb(var(--color-canvas));
+}
+.dark .bg-gray-100 {
+  background-color: rgb(var(--color-elevated));
+}
+.dark .bg-gray-200 {
+  background-color: rgb(var(--color-elevated));
+}
+
+/* Surface variants: hover / odd / even / focus */
+.dark .hover\:bg-white:hover {
+  background-color: rgb(var(--color-surface));
+}
+.dark .hover\:bg-gray-50:hover {
+  background-color: rgb(var(--color-surface-muted));
+}
+.dark .hover\:bg-gray-100:hover {
+  background-color: rgb(var(--color-elevated));
+}
+.dark .hover\:bg-gray-200:hover {
+  background-color: rgb(var(--color-elevated));
+}
+.dark .odd\:bg-gray-50:nth-child(odd) {
+  background-color: rgb(var(--color-surface-muted));
+}
+.dark .even\:bg-gray-50:nth-child(even) {
+  background-color: rgb(var(--color-surface-muted));
+}
+.dark .focus\:bg-gray-50:focus {
+  background-color: rgb(var(--color-surface-muted));
+}
+
+/* Text */
+.dark .text-gray-900,
+.dark .text-gray-800 {
+  color: rgb(var(--color-ink));
+}
+.dark .text-gray-700,
+.dark .text-gray-600 {
+  color: rgb(var(--color-ink-muted));
+}
+.dark .text-gray-500,
+.dark .text-gray-400 {
+  color: rgb(var(--color-ink-subtle));
+}
+.dark .hover\:text-gray-900:hover,
+.dark .hover\:text-gray-800:hover,
+.dark .hover\:text-gray-700:hover {
+  color: rgb(var(--color-ink));
+}
+.dark .hover\:text-gray-600:hover,
+.dark .hover\:text-gray-500:hover {
+  color: rgb(var(--color-ink-muted));
+}
+
+/* Borders */
+.dark .border-gray-100,
+.dark .border-gray-200,
+.dark .border-gray-300 {
+  border-color: rgb(var(--color-hairline));
+}
+.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgb(var(--color-hairline));
+}
+.dark .ring-gray-200,
+.dark .ring-gray-300 {
+  --tw-ring-color: rgb(var(--color-hairline));
+}
+
+/* Placeholders */
+.dark .placeholder-gray-400::placeholder,
+.dark .placeholder-gray-500::placeholder,
+.dark .placeholder\:text-gray-400::placeholder,
+.dark .placeholder\:text-gray-500::placeholder {
+  color: rgb(var(--color-ink-subtle));
+}
+
+/* Brand links and tints: keep bioaf legible on a dark surface */
+.dark .text-bioaf-600,
+.dark .text-bioaf-700,
+.dark .text-bioaf-800 {
+  color: rgb(56 189 248); /* bioaf-400 */
+}
+.dark .hover\:text-bioaf-700:hover,
+.dark .hover\:text-bioaf-800:hover {
+  color: rgb(125 211 252); /* bioaf-300 */
+}
+.dark .bg-bioaf-50 {
+  background-color: rgb(56 189 248 / 0.12);
+}
+.dark .hover\:bg-bioaf-50:hover {
+  background-color: rgb(56 189 248 / 0.16);
+}
+.dark .border-bioaf-100,
+.dark .border-bioaf-200 {
+  border-color: rgb(56 189 248 / 0.35);
+}
+
+/* Long-form markdown rendered by the typography plugin */
+.dark .prose {
+  color: rgb(var(--color-ink-muted));
+}
+.dark .prose :where(h1, h2, h3, h4, h5, h6, strong, th, td, blockquote, code, li):not(:where([class~="not-prose"] *)) {
+  color: rgb(var(--color-ink));
+}
+.dark .prose :where(a):not(:where([class~="not-prose"] *)) {
+  color: rgb(56 189 248);
+}
+.dark .prose :where(hr, thead, tbody tr):not(:where([class~="not-prose"] *)) {
+  border-color: rgb(var(--color-hairline));
+}
