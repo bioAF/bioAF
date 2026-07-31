@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { ErrorState } from "@/components/shared/ErrorState";
@@ -62,6 +63,7 @@ export default function LiteratureRecommendationsPage() {
 
   return (
     <>
+      <Breadcrumb entityName="AI Literature Review" />
       <main className="flex-1 overflow-y-auto p-6">
         <button
           onClick={() => router.push("/lab-knowledge/literature")}

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";
 import {
@@ -117,170 +118,173 @@ export default function LiteratureSearchesPage() {
   };
 
   return (
-    <main className="flex-1 overflow-y-auto p-6">
-      <button
-        onClick={() => router.push("/lab-knowledge/literature")}
-        className="text-bioaf-700 hover:underline text-sm mb-4"
-      >
-        &larr; Back to library
-      </button>
-      <h1 className="text-2xl font-bold mb-6">Literature Searches</h1>
-      <div className="bg-white rounded shadow p-4 mb-6">
-        <div className="flex gap-2">
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="e.g., TGF-beta signalling in triple-negative breast cancer"
-            className="flex-1 border border-gray-300 rounded px-3 py-2"
-            onKeyDown={(e) => e.key === "Enter" && submit()}
-          />
-          <button
-            onClick={submit}
-            disabled={submitting || !query.trim()}
-            className="bg-bioaf-600 text-white px-4 py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
-          >
-            {submitting ? "Searching..." : "Search"}
-          </button>
+    <>
+      <Breadcrumb entityName="Searches" />
+      <main className="flex-1 overflow-y-auto p-6">
+        <button
+          onClick={() => router.push("/lab-knowledge/literature")}
+          className="text-bioaf-700 hover:underline text-sm mb-4"
+        >
+          &larr; Back to library
+        </button>
+        <h1 className="text-2xl font-bold mb-6">Literature Searches</h1>
+        <div className="bg-white rounded shadow p-4 mb-6">
+          <div className="flex gap-2">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="e.g., TGF-beta signalling in triple-negative breast cancer"
+              className="flex-1 border border-gray-300 rounded px-3 py-2"
+              onKeyDown={(e) => e.key === "Enter" && submit()}
+            />
+            <button
+              onClick={submit}
+              disabled={submitting || !query.trim()}
+              className="bg-bioaf-600 text-white px-4 py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
+            >
+              {submitting ? "Searching..." : "Search"}
+            </button>
+          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            Runs across PubMed, bioRxiv, Europe PMC, and Semantic Scholar in
+            parallel. Results do not enter the Library until you add them.
+          </p>
         </div>
-        <p className="text-xs text-gray-500 mt-2">
-          Runs across PubMed, bioRxiv, Europe PMC, and Semantic Scholar in
-          parallel. Results do not enter the Library until you add them.
-        </p>
-      </div>
 
-      {loading ? (
-        <LoadingSpinner />
-      ) : error ? (
-        <ErrorState
-          message="Couldn't load searches."
-          details={error}
-          onRetry={refresh}
-        />
-      ) : (
-        <div className="bg-white rounded shadow divide-y">
-          {searches.length === 0 ? (
-            <div className="p-6 text-sm text-gray-500">No searches yet.</div>
-          ) : (
-            searches.map((s) => (
-              <div
-                key={s.id}
-                className={`p-4 cursor-pointer ${activeSearchId === s.id ? "bg-bioaf-50" : "hover:bg-gray-50"}`}
-                onClick={() => viewResults(s.id)}
-              >
-                <div className="flex justify-between">
-                  <div className="font-mono text-sm">{s.query_text}</div>
-                  <div className="text-xs text-gray-500">
-                    {new Date(s.created_at).toLocaleString()}
+        {loading ? (
+          <LoadingSpinner />
+        ) : error ? (
+          <ErrorState
+            message="Couldn't load searches."
+            details={error}
+            onRetry={refresh}
+          />
+        ) : (
+          <div className="bg-white rounded shadow divide-y">
+            {searches.length === 0 ? (
+              <div className="p-6 text-sm text-gray-500">No searches yet.</div>
+            ) : (
+              searches.map((s) => (
+                <div
+                  key={s.id}
+                  className={`p-4 cursor-pointer ${activeSearchId === s.id ? "bg-bioaf-50" : "hover:bg-gray-50"}`}
+                  onClick={() => viewResults(s.id)}
+                >
+                  <div className="flex justify-between">
+                    <div className="font-mono text-sm">{s.query_text}</div>
+                    <div className="text-xs text-gray-500">
+                      {new Date(s.created_at).toLocaleString()}
+                    </div>
+                  </div>
+                  <div className="text-xs text-gray-600 mt-1">
+                    status: <span className="font-medium">{s.status}</span>
+                    {s.result_count !== null && ` · ${s.result_count} results`}
+                  </div>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {Object.entries(s.per_source_status).map(([source, st]) => (
+                      <span
+                        key={source}
+                        className={
+                          st === "complete"
+                            ? "px-2 py-0.5 text-xs rounded bg-green-100 text-green-700"
+                            : st.startsWith("failed")
+                              ? "px-2 py-0.5 text-xs rounded bg-red-100 text-red-700"
+                              : "px-2 py-0.5 text-xs rounded bg-gray-100 text-gray-700"
+                        }
+                      >
+                        {source}: {st}
+                      </span>
+                    ))}
                   </div>
                 </div>
-                <div className="text-xs text-gray-600 mt-1">
-                  status: <span className="font-medium">{s.status}</span>
-                  {s.result_count !== null && ` · ${s.result_count} results`}
-                </div>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {Object.entries(s.per_source_status).map(([source, st]) => (
-                    <span
-                      key={source}
-                      className={
-                        st === "complete"
-                          ? "px-2 py-0.5 text-xs rounded bg-green-100 text-green-700"
-                          : st.startsWith("failed")
-                            ? "px-2 py-0.5 text-xs rounded bg-red-100 text-red-700"
-                            : "px-2 py-0.5 text-xs rounded bg-gray-100 text-gray-700"
-                      }
-                    >
-                      {source}: {st}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {activeResults.length > 0 && (
-        <div className="mt-6 bg-white rounded shadow p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold">Results</h2>
-            <div className="flex items-center gap-2">
-              <label className="flex items-center gap-1 text-sm">
-                <input
-                  type="checkbox"
-                  checked={
-                    activeResults.filter((p) => !p.in_library).length > 0 &&
-                    selectedIds.size ===
-                      activeResults.filter((p) => !p.in_library).length
-                  }
-                  onChange={toggleSelectAll}
-                />
-                <span>Select all not-in-library</span>
-              </label>
-              <button
-                onClick={addSelected}
-                disabled={selectedIds.size === 0 || adding}
-                className="px-3 py-1.5 bg-bioaf-600 text-white rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-              >
-                {adding ? "Adding..." : `Add ${selectedIds.size || ""} to Library`}
-              </button>
-            </div>
+              ))
+            )}
           </div>
-          <ul className="divide-y">
-            {activeResults.map((p) => (
-              <li key={p.id} className="py-3 flex gap-3">
-                {p.in_library ? (
-                  <span
-                    title="Already in Library"
-                    className="w-5 h-5 flex items-center justify-center mt-1 rounded-full bg-emerald-100 text-emerald-700 text-xs"
-                  >
-                    &#10003;
-                  </span>
-                ) : (
+        )}
+
+        {activeResults.length > 0 && (
+          <div className="mt-6 bg-white rounded shadow p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-semibold">Results</h2>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1 text-sm">
                   <input
                     type="checkbox"
-                    className="mt-1.5"
-                    checked={selectedIds.has(p.id)}
-                    onChange={() => toggleSelect(p.id)}
-                  />
-                )}
-                <div className="flex-1">
-                  <button
-                    onClick={() =>
-                      router.push(`/lab-knowledge/literature/papers/${p.id}`)
+                    checked={
+                      activeResults.filter((p) => !p.in_library).length > 0 &&
+                      selectedIds.size ===
+                        activeResults.filter((p) => !p.in_library).length
                     }
-                    className="text-bioaf-700 hover:underline text-left font-medium"
-                  >
-                    {cleanText(p.title)}
-                  </button>
-                  <div className="text-sm text-gray-600">
-                    {formatAuthors(p.authors)} &middot;{" "}
-                    {formatYear(p.publication_date)} &middot;{" "}
-                    {cleanText(p.journal)}
-                  </div>
-                  {p.abstract && (
-                    <div className="text-sm text-gray-700 mt-1 line-clamp-3">
-                      {cleanText(p.abstract)}
-                    </div>
+                    onChange={toggleSelectAll}
+                  />
+                  <span>Select all not-in-library</span>
+                </label>
+                <button
+                  onClick={addSelected}
+                  disabled={selectedIds.size === 0 || adding}
+                  className="px-3 py-1.5 bg-bioaf-600 text-white rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
+                >
+                  {adding ? "Adding..." : `Add ${selectedIds.size || ""} to Library`}
+                </button>
+              </div>
+            </div>
+            <ul className="divide-y">
+              {activeResults.map((p) => (
+                <li key={p.id} className="py-3 flex gap-3">
+                  {p.in_library ? (
+                    <span
+                      title="Already in Library"
+                      className="w-5 h-5 flex items-center justify-center mt-1 rounded-full bg-emerald-100 text-emerald-700 text-xs"
+                    >
+                      &#10003;
+                    </span>
+                  ) : (
+                    <input
+                      type="checkbox"
+                      className="mt-1.5"
+                      checked={selectedIds.has(p.id)}
+                      onChange={() => toggleSelect(p.id)}
+                    />
                   )}
-                  <div className="text-xs mt-2 flex gap-2 items-center">
-                    {p.in_library ? (
-                      <span className="text-emerald-700">In Library</span>
-                    ) : (
-                      <button
-                        disabled={adding}
-                        onClick={() => addOne(p.id)}
-                        className="text-bioaf-600 hover:underline"
-                      >
-                        Add to Library
-                      </button>
+                  <div className="flex-1">
+                    <button
+                      onClick={() =>
+                        router.push(`/lab-knowledge/literature/papers/${p.id}`)
+                      }
+                      className="text-bioaf-700 hover:underline text-left font-medium"
+                    >
+                      {cleanText(p.title)}
+                    </button>
+                    <div className="text-sm text-gray-600">
+                      {formatAuthors(p.authors)} &middot;{" "}
+                      {formatYear(p.publication_date)} &middot;{" "}
+                      {cleanText(p.journal)}
+                    </div>
+                    {p.abstract && (
+                      <div className="text-sm text-gray-700 mt-1 line-clamp-3">
+                        {cleanText(p.abstract)}
+                      </div>
                     )}
+                    <div className="text-xs mt-2 flex gap-2 items-center">
+                      {p.in_library ? (
+                        <span className="text-emerald-700">In Library</span>
+                      ) : (
+                        <button
+                          disabled={adding}
+                          onClick={() => addOne(p.id)}
+                          className="text-bioaf-600 hover:underline"
+                        >
+                          Add to Library
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </main>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </main>
+    </>
   );
 }

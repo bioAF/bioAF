@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
+import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import Link from "next/link";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ValidationStudyOutcome } from "@/components/validation/ValidationStudyOutcome";
@@ -135,123 +136,126 @@ export default function ValidationStudyPage() {
   const plan = study.plan;
 
   return (
-    <main className="flex-1 overflow-y-auto p-6">
-      <div className="mb-6 flex flex-wrap items-center gap-4">
-        <button onClick={() => router.back()} className="text-gray-500 hover:text-gray-700">
-          ← Back
-        </button>
-        <h1 className="text-2xl font-bold">Validation Study #{study.id}</h1>
-        {study.source_doi && (
-          <a
-            href={`https://doi.org/${study.source_doi}`}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded bg-blue-50 px-2 py-0.5 font-mono text-sm text-blue-700 hover:underline"
-            title="Source DOI"
-          >
-            {study.source_doi}
-          </a>
-        )}
-        {study.source_accession && (
-          <span className="rounded bg-gray-100 px-2 py-0.5 font-mono text-sm text-gray-600" title="Source accession">
-            {study.source_accession}
-          </span>
-        )}
-        {study.paper_id && (
-          <Link
-            href={`/lab-knowledge/literature/papers/${study.paper_id}`}
-            className="rounded bg-bioaf-50 px-2 py-0.5 text-sm text-bioaf-700 hover:underline"
-            title="Open this paper in the Literature library"
-          >
-            Source paper
-          </Link>
-        )}
-        {!PRE_REPORT_STATES.has(study.state) && (
-          <div className="ml-auto">
-            <ProvenanceExportMenu entityType="validation-studies" entityId={study.id} label="Export Report" />
-          </div>
-        )}
-      </div>
-
-      <section className="mb-6">
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">Outcome</h2>
-        <ValidationStudyOutcome
-          state={study.state}
-          confidence={study.confidence}
-          classification={study.classification}
-          failureReason={study.failure_reason}
-        />
-      </section>
-
-      {study.evidence?.classification_result && (
-        <section className="mb-6">
-          <ValidationVerdictPanel result={study.evidence.classification_result} />
-        </section>
-      )}
-
-      {plan && (
-        <section className="mb-6">
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
-            Reproduction plan
-          </h2>
-          <dl className="grid grid-cols-1 gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
-            <Field label="Pipeline">
-              {plan.pipeline_key
-                ? `${plan.pipeline_key}${plan.pipeline_version ? ` ${plan.pipeline_version}` : ""}`
-                : "-"}
-            </Field>
-            <Field label="Reference genome">{plan.reference_genome || "-"}</Field>
-            <Field label="Accessions">
-              {plan.accessions && plan.accessions.length > 0 ? plan.accessions.join(", ") : "-"}
-            </Field>
-            <Field label="Mapping confidence">{plan.mapping_confidence || "-"}</Field>
-          </dl>
-          {plan.blockers && plan.blockers.length > 0 && (
-            <div className="mt-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">Blockers</p>
-              <ul className="mt-1 list-inside list-disc text-sm text-gray-700">
-                {plan.blockers.map((b, i) => (
-                  <li key={i}>{b}</li>
-                ))}
-              </ul>
+    <>
+      <Breadcrumb entityName={`Study #${study.id}`} />
+      <main className="flex-1 overflow-y-auto p-6">
+        <div className="mb-6 flex flex-wrap items-center gap-4">
+          <button onClick={() => router.back()} className="text-gray-500 hover:text-gray-700">
+            ← Back
+          </button>
+          <h1 className="text-2xl font-bold">Validation Study #{study.id}</h1>
+          {study.source_doi && (
+            <a
+              href={`https://doi.org/${study.source_doi}`}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded bg-blue-50 px-2 py-0.5 font-mono text-sm text-blue-700 hover:underline"
+              title="Source DOI"
+            >
+              {study.source_doi}
+            </a>
+          )}
+          {study.source_accession && (
+            <span className="rounded bg-gray-100 px-2 py-0.5 font-mono text-sm text-gray-600" title="Source accession">
+              {study.source_accession}
+            </span>
+          )}
+          {study.paper_id && (
+            <Link
+              href={`/lab-knowledge/literature/papers/${study.paper_id}`}
+              className="rounded bg-bioaf-50 px-2 py-0.5 text-sm text-bioaf-700 hover:underline"
+              title="Open this paper in the Literature library"
+            >
+              Source paper
+            </Link>
+          )}
+          {!PRE_REPORT_STATES.has(study.state) && (
+            <div className="ml-auto">
+              <ProvenanceExportMenu entityType="validation-studies" entityId={study.id} label="Export Report" />
             </div>
           )}
-        </section>
-      )}
+        </div>
 
-      {study.state === "plan_ready" && (
         <section className="mb-6">
-          <Level3Gate
-            studyId={study.id}
-            design={plan?.differential_design}
-            claim={plan?.finding_claim}
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">Outcome</h2>
+          <ValidationStudyOutcome
+            state={study.state}
+            confidence={study.confidence}
+            classification={study.classification}
+            failureReason={study.failure_reason}
+          />
+        </section>
+
+        {study.evidence?.classification_result && (
+          <section className="mb-6">
+            <ValidationVerdictPanel result={study.evidence.classification_result} />
+          </section>
+        )}
+
+        {plan && (
+          <section className="mb-6">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
+              Reproduction plan
+            </h2>
+            <dl className="grid grid-cols-1 gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
+              <Field label="Pipeline">
+                {plan.pipeline_key
+                  ? `${plan.pipeline_key}${plan.pipeline_version ? ` ${plan.pipeline_version}` : ""}`
+                  : "-"}
+              </Field>
+              <Field label="Reference genome">{plan.reference_genome || "-"}</Field>
+              <Field label="Accessions">
+                {plan.accessions && plan.accessions.length > 0 ? plan.accessions.join(", ") : "-"}
+              </Field>
+              <Field label="Mapping confidence">{plan.mapping_confidence || "-"}</Field>
+            </dl>
+            {plan.blockers && plan.blockers.length > 0 && (
+              <div className="mt-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">Blockers</p>
+                <ul className="mt-1 list-inside list-disc text-sm text-gray-700">
+                  {plan.blockers.map((b, i) => (
+                    <li key={i}>{b}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </section>
+        )}
+
+        {study.state === "plan_ready" && (
+          <section className="mb-6">
+            <Level3Gate
+              studyId={study.id}
+              design={plan?.differential_design}
+              claim={plan?.finding_claim}
+              onChanged={(updated) => setStudy(updated as ValidationStudy)}
+            />
+          </section>
+        )}
+
+        {study.evidence?.level3_result && (
+          <section className="mb-6">
+            <Level3ResultPanel
+              result={study.evidence.level3_result}
+              contrast={plan?.differential_design?.contrasts?.[0]?.name ?? undefined}
+            />
+          </section>
+        )}
+
+        <section className="mb-6">
+          <ValidationStudyActions
+            study={{ id: study.id, state: study.state }}
             onChanged={(updated) => setStudy(updated as ValidationStudy)}
+            suggestedClassification={study.evidence?.classification_result?.classification}
           />
         </section>
-      )}
 
-      {study.evidence?.level3_result && (
-        <section className="mb-6">
-          <Level3ResultPanel
-            result={study.evidence.level3_result}
-            contrast={plan?.differential_design?.contrasts?.[0]?.name ?? undefined}
-          />
+        <section>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">Evidence</h2>
+          <ValidationEvidenceTable evidence={study.evidence} />
         </section>
-      )}
-
-      <section className="mb-6">
-        <ValidationStudyActions
-          study={{ id: study.id, state: study.state }}
-          onChanged={(updated) => setStudy(updated as ValidationStudy)}
-          suggestedClassification={study.evidence?.classification_result?.classification}
-        />
-      </section>
-
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">Evidence</h2>
-        <ValidationEvidenceTable evidence={study.evidence} />
-      </section>
-    </main>
+      </main>
+    </>
   );
 }
 

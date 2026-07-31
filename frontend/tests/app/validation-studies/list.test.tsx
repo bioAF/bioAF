@@ -4,6 +4,7 @@ import ValidationStudiesListPage from "@/app/(app)/lab-knowledge/validation-stud
 const mockPush = jest.fn();
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: mockPush }),
+  usePathname: () => "/lab-knowledge/validation-studies",
 }));
 
 jest.mock("@/lib/api", () => ({ api: { get: jest.fn() } }));
@@ -37,6 +38,14 @@ describe("ValidationStudiesListPage", () => {
     // Each row links to the detail page.
     expect(screen.getByRole("link", { name: /Study #7/ })).toHaveAttribute("href", "/lab-knowledge/validation-studies/7");
     expect(screen.getByRole("link", { name: /Study #8/ })).toHaveAttribute("href", "/lab-knowledge/validation-studies/8");
+  });
+
+  it("renders a breadcrumb locating the page under Lab Knowledge", async () => {
+    mockGet.mockResolvedValue([]);
+    render(<ValidationStudiesListPage />);
+    const breadcrumb = await screen.findByTestId("breadcrumb");
+    expect(breadcrumb).toHaveTextContent("Lab Knowledge");
+    expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("Validation Studies");
   });
 
   it("shows an empty state when there are no studies", async () => {

@@ -2,7 +2,10 @@ import { render, screen } from "@testing-library/react";
 import LiteratureRecommendationsPage from "./page";
 import { literature } from "@/lib/literature";
 
-jest.mock("next/navigation", () => ({ useRouter: () => ({ push: jest.fn() }) }));
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: jest.fn() }),
+  usePathname: () => "/lab-knowledge/literature/recommendations",
+}));
 jest.mock("@/lib/auth", () => ({
   isAuthenticated: () => true,
   getCurrentUser: () => ({ role_name: "admin" }),
@@ -17,6 +20,14 @@ jest.mock("@/lib/literature", () => {
 });
 
 const mockList = literature.listRecommendations as jest.Mock;
+
+test("renders a breadcrumb back to the Literature library", async () => {
+  mockList.mockResolvedValue({ items: [] });
+  render(<LiteratureRecommendationsPage />);
+  const breadcrumb = await screen.findByTestId("breadcrumb");
+  expect(breadcrumb).toHaveTextContent("Literature");
+  expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("AI Literature Review");
+});
 
 test("shows a retry-able error when recommendations fail to load", async () => {
   mockList.mockRejectedValue(new Error("boom"));

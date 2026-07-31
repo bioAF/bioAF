@@ -3,7 +3,10 @@ import LiteraturePage from "./page";
 import { literature } from "@/lib/literature";
 import { api } from "@/lib/api";
 
-jest.mock("next/navigation", () => ({ useRouter: () => ({ push: jest.fn() }) }));
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: jest.fn() }),
+  usePathname: () => "/lab-knowledge/literature",
+}));
 jest.mock("@/lib/auth", () => ({
   isAuthenticated: () => true,
   getCurrentUser: () => ({ role_name: "admin" }),
@@ -23,6 +26,15 @@ const mockApiGet = api.get as jest.Mock;
 beforeEach(() => {
   mockApiGet.mockResolvedValue({ projects: [], experiments: [] });
   mockListPapers.mockReset();
+});
+
+test("renders a breadcrumb locating the page under Lab Knowledge", async () => {
+  mockListPapers.mockResolvedValue({ items: [], total: 0 });
+  render(<LiteraturePage />);
+
+  const breadcrumb = await screen.findByTestId("breadcrumb");
+  expect(breadcrumb).toHaveTextContent("Lab Knowledge");
+  expect(breadcrumb).toHaveTextContent("Literature");
 });
 
 test("shows a retry-able error, not the empty state, when the library fails to load", async () => {

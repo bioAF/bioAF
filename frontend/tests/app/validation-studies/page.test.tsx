@@ -4,6 +4,7 @@ import ValidationStudyPage from "@/app/(app)/lab-knowledge/validation-studies/[i
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: jest.fn(), back: jest.fn() }),
   useParams: () => ({ id: "5" }),
+  usePathname: () => "/lab-knowledge/validation-studies/5",
 }));
 
 jest.mock("@/lib/api", () => ({
@@ -47,6 +48,20 @@ describe("ValidationStudyPage", () => {
     await waitFor(() => expect(screen.getByText("Fully Validated")).toBeInTheDocument());
     expect(screen.getByText(/10\.3390\/jfb17020057/)).toBeInTheDocument();
     expect(screen.queryByText("Could Not Reproduce")).not.toBeInTheDocument();
+  });
+
+  it("renders a breadcrumb trailing to this study under Validation Studies", async () => {
+    mockGet.mockResolvedValue({ id: 5, state: "classified", classification: "validated", confidence: 100 });
+
+    render(<ValidationStudyPage />);
+
+    const breadcrumb = await screen.findByTestId("breadcrumb");
+    expect(breadcrumb).toHaveTextContent("Validation Studies");
+    expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("Study #5");
+    expect(screen.getByRole("link", { name: "Validation Studies" })).toHaveAttribute(
+      "href",
+      "/lab-knowledge/validation-studies",
+    );
   });
 
   it("renders the pipeline stage (not a validation verdict) while the study is still running", async () => {

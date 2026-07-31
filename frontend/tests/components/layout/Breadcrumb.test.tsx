@@ -60,4 +60,40 @@ describe("Breadcrumb", () => {
     expect(breadcrumb).toHaveTextContent("Experiment List");
     expect(breadcrumb).toHaveTextContent("My Experiment");
   });
+
+  it("trails Lab Knowledge > Literature on the literature library", () => {
+    mockPathname.mockReturnValue("/lab-knowledge/literature");
+    render(<Breadcrumb />);
+    const breadcrumb = screen.getByTestId("breadcrumb");
+    expect(breadcrumb).toHaveTextContent("Lab Knowledge");
+    expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("Literature");
+  });
+
+  it("trails Lab Knowledge > Literature > paper title on a paper detail page", () => {
+    mockPathname.mockReturnValue("/lab-knowledge/literature/papers/123");
+    render(<Breadcrumb entityName="A CRISPR screen paper" />);
+    const breadcrumb = screen.getByTestId("breadcrumb");
+    expect(breadcrumb).toHaveTextContent("Lab Knowledge");
+    expect(breadcrumb).toHaveTextContent("Literature");
+    expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("A CRISPR screen paper");
+    // Literature is an intermediate crumb, so it links back to the library.
+    const litLink = screen.getByRole("link", { name: "Literature" });
+    expect(litLink).toHaveAttribute("href", "/lab-knowledge/literature");
+  });
+
+  it("trails Lab Knowledge > Validation Studies on the validation list", () => {
+    mockPathname.mockReturnValue("/lab-knowledge/validation-studies");
+    render(<Breadcrumb />);
+    expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("Validation Studies");
+  });
+
+  it("trails Lab Knowledge > Validation Studies > study on a validation detail page", () => {
+    mockPathname.mockReturnValue("/lab-knowledge/validation-studies/5");
+    render(<Breadcrumb entityName="Study #5" />);
+    const breadcrumb = screen.getByTestId("breadcrumb");
+    expect(breadcrumb).toHaveTextContent("Validation Studies");
+    expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("Study #5");
+    const listLink = screen.getByRole("link", { name: "Validation Studies" });
+    expect(listLink).toHaveAttribute("href", "/lab-knowledge/validation-studies");
+  });
 });

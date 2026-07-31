@@ -2,7 +2,10 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import LiteratureSourcesPage from "./page";
 import { literature } from "@/lib/literature";
 
-jest.mock("next/navigation", () => ({ useRouter: () => ({ push: jest.fn() }) }));
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: jest.fn() }),
+  usePathname: () => "/lab-knowledge/literature/sources",
+}));
 jest.mock("@/lib/auth", () => ({
   isAuthenticated: () => true,
   getCurrentUser: () => ({ role_name: "admin" }),
@@ -23,6 +26,17 @@ beforeEach(() => {
     items: [{ source: "pubmed", enabled: true, has_api_key: false, rate_limit_override: null }],
   });
   mockUpdate.mockResolvedValue({});
+});
+
+test("renders a breadcrumb back to the Literature library", async () => {
+  render(<LiteratureSourcesPage />);
+  const breadcrumb = await screen.findByTestId("breadcrumb");
+  expect(breadcrumb).toHaveTextContent("Literature");
+  expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("Sources");
+  expect(screen.getByRole("link", { name: "Literature" })).toHaveAttribute(
+    "href",
+    "/lab-knowledge/literature",
+  );
 });
 
 test("shows a retry-able error when sources fail to load", async () => {

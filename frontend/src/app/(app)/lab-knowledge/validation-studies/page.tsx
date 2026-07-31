@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ValidationStudyOutcome } from "@/components/validation/ValidationStudyOutcome";
 import { LitValidationGate } from "@/components/validation/LitValidationGate";
@@ -52,68 +53,71 @@ export default function ValidationStudiesListPage() {
   }, []);
 
   return (
-    <main className="flex-1 overflow-y-auto p-6">
-      <LitValidationGate>
-        <h1 className="mb-1 text-2xl font-bold">Validation Studies</h1>
-        <p className="mb-6 text-sm text-gray-500">
-          Reproduction attempts against papers. Start one from a paper in the Literature library.
-        </p>
+    <>
+      <Breadcrumb />
+      <main className="flex-1 overflow-y-auto p-6">
+        <LitValidationGate>
+          <h1 className="mb-1 text-2xl font-bold">Validation Studies</h1>
+          <p className="mb-6 text-sm text-gray-500">
+            Reproduction attempts against papers. Start one from a paper in the Literature library.
+          </p>
 
-        {error ? (
-          <ErrorState
-            message="Couldn't load validation studies."
-            details={error}
-            onRetry={load}
-          />
-        ) : studies === null ? (
-          <div className="flex justify-center py-16">
-            <LoadingSpinner size="lg" />
-          </div>
-        ) : studies.length === 0 ? (
-          <div className="rounded border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500">
-            No validation studies yet. Open a paper in the Literature library and choose{" "}
-            <span className="font-medium">Validate reproduction</span> to start one.
-          </div>
-        ) : (
-          <div className="overflow-x-auto rounded-lg bg-white shadow">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Study</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Source</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Requested</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Outcome</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {studies.map((s) => (
-                  <tr key={s.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-sm">
-                      <Link
-                        href={`/lab-knowledge/validation-studies/${s.id}`}
-                        className="font-medium text-bioaf-700 hover:underline"
-                      >
-                        Study #{s.id}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-600">
-                      {s.source_doi || s.source_accession || (s.paper_id ? `paper ${s.paper_id}` : "—")}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-500">{formatDate(s.created_at)}</td>
-                    <td className="px-4 py-3 text-sm">
-                      <ValidationStudyOutcome
-                        state={s.state}
-                        confidence={s.confidence}
-                        classification={s.classification}
-                      />
-                    </td>
+          {error ? (
+            <ErrorState
+              message="Couldn't load validation studies."
+              details={error}
+              onRetry={load}
+            />
+          ) : studies === null ? (
+            <div className="flex justify-center py-16">
+              <LoadingSpinner size="lg" />
+            </div>
+          ) : studies.length === 0 ? (
+            <div className="rounded border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500">
+              No validation studies yet. Open a paper in the Literature library and choose{" "}
+              <span className="font-medium">Validate reproduction</span> to start one.
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg bg-white shadow">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Study</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Source</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Requested</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Outcome</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </LitValidationGate>
-    </main>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {studies.map((s) => (
+                    <tr key={s.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm">
+                        <Link
+                          href={`/lab-knowledge/validation-studies/${s.id}`}
+                          className="font-medium text-bioaf-700 hover:underline"
+                        >
+                          Study #{s.id}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-gray-600">
+                        {s.source_doi || s.source_accession || (s.paper_id ? `paper ${s.paper_id}` : "—")}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-500">{formatDate(s.created_at)}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <ValidationStudyOutcome
+                          state={s.state}
+                          confidence={s.confidence}
+                          classification={s.classification}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </LitValidationGate>
+      </main>
+    </>
   );
 }
