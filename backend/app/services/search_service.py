@@ -136,6 +136,21 @@ class SearchService:
                 }
             )
 
+        paper_rows = await session.execute(
+            select(LiteraturePaper)
+            .where(
+                LiteraturePaper.organization_id == org_id,
+                LiteraturePaper.in_library.is_(True),
+                LiteraturePaper.title.ilike(pattern),
+            )
+            .order_by(LiteraturePaper.title)
+            .limit(limit_per_type)
+        )
+        for p in paper_rows.scalars():
+            results.append(
+                {"entity_type": "literature_paper", "entity_id": p.id, "name": p.title, "experiment_id": None}
+            )
+
         lab_doc_rows = await session.execute(
             select(LabDocument)
             .where(

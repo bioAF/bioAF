@@ -2,6 +2,7 @@ import pytest
 
 from app.models.experiment import Experiment
 from app.models.file import File
+from app.models.literature import LiteraturePaper
 from app.models.pipeline_run import PipelineRun
 from app.models.sample import Sample
 from app.services.search_service import SearchService
@@ -43,6 +44,34 @@ async def test_quick_search_matches_names_across_entity_types(session, admin_use
 
     # The non-matching experiment must not appear.
     assert all(h["name"] != "Beta Kidney Study" for h in hits)
+
+
+@pytest.mark.asyncio
+async def test_quick_search_matches_library_papers_by_title(session, admin_user):
+    """Papers in the library are reachable from the header jump-to search by title;
+    a paper no longer in the library does not surface."""
+    org_id = admin_user.organization_id
+    paper = LiteraturePaper(
+        organization_id=org_id,
+        title="Alpha CRISPR screen",
+        title_normalized="alpha crispr screen",
+        provenance="user_upload",
+    )
+    excluded = LiteraturePaper(
+        organization_id=org_id,
+        title="Alpha excluded paper",
+        title_normalized="alpha excluded paper",
+        provenance="user_upload",
+        in_library=False,
+    )
+    session.add_all([paper, excluded])
+    await session.commit()
+
+    hits = await SearchService.quick_search(session, org_id, "alpha")
+    papers = [h for h in hits if h["entity_type"] == "literature_paper"]
+
+    assert [h["entity_id"] for h in papers] == [paper.id]
+    assert papers[0]["name"] == "Alpha CRISPR screen"
 
 
 @pytest.mark.asyncio

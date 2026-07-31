@@ -36,6 +36,12 @@ describe("searchHitHref", () => {
       "/lab-knowledge/decision-records/17",
     );
   });
+
+  it("links a literature paper hit to its paper detail page", () => {
+    expect(
+      searchHitHref({ entity_type: "literature_paper", entity_id: 42, name: "A paper" }),
+    ).toBe("/lab-knowledge/literature/papers/42");
+  });
 });
 
 describe("searchHitTypeLabel", () => {
