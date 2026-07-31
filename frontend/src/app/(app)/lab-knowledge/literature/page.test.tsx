@@ -28,6 +28,37 @@ beforeEach(() => {
   mockListPapers.mockReset();
 });
 
+test("labels paper origin consistently in the filter and the table column (no Provenance/Source split)", async () => {
+  mockListPapers.mockResolvedValue({
+    items: [
+      {
+        id: 1,
+        title: "A paper",
+        authors: [],
+        publication_date: null,
+        journal: null,
+        provenance: "user_upload",
+        reading_status: "unread",
+        dismissed: false,
+        has_full_text: false,
+        associations: [],
+        comment_count: 0,
+      },
+    ],
+    total: 1,
+  });
+  render(<LiteraturePage />);
+
+  await screen.findByText("A paper");
+  // Both the filter label and the table column header read "Origin".
+  expect(screen.getAllByText("Origin")).toHaveLength(2);
+  // The old split names are gone: no "Provenance" label, no "Source" column header.
+  expect(screen.queryByText("Provenance")).not.toBeInTheDocument();
+  const headers = screen.getAllByRole("columnheader").map((h) => h.textContent?.trim());
+  expect(headers).toContain("Origin");
+  expect(headers).not.toContain("Source");
+});
+
 test("renders a breadcrumb locating the page under Lab Knowledge", async () => {
   mockListPapers.mockResolvedValue({ items: [], total: 0 });
   render(<LiteraturePage />);
