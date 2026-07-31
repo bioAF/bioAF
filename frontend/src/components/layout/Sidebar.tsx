@@ -7,7 +7,6 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useCapabilities, type CapabilityFlag } from "@/hooks/useCapabilities";
 import { useComponents } from "@/hooks/useComponents";
 import { useBetaFeatures } from "@/hooks/useBetaFeatures";
-import { useBackendReady } from "@/hooks/useBackendReady";
 import { navConfig, NavSection, NavChild, ComponentGate, PermissionRef, isChildActive } from "@/lib/navConfig";
 
 const SIDEBAR_COLLAPSED_KEY = "bioaf-sidebar-collapsed";
@@ -127,7 +126,6 @@ function SidebarSection({
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { ready: backendReady } = useBackendReady();
   const { canAccess, roleName, loading } = usePermissions();
   const { has: hasCapability } = useCapabilities();
   const { components, loading: componentsLoading } = useComponents();
@@ -269,18 +267,6 @@ export function Sidebar() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "true" : "false");
   }, [collapsed]);
-
-  if (!backendReady || loading || componentsLoading) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900" data-testid="app-loading">
-        <div className="text-center">
-          <div className="text-3xl font-bold text-bioaf-400 mb-4">bioAF</div>
-          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-bioaf-400 border-t-transparent" />
-          <p className="mt-3 text-sm text-gray-400">Loading bioAF...</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <aside

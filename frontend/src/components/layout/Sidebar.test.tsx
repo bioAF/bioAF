@@ -181,20 +181,10 @@ describe("Sidebar component gating", () => {
     expect(screen.queryByText("Cellxgene")).not.toBeInTheDocument();
   });
 
-  test("shows loading screen when components are still loading", () => {
-    mockComponents.mockReturnValue({
-      components: [],
-      loading: true,
-      refetch: jest.fn(),
-    });
-
-    render(<Sidebar />);
-
-    expect(screen.getByText("Loading bioAF...")).toBeInTheDocument();
-    expect(screen.queryByText("Pipelines")).not.toBeInTheDocument();
-  });
-
-  test("shows loading screen when permissions are still loading", () => {
+  test("renders its container but no nav items while permissions are still loading", () => {
+    // The app-loading splash now lives in the (app) layout (see (app)/layout.test.tsx);
+    // Sidebar itself renders its container and gates nav items to empty while
+    // permissions are still loading, so no flash of the wrong nav.
     mockPermissions.mockReturnValue({
       canAccess: () => true,
       roleName: "",
@@ -210,7 +200,7 @@ describe("Sidebar component gating", () => {
 
     render(<Sidebar />);
 
-    expect(screen.getByText("Loading bioAF...")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar")).toBeInTheDocument();
     expect(screen.queryByText("Pipelines")).not.toBeInTheDocument();
   });
 
