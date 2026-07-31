@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { ContentLoading } from "@/components/shared/ContentLoading";
-import { isAuthenticated } from "@/lib/auth";
 import { api, ApiError } from "@/lib/api";
 import type {
   PipelineCatalog,
@@ -67,7 +66,6 @@ export default function PipelineLauncherPage() {
   const [detectedProtocol, setDetectedProtocol] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isAuthenticated()) { router.push("/login"); return; }
     loadData();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router, pipelineKey]);

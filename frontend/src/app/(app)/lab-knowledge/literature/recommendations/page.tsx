@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { ErrorState } from "@/components/shared/ErrorState";
-import { getCurrentUser, isAuthenticated } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import {
   cleanText,
   formatAuthors,
@@ -44,10 +44,6 @@ export default function LiteratureRecommendationsPage() {
   }
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);

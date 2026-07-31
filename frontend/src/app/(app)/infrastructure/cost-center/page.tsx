@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { BillingSetupModal } from "@/components/infrastructure/BillingSetupModal";
@@ -75,7 +74,6 @@ export default function InfraCostCenterPage() {
   const [showTeardownConfirm, setShowTeardownConfirm] = useState(false);
 
   useEffect(() => {
-    if (!isAuthenticated()) { router.push("/login"); return; }
     if (permLoading) return;
     if (!canAccess("cost_center", "view")) { router.push("/dashboard"); return; }
 

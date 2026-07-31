@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { StorageSection } from "@/components/components/StorageSection";
 import { BootstrapCard } from "@/components/infrastructure/BootstrapCard";
 import { TerraformProgressModal } from "@/components/infrastructure/TerraformProgressModal";
@@ -11,7 +10,6 @@ import { OrphanedResourcesCard } from "@/components/infrastructure/OrphanedResou
 import { DeployRecoveryModal } from "@/components/infrastructure/DeployRecoveryModal";
 import { InfraUpdatesCard } from "@/components/infrastructure/InfraUpdatesCard";
 import { useDeploymentProgress } from "@/hooks/useDeploymentProgress";
-import { isAuthenticated } from "@/lib/auth";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { useStackOptions } from "@/hooks/useStackOptions";
 import { storageDisplay } from "@/lib/storageDisplay";
@@ -116,7 +114,6 @@ const CATEGORY_ORDER = [
 ];
 
 export default function InfraComponentsPage() {
-  const router = useRouter();
   const { has } = useCapabilities();
   // Provider-appropriate stack labels (GCP -> GKE+GCS, AWS -> EKS+S3); fails safe
   // to GCP defaults so a GCP install renders unchanged.
@@ -190,13 +187,9 @@ export default function InfraComponentsPage() {
   }, [deployStarted, deployProgress.active, deployProgress.status]);
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router, refreshKey, isAws]);
+  }, [refreshKey, isAws]);
 
   async function loadData() {
     // The compute region comes from the install's cloud settings: gcp_region on

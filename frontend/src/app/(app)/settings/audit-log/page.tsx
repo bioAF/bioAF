@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
-import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { ContentLoading } from "@/components/shared/ContentLoading";
@@ -40,7 +39,6 @@ export default function AuditLogPage() {
   const pageSize = 25;
 
   useEffect(() => {
-    if (!isAuthenticated()) { router.push("/login"); return; }
     if (permLoading) return;
     if (!canAccess("audit_log", "view")) { router.push("/dashboard"); return; }
   }, [router, permLoading, canAccess]);

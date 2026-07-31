@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { LabDocumentViewer } from "@/components/lab-knowledge/LabDocumentViewer";
 import { api } from "@/lib/api";
-import { getCurrentUser, isAuthenticated } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { labDocuments, uploadDocumentFile, type LabDocumentNote } from "@/lib/labDocuments";
 
@@ -84,10 +84,6 @@ export default function LabDocumentDetailPage() {
   }, [documentId]);
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     refresh();
   }, [refresh, router]);
 

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { InputDialog } from "@/components/shared/InputDialog";
 import { ErrorState } from "@/components/shared/ErrorState";
-import { getCurrentUser, isAuthenticated } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { literature, type SourceConfig, type LiteratureSourceName } from "@/lib/literature";
 
 const SOURCE_LABELS: Record<LiteratureSourceName, string> = {
@@ -45,10 +45,6 @@ export default function LiteratureSourcesPage() {
   }
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

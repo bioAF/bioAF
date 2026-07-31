@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
@@ -124,7 +123,6 @@ export default function InfraBackupPage() {
   }, []);
 
   useEffect(() => {
-    if (!isAuthenticated()) { router.push("/login"); return; }
     if (permLoading) return;
     if (!canAccess("backups", "view")) { router.push("/dashboard"); return; }
     loadData();

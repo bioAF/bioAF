@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { TemplateSheetImportModal } from "@/components/experiments/TemplateSheetImportModal";
-import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { NamingProfileSelect } from "@/components/naming/NamingProfileSelect";
 import type { ExperimentTemplate, TemplateCreateRequest } from "@/lib/types";
@@ -23,7 +21,6 @@ const STANDARD_SAMPLE_FIELDS = [
 ];
 
 export default function ExperimentTemplatesPage() {
-  const router = useRouter();
   const [templates, setTemplates] = useState<ExperimentTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -39,12 +36,8 @@ export default function ExperimentTemplatesPage() {
   });
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     loadTemplates();
-  }, [router]);
+  }, []);
 
   async function loadTemplates() {
     try {

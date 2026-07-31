@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { isAuthenticated, getCurrentUser } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { statusDotClass, statusLabel } from "@/lib/statusStyles";
 import type {
@@ -20,7 +19,6 @@ import type {
 type Tab = "versions" | "new-version";
 
 export default function EnvironmentsPage() {
-  const router = useRouter();
   const user = getCurrentUser();
   const canCreate = user?.role_name === "admin" || user?.role_name === "comp_bio";
   const canBuild = user?.role_name === "admin" || user?.role_name === "comp_bio";
@@ -62,9 +60,8 @@ export default function EnvironmentsPage() {
   const [buildConfirm, setBuildConfirm] = useState<{ envId: number; versionId: number } | null>(null);
 
   useEffect(() => {
-    if (!isAuthenticated()) { router.push("/login"); return; }
     loadEnvironments();
-  }, [router]);
+  }, []);
 
   async function loadEnvironments(type?: string) {
     try {

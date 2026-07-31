@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ContentLoading } from "@/components/shared/ContentLoading";
-import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import type { PipelineCatalog, PipelineCatalogListResponse } from "@/lib/types";
@@ -18,7 +17,6 @@ export default function PipelineCatalogPage() {
   const [registryOpen, setRegistryOpen] = useState(false);
 
   useEffect(() => {
-    if (!isAuthenticated()) { router.push("/login"); return; }
     loadPipelines();
   }, [router]);
 

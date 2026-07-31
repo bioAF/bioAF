@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { InviteForm } from "@/components/auth/InviteForm";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api, ApiError } from "@/lib/api";
 import type { User, Role, RoleListResponse } from "@/lib/types";
@@ -80,7 +79,6 @@ function SettingsUsersPageInner() {
   const [roles, setRoles] = useState<Role[]>([]);
 
   useEffect(() => {
-    if (!isAuthenticated()) { router.push("/login"); return; }
     if (permLoading) return;
     if (!canAccess("users", "view")) { router.push("/dashboard"); return; }
     fetchUsers();

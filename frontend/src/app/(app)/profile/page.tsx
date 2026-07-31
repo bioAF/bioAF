@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { AccountTab } from "./components/AccountTab";
 import { SessionCredentialsTab } from "./components/SessionCredentialsTab";
@@ -12,15 +10,8 @@ import { NotificationsTab } from "./components/NotificationsTab";
 type TabKey = "account" | "session" | "ssh" | "notifications";
 
 export default function ProfilePage() {
-  const router = useRouter();
   const { canAccess, loading: permsLoading } = usePermissions();
   const [activeTab, setActiveTab] = useState<TabKey>("account");
-
-  useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-    }
-  }, [router]);
 
   const canSeeNotifications = canAccess("notifications", "view");
 

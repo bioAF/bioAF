@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-import { isAuthenticated } from "@/lib/auth";
 import { api, ApiError } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
 import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
@@ -95,7 +94,6 @@ export default function WorkNodesPage() {
   const workNodeProfiles = resolveWorkNodeProfiles(machineTypes);
 
   useEffect(() => {
-    if (!isAuthenticated()) { router.push("/login"); return; }
     if (permLoading) return;
     if (!canAccess("work_nodes", "view")) { router.push("/dashboard"); return; }
     loadNodes();

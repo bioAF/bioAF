@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { VocabularySelect } from "@/components/shared/VocabularySelect";
 import { AssaySelect } from "@/components/shared/AssaySelect";
@@ -105,10 +104,6 @@ export default function NewExperimentPage() {
   }
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     Promise.all([
       api.get<ProjectListResponse>("/api/projects"),
       api.get<ExperimentTemplate[]>("/api/templates"),

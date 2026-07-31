@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api, ApiError } from "@/lib/api";
 import type { Role, RoleListResponse } from "@/lib/types";
@@ -30,7 +29,6 @@ export default function SettingsRolesPage() {
   const [expandedRoleId, setExpandedRoleId] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!isAuthenticated()) { router.push("/login"); return; }
     if (permLoading) return;
     if (!canAccess("roles", "view")) { router.push("/dashboard"); return; }
     loadData();

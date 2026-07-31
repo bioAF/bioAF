@@ -12,7 +12,7 @@ import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportP
 import { FileBrowser } from "@/components/files/FileBrowser";
 import { LiteratureTabPanel } from "@/components/literature/LiteratureTabPanel";
 import { ProjectExportModal } from "@/components/projects/ProjectExportModal";
-import { isAuthenticated, getCurrentUser } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
 import type { ProjectDetailResponse, ProjectSampleResponse, ProvenanceDAG, QCStatus } from "@/lib/types";
@@ -59,10 +59,6 @@ export default function ProjectDetailPage() {
   const canModify = user?.role_name === "admin" || user?.role_name === "comp_bio";
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     loadProject();
   }, [router, projectId]);
 

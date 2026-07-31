@@ -18,7 +18,6 @@ import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { LitValidationDisabledNotice } from "@/components/validation/LitValidationGate";
 import { useBetaFeatures } from "@/hooks/useBetaFeatures";
-import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 
 // States the background driver advances on its own; while a study sits in one, poll so the page
@@ -81,10 +80,6 @@ export default function ValidationStudyPage() {
   }, [id]);
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     let cancelled = false;
     (async () => {
       await refresh();

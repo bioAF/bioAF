@@ -10,7 +10,6 @@ import { AgentReviewTab } from "@/components/agent-reviews/AgentReviewTab";
 import { AgentReviewButtons } from "@/components/agent-reviews/AgentReviewButtons";
 import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBadge";
 import { usePermissions } from "@/hooks/usePermissions";
-import { isAuthenticated } from "@/lib/auth";
 import { getToken } from "@/lib/auth";
 import { api, ApiError } from "@/lib/api";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
@@ -193,7 +192,6 @@ export default function PipelineRunDetailPage() {
   }, [run?.custom_pipeline_version_id]);
 
   useEffect(() => {
-    if (!isAuthenticated()) { router.push("/login"); return; }
     loadRun();
     loadReferences();
   // eslint-disable-next-line react-hooks/exhaustive-deps

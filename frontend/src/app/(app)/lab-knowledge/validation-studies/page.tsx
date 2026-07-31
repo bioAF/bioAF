@@ -1,13 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ValidationStudyOutcome } from "@/components/validation/ValidationStudyOutcome";
 import { LitValidationGate } from "@/components/validation/LitValidationGate";
 import { ErrorState } from "@/components/shared/ErrorState";
-import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 
 interface ValidationStudySummary {
@@ -34,7 +32,6 @@ function formatDate(iso?: string | null): string {
  * to find and reopen them.
  */
 export default function ValidationStudiesListPage() {
-  const router = useRouter();
   const [studies, setStudies] = useState<ValidationStudySummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,10 +47,6 @@ export default function ValidationStudiesListPage() {
   }, []);
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -79,12 +79,6 @@ export default function LiteratureLibraryPage() {
   const [confirmingBulkDismiss, setConfirmingBulkDismiss] = useState(false);
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-    }
-  }, [router]);
-
-  useEffect(() => {
     if (!isAuthenticated()) return;
     api
       .get<ProjectListResponse>("/api/projects?page_size=100")

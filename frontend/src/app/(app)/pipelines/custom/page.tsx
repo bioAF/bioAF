@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ContentLoading } from "@/components/shared/ContentLoading";
-import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { statusBadgeClass } from "@/lib/statusStyles";
@@ -43,10 +42,6 @@ export default function CustomPipelineListPage() {
   const [createError, setCreateError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     loadPipelines();
   }, [router]);
 

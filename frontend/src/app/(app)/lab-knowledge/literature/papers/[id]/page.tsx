@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { InputDialog } from "@/components/shared/InputDialog";
-import { getCurrentUser, isAuthenticated } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { PaperPdfViewer } from "@/components/literature/PaperPdfViewer";
 import { AssociatePaperModal } from "@/components/literature/AssociatePaperModal";
 import { ValidatePaperButton } from "@/components/validation/ValidatePaperButton";
@@ -134,10 +134,6 @@ export default function PaperDetailPage() {
   }
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paperId]);

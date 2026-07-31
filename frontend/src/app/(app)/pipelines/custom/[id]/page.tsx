@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { CustomPipelineLaunchDialog } from "@/components/pipelines/CustomPipelineLaunchDialog";
-import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import type {
@@ -135,10 +134,6 @@ export default function CustomPipelineDetailPage() {
   const [versionError, setVersionError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     if (Number.isNaN(pipelineId)) return;
     void loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps

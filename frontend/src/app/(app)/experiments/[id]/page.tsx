@@ -19,7 +19,7 @@ import { CsvUploadModal } from "@/components/experiments/CsvUploadModal";
 import { AutoRunConfigSection } from "@/components/experiments/AutoRunConfigSection";
 import { ExtensibleVocabularySelect } from "@/components/shared/ExtensibleVocabularySelect";
 import { NamingProfileSelect } from "@/components/naming/NamingProfileSelect";
-import { isAuthenticated, getCurrentUser } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { api, fileContentUrl, plotThumbnailContentUrl } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
@@ -133,10 +133,6 @@ function ExperimentDetailPageInner() {
   ];
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     loadExperiment();
     api
       .get<NamingProfile[]>("/api/naming-profiles?status=active")

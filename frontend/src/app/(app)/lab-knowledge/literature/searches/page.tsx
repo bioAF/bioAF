@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";
-import { isAuthenticated } from "@/lib/auth";
 import {
   cleanText,
   formatAuthors,
@@ -27,10 +26,6 @@ export default function LiteratureSearchesPage() {
   const [adding, setAdding] = useState(false);
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

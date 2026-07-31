@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { isAuthenticated, getCurrentUser } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import {
   statusBadgeClass as badgeClass,
@@ -40,7 +39,6 @@ const POLL_INTERVAL_MS = 5000;
 type Tab = "versions" | "new-version";
 
 export default function PipelineEnvironmentsPage() {
-  const router = useRouter();
   const user = getCurrentUser();
   const canCreate = user?.role_name === "admin" || user?.role_name === "comp_bio";
   const canBuild = user?.role_name === "admin" || user?.role_name === "comp_bio";
@@ -88,12 +86,8 @@ export default function PipelineEnvironmentsPage() {
   }, [selectedVersion]);
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     loadEnvironments();
-  }, [router]);
+  }, []);
 
   // Status polling: while any environment (or the open detail) has a build in
   // progress, refresh in the background so the UI reflects the new status.

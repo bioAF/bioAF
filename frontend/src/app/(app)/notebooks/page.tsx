@@ -1,11 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { DetailModal } from "@/components/shared/DetailModal";
-import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { useComponents } from "@/hooks/useComponents";
 import type {
@@ -44,7 +42,6 @@ const PROFILE_META: Record<ResourceProfile, { label: string; description: string
 };
 
 export default function NotebooksPage() {
-  const router = useRouter();
   const { components } = useComponents();
   const jupyterEnabled = components.some((c) => c.key === "jupyterhub" && c.enabled);
   const rstudioEnabled = components.some((c) => c.key === "rstudio" && c.enabled);
@@ -87,17 +84,13 @@ export default function NotebooksPage() {
   const [pendingLaunch, setPendingLaunch] = useState<SessionType | null>(null);
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     loadSessions(bucket);
     loadExperiments();
     loadProjects();
     loadBuildStatus();
     loadEnvironments();
     loadResourceProfiles();
-  }, [router, bucket]);
+  }, [bucket]);
 
   useEffect(() => {
     const hasStarting = sessions.some((s) => s.status === "starting");

@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 
@@ -61,10 +60,6 @@ export default function WorkbenchSettingsPage() {
   const [notebookMessage, setNotebookMessage] = useState("");
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     if (permLoading) return;
     if (!canAccess("work_nodes", "configure")) {
       router.push("/dashboard");

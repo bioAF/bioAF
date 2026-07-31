@@ -34,13 +34,6 @@ export default function DataReferencesPage() {
   const statuses = ["active", "deprecated", "pending_approval"];
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
-  }, [router]);
-
-  useEffect(() => {
     if (!isAuthenticated()) return;
     setLoading(true);
 

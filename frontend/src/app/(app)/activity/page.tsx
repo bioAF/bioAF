@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
-import { isAuthenticated } from "@/lib/auth";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
 
@@ -37,7 +35,6 @@ const entityLinks: Record<string, (id: number) => string> = {
 };
 
 export default function ActivityFeedPage() {
-  const router = useRouter();
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -47,12 +44,6 @@ export default function ActivityFeedPage() {
   const [severityFilter, setSeverityFilter] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-
-  useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-    }
-  }, [router]);
 
   useEffect(() => {
     const load = async () => {

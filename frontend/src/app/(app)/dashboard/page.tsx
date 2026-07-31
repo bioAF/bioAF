@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useStackOptions } from "@/hooks/useStackOptions";
 import { DashboardContent } from "@/components/dashboard/DashboardContent";
@@ -18,7 +16,6 @@ interface CloudConfig {
 }
 
 export default function DashboardPage() {
-  const router = useRouter();
   const { roleName } = usePermissions();
   const { cloudProvider } = useStackOptions();
   const isAws = cloudProvider === "aws";
@@ -26,10 +23,6 @@ export default function DashboardPage() {
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     // The onboarding nudge is provider-specific: a GCP install checks its GCP
     // credentials, an AWS install checks its AWS credentials. cloudProvider falls
     // safe to "gcp" pre-auth/on error, so the GCP path is unchanged.
@@ -42,7 +35,7 @@ export default function DashboardPage() {
         )
       )
       .catch(() => setCloudConfigured(true)); // don't block dashboard on API error
-  }, [router, isAws]);
+  }, [isAws]);
 
   const cloudLabel = isAws ? "AWS" : "GCP";
   const settingsPath = isAws ? "/settings/aws" : "/settings/gcp";

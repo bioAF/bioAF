@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-import { isAuthenticated, getCurrentUser } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { Project, ProjectListResponse } from "@/lib/types";
 
@@ -32,10 +32,6 @@ function ProjectsPageInner() {
   const canCreate = user?.role_name === "admin" || user?.role_name === "comp_bio";
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     loadProjects();
   }, [router, search, statusFilter]);
 

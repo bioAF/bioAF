@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBadge";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-import { isAuthenticated, getCurrentUser } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type {
   ReferenceDatasetDetail,
@@ -56,10 +56,6 @@ export default function DataReferenceDetailPage() {
   const importPollHandle = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     loadReference();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, router]);

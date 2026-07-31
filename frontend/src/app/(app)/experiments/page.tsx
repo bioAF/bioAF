@@ -22,10 +22,6 @@ export default function ExperimentsPage() {
   const pageSize = 25;
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
     api.get<ProjectListResponse>("/api/projects").then((data) => {
       setProjects(data.projects.map((p) => ({ id: p.id, name: p.name })));
     }).catch(() => {});

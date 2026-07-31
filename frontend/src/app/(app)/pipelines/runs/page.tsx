@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ContentLoading } from "@/components/shared/ContentLoading";
-import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { ReviewBadge } from "@/components/experiments/ReviewBadge";
@@ -23,7 +22,6 @@ export default function PipelineRunsPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   useEffect(() => {
-    if (!isAuthenticated()) { router.push("/login"); return; }
     loadRuns();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router, page, statusFilter]);
