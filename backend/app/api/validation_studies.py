@@ -5,6 +5,8 @@ plan_ready or an early-exit classification), then the C1 gate (approve/decline).
 ``lit_validation`` permission. The comparison/execution back half is not wired here yet.
 """
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy import select
@@ -281,6 +283,36 @@ async def sample_manifest(
         reason = "; ".join(dict.fromkeys(reasons)) or "No samples were found for this study's accessions."
         return SampleManifestResponse(samples=[], unavailable_reason=reason)
     return SampleManifestResponse(samples=samples)
+
+
+@router.post("/{study_id}/override-samples", response_model=ValidationStudyResponse)
+async def override_samples(
+    study_id: int,
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """"Run with the samples we have": advance a study held in ``samples_mismatch`` (a picked sample was
+    not fetched) to ``setup``. The design was already rewritten to the fetched samples, so the reduced
+    reproduction runs cleanly. Records who overrode; approve-gated."""
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await _load(session, study_id, org_id)
+    if study.state != "samples_mismatch":
+        raise HTTPException(400, "This study is not held on missing samples.")
+    study.evidence_json = {
+        **(study.evidence_json or {}),
+        "samples_override": {"user_id": user_id, "at": datetime.now(timezone.utc).isoformat()},
+    }
+    study = await ValidationStudyService.transition(session, study_id, org_id, user_id, "setup")
+    await log_action(
+        session=session,
+        user_id=user_id,
+        entity_type="validation_study",
+        entity_id=study_id,
+        action="samples_override_approved",
+    )
+    await session.commit()
+    return await _study_response(session, study, org_id)
 
 
 @router.get("/{study_id}/finding-set/candidates")

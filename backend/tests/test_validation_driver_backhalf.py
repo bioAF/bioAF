@@ -102,9 +102,9 @@ async def _study(session, user, *, state, accessions=("SRR390728",), pipeline_ke
     return study
 
 
-async def _make_runnable_sample(session, user, exp_id, external_id="SRX079566"):
+async def _make_runnable_sample(session, user, exp_id, external_id="SRX079566", prep_notes=None):
     """Create a sample with one linked FASTQ file, as ingest+attach would."""
-    sample = Sample(experiment_id=exp_id, external_id=external_id, status="registered")
+    sample = Sample(experiment_id=exp_id, external_id=external_id, status="registered", prep_notes=prep_notes)
     session.add(sample)
     await session.flush()
     f = File(
@@ -226,6 +226,141 @@ async def test_run_still_running_is_left_untouched(session, admin_user, monkeypa
 
     await session.refresh(study)
     assert study.state == "acquiring_data"  # unchanged while the fetch is in flight
+
+
+# ---- acquiring_data: resolve picked accessions -> real external_ids; park on genuine missing data ----
+
+
+async def _acquiring_with_design(session, user, monkeypatch, *, design, samples):
+    """A study at acquiring_data with a completed fetch, a differential design on its plan, and the
+    given runnable samples (each `(external_id, prep_notes)`). ingest/attach are no-ops (the samples
+    are already created)."""
+
+    async def _noop(*a, **k):
+        return []
+
+    monkeypatch.setattr(FetchngsIngestService, "ingest_for_run", _noop)
+    monkeypatch.setattr(FetchngsIngestService, "attach_fastq_files", _noop)
+
+    exp_id = await _experiment_id(session, user)
+    study = await _study(session, user, state="acquiring_data", experiment_id=exp_id)
+    fetch = await _run(session, user, exp_id, name="nf-core/fetchngs", status="completed")
+    study.data_run_id = fetch.id
+    plan = await ReproductionPlanService.get_plan(session, study.id, user.organization_id)
+    plan.differential_design_json = design
+    for external_id, prep in samples:
+        await _make_runnable_sample(session, user, exp_id, external_id=external_id, prep_notes=prep)
+    await session.flush()
+    return study
+
+
+@pytest.mark.asyncio
+async def test_acquiring_data_resolves_picks_and_rewrites_design_to_external_ids(session, admin_user, monkeypatch):
+    """The picker stored the stable experiment accessions; post-fetch the driver resolves each to the
+    real minted Sample.external_id (via the prep_notes tokens) and rewrites the design so the DE run
+    matches the matrix columns by construction. All picks resolve -> proceed to setup."""
+    spy = _LaunchSpy()
+    monkeypatch.setattr(PipelineRunService, "launch_run", spy)
+    study = await _acquiring_with_design(
+        session,
+        admin_user,
+        monkeypatch,
+        design={
+            "contrasts": [
+                {
+                    "name": "t vs c",
+                    "test_samples": ["SRX1"],
+                    "reference_samples": ["SRX2"],
+                    "subjects": {"SRX1": "donorA", "SRX2": "donorA"},
+                }
+            ],
+            "thresholds": {"log2fc": 1.0, "padj": 0.05},
+        },
+        samples=[
+            ("GSM_A_SRR1", "Imported by accession. run_accession=SRR1 experiment_accession=SRX1"),
+            ("GSM_B_SRR2", "Imported by accession. run_accession=SRR2 experiment_accession=SRX2"),
+        ],
+    )
+
+    await ValidationDriverService.advance_active_studies(session)
+
+    await session.refresh(study)
+    assert study.state == "setup"
+    plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+    contrast = plan.differential_design_json["contrasts"][0]
+    assert contrast["test_samples"] == ["GSM_A_SRR1"]  # resolved from SRX1
+    assert contrast["reference_samples"] == ["GSM_B_SRR2"]  # resolved from SRX2
+    assert contrast["subjects"] == {"GSM_A_SRR1": "donorA", "GSM_B_SRR2": "donorA"}  # subjects remapped too
+
+
+@pytest.mark.asyncio
+async def test_acquiring_data_parks_in_samples_mismatch_when_a_pick_was_not_fetched(session, admin_user, monkeypatch):
+    """A picked sample with no runnable fetched sample is genuine missing data: park the study in
+    samples_mismatch (zero compute) and name what is missing, so a human decides."""
+    spy = _LaunchSpy()
+    monkeypatch.setattr(PipelineRunService, "launch_run", spy)
+    study = await _acquiring_with_design(
+        session,
+        admin_user,
+        monkeypatch,
+        design={
+            "contrasts": [{"name": "t vs c", "test_samples": ["SRX1"], "reference_samples": ["SRX3"]}],
+            "thresholds": {"log2fc": 1.0, "padj": 0.05},
+        },
+        # SRX3 was never fetched (only SRX1 has a runnable sample).
+        samples=[("GSM_A_SRR1", "run_accession=SRR1 experiment_accession=SRX1")],
+    )
+
+    await ValidationDriverService.advance_active_studies(session)
+
+    await session.refresh(study)
+    assert study.state == "samples_mismatch"
+    assert "SRX3" in (study.failure_reason or "")
+    assert spy.calls == []  # no analysis launched: zero compute spent
+    # the design is rewritten to the samples we DO have, so an override runs the reduced design cleanly
+    plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+    contrast = plan.differential_design_json["contrasts"][0]
+    assert contrast["test_samples"] == ["GSM_A_SRR1"]
+    assert contrast["reference_samples"] == []  # the unfetched SRX3 dropped
+
+
+@pytest.mark.asyncio
+async def test_qc_only_study_with_no_design_proceeds_to_setup_unchanged(session, admin_user, monkeypatch):
+    """A QC-only study (no differential design) skips resolution and advances to setup unchanged."""
+    spy = _LaunchSpy()
+    monkeypatch.setattr(PipelineRunService, "launch_run", spy)
+    study = await _acquiring_with_design(
+        session,
+        admin_user,
+        monkeypatch,
+        design=None,
+        samples=[("GSM_A_SRR1", "experiment_accession=SRX1")],
+    )
+
+    await ValidationDriverService.advance_active_studies(session)
+
+    await session.refresh(study)
+    assert study.state == "setup"
+    plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+    assert plan.differential_design_json is None  # untouched
+
+
+@pytest.mark.asyncio
+async def test_samples_mismatch_is_parked_and_not_auto_advanced(session, admin_user, monkeypatch):
+    """samples_mismatch is not an active back-half state, so the driver leaves it alone (no compute)
+    until a human overrides or declines."""
+    spy = _LaunchSpy()
+    monkeypatch.setattr(PipelineRunService, "launch_run", spy)
+    exp_id = await _experiment_id(session, admin_user)
+    study = await _study(session, admin_user, state="samples_mismatch", experiment_id=exp_id)
+    await session.flush()
+
+    advanced = await ValidationDriverService.advance_active_studies(session)
+
+    await session.refresh(study)
+    assert study.state == "samples_mismatch"  # untouched
+    assert advanced == 0
+    assert spy.calls == []
 
 
 # ---- acquiring_data: transient-failure auto-retry (ADR-069 pre-PR) ----

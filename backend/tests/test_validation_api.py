@@ -270,6 +270,41 @@ async def test_sample_manifest_missing_study_is_404(client, admin_token):
     assert r.status_code == 404
 
 
+async def _study_in_state(session, user, state):
+    from app.services.validation_study_service import ValidationStudyService
+
+    study = await ValidationStudyService.create_study(session, user.organization_id, user.id, source_accession="GSE1")
+    study.state = state
+    await session.commit()
+    return study
+
+
+async def test_override_samples_advances_a_held_study_to_setup(client, admin_token, admin_user, session):
+    """The 'run with the samples we have' action on a held (samples_mismatch) study advances it to
+    setup and stamps who overrode."""
+    study = await _study_in_state(session, admin_user, "samples_mismatch")
+
+    r = await client.post(f"/api/validation-studies/{study.id}/override-samples", headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    assert r.json()["state"] == "setup"
+
+    await session.refresh(study)
+    assert (study.evidence_json or {}).get("samples_override", {}).get("user_id") == admin_user.id
+
+
+async def test_override_samples_rejects_a_study_not_held(client, admin_token, admin_user, session):
+    """Override is only valid from samples_mismatch; any other state is a 400."""
+    study = await _study_in_state(session, admin_user, "plan_ready")
+    r = await client.post(f"/api/validation-studies/{study.id}/override-samples", headers=_auth(admin_token))
+    assert r.status_code == 400
+
+
+async def test_override_samples_requires_approver(client, viewer_token, admin_user, session):
+    study = await _study_in_state(session, admin_user, "samples_mismatch")
+    r = await client.post(f"/api/validation-studies/{study.id}/override-samples", headers=_auth(viewer_token))
+    assert r.status_code == 403
+
+
 async def test_viewer_cannot_confirm_finding_set(client, admin_token, viewer_token, monkeypatch):
     _patch_llm(monkeypatch, _GOOD)
     sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]

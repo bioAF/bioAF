@@ -65,6 +65,15 @@ def test_plan_can_be_declined_at_the_approval_gate():
     assert can_transition("plan_ready", "plan_declined")
 
 
+def test_samples_mismatch_holds_before_compute_and_can_run_or_stop():
+    # A picked sample that was not fetched parks the study here (zero compute) so a human decides.
+    assert "samples_mismatch" in VALIDATION_STUDY_STATES
+    assert can_transition("acquiring_data", "samples_mismatch")
+    assert can_transition("samples_mismatch", "setup")  # "run with the samples we have" (override)
+    assert can_transition("samples_mismatch", "plan_declined")  # "stop"
+    assert not is_terminal("samples_mismatch")
+
+
 def test_error_is_reachable_from_every_active_state():
     active = [s for s in VALIDATION_STUDY_STATES if s not in VALIDATION_STUDY_TERMINAL_STATES]
     for state in active:
