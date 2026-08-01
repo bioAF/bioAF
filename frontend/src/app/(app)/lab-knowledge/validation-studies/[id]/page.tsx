@@ -15,6 +15,7 @@ import {
   type FindingClaim,
 } from "@/components/validation/Level3Gate";
 import { Level3ResultPanel } from "@/components/validation/Level3ResultPanel";
+import { SamplesMismatchNotice } from "@/components/validation/SamplesMismatchNotice";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { LitValidationDisabledNotice } from "@/components/validation/LitValidationGate";
@@ -219,6 +220,16 @@ export default function ValidationStudyPage() {
                 </ul>
               </div>
             )}
+          </section>
+        )}
+
+        {study.state === "samples_mismatch" && (
+          <section className="mb-6">
+            <SamplesMismatchNotice
+              studyId={study.id}
+              failureReason={study.failure_reason}
+              onChanged={(updated) => setStudy(updated as ValidationStudy)}
+            />
           </section>
         )}
 
