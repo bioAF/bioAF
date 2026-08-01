@@ -38,11 +38,13 @@ beforeEach(() => {
   mockGet.mockResolvedValue({ candidates: [] });
 });
 
-test("renders the extracted differential design for review", () => {
+test("renders the extracted differential design for review", async () => {
   render(<Level3Gate studyId={1} design={DESIGN} claim={null} onChanged={jest.fn()} />);
+  // no manifest here (default mock returns candidates only) -> free-text sample inputs
   expect(screen.getByDisplayValue("dex vs untreated")).toBeInTheDocument();
   expect(screen.getByDisplayValue("SRX1, SRX2")).toBeInTheDocument();
   expect(screen.getByDisplayValue("SRX3, SRX4")).toBeInTheDocument();
+  await waitFor(() => expect(mockGet).toHaveBeenCalledWith("/api/validation-studies/1/sample-manifest"));
 });
 
 test("saving an edited design PUTs the normalized contrast to the design endpoint", async () => {
@@ -82,13 +84,128 @@ test("a matched-pairs pairing is parsed into the subjects map on save", async ()
   });
 });
 
-test("an already-saved pairing pre-fills the subject-pairing field", () => {
+test("an already-saved pairing pre-fills the subject-pairing field", async () => {
   const paired = {
     ...DESIGN,
     contrasts: [{ ...DESIGN.contrasts[0], subjects: { SRX1: "donorA", SRX3: "donorA" } }],
   };
   render(<Level3Gate studyId={1} design={paired} claim={null} onChanged={jest.fn()} />);
   expect((screen.getByLabelText(/subject pairing/i) as HTMLTextAreaElement).value).toContain("SRX1=donorA");
+  await waitFor(() => expect(mockGet).toHaveBeenCalledWith("/api/validation-studies/1/sample-manifest"));
+});
+
+// ---- Level-3 sample picker (recognition over accession typing) ----
+
+const MANIFEST = {
+  samples: [
+    {
+      experiment_accession: "SRX1",
+      run_accession: "SRR1",
+      sample_accession: "SRS1",
+      title: "Dexamethasone rep 1",
+      condition: "treatment: dex",
+    },
+    {
+      experiment_accession: "SRX3",
+      run_accession: "SRR3",
+      sample_accession: "SRS3",
+      title: "Untreated rep 1",
+      condition: "treatment: untreated",
+    },
+  ],
+  unavailable_reason: null,
+};
+
+// Route the manifest GET to a manifest payload; everything else keeps the default candidates shape.
+function mockManifest(payload: unknown) {
+  mockGet.mockImplementation(async (url: string) =>
+    url.includes("sample-manifest") ? payload : { candidates: [] },
+  );
+}
+
+test("renders recognizable sample rows (title + condition) instead of free-text sample inputs", async () => {
+  mockManifest(MANIFEST);
+  render(<Level3Gate studyId={7} design={DESIGN} claim={null} onChanged={jest.fn()} />);
+
+  expect(await screen.findByText("Dexamethasone rep 1")).toBeInTheDocument();
+  expect(screen.getByText("Untreated rep 1")).toBeInTheDocument();
+  expect(screen.getByText(/treatment: dex/i)).toBeInTheDocument();
+  // the scientist never sees the blind free-text accession boxes when a manifest is available
+  expect(screen.queryByLabelText(/^test samples/i)).not.toBeInTheDocument();
+});
+
+test("pre-groups samples by the extracted design and saves experiment accessions to the right arms", async () => {
+  mockManifest(MANIFEST);
+  render(<Level3Gate studyId={7} design={DESIGN} claim={null} onChanged={jest.fn()} />);
+  await screen.findByText("Dexamethasone rep 1");
+
+  await userEvent.click(screen.getByRole("button", { name: /save design/i }));
+
+  await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+  const [url, body] = mockPut.mock.calls[0];
+  expect(url).toBe("/api/validation-studies/7/differential-design");
+  // SRX1 is in the design's test_samples, SRX3 in reference_samples -> pre-grouped, no typing
+  expect(body.contrasts[0].test_samples).toEqual(["SRX1"]);
+  expect(body.contrasts[0].reference_samples).toEqual(["SRX3"]);
+});
+
+test("reassigning a sample moves it to the other arm on save", async () => {
+  mockManifest(MANIFEST);
+  render(<Level3Gate studyId={7} design={DESIGN} claim={null} onChanged={jest.fn()} />);
+  await screen.findByText("Dexamethasone rep 1");
+
+  await userEvent.selectOptions(screen.getByLabelText(/arm for Dexamethasone rep 1/i), "reference");
+  await userEvent.click(screen.getByRole("button", { name: /save design/i }));
+
+  await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+  const [, body] = mockPut.mock.calls[0];
+  expect(body.contrasts[0].test_samples).toEqual([]);
+  expect(body.contrasts[0].reference_samples).toEqual(expect.arrayContaining(["SRX1", "SRX3"]));
+});
+
+test("manual-add injects a sample id the manifest missed into the saved design", async () => {
+  mockManifest(MANIFEST);
+  render(<Level3Gate studyId={7} design={DESIGN} claim={null} onChanged={jest.fn()} />);
+  await screen.findByText("Dexamethasone rep 1");
+
+  await userEvent.type(screen.getByLabelText(/add a sample/i), "SRX_EXTRA");
+  await userEvent.click(screen.getByRole("button", { name: /add sample/i }));
+  await userEvent.click(screen.getByRole("button", { name: /save design/i }));
+
+  await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+  const [, body] = mockPut.mock.calls[0];
+  expect(body.contrasts[0].test_samples).toContain("SRX_EXTRA");
+});
+
+test("a per-sample subject is saved into the subjects map", async () => {
+  mockManifest(MANIFEST);
+  render(<Level3Gate studyId={7} design={DESIGN} claim={null} onChanged={jest.fn()} />);
+  await screen.findByText("Dexamethasone rep 1");
+
+  await userEvent.type(screen.getByLabelText(/subject for Dexamethasone rep 1/i), "donorA");
+  await userEvent.type(screen.getByLabelText(/subject for Untreated rep 1/i), "donorA");
+  await userEvent.click(screen.getByRole("button", { name: /save design/i }));
+
+  await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+  const [, body] = mockPut.mock.calls[0];
+  expect(body.contrasts[0].subjects).toEqual({ SRX1: "donorA", SRX3: "donorA" });
+});
+
+test("an unavailable manifest falls back to the free-text sample inputs", async () => {
+  mockManifest({ samples: [], unavailable_reason: "This study has no deposited accession to list samples from." });
+  render(<Level3Gate studyId={7} design={DESIGN} claim={null} onChanged={jest.fn()} />);
+
+  expect(await screen.findByText(/sample list unavailable/i)).toBeInTheDocument();
+  // free-text entry still works
+  const testInput = screen.getByLabelText(/^test samples/i);
+  expect(testInput).toBeInTheDocument();
+  await userEvent.clear(testInput);
+  await userEvent.type(testInput, "SRX9");
+  await userEvent.click(screen.getByRole("button", { name: /save design/i }));
+
+  await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+  const [, body] = mockPut.mock.calls[0];
+  expect(body.contrasts[0].test_samples).toEqual(["SRX9"]);
 });
 
 test("confirming a pasted ground-truth table POSTs to the finding-set endpoint", async () => {
@@ -138,7 +255,7 @@ test("auto-fetch with no candidates points the user to the journal SI", async ()
   await waitFor(() => expect(screen.getByText(/no deposited result table/i)).toBeInTheDocument());
 });
 
-test("shows the parsed finding-set summary once a claim is confirmed", () => {
+test("shows the parsed finding-set summary once a claim is confirmed", async () => {
   const claim = {
     kind: "gene",
     namespace: "symbol",
@@ -150,4 +267,5 @@ test("shows the parsed finding-set summary once a claim is confirmed", () => {
   render(<Level3Gate studyId={1} design={DESIGN} claim={claim} onChanged={jest.fn()} />);
   expect(screen.getByText(/10/)).toBeInTheDocument();
   expect(screen.getByText(/confirmed/i)).toBeInTheDocument();
+  await waitFor(() => expect(mockGet).toHaveBeenCalledWith("/api/validation-studies/1/sample-manifest"));
 });
