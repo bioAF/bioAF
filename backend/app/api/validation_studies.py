@@ -22,11 +22,13 @@ from app.schemas.validation_study import (
     FindingSetRequest,
     ReadRequest,
     ReproductionPlanResponse,
+    SampleManifestResponse,
     ValidationStudyRequest,
     ValidationStudyResponse,
     ValidationStudySummary,
 )
 from app.services.audit_service import log_action
+from app.services.literature.accession_manifest_service import AccessionManifestService
 from app.services.literature.ground_truth_fetch_service import GroundTruthFetchService
 from app.services.provenance.report_service import ProvenanceReportService
 from app.services.reproduction_plan_service import ReproductionPlanService
@@ -232,6 +234,53 @@ async def edit_differential_design(
     study = await _load(session, study_id, org_id)
     await session.commit()
     return await _study_response(session, study, org_id)
+
+
+@router.get("/{study_id}/sample-manifest", response_model=SampleManifestResponse)
+async def sample_manifest(
+    study_id: int,
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Level-3 picker source: resolve the study's deposited accession(s) into a per-sample manifest
+    (title + condition + accessions) so the scientist assigns samples to the test/reference arms by
+    RECOGNITION, never by typing accession tokens. Approve-time action (gated ``lit_validation:approve``).
+
+    Best-effort: a study with no accession, or a metadata fetch that fails, returns 200 with an
+    ``unavailable_reason`` (never a 500) so the gate degrades to today's free-text sample entry."""
+    org_id = int(current_user["org_id"])
+    await _load(session, study_id, org_id)  # 404 if missing or another org's study
+    plan = await ReproductionPlanService.get_plan(session, study_id, org_id)
+    accessions = [a for a in ((plan.accessions_json if plan else None) or []) if isinstance(a, str) and a.strip()]
+    if not accessions:
+        return SampleManifestResponse(
+            samples=[], unavailable_reason="This study has no deposited accession to list samples from."
+        )
+
+    # Union across the plan's accessions, de-duping an experiment that appears in more than one.
+    samples: list[dict] = []
+    seen: set[str] = set()
+    reasons: list[str] = []
+    for accession in accessions:
+        result = await AccessionManifestService.fetch_manifest(accession)
+        if result.unavailable_reason:
+            reasons.append(result.unavailable_reason)
+        for entry in result.samples:
+            key = (
+                entry.get("experiment_accession")
+                or entry.get("run_accession")
+                or entry.get("sample_accession")
+                or entry.get("title")
+            )
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            samples.append(entry)
+
+    if not samples:
+        reason = "; ".join(dict.fromkeys(reasons)) or "No samples were found for this study's accessions."
+        return SampleManifestResponse(samples=[], unavailable_reason=reason)
+    return SampleManifestResponse(samples=samples)
 
 
 @router.get("/{study_id}/finding-set/candidates")

@@ -153,6 +153,123 @@ async def test_finding_set_candidates_returns_autofetched(client, admin_token, m
     assert cands[0]["filename"] == "GSE52778_DEG.csv"
 
 
+async def test_sample_manifest_returns_entries(client, admin_token, monkeypatch):
+    """The Level-3 picker fetches the study's real sample manifest (title + condition + accessions).
+    The manifest fetch is stubbed (no network); the endpoint unions the plan's accessions."""
+    _patch_llm(monkeypatch, _GOOD)
+    sid = (
+        await client.post("/api/validation-studies", json={"source_accession": "GSE52778"}, headers=_auth(admin_token))
+    ).json()["id"]
+    await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+
+    from app.services.literature.accession_manifest_service import AccessionManifestService, ManifestResult
+
+    async def _fake(accession, *, fetcher=None):
+        return ManifestResult(
+            samples=[
+                {
+                    "experiment_accession": "SRX1",
+                    "run_accession": "SRR1",
+                    "sample_accession": "SRS1",
+                    "title": "Dex-treated rep 1",
+                    "condition": "treatment: dex",
+                }
+            ]
+        )
+
+    monkeypatch.setattr(AccessionManifestService, "fetch_manifest", _fake)
+
+    r = await client.get(f"/api/validation-studies/{sid}/sample-manifest", headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["unavailable_reason"] is None
+    assert len(body["samples"]) == 1
+    assert body["samples"][0]["experiment_accession"] == "SRX1"
+    assert body["samples"][0]["title"] == "Dex-treated rep 1"
+    assert body["samples"][0]["condition"] == "treatment: dex"
+
+
+async def test_sample_manifest_unions_and_dedupes_across_accessions(client, admin_token, monkeypatch):
+    """A multi-accession study unions its manifests and de-dupes an experiment seen in two accessions."""
+    two_acc = (
+        '```json\n{"accessions": ["GSE_A", "GSE_B"], "method": {"assay": "bulk RNA-seq"}, '
+        '"claims": [], "data_availability": "deposited", "blockers": []}\n```'
+    )
+    _patch_llm(monkeypatch, two_acc)
+    sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]
+    await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+
+    from app.services.literature.accession_manifest_service import AccessionManifestService, ManifestResult
+
+    async def _fake(accession, *, fetcher=None):
+        shared = {"experiment_accession": "SRX_SHARED", "run_accession": "", "sample_accession": "", "title": "Shared", "condition": ""}
+        unique = {"experiment_accession": f"SRX_{accession}", "run_accession": "", "sample_accession": "", "title": accession, "condition": ""}
+        return ManifestResult(samples=[shared, unique])
+
+    monkeypatch.setattr(AccessionManifestService, "fetch_manifest", _fake)
+
+    r = await client.get(f"/api/validation-studies/{sid}/sample-manifest", headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    exps = [s["experiment_accession"] for s in r.json()["samples"]]
+    assert exps == ["SRX_SHARED", "SRX_GSE_A", "SRX_GSE_B"]  # shared collapsed to one
+
+
+async def test_sample_manifest_no_accession_is_unavailable(client, admin_token, monkeypatch):
+    """A study with no deposited accession returns 200 with an unavailable reason, not a 500, so the
+    picker falls back to free-text entry."""
+    no_data = (
+        '```json\n{"accessions": [], "method": {"assay": "bulk RNA-seq"}, "claims": [], '
+        '"data_availability": "deposited", "blockers": []}\n```'
+    )
+    _patch_llm(monkeypatch, no_data)
+    sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]
+    await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+
+    r = await client.get(f"/api/validation-studies/{sid}/sample-manifest", headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["samples"] == []
+    assert body["unavailable_reason"]
+
+
+async def test_sample_manifest_fetch_failure_is_unavailable(client, admin_token, monkeypatch):
+    """A fetch failure surfaces as a 200 unavailable signal (the reason), never a 500."""
+    _patch_llm(monkeypatch, _GOOD)
+    sid = (
+        await client.post("/api/validation-studies", json={"source_accession": "GSE52778"}, headers=_auth(admin_token))
+    ).json()["id"]
+    await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+
+    from app.services.literature.accession_manifest_service import AccessionManifestService, ManifestResult
+
+    async def _fake(accession, *, fetcher=None):
+        return ManifestResult(samples=[], unavailable_reason="Could not reach ENA to list this study's samples.")
+
+    monkeypatch.setattr(AccessionManifestService, "fetch_manifest", _fake)
+
+    r = await client.get(f"/api/validation-studies/{sid}/sample-manifest", headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["samples"] == []
+    assert "ENA" in body["unavailable_reason"]
+
+
+async def test_sample_manifest_requires_approver(client, admin_token, viewer_token, monkeypatch):
+    """The picker is an approve-time action, so viewing the manifest requires the approve permission."""
+    _patch_llm(monkeypatch, _GOOD)
+    sid = (
+        await client.post("/api/validation-studies", json={"source_accession": "GSE52778"}, headers=_auth(admin_token))
+    ).json()["id"]
+    r = await client.get(f"/api/validation-studies/{sid}/sample-manifest", headers=_auth(viewer_token))
+    assert r.status_code == 403
+
+
+async def test_sample_manifest_missing_study_is_404(client, admin_token):
+    """Org-scoped load: a study id that is not this org's (here, nonexistent) 404s before any fetch."""
+    r = await client.get("/api/validation-studies/999999/sample-manifest", headers=_auth(admin_token))
+    assert r.status_code == 404
+
+
 async def test_viewer_cannot_confirm_finding_set(client, admin_token, viewer_token, monkeypatch):
     _patch_llm(monkeypatch, _GOOD)
     sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]

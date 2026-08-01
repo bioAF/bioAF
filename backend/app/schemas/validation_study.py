@@ -54,6 +54,25 @@ class FindingSetRequest(BaseModel):
     source_locator: str | None = None
 
 
+class SampleManifestEntry(BaseModel):
+    """One recognizable sample for the Level-3 picker: what the scientist reads (title + condition)
+    plus the accessions the picker stores + the resolver later maps to a fetched Sample."""
+
+    experiment_accession: str = ""
+    run_accession: str = ""
+    sample_accession: str = ""
+    title: str = ""
+    condition: str = ""
+
+
+class SampleManifestResponse(BaseModel):
+    """The study's per-sample manifest for the Level-3 picker, or an explicit unavailable reason (200,
+    never a 500) so the gate degrades to free-text sample entry."""
+
+    samples: list[SampleManifestEntry] = []
+    unavailable_reason: str | None = None
+
+
 class ComparisonTargetResponse(BaseModel):
     metric_key: str
     claimed_value: float | None = None
