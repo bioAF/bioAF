@@ -329,6 +329,65 @@ async def test_decline_flow(client, admin_token, monkeypatch):
     assert r.json()["failure_reason"] == "wrong accession"
 
 
+async def _paper(session, org_id, title):
+    from app.models.literature import LiteraturePaper
+
+    paper = LiteraturePaper(
+        organization_id=org_id,
+        title=title,
+        title_normalized=title.lower(),
+        provenance="manual",
+    )
+    session.add(paper)
+    await session.commit()
+    return paper
+
+
+async def test_study_response_titles_by_paper_when_linked(client, admin_token, admin_user, session):
+    """A study reproducing a library paper is named by that paper's title, not 'Study #{id}'."""
+    paper = await _paper(session, admin_user.organization_id, "A Landmark RNA-seq Reproduction")
+    sid = (
+        await client.post("/api/validation-studies", json={"paper_id": paper.id}, headers=_auth(admin_token))
+    ).json()["id"]
+
+    r = await client.get(f"/api/validation-studies/{sid}", headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    assert r.json()["title"] == "A Landmark RNA-seq Reproduction"
+
+
+async def test_study_title_ladder_falls_back_doi_then_accession_then_id(client, admin_token):
+    """No paper: title falls back down the ladder DOI -> accession -> 'Study #{id}'."""
+    by_doi = (
+        await client.post("/api/validation-studies", json={"source_doi": "10.1/xyz"}, headers=_auth(admin_token))
+    ).json()
+    assert by_doi["title"] == "10.1/xyz"
+
+    by_acc = (
+        await client.post("/api/validation-studies", json={"source_accession": "GSE99"}, headers=_auth(admin_token))
+    ).json()
+    assert by_acc["title"] == "GSE99"
+
+    bare = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()
+    assert bare["title"] == f"Study #{bare['id']}"
+
+
+async def test_list_studies_resolves_titles_for_a_mixed_batch(client, admin_token, admin_user, session):
+    """The list resolves the same title ladder, batching the paper-title lookup."""
+    paper = await _paper(session, admin_user.organization_id, "Batched Title Paper")
+    linked = (
+        await client.post("/api/validation-studies", json={"paper_id": paper.id}, headers=_auth(admin_token))
+    ).json()["id"]
+    accd = (
+        await client.post("/api/validation-studies", json={"source_accession": "GSE_BATCH"}, headers=_auth(admin_token))
+    ).json()["id"]
+
+    r = await client.get("/api/validation-studies", headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    items = {s["id"]: s for s in r.json()}
+    assert items[linked]["title"] == "Batched Title Paper"
+    assert items[accd]["title"] == "GSE_BATCH"
+
+
 async def test_viewer_cannot_request(client, viewer_token):
     r = await client.post("/api/validation-studies", json={}, headers=_auth(viewer_token))
     assert r.status_code == 403

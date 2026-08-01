@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import require_beta_feature, require_permission
 from app.api.provenance_reports import ReportFormat
 from app.database import get_session
+from app.models.literature import LiteraturePaper
 from app.models.validation_study import ValidationStudy, classification_confidence
 from app.schemas.validation_study import (
     ClassifyRequest,
@@ -78,11 +79,41 @@ def _plan_response(plan) -> ReproductionPlanResponse | None:
     )
 
 
+def _study_title(study: ValidationStudy, paper_title: str | None) -> str:
+    """A scientist-facing display title: the source paper's title, else the DOI, else the accession,
+    else 'Study #{id}' (so a study is always named by what it reproduces, never a bare id)."""
+    if paper_title:
+        return paper_title
+    if study.source_doi:
+        return study.source_doi
+    if study.source_accession:
+        return study.source_accession
+    return f"Study #{study.id}"
+
+
+async def _paper_titles(session: AsyncSession, studies: list[ValidationStudy], org_id: int) -> dict[int, str]:
+    """Batch-resolve paper titles for a set of studies in one query (avoids an N+1 in the list)."""
+    ids = {s.paper_id for s in studies if s.paper_id}
+    if not ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(LiteraturePaper.id, LiteraturePaper.title).where(
+                LiteraturePaper.id.in_(ids),
+                LiteraturePaper.organization_id == org_id,
+            )
+        )
+    ).all()
+    return {pid: title for pid, title in rows}
+
+
 async def _study_response(session: AsyncSession, study: ValidationStudy, org_id: int) -> ValidationStudyResponse:
     plan = await ReproductionPlanService.get_plan(session, study.id, org_id)
+    paper_title = (await _paper_titles(session, [study], org_id)).get(study.paper_id) if study.paper_id else None
     return ValidationStudyResponse(
         id=study.id,
         state=study.state,
+        title=_study_title(study, paper_title),
         classification=study.classification,
         confidence=classification_confidence(study.classification),
         paper_id=study.paper_id,
@@ -138,10 +169,12 @@ async def list_studies(
 ):
     org_id = int(current_user["org_id"])
     studies = await ValidationStudyService.list_studies(session, org_id)
+    titles = await _paper_titles(session, studies, org_id)
     return [
         ValidationStudySummary(
             id=s.id,
             state=s.state,
+            title=_study_title(s, titles.get(s.paper_id)),
             classification=s.classification,
             confidence=classification_confidence(s.classification),
             paper_id=s.paper_id,

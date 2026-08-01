@@ -106,6 +106,9 @@ class ValidationStudySummary(BaseModel):
 
     id: int
     state: str
+    # Display title resolved server-side: the source paper's title -> DOI -> accession -> "Study #{id}"
+    # (so a scientist scanning the list sees which paper each study reproduces, not a bare id).
+    title: str = ""
     classification: str | None = None
     confidence: float | None = None
     paper_id: int | None = None
@@ -118,6 +121,8 @@ class ValidationStudySummary(BaseModel):
 class ValidationStudyResponse(BaseModel):
     id: int
     state: str
+    # Display title resolved server-side via the paper.title -> DOI -> accession -> "Study #{id}" ladder.
+    title: str = ""
     classification: str | None = None
     # "% confident the results were validated" (0-100), derived from the classification for the UI status
     # badge (frontend lib/validationStatus). None = validation could not be run/concluded, or the study
