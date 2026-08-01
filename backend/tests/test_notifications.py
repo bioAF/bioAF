@@ -381,6 +381,145 @@ async def test_in_app_notification_preserves_explicit_metadata(session, admin_us
 
 
 @pytest.mark.asyncio
+async def test_in_app_notification_suppressed_when_preference_disabled(session, admin_user):
+    """Turning OFF the in-app toggle for an event must actually stop the in-app notification."""
+    import app.database as _database
+    from sqlalchemy import select
+
+    from app.models.notification import Notification, NotificationPreference
+    from app.services.event_types import PIPELINE_COMPLETED
+    from app.services.notification_router import NotificationRouter
+
+    session.add(
+        NotificationPreference(
+            user_id=admin_user.id, event_type=PIPELINE_COMPLETED, channel="in_app", enabled=False
+        )
+    )
+    await session.commit()
+
+    router = NotificationRouter(_database.async_session_factory)
+    await router._handle_event(
+        {
+            "event_type": PIPELINE_COMPLETED,
+            "org_id": admin_user.organization_id,
+            "target_user_id": admin_user.id,
+            "title": "Pipeline completed",
+            "message": "done",
+        }
+    )
+
+    rows = (
+        await session.execute(
+            select(Notification).where(
+                Notification.event_type == PIPELINE_COMPLETED, Notification.user_id == admin_user.id
+            )
+        )
+    ).scalars().all()
+    assert rows == []  # the disabled in-app preference is honored
+
+
+def _email_spy(monkeypatch):
+    from app.services.notification_channels.email_adapter import EmailChannel
+
+    calls: list[str] = []
+
+    async def _deliver(to, title, message, severity):
+        calls.append(to)
+        return True
+
+    monkeypatch.setattr(EmailChannel, "deliver", _deliver)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_email_delivered_by_preference_without_an_org_rule(session, admin_user, monkeypatch):
+    """Enabling email (or leaving it at the default-on) delivers via the configured SMTP with NO
+    org NotificationRule required - the previous rule gate was why email never sent."""
+    import app.database as _database
+    from app.services.event_types import PIPELINE_COMPLETED
+    from app.services.notification_router import NotificationRouter
+
+    calls = _email_spy(monkeypatch)
+    router = NotificationRouter(_database.async_session_factory)
+    await router._handle_event(
+        {
+            "event_type": PIPELINE_COMPLETED,
+            "org_id": admin_user.organization_id,
+            "target_user_id": admin_user.id,
+            "title": "Pipeline completed",
+            "message": "done",
+        }
+    )
+    assert admin_user.email in calls  # email attempted purely off the preference (default on)
+
+
+@pytest.mark.asyncio
+async def test_email_not_sent_when_preference_disabled(session, admin_user, monkeypatch):
+    import app.database as _database
+    from app.models.notification import NotificationPreference
+    from app.services.event_types import PIPELINE_COMPLETED
+    from app.services.notification_router import NotificationRouter
+
+    session.add(
+        NotificationPreference(
+            user_id=admin_user.id, event_type=PIPELINE_COMPLETED, channel="email", enabled=False
+        )
+    )
+    await session.commit()
+
+    calls = _email_spy(monkeypatch)
+    router = NotificationRouter(_database.async_session_factory)
+    await router._handle_event(
+        {
+            "event_type": PIPELINE_COMPLETED,
+            "org_id": admin_user.organization_id,
+            "target_user_id": admin_user.id,
+            "title": "Pipeline completed",
+            "message": "done",
+        }
+    )
+    assert admin_user.email not in calls  # disabled email preference is honored
+
+
+@pytest.mark.asyncio
+async def test_mandatory_email_rule_overrides_disabled_preference(session, admin_user, monkeypatch):
+    """A mandatory org email rule still forces delivery even when the user disabled the preference."""
+    import app.database as _database
+    from app.models.notification import NotificationPreference, NotificationRule
+    from app.services.event_types import PIPELINE_COMPLETED
+    from app.services.notification_router import NotificationRouter
+
+    session.add(
+        NotificationRule(
+            organization_id=admin_user.organization_id,
+            event_type=PIPELINE_COMPLETED,
+            channel="email",
+            mandatory=True,
+            enabled=True,
+        )
+    )
+    session.add(
+        NotificationPreference(
+            user_id=admin_user.id, event_type=PIPELINE_COMPLETED, channel="email", enabled=False
+        )
+    )
+    await session.commit()
+
+    calls = _email_spy(monkeypatch)
+    router = NotificationRouter(_database.async_session_factory)
+    await router._handle_event(
+        {
+            "event_type": PIPELINE_COMPLETED,
+            "org_id": admin_user.organization_id,
+            "target_user_id": admin_user.id,
+            "title": "Pipeline completed",
+            "message": "done",
+        }
+    )
+    assert admin_user.email in calls
+
+
+@pytest.mark.asyncio
 async def test_filter_notifications(client: AsyncClient, admin_token: str, admin_user, session):
     from app.models.notification import Notification
 
