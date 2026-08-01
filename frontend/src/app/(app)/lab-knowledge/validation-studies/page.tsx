@@ -12,6 +12,8 @@ import { api } from "@/lib/api";
 interface ValidationStudySummary {
   id: number;
   state: string;
+  // Server-resolved display title (paper.title -> DOI -> accession -> "Study #{id}").
+  title?: string | null;
   classification?: string | null;
   confidence?: number | null;
   paper_id?: number | null;
@@ -96,8 +98,11 @@ export default function ValidationStudiesListPage() {
                           href={`/lab-knowledge/validation-studies/${s.id}`}
                           className="font-medium text-bioaf-700 hover:underline"
                         >
-                          Study #{s.id}
+                          {s.title || `Study #${s.id}`}
                         </Link>
+                        {s.title && s.title !== `Study #${s.id}` && (
+                          <span className="ml-2 text-xs text-gray-400">#{s.id}</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-gray-600">
                         {s.source_doi || s.source_accession || (s.paper_id ? `paper ${s.paper_id}` : "-")}

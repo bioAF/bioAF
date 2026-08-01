@@ -124,7 +124,7 @@ describe("ValidationStudyPage", () => {
 
     render(<ValidationStudyPage />);
 
-    await waitFor(() => expect(screen.getByText(/Validation Study #5/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { name: /Study #5/ })).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: /export report/i })).not.toBeInTheDocument();
   });
 
@@ -148,8 +148,28 @@ describe("ValidationStudyPage", () => {
 
     render(<ValidationStudyPage />);
 
-    await waitFor(() => expect(screen.getByText(/Validation Study #5/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { name: /Study #5/ })).toBeInTheDocument());
     expect(screen.queryByRole("link", { name: /source paper/i })).not.toBeInTheDocument();
+  });
+
+  it("titles the header and breadcrumb by the resolved study title, with the id secondary", async () => {
+    mockGet.mockResolvedValue({ id: 5, state: "requested", confidence: null, title: "A Landmark RNA-seq Reproduction" });
+
+    render(<ValidationStudyPage />);
+
+    expect(await screen.findByRole("heading", { name: /A Landmark RNA-seq Reproduction/i })).toBeInTheDocument();
+    expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("A Landmark RNA-seq Reproduction");
+    expect(screen.getByText("#5")).toBeInTheDocument();
+  });
+
+  it("falls back to 'Study #id' for the header when no title resolved", async () => {
+    mockGet.mockResolvedValue({ id: 5, state: "requested", confidence: null });
+
+    render(<ValidationStudyPage />);
+
+    expect(await screen.findByRole("heading", { name: /Study #5/i })).toBeInTheDocument();
+    // no redundant secondary id when the header already IS the fallback
+    expect(screen.queryByText(/^#5$/)).not.toBeInTheDocument();
   });
 
   it("shows a not-found message with a retry when the study cannot be loaded", async () => {

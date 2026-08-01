@@ -40,6 +40,21 @@ describe("ValidationStudiesListPage", () => {
     expect(screen.getByRole("link", { name: /Study #8/ })).toHaveAttribute("href", "/lab-knowledge/validation-studies/8");
   });
 
+  it("labels a study by its resolved title, keeping the id as a secondary qualifier", async () => {
+    mockGet.mockResolvedValue([
+      { id: 7, state: "requested", title: "Batched Title Paper", created_at: "2026-07-06T00:00:00Z" },
+      { id: 8, state: "requested", title: "Study #8", created_at: "2026-07-07T00:00:00Z" },
+    ]);
+
+    render(<ValidationStudiesListPage />);
+
+    const link = await screen.findByRole("link", { name: /Batched Title Paper/i });
+    expect(link).toHaveAttribute("href", "/lab-knowledge/validation-studies/7");
+    expect(screen.getByText("#7")).toBeInTheDocument();
+    // a study with only the fallback title does not read "Study #8 #8"
+    expect(screen.queryByText("#8")).not.toBeInTheDocument();
+  });
+
   it("renders a breadcrumb locating the page under Lab Knowledge", async () => {
     mockGet.mockResolvedValue([]);
     render(<ValidationStudiesListPage />);

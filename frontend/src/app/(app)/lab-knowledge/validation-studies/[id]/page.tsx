@@ -46,6 +46,8 @@ interface ReproductionPlanView {
 interface ValidationStudy {
   id: number;
   state: string;
+  // Server-resolved display title (paper.title -> DOI -> accession -> "Study #{id}").
+  title?: string | null;
   classification?: string | null;
   confidence?: number | null;
   paper_id?: number | null;
@@ -135,16 +137,23 @@ export default function ValidationStudyPage() {
   }
 
   const plan = study.plan;
+  const fallbackTitle = `Study #${study.id}`;
+  const displayTitle = study.title || fallbackTitle;
 
   return (
     <>
-      <Breadcrumb entityName={`Study #${study.id}`} />
+      <Breadcrumb entityName={displayTitle} />
       <main className="flex-1 overflow-y-auto p-6">
         <div className="mb-6 flex flex-wrap items-center gap-4">
           <button onClick={() => router.back()} className="text-gray-500 hover:text-gray-700">
             ← Back
           </button>
-          <h1 className="text-2xl font-bold">Validation Study #{study.id}</h1>
+          <h1 className="text-2xl font-bold">{displayTitle}</h1>
+          {study.title && study.title !== fallbackTitle && (
+            <span className="font-mono text-sm text-gray-400" title="Validation study id">
+              #{study.id}
+            </span>
+          )}
           {study.source_doi && (
             <a
               href={`https://doi.org/${study.source_doi}`}
