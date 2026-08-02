@@ -164,8 +164,12 @@ class NotificationRouter:
                         session, org_id, event_type, notification_id, title, message, severity
                     )
 
-            # Deliver to Slack via OAuth channel mappings (independent of rules)
-            if not slack_delivered_via_rule and first_notification_id is not None:
+            # Deliver to Slack via OAuth channel mappings (independent of rules).
+            # Gate on there being someone to notify, NOT on an in-app row having been created:
+            # first_notification_id is only an anchor for the delivery log (and _log_delivery
+            # already no-ops on None), so keying delivery off it made one user's in-app opt-out
+            # silence the org's Slack channel.
+            if not slack_delivered_via_rule and recipients:
                 await self._deliver_slack(
                     session,
                     org_id,

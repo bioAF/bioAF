@@ -664,6 +664,147 @@ async def test_disabled_on_every_channel_delivers_nothing(session, admin_user, m
 
 
 @pytest.mark.asyncio
+async def test_disabling_in_app_does_not_also_disable_slack(session, admin_user, monkeypatch):
+    """Rules 1+4: the channels are independent. Turning OFF in-app must not silence Slack too.
+
+    Regression: Slack delivery via OAuth channel mappings was gated on `first_notification_id is not
+    None`, which only exists to anchor the delivery log. Once InAppChannel started returning None for
+    a suppressed in-app preference, a user turning in-app off silently killed the org's Slack posts.
+    """
+    import app.database as _database
+    from app.models.notification import (
+        NotificationPreference,
+        SlackChannelMapping,
+        SlackInstallation,
+    )
+    from app.services.event_types import PIPELINE_RUN_REVIEW_REMINDER
+    from app.services.notification_channels.slack_adapter import SlackChannel
+    from app.services.notification_router import NotificationRouter
+
+    session.add(
+        SlackInstallation(
+            organization_id=admin_user.organization_id,
+            team_id="T1",
+            team_name="Lab",
+            bot_token="xoxb-test",
+            bot_user_id="U1",
+            installed_by=admin_user.id,
+            enabled=True,
+        )
+    )
+    session.add(
+        SlackChannelMapping(
+            organization_id=admin_user.organization_id,
+            channel_id="C1",
+            channel_name="lab-alerts",
+            event_types_json=[],
+            enabled=True,
+        )
+    )
+    session.add(
+        NotificationPreference(
+            user_id=admin_user.id,
+            event_type=PIPELINE_RUN_REVIEW_REMINDER,
+            channel="in_app",
+            enabled=False,
+        )
+    )
+    await session.commit()
+
+    posted: list[str] = []
+
+    async def _deliver(bot_token, channel_id, title, message, severity):
+        posted.append(channel_id)
+        return True, None
+
+    monkeypatch.setattr(SlackChannel, "deliver", _deliver)
+
+    router = NotificationRouter(_database.async_session_factory)
+    await router._handle_event(
+        {
+            "event_type": PIPELINE_RUN_REVIEW_REMINDER,
+            "org_id": admin_user.organization_id,
+            "target_user_id": admin_user.id,
+            "title": "Pipeline run awaiting review (72h)",
+            "message": "not reviewed",
+        }
+    )
+
+    assert posted == ["C1"]  # Slack still posts; in-app being off is not Slack's business
+
+
+@pytest.mark.asyncio
+async def test_slack_channel_posts_are_org_level_not_per_user(session, admin_user, monkeypatch):
+    """A Slack post goes to a shared org channel, so it is NOT gated by one user's preference.
+
+    Documents why the profile page offers no per-user Slack toggle: routing is per channel
+    (Settings -> Slack picks the event types for each channel). The per-user slack preference is
+    only consulted for org NotificationRules, which nothing in the product creates, so a Slack
+    column on the per-user page would be a switch that changes nothing.
+    """
+    import app.database as _database
+    from app.models.notification import (
+        NotificationPreference,
+        SlackChannelMapping,
+        SlackInstallation,
+    )
+    from app.services.event_types import PIPELINE_RUN_REVIEW_REMINDER
+    from app.services.notification_channels.slack_adapter import SlackChannel
+    from app.services.notification_router import NotificationRouter
+
+    session.add(
+        SlackInstallation(
+            organization_id=admin_user.organization_id,
+            team_id="T1",
+            team_name="Lab",
+            bot_token="xoxb-test",
+            bot_user_id="U1",
+            installed_by=admin_user.id,
+            enabled=True,
+        )
+    )
+    session.add(
+        SlackChannelMapping(
+            organization_id=admin_user.organization_id,
+            channel_id="C1",
+            channel_name="lab-alerts",
+            event_types_json=[],
+            enabled=True,
+        )
+    )
+    session.add(
+        NotificationPreference(
+            user_id=admin_user.id,
+            event_type=PIPELINE_RUN_REVIEW_REMINDER,
+            channel="slack",
+            enabled=False,
+        )
+    )
+    await session.commit()
+
+    posted: list[str] = []
+
+    async def _deliver(bot_token, channel_id, title, message, severity):
+        posted.append(channel_id)
+        return True, None
+
+    monkeypatch.setattr(SlackChannel, "deliver", _deliver)
+
+    router = NotificationRouter(_database.async_session_factory)
+    await router._handle_event(
+        {
+            "event_type": PIPELINE_RUN_REVIEW_REMINDER,
+            "org_id": admin_user.organization_id,
+            "target_user_id": admin_user.id,
+            "title": "Pipeline run awaiting review (72h)",
+            "message": "not reviewed",
+        }
+    )
+
+    assert posted == ["C1"]
+
+
+@pytest.mark.asyncio
 async def test_each_recipient_gets_their_own_email(session, admin_user, monkeypatch):
     """Rule 5: one message per recipient. Never several users on one To, which would let a
     reply-all storm start (and leaks the recipient list)."""
@@ -710,6 +851,29 @@ async def test_each_recipient_gets_their_own_email(session, admin_user, monkeypa
     assert sorted(calls) == sorted([admin_user.email, second.email])
     for to in calls:
         assert "," not in to  # each send addresses exactly one mailbox
+
+
+def test_every_deliverable_event_type_has_a_preference_toggle():
+    """Rule 1 needs a switch to exist: a notification a user cannot turn off is not a preference.
+
+    The profile page listed 35 of the 60 event types users can actually receive. The other 25 - the
+    whole literature feature, sequencing batches, work nodes, auto-run, and the SDR/glossary
+    notifications raised outside the event bus - had no toggle at all, so they could not be turned
+    off by anyone. Keeps the page and the emitters from drifting apart again.
+    """
+    import pathlib
+    import re
+
+    from app.services.event_types import USER_CONFIGURABLE_EVENT_TYPES
+
+    ui = pathlib.Path(__file__).parents[2] / "frontend/src/app/(app)/profile/components/NotificationsTab.tsx"
+    listed = set(re.findall(r'\{ type: "([^"]+)"', ui.read_text()))
+
+    missing = sorted(set(USER_CONFIGURABLE_EVENT_TYPES) - listed)
+    assert missing == [], f"event types with no preference toggle: {missing}"
+
+    unknown = sorted(listed - set(USER_CONFIGURABLE_EVENT_TYPES))
+    assert unknown == [], f"toggles for event types nothing emits: {unknown}"
 
 
 def test_email_message_addresses_a_single_recipient():

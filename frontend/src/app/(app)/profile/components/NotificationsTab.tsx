@@ -27,9 +27,11 @@ const EVENT_CATEGORIES: EventCategory[] = [
     label: "Pipelines & Analysis",
     description: "Pipeline runs, QC results, and analysis outputs",
     events: [
+      { type: "pipeline.started", label: "Pipeline started", description: "A pipeline run began" },
       { type: "pipeline.completed", label: "Pipeline completed", description: "A pipeline run finished successfully" },
       { type: "pipeline.failed", label: "Pipeline failed", description: "A pipeline run failed" },
       { type: "pipeline.stage_error", label: "Pipeline stage error", description: "A pipeline stage encountered an error" },
+      { type: "pipeline.oom", label: "Pipeline out of memory", description: "A pipeline run ran out of memory" },
       { type: "pipeline_run.reviewed", label: "Pipeline run reviewed", description: "A pipeline run was reviewed" },
       { type: "pipeline_run.review_reminder", label: "Review reminder", description: "A pipeline run is waiting for review" },
       { type: "qc.results_ready", label: "QC results ready", description: "Quality control results are available" },
@@ -49,6 +51,35 @@ const EVENT_CATEGORIES: EventCategory[] = [
       { type: "ingest.unmatched_file", label: "Unmatched file", description: "An uploaded file could not be matched to a sample" },
       { type: "ingest.duplicate_file", label: "Duplicate file detected", description: "A duplicate file was found during ingestion" },
       { type: "reference.deprecated", label: "Reference data deprecated", description: "A reference dataset was marked as deprecated" },
+      { type: "sequencing_batch.detected", label: "Sequencing batch detected", description: "A new sequencing batch was found" },
+      { type: "sequencing_batch.file_verified", label: "Sequencing file verified", description: "A file in a sequencing batch passed verification" },
+      { type: "sequencing_batch.complete", label: "Sequencing batch complete", description: "All files in a sequencing batch arrived" },
+      { type: "sequencing_batch.partial", label: "Sequencing batch incomplete", description: "A sequencing batch is missing files" },
+    ],
+  },
+  {
+    label: "Literature",
+    description: "Paper searches, AI literature reviews, and library activity",
+    events: [
+      { type: "literature.paper_uploaded", label: "Paper added", description: "A paper was added to the Library" },
+      { type: "literature.search_completed", label: "Search completed", description: "A literature search finished" },
+      { type: "literature.search_failed", label: "Search failed", description: "A literature search could not complete" },
+      { type: "literature.review_run_completed", label: "AI review completed", description: "An AI literature review run finished" },
+      { type: "literature.review_run_failed", label: "AI review failed", description: "An AI literature review run failed" },
+      { type: "literature.auto_review_recommendations", label: "New recommendations", description: "An automated review produced paper recommendations" },
+      { type: "literature.comment_replied", label: "Comment reply", description: "Someone replied to your comment on a paper" },
+      { type: "literature.paper_dismissed", label: "Paper dismissed", description: "A recommended paper was dismissed" },
+    ],
+  },
+  {
+    label: "Lab Knowledge",
+    description: "Scientific Decision Records and glossary scans",
+    events: [
+      { type: "sdr_owner_assigned", label: "Decision record assigned", description: "You were made the owner of a Scientific Decision Record" },
+      { type: "sdr_reassessment_flagged", label: "Decision record flagged", description: "A decision record was flagged for reassessment" },
+      { type: "sdr_reassessment_warning", label: "Reassessment due soon", description: "A decision record is approaching its reassessment date" },
+      { type: "lab_glossary_scan_complete", label: "Glossary scan complete", description: "A lab glossary scan finished" },
+      { type: "lab_glossary_scan_failed", label: "Glossary scan failed", description: "A lab glossary scan could not complete" },
     ],
   },
   {
@@ -61,6 +92,9 @@ const EVENT_CATEGORIES: EventCategory[] = [
       { type: "terraform.apply_failure", label: "Deployment failed", description: "An infrastructure deployment failed" },
       { type: "backup.failure", label: "Backup failed", description: "A scheduled backup failed" },
       { type: "session.idle", label: "Session idle", description: "Your notebook session has been idle" },
+      { type: "work_node.launched", label: "Work node launched", description: "A work node started" },
+      { type: "work_node.stopped", label: "Work node stopped", description: "A work node was shut down" },
+      { type: "work_node.heartbeat_timeout", label: "Work node unresponsive", description: "A work node stopped reporting in" },
     ],
   },
   {
@@ -84,6 +118,9 @@ const EVENT_CATEGORIES: EventCategory[] = [
       { type: "trigger.budget_mid_queue", label: "Budget changed while queued", description: "Budget status changed while pipelines were queued" },
       { type: "trigger.evaluation_failed", label: "Trigger evaluation failed", description: "A pipeline trigger rule could not be evaluated" },
       { type: "trigger.batch_window_closed", label: "Batch window closed", description: "A scheduling batch window has ended" },
+      { type: "auto_run.launched", label: "Auto-run launched", description: "An automatic run started" },
+      { type: "auto_run.cancelled", label: "Auto-run cancelled", description: "An automatic run was cancelled" },
+      { type: "auto_run.budget_disabled", label: "Auto-run disabled (budget)", description: "Automatic runs were disabled because the budget was exhausted" },
     ],
   },
   {
@@ -102,10 +139,15 @@ const EVENT_CATEGORIES: EventCategory[] = [
  * email is opt-in. Rendering every email toggle as "on" while the server treats absent-as-off (or
  * vice versa) makes the page lie about what will actually be delivered.
  */
+/**
+ * Only the channels a user can actually control. Slack is deliberately absent: a Slack post goes to
+ * a shared org channel, so it cannot be gated per user. The router only consults a per-user slack
+ * preference for org NotificationRules, which nothing in the product creates, so the column that
+ * used to be here rendered and saved rows nothing ever read.
+ */
 const CHANNELS: { key: string; label: string; defaultOn: boolean }[] = [
   { key: "in_app", label: "In-App", defaultOn: true },
   { key: "email", label: "Email", defaultOn: false },
-  { key: "slack", label: "Slack", defaultOn: true },
 ];
 
 /** Fixed width for one channel column, shared by the header labels and the toggles below them. */
@@ -218,7 +260,9 @@ export function NotificationsTab() {
             Notification Preferences
           </h2>
           <p className="text-sm text-gray-500 mt-1">
-            Choose how you want to be notified about platform events.
+            Choose how you want to be notified about platform events. In-app is on by default and
+            email is off until you turn it on. Slack is not a personal setting: it posts to shared
+            channels and is configured per channel in Settings, Slack.
           </p>
         </div>
         <button
