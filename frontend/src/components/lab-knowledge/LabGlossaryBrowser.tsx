@@ -192,7 +192,7 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
             <button
               type="button"
               onClick={() => setShowAdd(true)}
-              className="bg-blue-600 text-white rounded px-4 py-1.5 text-sm font-medium"
+              className="bg-bioaf-600 text-white rounded px-4 py-1.5 text-sm font-medium"
             >
               Add Term
             </button>
@@ -414,7 +414,7 @@ function TermDetailPanel({
                 type="button"
                 onClick={save}
                 disabled={busy}
-                className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
+                className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
               >
                 Save
               </button>
@@ -436,7 +436,7 @@ function TermDetailPanel({
             {(canManage || canDelete) && (
               <div className="border-t pt-4 mt-4 flex items-center gap-4">
                 {canManage && (
-                  <button type="button" onClick={() => setEditing(true)} className="text-sm text-blue-600">
+                  <button type="button" onClick={() => setEditing(true)} className="text-sm text-bioaf-600">
                     Edit
                   </button>
                 )}
@@ -536,7 +536,7 @@ function AddTermModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
             type="button"
             onClick={submit}
             disabled={busy}
-            className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
+            className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
           >
             {busy ? "Saving..." : "Save"}
           </button>
@@ -597,7 +597,7 @@ function ImportModal({
             type="button"
             onClick={submit}
             disabled={busy}
-            className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
+            className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
           >
             {busy ? "Importing..." : "Import"}
           </button>
@@ -810,7 +810,7 @@ function ScanModal({
             type="button"
             onClick={submit}
             disabled={!canSubmit}
-            className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
+            className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
           >
             {busy ? "Starting..." : "Start AI Scan"}
           </button>
@@ -978,7 +978,7 @@ function ReviewPanel({
             type="button"
             onClick={() => commit("accept")}
             disabled={busy}
-            className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
+            className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
           >
             Accept All Remaining
           </button>

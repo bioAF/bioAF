@@ -448,7 +448,7 @@ export default function InfraBackupPage() {
                             onChange={(e) => setSettings({ ...settings, postgres_schedule_enabled: e.target.checked })}
                             className="sr-only peer"
                           />
-                          <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                          <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-bioaf-600"></div>
                         </label>
                       </div>
                       {settings.postgres_schedule_enabled && (
@@ -527,7 +527,7 @@ export default function InfraBackupPage() {
                             onChange={(e) => setSettings({ ...settings, config_schedule_enabled: e.target.checked })}
                             className="sr-only peer"
                           />
-                          <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                          <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-bioaf-600"></div>
                         </label>
                       </div>
                       {settings.config_schedule_enabled && (
@@ -598,7 +598,7 @@ export default function InfraBackupPage() {
                   <button
                     onClick={handleSaveSettings}
                     disabled={savingSettings}
-                    className="mt-4 text-sm bg-blue-600 text-white px-4 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50"
+                    className="mt-4 text-sm bg-bioaf-600 text-white px-4 py-1.5 rounded hover:bg-bioaf-700 disabled:opacity-50"
                   >
                     {savingSettings ? "Saving..." : "Save Settings"}
                   </button>
@@ -709,7 +709,7 @@ export default function InfraBackupPage() {
                         <td className="px-4 py-2.5">
                           <button
                             onClick={() => handleDownloadTfstate(f.name)}
-                            className="text-xs text-blue-600 hover:text-blue-800"
+                            className="text-xs text-bioaf-600 hover:text-bioaf-700"
                           >
                             Download
                           </button>

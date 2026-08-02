@@ -1209,7 +1209,7 @@ function ExperimentDetailPageInner() {
               </button>
               <button
                 onClick={() => handleLaunchNotebook("rstudio")}
-                className="bg-blue-600 text-white px-6 py-2 rounded-md text-sm hover:bg-blue-700"
+                className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700"
               >
                 Launch RStudio
               </button>
@@ -1511,7 +1511,7 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
                   <p className="text-xs text-gray-400">Status: {pub.status}</p>
                 </div>
                 {pub.stable_url && pub.status === "running" && (
-                  <a href={pub.stable_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-sm hover:underline">Open</a>
+                  <a href={pub.stable_url} target="_blank" rel="noopener noreferrer" className="text-bioaf-600 text-sm hover:underline">Open</a>
                 )}
               </div>
             ))}

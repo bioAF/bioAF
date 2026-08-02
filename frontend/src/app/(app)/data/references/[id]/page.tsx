@@ -321,7 +321,7 @@ export default function DataReferenceDetailPage() {
               )}
               <div className="bg-blue-100 h-2 rounded overflow-hidden">
                 <div
-                  className="bg-blue-600 h-2 transition-all"
+                  className="bg-bioaf-600 h-2 transition-all"
                   style={{ width: `${importStatus.progress_pct ?? 0}%` }}
                 />
               </div>

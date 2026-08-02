@@ -154,7 +154,7 @@ export function RoleEditorModal({ editingRole, catalog, onClose, onSaved }: Prop
                       <button
                         type="button"
                         onClick={() => toggleAllForResource(resource, actions)}
-                        className="text-xs text-blue-600 hover:underline"
+                        className="text-xs text-bioaf-600 hover:underline"
                       >
                         {allSelected ? "Deselect all" : "Select all"}
                       </button>
@@ -188,7 +188,7 @@ export function RoleEditorModal({ editingRole, catalog, onClose, onSaved }: Prop
           <button
             onClick={handleSave}
             disabled={saving}
-            className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+            className="px-4 py-2 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
           >
             {saving ? "Saving..." : editingRole ? "Save Changes" : "Create Role"}
           </button>

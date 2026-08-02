@@ -138,7 +138,7 @@ export function DeployRecoveryModal({
         {/* Loading */}
         {state === "loading" && (
           <div className="p-8 text-center">
-            <div className="inline-block h-8 w-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4" />
+            <div className="inline-block h-8 w-8 border-4 border-bioaf-200 border-t-bioaf-600 rounded-full animate-spin mb-4" />
             <p className="text-sm text-gray-600">
               Checking deployment status...
             </p>
@@ -184,7 +184,7 @@ export function DeployRecoveryModal({
               <button
                 onClick={handleRecover}
                 disabled={actionLoading}
-                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-2 text-sm font-medium text-white bg-bioaf-600 rounded-lg hover:bg-bioaf-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {actionLoading ? "Recovering..." : "Resume Deployment"}
               </button>
@@ -221,7 +221,7 @@ export function DeployRecoveryModal({
                   href="https://status.cloud.google.com"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-600 hover:underline"
+                  className="text-bioaf-600 hover:underline"
                 >
                   Google Cloud Status
                 </a>{" "}

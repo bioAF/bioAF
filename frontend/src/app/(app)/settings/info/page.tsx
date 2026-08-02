@@ -211,7 +211,7 @@ export default function SettingsInfoPage() {
                   {canDeploy && (
                     <button
                       onClick={handleInstallUpdate}
-                      className="ml-4 px-4 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 whitespace-nowrap"
+                      className="ml-4 px-4 py-1.5 bg-bioaf-600 text-white text-sm rounded hover:bg-bioaf-700 whitespace-nowrap"
                     >
                       Install Update
                     </button>

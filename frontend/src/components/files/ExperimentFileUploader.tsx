@@ -204,7 +204,7 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
+        className="px-3 py-1.5 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700"
       >
         {expanded ? "Cancel upload" : "Upload"}
       </button>
@@ -369,7 +369,7 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
             <button
               onClick={uploadAll}
               disabled={uploading}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
+              className="px-4 py-2 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
             >
               {uploading
                 ? "Uploading..."
@@ -408,8 +408,8 @@ function StatusLabel({ item }: { item: FileItem }) {
   }
   if (item.status === "uploading") {
     return (
-      <span className="text-xs font-medium text-blue-600 flex items-center gap-1 shrink-0">
-        <span className="inline-block h-1.5 w-1.5 bg-blue-600 rounded-full animate-pulse" />
+      <span className="text-xs font-medium text-bioaf-600 flex items-center gap-1 shrink-0">
+        <span className="inline-block h-1.5 w-1.5 bg-bioaf-600 rounded-full animate-pulse" />
         {item.progress}%
       </span>
     );

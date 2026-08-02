@@ -207,7 +207,7 @@ export function SdrBrowser() {
               <button
                 type="button"
                 onClick={() => setShowCreate(true)}
-                className="bg-blue-600 text-white rounded px-4 py-1.5 text-sm font-medium"
+                className="bg-bioaf-600 text-white rounded px-4 py-1.5 text-sm font-medium"
               >
                 New SDR
               </button>
@@ -530,12 +530,12 @@ function SdrActions({
         </>
       )}
       {(canAuthor || canManage) && (
-        <button type="button" onClick={onEdit} className="text-sm text-blue-600">
+        <button type="button" onClick={onEdit} className="text-sm text-bioaf-600">
           Edit
         </button>
       )}
       {canManage && (
-        <button type="button" onClick={() => setShowOwner(true)} className="text-sm text-blue-600">
+        <button type="button" onClick={() => setShowOwner(true)} className="text-sm text-bioaf-600">
           Reassign Owner
         </button>
       )}
@@ -699,7 +699,7 @@ function CreateSdrModal({
           type="button"
           onClick={submit}
           disabled={busy}
-          className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
+          className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
         >
           {busy ? "Saving..." : "Create"}
         </button>
@@ -795,7 +795,7 @@ function EditSdrForm({
           type="button"
           onClick={save}
           disabled={busy}
-          className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
+          className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
         >
           Save
         </button>
@@ -836,7 +836,7 @@ function UpholdModal({
         <button
           type="button"
           onClick={() => (note.trim() ? onConfirm(note.trim()) : setErr("A note is required."))}
-          className="bg-blue-600 text-white text-sm rounded px-4 py-1.5"
+          className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5"
         >
           Uphold
         </button>
@@ -893,7 +893,7 @@ function SupersedeModal({
           onClick={() =>
             targetId ? onConfirm(Number(targetId)) : setErr("Select a superseding SDR.")
           }
-          className="bg-blue-600 text-white text-sm rounded px-4 py-1.5"
+          className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5"
         >
           Supersede
         </button>
@@ -949,7 +949,7 @@ function OwnerModal({
         <button
           type="button"
           onClick={save}
-          className="bg-blue-600 text-white text-sm rounded px-4 py-1.5"
+          className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5"
         >
           Reassign
         </button>
@@ -1030,7 +1030,7 @@ function CategoryManagerModal({
           type="button"
           onClick={add}
           disabled={busy}
-          className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
+          className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
         >
           Add
         </button>

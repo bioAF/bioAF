@@ -158,13 +158,13 @@ export default function InfraCostCenterPage() {
         <div className="mb-4 p-4 rounded-lg border border-blue-200 bg-blue-50 flex items-center justify-between">
           <div>
             <p className="text-sm font-medium text-blue-800">Waiting for billing export data</p>
-            <p className="text-xs text-blue-600 mt-0.5">
+            <p className="text-xs text-blue-700 mt-0.5">
               Dataset created. Data typically appears within 24 hours after enabling export in the Google Cloud Console.
             </p>
           </div>
           <button
             onClick={() => setShowBillingSetupModal(true)}
-            className="px-3 py-1.5 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 whitespace-nowrap"
+            className="px-3 py-1.5 bg-bioaf-600 text-white rounded text-sm font-medium hover:bg-bioaf-700 whitespace-nowrap"
           >
             Check Status
           </button>

@@ -102,7 +102,7 @@ export default function SettingsRolesPage() {
           </div>
           <button
             onClick={openCreateForm}
-            className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+            className="px-4 py-2 bg-bioaf-600 text-white text-sm rounded hover:bg-bioaf-700"
           >
             Create Role
           </button>
@@ -136,7 +136,7 @@ export default function SettingsRolesPage() {
                 <tr key={role.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4">
                     <button
-                      className="text-sm font-medium text-blue-600 hover:underline"
+                      className="text-sm font-medium text-bioaf-600 hover:underline"
                       onClick={() => setExpandedRoleId(expandedRoleId === role.id ? null : role.id)}
                     >
                       {role.name}
@@ -158,7 +158,7 @@ export default function SettingsRolesPage() {
                       <>
                         <button
                           onClick={() => openEditForm(role)}
-                          className="text-sm text-blue-600 hover:underline"
+                          className="text-sm text-bioaf-600 hover:underline"
                         >
                           Edit
                         </button>

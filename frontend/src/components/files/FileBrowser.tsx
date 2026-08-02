@@ -580,7 +580,7 @@ export function FileBrowser({
             )}
             <button
               onClick={() => openLinkModal(Array.from(selectedIds))}
-              className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
+              className="px-3 py-1.5 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700"
             >
               Associate
             </button>
@@ -707,7 +707,7 @@ export function FileBrowser({
                           </svg>
                         </span>
                       )}
-                      <span className={file.storage_deleted ? "text-gray-400" : "text-blue-600"}>
+                      <span className={file.storage_deleted ? "text-gray-400" : "text-bioaf-600"}>
                         {file.filename}
                       </span>
                     </div>
@@ -729,7 +729,7 @@ export function FileBrowser({
                         <span className="text-amber-600 font-medium">Unlinked</span>
                         <button
                           onClick={() => openLinkModal([file.id])}
-                          className="text-blue-600 hover:underline"
+                          className="text-bioaf-600 hover:underline"
                         >
                           Associate
                         </button>
@@ -759,7 +759,7 @@ export function FileBrowser({
                         <button
                           onClick={() => triggerDownload(file.id)}
                           title="Download"
-                          className="text-gray-400 hover:text-blue-600"
+                          className="text-gray-400 hover:text-bioaf-600"
                         >
                           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
@@ -778,7 +778,7 @@ export function FileBrowser({
                   <td className="px-4 py-3" />
                   <td className="px-4 py-3 text-sm font-medium align-top">
                     <div className="flex items-center gap-2">
-                      <a href={doc.href} className="text-blue-600 hover:underline">
+                      <a href={doc.href} className="text-bioaf-600 hover:underline">
                         {doc.name}
                       </a>
                       <span className="text-xs shrink-0 rounded px-1.5 py-0.5 bg-indigo-50 text-indigo-700">
@@ -1147,7 +1147,7 @@ export function FileBrowser({
               <button
                 onClick={handleLink}
                 disabled={!linkModalHasSelection}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
+                className="px-4 py-2 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
               >
                 Save
               </button>

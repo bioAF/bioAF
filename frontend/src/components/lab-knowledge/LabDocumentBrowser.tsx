@@ -138,7 +138,7 @@ export function LabDocumentBrowser() {
           <button
             type="button"
             onClick={() => setShowUpload(true)}
-            className="bg-blue-600 text-white rounded px-4 py-1.5 text-sm font-medium"
+            className="bg-bioaf-600 text-white rounded px-4 py-1.5 text-sm font-medium"
           >
             Upload Document
           </button>
@@ -154,7 +154,7 @@ export function LabDocumentBrowser() {
               onClick={() => toggleTag(t.id)}
               className={`text-xs rounded-full px-3 py-1 border ${
                 selectedTagIds.includes(t.id)
-                  ? "bg-blue-600 text-white border-blue-600"
+                  ? "bg-bioaf-600 text-white border-bioaf-600"
                   : "bg-white text-gray-700 border-gray-300"
               }`}
             >
@@ -305,7 +305,7 @@ function UploadDocumentModal({
       }}
       aria-pressed={mode === value}
       className={`px-3 py-1.5 text-sm ${extra} ${
-        mode === value ? "bg-blue-600 text-white" : "bg-white text-gray-700 hover:bg-gray-50"
+        mode === value ? "bg-bioaf-600 text-white" : "bg-white text-gray-700 hover:bg-gray-50"
       }`}
     >
       {label}
@@ -356,7 +356,7 @@ function UploadDocumentModal({
                 onClick={() => toggle(t.id)}
                 className={`text-xs rounded-full px-3 py-1 border ${
                   tagIds.includes(t.id)
-                    ? "bg-blue-600 text-white border-blue-600"
+                    ? "bg-bioaf-600 text-white border-bioaf-600"
                     : "bg-white text-gray-700 border-gray-300"
                 }`}
               >
@@ -377,7 +377,7 @@ function UploadDocumentModal({
             type="button"
             onClick={submit}
             disabled={busy}
-            className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
+            className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
           >
             {busy
               ? mode === "url"

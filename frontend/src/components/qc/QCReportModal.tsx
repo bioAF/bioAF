@@ -125,7 +125,7 @@ export function QCReportModal({
                   {contextParts.length > 0 && <span>{contextParts.join(" / ")} / </span>}
                   <Link
                     href={`/pipelines/runs/${dashboard.pipeline_run_id}`}
-                    className="text-blue-600 hover:underline"
+                    className="text-bioaf-600 hover:underline"
                   >
                     Run #{dashboard.pipeline_run_id}
                   </Link>

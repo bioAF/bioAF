@@ -190,7 +190,7 @@ function PublishForm({
             }
           }}
           disabled={!canPublish}
-          className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
+          className="px-4 py-2 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
         >
           Publish
         </button>
@@ -241,7 +241,7 @@ function PublicationCard({
             href={pub.access_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="px-3 py-1 text-sm font-medium text-blue-600 bg-blue-50 rounded hover:bg-blue-100"
+            className="px-3 py-1 text-sm font-medium text-bioaf-700 bg-bioaf-50 rounded hover:bg-bioaf-100"
           >
             Open
           </a>
@@ -347,7 +347,7 @@ export default function CellxgenePage() {
         <h1 className="text-2xl font-bold">cellxgene Explorer</h1>
         <button
           onClick={() => setShowPublishForm(!showPublishForm)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
+          className="px-4 py-2 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700"
         >
           Publish Dataset
         </button>

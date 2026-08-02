@@ -463,7 +463,7 @@ export default function PipelineRunDetailPage() {
                 <div className="flex gap-2 mt-2">
                   <button
                     onClick={() => handleReproduce()}
-                    className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                    className="px-3 py-1 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
                   >
                     Re-run pipeline
                   </button>

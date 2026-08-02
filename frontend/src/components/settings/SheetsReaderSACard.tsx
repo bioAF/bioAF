@@ -96,7 +96,7 @@ export function SheetsReaderSACard() {
             </code>
             <button
               onClick={copyEmail}
-              className="text-xs text-blue-600 hover:text-blue-800 whitespace-nowrap"
+              className="text-xs text-blue-700 hover:text-blue-900 whitespace-nowrap"
             >
               {copied ? "Copied" : "Copy"}
             </button>

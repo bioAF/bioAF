@@ -544,7 +544,7 @@ export default function DataUploadPage() {
                 onClick={uploadAll}
                 disabled={uploading || !scopeReady}
                 title={!scopeReady ? `Pick a ${scope} first` : undefined}
-                className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
+                className="mt-4 px-4 py-2 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
               >
                 {uploading ? "Uploading..." : `Upload ${pendingCount} file${pendingCount !== 1 ? "s" : ""}`}
               </button>
@@ -565,8 +565,8 @@ function StatusLabel({ item }: { item: FileItem }) {
   }
   if (item.status === "uploading") {
     return (
-      <span className="text-xs font-medium text-blue-600 flex items-center gap-1 shrink-0">
-        <span className="inline-block h-1.5 w-1.5 bg-blue-600 rounded-full animate-pulse" />
+      <span className="text-xs font-medium text-bioaf-600 flex items-center gap-1 shrink-0">
+        <span className="inline-block h-1.5 w-1.5 bg-bioaf-600 rounded-full animate-pulse" />
         {item.progress}%
       </span>
     );

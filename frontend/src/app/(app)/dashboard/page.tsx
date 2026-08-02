@@ -58,7 +58,7 @@ export default function DashboardPage() {
           <button
             data-testid="cloud-banner-dismiss"
             onClick={() => setBannerDismissed(true)}
-            className="shrink-0 text-blue-600 hover:text-blue-900 text-lg leading-none"
+            className="shrink-0 text-blue-700 hover:text-blue-900 text-lg leading-none"
             aria-label={`Dismiss ${cloudLabel} banner`}
           >
             &times;

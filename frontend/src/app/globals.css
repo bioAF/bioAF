@@ -152,6 +152,7 @@
 .dark .text-bioaf-800 {
   color: rgb(56 189 248); /* bioaf-400 */
 }
+.dark .hover\:text-bioaf-600:hover,
 .dark .hover\:text-bioaf-700:hover,
 .dark .hover\:text-bioaf-800:hover {
   color: rgb(125 211 252); /* bioaf-300 */
@@ -159,8 +160,14 @@
 .dark .bg-bioaf-50 {
   background-color: rgb(56 189 248 / 0.12);
 }
+.dark .bg-bioaf-100 {
+  background-color: rgb(56 189 248 / 0.18);
+}
 .dark .hover\:bg-bioaf-50:hover {
   background-color: rgb(56 189 248 / 0.16);
+}
+.dark .hover\:bg-bioaf-100:hover {
+  background-color: rgb(56 189 248 / 0.22);
 }
 .dark .border-bioaf-100,
 .dark .border-bioaf-200 {

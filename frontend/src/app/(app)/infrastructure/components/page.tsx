@@ -517,7 +517,7 @@ export default function InfraComponentsPage() {
         {loading ? (
           <div className="flex items-center justify-center py-20">
             <div className="text-center">
-              <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+              <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-bioaf-600 border-t-transparent" />
               <p className="mt-3 text-sm text-gray-500">Loading infrastructure status...</p>
             </div>
           </div>
@@ -626,7 +626,7 @@ export default function InfraComponentsPage() {
                         <div className="flex gap-2">
                           <button
                             onClick={() => setShowDeployModal(true)}
-                            className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 font-medium"
+                            className="px-3 py-1.5 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700 font-medium"
                           >
                             View Progress
                           </button>
@@ -642,7 +642,7 @@ export default function InfraComponentsPage() {
                       <button
                         onClick={handleStartDeploy}
                         disabled={deployLoading}
-                        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {deployLoading ? "Starting..." : "Deploy"}
                       </button>
@@ -701,7 +701,7 @@ export default function InfraComponentsPage() {
                       </div>
                       <button
                         onClick={() => setShowConfigPanel(!showConfigPanel)}
-                        className="text-sm text-blue-600 hover:text-blue-800"
+                        className="text-sm text-bioaf-600 hover:text-bioaf-700"
                       >
                         Configure
                       </button>
@@ -820,7 +820,7 @@ export default function InfraComponentsPage() {
                                 }}
                                 className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
                                   (configEdits.k8s_pipeline_use_spot ?? clusterConfig.k8s_pipeline_use_spot)
-                                    ? "bg-blue-600"
+                                    ? "bg-bioaf-600"
                                     : "bg-gray-300"
                                 }`}
                               >
@@ -900,7 +900,7 @@ export default function InfraComponentsPage() {
                                 setConfigSaving(false);
                               }
                             }}
-                            className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                            className="px-3 py-1 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
                           >
                             {configSaving ? "Saving..." : "Save Changes"}
                           </button>
@@ -1035,7 +1035,7 @@ export default function InfraComponentsPage() {
                                     <button
                                       onClick={() => handleRetryBuild(comp.key)}
                                       disabled={togglingComponent === comp.key}
-                                      className="mt-1 text-xs text-blue-600 hover:text-blue-800 font-medium"
+                                      className="mt-1 text-xs text-bioaf-600 hover:text-bioaf-700 font-medium"
                                     >
                                       {togglingComponent === comp.key ? "Retrying..." : "Retry Build"}
                                     </button>
@@ -1054,7 +1054,7 @@ export default function InfraComponentsPage() {
                                             ? "bg-amber-100 text-amber-700 cursor-not-allowed"
                                             : comp.status === "build_failed"
                                               ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                                              : "bg-blue-600 text-white hover:bg-blue-700"
+                                              : "bg-bioaf-600 text-white hover:bg-bioaf-700"
                                     }`}
                                   >
                                     {togglingComponent === comp.key
@@ -1246,7 +1246,7 @@ export default function InfraComponentsPage() {
               <button
                 onClick={handleConfirmDeploy}
                 disabled={deployLoading}
-                className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                className="px-4 py-2 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
               >
                 {deployLoading ? "Starting..." : "Deploy"}
               </button>

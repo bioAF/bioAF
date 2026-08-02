@@ -65,7 +65,7 @@ function DashboardDetail({ dashboard, onBack, onRegenerate, regenerating, onExpa
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <button onClick={onBack} className="text-blue-600 text-sm hover:underline">
+        <button onClick={onBack} className="text-bioaf-600 text-sm hover:underline">
           Back to list
         </button>
         <ExportPdfButton
@@ -82,7 +82,7 @@ function DashboardDetail({ dashboard, onBack, onRegenerate, regenerating, onExpa
               {contextParts.length > 0 && <span>{contextParts.join(" / ")} / </span>}
               <Link
                 href={`/pipelines/runs/${dashboard.pipeline_run_id}`}
-                className="text-blue-600 hover:underline"
+                className="text-bioaf-600 hover:underline"
               >
                 Run #{dashboard.pipeline_run_id}
               </Link>
