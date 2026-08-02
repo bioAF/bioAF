@@ -25,6 +25,18 @@ from app.services.notification_channels.slack_adapter import SlackChannel
 
 logger = logging.getLogger("bioaf.notification_router")
 
+# Channels that deliver when the user has expressed no preference for an event type.
+#
+# In-app is the platform's default surface (the bell), so it is on unless the user turns it off.
+# Email is OPT-IN: defaulting it on mails every user for every one of the ~40 event types, and
+# recipient resolution fans out to all org admins when no rule exists, so a silent default-on is a
+# mail flood nobody asked for. Slack only reaches this check from inside a rule loop, so it is
+# already gated by the org rule that names the channel.
+#
+# The profile UI renders the same defaults per channel (frontend NotificationsTab CHANNELS.defaultOn);
+# the two must agree or the toggles lie about what will be delivered.
+DEFAULT_ON_CHANNELS = {"in_app", "slack"}
+
 
 def build_notification_metadata(payload: dict[str, Any]) -> dict[str, Any]:
     """Compose the metadata persisted on an in-app notification.
@@ -230,7 +242,11 @@ class NotificationRouter:
         event_type: str,
         channel: str,
     ) -> bool:
-        """Check if user has opted in/out for this event+channel. Default is enabled."""
+        """Check if user has opted in/out for this event+channel.
+
+        With no stored preference the answer is the channel's default (see DEFAULT_ON_CHANNELS):
+        in-app delivers, email does not.
+        """
         result = await session.execute(
             select(NotificationPreference).where(
                 NotificationPreference.user_id == user_id,
@@ -240,7 +256,7 @@ class NotificationRouter:
         )
         pref = result.scalar_one_or_none()
         if pref is None:
-            return True  # default enabled
+            return channel in DEFAULT_ON_CHANNELS
         return pref.enabled
 
     async def _deliver_slack(

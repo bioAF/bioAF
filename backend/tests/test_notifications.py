@@ -432,9 +432,44 @@ def _email_spy(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_email_delivered_by_preference_without_an_org_rule(session, admin_user, monkeypatch):
-    """Enabling email (or leaving it at the default-on) delivers via the configured SMTP with NO
-    org NotificationRule required - the previous rule gate was why email never sent."""
+async def test_email_opt_in_delivers_without_an_org_rule(session, admin_user, monkeypatch):
+    """An explicit email opt-in delivers via the configured SMTP with NO org NotificationRule
+    required - the old rule gate was why email never sent at all."""
+    import app.database as _database
+    from app.models.notification import NotificationPreference
+    from app.services.event_types import PIPELINE_COMPLETED
+    from app.services.notification_router import NotificationRouter
+
+    session.add(
+        NotificationPreference(
+            user_id=admin_user.id, event_type=PIPELINE_COMPLETED, channel="email", enabled=True
+        )
+    )
+    await session.commit()
+
+    calls = _email_spy(monkeypatch)
+    router = NotificationRouter(_database.async_session_factory)
+    await router._handle_event(
+        {
+            "event_type": PIPELINE_COMPLETED,
+            "org_id": admin_user.organization_id,
+            "target_user_id": admin_user.id,
+            "title": "Pipeline completed",
+            "message": "done",
+        }
+    )
+    assert admin_user.email in calls
+
+
+@pytest.mark.asyncio
+async def test_email_not_sent_without_an_explicit_opt_in(session, admin_user, monkeypatch):
+    """Email is OPT-IN: no preference row means no email.
+
+    Regression. Making email "preference-driven, default on" silently opted every user into email
+    for every one of the ~40 event types (and `_resolve_recipients` fans out to all org admins when
+    no rule exists), so users got mail they never asked for. In-app is the default channel; email
+    is only sent where the user turned it on.
+    """
     import app.database as _database
     from app.services.event_types import PIPELINE_COMPLETED
     from app.services.notification_router import NotificationRouter
@@ -450,7 +485,62 @@ async def test_email_delivered_by_preference_without_an_org_rule(session, admin_
             "message": "done",
         }
     )
-    assert admin_user.email in calls  # email attempted purely off the preference (default on)
+    assert admin_user.email not in calls
+
+
+@pytest.mark.asyncio
+async def test_review_reminder_in_app_on_email_off(session, admin_user, monkeypatch):
+    """The reported configuration end to end: in-app ON, email OFF for review reminders.
+
+    Expect the in-app notification to be created and NO email. Pins the two channels to their own
+    preference rows so one can never be served by the other's setting.
+    """
+    import app.database as _database
+    from sqlalchemy import select
+    from app.models.notification import Notification, NotificationPreference
+    from app.services.event_types import PIPELINE_RUN_REVIEW_REMINDER
+    from app.services.notification_router import NotificationRouter
+
+    session.add(
+        NotificationPreference(
+            user_id=admin_user.id,
+            event_type=PIPELINE_RUN_REVIEW_REMINDER,
+            channel="in_app",
+            enabled=True,
+        )
+    )
+    session.add(
+        NotificationPreference(
+            user_id=admin_user.id,
+            event_type=PIPELINE_RUN_REVIEW_REMINDER,
+            channel="email",
+            enabled=False,
+        )
+    )
+    await session.commit()
+
+    calls = _email_spy(monkeypatch)
+    router = NotificationRouter(_database.async_session_factory)
+    await router._handle_event(
+        {
+            "event_type": PIPELINE_RUN_REVIEW_REMINDER,
+            "org_id": admin_user.organization_id,
+            "target_user_id": admin_user.id,
+            "title": "Pipeline run awaiting review (72h)",
+            "message": "not reviewed",
+        }
+    )
+
+    rows = (
+        await session.execute(
+            select(Notification).where(
+                Notification.event_type == PIPELINE_RUN_REVIEW_REMINDER,
+                Notification.user_id == admin_user.id,
+            )
+        )
+    ).scalars().all()
+    assert len(rows) == 1  # in-app delivered
+    assert admin_user.email not in calls  # and NOT diverted to email
 
 
 @pytest.mark.asyncio

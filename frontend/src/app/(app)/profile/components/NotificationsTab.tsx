@@ -96,11 +96,23 @@ const EVENT_CATEGORIES: EventCategory[] = [
   },
 ];
 
-const CHANNELS: { key: string; label: string }[] = [
-  { key: "in_app", label: "In-App" },
-  { key: "email", label: "Email" },
-  { key: "slack", label: "Slack" },
+/**
+ * `defaultOn` is what the server does for an event with NO stored preference row, and it MUST match
+ * the backend (notification_router.DEFAULT_ON_CHANNELS): in-app is the platform's default surface,
+ * email is opt-in. Rendering every email toggle as "on" while the server treats absent-as-off (or
+ * vice versa) makes the page lie about what will actually be delivered.
+ */
+const CHANNELS: { key: string; label: string; defaultOn: boolean }[] = [
+  { key: "in_app", label: "In-App", defaultOn: true },
+  { key: "email", label: "Email", defaultOn: false },
+  { key: "slack", label: "Slack", defaultOn: true },
 ];
+
+/** Fixed width for one channel column, shared by the header labels and the toggles below them. */
+const CHANNEL_COL = "w-12";
+
+const channelDefault = (channel: string): boolean =>
+  CHANNELS.find((c) => c.key === channel)?.defaultOn ?? true;
 
 export function NotificationsTab() {
   const [preferences, setPreferences] = useState<Preference[]>([]);
@@ -126,7 +138,7 @@ export function NotificationsTab() {
     const pref = preferences.find(
       (p) => p.event_type === eventType && p.channel === channel,
     );
-    return pref ? pref.enabled : true;
+    return pref ? pref.enabled : channelDefault(channel);
   };
 
   const toggle = (eventType: string, channel: string) => {
@@ -142,9 +154,11 @@ export function NotificationsTab() {
         ),
       );
     } else {
+      // No stored row yet, so this click flips the channel's default: turning a default-off
+      // channel (email) ON must persist an explicit opt-in, not another "off".
       setPreferences([
         ...preferences,
-        { event_type: eventType, channel, enabled: false },
+        { event_type: eventType, channel, enabled: !channelDefault(channel) },
       ]);
     }
   };
@@ -245,7 +259,7 @@ export function NotificationsTab() {
                       <button
                         key={ch.key}
                         onClick={() => toggleCategory(category, ch.key)}
-                        className="flex flex-col items-center gap-1"
+                        className={`${CHANNEL_COL} flex flex-col items-center gap-1`}
                         title={`Toggle all ${ch.label} for ${category.label}`}
                       >
                         <span className="text-xs text-gray-500">{ch.label}</span>
@@ -287,9 +301,11 @@ export function NotificationsTab() {
                     </div>
                     <div className="flex items-center gap-6">
                       {CHANNELS.map((ch) => (
-                        <div key={ch.key} className="w-12 flex justify-center">
+                        <div key={ch.key} className={`${CHANNEL_COL} flex justify-center`}>
                           <button
                             onClick={() => toggle(event.type, ch.key)}
+                            aria-label={`${ch.label} notifications for ${event.label}`}
+                            aria-pressed={isEnabled(event.type, ch.key)}
                             className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
                               isEnabled(event.type, ch.key)
                                 ? "bg-bioaf-600"
