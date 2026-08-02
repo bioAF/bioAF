@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
+import { getCurrentUser } from "@/lib/auth";
 
 interface Preference {
   event_type: string;
@@ -140,14 +141,19 @@ const EVENT_CATEGORIES: EventCategory[] = [
  * vice versa) makes the page lie about what will actually be delivered.
  */
 /**
- * Only the channels a user can actually control. Slack is deliberately absent: a Slack post goes to
- * a shared org channel, so it cannot be gated per user. The router only consults a per-user slack
- * preference for org NotificationRules, which nothing in the product creates, so the column that
- * used to be here rendered and saved rows nothing ever read.
+ * `defaultOn` is what the server does for an event with NO stored preference row, and it MUST match
+ * the backend (notification_router.DEFAULT_ON_CHANNELS): in-app is the platform's default surface,
+ * email is opt-in.
+ *
+ * `adminOnly` hides a channel from the toggles without removing it from the model: Slack routing is
+ * org-level (a post goes to a shared channel, and Settings -> Slack picks the event types per
+ * channel), so it is an admin concern rather than a personal one. A hidden channel's stored
+ * preferences are still loaded and saved untouched.
  */
-const CHANNELS: { key: string; label: string; defaultOn: boolean }[] = [
+const CHANNELS: { key: string; label: string; defaultOn: boolean; adminOnly?: boolean }[] = [
   { key: "in_app", label: "In-App", defaultOn: true },
   { key: "email", label: "Email", defaultOn: false },
+  { key: "slack", label: "Slack", defaultOn: true, adminOnly: true },
 ];
 
 /** Fixed width for one channel column, shared by the header labels and the toggles below them. */
@@ -157,6 +163,9 @@ const channelDefault = (channel: string): boolean =>
   CHANNELS.find((c) => c.key === channel)?.defaultOn ?? true;
 
 export function NotificationsTab() {
+  const isAdmin = getCurrentUser()?.role_name === "admin";
+  // Hidden channels stay in `preferences` so a save never drops what it did not render.
+  const visibleChannels = CHANNELS.filter((c) => !c.adminOnly || isAdmin);
   const [preferences, setPreferences] = useState<Preference[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -261,8 +270,8 @@ export function NotificationsTab() {
           </h2>
           <p className="text-sm text-gray-500 mt-1">
             Choose how you want to be notified about platform events. In-app is on by default and
-            email is off until you turn it on. Slack is not a personal setting: it posts to shared
-            channels and is configured per channel in Settings, Slack.
+            email is off until you turn it on.
+            {isAdmin && " Slack posts to shared channels, and which events reach each channel is set in Settings, Slack."}
           </p>
         </div>
         <button
@@ -311,7 +320,7 @@ export function NotificationsTab() {
                     </p>
                   </div>
                   <div className="flex items-center gap-6">
-                    {CHANNELS.map((ch) => (
+                    {visibleChannels.map((ch) => (
                       <button
                         key={ch.key}
                         onClick={() => toggleCategory(category, ch.key)}
@@ -356,7 +365,7 @@ export function NotificationsTab() {
                       <p className="text-xs text-gray-400">{event.description}</p>
                     </div>
                     <div className="flex items-center gap-6">
-                      {CHANNELS.map((ch) => (
+                      {visibleChannels.map((ch) => (
                         <div key={ch.key} className={`${CHANNEL_COL} flex justify-center`}>
                           <button
                             onClick={() => toggle(event.type, ch.key)}

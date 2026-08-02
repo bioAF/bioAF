@@ -737,10 +737,11 @@ async def test_disabling_in_app_does_not_also_disable_slack(session, admin_user,
 async def test_slack_channel_posts_are_org_level_not_per_user(session, admin_user, monkeypatch):
     """A Slack post goes to a shared org channel, so it is NOT gated by one user's preference.
 
-    Documents why the profile page offers no per-user Slack toggle: routing is per channel
-    (Settings -> Slack picks the event types for each channel). The per-user slack preference is
-    only consulted for org NotificationRules, which nothing in the product creates, so a Slack
-    column on the per-user page would be a switch that changes nothing.
+    Routing is per channel: Settings -> Slack picks the event types for each channel. The per-user
+    slack preference is consulted only for org NotificationRules. The profile page keeps its Slack
+    column (admin-only, since Slack routing is an admin concern) and the preferences are stored;
+    this pins that an OAuth channel mapping still posts regardless, so nobody expects one user's
+    toggle to silence a shared channel.
     """
     import app.database as _database
     from app.models.notification import (

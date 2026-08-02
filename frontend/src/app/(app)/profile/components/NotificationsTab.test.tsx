@@ -2,9 +2,11 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 const mockGet = jest.fn();
 const mockPut = jest.fn();
+const mockGetCurrentUser = jest.fn();
 jest.mock("@/lib/api", () => ({
   api: { get: (...a: unknown[]) => mockGet(...a), put: (...a: unknown[]) => mockPut(...a) },
 }));
+jest.mock("@/lib/auth", () => ({ getCurrentUser: () => mockGetCurrentUser() }));
 jest.mock("@/components/shared/ContentLoading", () => ({ ContentLoading: () => <div /> }));
 
 import { NotificationsTab } from "./NotificationsTab";
@@ -12,6 +14,8 @@ import { NotificationsTab } from "./NotificationsTab";
 beforeEach(() => {
   mockGet.mockReset();
   mockPut.mockReset();
+  mockGetCurrentUser.mockReset();
+  mockGetCurrentUser.mockReturnValue({ role_name: "admin" });
 });
 
 test("loads preferences and renders event categories", async () => {
@@ -29,18 +33,45 @@ test("each toggle names its channel and event, so the right switch is unambiguou
 
   expect(screen.getByRole("button", { name: "In-App notifications for Review reminder" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Email notifications for Review reminder" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Slack notifications for Review reminder" })).toBeInTheDocument();
 });
 
-test("offers no per-user Slack switch, and says where Slack routing lives", async () => {
-  // A Slack post goes to a shared org channel, so it cannot be gated per user: the router only
-  // consults a per-user slack preference for org NotificationRules, which nothing creates. The
-  // column rendered and saved rows that were never read.
+test("shows the Slack column to admins", async () => {
+  mockGetCurrentUser.mockReturnValue({ role_name: "admin" });
+  mockGet.mockResolvedValue([]);
+  render(<NotificationsTab />);
+  await screen.findByText("Review reminder");
+
+  expect(screen.getByRole("button", { name: "Slack notifications for Review reminder" })).toBeInTheDocument();
+});
+
+test("hides the Slack column from non-admins", async () => {
+  mockGetCurrentUser.mockReturnValue({ role_name: "comp_bio" });
   mockGet.mockResolvedValue([]);
   render(<NotificationsTab />);
   await screen.findByText("Review reminder");
 
   expect(screen.queryByRole("button", { name: /Slack notifications for/i })).not.toBeInTheDocument();
-  expect(screen.getByText(/Slack.*configured per channel/i)).toBeInTheDocument();
+  // the personal channels are unaffected
+  expect(screen.getByRole("button", { name: "In-App notifications for Review reminder" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Email notifications for Review reminder" })).toBeInTheDocument();
+});
+
+test("a non-admin save leaves the user's stored Slack preferences alone", async () => {
+  // The Slack column is hidden, not deleted: a non-admin's save must not drop slack rows it never
+  // rendered (update_preferences upserts, but the payload must still carry them).
+  mockGetCurrentUser.mockReturnValue({ role_name: "comp_bio" });
+  mockGet.mockResolvedValue([
+    { event_type: "pipeline_run.review_reminder", channel: "slack", enabled: false },
+  ]);
+  mockPut.mockResolvedValue({});
+  render(<NotificationsTab />);
+  await screen.findByText("Review reminder");
+
+  fireEvent.click(screen.getByRole("button", { name: /save preferences/i }));
+  await waitFor(() => expect(mockPut).toHaveBeenCalled());
+  const body = mockPut.mock.calls[0][1] as { preferences: { channel: string }[] };
+  expect(body.preferences.some((p) => p.channel === "slack")).toBe(true);
 });
 
 test("channel header labels sit in the same column width as the toggles they control", async () => {
