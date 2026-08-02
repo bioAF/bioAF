@@ -79,6 +79,16 @@ test("turning email on for one event saves an explicit opt-in row", async () => 
   });
 });
 
+test("a failed load is surfaced and blocks saving over the stored settings", async () => {
+  // The load used to be swallowed, so a failure rendered every toggle at its channel default and a
+  // Save from that state wrote those defaults over whatever the user actually had stored.
+  mockGet.mockRejectedValue(new Error("boom"));
+  render(<NotificationsTab />);
+
+  expect(await screen.findByText(/could not load your notification preferences/i)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /save preferences/i })).toBeDisabled();
+});
+
 test("saves the current preferences", async () => {
   mockGet.mockResolvedValue([]);
   mockPut.mockResolvedValue({});

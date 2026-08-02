@@ -117,6 +117,7 @@ const channelDefault = (channel: string): boolean =>
 export function NotificationsTab() {
   const [preferences, setPreferences] = useState<Preference[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -125,8 +126,12 @@ export function NotificationsTab() {
       try {
         const data = await api.get<Preference[]>("/api/notifications/preferences");
         setPreferences(data);
+        setLoadFailed(false);
       } catch {
-        // ignore
+        // Never swallow this: with no preferences loaded every toggle falls back to its channel
+        // default, and saving from that state would write those defaults over what the user
+        // actually has stored. Say so, and refuse to save until a real load succeeds.
+        setLoadFailed(true);
       } finally {
         setLoading(false);
       }
@@ -218,12 +223,19 @@ export function NotificationsTab() {
         </div>
         <button
           onClick={handleSave}
-          disabled={saving}
+          disabled={saving || loadFailed}
           className="px-4 py-2 bg-bioaf-600 text-white rounded-lg hover:bg-bioaf-700 disabled:opacity-50 text-sm font-medium"
         >
           {saving ? "Saving..." : "Save Preferences"}
         </button>
       </div>
+
+      {loadFailed && (
+        <div className="mb-4 p-3 rounded text-sm bg-red-50 border border-red-200 text-red-700">
+          Could not load your notification preferences. Reload the page before changing anything:
+          saving now would overwrite your saved settings with the defaults shown below.
+        </div>
+      )}
 
       {message && (
         <div className={`mb-4 p-3 rounded text-sm ${

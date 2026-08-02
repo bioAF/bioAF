@@ -14,6 +14,48 @@ MAX_RETRIES = 3
 BACKOFF_BASE = 2  # seconds: 2, 8, 32
 
 
+def build_message(
+    to: str | list[str],
+    title: str,
+    message: str,
+    severity: str,
+) -> MIMEMultipart:
+    """Build the notification email.
+
+    A notification is addressed to ONE person: the router sends a separate message per recipient so
+    each user only ever sees their own address. If a caller does hand over several recipients, they
+    go to Bcc rather than To, so no recipient can reply-all (or even see who else was mailed) and
+    nobody gets pulled into a reply storm.
+    """
+    recipients = [to] if isinstance(to, str) else list(to)
+
+    severity_label = severity.upper()
+    body_html = f"""
+    <div style="font-family: sans-serif; max-width: 600px;">
+        <h2 style="color: #1a1a1a;">bioAF Notification</h2>
+        <p style="color: #666; font-size: 12px;">Severity: {severity_label}</p>
+        <h3>{title}</h3>
+        <p>{message}</p>
+        <hr style="border: none; border-top: 1px solid #eee;">
+        <p style="color: #999; font-size: 11px;">
+            This notification was sent by your bioAF platform.
+            You can manage your notification preferences in your profile settings.
+        </p>
+    </div>
+    """
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"[bioAF] {title}"
+    msg["From"] = settings.smtp_from_address
+    if len(recipients) == 1:
+        msg["To"] = recipients[0]
+    else:
+        msg["To"] = settings.smtp_from_address
+        msg["Bcc"] = ", ".join(recipients)
+    msg.attach(MIMEText(body_html, "html"))
+    return msg
+
+
 class EmailChannel:
     @staticmethod
     def is_configured() -> bool:
@@ -21,7 +63,7 @@ class EmailChannel:
 
     @staticmethod
     async def deliver(
-        to: str,
+        to: str | list[str],
         title: str,
         message: str,
         severity: str,
@@ -30,26 +72,7 @@ class EmailChannel:
             logger.warning("SMTP not configured, email to %s not sent", to)
             return False
 
-        severity_label = severity.upper()
-        body_html = f"""
-        <div style="font-family: sans-serif; max-width: 600px;">
-            <h2 style="color: #1a1a1a;">bioAF Notification</h2>
-            <p style="color: #666; font-size: 12px;">Severity: {severity_label}</p>
-            <h3>{title}</h3>
-            <p>{message}</p>
-            <hr style="border: none; border-top: 1px solid #eee;">
-            <p style="color: #999; font-size: 11px;">
-                This notification was sent by your bioAF platform.
-                You can manage your notification preferences in your profile settings.
-            </p>
-        </div>
-        """
-
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"[bioAF] {title}"
-        msg["From"] = settings.smtp_from_address
-        msg["To"] = to
-        msg.attach(MIMEText(body_html, "html"))
+        msg = build_message(to, title, message, severity)
 
         for attempt in range(MAX_RETRIES):
             try:

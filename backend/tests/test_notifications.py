@@ -572,6 +572,242 @@ async def test_email_not_sent_when_preference_disabled(session, admin_user, monk
 
 
 @pytest.mark.asyncio
+async def test_every_selected_channel_delivers(session, admin_user, monkeypatch):
+    """Rule 4: a combination of enabled channels delivers to ALL of them, not just one."""
+    import app.database as _database
+    from sqlalchemy import select
+    from app.models.notification import Notification, NotificationPreference
+    from app.services.event_types import PIPELINE_RUN_REVIEW_REMINDER
+    from app.services.notification_router import NotificationRouter
+
+    for channel in ("in_app", "email"):
+        session.add(
+            NotificationPreference(
+                user_id=admin_user.id,
+                event_type=PIPELINE_RUN_REVIEW_REMINDER,
+                channel=channel,
+                enabled=True,
+            )
+        )
+    await session.commit()
+
+    calls = _email_spy(monkeypatch)
+    router = NotificationRouter(_database.async_session_factory)
+    await router._handle_event(
+        {
+            "event_type": PIPELINE_RUN_REVIEW_REMINDER,
+            "org_id": admin_user.organization_id,
+            "target_user_id": admin_user.id,
+            "title": "Pipeline run awaiting review (72h)",
+            "message": "not reviewed",
+        }
+    )
+
+    rows = (
+        await session.execute(
+            select(Notification).where(
+                Notification.event_type == PIPELINE_RUN_REVIEW_REMINDER,
+                Notification.user_id == admin_user.id,
+            )
+        )
+    ).scalars().all()
+    assert len(rows) == 1
+    assert admin_user.email in calls
+
+
+@pytest.mark.asyncio
+async def test_disabled_on_every_channel_delivers_nothing(session, admin_user, monkeypatch):
+    """Rules 1+3: turning a notification off must silence it, NOT re-route it to another avenue.
+
+    This is the shape of the reported bug: in-app was off, so the notification "went to email
+    instead". Nothing may fall back to another channel when a channel is disabled.
+    """
+    import app.database as _database
+    from sqlalchemy import select
+    from app.models.notification import Notification, NotificationPreference
+    from app.services.event_types import PIPELINE_RUN_REVIEW_REMINDER
+    from app.services.notification_router import NotificationRouter
+
+    for channel in ("in_app", "email", "slack"):
+        session.add(
+            NotificationPreference(
+                user_id=admin_user.id,
+                event_type=PIPELINE_RUN_REVIEW_REMINDER,
+                channel=channel,
+                enabled=False,
+            )
+        )
+    await session.commit()
+
+    calls = _email_spy(monkeypatch)
+    router = NotificationRouter(_database.async_session_factory)
+    await router._handle_event(
+        {
+            "event_type": PIPELINE_RUN_REVIEW_REMINDER,
+            "org_id": admin_user.organization_id,
+            "target_user_id": admin_user.id,
+            "title": "Pipeline run awaiting review (72h)",
+            "message": "not reviewed",
+        }
+    )
+
+    rows = (
+        await session.execute(
+            select(Notification).where(
+                Notification.event_type == PIPELINE_RUN_REVIEW_REMINDER,
+                Notification.user_id == admin_user.id,
+            )
+        )
+    ).scalars().all()
+    assert rows == []
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_each_recipient_gets_their_own_email(session, admin_user, monkeypatch):
+    """Rule 5: one message per recipient. Never several users on one To, which would let a
+    reply-all storm start (and leaks the recipient list)."""
+    import app.database as _database
+    from app.models.notification import NotificationPreference
+    from app.models.user import User
+    from app.services.auth_service import AuthService
+    from app.services.event_types import PIPELINE_RUN_REVIEW_REMINDER
+    from app.services.notification_router import NotificationRouter
+
+    role_map = admin_user._test_role_map  # type: ignore[attr-defined]
+    second = User(
+        email="second-admin@test.com",
+        password_hash=AuthService.hash_password("testpassword123"),
+        role_id=role_map["admin"],
+        organization_id=admin_user.organization_id,
+        status="active",
+    )
+    session.add(second)
+    await session.flush()
+
+    for user_id in (admin_user.id, second.id):
+        session.add(
+            NotificationPreference(
+                user_id=user_id,
+                event_type=PIPELINE_RUN_REVIEW_REMINDER,
+                channel="email",
+                enabled=True,
+            )
+        )
+    await session.commit()
+
+    calls = _email_spy(monkeypatch)
+    router = NotificationRouter(_database.async_session_factory)
+    await router._handle_event(
+        {
+            "event_type": PIPELINE_RUN_REVIEW_REMINDER,
+            "org_id": admin_user.organization_id,
+            "title": "Pipeline run awaiting review (72h)",
+            "message": "not reviewed",
+        }
+    )
+
+    assert sorted(calls) == sorted([admin_user.email, second.email])
+    for to in calls:
+        assert "," not in to  # each send addresses exactly one mailbox
+
+
+def test_email_message_addresses_a_single_recipient():
+    """Rule 5, at the wire: a one-recipient send puts that address in To."""
+    from app.services.notification_channels.email_adapter import build_message
+
+    msg = build_message("one@example.com", "Title", "Body", "info")
+    assert msg["To"] == "one@example.com"
+    assert not msg["Bcc"]
+
+
+def test_email_message_with_several_recipients_uses_bcc():
+    """Rule 5: if a caller ever hands several recipients to one message, they go to Bcc so nobody
+    can reply-all and no recipient sees the others."""
+    from app.services.notification_channels.email_adapter import build_message
+
+    msg = build_message(["a@example.com", "b@example.com"], "Title", "Body", "info")
+    assert msg["Bcc"] == "a@example.com, b@example.com"
+    assert "a@example.com" not in (msg["To"] or "")
+    assert "b@example.com" not in (msg["To"] or "")
+
+
+@pytest.mark.asyncio
+async def test_saving_some_preferences_does_not_wipe_the_rest(session, admin_user):
+    """A save that carries only part of the user's preferences must not delete the others.
+
+    update_preferences used to DELETE every row for the user and re-insert the payload, so a page
+    that saved from a partial view (for example after its load failed and left the form at defaults)
+    silently wiped every stored preference the user had.
+    """
+    from sqlalchemy import select
+    from app.models.notification import NotificationPreference
+    from app.services.event_types import PIPELINE_COMPLETED, PIPELINE_RUN_REVIEW_REMINDER
+    from app.services.notification_service import NotificationService
+
+    session.add(
+        NotificationPreference(
+            user_id=admin_user.id, event_type=PIPELINE_COMPLETED, channel="email", enabled=False
+        )
+    )
+    await session.commit()
+
+    await NotificationService.update_preferences(
+        session,
+        admin_user.id,
+        [{"event_type": PIPELINE_RUN_REVIEW_REMINDER, "channel": "in_app", "enabled": True}],
+    )
+    await session.commit()
+
+    rows = (
+        await session.execute(
+            select(NotificationPreference).where(NotificationPreference.user_id == admin_user.id)
+        )
+    ).scalars().all()
+    stored = {(r.event_type, r.channel): r.enabled for r in rows}
+    assert stored[(PIPELINE_COMPLETED, "email")] is False  # untouched row survived
+    assert stored[(PIPELINE_RUN_REVIEW_REMINDER, "in_app")] is True
+
+
+@pytest.mark.asyncio
+async def test_resaving_a_preference_updates_it_in_place(session, admin_user):
+    """Re-enabling a channel the user had turned off must actually flip the stored row."""
+    from sqlalchemy import select
+    from app.models.notification import NotificationPreference
+    from app.services.event_types import PIPELINE_RUN_REVIEW_REMINDER
+    from app.services.notification_service import NotificationService
+
+    session.add(
+        NotificationPreference(
+            user_id=admin_user.id,
+            event_type=PIPELINE_RUN_REVIEW_REMINDER,
+            channel="in_app",
+            enabled=False,
+        )
+    )
+    await session.commit()
+
+    await NotificationService.update_preferences(
+        session,
+        admin_user.id,
+        [{"event_type": PIPELINE_RUN_REVIEW_REMINDER, "channel": "in_app", "enabled": True}],
+    )
+    await session.commit()
+
+    rows = (
+        await session.execute(
+            select(NotificationPreference).where(
+                NotificationPreference.user_id == admin_user.id,
+                NotificationPreference.event_type == PIPELINE_RUN_REVIEW_REMINDER,
+                NotificationPreference.channel == "in_app",
+            )
+        )
+    ).scalars().all()
+    assert len(rows) == 1  # updated in place, not duplicated
+    assert rows[0].enabled is True
+
+
+@pytest.mark.asyncio
 async def test_mandatory_email_rule_overrides_disabled_preference(session, admin_user, monkeypatch):
     """A mandatory org email rule still forces delivery even when the user disabled the preference."""
     import app.database as _database
