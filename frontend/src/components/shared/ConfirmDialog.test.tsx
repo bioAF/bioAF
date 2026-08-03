@@ -40,3 +40,46 @@ test("disables cancel while busy", () => {
   setup({ busy: true });
   expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
 });
+
+// Accessibility. This is the styled replacement for window.confirm(), and the review's heuristic-3
+// complaint was that a native confirm cannot be Escaped. A replacement that also cannot be Escaped,
+// and that announces as an anonymous div, is worse than what it replaced on both counts.
+
+test("is a real dialog, named by its title", () => {
+  setup();
+  const dialog = screen.getByRole("dialog");
+  expect(dialog).toHaveAttribute("aria-modal", "true");
+  expect(dialog).toHaveAccessibleName("Send reset");
+});
+
+test("Escape cancels", () => {
+  const { onCancel } = setup();
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(onCancel).toHaveBeenCalledTimes(1);
+});
+
+test("Escape does not cancel while the action is in flight", () => {
+  const { onCancel } = setup({ busy: true });
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(onCancel).not.toHaveBeenCalled();
+});
+
+test("moves focus into the dialog, onto Cancel rather than the destructive action", () => {
+  setup({ variant: "danger", confirmLabel: "Delete" });
+  expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+});
+
+test("does not listen for Escape while closed", () => {
+  const onCancel = jest.fn();
+  render(
+    <ConfirmDialog
+      open={false}
+      title="Send reset"
+      message="Send a password reset email?"
+      onConfirm={jest.fn()}
+      onCancel={onCancel}
+    />,
+  );
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(onCancel).not.toHaveBeenCalled();
+});

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useId, useRef } from "react";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -17,6 +17,15 @@ interface ConfirmDialogProps {
   busy?: boolean;
 }
 
+/**
+ * The styled replacement for `window.confirm()`. Accessible in the same way as InputDialog:
+ * role="dialog" + aria-modal, labelled by its title, Escape to cancel, and focus moved into the
+ * dialog on open. Escape matters especially here: a native confirm() can always be dismissed with
+ * it, so a replacement that could not would be a step backwards for keyboard users.
+ *
+ * Focus lands on Cancel, not the confirm button, so a stray Enter never triggers a destructive
+ * action the user has not read yet.
+ */
 export function ConfirmDialog({
   open,
   title,
@@ -28,17 +37,45 @@ export function ConfirmDialog({
   variant = "default",
   busy = false,
 }: ConfirmDialogProps) {
+  const titleId = useId();
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  // Escape is bound to the document, not the dialog subtree, so it works no matter where focus
+  // happens to be when the dialog opens.
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      if (!busy) onCancel();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open, busy, onCancel]);
+
+  // Move focus into the dialog, so the keyboard is inside it. The ref is attached during commit,
+  // so it is already there by the time this effect runs.
+  useEffect(() => {
+    if (open) cancelRef.current?.focus();
+  }, [open]);
+
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-        <h3 className="text-lg font-semibold mb-2">{title}</h3>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="bg-white rounded-lg shadow-xl max-w-md w-full p-6"
+      >
+        <h3 id={titleId} className="text-lg font-semibold mb-2">{title}</h3>
         <div className="text-gray-600 mb-6 space-y-3">
           {typeof message === "string" ? <p>{message}</p> : message}
         </div>
         <div className="flex justify-end gap-3">
           <button
+            ref={cancelRef}
             onClick={onCancel}
             disabled={busy}
             className="px-4 py-2 text-gray-700 bg-gray-100 rounded hover:bg-gray-200 disabled:opacity-50"
