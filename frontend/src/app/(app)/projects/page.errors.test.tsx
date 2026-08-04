@@ -5,7 +5,7 @@
  * "handled by api client". It was not: lib/api.ts only throws, and there was no
  * notification layer anywhere in the frontend to catch it.
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import ProjectsPage from "./page";
 
 jest.mock("@/lib/auth", () => ({
@@ -48,4 +48,24 @@ test("a genuinely empty account still says so", async () => {
 
   await waitFor(() => expect(screen.getByText(/no projects found/i)).toBeInTheDocument());
   expect(screen.queryByTestId("error-message")).not.toBeInTheDocument();
+});
+
+test("a failed create raises a toast instead of leaving the dialog silent", async () => {
+  // Previously this caught the error behind a "handled by api client" comment and
+  // said nothing, so the modal just sat there and the user clicked Create again.
+  const { toastMock } = jest.requireMock("@/components/shared/Toast");
+  mockGet.mockResolvedValue({ projects: [], total: 0 });
+  const mockPost = (api as unknown as { post: jest.Mock }).post;
+  mockPost.mockRejectedValue(new Error("Name already taken"));
+
+  render(<ProjectsPage />);
+  await waitFor(() => expect(screen.getByText(/no projects found/i)).toBeInTheDocument());
+
+  fireEvent.click(screen.getAllByRole("button", { name: /new project/i })[0]);
+  fireEvent.change(screen.getByPlaceholderText(/Integration Atlas/i), {
+    target: { value: "Atlas" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^create project$/i }));
+
+  await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith("Name already taken"));
 });

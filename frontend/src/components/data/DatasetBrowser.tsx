@@ -10,8 +10,10 @@ import type {
   Project,
   ProjectListResponse,
 } from "@/lib/types";
+import { useToast } from "@/components/shared/Toast";
 
 export function DatasetBrowser() {
+  const toast = useToast();
   const [datasets, setDatasets] = useState<DatasetExperimentSummary[]>([]);
   const [viewingDataset, setViewingDataset] = useState<DatasetExperimentSummary | null>(null);
   const [query, setQuery] = useState("");
@@ -113,9 +115,9 @@ export function DatasetBrowser() {
           if (expData.samples) {
             sampleIds.push(...expData.samples.map((s) => s.id));
           }
-        } catch {
-          // skip
-        }
+        } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not add the datasets to the project.");
+    }
       }
 
       if (sampleIds.length > 0) {

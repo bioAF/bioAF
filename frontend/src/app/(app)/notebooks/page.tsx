@@ -31,6 +31,7 @@ import { SessionBucketFilter, type SessionBucket } from "@/components/shared/Ses
 import { formatSessionStatusLabel, formatLinkedTo } from "@/lib/sessionStatus";
 import { prefillFromNotebookSession } from "@/lib/sessionRecreate";
 import { statusBadgeClass } from "@/lib/statusStyles";
+import { useToast } from "@/components/shared/Toast";
 
 const PROFILE_ORDER: ResourceProfile[] = ["small", "medium", "large", "xlarge", "2xlarge"];
 
@@ -43,6 +44,7 @@ const PROFILE_META: Record<ResourceProfile, { label: string; description: string
 };
 
 export default function NotebooksPage() {
+  const toast = useToast();
   const { components } = useComponents();
   const jupyterEnabled = components.some((c) => c.key === "jupyterhub" && c.enabled);
   const rstudioEnabled = components.some((c) => c.key === "rstudio" && c.enabled);
@@ -186,7 +188,9 @@ export default function NotebooksPage() {
         setSelectedVersionImageUri(readyVersion.image_uri);
         setSelectedVersionId(readyVersion.id);
       }
-    } catch {}
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not change the environment.");
+    }
   }
 
   function openLaunchModal() {
@@ -224,7 +228,9 @@ export default function NotebooksPage() {
         await loadFilesForExperiment(prefill.experiment_id);
         // loadFilesForExperiment clears selectedFileIds; restore the snapshot.
         setSelectedFileIds(prefill.input_file_ids);
-      } catch {}
+      } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not recreate the session.");
+    }
     }
     setShowLaunchModal(true);
     setViewingSession(null);
@@ -322,7 +328,8 @@ export default function NotebooksPage() {
     try {
       await api.post(`/api/v1/notebooks/sessions/${sessionId}/stop`);
       loadSessions(bucket);
-    } catch {
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not stop the session. It may still be running and billing.");
     } finally {
       setStoppingSessions((prev) => {
         const next = new Set(prev);

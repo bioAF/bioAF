@@ -10,8 +10,10 @@ import type {
   PipelineCatalogListResponse,
   ParameterSchema,
 } from "@/lib/types";
+import { useToast } from "@/components/shared/Toast";
 
 export function AutoRunConfigSection({ experimentId }: { experimentId: number }) {
+  const toast = useToast();
   const [configs, setConfigs] = useState<AutoRunConfig[]>([]);
   const [pipelines, setPipelines] = useState<PipelineCatalog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,7 +39,9 @@ export function AutoRunConfigSection({ experimentId }: { experimentId: number })
         { enabled: !config.enabled },
       );
       loadConfigs();
-    } catch {}
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not change the auto-run setting.");
+    }
   }
 
   async function handleDelete(configId: number) {
@@ -45,7 +49,9 @@ export function AutoRunConfigSection({ experimentId }: { experimentId: number })
       await api.delete(`/api/experiments/${experimentId}/auto-runs/${configId}`);
       setDeleteConfirm(null);
       loadConfigs();
-    } catch {}
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not delete the auto-run rule.");
+    }
   }
 
   function openCreate() {

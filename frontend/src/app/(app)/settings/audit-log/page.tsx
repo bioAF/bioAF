@@ -6,6 +6,7 @@ import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { ContentLoading } from "@/components/shared/ContentLoading";
+import { useToast } from "@/components/shared/Toast";
 
 interface AuditUser {
   id: number;
@@ -25,6 +26,7 @@ interface AuditEntry {
 }
 
 export default function AuditLogPage() {
+  const toast = useToast();
   const router = useRouter();
   const { canAccess, loading: permLoading } = usePermissions();
   const [entries, setEntries] = useState<AuditEntry[]>([]);
@@ -85,8 +87,8 @@ export default function AuditLogPage() {
       a.download = "audit_log.csv";
       a.click();
       URL.revokeObjectURL(a.href);
-    } catch {
-      // ignore
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not export the audit log.");
     } finally {
       setExporting(false);
     }

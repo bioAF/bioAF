@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { NotificationItem } from "./NotificationItem";
+import { useToast } from "@/components/shared/Toast";
 
 interface Notification {
   id: number;
@@ -22,6 +23,7 @@ interface Props {
 }
 
 export function NotificationDropdown({ onClose, onCountChange }: Props) {
+  const toast = useToast();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -46,8 +48,8 @@ export function NotificationDropdown({ onClose, onCountChange }: Props) {
       await api.post("/api/notifications/mark-all-read");
       setNotifications(notifications.map((n) => ({ ...n, read: true })));
       onCountChange(0);
-    } catch {
-      // ignore
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not mark notifications as read.");
     }
   };
 
@@ -58,8 +60,8 @@ export function NotificationDropdown({ onClose, onCountChange }: Props) {
         notifications.map((n) => (n.id === id ? { ...n, read: true } : n))
       );
       onCountChange(Math.max(0, notifications.filter((n) => !n.read).length - 1));
-    } catch {
-      // ignore
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not mark the notification as read.");
     }
   };
 

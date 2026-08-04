@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { useToast } from "@/components/shared/Toast";
 
 interface AutoIngestStatus {
   enabled: boolean;
@@ -29,6 +30,7 @@ export function AutoIngestControls({
   pubsubConfigured,
   onUpdateStorage,
 }: AutoIngestControlsProps) {
+  const toast = useToast();
   const [status, setStatus] = useState<AutoIngestStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -115,8 +117,8 @@ export function AutoIngestControls({
         "/api/v1/settings/auto-ingest",
       );
       setStatus(updated);
-    } catch {
-      // ignore
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not change auto-ingest.");
     } finally {
       setLoading(false);
     }
@@ -145,8 +147,8 @@ export function AutoIngestControls({
       setDirty(false);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
-    } catch {
-      // ignore
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save the auto-ingest settings.");
     } finally {
       setSaving(false);
     }

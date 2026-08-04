@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
+import { useToast } from "@/components/shared/Toast";
 
 interface UpdateCheck {
   current_version: string;
@@ -44,6 +45,7 @@ const STEP_LABELS: Record<string, string> = {
 const WARN_DURATION_SECONDS = 60;
 
 export default function SettingsInfoPage() {
+  const toast = useToast();
   const { canAccess } = usePermissions();
   const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null);
   const [upgradeHistory, setUpgradeHistory] = useState<UpgradeHistoryItem[]>([]);
@@ -144,8 +146,8 @@ export default function SettingsInfoPage() {
       // load and the daily background poll leave the cache in place.
       const data = await api.get<UpdateCheck>("/api/upgrades/check?force=true");
       setUpdateCheck(data);
-    } catch {
-      // ignore
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not check for updates.");
     } finally {
       setCheckingUpdate(false);
     }

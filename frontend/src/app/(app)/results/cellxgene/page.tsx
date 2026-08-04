@@ -9,6 +9,7 @@ import type {
   CellxgeneFileInspection,
   ExperimentListResponse,
 } from "@/lib/types";
+import { useToast } from "@/components/shared/Toast";
 
 function formatBytes(bytes: number | null): string {
   if (bytes == null) return "Unknown size";
@@ -265,6 +266,7 @@ function PublicationCard({
 }
 
 export default function CellxgenePage() {
+  const toast = useToast();
   const [publications, setPublications] = useState<CellxgenePublicationResponse[]>([]);
   const [experiments, setExperiments] = useState<Map<number, string>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -323,8 +325,8 @@ export default function CellxgenePage() {
       });
       setShowPublishForm(false);
       fetchPublications();
-    } catch {
-      // ignore
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not publish the dataset.");
     }
   };
 
@@ -333,8 +335,8 @@ export default function CellxgenePage() {
     try {
       await api.delete(`/api/cellxgene/${id}`);
       fetchPublications();
-    } catch {
-      // ignore
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not unpublish the dataset.");
     }
   };
 

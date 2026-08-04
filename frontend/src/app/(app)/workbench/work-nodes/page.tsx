@@ -49,6 +49,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 export default function WorkNodesPage() {
+  const toast = useToast();
   const router = useRouter();
   const { canAccess, loading: permLoading } = usePermissions();
 
@@ -111,7 +112,6 @@ export default function WorkNodesPage() {
   }, [nodes]);
 
   const [loadError, setLoadError] = useState<string | null>(null);
-  const toast = useToast();
 
   const loadNodes = useCallback(async () => {
     try {
@@ -157,7 +157,9 @@ export default function WorkNodesPage() {
     try {
       await api.delete(`/api/v1/github-repos/${repoId}`);
       loadRepos();
-    } catch {}
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not delete the repository.");
+    }
   }
 
   async function openLaunchDialog() {
@@ -228,7 +230,9 @@ export default function WorkNodesPage() {
         setExperiments(expData.experiments);
         setMachineTypes(mtData);
         setEnvironments(envData.environments);
-      } catch {}
+      } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not recreate the work node.");
+    }
     }
   }
 
@@ -291,7 +295,9 @@ export default function WorkNodesPage() {
       setEnvDetail(detail);
       const readyVersion = detail.versions.find((v) => v.status === "ready" && v.image_uri);
       if (readyVersion) setSelectedVersionId(readyVersion.id);
-    } catch {}
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not select that environment.");
+    }
   }
 
   function toggleRepo(repoId: number) {

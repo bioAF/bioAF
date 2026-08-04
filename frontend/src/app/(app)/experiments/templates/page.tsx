@@ -6,6 +6,7 @@ import { TemplateSheetImportModal } from "@/components/experiments/TemplateSheet
 import { api } from "@/lib/api";
 import { NamingProfileSelect } from "@/components/naming/NamingProfileSelect";
 import type { ExperimentTemplate, TemplateCreateRequest } from "@/lib/types";
+import { useToast } from "@/components/shared/Toast";
 
 const STANDARD_SAMPLE_FIELDS = [
   "organism",
@@ -21,6 +22,7 @@ const STANDARD_SAMPLE_FIELDS = [
 ];
 
 export default function ExperimentTemplatesPage() {
+  const toast = useToast();
   const [templates, setTemplates] = useState<ExperimentTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -99,7 +101,9 @@ export default function ExperimentTemplatesPage() {
       setEditingId(null);
       setForm({ name: "", description: null, required_fields_json: { sample_fields: [], experiment_fields: [] }, custom_fields_schema_json: { fields: [] }, naming_profile_id: null });
       loadTemplates();
-    } catch {}
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save the template.");
+    }
   }
 
   function handleEdit(t: ExperimentTemplate) {

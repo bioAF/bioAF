@@ -16,6 +16,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
 import type { ProjectDetailResponse, ProjectSampleResponse, ProvenanceDAG, QCStatus } from "@/lib/types";
+import { useToast } from "@/components/shared/Toast";
 
 type Tab =
   | "experiments"
@@ -27,6 +28,7 @@ type Tab =
   | "literature";
 
 export default function ProjectDetailPage() {
+  const toast = useToast();
   const params = useParams();
   const router = useRouter();
   const projectId = params.id as string;
@@ -131,8 +133,8 @@ export default function ProjectDetailPage() {
       setShowSamplePicker(false);
       setSelectedSampleIds(new Set());
       loadProject();
-    } catch {
-      // handled
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not add the samples to this project.");
     } finally {
       setAdding(false);
     }
@@ -142,8 +144,8 @@ export default function ProjectDetailPage() {
     try {
       await api.delete(`/api/projects/${projectId}/samples/${sampleId}`);
       loadProject();
-    } catch {
-      // handled
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not remove the sample.");
     }
   };
 

@@ -16,6 +16,7 @@ import type {
   ProjectListResponse,
   SampleBrief,
 } from "@/lib/types";
+import { useToast } from "@/components/shared/Toast";
 
 function formatBytes(bytes: number | null): string {
   if (bytes == null) return "-";
@@ -64,6 +65,7 @@ export function FileBrowser({
   showUpload = false,
   focusFileId,
 }: Props) {
+  const toast = useToast();
   const [files, setFiles] = useState<FileResponse[]>([]);
   const [labDocHits, setLabDocHits] = useState<LabDocHit[]>([]);
   const [loading, setLoading] = useState(true);
@@ -267,8 +269,8 @@ export function FileBrowser({
       );
       setLinkingFileIds([]);
       fetchFiles();
-    } catch {
-      // ignore
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not link the files.");
     }
   };
 
@@ -299,8 +301,8 @@ export function FileBrowser({
       );
       setSelectedIds(new Set());
       fetchFiles();
-    } catch {
-      // ignore
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not delete the selected files. Nothing was removed.");
     }
   };
 

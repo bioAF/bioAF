@@ -8,6 +8,7 @@ import { ErrorState } from "@/components/shared/ErrorState";
 import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { Project, ProjectListResponse } from "@/lib/types";
+import { useToast } from "@/components/shared/Toast";
 
 export default function ProjectsPage() {
   return (
@@ -18,6 +19,7 @@ export default function ProjectsPage() {
 }
 
 function ProjectsPageInner() {
+  const toast = useToast();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -75,8 +77,8 @@ function ProjectsPageInner() {
       setNewName("");
       setNewHypothesis("");
       loadProjects();
-    } catch {
-      // handled by api client
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not create the project.");
     } finally {
       setCreating(false);
     }

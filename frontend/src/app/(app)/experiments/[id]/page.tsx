@@ -57,6 +57,7 @@ import type {
   PlotArchiveResponse,
   PlotArchiveListResponse,
 } from "@/lib/types";
+import { useToast } from "@/components/shared/Toast";
 
 type Tab = ExperimentTabKey;
 
@@ -69,6 +70,7 @@ export default function ExperimentDetailPage() {
 }
 
 function ExperimentDetailPageInner() {
+  const toast = useToast();
   const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams();
@@ -239,7 +241,9 @@ function ExperimentDetailPageInner() {
       setShowBatchForm(false);
       loadBatches();
       loadExperiment();
-    } catch {}
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not add the batch.");
+    }
   }
 
   function startEditOverview() {
@@ -306,7 +310,9 @@ function ExperimentDetailPageInner() {
     try {
       await api.patch(`/api/samples/${sampleId}/qc`, { qc_status: qcStatus });
       loadSamples();
-    } catch {}
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not update the QC status.");
+    }
   }
 
   function handleCsvUploadSuccess() {
@@ -396,7 +402,9 @@ function ExperimentDetailPageInner() {
       setShowDeleteConfirm(false);
       setSelectedSampleIds(new Set());
       loadSamples();
-    } catch {} finally {
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not delete the selected samples. Nothing was removed.");
+    } finally {
       setDeleting(false);
     }
   }
