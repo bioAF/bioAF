@@ -117,7 +117,7 @@ export function ValidationStudyActions({
           message={
             <>
               <p>
-                This fetches the paper's data and runs the reproduction pipeline on it.
+                This fetches the data behind the paper and runs the reproduction pipeline on it.
                 That spends compute on your cloud account, and the spend cannot be
                 recovered once the run starts.
               </p>
