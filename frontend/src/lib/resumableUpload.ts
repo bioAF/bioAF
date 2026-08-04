@@ -2,7 +2,7 @@
  * Browser-side chunked PUT against a GCS resumable upload session URL.
  *
  * The session URL is created server-side by ReferenceDataService.init_upload
- * (spec §2). The browser then PUTs the bytes directly — no bioAF auth on the
+ * (spec §2). The browser then PUTs the bytes directly: no bioAF auth on the
  * upload path, just GCS's own session token embedded in the URL.
  *
  * Resume protocol: GCS returns 308 with `Range: bytes=0-N` to tell us the
@@ -54,7 +54,7 @@ export async function uploadFileResumable(
     if (response.status === 308) {
       const rangeHeader = response.headers.get("Range");
       if (rangeHeader) {
-        // GCS returns "bytes=0-N" — last byte received
+        // GCS returns "bytes=0-N": last byte received
         const match = rangeHeader.match(/bytes=\d+-(\d+)/);
         if (match) {
           const lastByte = parseInt(match[1], 10);

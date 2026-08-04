@@ -1112,7 +1112,7 @@ function RuntimeContractPanel() {
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-blue-900"
       >
-        <span>Runtime contract — what your code can expect</span>
+        <span>Runtime contract: what your code can expect</span>
         <span className="text-xs">{open ? "▲" : "▼"}</span>
       </button>
       {open && (
@@ -1154,7 +1154,7 @@ function RuntimeContractPanel() {
           <div>
             <span className="font-semibold">Entrypoint:</span> the entrypoint command
             below runs from the working directory above. Use the same form you would in
-            a shell — for example, <code className="bg-white/60 px-1 rounded">bash run.sh</code>{" "}
+            a shell: for example, <code className="bg-white/60 px-1 rounded">bash run.sh</code>{" "}
             or <code className="bg-white/60 px-1 rounded">python main.py</code>.
           </div>
         </div>

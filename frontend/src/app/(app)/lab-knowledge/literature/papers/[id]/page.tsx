@@ -7,6 +7,7 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { InputDialog } from "@/components/shared/InputDialog";
 import { getCurrentUser } from "@/lib/auth";
+import { statusLabel } from "@/lib/statusStyles";
 import { PaperPdfViewer } from "@/components/literature/PaperPdfViewer";
 import { AssociatePaperModal } from "@/components/literature/AssociatePaperModal";
 import { ValidatePaperButton } from "@/components/validation/ValidatePaperButton";
@@ -522,9 +523,9 @@ export default function PaperDetailPage() {
                 <dt className="text-gray-500 mt-2">PMID</dt>
                 <dd>{paper.pmid ?? "-"}</dd>
                 <dt className="text-gray-500 mt-2">Provenance</dt>
-                <dd>{paper.provenance}</dd>
+                <dd>{statusLabel("literatureProvenance", paper.provenance)}</dd>
                 <dt className="text-gray-500 mt-2">Extraction</dt>
-                <dd>{paper.extraction_status}</dd>
+                <dd>{statusLabel("literatureExtraction", paper.extraction_status)}</dd>
               </dl>
             </div>
 
@@ -542,7 +543,7 @@ export default function PaperDetailPage() {
                           : "border border-gray-300 px-3 py-1 rounded text-sm hover:bg-gray-50"
                       }
                     >
-                      {status}
+                      {statusLabel("literatureReading", status)}
                     </button>
                   ),
                 )}

@@ -113,7 +113,7 @@ export function InviteForm({ roles = [] }: InviteFormProps) {
           <h4 className="font-medium mb-1">Invited:</h4>
           {results.map((r, i) => (
             <p key={i} className="text-gray-600">
-              {r.email} — {r.status}
+              {r.email}: {r.status}
             </p>
           ))}
         </div>

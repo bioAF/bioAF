@@ -159,10 +159,11 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
     };
   }, [activeScanJobId, fetchPending]);
 
-  if (loading) {
-    return <div data-testid="glossary-loading" className="p-8 text-gray-500">Loading glossary...</div>;
-  }
-
+  // NOTE: deliberately no `if (loading) return ...` early return here. `query` is a
+  // dependency of the fetch, so every keystroke sets loading=true; returning early
+  // unmounted the whole toolbar, taking the search input (and the caret) with it, so
+  // only the first character of a search ever landed. The loading state is rendered
+  // in the results region instead, below, and the toolbar stays mounted.
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -246,7 +247,11 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
       {scanError && <div className="text-red-600 text-sm mb-3">{scanError}</div>}
       {error && <div className="text-red-600 text-sm mb-3">{error}</div>}
 
-      {terms.length === 0 ? (
+      {loading ? (
+        <div data-testid="glossary-loading" className="text-gray-500 py-12 text-center">
+          Loading glossary...
+        </div>
+      ) : terms.length === 0 ? (
         <div className="text-gray-500 py-12 text-center">
           No terms yet. {canManage ? "Add one manually, import a CSV, or run an AI scan." : ""}
         </div>

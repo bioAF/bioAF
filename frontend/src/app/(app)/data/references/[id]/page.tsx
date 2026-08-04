@@ -312,7 +312,7 @@ export default function DataReferenceDetailPage() {
             <>
               <div className="text-sm text-blue-900">
                 Status: <span className="font-mono">{importStatus.status}</span>
-                {importStatus.progress_pct != null && <> &mdash; {importStatus.progress_pct}%</>}
+                {importStatus.progress_pct != null && <>, {importStatus.progress_pct}%</>}
               </div>
               {importStatus.total_bytes != null && (
                 <div className="text-sm text-blue-900">

@@ -392,7 +392,7 @@ export default function PipelineRunDetailPage() {
         <>
         <div className="flex items-center gap-4 mb-6">
           <button onClick={() => router.push("/pipelines/runs")} className="text-gray-500 hover:text-gray-700">← Back</button>
-          <h1 className="text-2xl font-bold">Run #{run.id} — {run.pipeline_name}</h1>
+          <h1 className="text-2xl font-bold">Run #{run.id}: {run.pipeline_name}</h1>
           <span className={`px-2 py-0.5 text-xs rounded-full ${statusBadgeClass("pipelineRun", run.status)}`}>{run.status}</span>
           {isActive && (
             <button onClick={handleCancel} className="ml-auto bg-red-600 text-white px-4 py-1.5 rounded text-sm hover:bg-red-700">Cancel</button>
@@ -856,7 +856,7 @@ export default function PipelineRunDetailPage() {
           </div>
         )}
 
-        {/* References Used section — shown below active tab content */}
+        {/* References Used section: shown below active tab content */}
         {references.length > 0 && (
           <div className="bg-white rounded-lg shadow mt-6">
             <div className="p-6 border-b">

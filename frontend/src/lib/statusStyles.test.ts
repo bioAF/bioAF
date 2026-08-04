@@ -16,7 +16,11 @@ describe("statusStyles library", () => {
 
   it("preserves experiment lifecycle labels and styles", () => {
     expect(statusLabel("experiment", "pipeline_complete")).toBe("Pipeline Complete");
-    expect(statusBadgeClass("experiment", "pipeline_complete")).toBe("bg-teal-100 text-teal-800");
+    // Was bg-teal-100/text-teal-800. The lifecycle moved off nine unrelated hues onto
+    // a two-step brand ramp so colour encodes progress rather than identity; see the
+    // "experiment lifecycle color encodes progress" block below. The LABEL, which is
+    // what this test exists to protect, is unchanged.
+    expect(statusBadgeClass("experiment", "pipeline_complete")).toBe("bg-bioaf-100 text-bioaf-800");
     expect(statusBadgeClass("experiment", "complete")).toBe("bg-green-100 text-green-800");
     expect(statusBadgeClass("experiment", "registered")).toBe("bg-gray-100 text-gray-800");
   });
@@ -123,5 +127,98 @@ describe("tailwind content config covers statusStyles", () => {
       return normalized.startsWith("src/**") || normalized.startsWith("src/lib");
     });
     expect(coversLib).toBe(true);
+  });
+});
+
+describe("experiment lifecycle color encodes progress, not identity", () => {
+  // The lifecycle is one linear progression. It previously used nine unrelated hues
+  // (gray, blue, indigo, purple, yellow, teal, cyan, orange, green), so color acted
+  // as an arbitrary identifier that could not be learned, and `analysis` rendered
+  // orange right next to `failed` red, reading as a warning when it is a normal step.
+  const LIFECYCLE = [
+    "registered",
+    "library_prep",
+    "sequencing",
+    "fastq_uploaded",
+    "processing",
+    "pipeline_complete",
+    "reviewed",
+    "analysis",
+    "complete",
+  ];
+
+  test("no lifecycle step uses a hue that carries an unrelated meaning", () => {
+    const BANNED = ["indigo", "purple", "teal", "cyan", "orange", "yellow", "amber"];
+    for (const status of LIFECYCLE) {
+      const badge = statusBadgeClass("experiment", status);
+      for (const hue of BANNED) {
+        expect(`${status}: ${badge}`).not.toContain(hue);
+      }
+    }
+  });
+
+  test("in-flight steps all share the brand hue", () => {
+    const inFlight = LIFECYCLE.slice(1, -1); // everything between registered and complete
+    for (const status of inFlight) {
+      expect(statusBadgeClass("experiment", status)).toContain("bioaf");
+    }
+  });
+
+  test("the ramp advances: later in-flight steps are visually deeper than earlier ones", () => {
+    expect(statusBadgeClass("experiment", "library_prep")).not.toEqual(
+      statusBadgeClass("experiment", "processing"),
+    );
+  });
+
+  test("not-started is neutral and terminal success is green", () => {
+    expect(statusBadgeClass("experiment", "registered")).toContain("gray");
+    expect(statusBadgeClass("experiment", "complete")).toContain("green");
+  });
+
+  test("red stays reserved for failure", () => {
+    expect(statusBadgeClass("experiment", "failed")).toContain("red");
+    for (const status of LIFECYCLE) {
+      expect(`${status}`).not.toEqual("__never__");
+      expect(statusBadgeClass("experiment", status)).not.toContain("red");
+    }
+  });
+
+  test("every lifecycle step keeps its explicit label, since colour no longer distinguishes them", () => {
+    for (const status of LIFECYCLE) {
+      expect(statusLabel("experiment", status)).not.toEqual("");
+      expect(statusLabel("experiment", status)).not.toContain("_");
+    }
+  });
+});
+
+describe("literature provenance and reading status carry their own labels", () => {
+  // These previously had colours here but no labels, so the label maps lived in
+  // literature/page.tsx and the paper detail page rendered the raw enum instead.
+  test("provenance labels are human-readable, not raw enum values", () => {
+    expect(statusLabel("literatureProvenance", "user_upload")).toBe("Uploaded");
+    expect(statusLabel("literatureProvenance", "source_search")).toBe("From search");
+    expect(statusLabel("literatureProvenance", "lit_review_run")).toBe("AI Lit Review");
+  });
+
+  test("reading status labels are capitalised for display", () => {
+    expect(statusLabel("literatureReading", "unread")).toBe("Unread");
+    expect(statusLabel("literatureReading", "reading")).toBe("Reading");
+    expect(statusLabel("literatureReading", "read")).toBe("Read");
+  });
+});
+
+describe("literature extraction status is presentable", () => {
+  // Value set confirmed against backend/app/models/literature.py:35-38
+  // (EXTRACTION_NONE / PENDING / COMPLETE / FAILED). The paper detail page rendered
+  // this column raw, so "none" appeared to the user as the word "none".
+  test("every backend value has a human label", () => {
+    expect(statusLabel("literatureExtraction", "none")).toBe("Not extracted");
+    expect(statusLabel("literatureExtraction", "pending")).toBe("Pending");
+    expect(statusLabel("literatureExtraction", "complete")).toBe("Extracted");
+    expect(statusLabel("literatureExtraction", "failed")).toBe("Failed");
+  });
+
+  test("an unknown value degrades to a humanised string rather than blowing up", () => {
+    expect(statusLabel("literatureExtraction", "some_new_state")).toBe("some new state");
   });
 });

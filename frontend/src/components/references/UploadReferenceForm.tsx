@@ -264,7 +264,7 @@ export function UploadReferenceForm({
               <div className="flex justify-between">
                 <span className="font-mono">{p.filename}</span>
                 <span className="text-gray-500">
-                  {formatBytes(p.uploaded)} / {formatBytes(p.size)} &mdash;{" "}
+                  {formatBytes(p.uploaded)} / {formatBytes(p.size)},{" "}
                   <span
                     className={
                       p.status === "done"

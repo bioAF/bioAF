@@ -8,7 +8,7 @@ from typing import Any
 def extract_anndata_metadata(adata: Any) -> dict:
     """Extract metadata from an AnnData object for snapshot storage.
 
-    Handles missing attributes gracefully — returns what's available.
+    Handles missing attributes gracefully: returns what's available.
     """
     result: dict[str, Any] = {
         "object_type": "anndata",

@@ -54,7 +54,7 @@ export function ReferencePicker({
         className="w-full border rounded px-3 py-2 text-sm font-mono bg-white"
         disabled={loading}
       >
-        <option value="">— Select a reference —</option>
+        <option value="">: Select a reference, </option>
         {visible.map((r) => (
           <option
             key={r.id}
@@ -62,7 +62,7 @@ export function ReferencePicker({
             disabled={r.status === "deprecated"}
           >
             {r.name} ({r.version})
-            {r.status !== "active" ? ` — ${r.status}` : ""}
+            {r.status !== "active" ? `: ${r.status}` : ""}
           </option>
         ))}
       </select>

@@ -276,3 +276,15 @@ test("clicking the pending banner opens the review modal", async () => {
   });
   expect(screen.getByText("Spheroid")).toBeInTheDocument();
 });
+
+test("search box survives typing: the input stays mounted and keeps focus between keystrokes", async () => {
+  render(<LabGlossaryBrowser />);
+  await waitFor(() => expect(screen.getByPlaceholderText("Search glossary...")).toBeInTheDocument());
+
+  const input = screen.getByPlaceholderText("Search glossary...") as HTMLInputElement;
+  input.focus();
+  fireEvent.change(input, { target: { value: "c" } });
+
+  expect(screen.queryByPlaceholderText("Search glossary...")).toBeInTheDocument();
+  expect(document.activeElement).toBe(screen.getByPlaceholderText("Search glossary..."));
+});

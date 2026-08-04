@@ -189,3 +189,21 @@ test("URL import enqueues a job and polls it to completion", async () => {
     expect(mockGet.mock.calls.some(([u]) => u.includes("/url-imports/99"))).toBe(true);
   });
 });
+
+test("search box survives typing: the input stays mounted and keeps focus between keystrokes", async () => {
+  render(<LabDocumentBrowser />);
+  await waitFor(() => expect(screen.getByPlaceholderText("Search documents...")).toBeInTheDocument());
+
+  const input = screen.getByPlaceholderText("Search documents...") as HTMLInputElement;
+  input.focus();
+  expect(document.activeElement).toBe(input);
+
+  fireEvent.change(input, { target: { value: "c" } });
+
+  // The user is mid-word. The search box must still be on screen and still focused,
+  // otherwise the next keystroke goes nowhere and they have to click back in.
+  expect(screen.queryByPlaceholderText("Search documents...")).toBeInTheDocument();
+  expect(document.activeElement).toBe(
+    screen.getByPlaceholderText("Search documents..."),
+  );
+});

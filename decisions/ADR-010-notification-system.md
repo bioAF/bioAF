@@ -6,7 +6,7 @@
 
 ## Context
 
-bioAF manages long-running processes (pipeline runs, cluster provisioning), background operations (backups), and cost-sensitive resources (autoscaling compute). Users need to be notified when things complete, fail, or require attention — even when they're not looking at the dashboard.
+bioAF manages long-running processes (pipeline runs, cluster provisioning), background operations (backups), and cost-sensitive resources (autoscaling compute). Users need to be notified when things complete, fail, or require attention: even when they're not looking at the dashboard.
 
 Options considered:
 
@@ -34,7 +34,7 @@ Platform Events → Event Bus → Notification Router → Channel Adapters
                               (per-event routing config)
 ```
 
-**Event Bus:** Internal (in-process) pub/sub within the FastAPI application. Platform events are emitted by service handlers (pipeline complete, backup failure, etc.) and consumed by the notification router. Not an external message broker — this is a simple observer pattern.
+**Event Bus:** Internal (in-process) pub/sub within the FastAPI application. Platform events are emitted by service handlers (pipeline complete, backup failure, etc.) and consumed by the notification router. Not an external message broker: this is a simple observer pattern.
 
 **Notification Router:** Reads the notification rules configuration to determine which events trigger which channels for which recipients. Rules are configurable by admin and per-user preferences are respected.
 
@@ -55,7 +55,7 @@ Platform Events → Event Bus → Notification Router → Channel Adapters
 - **Slack is where biotech teams communicate.** Adding a Slack connector is low effort (HTTP POST to a webhook URL) and high value.
 - **In-app is the notification of record.** Even if email or Slack fail, the in-app notification persists.
 - **No external dependencies.** No PagerDuty, no SNS, no third-party notification SaaS. The entire system runs within the bioAF control plane using SMTP and HTTP POST.
-- **Simple architecture scales to our needs.** A small biotech generates at most dozens of notifications per day. An in-process event bus is more than sufficient — no Kafka, no Redis pub/sub, no external queue.
+- **Simple architecture scales to our needs.** A small biotech generates at most dozens of notifications per day. An in-process event bus is more than sufficient: no Kafka, no Redis pub/sub, no external queue.
 
 ## Consequences
 

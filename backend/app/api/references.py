@@ -236,7 +236,7 @@ async def upload_complete(
     current_user: dict = require_permission("references", "upload"),
     session: AsyncSession = Depends(get_session),
 ):
-    """Finalize a resumable upload — list GCS, verify files, persist md5+size."""
+    """Finalize a resumable upload: list GCS, verify files, persist md5+size."""
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 

@@ -1,6 +1,6 @@
 #' Capture an analysis snapshot and send to bioAF
 #'
-#' @param obj A Seurat object (or any R object — metadata extraction is best-effort)
+#' @param obj A Seurat object (or any R object: metadata extraction is best-effort)
 #' @param label Human-readable label for this snapshot
 #' @param notes Optional free-text notes
 #' @param figure Optional file path to a figure to attach

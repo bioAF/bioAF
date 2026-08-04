@@ -50,7 +50,7 @@ beforeEach(() => {
   mockPost.mockReset();
 });
 
-describe("Reference Detail — versioning UX", () => {
+describe("Reference Detail: versioning UX", () => {
   it("Upload new version button navigates with locked name + category + scope", async () => {
     mockGet.mockImplementation((url: string) => {
       if (url.startsWith("/api/references/1")) return Promise.resolve(REF_DETAIL);

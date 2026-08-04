@@ -9,7 +9,7 @@ import { AssociatePaperModal } from "@/components/literature/AssociatePaperModal
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { api } from "@/lib/api";
-import { statusBadgeClass } from "@/lib/statusStyles";
+import { statusBadgeClass, statusLabel } from "@/lib/statusStyles";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import {
   cleanText,
@@ -28,18 +28,6 @@ import type {
 } from "@/lib/types";
 
 type StatusFlag = "active" | "dismissed" | "unread" | "reading" | "read";
-
-const PROVENANCE_LABELS: Record<Provenance, string> = {
-  user_upload: "Uploaded",
-  source_search: "From search",
-  lit_review_run: "AI Lit Review",
-};
-
-const READING_LABELS: Record<ReadingStatusValue, string> = {
-  unread: "Unread",
-  reading: "Reading",
-  read: "Read",
-};
 
 const DEFAULT_TOGGLES: Record<StatusFlag, boolean> = {
   active: true,
@@ -505,7 +493,7 @@ export default function LiteratureLibraryPage() {
                       <span
                         className={`inline-block px-2 py-0.5 rounded ${statusBadgeClass("literatureProvenance", p.provenance)}`}
                       >
-                        {PROVENANCE_LABELS[p.provenance]}
+                        {statusLabel("literatureProvenance", p.provenance)}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-xs">
@@ -514,7 +502,7 @@ export default function LiteratureLibraryPage() {
                           <span
                             className={`px-1.5 py-0.5 rounded ${statusBadgeClass("literatureReading", p.reading_status)}`}
                           >
-                            {READING_LABELS[p.reading_status]}
+                            {statusLabel("literatureReading", p.reading_status)}
                           </span>
                         )}
                         {p.dismissed && (

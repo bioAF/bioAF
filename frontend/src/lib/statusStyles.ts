@@ -36,15 +36,30 @@ function humanize(status: string): string {
 export const STATUS_STYLES: Record<string, StatusDomain> = {
   // Experiment: the fixed lifecycle (registered -> ... -> complete) plus the
   // higher-level summary statuses used by the dashboard widget.
+  //
+  // The lifecycle is ONE linear progression, so colour encodes *how far along* it
+  // is, not *which step* it is. It previously used nine unrelated hues (gray, blue,
+  // indigo, purple, yellow, teal, cyan, orange, green), which made colour an
+  // arbitrary identifier that could not be learned, and put `analysis` in orange
+  // directly beside `failed` red so a normal step read as a warning.
+  //
+  // The ramp is: neutral (not started) -> brand-light (sample in the lab) ->
+  // brand-deep (compute and interpretation) -> green (done). Red is reserved for
+  // failure and never appears in the lifecycle. The exact step is carried by the
+  // label, which is always rendered with the badge.
+  //
+  // Both brand steps stay within the set of utilities the dark-mode override layer
+  // in globals.css remaps (bg-bioaf-50/100, text-bioaf-600/700/800). Going deeper
+  // (bioaf-200, text-bioaf-900) would render untreated on the dark canvas.
   experiment: {
     registered: { badge: "bg-gray-100 text-gray-800", label: "Registered" },
-    library_prep: { badge: "bg-blue-100 text-blue-800", label: "Library Prep" },
-    sequencing: { badge: "bg-indigo-100 text-indigo-800", label: "Sequencing" },
-    fastq_uploaded: { badge: "bg-purple-100 text-purple-800", label: "FASTQ Uploaded" },
-    processing: { badge: "bg-yellow-100 text-yellow-800", label: "Processing" },
-    pipeline_complete: { badge: "bg-teal-100 text-teal-800", label: "Pipeline Complete" },
-    reviewed: { badge: "bg-cyan-100 text-cyan-800", label: "Reviewed" },
-    analysis: { badge: "bg-orange-100 text-orange-800", label: "Analysis" },
+    library_prep: { badge: "bg-bioaf-50 text-bioaf-700", label: "Library Prep" },
+    sequencing: { badge: "bg-bioaf-50 text-bioaf-700", label: "Sequencing" },
+    fastq_uploaded: { badge: "bg-bioaf-50 text-bioaf-700", label: "FASTQ Uploaded" },
+    processing: { badge: "bg-bioaf-100 text-bioaf-800", label: "Processing" },
+    pipeline_complete: { badge: "bg-bioaf-100 text-bioaf-800", label: "Pipeline Complete" },
+    reviewed: { badge: "bg-bioaf-100 text-bioaf-800", label: "Reviewed" },
+    analysis: { badge: "bg-bioaf-100 text-bioaf-800", label: "Analysis" },
     complete: { badge: "bg-green-100 text-green-800", label: "Complete" },
     // Dashboard widget summary statuses (distinct keys, do not collide above).
     active: { badge: "bg-green-100 text-green-700", label: "Active" },
@@ -156,19 +171,33 @@ export const STATUS_STYLES: Record<string, StatusDomain> = {
     missing_recommended: { badge: "bg-gray-400", label: "Missing (Recommended)" },
   },
 
-  // Literature Paper provenance (how a paper entered the Library). The label is
-  // supplied separately by the page (PROVENANCE_LABELS); this is the color only.
+  // Literature Paper provenance (how a paper entered the Library). Labels live here
+  // rather than in the page: they used to be a local PROVENANCE_LABELS map in
+  // literature/page.tsx, so the paper *detail* page had no access to them and
+  // rendered the raw enum ("user_upload") straight at the user.
   literatureProvenance: {
-    user_upload: { badge: "bg-blue-100 text-blue-800" },
-    source_search: { badge: "bg-green-100 text-green-800" },
-    lit_review_run: { badge: "bg-purple-100 text-purple-800" },
+    user_upload: { badge: "bg-blue-100 text-blue-800", label: "Uploaded" },
+    source_search: { badge: "bg-green-100 text-green-800", label: "From search" },
+    lit_review_run: { badge: "bg-purple-100 text-purple-800", label: "AI Lit Review" },
   },
 
-  // Literature Paper reading status (color only; label supplied by the page).
+  // Literature Paper full-text extraction state. Values mirror the backend
+  // constants in backend/app/models/literature.py:35-38 (EXTRACTION_NONE /
+  // PENDING / COMPLETE / FAILED). The detail page rendered this column raw, so a
+  // paper with no PDF reported its extraction status as the bare word "none".
+  literatureExtraction: {
+    none: { badge: "bg-gray-100 text-gray-600", label: "Not extracted" },
+    pending: { badge: "bg-yellow-100 text-yellow-800", label: "Pending" },
+    complete: { badge: "bg-green-100 text-green-800", label: "Extracted" },
+    failed: { badge: "bg-red-100 text-red-800", label: "Failed" },
+  },
+
+  // Literature Paper reading status. Labels live here for the same reason as
+  // provenance above: the detail page rendered the bare lowercase enum.
   literatureReading: {
-    unread: { badge: "bg-gray-100 text-gray-700" },
-    reading: { badge: "bg-amber-100 text-amber-800" },
-    read: { badge: "bg-emerald-100 text-emerald-800" },
+    unread: { badge: "bg-gray-100 text-gray-700", label: "Unread" },
+    reading: { badge: "bg-amber-100 text-amber-800", label: "Reading" },
+    read: { badge: "bg-emerald-100 text-emerald-800", label: "Read" },
   },
 
   // Literature recommendation relevance bucket (color only).

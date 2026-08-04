@@ -4,7 +4,7 @@ Revision ID: 073
 Revises: 072
 Create Date: 2026-05-04
 
-Spec §5 — when variable_type='reference', this column scopes the
+Spec §5: when variable_type='reference', this column scopes the
 launch-time dropdown to a single reference category. Nullable because
 existing string/number/boolean variables don't use it.
 """

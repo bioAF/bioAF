@@ -87,7 +87,7 @@ class PipelineRunService:
         *,
         via_assistant: bool = False,
     ) -> PipelineRun:
-        """Launch a pipeline run — the core orchestration method."""
+        """Launch a pipeline run: the core orchestration method."""
         # 1. Load pipeline from catalog
         pipeline = await PipelineCatalogService.get_pipeline(session, org_id, data.pipeline_key)
         if not pipeline:
@@ -326,7 +326,7 @@ class PipelineRunService:
                 "processing",
             )
         except Exception as e:
-            # Status transition may not be valid from current state — that's OK
+            # Status transition may not be valid from current state: that's OK
             logger.warning("Could not update experiment status: %s", e)
 
         # 12. Write audit log

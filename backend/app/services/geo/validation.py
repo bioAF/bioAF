@@ -1,4 +1,4 @@
-"""GEO export validation engine — checks completeness of metadata for GEO submission."""
+"""GEO export validation engine: checks completeness of metadata for GEO submission."""
 
 import json
 import logging

@@ -6,22 +6,22 @@
 
 ## Context
 
-bioAF's experiment tracking schema (ADR-006) captures extensive sample and experiment metadata, and supports flexible custom fields via JSON schemas on experiment templates. However, several metadata elements required by the MINSEQE (Minimum Information about a high-throughput Nucleotide SEQuencing Experiment) standard — and by extension MIAME and GEO submission requirements — are currently either absent from the schema or only capturable as free-text custom fields.
+bioAF's experiment tracking schema (ADR-006) captures extensive sample and experiment metadata, and supports flexible custom fields via JSON schemas on experiment templates. However, several metadata elements required by the MINSEQE (Minimum Information about a high-throughput Nucleotide SEQuencing Experiment) standard, and by extension MIAME and GEO submission requirements: are currently either absent from the schema or only capturable as free-text custom fields.
 
 The five MINSEQE elements are:
 
-1. **Biological system and sample description** — organism, tissue, experimental factors and their values
-2. **Raw sequence read data** — FASTQ files with quality score encoding description
-3. **Final processed data** — the data on which conclusions are based, with format descriptions
-4. **Experiment overview and sample-data relationships** — summary, contacts, publication info, sample-to-file mapping
-5. **Protocols** — sample isolation, library preparation, sequencing instrument, alignment algorithms, data processing methods
+1. **Biological system and sample description**: organism, tissue, experimental factors and their values
+2. **Raw sequence read data**: FASTQ files with quality score encoding description
+3. **Final processed data**: the data on which conclusions are based, with format descriptions
+4. **Experiment overview and sample-data relationships**: summary, contacts, publication info, sample-to-file mapping
+5. **Protocols**: sample isolation, library preparation, sequencing instrument, alignment algorithms, data processing methods
 
 bioAF's current schema covers elements 1, 3, and 4 well through the `samples`, `experiments`, `files`, `pipeline_runs`, and `sample_files` tables. Elements 2 and 5 have gaps: sequencing instrument model, library preparation strategy, library layout, molecule type, quality score encoding, and reference genome are not first-class structured fields. They exist only as values buried in `pipeline_runs.parameters_json` or as free-text entries in `experiment_custom_fields`.
 
 This matters because:
 
 - Labs preparing to publish must submit to repositories like GEO, which enforce MIAME/MINSEQE compliance through structured submission templates with specific required fields and controlled vocabularies.
-- If these fields are unstructured, the "export to GEO" process becomes a painful manual data-gathering exercise — exactly the kind of workflow bioAF exists to eliminate.
+- If these fields are unstructured, the "export to GEO" process becomes a painful manual data-gathering exercise: exactly the kind of workflow bioAF exists to eliminate.
 - Structured fields enable meaningful search and filtering in the dataset browser (e.g., "show me all NovaSeq 6000 runs" or "all 10x Chromium 3' v3 libraries").
 
 ## Decision
@@ -82,7 +82,7 @@ The default scRNA-seq experiment template is updated to include the new fields w
 - `molecule_type`: "total RNA"
 - `library_layout`: "paired-end"
 - `quality_score_encoding`: "Phred+33"
-- `library_prep_method`: (required, no default — must be specified per experiment)
+- `library_prep_method`: (required, no default, must be specified per experiment)
 
 Admins can modify these defaults per template as with existing custom fields.
 
@@ -97,7 +97,7 @@ Admins can modify these defaults per template as with existing custom fields.
 ## Consequences
 
 - A database migration (Phase 7 or a point release within Phase 6) adds the new columns and the `controlled_vocabularies` table.
-- The experiment registration form gains new fields. Care must be taken to avoid overwhelming bench scientists — these fields should be in an "advanced" or "sequencing details" section, not the primary form.
+- The experiment registration form gains new fields. Care must be taken to avoid overwhelming bench scientists: these fields should be in an "advanced" or "sequencing details" section, not the primary form.
 - The pipeline launcher should auto-populate `reference_genome` and `alignment_algorithm` from the selected pipeline's parameters where possible, reducing manual entry.
 - The dataset browser gains new filter dimensions (instrument, molecule type, library prep, reference genome).
 - Existing experiments and pipeline runs will have NULL values for the new columns until backfilled. The GEO export service must handle NULLs gracefully by flagging incomplete fields rather than failing.

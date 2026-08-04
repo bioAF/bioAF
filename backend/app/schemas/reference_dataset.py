@@ -93,7 +93,7 @@ class ReferenceUploadInitResponse(BaseModel):
     uploads: list[ReferenceUploadSlot]
 
 
-# --- Import-from-URL (GKE Job) schemas — spec §3 ---
+# --- Import-from-URL (GKE Job) schemas: spec §3 ---
 
 
 VALID_EXTRACT_MODES = ["none", "gzip", "tar", "tar.gz"]
@@ -153,7 +153,7 @@ class ReferenceImportStatusResponse(BaseModel):
 
 
 class ReferenceImportProgressUpdate(BaseModel):
-    """Internal callback body — written by the importer container."""
+    """Internal callback body: written by the importer container."""
 
     status: str
     progress_pct: int | None = None

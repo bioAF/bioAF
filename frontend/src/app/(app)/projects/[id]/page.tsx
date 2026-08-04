@@ -453,7 +453,7 @@ export default function ProjectDetailPage() {
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-sm font-semibold text-gray-700">
-                    Provenance DAG — {provenance.nodes.length} nodes, {provenance.edges.length} edges
+                    Provenance DAG: {provenance.nodes.length} nodes, {provenance.edges.length} edges
                   </h3>
                   <ProvenanceExportMenu entityType="projects" entityId={Number(projectId)} />
                 </div>

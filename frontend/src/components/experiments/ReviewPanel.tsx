@@ -156,7 +156,7 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
                 <div key={r.id} className="bg-gray-50 rounded p-3 text-sm">
                   <div className="flex items-center justify-between">
                     <span className="text-gray-500">
-                      {r.reviewer.name || r.reviewer.email} — {new Date(r.reviewed_at).toLocaleString()}
+                      {r.reviewer.name || r.reviewer.email}: {new Date(r.reviewed_at).toLocaleString()}
                     </span>
                     <ReviewBadge verdict={r.verdict} />
                   </div>

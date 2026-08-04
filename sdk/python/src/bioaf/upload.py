@@ -52,7 +52,7 @@ def upload_checkpoint(adata: Any, api_post_fn: Callable) -> int | None:
     Returns file_id from the API, or None if upload fails.
     """
     try:
-        import pandas  # noqa: F401 — needed for DataFrame.to_parquet
+        import pandas  # noqa: F401  (needed for DataFrame.to_parquet)
 
         # Start with obs DataFrame
         df = adata.obs.copy()

@@ -6,7 +6,7 @@
 
 ## Context
 
-bioAF provisions a large number of infrastructure components: GKE, Cloud SQL, GCS, SLURM, Filestore, JupyterHub, RStudio, Nextflow, Snakemake, cellxgene, Meilisearch, and monitoring. Deploying everything at once increases the initial deployment time, cost, and complexity. Not every team needs every component immediately — some may want to start with experiment tracking and data management before enabling compute.
+bioAF provisions a large number of infrastructure components: GKE, Cloud SQL, GCS, SLURM, Filestore, JupyterHub, RStudio, Nextflow, Snakemake, cellxgene, Meilisearch, and monitoring. Deploying everything at once increases the initial deployment time, cost, and complexity. Not every team needs every component immediately: some may want to start with experiment tracking and data management before enabling compute.
 
 ## Decision
 

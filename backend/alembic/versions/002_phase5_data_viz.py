@@ -168,7 +168,7 @@ def upgrade() -> None:
     op.create_foreign_key("fk_sample_files_file", "sample_files", "files", ["file_id"], ["id"])
     op.create_foreign_key("fk_nsf_file", "notebook_session_files", "files", ["file_id"], ["id"])
 
-    # Grant permissions (conditionally — bioaf_app role may not exist in dev/POC)
+    # Grant permissions (conditionally: bioaf_app role may not exist in dev/POC)
     op.execute("""
         DO $$
         BEGIN

@@ -4,7 +4,7 @@ Revision ID: 072
 Revises: 071
 Create Date: 2026-05-04
 
-Spec §3 — tracks GKE-job-driven reference imports. One row per
+Spec §3: tracks GKE-job-driven reference imports. One row per
 ReferenceDataset (1:1 via reference_id PK with cascade delete).
 """
 

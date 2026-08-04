@@ -622,8 +622,8 @@ See [ADR-058](decisions/ADR-058-naming-profile-parse-only.md).
   em-dash. The new `detect_reference_file_type` is applied on write
   (URL-import finalization persists it) and as a read-side backfill in
   the detail response, so already-imported datasets light up without a
-  data migration. Unknown extensions still render as `—`; the detector
-  does not invent a category.
+  data migration. Unknown extensions still render as the empty-value
+  placeholder; the detector does not invent a category.
 
 - For reference datasets already stuck in `uploading` from before the
   finalize fix landed (or any future case where the backend crashed
@@ -2680,7 +2680,7 @@ unchanged. The full design is in
 
 ## v0.10.3
 
-Reference Data Ingest — completes the four user-facing capabilities of ADR-017 / ADR-047 (upload, import-from-URL, versioning, and pipeline linkage). Existing reference data CRUD is unchanged; this release adds everything around getting bytes into the registry and using them in pipelines.
+Reference Data Ingest: completes the four user-facing capabilities of ADR-017 / ADR-047 (upload, import-from-URL, versioning, and pipeline linkage). Existing reference data CRUD is unchanged; this release adds everything around getting bytes into the registry and using them in pipelines.
 
 ### New features
 

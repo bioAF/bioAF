@@ -12,7 +12,7 @@ bioAF's experiment tracking system requires a complete, tamper-proof audit trail
 - Regulatory compliance (FDA submissions, potential HIPAA/21 CFR Part 11 in v2)
 - Internal accountability (who changed what, when)
 
-The audit log must be immutable — no user, including admins, should be able to edit or delete audit entries. This raises the question of where to enforce immutability.
+The audit log must be immutable: no user, including admins, should be able to edit or delete audit entries. This raises the question of where to enforce immutability.
 
 Options:
 
@@ -92,8 +92,8 @@ When a user updates experiment or sample metadata, the audit log captures both t
 
 - The bioAF application cannot implement a "purge audit log" feature, even for admins. If storage becomes a concern, old audit entries can be archived to GCS (exported and then the table could theoretically be truncated by a superuser), but this should be a deliberate, documented operational procedure, not a UI feature.
 - Schema migrations that alter the `audit_log` table must be handled carefully. Adding columns is fine (ALTER TABLE ... ADD COLUMN). The migration system should never issue UPDATE or DELETE against audit_log.
-- The Cloud SQL admin user (used by Terraform for schema migrations) technically has superuser privileges. This is a known gap — in v2, schema migrations could be run by a separate privileged role that is not used at runtime.
-- Audit log entries grow indefinitely. For a typical small biotech, this is likely thousands of entries per month — negligible storage. If it becomes a concern, archival to GCS can be implemented without deleting entries (export, then consider partitioning by date).
+- The Cloud SQL admin user (used by Terraform for schema migrations) technically has superuser privileges. This is a known gap: in v2, schema migrations could be run by a separate privileged role that is not used at runtime.
+- Audit log entries grow indefinitely. For a typical small biotech, this is likely thousands of entries per month: negligible storage. If it becomes a concern, archival to GCS can be implemented without deleting entries (export, then consider partitioning by date).
 - The API must ensure every state-changing operation writes to the audit log within the same database transaction as the state change. If the state change succeeds but the audit log write fails, the entire transaction must roll back.
 
 ---

@@ -66,7 +66,7 @@ slurm_use_spot     = true
 - Stored in a GCS backend bucket in the customer's project (versioned)
 - bioAF's FastAPI backend runs Terraform via subprocess with appropriate credentials
 - State locking via GCS to prevent concurrent applies
-- The customer owns their Terraform state — it's in their GCP project
+- The customer owns their Terraform state: it's in their GCP project
 
 ## Rationale
 
@@ -82,4 +82,4 @@ slurm_use_spot     = true
 - The backend must parse Terraform plan output and generate human-readable summaries for the UI. Terraform's JSON plan output format (`terraform show -json`) can be parsed for this.
 - Concurrent infrastructure changes must be prevented (only one apply at a time). The UI should show "infrastructure change in progress" and queue or block additional changes.
 - Cost estimation requires mapping Terraform resources to GCP pricing. This can be done via the GCP Pricing API or a static pricing table updated with each bioAF release.
-- The GitOps repo must be kept in sync with actual Terraform state. The control plane is the only writer — manual edits to the GitOps repo's Terraform files are not supported in v1 (they'd be overwritten on next UI-driven change).
+- The GitOps repo must be kept in sync with actual Terraform state. The control plane is the only writer: manual edits to the GitOps repo's Terraform files are not supported in v1 (they'd be overwritten on next UI-driven change).

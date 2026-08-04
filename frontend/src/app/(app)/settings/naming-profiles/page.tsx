@@ -107,18 +107,18 @@ export default function SettingsNamingProfilesPage() {
           <ul className="text-xs text-blue-800 space-y-1 list-disc list-inside">
             <li>
               <span className="font-medium">Number segment</span>
-              {" — "}letters plus a zero-padded integer, e.g.{" "}
+              {": "}letters plus a zero-padded integer, e.g.{" "}
               <code>SMP0042</code>.
             </li>
             <li>
               <span className="font-medium">String segment</span>
-              {" — "}letters plus a value separated by the opposite of
+              {": "}letters plus a value separated by the opposite of
               the profile delimiter, e.g. <code>req-bmills</code> with
               delimiter <code>_</code>.
             </li>
             <li>
               <span className="font-medium">Date segment</span>
-              {" — "}one of <code>YYYYMMDD</code>, <code>YYYY-MM-DD</code>
+              {": "}one of <code>YYYYMMDD</code>, <code>YYYY-MM-DD</code>
               , or <code>YYMMDD</code>. No identifier.
             </li>
           </ul>

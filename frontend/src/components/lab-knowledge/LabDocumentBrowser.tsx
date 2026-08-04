@@ -109,10 +109,11 @@ export function LabDocumentBrowser() {
     setSelectedTagIds((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]));
   };
 
-  if (loading) {
-    return <div data-testid="lab-docs-loading" className="p-8 text-gray-500">Loading documents...</div>;
-  }
-
+  // NOTE: deliberately no `if (loading) return ...` early return here. `query` is a
+  // dependency of fetchDocuments, so every keystroke sets loading=true; returning
+  // early unmounted the whole toolbar, taking the search input (and the caret) with
+  // it, so only the first character of a search ever landed. The loading state is
+  // rendered in the results region instead, below, and the toolbar stays mounted.
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -166,7 +167,11 @@ export function LabDocumentBrowser() {
 
       {error && <div className="text-red-600 text-sm mb-3">{error}</div>}
 
-      {documents.length === 0 ? (
+      {loading ? (
+        <div data-testid="lab-docs-loading" className="text-gray-500 py-12 text-center">
+          Loading documents...
+        </div>
+      ) : documents.length === 0 ? (
         <div className="text-gray-500 py-12 text-center">No documents found.</div>
       ) : (
         <table className="w-full text-sm">
