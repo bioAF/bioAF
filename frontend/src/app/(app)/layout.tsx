@@ -8,6 +8,7 @@ import { isAuthenticated } from "@/lib/auth";
 import { useBackendReady } from "@/hooks/useBackendReady";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useComponents } from "@/hooks/useComponents";
+import { ToastProvider } from "@/components/shared/Toast";
 
 /**
  * Shared shell for every authenticated page. It mounts the Sidebar + Header ONCE
@@ -49,12 +50,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen">
-      <Sidebar />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Header />
-        {children}
+    // ToastProvider wraps the shell so any page can surface a failure. It is the
+    // app's only live region: before it, a failed mutation produced no message
+    // and no announcement anywhere.
+    <ToastProvider>
+      <div className="flex h-screen">
+        <Sidebar />
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <Header />
+          {children}
+        </div>
       </div>
-    </div>
+    </ToastProvider>
   );
 }

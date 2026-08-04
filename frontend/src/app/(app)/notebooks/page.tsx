@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ErrorState } from "@/components/shared/ErrorState";
 import { DetailModal } from "@/components/shared/DetailModal";
 import { api } from "@/lib/api";
 import { useComponents } from "@/hooks/useComponents";
@@ -45,6 +46,7 @@ export default function NotebooksPage() {
   const { components } = useComponents();
   const jupyterEnabled = components.some((c) => c.key === "jupyterhub" && c.enabled);
   const rstudioEnabled = components.some((c) => c.key === "rstudio" && c.enabled);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<NotebookSession[]>([]);
   const [bucket, setBucket] = useState<SessionBucket>("active");
   const [viewingSession, setViewingSession] = useState<NotebookSession | null>(null);
@@ -134,7 +136,11 @@ export default function NotebooksPage() {
         `/api/v1/notebooks/sessions?bucket=${currentBucket}`,
       );
       setSessions(data.sessions);
-    } catch {
+      setLoadError(null);
+    } catch (e) {
+      // These sessions bill while they run, so "you have none" must never stand
+      // in for "we could not ask".
+      setLoadError(e instanceof Error ? e.message : "Could not load notebook sessions.");
     } finally {
       setLoading(false);
     }
@@ -483,6 +489,20 @@ export default function NotebooksPage() {
                   </td>
                 </tr>
               ))}
+              {loadError ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-12 text-center">
+                    <p className="text-red-700 mb-3">Could not load notebook sessions. {loadError}</p>
+                    <button
+                      type="button"
+                      onClick={() => loadSessions()}
+                      className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50"
+                    >
+                      Retry
+                    </button>
+                  </td>
+                </tr>
+              ) : null}
               {sessions.length === 0 && (
                 <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No active sessions</td></tr>
               )}

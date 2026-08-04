@@ -13,6 +13,7 @@ export default function PipelineRunsPage() {
   const router = useRouter();
   const { has } = useCapabilities();
   const showCost = has("cost_estimation");
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [runs, setRuns] = useState<PipelineRun[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -34,7 +35,10 @@ export default function PipelineRunsPage() {
       const data = await api.get<PipelineRunListResponse>(`/api/pipeline-runs?${params}`);
       setRuns(data.runs);
       setTotal(data.total);
-    } catch {} finally { setLoading(false); }
+      setLoadError(null);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Could not load pipeline runs.");
+    } finally { setLoading(false); }
   }
 
   function formatDuration(startedAt: string | null, completedAt: string | null): string {
@@ -141,9 +145,22 @@ export default function PipelineRunsPage() {
                 {showCost && <td className="px-4 py-3 text-sm text-gray-500">{r.cost_estimate ? `$${r.cost_estimate.toFixed(2)}/hr` : "—"}</td>}
               </tr>
             ))}
-            {runs.length === 0 && (
-              <tr><td colSpan={showCost ? 10 : 9} className="px-4 py-12 text-center text-gray-400">No pipeline runs</td></tr>
-            )}
+            {loadError ? (
+              <tr>
+                <td colSpan={showCost ? 10 : 9} className="px-4 py-12 text-center">
+                  <p className="text-red-700 mb-3">Could not load pipeline runs. {loadError}</p>
+                  <button
+                    type="button"
+                    onClick={() => loadRuns()}
+                    className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50"
+                  >
+                    Retry
+                  </button>
+                </td>
+              </tr>
+            ) : runs.length === 0 ? (
+              <tr><td colSpan={showCost ? 10 : 9} className="px-4 py-12 text-center text-gray-500">No pipeline runs</td></tr>
+            ) : null}
           </tbody>
         </table>
       </div>

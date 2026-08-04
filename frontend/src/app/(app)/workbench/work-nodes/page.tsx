@@ -8,6 +8,8 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
 import { resolveWorkNodeProfiles } from "@/lib/workNodeProfiles";
 import { SessionBucketFilter, type SessionBucket } from "@/components/shared/SessionBucketFilter";
+import { ErrorState } from "@/components/shared/ErrorState";
+import { useToast } from "@/components/shared/Toast";
 import { formatSessionStatusLabel, formatLinkedTo } from "@/lib/sessionStatus";
 import { prefillFromWorkNode } from "@/lib/sessionRecreate";
 import type {
@@ -108,12 +110,18 @@ export default function WorkNodesPage() {
     return () => clearInterval(interval);
   }, [nodes]);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const toast = useToast();
+
   const loadNodes = useCallback(async () => {
     try {
       const data = await api.get<WorkNodeListResponse>(`/api/v1/work-nodes/sessions?bucket=${bucket}`);
       setNodes(data.sessions);
-    } catch {
-      // ignore
+      setLoadError(null);
+    } catch (e) {
+      // Never fall through to the empty state here: these nodes bill by the hour,
+      // and "you have none" is a very different claim from "we could not ask".
+      setLoadError(e instanceof Error ? e.message : "Could not load work nodes.");
     } finally {
       setLoading(false);
     }
@@ -347,7 +355,10 @@ export default function WorkNodesPage() {
       await api.post(`/api/v1/work-nodes/sessions/${nodeId}/stop`);
       loadNodes();
       if (viewingNode?.id === nodeId) setViewingNode(null);
-    } catch {
+    } catch (e) {
+      // A silent failure here leaves a node running and billing while the user
+      // believes they stopped it.
+      toast.error(e instanceof Error ? e.message : "Could not stop the work node.");
     } finally {
       setStoppingNodes((prev) => {
         const next = new Set(prev);
@@ -528,7 +539,15 @@ export default function WorkNodesPage() {
         <h2 className="text-base font-semibold text-gray-900">Work Nodes</h2>
         <SessionBucketFilter value={bucket} onChange={setBucket} />
       </div>
-      {nodes.length === 0 ? (
+      {loadError ? (
+        <ErrorState
+          message={`Could not load work nodes. ${loadError}`}
+          onRetry={() => {
+            setLoading(true);
+            loadNodes();
+          }}
+        />
+      ) : nodes.length === 0 ? (
         <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
           <p className="text-gray-500">
             No work nodes in this view.

@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ErrorState } from "@/components/shared/ErrorState";
 import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { Project, ProjectListResponse } from "@/lib/types";
@@ -19,6 +20,7 @@ export default function ProjectsPage() {
 function ProjectsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -51,8 +53,11 @@ function ProjectsPageInner() {
       if (statusFilter) params.set("status", statusFilter);
       const data = await api.get<ProjectListResponse>(`/api/projects?${params}`);
       setProjects(data.projects);
-    } catch {
-      // handled by api client
+      setLoadError(null);
+    } catch (e) {
+      // The old comment here claimed the api client handled this. It does not:
+      // lib/api.ts only throws, and there was no notification layer to catch it.
+      setLoadError(e instanceof Error ? e.message : "Could not load projects.");
     } finally {
       setLoading(false);
     }
@@ -118,6 +123,14 @@ function ProjectsPageInner() {
           <div className="flex justify-center py-12">
             <LoadingSpinner size="lg" />
           </div>
+        ) : loadError ? (
+          <ErrorState
+            message={`Could not load projects. ${loadError}`}
+            onRetry={() => {
+              setLoading(true);
+              loadProjects();
+            }}
+          />
         ) : projects.length === 0 ? (
           <div className="bg-white rounded-lg shadow p-12 text-center">
             <h2 className="text-lg font-semibold text-gray-400 mb-2">No projects found</h2>
