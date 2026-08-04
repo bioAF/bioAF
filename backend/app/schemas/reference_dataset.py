@@ -221,6 +221,19 @@ class ReferenceDatasetListResponse(BaseModel):
     total: int
 
 
+class ReferenceFilterOptions(BaseModel):
+    """The vocabularies the Reference Data filters may offer.
+
+    Served rather than hard-coded in the frontend: the page previously kept its
+    own copies and they never matched the model (it offered scopes
+    "global"/"organization" against REFERENCE_SCOPES of ["public", "internal"],
+    so every scope filter returned zero rows).
+    """
+
+    categories: list[str]
+    scopes: list[str]
+
+
 # --- Impact schemas ---
 
 

@@ -166,6 +166,8 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
     setPendingRoleTarget(null);
   };
 
+  const [pendingRevoke, setPendingRevoke] = useState<number | null>(null);
+
   const handleRevoke = async (keyId: number) => {
     try {
       await integrationsApi.revokeApiKey(keyId);
@@ -381,7 +383,7 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
                         <td className="px-2 py-2 text-right">
                           {!k.revoked_at && (
                             <button
-                              onClick={() => handleRevoke(k.id)}
+                              onClick={() => setPendingRevoke(k.id)}
                               className="text-xs text-red-600 hover:underline"
                             >
                               Revoke
@@ -516,6 +518,28 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
           onCancel={() => setPendingDisable(null)}
         />
       )}
+
+      <ConfirmDialog
+        open={pendingRevoke !== null}
+        variant="danger"
+        title="Revoke this API key?"
+        message={
+          <>
+            <p>
+              Any automation still using this key stops working immediately, and the key
+              cannot be restored.
+            </p>
+            <p>Issue a new key first if something is depending on this one.</p>
+          </>
+        }
+        confirmLabel="Revoke key"
+        onConfirm={() => {
+          const id = pendingRevoke;
+          setPendingRevoke(null);
+          if (id !== null) handleRevoke(id);
+        }}
+        onCancel={() => setPendingRevoke(null)}
+      />
 
       {revealedSecret && (
         <RevealSecretModal

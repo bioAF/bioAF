@@ -11,6 +11,12 @@ interface ConfirmDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   variant?: "danger" | "default";
+  /** Optional third choice, for decisions with two distinct "yes" outcomes plus a
+   * real cancel (e.g. rebuild the image vs reuse the existing one vs do nothing).
+   * Omit both and the dialog stays a plain two-button confirm. Cancel always
+   * means cancel: Escape and the cancel button never trigger this. */
+  secondaryLabel?: string;
+  onSecondary?: () => void;
   /** When true, the action is in flight: buttons are disabled and the confirm
    * button shows a working state, preventing a confusing no-feedback wait and
    * double submissions. */
@@ -36,6 +42,8 @@ export function ConfirmDialog({
   onCancel,
   variant = "default",
   busy = false,
+  secondaryLabel,
+  onSecondary,
 }: ConfirmDialogProps) {
   const titleId = useId();
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -82,6 +90,17 @@ export function ConfirmDialog({
           >
             {cancelLabel}
           </button>
+          {secondaryLabel && onSecondary && (
+            <button
+              onClick={() => {
+                if (!busy) onSecondary();
+              }}
+              disabled={busy}
+              className="px-4 py-2 text-gray-700 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50"
+            >
+              {secondaryLabel}
+            </button>
+          )}
           <button
             onClick={() => {
               if (!busy) onConfirm();

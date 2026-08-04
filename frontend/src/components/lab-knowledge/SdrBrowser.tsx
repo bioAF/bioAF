@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { STATUS_STYLES, statusBadgeClass, statusLabel } from "@/lib/statusStyles";
 
 interface UserSummary {
@@ -475,6 +476,7 @@ function SdrActions({
   setErr: (s: string | null) => void;
 }) {
   const [showSupersede, setShowSupersede] = useState(false);
+  const [showRepeal, setShowRepeal] = useState(false);
   const [showUphold, setShowUphold] = useState(false);
   const [showOwner, setShowOwner] = useState(false);
 
@@ -523,13 +525,37 @@ function SdrActions({
           <button
             type="button"
             disabled={busy}
-            onClick={() => onTransition("repealed")}
+            onClick={() => setShowRepeal(true)}
             className="text-sm text-red-600"
           >
             Repeal
           </button>
         </>
       )}
+      <ConfirmDialog
+        open={showRepeal}
+        variant="danger"
+        title={`Repeal ${sdrCode(sdr.sdr_number)}?`}
+        message={
+          <>
+            <p>
+              Repealing retires this decision record permanently. It is a terminal
+              state: the record cannot be reactivated, superseded, or edited afterwards.
+            </p>
+            <p>
+              If a newer decision replaces this one, use Supersede instead so the link
+              between them is preserved.
+            </p>
+          </>
+        }
+        confirmLabel="Repeal"
+        busy={busy}
+        onConfirm={() => {
+          setShowRepeal(false);
+          onTransition("repealed");
+        }}
+        onCancel={() => setShowRepeal(false)}
+      />
       {(canAuthor || canManage) && (
         <button type="button" onClick={onEdit} className="text-sm text-bioaf-600">
           Edit

@@ -49,6 +49,7 @@ export function WebhooksTab() {
   const [pendingDisable, setPendingDisable] = useState<WebhookSubscription | null>(null);
 
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
+  const [pendingRotate, setPendingRotate] = useState<WebhookSubscription | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -312,7 +313,7 @@ export function WebhooksTab() {
                 Send test event
               </button>
               <button
-                onClick={() => handleRotate(selectedSub.id)}
+                onClick={() => setPendingRotate(selectedSub)}
                 className="px-3 py-1.5 text-xs bg-gray-100 border rounded hover:bg-gray-200"
               >
                 Rotate secret
@@ -463,6 +464,31 @@ export function WebhooksTab() {
           onCancel={() => setPendingDisable(null)}
         />
       )}
+
+      <ConfirmDialog
+        open={pendingRotate !== null}
+        variant="danger"
+        title="Rotate signing secret?"
+        message={
+          pendingRotate ? (
+            <>
+              <p>
+                Every request signed with the current secret for{" "}
+                <strong>{pendingRotate.name}</strong> will start failing immediately.
+                Whatever consumes this webhook has to be updated before it works again.
+              </p>
+              <p>The new secret is shown once and cannot be retrieved afterwards.</p>
+            </>
+          ) : null
+        }
+        confirmLabel="Rotate secret"
+        onConfirm={() => {
+          const sub = pendingRotate;
+          setPendingRotate(null);
+          if (sub) handleRotate(sub.id);
+        }}
+        onCancel={() => setPendingRotate(null)}
+      />
 
       {revealedSecret && (
         <RevealSecretModal

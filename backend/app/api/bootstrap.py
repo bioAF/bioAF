@@ -354,11 +354,17 @@ async def configure_smtp(body: ConfigureSmtpRequest, request: Request, session: 
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
+    # An absent or empty password means "keep the stored one". The settings form
+    # cannot round-trip the real password (GET returns it masked), so a save that
+    # only changed the host would otherwise clear the credential and silently break
+    # invites, password resets, and every notification email.
+    effective_password = body.password if body.password else org.smtp_password
+
     # Persist to database
     org.smtp_host = body.host
     org.smtp_port = body.port
     org.smtp_username = body.username
-    org.smtp_password = body.password
+    org.smtp_password = effective_password
     org.smtp_from_address = body.from_address
     org.smtp_encryption = body.encryption
     org.smtp_configured = True
@@ -371,7 +377,7 @@ async def configure_smtp(body: ConfigureSmtpRequest, request: Request, session: 
         host=body.host,
         port=body.port,
         username=body.username,
-        password=body.password,
+        password=effective_password,
         from_address=body.from_address,
         encryption=body.encryption,
     )

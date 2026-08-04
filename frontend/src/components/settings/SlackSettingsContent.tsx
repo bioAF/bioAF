@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { api } from "@/lib/api";
 
 interface SlackStatus {
@@ -114,6 +115,7 @@ const EVENT_CATEGORIES: Record<string, { label: string; events: string[] }> = {
 
 export function SlackSettingsContent() {
   const [status, setStatus] = useState<SlackStatus | null>(null);
+  const [pendingDestructive, setPendingDestructive] = useState<"startOver" | "disconnect" | null>(null);
   const [channels, setChannels] = useState<SlackChannel[]>([]);
   const [mappings, setMappings] = useState<ChannelMapping[]>([]);
   const [manifest, setManifest] = useState<SlackManifest | null>(null);
@@ -581,7 +583,7 @@ export function SlackSettingsContent() {
                   </button>
                   <div className="mt-6">
                     <button
-                      onClick={handleStartOver}
+                      onClick={() => setPendingDestructive("startOver")}
                       className="text-sm text-red-500 hover:text-red-700"
                     >
                       Start Over
@@ -609,7 +611,7 @@ export function SlackSettingsContent() {
                       </div>
                     </div>
                     <button
-                      onClick={handleDisconnect}
+                      onClick={() => setPendingDestructive("disconnect")}
                       className="text-sm text-red-500 hover:text-red-700"
                     >
                       Disconnect
@@ -842,6 +844,39 @@ export function SlackSettingsContent() {
               </>
             )}
           </div>
+      <ConfirmDialog
+        open={pendingDestructive !== null}
+        variant="danger"
+        title={pendingDestructive === "startOver" ? "Delete the stored Slack app credentials?" : "Disconnect this Slack workspace?"}
+        message={
+          pendingDestructive === "startOver" ? (
+            <>
+              <p>
+                This deletes the stored client secret and signing secret. They cannot be
+                recovered: you would have to fetch them again from api.slack.com to set
+                Slack up.
+              </p>
+              <p>Every channel mapping is removed as well.</p>
+            </>
+          ) : (
+            <>
+              <p>
+                This uninstalls the bioAF app from the workspace and removes every channel
+                mapping. Slack notifications stop immediately.
+              </p>
+              <p>Your stored app credentials are kept, so you can reconnect later.</p>
+            </>
+          )
+        }
+        confirmLabel={pendingDestructive === "startOver" ? "Delete credentials" : "Disconnect"}
+        onConfirm={() => {
+          const which = pendingDestructive;
+          setPendingDestructive(null);
+          if (which === "startOver") handleStartOver();
+          else if (which === "disconnect") handleDisconnect();
+        }}
+        onCancel={() => setPendingDestructive(null)}
+      />
     </>
   );
 }

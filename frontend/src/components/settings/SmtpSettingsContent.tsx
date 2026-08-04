@@ -55,7 +55,12 @@ export function SmtpSettingsContent() {
         host: smtpHost,
         port: parseInt(smtpPort),
         username: smtpUsername,
-        password: smtpPassword,
+        // Omit the password unless the admin actually typed a new one. The load
+        // path deliberately leaves this field empty (the API returns the password
+        // masked, so there is nothing real to populate it with), and sending that
+        // empty string overwrote the stored credential: a save that only changed
+        // the host silently broke invites, password resets, and notification email.
+        ...(smtpPassword ? { password: smtpPassword } : {}),
         from_address: smtpFrom,
         encryption: smtpEncryption,
       });
@@ -115,6 +120,11 @@ export function SmtpSettingsContent() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
             <input type="password" value={smtpPassword} onChange={(e) => setSmtpPassword(e.target.value)} className="w-full px-3 py-2 border rounded" placeholder={hasExistingPassword ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 (saved)" : "Enter password"} />
+            {hasExistingPassword && (
+              <p className="text-xs text-gray-500 mt-1">
+                A password is saved. Leave blank to keep it, or type a new one to replace it.
+              </p>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">From Address</label>

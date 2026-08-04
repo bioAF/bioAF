@@ -83,3 +83,65 @@ test("does not listen for Escape while closed", () => {
   fireEvent.keyDown(document, { key: "Escape" });
   expect(onCancel).not.toHaveBeenCalled();
 });
+
+describe("optional secondary action (three-way choice)", () => {
+  // Some decisions genuinely have two "yes" outcomes plus a real cancel. The
+  // component-rebuild prompt is the case that forced this: it used window.confirm,
+  // where OK meant "rebuild" and Cancel meant "use the existing image", so there
+  // was no way to abort at all and Escape silently took an action.
+  const base = {
+    open: true,
+    title: "Rebuild image?",
+    message: "An existing image is available.",
+    onConfirm: jest.fn(),
+    onCancel: jest.fn(),
+  };
+
+  test("renders the secondary action when one is supplied", () => {
+    render(
+      <ConfirmDialog
+        {...base}
+        secondaryLabel="Use existing image"
+        onSecondary={jest.fn()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Use existing image" })).toBeInTheDocument();
+  });
+
+  test("the secondary action is distinct from cancel", () => {
+    const onSecondary = jest.fn();
+    const onCancel = jest.fn();
+    render(
+      <ConfirmDialog
+        {...base}
+        onCancel={onCancel}
+        secondaryLabel="Use existing image"
+        onSecondary={onSecondary}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Use existing image" }));
+    expect(onSecondary).toHaveBeenCalledTimes(1);
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  test("Escape still cancels outright, and never triggers the secondary action", () => {
+    const onSecondary = jest.fn();
+    const onCancel = jest.fn();
+    render(
+      <ConfirmDialog
+        {...base}
+        onCancel={onCancel}
+        secondaryLabel="Use existing image"
+        onSecondary={onSecondary}
+      />,
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onSecondary).not.toHaveBeenCalled();
+  });
+
+  test("stays a two-button dialog when no secondary action is supplied", () => {
+    render(<ConfirmDialog {...base} />);
+    expect(screen.getAllByRole("button")).toHaveLength(2);
+  });
+});

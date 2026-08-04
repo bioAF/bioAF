@@ -29,16 +29,34 @@ export default function DataReferencesPage() {
   const [scopeFilter, setScopeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
 
-  const categories = ["genome", "transcriptome", "annotation", "index", "other"];
-  const scopes = ["global", "organization"];
+  // Served by the API rather than hard-coded here. The previous local lists never
+  // matched the model: scopes were ["global", "organization"] against
+  // REFERENCE_SCOPES of ["public", "internal"], so every scope filter returned
+  // zero rows, and the category list invented "transcriptome" while omitting
+  // "atlas" and "markers", which the upload form can create.
+  const [categories, setCategories] = useState<string[]>([]);
+  const [scopes, setScopes] = useState<string[]>([]);
   const statuses = ["active", "deprecated", "pending_approval"];
+
+  useEffect(() => {
+    if (!isAuthenticated()) return;
+    api
+      .get<{ categories: string[]; scopes: string[] }>("/api/references/filter-options")
+      .then((data) => {
+        setCategories(data.categories);
+        setScopes(data.scopes);
+      })
+      .catch(() => {
+        // Leave the filters empty rather than offering values the API will reject.
+      });
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated()) return;
     setLoading(true);
 
     const params = new URLSearchParams();
-    if (search) params.set("search", search);
+    if (search) params.set("name_search", search);
     if (categoryFilter) params.set("category", categoryFilter);
     if (scopeFilter) params.set("scope", scopeFilter);
     if (statusFilter) params.set("status", statusFilter);

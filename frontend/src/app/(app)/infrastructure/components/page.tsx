@@ -9,6 +9,7 @@ import { TerraformRunHistory } from "@/components/infrastructure/TerraformRunHis
 import { OrphanedResourcesCard } from "@/components/infrastructure/OrphanedResourcesCard";
 import { DeployRecoveryModal } from "@/components/infrastructure/DeployRecoveryModal";
 import { InfraUpdatesCard } from "@/components/infrastructure/InfraUpdatesCard";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useDeploymentProgress } from "@/hooks/useDeploymentProgress";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { useStackOptions } from "@/hooks/useStackOptions";
@@ -427,16 +428,16 @@ export default function InfraComponentsPage() {
   // Components that have a built image
   const imageComponents = new Set(["rstudio", "jupyterhub", "cellxgene"]);
 
-  async function handleComponentToggle(componentKey: string) {
+  async function handleComponentToggle(componentKey: string, rebuildChoice?: boolean) {
     setComponentErrors((prev) => ({ ...prev, [componentKey]: "" }));
 
     // When re-enabling an image component, check if it already has a
     // successful build and ask the user whether to rebuild.
     const comp = componentsData?.components.find((c) => c.key === componentKey);
     const isEnabling = comp && comp.status === "disabled";
-    let forceRebuild = false;
+    let forceRebuild = rebuildChoice ?? false;
 
-    if (isEnabling && imageComponents.has(componentKey)) {
+    if (rebuildChoice === undefined && isEnabling && imageComponents.has(componentKey)) {
       // Check if there's already a successful image for this component
       const buildType = cellxgeneKeys.has(componentKey) ? "cellxgene" : "notebook";
       const statusUrl = buildType === "cellxgene"
@@ -449,10 +450,10 @@ export default function InfraComponentsPage() {
           image_uri: string | null;
         }>(statusUrl);
         if (status.image_uri) {
-          forceRebuild = confirm(
-            "An existing image is available. Rebuild with the latest definition?\n\n"
-            + "Choose OK to rebuild, or Cancel to use the existing image."
-          );
+          // Hand off to the dialog and stop here. It re-enters this function with
+          // an explicit choice, so dismissing it genuinely does nothing.
+          setPendingRebuild(componentKey);
+          return;
         }
       } catch {
         // No existing build -- proceed normally
@@ -474,6 +475,8 @@ export default function InfraComponentsPage() {
       setTogglingComponent(null);
     }
   }
+
+  const [pendingRebuild, setPendingRebuild] = useState<string | null>(null);
 
   const [cancellingBuild, setCancellingBuild] = useState(false);
 
@@ -880,6 +883,11 @@ export default function InfraComponentsPage() {
                             )}
                           </div>
                         </div>
+                        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mt-4">
+                          Applying these changes redeploys the cluster immediately. Replacing a
+                          machine type recreates its node pool, which stops pipelines and notebooks
+                          running on it.
+                        </p>
                         <div className="flex gap-2 mt-4">
                           <button
                             disabled={configSaving || Object.keys(configEdits).length === 0}
@@ -902,7 +910,7 @@ export default function InfraComponentsPage() {
                             }}
                             className="px-3 py-1 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
                           >
-                            {configSaving ? "Saving..." : "Save Changes"}
+                            {configSaving ? "Applying..." : "Apply and redeploy"}
                           </button>
                           <button
                             disabled={configSaving}
@@ -1493,6 +1501,34 @@ export default function InfraComponentsPage() {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={pendingRebuild !== null}
+        title="Rebuild the image?"
+        message={
+          <>
+            <p>
+              An image for this component already exists. You can rebuild it with the
+              latest definition, or enable the component using the image that is
+              already there.
+            </p>
+            <p>Rebuilding takes several minutes. Nothing happens if you cancel.</p>
+          </>
+        }
+        confirmLabel="Rebuild"
+        secondaryLabel="Use existing image"
+        cancelLabel="Cancel"
+        onConfirm={() => {
+          const key = pendingRebuild;
+          setPendingRebuild(null);
+          if (key) handleComponentToggle(key, true);
+        }}
+        onSecondary={() => {
+          const key = pendingRebuild;
+          setPendingRebuild(null);
+          if (key) handleComponentToggle(key, false);
+        }}
+        onCancel={() => setPendingRebuild(null)}
+      />
     </>
   );
 }

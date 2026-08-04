@@ -37,7 +37,13 @@ class ConfigureSmtpRequest(BaseModel):
     host: str
     port: int = 587
     username: str
-    password: str
+    # Optional so a partial save can leave the stored credential alone. GET
+    # /smtp-settings returns the password masked, so the settings form has no real
+    # value to populate its password input with and submits an empty string when
+    # the admin edits some other field. Treating that as "clear the password" broke
+    # all outbound email silently. None or "" now means "keep what is stored";
+    # sending a non-empty value replaces it.
+    password: str | None = None
     from_address: str
     encryption: str = "starttls"
 
