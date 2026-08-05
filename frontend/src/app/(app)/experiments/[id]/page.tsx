@@ -60,6 +60,7 @@ import type {
 import { useToast } from "@/components/shared/Toast";
 
 import { clickableRow } from "@/lib/a11y";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 
 type Tab = ExperimentTabKey;
 
@@ -113,6 +114,7 @@ function ExperimentDetailPageInner() {
   const [viewingSample, setViewingSample] = useState<Sample | null>(null);
   const [selectedSampleIds, setSelectedSampleIds] = useState<Set<number>>(new Set());
   const [editingSampleId, setEditingSampleId] = useState<number | null>(null);
+  useDismissOnEscape(editingSampleId !== null, () => { setEditingSampleId(null); setEditSampleError(""); });
   const [editSampleForm, setEditSampleForm] = useState<SampleUpdateRequest>({});
   const [editSampleError, setEditSampleError] = useState("");
   const [editSampleCustomFields, setEditSampleCustomFields] = useState<Record<string, string>>({});

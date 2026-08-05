@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { api } from "@/lib/api";
 import type { FileResponse } from "@/lib/types";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 
 interface PlotMetadata {
   experimentName?: string | null;
@@ -61,13 +62,7 @@ function formatDate(dateStr: string): string {
 }
 
 export function PlotModal({ url, title, metadata, onClose }: PlotModalProps) {
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [onClose]);
+  useDismissOnEscape(true, onClose);
 
   const file = metadata?.file;
   const hasDetail = !!metadata;

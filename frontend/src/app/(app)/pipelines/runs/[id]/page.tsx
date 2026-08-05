@@ -14,6 +14,7 @@ import { getToken } from "@/lib/auth";
 import { api, ApiError } from "@/lib/api";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { statusBadgeClass } from "@/lib/statusStyles";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 import type {
   CustomPipelineRunOverview,
   PipelineRunDetail,
@@ -163,6 +164,7 @@ export default function PipelineRunDetailPage() {
   const [systemLogs, setSystemLogs] = useState<LogResponse | null>(null);
   const [systemLogsLoading, setSystemLogsLoading] = useState(false);
   const [showRetriesModal, setShowRetriesModal] = useState(false);
+  useDismissOnEscape(showRetriesModal, () => { setShowRetriesModal(false); });
 
   const loadRun = useCallback(async () => {
     try {

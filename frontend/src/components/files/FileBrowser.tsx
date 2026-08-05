@@ -19,6 +19,7 @@ import type {
 import { useToast } from "@/components/shared/Toast";
 
 import { clickableRow } from "@/lib/a11y";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 
 function formatBytes(bytes: number | null): string {
   if (bytes == null) return "-";
@@ -85,8 +86,10 @@ export function FileBrowser({
   const [samples, setSamples] = useState<{ id: number; label: string }[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [viewingFile, setViewingFile] = useState<FileResponse | null>(null);
+  useDismissOnEscape(viewingFile !== null, () => { setViewingFile(null); });
   const contentUrl = useFileContentUrl(viewingFile?.id ?? null);
   const [showProvenance, setShowProvenance] = useState(false);
+  useDismissOnEscape(showProvenance, () => { setShowProvenance(false); });
   const [page, setPage] = useState(1);
   const [totalFiles, setTotalFiles] = useState(0);
   const [downloading, setDownloading] = useState(false);

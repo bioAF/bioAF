@@ -34,6 +34,7 @@ import { statusBadgeClass } from "@/lib/statusStyles";
 import { useToast } from "@/components/shared/Toast";
 
 import { clickableRow } from "@/lib/a11y";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 
 const PROFILE_ORDER: ResourceProfile[] = ["small", "medium", "large", "xlarge", "2xlarge"];
 
@@ -54,6 +55,7 @@ export default function NotebooksPage() {
   const [sessions, setSessions] = useState<NotebookSession[]>([]);
   const [bucket, setBucket] = useState<SessionBucket>("active");
   const [viewingSession, setViewingSession] = useState<NotebookSession | null>(null);
+  useDismissOnEscape(viewingSession !== null, () => { setViewingSession(null); setProvenance(null); });
   const [loading, setLoading] = useState(true);
   const [imageBuildStatus, setImageBuildStatus] = useState<{
     build_id: string | null;

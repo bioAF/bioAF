@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { AssembledPromptModal } from "./AssembledPromptModal";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 
 interface SubItem {
   id: string;
@@ -83,6 +84,7 @@ export function SectionBuilderModal({
   onSubmitted,
   onError,
 }: Props) {
+  useDismissOnEscape(true, () => onCancel());
   const isExperiment = entityType === "experiment";
 
   const [catalog, setCatalog] = useState<SectionCatalogResponse | null>(null);

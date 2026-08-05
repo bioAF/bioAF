@@ -14,6 +14,7 @@ import { QualityBadge } from "./QualityBadge";
 import { PlotModal } from "@/components/shared/PlotModal";
 import { useFileContentUrl } from "@/hooks/useContentUrl";
 import type { QCDashboardResponse } from "@/lib/types";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 
 function PlotImage({
   fileId,
@@ -88,13 +89,7 @@ export function QCReportModal({
     };
   }, [dashboardId]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  useDismissOnEscape(true, onClose);
 
   const pipelineLabel = dashboard?.pipeline_name
     ? `${dashboard.pipeline_name}${dashboard.pipeline_version ? ` v${dashboard.pipeline_version}` : ""}`

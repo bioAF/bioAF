@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, type ReactNode } from "react";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 
 export interface DetailField {
   label: string;
@@ -15,13 +16,7 @@ interface DetailModalProps {
 }
 
 export function DetailModal({ title, onClose, fields, actions }: DetailModalProps) {
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [onClose]);
+  useDismissOnEscape(true, onClose);
 
   return (
     <div

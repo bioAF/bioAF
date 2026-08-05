@@ -8,6 +8,7 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { STATUS_STYLES, statusBadgeClass, statusLabel } from "@/lib/statusStyles";
 
 import { clickableRow } from "@/lib/a11y";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 
 interface UserSummary {
   id: number;
@@ -618,6 +619,7 @@ function ModalShell({
   children: React.ReactNode;
   onClose: () => void;
 }) {
+  useDismissOnEscape(true, () => onClose());
   return (
     <div
       className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60]"

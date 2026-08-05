@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { api } from "@/lib/api";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 
 interface SavedPrompt {
   id: number;
@@ -25,6 +26,7 @@ export function AssembledPromptModal({
   onRunWithCustomBody,
   onSavedAndRun,
 }: Props) {
+  useDismissOnEscape(true, () => onClose());
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(body);
   const [name, setName] = useState("");

@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 
 export type AgentReviewEntityType = "pipeline_run" | "experiment";
 
@@ -180,6 +181,7 @@ export function ReviewModal({
   onClose: () => void;
   onMutated: () => void;
 }) {
+  useDismissOnEscape(true, () => onClose());
   const [review, setReview] = useState<AgentReviewDetail | null>(null);
   const [busy, setBusy] = useState(false);
   const [catalog, setCatalog] = useState<SectionCatalog | null>(null);

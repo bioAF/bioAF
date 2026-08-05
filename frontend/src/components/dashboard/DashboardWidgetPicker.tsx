@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import type { WidgetDefinition } from "@/components/dashboard/registry";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 
 interface DashboardWidgetPickerProps {
   /** Widgets the user is permitted to use (already permission-filtered). */
@@ -19,6 +20,7 @@ export function DashboardWidgetPicker({
   onClose,
   onSave,
 }: DashboardWidgetPickerProps) {
+  useDismissOnEscape(true, () => onClose());
   const [selected, setSelected] = useState<Set<string>>(new Set(enabledKeys));
 
   const toggle = (key: string) => {

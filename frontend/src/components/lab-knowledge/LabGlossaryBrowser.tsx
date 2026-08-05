@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
 
 import { clickableCard } from "@/lib/a11y";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 
 interface UserSummary {
   id: number;
@@ -352,6 +353,7 @@ function TermDetailPanel({
   onClose: () => void;
   onChanged: () => void;
 }) {
+  useDismissOnEscape(true, () => onClose());
   const [editing, setEditing] = useState(false);
   const [definition, setDefinition] = useState(term.definition);
   const [category, setCategory] = useState(term.category ?? "");
@@ -462,6 +464,7 @@ function TermDetailPanel({
 }
 
 function AddTermModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  useDismissOnEscape(true, () => onClose());
   const [term, setTerm] = useState("");
   const [definition, setDefinition] = useState("");
   const [aliases, setAliases] = useState("");
@@ -560,6 +563,7 @@ function ImportModal({
   onClose: () => void;
   onImported: (jobId: number) => void;
 }) {
+  useDismissOnEscape(true, () => onClose());
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -639,6 +643,7 @@ function ScanModal({
   onClose: () => void;
   onStarted: (job: ScanJob) => void;
 }) {
+  useDismissOnEscape(true, () => onClose());
   // "topic" was removed (LK-SPEC-D, D1); "experiment" reuses the Experiment
   // Review material, "document" picks a Lab Knowledge document OR a Data & Files
   // file via search.
@@ -836,6 +841,7 @@ function ReviewPanel({
   onClose: () => void;
   onReviewed: () => void;
 }) {
+  useDismissOnEscape(true, () => onClose());
   const [data, setData] = useState<ProposalListResponse | null>(null);
   const [decisions, setDecisions] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);

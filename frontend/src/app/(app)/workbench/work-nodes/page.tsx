@@ -32,6 +32,7 @@ import type {
 import { statusBadgeClass } from "@/lib/statusStyles";
 
 import { clickableRow } from "@/lib/a11y";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 
 function statusLabel(node: WorkNode): string {
   if (node.status === "stopping") return "Syncing outputs...";
@@ -59,7 +60,9 @@ export default function WorkNodesPage() {
   const [bucket, setBucket] = useState<SessionBucket>("active");
   const [loading, setLoading] = useState(true);
   const [showLaunch, setShowLaunch] = useState(false);
+  useDismissOnEscape(showLaunch, () => { setShowLaunch(false); });
   const [viewingNode, setViewingNode] = useState<WorkNode | null>(null);
+  useDismissOnEscape(viewingNode !== null, () => { setViewingNode(null); });
 
   // GitHub repos state
   const [repos, setRepos] = useState<GitHubRepo[]>([]);

@@ -7,6 +7,7 @@ import { uploadDocumentFile } from "@/lib/labDocuments";
 import { usePermissions } from "@/hooks/usePermissions";
 
 import { clickableRow } from "@/lib/a11y";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 
 interface Tag {
   id: number;
@@ -234,6 +235,7 @@ function UploadDocumentModal({
   onClose: () => void;
   onUploaded: () => void;
 }) {
+  useDismissOnEscape(true, () => onClose());
   const fileInput = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<"device" | "url">("device");
   const [sourceUrl, setSourceUrl] = useState("");
