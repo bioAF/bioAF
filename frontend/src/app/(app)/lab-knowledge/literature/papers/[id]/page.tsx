@@ -469,7 +469,11 @@ export default function PaperDetailPage() {
                     ? "A PDF is attached. Upload a new file to replace it."
                     : "No PDF attached yet. Upload the full paper to replace this abstract-only entry."}
                 </p>
-                <label className="inline-block">
+                {/* The <span> is styled to look like a button but is not one,
+                    so the label was mouse-only: `hidden` kept the input out of
+                    the tab order. `sr-only` puts it back, and `focus-within`
+                    draws the ring on the span the user can actually see. */}
+                <label className="inline-block focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[rgb(var(--color-focus-ring))] rounded">
                   <span
                     className={`inline-block px-3 py-1.5 rounded text-sm cursor-pointer ${
                       uploadingPdf
@@ -486,9 +490,10 @@ export default function PaperDetailPage() {
                   <input
                     type="file"
                     accept="application/pdf,.pdf"
-                    className="hidden"
+                    className="sr-only"
                     disabled={uploadingPdf}
                     onChange={onPdfSelected}
+                    aria-label={paper.has_pdf ? "Replace PDF" : "Upload full paper"}
                   />
                 </label>
                 {paper.has_pdf && (

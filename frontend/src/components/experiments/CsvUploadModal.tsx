@@ -320,7 +320,11 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
                     </p>
                   </div>
 
-                  <label className="flex items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-bioaf-400 hover:bg-gray-50 transition-colors">
+                  {/* `sr-only` rather than `hidden` on the input below: the
+                      label was already click-to-browse for a mouse, but
+                      display:none kept the input out of the tab order, so there
+                      was no keyboard path to the picker. */}
+                  <label className="flex items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-bioaf-400 hover:bg-gray-50 transition-colors focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[rgb(var(--color-focus-ring))]">
                     <div className="text-center">
                       {loading ? (
                         <p className="text-sm text-gray-500">Analyzing file...</p>
@@ -338,7 +342,8 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
                     <input
                       type="file"
                       accept=".csv,.tsv,.txt"
-                      className="hidden"
+                      className="sr-only"
+                      aria-label="Select a CSV file"
                       onChange={(e) => {
                         if (e.target.files?.[0]) handleFileSelect(e.target.files[0]);
                       }}

@@ -211,11 +211,13 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
 
       {expanded && (
         <div className="basis-full w-full bg-white rounded-lg shadow p-4 space-y-4">
-          <div
+          {/* See data/upload/page.tsx: a <label> keeps the whole area
+              click-to-browse while `sr-only` keeps the input focusable, so the
+              picker opens on Enter or Space without a key handler. */}
+          <label
             onDrop={handleDrop}
             onDragOver={(e) => e.preventDefault()}
-            onClick={() => fileInputRef.current?.click()}
-            className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-blue-400 transition-colors"
+            className="block border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-blue-400 transition-colors focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[rgb(var(--color-focus-ring))]"
           >
             <p className="text-gray-500 mb-1">Drag &amp; drop any files here</p>
             <p className="text-sm text-gray-400">or click to browse</p>
@@ -225,9 +227,10 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
               type="file"
               multiple
               onChange={handleFileSelect}
-              className="hidden"
+              aria-label="Upload files: drag and drop, or browse"
+              className="sr-only"
             />
-          </div>
+          </label>
 
           <div>
             <label

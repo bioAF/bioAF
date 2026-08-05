@@ -315,12 +315,16 @@ export default function DataUploadPage() {
       <h1 className="text-2xl font-bold mb-6">Data Upload</h1>
 
       <div className="space-y-6">
-        {/* Drop zone */}
-        <div
+        {/* Drop zone. A <label> rather than a <div> so the whole area is still
+            click-to-browse for a mouse, while the input inside it stays in the
+            tab order: `sr-only` clips the input out of sight but leaves it
+            focusable, and a focused file input opens the picker on Enter or
+            Space with no key handler of our own. `focus-within` moves the ring
+            onto the visible border, since the input itself is 1px. */}
+        <label
           onDrop={handleDrop}
           onDragOver={(e) => e.preventDefault()}
-          onClick={() => fileInputRef.current?.click()}
-          className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center cursor-pointer hover:border-blue-400 transition-colors"
+          className="block border-2 border-dashed border-gray-300 rounded-lg p-12 text-center cursor-pointer hover:border-blue-400 transition-colors focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[rgb(var(--color-focus-ring))]"
         >
           <p className="text-gray-500 mb-2">
             Drag & drop any files here
@@ -331,9 +335,10 @@ export default function DataUploadPage() {
             type="file"
             multiple
             onChange={handleFileSelect}
-            className="hidden"
+            aria-label="Upload files: drag and drop, or browse"
+            className="sr-only"
           />
-        </div>
+        </label>
 
         {/* Association selectors */}
         <div className="bg-white rounded-lg shadow p-4 space-y-4">
