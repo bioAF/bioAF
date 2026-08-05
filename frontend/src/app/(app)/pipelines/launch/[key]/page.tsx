@@ -230,11 +230,11 @@ export default function PipelineLauncherPage() {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-3 w-10"></th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sample ID</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Organism</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tissue</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">QC</th>
+                <th scope="col" className="px-4 py-3 w-10"></th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sample ID</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Organism</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tissue</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">QC</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">

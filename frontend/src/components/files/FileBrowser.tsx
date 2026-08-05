@@ -654,33 +654,33 @@ export function FileBrowser({
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-3 w-10">
+                <th scope="col" className="px-4 py-3 w-10">
                   <input
                     type="checkbox"
                     checked={files.length > 0 && selectedIds.size === files.length}
                     onChange={toggleSelectAll}
                   />
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                   Filename
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                   Type
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                   Size
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                   Uploaded
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                   Creator
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                   Source
                 </th>
                 {canDownload && (
-                  <th className="px-4 py-3 w-10">
+                  <th scope="col" className="px-4 py-3 w-10">
                     <span className="sr-only">Actions</span>
                   </th>
                 )}

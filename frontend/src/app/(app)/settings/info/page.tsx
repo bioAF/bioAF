@@ -279,10 +279,10 @@ export default function SettingsInfoPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-gray-50">
-                <th className="text-left px-3 py-2 font-medium text-gray-700">From</th>
-                <th className="text-left px-3 py-2 font-medium text-gray-700">To</th>
-                <th className="text-left px-3 py-2 font-medium text-gray-700">Status</th>
-                <th className="text-left px-3 py-2 font-medium text-gray-700">Date</th>
+                <th scope="col" className="text-left px-3 py-2 font-medium text-gray-700">From</th>
+                <th scope="col" className="text-left px-3 py-2 font-medium text-gray-700">To</th>
+                <th scope="col" className="text-left px-3 py-2 font-medium text-gray-700">Status</th>
+                <th scope="col" className="text-left px-3 py-2 font-medium text-gray-700">Date</th>
               </tr>
             </thead>
             <tbody>

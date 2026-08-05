@@ -65,12 +65,12 @@ export function TerraformRunHistory({ runs }: TerraformRunHistoryProps) {
     <table data-testid="run-history-table" className="w-full text-sm border-collapse">
       <thead>
         <tr className="border-b text-left text-gray-500">
-          <th className="py-2 pr-4 font-medium">ID</th>
-          <th className="py-2 pr-4 font-medium">Action</th>
-          <th className="py-2 pr-4 font-medium">Module</th>
-          <th className="py-2 pr-4 font-medium">Status</th>
-          <th className="py-2 pr-4 font-medium">Resources</th>
-          <th className="py-2 font-medium">Started</th>
+          <th scope="col" className="py-2 pr-4 font-medium">ID</th>
+          <th scope="col" className="py-2 pr-4 font-medium">Action</th>
+          <th scope="col" className="py-2 pr-4 font-medium">Module</th>
+          <th scope="col" className="py-2 pr-4 font-medium">Status</th>
+          <th scope="col" className="py-2 pr-4 font-medium">Resources</th>
+          <th scope="col" className="py-2 font-medium">Started</th>
         </tr>
       </thead>
       <tbody>

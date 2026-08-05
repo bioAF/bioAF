@@ -114,9 +114,9 @@ function ParameterDiffTable({
         <table className="min-w-full text-sm border rounded-lg overflow-hidden">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Parameter</th>
+              <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Parameter</th>
               {snapshots.map((snap, i) => (
-                <th key={snap.id} className="px-3 py-2 text-left text-xs font-medium uppercase" style={{ color: COLORS[i] }}>
+                <th scope="col" key={snap.id} className="px-3 py-2 text-left text-xs font-medium uppercase" style={{ color: COLORS[i] }}>
                   {snap.label}
                 </th>
               ))}
@@ -222,13 +222,13 @@ function CommandLogDiffTable({
         <table className="min-w-full text-sm border rounded-lg overflow-hidden">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Command</th>
+              <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Command</th>
               {snapshots.map((snap, i) => (
-                <th key={snap.id} className="px-3 py-2 text-left text-xs font-medium uppercase" style={{ color: COLORS[i] }}>
+                <th scope="col" key={snap.id} className="px-3 py-2 text-left text-xs font-medium uppercase" style={{ color: COLORS[i] }}>
                   {snap.label}
                 </th>
               ))}
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+              <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">

@@ -237,12 +237,12 @@ export function SdrBrowser() {
         <table className="w-full text-sm border rounded">
           <thead className="bg-gray-50 text-left text-xs text-gray-500">
             <tr>
-              <th className="p-2 w-20">Number</th>
-              <th className="p-2">Title</th>
-              <th className="p-2 w-36">Category</th>
-              <th className="p-2 w-36">Status</th>
-              <th className="p-2 w-32">Owner</th>
-              <th className="p-2 w-28">Trigger</th>
+              <th scope="col" className="p-2 w-20">Number</th>
+              <th scope="col" className="p-2">Title</th>
+              <th scope="col" className="p-2 w-36">Category</th>
+              <th scope="col" className="p-2 w-36">Status</th>
+              <th scope="col" className="p-2 w-32">Owner</th>
+              <th scope="col" className="p-2 w-28">Trigger</th>
             </tr>
           </thead>
           <tbody className="divide-y">

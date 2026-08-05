@@ -624,11 +624,11 @@ export default function InfraBackupPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-gray-50">
-                    <th className="text-left px-4 py-3 font-medium text-gray-700">Filename</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-700">Date</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-700">Size</th>
+                    <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700">Filename</th>
+                    <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700">Date</th>
+                    <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700">Size</th>
                     {canAccess("backups", "restore") && (
-                      <th className="text-left px-4 py-3 font-medium text-gray-700"></th>
+                      <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700"></th>
                     )}
                   </tr>
                 </thead>
@@ -668,9 +668,9 @@ export default function InfraBackupPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-gray-50">
-                    <th className="text-left px-4 py-3 font-medium text-gray-700">Date</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-700">Size</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-700">Tier</th>
+                    <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700">Date</th>
+                    <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700">Size</th>
+                    <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700">Tier</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -698,10 +698,10 @@ export default function InfraBackupPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-gray-50">
-                    <th className="text-left px-4 py-3 font-medium text-gray-700">Name</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-700">Size</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-700">Last Updated</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-700"></th>
+                    <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700">Name</th>
+                    <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700">Size</th>
+                    <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700">Last Updated</th>
+                    <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700"></th>
                   </tr>
                 </thead>
                 <tbody>

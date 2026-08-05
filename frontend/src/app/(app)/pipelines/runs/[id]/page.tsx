@@ -552,8 +552,8 @@ export default function PipelineRunDetailPage() {
                 <table className="text-xs border w-full">
                   <thead className="bg-gray-50 text-gray-500 uppercase">
                     <tr>
-                      <th className="px-2 py-1 text-left">Name</th>
-                      <th className="px-2 py-1 text-left">Value</th>
+                      <th scope="col" className="px-2 py-1 text-left">Name</th>
+                      <th scope="col" className="px-2 py-1 text-left">Value</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -641,10 +641,10 @@ export default function PipelineRunDetailPage() {
                       <table className="min-w-full text-sm">
                         <thead className="bg-gray-50 text-gray-600">
                           <tr>
-                            <th className="text-left px-3 py-2 font-medium">Project</th>
-                            <th className="text-left px-3 py-2 font-medium">Experiment</th>
-                            <th className="text-left px-3 py-2 font-medium">Sample</th>
-                            <th className="text-left px-3 py-2 font-medium">File</th>
+                            <th scope="col" className="text-left px-3 py-2 font-medium">Project</th>
+                            <th scope="col" className="text-left px-3 py-2 font-medium">Experiment</th>
+                            <th scope="col" className="text-left px-3 py-2 font-medium">Sample</th>
+                            <th scope="col" className="text-left px-3 py-2 font-medium">File</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y">
@@ -865,11 +865,11 @@ export default function PipelineRunDetailPage() {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Version</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Version</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">

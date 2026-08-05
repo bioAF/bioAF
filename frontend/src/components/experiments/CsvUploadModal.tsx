@@ -298,7 +298,7 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
                         <thead className="bg-gray-50">
                           <tr>
                             {SAMPLE_FIELDS.map((f) => (
-                              <th key={f.value} className="px-2 py-1.5 text-left font-medium text-gray-600 whitespace-nowrap">
+                              <th scope="col" key={f.value} className="px-2 py-1.5 text-left font-medium text-gray-600 whitespace-nowrap">
                                 {f.value}
                               </th>
                             ))}
@@ -479,7 +479,7 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
                       <thead className="bg-gray-50">
                         <tr>
                           {Object.keys(preview.preview_rows[0]).map((key) => (
-                            <th key={key} className="px-3 py-2 text-left font-medium text-gray-600">
+                            <th scope="col" key={key} className="px-3 py-2 text-left font-medium text-gray-600">
                               {key}
                             </th>
                           ))}

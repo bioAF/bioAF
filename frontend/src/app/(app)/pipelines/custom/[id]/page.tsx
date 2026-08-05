@@ -700,10 +700,10 @@ export default function CustomPipelineDetailPage() {
                             <table className="w-full text-xs border">
                               <thead className="bg-gray-100 text-gray-500 uppercase">
                                 <tr>
-                                  <th className="px-2 py-1 text-left">Name</th>
-                                  <th className="px-2 py-1 text-left">Type</th>
-                                  <th className="px-2 py-1 text-left">Default</th>
-                                  <th className="px-2 py-1 text-left">Required</th>
+                                  <th scope="col" className="px-2 py-1 text-left">Name</th>
+                                  <th scope="col" className="px-2 py-1 text-left">Type</th>
+                                  <th scope="col" className="px-2 py-1 text-left">Default</th>
+                                  <th scope="col" className="px-2 py-1 text-left">Required</th>
                                 </tr>
                               </thead>
                               <tbody>

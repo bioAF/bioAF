@@ -84,10 +84,10 @@ export default function ValidationStudiesListPage() {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Study</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Source</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Requested</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Outcome</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Study</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Source</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Requested</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Outcome</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">

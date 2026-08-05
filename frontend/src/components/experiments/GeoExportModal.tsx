@@ -270,10 +270,10 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
                     <table className="min-w-full text-sm">
                       <thead>
                         <tr className="border-b">
-                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">GEO Column</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Value</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Message</th>
+                          <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">GEO Column</th>
+                          <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                          <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Value</th>
+                          <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Message</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200">
@@ -299,10 +299,10 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
                     <table className="min-w-full text-sm">
                       <thead>
                         <tr className="border-b">
-                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">GEO Column</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Value</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Message</th>
+                          <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">GEO Column</th>
+                          <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                          <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Value</th>
+                          <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Message</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200">

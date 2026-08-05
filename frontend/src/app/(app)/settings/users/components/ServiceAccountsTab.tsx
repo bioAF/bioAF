@@ -229,10 +229,10 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
@@ -368,10 +368,10 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Prefix</th>
-                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                      <th className="px-2 py-2"></th>
+                      <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                      <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Prefix</th>
+                      <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                      <th scope="col" className="px-2 py-2"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">

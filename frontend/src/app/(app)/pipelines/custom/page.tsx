@@ -158,11 +158,11 @@ export default function CustomPipelineListPage() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-gray-500 uppercase text-xs tracking-wide">
                 <tr>
-                  <th className="px-4 py-3 text-left font-medium">Name</th>
-                  <th className="px-4 py-3 text-left font-medium">Creator</th>
-                  <th className="px-4 py-3 text-left font-medium">Latest Version</th>
-                  <th className="px-4 py-3 text-left font-medium">Last Run Status</th>
-                  <th className="px-4 py-3 text-left font-medium">Created At</th>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Name</th>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Creator</th>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Latest Version</th>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Last Run Status</th>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Created At</th>
                 </tr>
               </thead>
               <tbody>

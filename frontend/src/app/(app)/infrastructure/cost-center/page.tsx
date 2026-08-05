@@ -343,8 +343,8 @@ export default function InfraCostCenterPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-gray-50">
-                      <th className="text-left px-3 py-2 font-medium text-gray-700">Date</th>
-                      <th className="text-right px-3 py-2 font-medium text-gray-700">Amount</th>
+                      <th scope="col" className="text-left px-3 py-2 font-medium text-gray-700">Date</th>
+                      <th scope="col" className="text-right px-3 py-2 font-medium text-gray-700">Amount</th>
                     </tr>
                   </thead>
                   <tbody>

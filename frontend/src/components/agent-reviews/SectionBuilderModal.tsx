@@ -415,7 +415,7 @@ export function SectionBuilderModal({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-gray-500 border-b">
-                    <th className="py-1 w-8">
+                    <th scope="col" className="py-1 w-8">
                       <input
                         type="checkbox"
                         aria-label="Select all runs"
@@ -424,9 +424,9 @@ export function SectionBuilderModal({
                         onChange={toggleAllRuns}
                       />
                     </th>
-                    <th className="py-1">Run</th>
-                    <th className="py-1">Status</th>
-                    <th className="py-1 w-28">
+                    <th scope="col" className="py-1">Run</th>
+                    <th scope="col" className="py-1">Status</th>
+                    <th scope="col" className="py-1 w-28">
                       <label className="inline-flex items-center gap-1">
                         <input
                           type="checkbox"

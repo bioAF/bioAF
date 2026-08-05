@@ -422,7 +422,7 @@ export default function LiteratureLibraryPage() {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 w-10">
+                  <th scope="col" className="px-4 py-3 w-10">
                     <input
                       type="checkbox"
                       aria-label="Select all papers"
@@ -433,22 +433,22 @@ export default function LiteratureLibraryPage() {
                       onChange={toggleSelectAll}
                     />
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                     Title
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-40">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-40">
                     Authors
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-16">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-16">
                     Year
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-32">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-32">
                     Provenance
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-44">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-44">
                     Flags
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-16">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-16">
                     Comments
                   </th>
                 </tr>

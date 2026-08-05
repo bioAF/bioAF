@@ -99,16 +99,16 @@ export default function PipelineRunsPage() {
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort("id")}>Run{sortIcon("id")}</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort("pipeline_name")}>Pipeline{sortIcon("pipeline_name")}</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Experiment</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort("status")}>Status{sortIcon("status")}</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Review</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Progress</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Submitter</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Started</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
-              {showCost && <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Est. $/hr</th>}
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort("id")}>Run{sortIcon("id")}</th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort("pipeline_name")}>Pipeline{sortIcon("pipeline_name")}</th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Experiment</th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort("status")}>Status{sortIcon("status")}</th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Review</th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Progress</th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Submitter</th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Started</th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
+              {showCost && <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Est. $/hr</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">

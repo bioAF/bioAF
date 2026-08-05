@@ -198,10 +198,10 @@ export function WebhooksTab() {
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">URL</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Events</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">URL</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Events</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
@@ -344,11 +344,11 @@ export function WebhooksTab() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Event</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Attempts</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Last Status</th>
-                  <th className="px-2 py-2"></th>
+                  <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Event</th>
+                  <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                  <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Attempts</th>
+                  <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Last Status</th>
+                  <th scope="col" className="px-2 py-2"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">

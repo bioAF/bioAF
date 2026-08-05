@@ -91,11 +91,11 @@ export function ValidationEvidenceTable({ evidence }: { evidence: Evidence | nul
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500">
-                  <th className="py-2 pr-4">Claimed metric</th>
-                  <th className="py-2 pr-4">Claimed</th>
-                  <th className="py-2 pr-4">Computed</th>
-                  <th className="py-2 pr-4">Δ</th>
-                  <th className="py-2">Verdict</th>
+                  <th scope="col" className="py-2 pr-4">Claimed metric</th>
+                  <th scope="col" className="py-2 pr-4">Claimed</th>
+                  <th scope="col" className="py-2 pr-4">Computed</th>
+                  <th scope="col" className="py-2 pr-4">Δ</th>
+                  <th scope="col" className="py-2">Verdict</th>
                 </tr>
               </thead>
               <tbody>
@@ -171,12 +171,12 @@ export function ValidationEvidenceTable({ evidence }: { evidence: Evidence | nul
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500">
-                  <th className="py-2 pr-4">Metric</th>
-                  <th className="py-2 pr-4">Claimed</th>
-                  <th className="py-2 pr-4">Unit</th>
-                  <th className="py-2 pr-4">Computed</th>
-                  <th className="py-2 pr-4">Tolerance</th>
-                  <th className="py-2">Source</th>
+                  <th scope="col" className="py-2 pr-4">Metric</th>
+                  <th scope="col" className="py-2 pr-4">Claimed</th>
+                  <th scope="col" className="py-2 pr-4">Unit</th>
+                  <th scope="col" className="py-2 pr-4">Computed</th>
+                  <th scope="col" className="py-2 pr-4">Tolerance</th>
+                  <th scope="col" className="py-2">Source</th>
                 </tr>
               </thead>
               <tbody>
@@ -221,8 +221,8 @@ function OtherComputed({ entries }: { entries: [string, unknown][] }) {
         <table className="min-w-full text-sm">
           <thead>
             <tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500">
-              <th className="py-2 pr-4">Metric</th>
-              <th className="py-2">Value</th>
+              <th scope="col" className="py-2 pr-4">Metric</th>
+              <th scope="col" className="py-2">Value</th>
             </tr>
           </thead>
           <tbody>

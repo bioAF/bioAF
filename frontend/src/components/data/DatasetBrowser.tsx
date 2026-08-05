@@ -231,24 +231,24 @@ export function DatasetBrowser() {
               <thead className="bg-gray-50">
                 <tr>
                   {canModify && (
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-8"></th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-8"></th>
                   )}
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                     Experiment
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                     Status
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                     Organism
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                     Samples
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                     Files
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                     Total Size
                   </th>
                 </tr>

@@ -723,10 +723,10 @@ function PromotionModal({
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-3 py-2 text-left font-medium text-gray-600">Name</th>
-              <th className="px-3 py-2 text-left font-medium text-gray-600">Type</th>
-              <th className="px-3 py-2 text-left font-medium text-gray-600">Required</th>
-              <th className="px-3 py-2 text-left font-medium text-gray-600">Add to template</th>
+              <th scope="col" className="px-3 py-2 text-left font-medium text-gray-600">Name</th>
+              <th scope="col" className="px-3 py-2 text-left font-medium text-gray-600">Type</th>
+              <th scope="col" className="px-3 py-2 text-left font-medium text-gray-600">Required</th>
+              <th scope="col" className="px-3 py-2 text-left font-medium text-gray-600">Add to template</th>
             </tr>
           </thead>
           <tbody className="divide-y">

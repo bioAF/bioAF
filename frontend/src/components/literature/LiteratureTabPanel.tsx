@@ -83,19 +83,19 @@ export function LiteratureTabPanel({ experimentId, projectId }: Props) {
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                 Title
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-40">
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-40">
                 Authors
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-16">
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-16">
                 Year
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-32">
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-32">
                 Source
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                 Scope
               </th>
             </tr>

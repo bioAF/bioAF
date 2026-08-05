@@ -177,11 +177,11 @@ export function LabDocumentBrowser() {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-gray-500 border-b">
-              <th className="py-2">Title</th>
-              <th>Tags</th>
-              <th>Version</th>
-              <th>Uploaded by</th>
-              <th>Last updated</th>
+              <th scope="col" className="py-2">Title</th>
+              <th scope="col">Tags</th>
+              <th scope="col">Version</th>
+              <th scope="col">Uploaded by</th>
+              <th scope="col">Last updated</th>
             </tr>
           </thead>
           <tbody>

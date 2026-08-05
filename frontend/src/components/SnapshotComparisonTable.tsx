@@ -47,7 +47,7 @@ export default function SnapshotComparisonTable({ snapshots, onCompare }: Snapsh
   }, [snapshots, sortKey, sortDir]);
 
   const SortHeader = ({ label, field }: { label: string; field: SortKey }) => (
-    <th
+    <th scope="col"
       className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:text-gray-700"
       onClick={() => handleSort(field)}
     >
@@ -77,8 +77,8 @@ export default function SnapshotComparisonTable({ snapshots, onCompare }: Snapsh
         <table className="min-w-full text-sm bg-white border rounded-lg overflow-hidden">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-3 py-2 w-8"></th>
-              <th className="px-3 py-2 w-8"></th>
+              <th scope="col" className="px-3 py-2 w-8"></th>
+              <th scope="col" className="px-3 py-2 w-8"></th>
               <SortHeader label="Label" field="label" />
               <SortHeader label="Date" field="created_at" />
               <SortHeader label="User" field="user_name" />
@@ -86,7 +86,7 @@ export default function SnapshotComparisonTable({ snapshots, onCompare }: Snapsh
               <SortHeader label="Cells" field="cell_count" />
               <SortHeader label="Genes" field="gene_count" />
               <SortHeader label="Clusters" field="cluster_count" />
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Figure</th>
+              <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Figure</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">

@@ -198,11 +198,11 @@ export default function AuditLogPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-gray-50">
-                <th className="text-left px-4 py-3 font-medium text-gray-700">Time</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-700">User</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-700">Entity</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-700">Action</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-700">Details</th>
+                <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700">Time</th>
+                <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700">User</th>
+                <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700">Entity</th>
+                <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700">Action</th>
+                <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700">Details</th>
               </tr>
             </thead>
             <tbody>
