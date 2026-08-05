@@ -6,6 +6,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { statusBadgeClass } from "@/lib/statusStyles";
+import { ErrorState } from "@/components/shared/ErrorState";
 
 interface BackupTier {
   tier: string;
@@ -76,6 +77,7 @@ export default function InfraBackupPage() {
   const { canAccess, loading: permLoading } = usePermissions();
   const [tiers, setTiers] = useState<BackupTier[]>([]);
   const [overallStatus, setOverallStatus] = useState("");
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [snapshots, setSnapshots] = useState<ConfigSnapshot[]>([]);
   const [pgSnapshots, setPgSnapshots] = useState<PostgresSnapshot[]>([]);
   const [tfstateFiles, setTfstateFiles] = useState<TfstateFile[]>([]);
@@ -115,8 +117,11 @@ export default function InfraBackupPage() {
       setTfstateFiles(tfFiles.files);
       setSettings(backupSettings);
       setRestoreStatus(rStatus);
-    } catch {
-      // ignore
+      setLoadError(null);
+    } catch (e) {
+      // Falling through to the empty states told an admin there were NO backups,
+      // which during an outage is the most alarming possible wrong answer.
+      setLoadError(e instanceof Error ? e.message : "Could not load backup status.");
     } finally {
       setLoading(false);
     }
@@ -300,6 +305,14 @@ export default function InfraBackupPage() {
     <>
       <main className="flex-1 overflow-y-auto p-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-6">Backup & Recovery</h1>
+        {loadError && (
+          <div className="mb-6">
+            <ErrorState
+              message={`Could not load backup status. ${loadError}`}
+              onRetry={() => loadData()}
+            />
+          </div>
+        )}
 
         {/* Restore review banner */}
         {restoreStatus.active && (
@@ -620,7 +633,7 @@ export default function InfraBackupPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pgSnapshots.length === 0 ? (
+                  {loadError ? null : pgSnapshots.length === 0 ? (
                     <tr>
                       <td colSpan={canAccess("backups", "restore") ? 4 : 3} className="px-4 py-8 text-center text-gray-500">
                         No snapshots available
@@ -661,7 +674,7 @@ export default function InfraBackupPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {snapshots.length === 0 ? (
+                  {loadError ? null : snapshots.length === 0 ? (
                     <tr>
                       <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
                         No snapshots available
@@ -692,7 +705,7 @@ export default function InfraBackupPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {tfstateFiles.length === 0 ? (
+                  {loadError ? null : tfstateFiles.length === 0 ? (
                     <tr>
                       <td colSpan={4} className="px-4 py-8 text-center text-gray-500">
                         No state files available

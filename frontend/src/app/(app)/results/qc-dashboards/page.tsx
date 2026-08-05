@@ -13,6 +13,7 @@ import { QCDashboardListItem } from "@/components/qc/QCDashboardListItem";
 import { api } from "@/lib/api";
 import { useFileContentUrl } from "@/hooks/useContentUrl";
 import type { QCDashboardSummary, QCDashboardResponse } from "@/lib/types";
+import { ErrorState } from "@/components/shared/ErrorState";
 
 function PlotImage({ fileId, title, onExpand }: { fileId: number; title: string; onExpand: (url: string) => void }) {
   const url = useFileContentUrl(fileId);
@@ -139,6 +140,9 @@ export default function QCDashboardsPage() {
 
 function QCDashboardsPageInner() {
   const [dashboards, setDashboards] = useState<QCDashboardSummary[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Bumped by Retry: the load lives in an effect with no named loader.
+  const [reloadKey, setReloadKey] = useState(0);
   const [selected, setSelected] = useState<QCDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
@@ -150,13 +154,13 @@ function QCDashboardsPageInner() {
       try {
         const data = await api.get<QCDashboardSummary[]>("/api/qc-dashboards");
         setDashboards(data);
-      } catch {
-        // ignore
+      } catch (e) {
+        setLoadError(e instanceof Error ? e.message : "Could not load QC dashboards.");
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [reloadKey]);
 
   // Deep link: ?run=<id> opens that run's dashboard directly. This is where the
   // "results ready" notification lands. Falls back to the list if there is none.
@@ -215,6 +219,8 @@ function QCDashboardsPageInner() {
           />
         ) : loading ? (
           <ContentLoading />
+        ) : loadError ? (
+          <ErrorState message={`Could not load QC dashboards. ${loadError}`} onRetry={() => setReloadKey((k) => k + 1)} />
         ) : dashboards.length === 0 ? (
           <p className="text-gray-400 text-sm">
             No QC dashboards yet. They are generated automatically when pipeline runs complete.

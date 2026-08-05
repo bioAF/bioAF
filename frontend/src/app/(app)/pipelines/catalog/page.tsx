@@ -7,12 +7,14 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import type { PipelineCatalog, PipelineCatalogListResponse } from "@/lib/types";
 import { RegistryBrowseModal } from "@/components/pipelines/RegistryBrowseModal";
+import { ErrorState } from "@/components/shared/ErrorState";
 
 export default function PipelineCatalogPage() {
   const router = useRouter();
   const { canAccess, loading: permsLoading } = usePermissions();
 
   const [pipelines, setPipelines] = useState<PipelineCatalog[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [registryOpen, setRegistryOpen] = useState(false);
 
@@ -24,7 +26,10 @@ export default function PipelineCatalogPage() {
     try {
       const data = await api.get<PipelineCatalogListResponse>("/api/pipelines");
       setPipelines(data.pipelines);
-    } catch {} finally { setLoading(false); }
+      setLoadError(null);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Could not load the pipeline catalog.");
+    } finally { setLoading(false); }
   }
 
   function launchPipeline(p: PipelineCatalog) {
@@ -129,8 +134,13 @@ export default function PipelineCatalogPage() {
               </div>
             );
           })}
-          {pipelines.length === 0 && (
-            <div className="col-span-full text-center py-12 text-gray-400">No pipelines available</div>
+          {loadError ? (
+            <div className="col-span-full">
+              <ErrorState message={`Could not load the pipeline catalog. ${loadError}`} onRetry={() => loadPipelines()} />
+            </div>
+          ) : null}
+          {!loadError && pipelines.length === 0 && (
+            <div className="col-span-full text-center py-12 text-gray-500">No pipelines available</div>
           )}
         </div>
         </>

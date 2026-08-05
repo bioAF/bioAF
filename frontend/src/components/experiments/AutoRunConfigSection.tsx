@@ -11,10 +11,12 @@ import type {
   ParameterSchema,
 } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
+import { ErrorState } from "@/components/shared/ErrorState";
 
 export function AutoRunConfigSection({ experimentId }: { experimentId: number }) {
   const toast = useToast();
   const [configs, setConfigs] = useState<AutoRunConfig[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [pipelines, setPipelines] = useState<PipelineCatalog[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -29,7 +31,9 @@ export function AutoRunConfigSection({ experimentId }: { experimentId: number })
     try {
       const data = await api.get<AutoRunConfig[]>(`/api/experiments/${experimentId}/auto-runs`);
       setConfigs(data);
-    } catch {} finally { setLoading(false); }
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Could not load auto-run rules.");
+    } finally { setLoading(false); }
   }
 
   async function handleToggle(config: AutoRunConfig) {
@@ -84,6 +88,8 @@ export function AutoRunConfigSection({ experimentId }: { experimentId: number })
 
       {loading ? (
         <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">Loading...</div>
+      ) : loadError ? (
+        <ErrorState message={`Could not load auto-run rules. ${loadError}`} onRetry={() => loadConfigs()} />
       ) : configs.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-8 text-center">
           <p className="text-gray-400 text-sm">

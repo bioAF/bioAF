@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
+import { ErrorState } from "@/components/shared/ErrorState";
 
 interface ActivityEvent {
   id: number;
@@ -36,6 +37,10 @@ const entityLinks: Record<string, (id: number) => string> = {
 
 export default function ActivityFeedPage() {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Bumped by the error state's Retry: the load lives inside an effect, so this
+  // is what re-triggers it.
+  const [reloadKey, setReloadKey] = useState(0);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -61,14 +66,18 @@ export default function ActivityFeedPage() {
         );
         setEvents(data.events);
         setTotal(data.total);
-      } catch {
-        // handled by api client
+        setLoadError(null);
+      } catch (e) {
+        // The old comment claimed the api client handled this. It does not:
+        // lib/api.ts only throws. Falling through left the page saying there was
+        // no activity, which is a different claim from "we could not load it".
+        setLoadError(e instanceof Error ? e.message : "Could not load activity.");
       } finally {
         setLoading(false);
       }
     };
     load();
-  }, [page, eventTypeFilter, userFilter, dateFrom, dateTo, severityFilter]);
+  }, [page, eventTypeFilter, userFilter, dateFrom, dateTo, severityFilter, reloadKey]);
 
   const totalPages = Math.ceil(total / 50);
 
@@ -178,6 +187,8 @@ export default function ActivityFeedPage() {
         <div className="bg-white rounded-lg border border-gray-200">
           {loading ? (
             <ContentLoading />
+          ) : loadError ? (
+            <ErrorState message={`Could not load activity. ${loadError}`} onRetry={() => setReloadKey((k) => k + 1)} />
           ) : events.length === 0 ? (
             <div className="p-8 text-center text-gray-500" data-testid="activity-empty">
               No activity matches your filters.

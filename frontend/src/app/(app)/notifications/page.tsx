@@ -5,6 +5,7 @@ import Link from "next/link";
 import { NotificationItem } from "@/components/notifications/NotificationItem";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
+import { ErrorState } from "@/components/shared/ErrorState";
 
 interface Notification {
   id: number;
@@ -19,6 +20,10 @@ interface Notification {
 
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Bumped by the error state's Retry: the load lives inside an effect, so this
+  // is what re-triggers it.
+  const [reloadKey, setReloadKey] = useState(0);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -35,14 +40,15 @@ export default function NotificationsPage() {
         const data = await api.get<{ notifications: Notification[]; total: number }>(url);
         setNotifications(data.notifications);
         setTotal(data.total);
-      } catch {
-        // ignore
+        setLoadError(null);
+      } catch (e) {
+        setLoadError(e instanceof Error ? e.message : "Could not load notifications.");
       } finally {
         setLoading(false);
       }
     };
     load();
-  }, [page, filter, severityFilter]);
+  }, [page, filter, severityFilter, reloadKey]);
 
   const handleMarkRead = async (id: number) => {
     await api.patch(`/api/notifications/${id}/read`);
@@ -106,6 +112,8 @@ export default function NotificationsPage() {
       <div className="bg-white rounded-lg border border-gray-200">
         {loading ? (
           <ContentLoading />
+        ) : loadError ? (
+          <ErrorState message={`Could not load notifications. ${loadError}`} onRetry={() => setReloadKey((k) => k + 1)} />
         ) : notifications.length === 0 ? (
           <div className="p-8 text-center text-gray-500">No notifications</div>
         ) : (

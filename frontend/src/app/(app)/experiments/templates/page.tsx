@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { NamingProfileSelect } from "@/components/naming/NamingProfileSelect";
 import type { ExperimentTemplate, TemplateCreateRequest } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
+import { ErrorState } from "@/components/shared/ErrorState";
 
 const STANDARD_SAMPLE_FIELDS = [
   "organism",
@@ -24,6 +25,7 @@ const STANDARD_SAMPLE_FIELDS = [
 export default function ExperimentTemplatesPage() {
   const toast = useToast();
   const [templates, setTemplates] = useState<ExperimentTemplate[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -45,7 +47,10 @@ export default function ExperimentTemplatesPage() {
     try {
       const data = await api.get<ExperimentTemplate[]>("/api/templates");
       setTemplates(data);
-    } catch {} finally {
+      setLoadError(null);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Could not load templates.");
+    } finally {
       setLoading(false);
     }
   }
@@ -248,6 +253,8 @@ export default function ExperimentTemplatesPage() {
 
       {loading ? (
         <div className="flex justify-center py-12"><LoadingSpinner size="lg" /></div>
+      ) : loadError ? (
+        <ErrorState message={`Could not load templates. ${loadError}`} onRetry={() => loadTemplates()} />
       ) : templates.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-12 text-center">
           <p className="text-gray-400">No templates yet. Create one to standardize experiment registration.</p>

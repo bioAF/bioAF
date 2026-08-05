@@ -7,6 +7,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { useToast } from "@/components/shared/Toast";
+import { ErrorState } from "@/components/shared/ErrorState";
 
 interface AuditUser {
   id: number;
@@ -30,6 +31,7 @@ export default function AuditLogPage() {
   const router = useRouter();
   const { canAccess, loading: permLoading } = usePermissions();
   const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -55,9 +57,10 @@ export default function AuditLogPage() {
       if (endDate) url += `&end_date=${endDate}`;
       const data = await api.get<{ entries: AuditEntry[]; total: number }>(url);
       setEntries(data.entries);
+      setLoadError(null);
       setTotal(data.total);
-    } catch {
-      // ignore
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Could not load the audit log.");
     } finally {
       setLoading(false);
     }
@@ -205,6 +208,10 @@ export default function AuditLogPage() {
             <tbody>
               {loading ? (
                 <tr><td colSpan={5} className="px-4 py-8"><ContentLoading /></td></tr>
+              ) : loadError ? (
+                <tr><td colSpan={5} className="px-4 py-8">
+                  <ErrorState message={`Could not load the audit log. ${loadError}`} onRetry={() => load()} />
+                </td></tr>
               ) : entries.length === 0 ? (
                 <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">No audit log entries</td></tr>
               ) : (

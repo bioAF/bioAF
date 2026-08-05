@@ -11,10 +11,12 @@ import type {
   ProjectListResponse,
 } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
+import { ErrorState } from "@/components/shared/ErrorState";
 
 export function DatasetBrowser() {
   const toast = useToast();
   const [datasets, setDatasets] = useState<DatasetExperimentSummary[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [viewingDataset, setViewingDataset] = useState<DatasetExperimentSummary | null>(null);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -57,8 +59,8 @@ export function DatasetBrowser() {
       );
       setDatasets(data.experiments);
       setTotal(data.total);
-    } catch {
-      // ignore
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Could not load datasets.");
     } finally {
       setLoading(false);
     }
@@ -218,6 +220,8 @@ export function DatasetBrowser() {
 
       {loading ? (
         <p className="text-gray-400 text-sm">Loading...</p>
+      ) : loadError ? (
+        <ErrorState message={`Could not load datasets. ${loadError}`} onRetry={() => fetchDatasets()} />
       ) : datasets.length === 0 ? (
         <p className="text-gray-400 text-sm">No datasets found.</p>
       ) : (

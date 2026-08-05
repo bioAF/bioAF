@@ -5,6 +5,7 @@ import { PlotModal } from "@/components/shared/PlotModal";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api, fileContentUrl, plotThumbnailContentUrl } from "@/lib/api";
 import { PlotThumbnail, StorageDeletedPlaceholder } from "@/components/plots/PlotThumbnail";
+import { ErrorState } from "@/components/shared/ErrorState";
 import type {
   PlotArchiveResponse,
   PlotArchiveListResponse,
@@ -14,6 +15,7 @@ import type {
 
 export default function PlotArchivePage() {
   const [plots, setPlots] = useState<PlotArchiveResponse[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [experimentId, setExperimentId] = useState("");
   const [pipelineRunId, setPipelineRunId] = useState("");
@@ -84,8 +86,8 @@ export default function PlotArchivePage() {
       );
       setPlots(data.plots);
       setTotal(data.total);
-    } catch {
-      // ignore
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Could not load plots.");
     } finally {
       setLoading(false);
     }
@@ -203,6 +205,8 @@ export default function PlotArchivePage() {
 
         {loading ? (
           <ContentLoading />
+        ) : loadError ? (
+          <ErrorState message={`Could not load plots. ${loadError}`} onRetry={() => fetchPlots()} />
         ) : plots.length === 0 ? (
           <p className="text-gray-400 text-sm">No plots found.</p>
         ) : (
